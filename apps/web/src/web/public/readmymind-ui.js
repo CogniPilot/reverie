@@ -16,7 +16,7 @@
  * Suggestions are NEVER auto-sent: the explicit click here is the security
  * boundary for observed/injectable predictor inputs, so suggestion text is
  * always rendered via value/textContent, never innerHTML. Send/Insert go
- * server-side through `POST /api/sessions/:id/input` (UI chrome, not terminal
+ * through the browser input journal and `POST /api/sessions/:id/input` (UI chrome, not terminal
  * typing, so the local-echo-overlay `sendEnterKey` trap does not apply);
  * Send appends the `\r` that actually submits, Insert omits it.
  *
@@ -171,18 +171,43 @@ Object.assign(ReverieApp.prototype, {
     const state = this._rmm;
     const input = document.getElementById('readMyMindPrompt');
     const text = input ? input.value.replace(/[\r\n]+/g, ' ').trim() : '';
-    if (!state || !text) return;
-
-    const res = await this._apiJson(`/api/sessions/${state.sessionId}/input`, {
-      method: 'POST',
-      body: { input: withEnter ? `${text}\r` : text },
-    });
-    if (res === null) {
-      this.showToast('Could not reach the session', 'error');
-      return;
+    if (!state || !text || state.sending) return false;
+    const sessionId = state.sessionId,
+      value = input.value,
+      selected = state.selected;
+    let edited = false;
+    const changed = () => {
+      edited = true;
+    };
+    input.addEventListener('input', changed);
+    state.sending = true;
+    let accepted;
+    try {
+      accepted = await this._sendInputAsync(sessionId, withEnter ? `${text}\r` : text);
+    } catch {
+      this.showToast(
+        'Input queue outcome is unconfirmed. Keep your draft and check the terminal before trying again.',
+        'warning'
+      );
+      return false;
+    } finally {
+      state.sending = false;
+      input.removeEventListener('input', changed);
     }
-    this.closeReadMyMind();
-    this.showToast(withEnter ? 'Prompt sent' : 'Inserted, press Enter in the terminal to send', 'success');
+    if (!accepted) {
+      this.showToast('Input was not queued. Keep your draft and check browser input status.', 'warning');
+      return false;
+    }
+    if (
+      this._rmm === state &&
+      state.selected === selected &&
+      !edited &&
+      document.getElementById('readMyMindPrompt') === input &&
+      input.value === value
+    )
+      this.closeReadMyMind();
+    this.showToast(withEnter ? 'Prompt queued' : 'Text queued without Enter', 'success');
+    return true;
   },
 
   /** Re-run with the whole shown set (main + alternates) recorded as rejected:

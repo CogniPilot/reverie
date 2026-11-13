@@ -17,9 +17,15 @@ export function sameLaunchProtocol(first: CliEntry, second: CliEntry): boolean {
     right = protocol(second);
   return !!left && !!right && isDeepStrictEqual(left, right);
 }
-export function resolvedStockProtocol(mode: string): { entry: CliEntry; shipped: CliEntry } | undefined {
+/** Actual registry provenance only; a feature must separately validate its own declaration. */
+export function resolvedStockEntry(mode: string): { entry: CliEntry; shipped: CliEntry } | undefined {
   const entry = getCli(mode),
     shipped = STOCK_CLIS.find((candidate) => candidate.id === mode);
-  if (!entry?.stock || !shipped || !sameLaunchProtocol(entry, shipped)) return undefined;
+  if (!entry?.stock || !shipped || !CliEntrySchema.safeParse(entry).success) return undefined;
   return { entry, shipped };
+}
+/** Launch/environment protocol equality remains mandatory for its existing consumers. */
+export function resolvedStockProtocol(mode: string): { entry: CliEntry; shipped: CliEntry } | undefined {
+  const pair = resolvedStockEntry(mode);
+  return pair && sameLaunchProtocol(pair.entry, pair.shipped) ? pair : undefined;
 }

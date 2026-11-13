@@ -21,6 +21,7 @@ import { base32Decode, hotp, totpStep } from '../src/owner-auth/crypto.js';
 import { unreadFor } from '../src/chatroom-store.js';
 import { authenticatedPlanMover } from '../src/web/plan-move-auth.js';
 import { AUTH_COOKIE_NAME } from '../src/web/middleware/auth.js';
+import { SESSION_IDLE_MS } from '../src/owner-auth/service.js';
 
 const password = 'Synthetic-correct-harbor-42!';
 let directory: string, app: FastifyInstance, auth: OfficeAuthService, store: OwnerAuthStore, rooms: ChatroomStore;
@@ -130,6 +131,16 @@ afterEach(async () => {
   if (oldBoundary === undefined) delete process.env.REVERIE_PASSWORD;
   else process.env.REVERIE_PASSWORD = oldBoundary;
   await rm(directory, { recursive: true, force: true });
+});
+
+it('observes original primary and invited sessions without extending either idle deadline', async () => {
+  const person = await invite('owner');
+  clock += SESSION_IDLE_MS - 1000;
+  expect(auth.session(primary, false)?.role).toBe('owner');
+  expect(auth.session(person.token, false)?.role).toBe('owner');
+  clock += 1001;
+  expect(auth.session(primary, false)).toBeUndefined();
+  expect(auth.session(person.token, false)).toBeUndefined();
 });
 
 it('requires a complete current account before granting message-owner authority', async () => {

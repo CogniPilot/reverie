@@ -10,6 +10,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { flattenOwnerSessionOrder, type TabLayout } from '../src/tab-layout.js';
 import { WebServer } from '../src/web/server.js';
 import { SseEvent } from '../src/web/sse-events.js';
+import type {Session} from '../src/session.js';
 
 describe('Stable HTTP contract (live server)', () => {
   let server: WebServer;
@@ -329,20 +330,23 @@ describe('Stable HTTP contract (live server)', () => {
     });
 
     it('wraps the non-wait input response as { success: true, data: {} }', async () => {
-      const session = (server as unknown as {sessions: Map<string, object>}).sessions.get(sessionId)!;
-      const write = vi.fn();
-      Object.assign(session, {ptyProcess: {write}});
       // What a client actually receives on the fire-and-forget path — NOT the bare
       // `{}` the handler returns and the route tests assert.
+      const session = (server as unknown as {sessions: Map<string, Session>}).sessions.get(sessionId)!;
+      const write = vi.fn();
+      // Test mode starts no provider. Supply only this owned physical sink;
+      // real Session admission/write and WebServer envelope still execute.
+      Object.assign(session, {ptyProcess: {write}});
       const res = await fetch(`${base}/api/v1/sessions/${sessionId}/input`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: 'hello' }),
+        body: JSON.stringify({ input: 'hello', useMux: false }),
       });
-      expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ success: true, data: {} });
-      expect(write).toHaveBeenCalledExactlyOnceWith('hello');
       Object.assign(session, {ptyProcess: null});
+      const result = await res.json();
+      expect(res.status, JSON.stringify(result)).toBe(200);
+      expect(result).toEqual({ success: true, data: {} });
+      expect(write).toHaveBeenCalledExactlyOnceWith('hello');
     });
 
     it('serves wait-output through the same envelope', async () => {

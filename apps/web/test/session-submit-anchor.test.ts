@@ -10,8 +10,14 @@
  * Port: N/A (no server needed)
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Session } from '../src/session.js';
+
+function withPty(session: Session) {
+  const write = vi.fn();
+  Object.assign(session, {ptyProcess: {write}});
+  return write;
+}
 
 describe('session submit anchor', () => {
   it('records the pane Enter and carries it into persisted state', () => {
@@ -19,9 +25,10 @@ describe('session submit anchor', () => {
     expect(session.lastSubmitAt).toBe(0);
     expect(session.toState().lastSubmitAt).toBeUndefined();
 
+    const write = withPty(session);
     const before = Date.now();
-    Object.assign(session, { ptyProcess: { write() {} } });
-    session.write('hello\r');
+    expect(session.write('hello\r')).toBe(true);
+    expect(write).toHaveBeenCalledExactlyOnceWith('hello\r');
     const after = Date.now();
 
     expect(session.lastSubmitAt).toBeGreaterThanOrEqual(before);
@@ -31,8 +38,10 @@ describe('session submit anchor', () => {
 
   it('leaves the anchor unset for keystrokes that never submit', () => {
     const session = new Session({ workingDir: '/tmp' });
-    session.write('hello');
-    session.write('\x1b[A'); // arrow-up: history recall, not a submit
+    const write = withPty(session);
+    expect(session.write('hello')).toBe(true);
+    session.write('\x1b[A');
+    expect(write.mock.calls).toEqual([['hello'], ['\x1b[A']]); // arrow-up: history recall, not a submit
 
     expect(session.lastSubmitAt).toBe(0);
     expect(session.toState().lastSubmitAt).toBeUndefined();
@@ -40,8 +49,9 @@ describe('session submit anchor', () => {
 
   it('restores the anchor from persisted state on boot recovery', () => {
     const submitted = new Session({ workingDir: '/tmp' });
-    Object.assign(submitted, { ptyProcess: { write() {} } });
-    submitted.write('prompt\r');
+    const write = withPty(submitted);
+    expect(submitted.write('prompt\r')).toBe(true);
+    expect(write).toHaveBeenCalledExactlyOnceWith('prompt\r');
     const persisted = submitted.toState();
 
     const recovered = new Session({ workingDir: '/tmp', lastSubmitAt: persisted.lastSubmitAt });

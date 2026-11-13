@@ -15,6 +15,7 @@ import { closeSync, constants, fstatSync, openSync, readSync, readdirSync, realp
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { getCli } from '../../config/cli-registry/registry.js';
+import { runtimePolicyFallbackProfile } from '../../utils/runtime-policy-profile.js';
 
 /** What a report may include: direct-message rooms only for the owner. */
 export interface ProfileView {
@@ -170,9 +171,7 @@ function loadRuntime(policyPath: string): Runtime {
   const fallback = get(policy, 'fallback');
   const chosen = typeof fallback === 'string' ? get(backends, fallback) : undefined;
   if (!isObject(chosen) || !truthy(chosen.enabled)) throw new Error('an enabled local fallback is required');
-  const injection = typeof chosen.mode === 'string' ? getCli(chosen.mode)?.capabilities.customModelInjection : undefined;
-  if (injection?.kind !== 'configContentEnv' || injection.template !== 'opencode-json')
-    throw new Error('the fallback must use the local OpenCode adapter');
+  if (!runtimePolicyFallbackProfile(chosen.mode)) throw new Error('the fallback must use the local OpenCode adapter');
   return { dir, policy, state: isObject(state) ? state : {} };
 }
 

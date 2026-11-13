@@ -201,7 +201,8 @@ describe('system-routes', () => {
       expect(res.statusCode).toBe(200);
       const body = JSON.parse(res.body);
       expect(body.config).toBeDefined();
-      expect(harness.ctx.store.setConfig).toHaveBeenCalled();
+      expect(harness.ctx.store.commitConfig).toHaveBeenCalledWith({ maxConcurrentSessions: 10 });
+      expect(harness.ctx.store.setConfig).not.toHaveBeenCalled();
     });
 
     it('rejects unknown config fields (strict schema)', async () => {

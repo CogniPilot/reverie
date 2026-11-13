@@ -1,5 +1,5 @@
 /** Source-declaration ratchet. It does not infer behavioral coverage from a passing file. */
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -23,6 +23,7 @@ export interface Scenario {
 export interface Manifest {
   version: 2;
   sources: string[];
+  sourceExclusions: Record<string, string>;
   scenarios: Record<string, Scenario>;
   mappings: Array<{ declaration: string; scenarios: string[]; remaining: string }>;
   gaps: Array<{ declaration: string; reason: string }>;
@@ -31,18 +32,93 @@ export interface Manifest {
 }
 
 const tags = new Set(['button', 'input', 'select', 'textarea', 'summary', 'a']);
-export const INVENTORY_SOURCES = [
-  'src/web/public/chat-app.js',
-  'src/web/public/company-ui.js',
-  'src/web/public/company-resources.js',
-  'src/web/public/plans-ui.js',
-  'src/web/public/workspace-files.js',
-  'src/web/public/index.html',
-  'src/web/public/board.html',
-  'src/web/public/plans.html',
-  'src/web/public/company-plans.html',
-  'src/web/public/workspace-files.html',
-];
+
+/** Web-relative roots also exist in the flattened Nix web source, without Git. */
+export const INVENTORY_ROOTS = ['src/web/public', 'packages/xterm-zerolag-input/src'] as const;
+export const INVENTORY_GENERATED_SOURCES = [
+  'packages/xterm-zerolag-input/src/zerolag-input-addon.ts',
+  'packages/xterm-zerolag-input/src/predictive-echo-addon.ts',
+] as const;
+export const INVENTORY_GENERATORS = [
+  'scripts/prepare-test-vendor.mjs',
+  'scripts/build.mjs',
+  'scripts/postinstall.js',
+] as const;
+/** Exact assets only. Unknown neighbors are first-party candidates, never directory-excluded. */
+export const INVENTORY_EXCLUSIONS: Readonly<Record<string, string>> = {
+  'src/web/public/vendor/dompurify.min.js':
+    'Third-party DOMPurify browser bundle; committed upstream distribution, not Reverie control source.',
+  'src/web/public/vendor/marked.min.js':
+    'Third-party Marked Markdown parser browser bundle; committed upstream distribution.',
+  'src/web/public/vendor/katex-0.19.0/katex.min.js':
+    'Pinned third-party KaTeX0.19.0 browser distribution; vendor/katex-0.19.0/LICENSE.',
+  'src/web/public/vendor/highlight-11.12.0.min.js':
+    'Pinned third-party Highlight.js11.12.0 distribution; vendor/highlight-LICENSE.txt.',
+  'src/web/public/vendor/embassy-qr-code.min.js':
+    'Third-party qrcode1.5.4 browser entry bundled with esbuild; exact origin/licenses in vendor/EMBASSY-QR-NOTICES.md.',
+  'src/web/public/vendor/embassy-qr-scan.min.js':
+    'Third-party jsQR1.4.0 browser bundle; exact origin/integrity/licenses in vendor/EMBASSY-QR-NOTICES.md.',
+  'src/web/public/vendor/pdfjs-6.4.299/pdf.mjs':
+    'Pinned third-party PDF.js6.4.299 distribution; vendor/pdfjs-6.4.299/PINS.json and LICENSE.',
+  'src/web/public/vendor/pdfjs-6.4.299/pdf.worker.mjs':
+    'Pinned third-party PDF.js6.4.299 worker distribution; vendor/pdfjs-6.4.299/PINS.json and LICENSE.',
+  'src/web/public/vendor/pdfjs-6.4.299/wasm/openjpeg_nowasm_fallback.js':
+    'Pinned third-party PDF.js OpenJPEG fallback; vendor/pdfjs-6.4.299/wasm/LICENSE_OPENJPEG.',
+  'src/web/public/vendor/pdfjs-6.4.299/wasm/jbig2_nowasm_fallback.js':
+    'Pinned third-party PDF.js JBIG2 fallback; vendor/pdfjs-6.4.299/wasm/LICENSE_JBIG2.',
+  'src/web/public/vendor/xterm.min.js':
+    'Generated third-party @xterm/xterm distribution from node_modules; scripts/prepare-test-vendor.mjs ASSETS.',
+  'src/web/public/vendor/xterm-addon-fit.min.js':
+    'Generated third-party @xterm/addon-fit distribution; scripts/prepare-test-vendor.mjs ASSETS.',
+  'src/web/public/vendor/xterm-addon-serialize.min.js':
+    'Generated third-party @xterm/addon-serialize distribution; scripts/prepare-test-vendor.mjs ASSETS.',
+  'src/web/public/vendor/xterm-addon-unicode11.min.js':
+    'Generated third-party @xterm/addon-unicode11 distribution; scripts/prepare-test-vendor.mjs ASSETS.',
+  'src/web/public/vendor/xterm-addon-webgl.min.js':
+    'Generated third-party @xterm/addon-webgl distribution; scripts/prepare-test-vendor.mjs ASSETS.',
+  'src/web/public/vendor/exceljs.min.js':
+    'Generated third-party ExcelJS browser distribution; scripts/prepare-spreadsheet-assets.mjs copies pinned package bytes.',
+  'src/web/public/vendor/fflate.min.js':
+    'Generated third-party fflate browser bundle; scripts/prepare-spreadsheet-assets.mjs bundles pinned package.',
+  'src/web/public/vendor/xterm-zerolag-input.js':
+    'Generated duplicate of owned packages/xterm-zerolag-input/src/zerolag-input-addon.ts and its siblings, ALL inventoried as TypeScript; appended alias glue from scripts/prepare-test-vendor.mjs, scripts/build.mjs and scripts/postinstall.js is also inventoried. Producer: scripts/prepare-test-vendor.mjs; separate behavior suite: npm --prefix packages/xterm-zerolag-input test (not qualified by inventory).',
+  'src/web/public/vendor/xterm-predictive-echo.js':
+    'Generated duplicate of owned packages/xterm-zerolag-input/src/predictive-echo-addon.ts and its siblings, ALL inventoried as TypeScript; appended alias glue from scripts/prepare-test-vendor.mjs, scripts/build.mjs and scripts/postinstall.js is also inventoried. Producer: scripts/prepare-test-vendor.mjs; separate behavior suite: npm --prefix packages/xterm-zerolag-input test (not qualified by inventory).',
+};
+
+/** Inventory presence is independent of whether a file contains recognized controls. */
+export function discoverInventorySources(root: string): string[] {
+  const found: string[] = [];
+  const walk = (relative: string) => {
+    const directory = join(root, relative);
+    const original = lstatSync(directory);
+    if (!original.isDirectory() || original.isSymbolicLink())
+      throw new Error(`Inventory source root is not a real directory: ${relative}`);
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const file = relative + '/' + entry.name;
+      if (entry.isSymbolicLink()) throw new Error(`Inventory source symlink is not supported: ${file}`);
+      if (entry.isDirectory()) walk(file);
+      else if (
+        entry.isFile() &&
+        /\.(?:[cm]?js|jsx|[cm]?ts|tsx|html?)$/i.test(entry.name) &&
+        !Object.hasOwn(INVENTORY_EXCLUSIONS, file)
+      )
+        found.push(file);
+    }
+  };
+  for (const directory of INVENTORY_ROOTS) walk(directory);
+  for (const file of INVENTORY_GENERATORS) {
+    const entry = lstatSync(join(root, file));
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new Error(`Inventory generator is not a real file: ${file}`);
+    found.push(file);
+  }
+  for (const file of INVENTORY_GENERATED_SOURCES)
+    if (!found.includes(file)) throw new Error(`Missing owned primary source: ${file}`);
+  return found.sort();
+}
+
+export const INVENTORY_SOURCES = discoverInventorySources(resolve(dirname(fileURLToPath(import.meta.url)), '..'));
+
 const compact = (text: string) => text.replace(/\s+/g, ' ').trim();
 const digest = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 12);
 
@@ -79,7 +155,14 @@ function scope(node: ts.Node, source: ts.SourceFile): { owner: string; binding: 
 
 /** Recognizes these constructors only; unresolved dynamic constructors/markup stay visible as gaps. */
 export function scanJavaScript(file: string, text: string): Declaration[] {
-  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const kind = /\.tsx$/i.test(file)
+    ? ts.ScriptKind.TSX
+    : /\.[cm]?ts$/i.test(file)
+      ? ts.ScriptKind.TS
+      : /\.jsx$/i.test(file)
+        ? ts.ScriptKind.JSX
+        : ts.ScriptKind.JS;
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
   const declarations: Declaration[] = [];
   const add = (node: ts.Node, kind: Declaration['kind'], detail: string) => {
     const { owner, binding } = scope(node, source);
@@ -120,6 +203,9 @@ export function scanJavaScript(file: string, text: string): Declaration[] {
       ['button', 'tab', 'switch', 'checkbox', 'menuitem'].includes(literal(node.arguments[1], source) || '')
     )
       add(node, 'detection-gap', `semantic-role:${compact(node.getText(source))}`);
+
+    if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node))
+      add(node, 'detection-gap', `jsx-markup:${digest(compact(node.getText(source)))}`);
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -169,7 +255,7 @@ export function scanHtml(file: string, text: string): Declaration[] {
 export function scanSources(root: string, sources: string[]): Declaration[] {
   return sources.flatMap((file) => {
     const text = readFileSync(join(root, file), 'utf8');
-    return file.endsWith('.html') ? scanHtml(file, text) : scanJavaScript(file, text);
+    return /\.html?$/i.test(file) ? scanHtml(file, text) : scanJavaScript(file, text);
   });
 }
 
@@ -207,16 +293,45 @@ function skippedAncestor(node: ts.Node): boolean {
   return false;
 }
 
+/** Only a direct top-level nonempty static numeric browser table is a known registration.
+ * Runtime tables, holes/spreads, conditional registrations and modifiers remain unknown.
+ */
+function scenarioRegistration(node: ts.CallExpression): boolean {
+  const expression = node.expression;
+  if (ts.isIdentifier(expression)) return ['it', 'test'].includes(expression.text);
+  if (!ts.isExpressionStatement(node.parent) || !ts.isSourceFile(node.parent.parent)) return false;
+  if (!ts.isCallExpression(expression) || expression.arguments.length !== 1) return false;
+  const factory = expression.expression;
+  if (
+    !ts.isPropertyAccessExpression(factory) ||
+    factory.name.text !== 'each' ||
+    !ts.isIdentifier(factory.expression) ||
+    !['it', 'test'].includes(factory.expression.text)
+  )
+    return false;
+  const table = expression.arguments[0];
+  if (
+    !ts.isArrayLiteralExpression(table) ||
+    !table.elements.length ||
+    !table.elements.every((entry) => ts.isNumericLiteral(entry) && Number.isFinite(Number(entry.text)))
+  )
+    return false;
+
+  return true;
+}
+
 /** Exact title and assertion anchors are reviewed scenario contracts, not evidence inferred from filenames. */
 export function validateManifest(
   root: string,
   manifest: Manifest,
-  declarations = scanSources(root, INVENTORY_SOURCES)
+  declarations = scanSources(root, discoverInventorySources(root))
 ): string[] {
   const errors: string[] = [];
   if (manifest.version !== 2) return ['Unknown manifest version: expected 2'];
-  if (JSON.stringify(manifest.sources) !== JSON.stringify(INVENTORY_SOURCES))
+  if (JSON.stringify(manifest.sources) !== JSON.stringify(discoverInventorySources(root)))
     errors.push('Source surface list differs from the reviewed scanner scope');
+  if (JSON.stringify(manifest.sourceExclusions) !== JSON.stringify(INVENTORY_EXCLUSIONS))
+    errors.push('Source exclusions differ from the reviewed exact asset policy');
   const actual = new Map(declarations.map((entry) => [entry.id, entry]));
   const assigned = new Set<string>();
   for (const entry of [...manifest.mappings, ...manifest.gaps]) {
@@ -240,11 +355,7 @@ export function validateManifest(
     const parsed = ts.createSourceFile(scenario.test, source, ts.ScriptTarget.Latest, true);
     const bodies: string[] = [];
     const visit = (node: ts.Node) => {
-      if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        ['it', 'test'].includes(node.expression.text)
-      ) {
+      if (ts.isCallExpression(node) && scenarioRegistration(node)) {
         const title = literal(node.arguments[0], parsed);
         if (title === scenario.title && node.arguments[1] && !skippedAncestor(node))
           bodies.push(node.arguments[1].getText(parsed));
@@ -291,6 +402,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     JSON.stringify(
       {
         sources: manifest.sources,
+        sourceExclusions: manifest.sourceExclusions,
         declarations: declarations.length,
         mappedDeclarations: manifest.mappings.length,
         reviewedScenarioLinks: manifest.mappings.reduce(

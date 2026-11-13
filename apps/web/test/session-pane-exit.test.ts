@@ -1,3 +1,6 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
+import { randomUUID } from 'node:crypto';
 /**
  * @fileoverview `SessionState.paneExit` — Reverie noticing that a pane's agent
  * has exited (Ark0N/Codeman#446).
@@ -189,30 +192,39 @@ describe('a relaunch in the same pane forgetting the old exit', () => {
   /** A mux whose respawn succeeds, so `restartCli()` reaches its success path. */
   const respawningMux = () => {
     const cleared: string[] = [];
+    const registry = registeredMuxFixture({
+      sessionId: randomUUID(),
+      muxName: 'reverie-aaaa',
+      pid: 4241,
+      workingDir: '/tmp',
+      mode: 'claude',
+    });
     const mux = {
+      ...registry,
       isAvailable: () => true,
       muxSessionExists: () => true,
       respawnPane: async (options: import('../src/mux-interface.js').RespawnPaneOptions) => {
         if (options.admitted && !options.admitted()) return null;
-        options.onProviderDispatch?.();
+        await acknowledgeMuxFixture(options);
         return 4242;
       },
       clearPaneExit: (muxName: string) => cleared.push(muxName),
     };
-    return { mux: mux as unknown as TerminalMultiplexer, cleared };
+    return { mux: mux as unknown as TerminalMultiplexer, cleared, subject: registry.subject };
   };
 
   it('clears the exit when restartCli relaunches the CLI', async () => {
     // restartCli() is the custom-model endpoint switch. Its caller persists and
     // broadcasts straight afterwards, so an exit left in place here is written
     // back onto a session that is running again.
-    const { mux, cleared } = respawningMux();
+    const { mux, cleared, subject } = respawningMux();
     const session = new Session({
+      id: subject.sessionId,
       workingDir: '/tmp',
       mode: 'claude',
       useMux: true,
       mux,
-      muxSession: stubMuxSession(),
+      muxSession: subject,
       paneExit: EXIT,
     });
     expect(session.paneExit).toEqual(EXIT);
@@ -228,14 +240,15 @@ describe('a relaunch in the same pane forgetting the old exit', () => {
 
   it('leaves the exit alone when the relaunch fails', async () => {
     // A failed respawn means the old command is still what the pane last ran.
-    const { mux, cleared } = respawningMux();
+    const { mux, cleared, subject } = respawningMux();
     (mux as unknown as { respawnPane: () => Promise<null> }).respawnPane = async () => null;
     const session = new Session({
+      id: subject.sessionId,
       workingDir: '/tmp',
       mode: 'claude',
       useMux: true,
       mux,
-      muxSession: stubMuxSession(),
+      muxSession: subject,
       paneExit: EXIT,
     });
 

@@ -102,13 +102,13 @@ export class OfficeAuthService extends OwnerAuthService {
     return this;
   }
 
-  override session(token: string | undefined): OwnerSession | undefined {
-    const primary = super.session(token);
+  override session(token: string | undefined, touch = true): OwnerSession | undefined {
+    const primary = super.session(token, touch);
     if (primary) return { ...primary, role: 'owner' };
     if (!token) return undefined;
     for (const p of this.people)
       if (!p.disabled && !this.accessChanging.has(p.id)) {
-        const session = this.children.get(p.id)?.session(token);
+        const session = this.children.get(p.id)?.session(token, touch);
         if (session) return { ...session, role: p.role };
       }
     return undefined;
@@ -148,6 +148,33 @@ export class OfficeAuthService extends OwnerAuthService {
     const account = this.forSession(token);
     const identity = account === this ? super.registrationIdentity(token) : account.registrationIdentity(token);
     return Object.freeze({ ...identity, personId: person.id });
+  }
+
+  override registeredResourceOwner(owner: string | undefined): OwnerRegistrationIdentity {
+    // Empty canonical owner means PRIMARY, even when invited owners exist.
+    if (owner === undefined) return super.registeredResourceOwner(undefined);
+    let people: OfficePerson[];
+    try {
+      people = PeopleSchema.parse(JSON.parse(readFileSync(this.peopleFile, 'utf8'))).people;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.people.length)
+        throw new OwnerAuthError('Current registered resource owner is unavailable', 403);
+      people = [];
+    }
+    const matches: OwnerRegistrationIdentity[] = [];
+    try { matches.push(super.registeredResourceOwner(owner)); } catch { /* Not this canonical account. */ }
+    for (const person of people) {
+      if (person.disabled || person.role !== 'owner' || this.accessChanging.has(person.id)) continue;
+      const original = this.people.find(row => row.id === person.id);
+      if (!original || original.disabled || original.role !== 'owner') continue;
+      const child = this.children.get(person.id);
+      if (!child) continue;
+      try {
+        matches.push(Object.freeze({ ...child.registeredResourceOwner(owner), personId: person.id }));
+      } catch { /* A missing/nonmatching account supplies no candidate. */ }
+    }
+    if (matches.length !== 1) throw new OwnerAuthError('Current registered resource owner is unavailable', 403);
+    return matches[0]!;
   }
 
   override inputIdentity(token: string | undefined): BrowserInputIdentity {

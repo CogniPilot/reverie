@@ -1,13 +1,14 @@
 import { afterEach, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHarness } from './helpers/chat-app-harness.mjs';
+import { EmployeePermissionsSchema } from '../src/company-types.js';
 const handles: any[] = [];
 afterEach(() => { for (const h of handles.splice(0)) h.window.close(); });
 const labels = ['Update own board work', 'Manage company board', 'Prepare decision cards'];
 async function setup(options: { owner?: boolean; projection?: boolean } = {}) {
   const employee: any = {
     id: 'river', sessionId: 'runtime', name: 'River', icon: 'R', position: 'CEO', reportsTo: 'owner', onVacation: true,
-    permissions: { editBoardIssues: false, recoverEmployees: false, moveOwnPlan: false, managePlans: false },
+    permissions: EmployeePermissionsSchema.parse({ editBoardIssues: false }),
     ...(options.projection === false ? {} : {
       effectiveBoardPermissions: { editBoardIssues: true, manageBoard: true, manageDecisions: true },
       boardPermissionSources: { editBoardIssues: 'included', manageBoard: 'legacy', manageDecisions: 'legacy' },
@@ -19,6 +20,11 @@ async function setup(options: { owner?: boolean; projection?: boolean } = {}) {
   h.app._chatApi = async (path: string, opts?: any) => {
     if (path === '/api/company') return { ok: true, data: structuredClone(company) };
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: options.owner === false ? 'runtime' : 'owner', canSetOwn: options.owner !== false } };
+    if (path === '/api/company/employees/river/permissions') return { ok: true, data: {
+      employeeId: employee.id, permissions: structuredClone(employee.permissions),
+      effectiveBoardPermissions: structuredClone(employee.effectiveBoardPermissions),
+      boardPermissionSources: structuredClone(employee.boardPermissionSources),
+    } };
     if (path === '/api/company/employees/river' && opts?.method === 'PUT')
       return new Promise(resolve => pending.push({ body: opts.body, resolve }));
     return { ok: true, data: {} };
@@ -65,15 +71,18 @@ it('saves an explicit revocation, preserves a separate basic denial, and rereads
   expect(employee.permissions.recoverEmployees).toBe(false);
 });
 
-it('restores the effective checked state when an inherited permission revocation is refused', async () => {
+it('keeps a refused permission uncertain until a read confirms the unchanged inherited access', async () => {
   const { h, employee, pending, input } = await setup();
   input(labels[2]).click(); await h.flush();
   expect(pending[0].body).toEqual({ permissions: { manageDecisions: false } });
   pending[0].resolve({ ok: false, status: 403, error: 'Owner session expired' }); await h.flush();
-  expect(input(labels[2]).checked).toBe(true); expect(input(labels[2]).disabled).toBe(false);
+  expect(input(labels[2]).indeterminate).toBe(true); expect(input(labels[2]).disabled).toBe(true);
   expect(employee.permissions).not.toHaveProperty('manageDecisions');
   expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Owner session expired');
   expect(input(labels[0]).disabled).toBe(true);
+  h.document.querySelector('[aria-label="Refresh permissions for River"]').click(); await h.flush();
+  expect(input(labels[2]).checked).toBe(true); expect(input(labels[2]).indeterminate).toBe(false);
+  expect(input(labels[2]).disabled).toBe(false); expect(pending).toHaveLength(1);
 });
 
 it('does not report an incomplete effective-access response as confirmed, or invent missing server access', async () => {
@@ -81,8 +90,8 @@ it('does not report an incomplete effective-access response as confirmed, or inv
   input(labels[2]).click(); await h.flush();
   pending[0].resolve({ ok: true, data: { employee: { id: employee.id, permissions: { manageDecisions: false } } } });
   await h.flush();
-  expect(input(labels[2]).checked).toBe(true);
-  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('current access could not be read');
+  expect(input(labels[2]).indeterminate).toBe(true); expect(input(labels[2]).disabled).toBe(true);
+  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('may already have saved');
   expect(h.document.querySelector('.ca-expert-profile').textContent).not.toContain('Preferences saved.');
   const missing = await setup({ projection: false });
   for (const label of labels) expect(missing.input(label).disabled).toBe(true);
@@ -133,7 +142,7 @@ it('keeps office management explicit, saves only that grant, and rereads grant a
   const { h, employee, pending, input } = await setup();
   const label = 'Manage office attendance and restarts';
   expect(input(label).checked).toBe(false);
-  expect(employee.permissions).not.toHaveProperty('manageOffice');
+  expect(employee.permissions.manageOffice).toBe(false);
   for (const value of [true, false]) {
     input(label).click(); await h.flush();
     const save = pending.at(-1)!;
@@ -159,12 +168,14 @@ it('does not expose the office grant to a delegate, or confirm an unverified gra
   const { h, employee, pending, input } = await setup();
   input(label).click(); await h.flush();
   pending[0].resolve({ ok: false, status: 403, error: 'Owner session expired' }); await h.flush();
-  expect(input(label).checked).toBe(false);
-  expect(employee.permissions).not.toHaveProperty('manageOffice');
+  expect(input(label).indeterminate).toBe(true); expect(input(label).disabled).toBe(true);
+  expect(employee.permissions.manageOffice).toBe(false);
   expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Owner session expired');
+  h.document.querySelector('[aria-label="Refresh permissions for River"]').click(); await h.flush();
+  expect(input(label).checked).toBe(false); expect(input(label).indeterminate).toBe(false);
   input(label).click(); await h.flush();
   pending[1].resolve({ ok: true, data: { employee: { id: 'different', permissions: { manageOffice: true } } } }); await h.flush();
-  expect(input(label).checked).toBe(false);
-  expect(employee.permissions).not.toHaveProperty('manageOffice');
-  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('Save not confirmed');
+  expect(input(label).indeterminate).toBe(true); expect(input(label).disabled).toBe(true);
+  expect(employee.permissions.manageOffice).toBe(false);
+  expect(h.document.querySelector('.ca-expert-profile').textContent).toContain('may already have saved');
 });

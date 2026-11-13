@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 /**
  * Workspace-trust dialog auto-accept.
  *
@@ -148,7 +148,8 @@ describe('Session trust-dialog auto-accept', () => {
   /** A session whose pane renders `screen`, recording everything written to it. */
   function sessionShowing(screen: () => string) {
     const writes: string[] = [];
-    const mux = {
+    const registry = registeredMuxFixture({mode: 'claude', sessionId: 'test', muxName: 'reverie-test', pid: 42});
+    const mux = {...registry,
       isAvailable: () => true,
       capturePaneText: () => screen(),
       sendInput: (_id: string, data: string) => {
@@ -157,12 +158,12 @@ describe('Session trust-dialog auto-accept', () => {
       },
     };
     const session = new Session({
+      id: registry.subject.sessionId,
       workingDir: '/tmp',
       mode: 'claude',
       mux,
-      muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
+      muxSession: registry.subject,
     } as ConstructorParameters<typeof Session>[0]);
-    registerMuxFixture(session);
     const internals = session as unknown as {
       _maybeAcceptTrustDialog(): void;
       _interactiveStartedAt: number;

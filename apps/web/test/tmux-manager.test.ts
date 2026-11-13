@@ -22,8 +22,10 @@ import {
   resolveActivePaneTarget,
 } from '../src/tmux-manager.js';
 import { execSync, exec } from 'node:child_process';
-import type { MuxSession } from '../src/mux-interface.js';
+import type { MuxSession, CreateSessionOptions, RespawnPaneOptions } from '../src/mux-interface.js';
+import type { SessionDocker } from '../src/types.js';
 import { withWriteGate } from '../src/submit-settle.js';
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 
 // ============================================================================
 // Unit Tests (mocked)
@@ -54,13 +56,15 @@ vi.mock('node:child_process', async () => {
   };
 });
 
-// Mock fs to avoid file I/O
+// Keep tmux metadata existence/writes controlled, but preserve the real read
+// contract for the owned StateStore fixtures: actual ENOENT or original bytes.
+// The test setup isolates HOME; these reads confer no publication authority.
 vi.mock('node:fs', async () => {
-  const actual = await vi.importActual('node:fs');
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(false),
-    readFileSync: vi.fn(),
+    readFileSync: vi.fn(actual.readFileSync),
     mkdirSync: vi.fn(),
     writeFile: vi.fn((_path: string, _data: string, cb: (err: Error | null) => void) => cb(null)),
   };
@@ -77,6 +81,7 @@ vi.mock('node:fs/promises', async () => {
 
 describe('TmuxManager (unit)', () => {
   let manager: TmuxManager;
+  const publications: Array<{ session: import('../src/session.js').Session; store: import('../src/state-store.js').StateStore; root: string }> = [];
   const mockedExecSync = vi.mocked(execSync);
   const mockedExec = vi.mocked(exec);
 
@@ -95,8 +100,159 @@ describe('TmuxManager (unit)', () => {
     manager = new TmuxManager();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     manager.destroy();
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    for (const owner of publications.splice(0)) {
+      await owner.session.stop(false);
+      if (!owner.store.statePublicationHeld) await owner.store.saveNowAsync();
+      fs.rmSync(owner.root, { recursive: true, force: true });
+    }
+  });
+
+  /** A fresh private real store per original Session. Reused DATA session IDs
+   * in unrelated cases must not inherit another case's deliberately held row. */
+  async function sessionOwner(config: ConstructorParameters<typeof import('../src/session.js').Session>[0]) {
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { Session } = await import('../src/session.js');
+    const { StateStore } = await import('../src/state-store.js');
+    const root = fs.mkdtempSync(join(tmpdir(), 'mux-publication-'));
+    const store = new StateStore(join(root, 'state.json'));
+    const session = new Session({ ...config, publicationStore: store });
+    const owner = { session, store, root };
+    publications.push(owner);
+    return owner;
+  }
+
+  /** Fresh real Session/Store owners for the existing synthetic command executor.
+   * Neither this helper nor the fake executor supplies a durability receipt. */
+  async function publicationOptions<T extends CreateSessionOptions | RespawnPaneOptions>(options: T): Promise<T> {
+    if (options.workerAttachOnly || options.remote?.owned === false) return options;
+    const { session: subject, store } = await sessionOwner({
+      id: options.sessionId,
+      owner: options.owner,
+      mode: options.mode,
+      workingDir: options.workingDir,
+    });
+    const socket = process.env.REVERIE_WORKER_SOCKET;
+    const publication = store.stageProviderLaunch(subject, {
+      transport: socket ? 'native-ordinary' : 'local-mux',
+      brokerSocket: socket,
+      current: () => true,
+      snapshot: () => subject.toPersistedState(),
+    });
+    const onDispatch = options.onProviderDispatch;
+    return {
+      ...options,
+      providerSubject: subject,
+      providerLaunch: publication,
+      onProviderDispatch: () => {
+        publication.claim();
+        onDispatch?.();
+      },
+    };
+  }
+
+  async function ownedCreate(instance: TmuxManager, options: CreateSessionOptions) {
+    return instance.createSession(await publicationOptions(options));
+  }
+  async function ownedRespawn(instance: TmuxManager, options: RespawnPaneOptions) {
+    return instance.respawnPane(await publicationOptions(options));
+  }
+
+
+  it('keeps actual corrupt owned state unknown instead of treating the read as a missing file', async () => {
+    const options: CreateSessionOptions = await publicationOptions({
+      sessionId: '70000000-0000-4000-8000-000000000001',
+      workingDir: '/synthetic',
+      mode: 'shell',
+    });
+    const original = publications.at(-1)!;
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const { join } = await import('node:path');
+    const { StateStore } = await import('../src/state-store.js');
+    const { Session } = await import('../src/session.js');
+    const file = join(original.root, 'state.json');
+    actual.writeFileSync(file, 'corrupt-original-state', { mode: 0o600 });
+    const loadedStore = new StateStore(file);
+    const loaded = new Session({
+      id: options.sessionId,
+      workingDir: options.workingDir,
+      mode: options.mode,
+      useMux: false,
+      publicationStore: loadedStore,
+    });
+    try {
+      expect(loaded.providerDispatchHeld).toBe(true);
+      const publication = loadedStore.stageProviderLaunch(loaded, {
+        transport: 'local-mux',
+        current: () => true,
+        snapshot: () => loaded.toPersistedState(),
+      });
+      await expect(
+        publication.prepare(loaded, {
+          kind: 'mux',
+          sessionId: loaded.id,
+          owner: null,
+          mode: loaded.mode,
+          command: 'fixture-with-no-physical-dispatch',
+          cwd: loaded.workingDir,
+          environment: {},
+        })
+      ).rejects.toThrow('Original provider launch');
+      expect(actual.readFileSync(file, 'utf8')).toBe('corrupt-original-state');
+      expect(mockedExec.mock.calls).toHaveLength(0);
+    } finally {
+      await loaded.stop(false);
+    }
+  });
+
+  it('reads real retained launch bytes as a denial without recreating their private owner', async () => {
+    const options: CreateSessionOptions = await publicationOptions({
+      sessionId: '70000000-0000-4000-8000-000000000002',
+      workingDir: '/synthetic',
+      mode: 'shell',
+    });
+    const original = publications.at(-1)!;
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const { join } = await import('node:path');
+    const { StateStore } = await import('../src/state-store.js');
+    const { Session } = await import('../src/session.js');
+    await options.providerLaunch!.prepare(options.providerSubject, {
+      kind: 'mux',
+      sessionId: options.sessionId,
+      owner: null,
+      mode: options.mode,
+      command: 'fixture-with-no-physical-dispatch',
+      cwd: options.workingDir,
+      environment: {},
+    });
+    const file = join(original.root, 'state.json'),
+      bytes = actual.readFileSync(file, 'utf8');
+    expect(JSON.parse(bytes).__providerLaunchIntentsV1.rows[options.sessionId]).toMatchObject({
+      sessionId: options.sessionId,
+      phase: 'dispatch-intent',
+      transport: 'local-mux',
+    });
+    const loadedStore = new StateStore(file);
+    const loaded = new Session({
+      id: options.sessionId,
+      workingDir: options.workingDir,
+      mode: options.mode,
+      useMux: false,
+      publicationStore: loadedStore,
+    });
+    try {
+      expect(loadedStore.providerLaunchHeldFor(loaded)).toBe(true);
+      expect(loaded.providerDispatchHeld).toBe(true);
+      expect(loaded.canAcceptChatInput()).toBe(false);
+      expect(actual.readFileSync(file, 'utf8')).toBe(bytes);
+      expect(mockedExec.mock.calls).toHaveLength(0);
+    } finally {
+      await loaded.stop(false);
+    }
   });
 
   it('refuses a failed private hook environment write without logging its value', () => {
@@ -859,12 +1015,19 @@ describe('TmuxManager (unit)', () => {
     it.each(['held', 'epoch', 'owner'] as const)('ordinary Session input withholds later Enter when %s changes during physical text IO', async change => {
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const instance = new NonTestTmuxManager();
-      const {Session} = await import('../src/session.js');
+
       const record = {owner: 'original', sessionId: 'ordinary-admission123', muxName: 'reverie-abcd5678', pid: 12345,
         createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
       instance.registerSession(record);
-      const session = new Session({id: record.sessionId, workingDir: '/tmp', mode: 'opencode', useMux: true,
-        mux: instance, muxSession: record, owner: 'original'});
+      const { session } = await sessionOwner({
+        id: record.sessionId,
+        workingDir: '/tmp',
+        mode: 'opencode',
+        useMux: true,
+        mux: instance,
+        muxSession: record,
+        owner: 'original',
+      });
       const {exec: currentExec} = await import('node:child_process');
       const previous = vi.mocked(currentExec).getMockImplementation();
       const commands: string[] = [];
@@ -882,14 +1045,15 @@ describe('TmuxManager (unit)', () => {
       });
       vi.spyOn(instance, 'capturePaneText').mockReturnValue('');
       try {
-        const writing = session.writeViaMux('synthetic ordinary text\r', {admitted: () => true});
+        const writing = session.writeViaMux('synthetic ordinary text\r', {admitted: () => true})
+          .then(value => ({value,error:undefined}),error => ({value:undefined,error}));
         await firstKey;
         if (change === 'held') {
-          vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return null;});
+          vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {await acknowledgeMuxFixture(options); return null;});
           await expect(session.restartCli()).rejects.toMatchObject({name: 'ProviderDispatchUnconfirmedError'});
         } else if (change === 'epoch') {session.setMode('shell'); session.setMode('opencode');}
         else session.owner = 'successor';
-        release!(); await expect(writing).rejects.toMatchObject({name: 'TerminalInputUnconfirmedError'});
+        release!(); expect((await writing).error).toMatchObject({name: 'TerminalInputUnconfirmedError'});
         expect(commands.filter(command => command.includes('send-keys'))).toHaveLength(1);
         expect(commands.some(command => /send-keys.* Enter/.test(command))).toBe(false);
       } finally {release?.(); vi.mocked(currentExec).mockImplementation(previous!); await session.stop(false); instance.destroy();}
@@ -898,12 +1062,19 @@ describe('TmuxManager (unit)', () => {
       'delayed verifier admission across %s while its real Escape IO awaits', async change => {
         const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
         const instance = new NonTestTmuxManager(), replacement = new NonTestTmuxManager();
-        const {Session} = await import('../src/session.js');
+
         const record = {owner: 'original', sessionId: 'verifier-admission123', muxName: 'reverie-abcd5678', pid: 12345,
           createdAt: Date.now(), workingDir: '/tmp', mode: 'opencode' as const, attached: true};
         instance.registerSession(record);
-        const session = new Session({id: record.sessionId, workingDir: '/tmp', mode: 'opencode', useMux: true,
-          mux: instance, muxSession: record, owner: 'original'});
+        const { session } = await sessionOwner({
+          id: record.sessionId,
+          workingDir: '/tmp',
+          mode: 'opencode',
+          useMux: true,
+          mux: instance,
+          muxSession: record,
+          owner: 'original',
+        });
         const {exec: currentExec} = await import('node:child_process');
         const previous = vi.mocked(currentExec).getMockImplementation();
         const commands: string[] = [];
@@ -933,7 +1104,7 @@ describe('TmuxManager (unit)', () => {
           else if (change === 'mux-record') instance.registerSession({...record, pid: record.pid + 1});
           else if (change === 'subject') Object.assign(session, {_muxSession: {...record, muxName: 'reverie-new12345'}});
           else if (change === 'held') {
-            vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return null;});
+            vi.spyOn(instance, 'respawnPane').mockImplementation(async options => {await acknowledgeMuxFixture(options); return null;});
             await expect(session.restartCli()).rejects.toMatchObject({name: 'ProviderDispatchUnconfirmedError'});
           } else if (change === 'caller') allowed = false;
           else if (change === 'new-arm') {frame = '┃ successor draft\n────────────────\nnormal'; session.verifySubmitted('successor draft', nextOutcome);}
@@ -1111,6 +1282,8 @@ describe('TmuxManager (unit)', () => {
       const tools = path.join(root, 'tools');
       fs.mkdirSync(tools);
       const capture = path.join(root, 'tmux-argv.json');
+      const envProgram = child.execFileSync('/bin/sh', ['-c', 'command -v env'], {encoding:'utf8',env:{PATH:process.env.PATH}}).trim();
+      fs.symlinkSync(envProgram,path.join(tools,'env'));
       const script = (file: string, body: string) => {
         fs.writeFileSync(file, `#!${process.execPath}\n${body}\n`, { mode: 0o700 });
       };
@@ -1123,6 +1296,168 @@ describe('TmuxManager (unit)', () => {
       };
       return { fs, child, bash, path, root, tools, script, outerArgs, close: () => fs.rmSync(root, { recursive: true, force: true }) };
     }
+
+    it.each([
+      ['dedicated', 'changed', true], ['dedicated', 'removed', false], ['broker', 'changed', false], ['broker', 'removed', false],
+    ] as const)('viewer repair preserves original %s routing when global configuration is %s (normal launch %s)', async (kind, change, normalLaunch) => {
+      const f = await launchFixture();
+      vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/synthetic-broker.sock');
+      vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', kind === 'dedicated' ? "/run/synthetic-viewer 'quoted'.sock" : '');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      const id = '12345678-1234-4123-8123-123456789abc';
+      const result = f.path.join(f.root, 'viewer.json');
+      const envProgram = f.child.execFileSync('/bin/sh',['-c','command -v env'],{encoding:'utf8',env:{PATH:process.env.PATH}}).trim();
+      expect(f.fs.realpathSync(f.path.join(f.tools,'env'))).toBe(f.fs.realpathSync(envProgram));
+      f.script(f.path.join(f.tools, 'reverie-worker-exec'), `require('node:fs').writeFileSync(process.env.VIEWER_RESULT, JSON.stringify({socket:process.env.REVERIE_WORKER_SOCKET,args:process.argv.slice(2)}))`);
+      try {
+        if (normalLaunch) vi.spyOn(instance as unknown as {_resolveStatusLine():Promise<{state:undefined}>},'_resolveStatusLine')
+          .mockImplementationOnce(async () => {
+            vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','/run/changed-during-launch.sock');
+            return {state:undefined};
+          });
+        const record = await ownedCreate(instance, {sessionId:id,workingDir:f.root,mode:'shell',workerAttachOnly:!normalLaunch});
+        const original = {...record};
+        const serialized = JSON.stringify(record);
+        expect(serialized).not.toContain('sock');
+        const originalPane = mockedExecSync.mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))![0];
+        expect(String(originalPane).includes('--attach-only')).toBe(!normalLaunch);
+        vi.stubEnv('REVERIE_WORKER_SOCKET', change === 'removed' ? '' : '/run/replacement-broker.sock');
+        vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', change === 'removed' ? '' : '/run/replacement-viewer.sock');
+        mockedExec.mockClear(); mockedExecSync.mockClear();
+        expect(await ownedRespawn(instance, {sessionId:id,workingDir:f.root,mode:'shell',workerAttachOnly:true,onlyIfDead:true})).toBe(4242);
+        const launches = mockedExec.mock.calls.filter(([cmd]) => String(cmd).includes(' respawn-pane '));
+        expect(launches).toHaveLength(1);
+        const command = String(launches[0][0]);
+        expect(command).not.toContain('respawn-pane -k');
+        expect(command).not.toContain('replacement-');
+        const args = f.outerArgs(command);
+        f.child.execFileSync(f.bash, ['--noprofile','--norc','-c',args.at(-1)!], {
+          env:{HOME:f.root,PATH:f.tools+':/bin',VIEWER_RESULT:result,REVERIE_WORKER_SOCKET:'/run/stale-tmux-server.sock'},
+        });
+        expect(JSON.parse(f.fs.readFileSync(result,'utf8'))).toMatchObject({
+          socket:kind === 'dedicated' ? "/run/synthetic-viewer 'quoted'.sock" : '/run/synthetic-broker.sock',
+          args:['--attach-only','--session-id',id,'--cwd',f.root,'--command',expect.any(String)],
+        });
+        expect(instance.getSession(id)).toBe(record); expect(record).toEqual(original);
+        expect([...mockedExec.mock.calls,...mockedExecSync.mock.calls].some(([cmd]) => /kill-|stop-laptops|new-session/.test(String(cmd)))).toBe(false);
+      } finally {instance.destroy();vi.unstubAllEnvs();f.close();}
+    });
+
+    it.each(['replaced-record','changed-owner','manual-record'] as const)('refuses %s without adopting an endpoint or issuing tmux effects', async change => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET','/run/original.sock');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager(), id = '12345678-1234-4123-8123-123456789abc';
+      try {
+        const record = await ownedCreate(instance, {sessionId:id,workingDir:'/synthetic',mode:'shell',workerAttachOnly:true});
+        if (change === 'manual-record') instance.registerSession({...JSON.parse(JSON.stringify(record))});
+        else vi.spyOn(instance as never, '_resolveStatusLine').mockImplementationOnce(async () => {
+          if (change === 'replaced-record') instance.registerSession({...record,pid:record.pid+1});
+          else record.owner = 'successor';
+          return {state:undefined};
+        });
+        mockedExec.mockClear(); mockedExecSync.mockClear();
+        await expect(ownedRespawn(instance, {sessionId:id,workingDir:'/synthetic',mode:'shell',workerAttachOnly:true,onlyIfDead:true}))
+          .rejects.toMatchObject({name:'WorkerViewerEndpointCustodyError'});
+        expect(mockedExec.mock.calls).toHaveLength(0);
+        expect(mockedExecSync.mock.calls.filter(([cmd]) => /setenv|respawn-pane|new-session|kill-/.test(String(cmd)))).toHaveLength(0);
+      } finally {instance.destroy();vi.unstubAllEnvs();}
+    });
+
+    it('does not make normal provider creation depend on invalid viewer-only configuration', async () => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET','/run/original.sock');
+      vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','invalid-relative-viewer.sock');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager(), id = '12345678-1234-4123-8123-123456789abc';
+      try {
+        const record = await ownedCreate(instance, {sessionId:id,workingDir:'/synthetic',mode:'shell'});
+        const original = mockedExecSync.mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))![0];
+        expect(original).toContain('exec env REVERIE_WORKER_SOCKET=');
+        expect(original).toContain('reverie-worker-exec --attempt-id');
+        expect(original).not.toContain('invalid-relative-viewer'); expect(original).not.toContain('--attach-only');
+        mockedExec.mockClear(); mockedExecSync.mockClear();
+        // Fixing global config does not silently replace the denied original routing admission.
+        vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','/run/changed.sock');
+        await expect(ownedRespawn(instance, {sessionId:id,workingDir:'/synthetic',mode:'shell',workerAttachOnly:true,onlyIfDead:true}))
+          .rejects.toMatchObject({name:'WorkerViewerEndpointCustodyError',reason:'viewer-endpoint-configuration-invalid'});
+        expect(mockedExec.mock.calls).toHaveLength(0); expect(mockedExecSync.mock.calls).toHaveLength(0);
+        expect(instance.getSession(id)).toBe(record);
+      } finally {instance.destroy();vi.unstubAllEnvs();}
+    });
+
+    it('does not require a website CLI binary to attach an existing worker provider', async () => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/original.sock');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      vi.spyOn(instance as unknown as {
+        buildPathExport(mode: string): {pathExport: string; dir: string | null};
+      }, 'buildPathExport').mockReturnValue({pathExport: '', dir: null});
+      try {
+        const sessionId = '12345678-1234-4123-8123-123456789abc';
+        const record = await ownedCreate(instance, {sessionId, workingDir: '/synthetic', mode: 'codex', workerAttachOnly: true});
+        expect(record.mode).toBe('codex');
+        const launch = mockedExecSync.mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))![0];
+        expect(launch).toContain('reverie-worker-exec --attach-only');
+        await expect(ownedCreate(instance, {sessionId: '22345678-1234-4123-8123-123456789abc', workingDir: '/synthetic', mode: 'codex'}))
+          .rejects.toThrow('Codex CLI not found');
+      } finally {instance.destroy(); vi.unstubAllEnvs();}
+    });
+
+    it.each([false, true])('launches a docker session without a host CLI and retains local refusal (owned=%s)', async owned => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', '');
+      vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', '');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      vi.spyOn(instance as unknown as {
+        buildPathExport(mode: string): {pathExport: string; dir: string | null};
+      }, 'buildPathExport').mockReturnValue({pathExport: '', dir: null});
+      const docker: SessionDocker = {
+        hostId:'fixture',label:'Fixture',engine:'docker',image:'fixture:immutable',
+        containerName:'fixture-container',hostWorkspacePath:'/synthetic',containerWorkdir:'/work',
+        network:'none',mountCredentials:false,hooksEnabled:false,resumeOnStart:false,owned,
+      };
+      try {
+        const record = await ownedCreate(instance, {sessionId:'32345678-1234-4123-8123-123456789abc',
+          workingDir:'/synthetic',mode:'codex',docker});
+        expect(record.docker).toEqual(docker);
+        const launch = mockedExecSync.mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))![0];
+        expect(launch).toContain('docker');
+        expect(launch).toContain('fixture-container');
+        expect(launch).toContain('exec codex');
+        expect(launch).not.toContain('reverie-worker-exec');
+        await expect(ownedCreate(instance, {sessionId:'42345678-1234-4123-8123-123456789abc',
+          workingDir:'/synthetic',mode:'codex'})).rejects.toThrow('Codex CLI not found');
+      } finally {instance.destroy(); vi.unstubAllEnvs();}
+    });
+
+    it.each(['unconfigured','remote','docker','invalid-viewer'] as const)('initial attach-only %s refuses before any tmux effect', async kind => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET',kind === 'unconfigured' ? '' : '/run/original.sock');
+      vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET',kind === 'invalid-viewer' ? 'invalid-relative.sock' : '');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      mockedExec.mockClear(); mockedExecSync.mockClear();
+      try {
+        await expect(ownedCreate(instance, {sessionId:'12345678-1234-4123-8123-123456789abc',workingDir:'/synthetic',mode:'shell',workerAttachOnly:true,
+          ...(kind === 'remote' ? {remote:{host:'synthetic',user:'synthetic'} as never} : {}),
+          ...(kind === 'docker' ? {docker:{container:'synthetic',owned:false} as never} : {}),
+        })).rejects.toMatchObject({name:'WorkerViewerEndpointCustodyError'});
+        expect(mockedExec.mock.calls).toHaveLength(0); expect(mockedExecSync.mock.calls).toHaveLength(0);
+        expect(instance.getSessions()).toHaveLength(0);
+      } finally {instance.destroy();vi.unstubAllEnvs();}
+    });
+
+    it('preserves ordinary local creation without native worker configuration', async () => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET',''); vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','');
+      const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
+      const instance = new NonTestTmuxManager();
+      mockedExec.mockClear();
+      try {
+        const record = await ownedCreate(instance, {sessionId:'12345678-1234-4123-8123-123456789abc',workingDir:'/synthetic',mode:'shell'});
+        expect(record.pid).toBe(4242);
+        const command = mockedExecSync.mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))![0];
+        expect(command).not.toContain('reverie-worker-exec'); expect(command).not.toContain('--attach-only');
+      } finally {instance.destroy();vi.unstubAllEnvs();}
+    });
 
     it('passes literal variables, substitutions, backticks and spaces through the outer shell as one program', async () => {
       const f = await launchFixture();
@@ -1161,7 +1496,7 @@ describe('TmuxManager (unit)', () => {
       const resolverSpy = vi.spyOn(resolver, 'resolveCliBinDir').mockReturnValue(cliDir);
       mockedExecSync.mockClear();
       try {
-        await nonTestManager.createSession({ sessionId: '11111111-1234-4123-8123-123456789abc', workingDir: f.root, mode: 'codex' });
+        await ownedCreate(nonTestManager, { sessionId: '11111111-1234-4123-8123-123456789abc', workingDir: f.root, mode: 'codex' });
         const command = mockedExecSync.mock.calls.find(([value]) => String(value).includes(' respawn-pane '))?.[0];
         const args = f.outerArgs(String(command), { PATH: f.tools + ':/website-parent', NAME: 'PARENT_EXPANSION' });
         f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { env: { HOME: f.root, PATH: '/pane-base', NAME: 'CHILD_EXPANSION', PROVIDER_RESULT: output } });
@@ -1210,10 +1545,10 @@ process.exit(result.status === null ? 1 : result.status);`);
       mockedExecSync.mockClear(); mockedExec.mockClear();
       try {
         const sessionId = '12345678-1234-4123-8123-123456789abc';
-        if (action === 'create') await nonTestManager.createSession({ sessionId, workingDir: cwd, mode: 'codex' });
+        if (action === 'create') await ownedCreate(nonTestManager, { sessionId, workingDir: cwd, mode: 'codex' });
         else {
           nonTestManager.registerSession({ sessionId, muxName: 'reverie-12345678', pid: 1000, createdAt: Date.now(), workingDir: cwd, mode: 'codex', attached: false });
-          expect(await nonTestManager.respawnPane({ sessionId, workingDir: cwd, mode: 'codex', onlyIfDead: true })).toBe(4242);
+          expect(await ownedRespawn(nonTestManager, { sessionId, workingDir: cwd, mode: 'codex', onlyIfDead: true })).toBe(4242);
         }
         const calls = action === 'create' ? mockedExecSync.mock.calls : mockedExec.mock.calls;
         const command = calls.find(([value]) => String(value).includes(' respawn-pane '))?.[0];
@@ -1222,7 +1557,9 @@ process.exit(result.status === null ? 1 : result.status);`);
         const args = f.outerArgs(String(command), env);
         f.child.execFileSync(f.bash, ['--noprofile', '--norc', '-c', args.at(-1)!], { env: { HOME: f.root, ...env } });
         const sent = JSON.parse(f.fs.readFileSync(workerArgs, 'utf8')) as string[];
-        expect(sent.slice(0, 4)).toEqual(['--session-id', sessionId, '--cwd', cwd]);
+        const owner = publications.at(-1)!;
+        const intent = JSON.parse(f.fs.readFileSync(f.path.join(owner.root,'state.json'),'utf8')).__providerLaunchIntentsV1.rows[sessionId];
+        expect(sent.slice(0, 6)).toEqual(['--attempt-id',intent.attemptId,'--session-id', sessionId, '--cwd', cwd]);
         expect(sent.at(-1)).not.toContain(serverBin);
         const result = JSON.parse(f.fs.readFileSync(output, 'utf8'));
         expect(result).toMatchObject({ selection: 'private-profile', cwd, cargo: f.path.join(shimBin, 'cargo'), profile: f.path.join(profileBin, 'profile-tool') });
@@ -1239,7 +1576,7 @@ process.exit(result.status === null ? 1 : result.status);`);
       const nonTestManager = new NonTestTmuxManager();
 
       try {
-        const session = await nonTestManager.createSession({
+        const session = await ownedCreate(nonTestManager, {
           sessionId: '00000030-003b-4000-8000-000000000055',
           workingDir: '/mnt/gdrive/project with spaces',
           mode: 'shell',
@@ -1294,7 +1631,7 @@ process.exit(result.status === null ? 1 : result.status);`);
       const nonTestManager = new NonTestTmuxManager();
 
       try {
-        await nonTestManager.createSession({
+        await ownedCreate(nonTestManager, {
           sessionId: '00000044-0056-4000-8000-000000000082',
           workingDir: '/project',
           mode: 'shell',
@@ -1334,7 +1671,7 @@ process.exit(result.status === null ? 1 : result.status);`);
       });
 
       try {
-        const pid = await nonTestManager.respawnPane({
+        const pid = await ownedRespawn(nonTestManager, {
           sessionId: 'respawn1234',
           workingDir: '/mnt/gdrive/project',
           mode: 'shell',
@@ -1360,7 +1697,7 @@ process.exit(result.status === null ? 1 : result.status);`);
         createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true,
       });
       try {
-        expect(await nonTestManager.respawnPane({ sessionId: 'recovery1234', workingDir: '/tmp', mode: 'shell', onlyIfDead })).toBe(4242);
+        expect(await ownedRespawn(nonTestManager, { sessionId: 'recovery1234', workingDir: '/tmp', mode: 'shell', onlyIfDead })).toBe(4242);
         const { exec: currentExec } = await import('node:child_process');
         const command = vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0];
         expect(command).toContain(`respawn-pane${onlyIfDead ? '' : ' -k'} -c /tmp -t 'reverie-abcd1234'`);
@@ -1372,10 +1709,11 @@ process.exit(result.status === null ? 1 : result.status);`);
       vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/fixture/worker.sock');
       const NonTestTmuxManager = await importWithTmuxCommandsEnabled();
       const nonTestManager = new NonTestTmuxManager();
-      nonTestManager.registerSession({ sessionId: 'viewer1234', muxName: 'reverie-abcd1234', pid: 1000,
-        createdAt: Date.now(), workingDir: '/tmp', mode: 'shell', attached: true });
       try {
-        expect(await nonTestManager.respawnPane({ sessionId: 'viewer1234', workingDir: '/tmp', mode: 'shell',
+        const sessionId = '12345678-1234-4123-8123-123456789abc';
+        await ownedCreate(nonTestManager, {sessionId,workingDir:'/tmp',mode:'shell',workerAttachOnly:true});
+        mockedExec.mockClear();
+        expect(await ownedRespawn(nonTestManager, { sessionId, workingDir: '/tmp', mode: 'shell',
           onlyIfDead: true, workerAttachOnly })).toBe(4242);
         const { exec: currentExec } = await import('node:child_process');
         const command = String(vi.mocked(currentExec).mock.calls.find(([cmd]) => String(cmd).includes(' respawn-pane '))?.[0]);
@@ -1400,7 +1738,7 @@ process.exit(result.status === null ? 1 : result.status);`);
         return { on: vi.fn(), kill: vi.fn(), pid: 12345 } as never;
       });
       try {
-        expect(await nonTestManager.respawnPane({ sessionId: 'recovery5678', workingDir: '/tmp', mode: 'shell', onlyIfDead: true })).toBeNull();
+        expect(await ownedRespawn(nonTestManager, { sessionId: 'recovery5678', workingDir: '/tmp', mode: 'shell', onlyIfDead: true })).toBeNull();
         const commands = vi.mocked(currentExec).mock.calls.filter(([cmd]) => String(cmd).includes(' respawn-pane '));
         expect(commands).toHaveLength(1);
         expect(commands[0][0]).not.toMatch(/respawn-pane\s+-k\b/);
@@ -1428,7 +1766,7 @@ process.exit(result.status === null ? 1 : result.status);`);
       });
 
       try {
-        const pid = await nonTestManager.respawnPane({
+        const pid = await ownedRespawn(nonTestManager, {
           sessionId: 'respawn5678',
           workingDir: '/tmp',
           mode: 'shell',

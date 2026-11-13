@@ -6,7 +6,6 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { EventEmitter } from 'node:events';
 
 // Mock state that can be accessed by both mocks and tests
 const mockState = vi.hoisted(() => ({
@@ -27,6 +26,9 @@ vi.mock('../src/state-store.js', () => {
     setSession = vi.fn((id: string, state: any) => {
       this.state.sessions[id] = state;
     });
+    setSessionFromOwner = vi.fn((session: { id: string }, state: unknown) => {
+      this.setSession(session.id, state);
+    });
     removeSession = vi.fn((id: string) => {
       delete this.state.sessions[id];
     });
@@ -42,8 +44,8 @@ vi.mock('../src/state-store.js', () => {
 });
 
 // Mock the Session class
-vi.mock('../src/session.js', () => {
-  const { EventEmitter } = require('node:events');
+vi.mock('../src/session.js', async () => {
+  const { EventEmitter } = await import('node:events');
 
   class MockSession extends EventEmitter {
     id: string;
@@ -75,6 +77,11 @@ vi.mock('../src/session.js', () => {
         status: this._stopped ? 'stopped' : this._started ? 'running' : 'pending',
         pid: this._started && !this._stopped ? 12345 : null,
       };
+    }
+
+    toPersistedState() {
+      return { ...this.toState(), __customModel: this.getCustomModelForPersist(),
+        __envOverrides: this.getEnvOverridesForPersist(), __attachmentHistory: undefined };
     }
 
     getCustomModelForPersist() {

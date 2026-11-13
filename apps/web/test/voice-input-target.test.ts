@@ -37,7 +37,7 @@ type Pane = { sessionId: string; isPrimary?: boolean; terminal?: { focus: () => 
 
 function load(opts: { insertMode?: string; localEcho?: boolean; focused?: string; tiles?: boolean; pane?: Pane } = {}) {
   const sendInput = vi.fn(async () => {});
-  const sendInputAsync = vi.fn();
+  const sendInputAsync = vi.fn(async () => true);
   const appendText = vi.fn();
   const overlayClear = vi.fn();
   const showToast = vi.fn();

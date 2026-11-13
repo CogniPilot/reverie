@@ -18,11 +18,17 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { JSDOM } from 'jsdom';
+import { frontendDeclarations } from './helpers/frontend-declarations.js';
 
 const CONSTANTS = readFileSync(new URL('../src/web/public/constants.js', import.meta.url), 'utf-8');
 const APP = readFileSync(new URL('../src/web/public/app.js', import.meta.url), 'utf-8');
+// This unit fixture exercises the real layout methods, not application startup.
+// Select declarations through the existing AST reader so the queued production
+// DOMContentLoaded handler cannot accidentally construct an incomplete app.
+const LAYOUT_APP = frontendDeclarations(APP, ['ReverieApp', 'SIDEBAR_RICH_CLOCK_MS',
+  'parseSessionPrefix', 'paneExitLabel', 'paneExitAriaLabel', 'applyPaneExitBadge']);
 const SETTINGS_UI = readFileSync(new URL('../src/web/public/settings-ui.js', import.meta.url), 'utf-8');
 const INDEX_HTML = readFileSync(new URL('../src/web/public/index.html', import.meta.url), 'utf-8');
 const STYLES_CSS = readFileSync(new URL('../src/web/public/styles.css', import.meta.url), 'utf-8');
@@ -31,6 +37,18 @@ const I18N = readFileSync(new URL('../src/web/public/i18n.js', import.meta.url),
 const TERMINAL_UI = readFileSync(new URL('../src/web/public/terminal-ui.js', import.meta.url), 'utf-8');
 const MOBILE_HANDLERS = readFileSync(new URL('../src/web/public/mobile-handlers.js', import.meta.url), 'utf-8');
 const SCHEMAS = readFileSync(new URL('../src/web/schemas.ts', import.meta.url), 'utf-8');
+const pages: Array<{dom: JSDOM; errors: string[]}> = [];
+afterEach(async () => {
+  // Let queued DOM events settle before checking: deferred startup failures
+  // must not disappear merely because the layout assertions ran first.
+  await new Promise(resolve => setTimeout(resolve, 0));
+  const errors: string[] = [];
+  for (const page of pages.splice(0)) {
+    errors.push(...page.errors);
+    page.dom.window.close();
+  }
+  expect(errors).toEqual([]);
+});
 
 interface LayoutApp {
   soloSessionId: string | null;
@@ -118,6 +136,9 @@ function boot(
     runScripts: 'outside-only',
   });
   const win = dom.window as unknown as Window & typeof globalThis & { __ReverieApp: new () => LayoutApp };
+  const errors: string[] = [];
+  pages.push({dom, errors});
+  win.addEventListener('error', event => {errors.push(event.message);});
 
   // Whether the sidebar is a docked column or a modal overlay is decided by
   // WIDTH (< 1024px), not by MobileDetection.getDeviceType() — that one calls
@@ -149,7 +170,7 @@ function boot(
          isTouchDevice: () => false,
        };`,
       CONSTANTS,
-      APP,
+      LAYOUT_APP,
       SETTINGS_UI,
       'window.__ReverieApp = ReverieApp;',
     ].join('\n')

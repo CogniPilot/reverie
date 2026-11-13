@@ -98,7 +98,7 @@ export class FakeEl {
   get firstChild() {
     return this.children[0] ?? null;
   }
-  get lastElementChild() {
+  get lastElementChild(): FakeEl | null {
     return this.children.at(-1) ?? null;
   }
   /** In the fake document: its ancestors end at `main` or `body`. */
@@ -212,7 +212,31 @@ export const tileEl = (id: string) => section.children.find((el) => el.dataset.s
 export const bySelector = new Map<string, FakeEl>();
 export const body = new FakeEl();
 /** The context's `fetch`; a test sets what it answers. */
-export const fetchSpy = vi.fn(async (..._args: unknown[]) => ({ ok: true, json: async () => ({}) }));
+export const fetchSpy = vi.fn(async (...args: unknown[]) => ({
+  ok: true,
+  ...(args[0] === '/api/events/subscribe' ? { status: 204 } : {}),
+  json: async () => ({}),
+}));
+/** Browser transport port only; production connectSSE owns registration/filter state. */
+class GridEventSource {
+  static OPEN = 1;
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  listeners = new Map<string, Set<unknown>>();
+  constructor(readonly url: string) {}
+  addEventListener(event: string, listener: unknown) {
+    const listeners = this.listeners.get(event) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(event, listeners);
+  }
+  removeEventListener(event: string, listener: unknown) {
+    this.listeners.get(event)?.delete(listener);
+  }
+  close() {
+    this.readyState = 2;
+  }
+}
 /** What `document.elementFromPoint` answers (the gesture overlay's hit test); a test sets it. */
 export const pointHits: { at: ((x: number, y: number) => FakeEl | null) | null } = { at: null };
 /** `document.addEventListener`, so a test can find a listener the app installed. */
@@ -248,6 +272,9 @@ export const windowStub: Record<string, unknown> = {
 
 const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../../src/web/public/${f}`), 'utf8');
 const context = vm.createContext({
+  EventSource: GridEventSource,
+  URLSearchParams,
+  AbortController,
   console: { ...console, log: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
   performance: { now: () => clock },
   PerformanceObserver: class {
@@ -315,6 +342,18 @@ export const ReverieApp = (context as unknown as { __ReverieApp: { prototype: Re
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type GridApp = Record<string, any>;
+
+/** Explicitly opt a test into the actual connection/subscription owner. */
+export function connectGridStream(app: GridApp): GridEventSource {
+  app._wsTabNonce ??= 'grid-page-key';
+  app.reconnectAttempts ??= 0;
+  app.setConnectionStatus = vi.fn(); // Display port; this fake transport is not browser/server readiness qualification.
+  app.connectSSE();
+  const source: GridEventSource = app.eventSource;
+  source.readyState = GridEventSource.OPEN;
+  source.onopen?.();
+  return source;
+}
 
 /** Stubbed around the grid: panels, tabs, the main terminal's own select path. */
 const STUBS = [

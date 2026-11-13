@@ -1,4 +1,6 @@
 import { isEmbassyProtocolRoute } from '../../embassy-public-routes.js';
+import { isEmployeeRecoveryTransport } from '../../employee-recovery-service.js';
+import { isMuxMetadataTransport } from '../../mux-metadata-reconciliation.js';
 /**
  * @fileoverview Authentication and security middleware.
  *
@@ -12,7 +14,7 @@ import { isEmbassyProtocolRoute } from '../../embassy-public-routes.js';
 import type { OwnerAuthService } from '../../owner-auth/service.js';
 import { OWNER_COOKIE, isAppPage } from '../../owner-auth/policy.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { StaleExpirationMap } from '../../utils/index.js';
 import type { AuthSessionRecord } from '../ports/auth-port.js';
 import { isAllowedRequestHost, isAllowedRequestOrigin, type HostPolicy } from '../network-auth-policy.js';
@@ -27,6 +29,7 @@ import { isMultiUserMode } from '../../config/multiuser.js';
 import {
   findUser,
   rehashAuthenticatedUser,
+  readUsers,
   touchLastLogin,
   userAuthenticationFingerprint,
   verifyPassword,
@@ -59,6 +62,91 @@ export const AUTH_COOKIE_NAME = 'reverie_session';
 const browserAuthSessions = new WeakMap<FastifyRequest, AuthSessionRecord>();
 export function browserAuthSession(req: FastifyRequest): AuthSessionRecord | undefined {
   return browserAuthSessions.get(req);
+}
+
+// A successful stateless Basic verification has a credential epoch, not a shared
+// cookie-session object. Only the actual verifier records this private proof.
+const transportRechecks = new WeakMap<FastifyRequest, () => boolean | Promise<boolean>>();
+/** Recheck only the original verifier's private observation; never a claimed principal. */
+export async function recheckTransportAuthentication(req: FastifyRequest): Promise<boolean> {
+  try {
+    return (await transportRechecks.get(req)?.()) === true;
+  } catch {
+    return false;
+  }
+}
+// Lifecycle continuations join the actual middleware branch, mode and identity.
+// The no-credential branch remains a compatibility observation, never auth.
+const humanTransportContinuations = new WeakMap<FastifyRequest, () => Promise<boolean>>();
+export function humanTransportContinuation(req: FastifyRequest): (() => Promise<boolean>) | undefined {
+  return humanTransportContinuations.get(req);
+}
+function recordHumanTransport(
+  req: FastifyRequest,
+  multiUser: boolean,
+  current: () => boolean | Promise<boolean>
+): void {
+  const identity = req.authUser;
+  const username = identity?.username,
+    role = identity?.role;
+  const ownerCookie = req.cookies?.[OWNER_COOKIE];
+  let revoked = false;
+  const same = () =>
+    isMultiUserMode() === multiUser &&
+    req.authUser === identity &&
+    req.authUser?.username === username &&
+    req.authUser?.role === role &&
+    req.cookies?.[OWNER_COOKIE] === ownerCookie;
+  humanTransportContinuations.set(req, async () => {
+    if (revoked || !same()) {
+      revoked = true;
+      return false;
+    }
+    try {
+      if (!(await current()) || !same()) {
+        revoked = true;
+        return false;
+      }
+      return true;
+    } catch {
+      revoked = true;
+      return false;
+    }
+  });
+}
+function recordVerifiedTransport(
+  req: FastifyRequest,
+  multiUser: boolean,
+  current: () => boolean | Promise<boolean>
+): void {
+  transportRechecks.set(req, current);
+  recordHumanTransport(req, multiUser, current);
+}
+async function currentTransportUser(identity: Readonly<AuthUser>, fingerprint: string): Promise<boolean> {
+  const live = (await readUsers(true)).find((user) => user.username === identity.username);
+  return (
+    !!live &&
+    !live.disabled &&
+    !live.mustChangePassword &&
+    live.role === identity.role &&
+    userAuthenticationFingerprint(live) === fingerprint
+  );
+}
+const basicAuthentication = new WeakMap<FastifyRequest, string>();
+export function verifiedBasicAuthentication(req: FastifyRequest): string | undefined {
+  return basicAuthentication.get(req);
+}
+// Compatibility observation ONLY: the real middleware selected no credentials.
+// This never authenticates a caller or supplies native/Source authority.
+const credentiallessTransport = new WeakMap<FastifyRequest, () => boolean>();
+export function credentiallessTransportCurrent(req: FastifyRequest): boolean {
+  return credentiallessTransport.get(req)?.() === true;
+}
+const publicTransport = new WeakMap<FastifyRequest, { scope: object; current(): boolean }>();
+/** View-filter scope only; never an authenticated principal or operation grant. */
+export function acknowledgedPublicTransport(req: FastifyRequest): object | undefined {
+  const proof = publicTransport.get(req);
+  return proof?.current() ? proof.scope : undefined;
 }
 
 /** State returned from registerAuthMiddleware for cleanup in server stop() */
@@ -326,7 +414,8 @@ export function registerAuthMiddleware(
   app: FastifyInstance,
   https: boolean,
   basePath = '',
-  ownerAuth?: Pick<OwnerAuthService, 'policy' | 'session' | 'setupAvailable'>
+  ownerAuth?: Pick<OwnerAuthService, 'policy' | 'session' | 'setupAvailable'>,
+  publicTransportAcknowledged = false
 ): AuthState {
   const state: AuthState = {
     authSessions: null,
@@ -343,10 +432,29 @@ export function registerAuthMiddleware(
   const multiUser = isMultiUserMode();
   const authPassword = process.env.REVERIE_PASSWORD;
 
-  // No auth at all: single-user with no password (byte-identical to legacy). In
+  // No credential authentication: single-user with no password. In
   // multi-user mode auth is ALWAYS active (users authenticate individually), even
   // without REVERIE_PASSWORD.
-  if (!multiUser && !authPassword) return state;
+  if (!multiUser && !authPassword) {
+    app.addHook('onRequest', (req, _reply, done) => {
+      const current = () => !isMultiUserMode() && process.env.REVERIE_PASSWORD === authPassword;
+      credentiallessTransport.set(req, current);
+      recordHumanTransport(req, false, current);
+      done();
+    });
+    if (publicTransportAcknowledged) {
+      const scope = Object.freeze({});
+      const current = () => ownerAuth?.policy() === 'off';
+      app.addHook('onRequest', (req, _reply, done) => {
+        // Re-read the actual owner policy: setup/enforcement activation revokes
+        // public view-filter access without changing authentication policy.
+        if (current() && !req.headers.authorization && !req.cookies?.[OWNER_COOKIE] && !req.cookies?.[AUTH_COOKIE_NAME])
+          publicTransport.set(req, { scope, current });
+        done();
+      });
+    }
+    return state;
+  }
 
   // Session token store — active sessions extend TTL on access
   state.authSessions = new StaleExpirationMap<string, AuthSessionRecord>({
@@ -396,6 +504,7 @@ export function registerAuthMiddleware(
   const expectedHeader = 'Basic ' + Buffer.from(`${authUsername}:${authPassword}`).toString('base64');
 
   app.addHook('onRequest', (req, reply, done) => {
+    if (isEmployeeRecoveryTransport(req, basePath) || isMuxMetadataTransport(req, basePath)) { done(); return; }
     const bypass = checkHookSecretBypass(req, reply, hookSecretFailures);
     if (bypass === 'bypass') {
       done();
@@ -459,7 +568,13 @@ export function registerAuthMiddleware(
           ].includes(path ?? ''));
       // These handlers validate passwords/challenges/cookies themselves. The
       // owner policy still enforces one-time-password and same-origin limits.
-      if (publicOwnerRoute || ownerAuth.session(req.cookies?.[OWNER_COOKIE])) {
+      const ownerCookie = req.cookies?.[OWNER_COOKIE];
+      const ownerSession = ownerAuth.session(ownerCookie);
+      if (publicOwnerRoute || ownerSession) {
+        if (ownerSession)
+          recordHumanTransport(req, false, () =>
+            ownerAuth.policy() === 'enforce' && req.cookies?.[OWNER_COOKIE] === ownerCookie && !!ownerAuth.session(ownerCookie)
+          );
         done();
         return;
       }
@@ -482,6 +597,7 @@ export function registerAuthMiddleware(
     const authenticatedRecord = sessionToken ? authSessions.get(sessionToken) : undefined;
     if (sessionToken && authenticatedRecord) {
       browserAuthSessions.set(req, authenticatedRecord);
+      recordVerifiedTransport(req, false, () => authSessions.get(sessionToken) === authenticatedRecord);
       // Sliding cookie: re-issue on every authenticated request so the browser
       // cookie lifetime tracks the server-side sliding TTL (refreshOnGet above).
       reply.setCookie(AUTH_COOKIE_NAME, sessionToken, {
@@ -517,6 +633,8 @@ export function registerAuthMiddleware(
       };
       authSessions.set(token, record);
       browserAuthSessions.set(req, record);
+      basicAuthentication.set(req, createHash('sha256').update(expectedHeader).digest('hex'));
+      recordVerifiedTransport(req, false, () => authSessions.get(token) === record);
 
       // Reset failure count on successful auth
       authFailures.delete(clientIp);
@@ -603,6 +721,7 @@ function registerMultiUserAuthHook(
   };
 
   app.addHook('onRequest', async (req, reply) => {
+    if (isEmployeeRecoveryTransport(req, basePath) || isMuxMetadataTransport(req, basePath)) return;
     const bypass = checkHookSecretBypass(req, reply, hookSecretFailures);
     if (bypass === 'bypass' || bypass === 'rejected') return;
 
@@ -656,7 +775,16 @@ function registerMultiUserAuthHook(
       // Trust the LIVE role/mustChangePassword, not the (possibly stale) cookie snapshot
       // (also defends #9/#13: a CLI demotion is reflected without a revoke).
       req.authUser = { username: live.username, role: live.role };
-      if (!live.mustChangePassword && record.credentialFingerprint !== undefined) browserAuthSessions.set(req, record);
+      if (!live.mustChangePassword && record.credentialFingerprint !== undefined) {
+        browserAuthSessions.set(req, record);
+        const identity = Object.freeze({ username: live.username, role: live.role });
+        const fingerprint = record.credentialFingerprint;
+        recordVerifiedTransport(
+          req,
+          true,
+          async () => (await currentTransportUser(identity, fingerprint)) && authSessions.get(sessionToken!) === record
+        );
+      }
       setSessionCookie(reply, sessionToken!); // sliding re-issue
       enforcePasswordChange(req, reply, !!live.mustChangePassword);
       return;
@@ -702,8 +830,14 @@ function registerMultiUserAuthHook(
           mustChangePassword: !!user.mustChangePassword,
         };
         authSessions.set(token, record);
-        if (!user.mustChangePassword) browserAuthSessions.set(req, record);
         req.authUser = { username: user.username, role: user.role };
+        if (!user.mustChangePassword) {
+          browserAuthSessions.set(req, record);
+          const fingerprint = userAuthenticationFingerprint(user);
+          basicAuthentication.set(req, fingerprint);
+          const identity = Object.freeze({ username: user.username, role: user.role });
+          recordVerifiedTransport(req, true, () => currentTransportUser(identity, fingerprint));
+        }
         setSessionCookie(reply, token);
         enforcePasswordChange(req, reply, !!user.mustChangePassword);
         return;

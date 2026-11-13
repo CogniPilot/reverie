@@ -1,3 +1,6 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
+import { randomUUID } from 'node:crypto';
 /** Bug 11: explicit verified-owner restarts record running intent through the real routes; automatic paths never do. */
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -5,7 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Session } from '../src/session.js';
-import type { MuxSession, TerminalMultiplexer } from '../src/mux-interface.js';
+import type { TerminalMultiplexer, RespawnPaneOptions } from '../src/mux-interface.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../src/types.js';
 import { CompanyStore } from '../src/company-store.js';
@@ -19,19 +22,23 @@ let service: CompanyService;
 const sessions: Session[] = [];
 
 function deadPaneSession() {
+  const registry = registeredMuxFixture({ sessionId: randomUUID(), muxName: 'reverie-bbbbbbbb',
+    pid: 4241, workingDir: '/tmp', mode: 'opencode' });
   const mux = {
+    ...registry,
     isAvailable: () => true,
     muxSessionExists: vi.fn(() => true),
     isPaneDead: vi.fn(() => true),
-    respawnPane: vi.fn(async (options: {onProviderDispatch?: () => void}) => {options.onProviderDispatch?.(); return 4242 as number | null;}),
+    respawnPane: vi.fn(async (options: RespawnPaneOptions) => {await acknowledgeMuxFixture(options); return 4242 as number | null;}),
     clearPaneExit: vi.fn(),
   };
   const session = new Session({
+    id: registry.subject.sessionId,
     workingDir: '/tmp',
     mode: 'opencode',
     useMux: true,
     mux: mux as unknown as TerminalMultiplexer,
-    muxSession: { sessionId: 'test-session', muxName: 'reverie-bbbbbbbb', pid: 4241 } as MuxSession,
+    muxSession: registry.subject,
     openCodeConfig: { model: 'local/model', continueSession: 'ses_000000000000000000000001' },
   });
   sessions.push(session);

@@ -2,15 +2,29 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createHarness } from './helpers/chat-app-harness.mjs';
 
 const handles: Awaited<ReturnType<typeof createHarness>>[] = [];
-afterEach(() => { for (const handle of handles.splice(0)) handle.window.close(); });
+afterEach(() => {
+  for (const handle of handles.splice(0)) handle.window.close();
+});
 
 async function fixture({ name = '', self = 'owner', canSetOwn = true, canManage = true } = {}) {
-  const company = { employees: [], canManage, settings: { ownerName: name, owner: 'account-one', nightHour: 1, autoWakeEnabled: false, crashWakeEmployeeId: 'chosen' } };
+  const company = {
+    employees: [],
+    canManage,
+    settings: {
+      ownerName: name,
+      owner: 'account-one',
+      nightHour: 1,
+      autoWakeEnabled: false,
+      crashWakeEmployeeId: 'chosen',
+    },
+  };
   const handle = await createHarness({ company, loadShell: false });
   handles.push(handle);
   const previous = handle.app._chatApi.bind(handle.app);
-  handle.app._chatApi = (path: string, options: unknown) => path === '/api/chatrooms/phone-status'
-    ? Promise.resolve({ ok: true, data: { self, canSetOwn } }) : previous(path, options);
+  handle.app._chatApi = (path: string, options: unknown) =>
+    path === '/api/chatrooms/phone-status'
+      ? Promise.resolve({ ok: true, data: { self, canSetOwn } })
+      : previous(path, options);
   const shell = await handle.startShell();
   await handle.flush(80);
   return { ...handle, shell, company };
@@ -26,7 +40,19 @@ describe('first-run owner display name', () => {
     dialog.querySelector<HTMLInputElement>('input')!.value = 'New Owner';
     dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
     await h.flush(80);
-    expect(h.server.company.settings).toEqual({ ownerName: 'New Owner', nightHour: 3, autoWakeEnabled: false, crashWakeEmployeeId: 'chosen' });
+    expect(h.server.company.settings).toEqual({
+      owner: 'account-one',
+      ownerName: 'New Owner',
+      nightHour: 3,
+      autoWakeEnabled: false,
+      crashWakeEmployeeId: 'chosen',
+    });
+    expect(
+      h.server.calls.find(
+        (call: { method: string; path: string; body: unknown }) =>
+          call.method === 'PUT' && call.path === '/api/company/settings'
+      )?.body
+    ).toEqual({ ownerName: 'New Owner' });
     expect(h.document.querySelector('dialog[aria-label="Your name"]')).toBeNull();
     expect(h.shell.ownerName).toBe('New Owner');
   });
@@ -36,10 +62,13 @@ describe('first-run owner display name', () => {
     expect(h.document.querySelector('dialog[aria-label="Your name"]')).toBeNull();
   });
 
-  it.each([{ self: 'agent-session' }, { canSetOwn: false }, { canManage: false }])('never asks an agent or unverified owner %j', async overrides => {
-    const h = await fixture(overrides);
-    expect(h.document.querySelector('dialog[aria-label="Your name"]')).toBeNull();
-  });
+  it.each([{ self: 'agent-session' }, { canSetOwn: false }, { canManage: false }])(
+    'never asks an agent or unverified owner %j',
+    async (overrides) => {
+      const h = await fixture(overrides);
+      expect(h.document.querySelector('dialog[aria-label="Your name"]')).toBeNull();
+    }
+  );
 
   it('cancel leaves settings intact and does not prompt again in the same tab session', async () => {
     const h = await fixture();
@@ -47,22 +76,48 @@ describe('first-run owner display name', () => {
     await h.shell.loadOwner();
     expect(h.document.querySelector('dialog[aria-label="Your name"]')).toBeNull();
     expect(h.server.company.settings).toEqual(h.company.settings);
-    expect(h.server.calls.filter(call => call.method === 'PUT')).toEqual([]);
+    expect(h.server.calls.filter((call) => call.method === 'PUT')).toEqual([]);
   });
 
   it('failed save keeps the dialog and existing settings for retry', async () => {
     const h = await fixture();
     const previous = h.app._chatApi.bind(h.app);
-    h.app._chatApi = (path: string, options: unknown) => path === '/api/company/settings'
-      ? Promise.resolve({ ok: false, error: 'synthetic refusal' }) : previous(path, options);
+    h.app._chatApi = (path: string, options: unknown) =>
+      path === '/api/company/settings'
+        ? Promise.resolve({ ok: false, status: 403, error: 'synthetic refusal' })
+        : previous(path, options);
     const dialog = h.document.querySelector<HTMLDialogElement>('dialog[aria-label="Your name"]')!;
     dialog.querySelector<HTMLInputElement>('input')!.value = 'New Owner';
     dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
     await h.flush(80);
     expect(dialog.open).toBe(true);
-    expect(dialog.querySelector('[role="alert"]')!.textContent).toContain('Try again');
+    expect(dialog.querySelector('[role="alert"]')!.textContent).toBe('synthetic refusal');
     expect(h.server.company.settings.ownerName).toBe('');
     expect(h.shell.ownerName).toBe('');
     expect(h.server.company.settings.autoWakeEnabled).toBe(false);
+  });
+
+  it('keeps the first-run draft and reports a lost committed name response without claiming browser-only storage', async () => {
+    const h = await fixture();
+    const original = h.app._chatApi.bind(h.app);
+    let writes = 0;
+    h.app._chatApi = async (path: string, options: unknown) => {
+      const result = await original(path, options);
+      if (path !== '/api/company/settings') return result;
+      writes++;
+      return { ok: false, error: 'Network error' };
+    };
+    const dialog = h.document.querySelector<HTMLDialogElement>('dialog[aria-label="Your name"]')!;
+    dialog.querySelector<HTMLInputElement>('input')!.value = 'Committed owner';
+    dialog.querySelector<HTMLFormElement>('form')!.requestSubmit();
+    await h.flush(80);
+    expect(dialog.open).toBe(true);
+    expect(dialog.querySelector('[role="alert"]')!.textContent).toContain('It may already have saved.');
+    expect(dialog.querySelector('[role="alert"]')!.textContent).toContain('Reopen settings to check the saved values');
+    expect(dialog.querySelector('[role="alert"]')!.textContent).not.toContain('browser only');
+    expect(dialog.querySelector<HTMLInputElement>('input')!.value).toBe('Committed owner');
+    expect(h.server.company.settings.ownerName).toBe('Committed owner');
+    expect(h.shell.ownerName).not.toBe('Committed owner');
+    expect(writes).toBe(1);
   });
 });

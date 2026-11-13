@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
-import type { CompanyService } from './company-service.js';
+import { CompanyService } from './company-service.js';
 import type { PlanService } from './plan-accounts.js';
 import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
@@ -264,6 +264,8 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
     verifyViewerRepair: record => verifyRecoveryBinding(record, false),
     snapshot: async (employeeId, _owner, purpose) => {
       assertAuthorized();
+      if(runtime.company instanceof CompanyService)
+        CompanyService.prototype.assertEmployeeRecoveryAvailable.call(runtime.company,employeeId,owner);
       const id = binding(employeeId);
       if (!id) throw new PlanMoveError('Unknown current employee', 404);
       const current = session(id);

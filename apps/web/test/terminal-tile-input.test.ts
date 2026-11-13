@@ -28,15 +28,17 @@
  * fakes (test/mocks/terminal-tile-fakes.ts); `connect()` runs for real.
  */
 import { readFileSync } from 'node:fs';
-import { performance } from 'node:perf_hooks';
-import { resolve } from 'node:path';
+import {performance} from 'node:perf_hooks';
 import vm from 'node:vm';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {browserInputFixture, type InputApp} from './helpers/browser-input-fixture.js';
 import { FakeFit, FakeSocket, FakeTerminal } from './mocks/terminal-tile-fakes.js';
 
 const fetchMock = vi.fn();
 const storageMock = {length: 0, key: vi.fn(), getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn()};
 
+let fixture: ReturnType<typeof browserInputFixture>;
 function loadContext() {
   const read = (f: string) => readFileSync(resolve(import.meta.dirname, `../src/web/public/${f}`), 'utf8');
   const windowStub: Record<string, unknown> = {
@@ -89,30 +91,15 @@ function loadContext() {
   };
 }
 
-const { ReverieApp, windowStub } = loadContext();
+const { windowStub } = loadContext();
 
-type App = Record<string, unknown> & {
-  _pendingDeliveries: Map<string, Array<{ seq: number; data: string }>>;
-  markIdleAlertSeen: ReturnType<typeof vi.fn>;
-};
 
-function makeApp(): App {
-  const app = Object.create(ReverieApp.prototype) as App;
-  app._clientId = 'c-test';
-  app._wsTabNonce = 'nonce-1';
-  app._seqCounters = new Map();
-  app._pendingDeliveries = new Map();
-  app._postDraining = new Set();
-  app._extraInputSockets = new Map();
-  app._persistReliableState = vi.fn();
-  app._persistReliableNow = vi.fn();
-  app._updateConnectionIndicator = vi.fn();
-  app.markIdleAlertSeen = vi.fn();
-  app.showToast = vi.fn();
-  // The key handler's chord gates read the shortcut registry, which reads these.
+type App = InputApp & Record<string, unknown> & {markIdleAlertSeen: ReturnType<typeof vi.fn>};
+async function makeApp(): Promise<App> {
+  fixture ||= browserInputFixture();
+  const app = await fixture.page(async (url, options) => fetchMock(url, options), ['terminal-ui.js']) as App;
+  app._clientId = 'c-test'; app._wsTabNonce = 'nonce-1'; app._extraInputSockets = new Map();
   app.loadAppSettingsFromStorage = () => ({});
-  app._ws = null;
-  app._wsSessionId = null;
   app._estimateReplayRows = (text: string) => text.split('\n').length;
   return app;
 }
@@ -126,7 +113,6 @@ type Tile = {
   ws: FakeSocket | null;
   _reconnectAttempts: number;
 };
-const TerminalTile = windowStub.TerminalTile as new (id: string, mount: unknown, opts?: object) => Tile;
 
 /**
  * Every tile a test creates, destroyed after it. A tile closed with real timers
@@ -134,6 +120,7 @@ const TerminalTile = windowStub.TerminalTile as new (id: string, mount: unknown,
  * there (FakeSocket.instances is shared), which flaked under full-suite load.
  */
 const liveTiles: Tile[] = [];
+const TerminalTile = windowStub.TerminalTile as new (id: string, mount: unknown, opts?: object) => Tile;
 
 async function connectTile(app: App, opts: Record<string, unknown> = {}) {
   windowStub.app = app;
@@ -148,9 +135,11 @@ async function connectTile(app: App, opts: Record<string, unknown> = {}) {
   return { tile, ws, term: FakeTerminal.last! };
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const tile of liveTiles.splice(0)) tile.destroy();
   vi.useRealTimers();
+  await fixture?.close();
+  fixture = undefined as unknown as ReturnType<typeof browserInputFixture>;
 });
 
 beforeEach(() => {
@@ -158,7 +147,6 @@ beforeEach(() => {
   FakeFit.proposed = { cols: 80, rows: 24 };
   FakeSocket.instances = [];
   fetchMock.mockReset();
-  storageMock.getItem.mockReset(); storageMock.setItem.mockReset();
   fetchMock.mockImplementation(async () => ({
     ok: true,
     status: 200,
@@ -168,414 +156,213 @@ beforeEach(() => {
 
 describe('TerminalTile socket identity', () => {
   it('connects with the tab identity plus a :tile suffix, never the primary pane cid', async () => {
-    const { ws } = await connectTile(makeApp());
+    const { ws } = await connectTile(await makeApp());
 
     const cid = new URL(ws.url).searchParams.get('cid');
     expect(cid).toBe('c-test:nonce-1:tile');
   });
 });
 
-describe('TerminalTile input through the exactly-once queue', () => {
-  it('keeps a pending original receipt and later text behind it until a confirmed ACK', async () => {
-    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open();
-    vi.useFakeTimers();
-    try {
-      term.type('original input');
-      ws.receive({t: 'ip', seq: 1});
-      term.type('later text');
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input']]);
-      expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['original input', 'later text']);
-      expect(app._sessionInputHeld('s-tile')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1001); app._redeliverSweep();
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input'], [1, 'original input']]);
-      term.type('typed during lookup');
-      expect(ws.inputFrames()).toHaveLength(2);
-      ws.receive({t: 'ip', seq: 1});
-      ws.receive({t: 'ia', seq: 1, confirmed: true});
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original input'], [1, 'original input'], [2, 'later text'], [3, 'typed during lookup']]);
-      expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['later text', 'typed during lookup']);
-      expect(app.markIdleAlertSeen).toHaveBeenCalledOnce();
-    } finally {vi.useRealTimers();}
-  });
+const inputReply = (data: object = {}, status = 200) => ({ok: status === 200, status, json: async () => ({success: status === 200, ...(status === 409 ? {errorCode: 'SESSION_BUSY'} : {}), data})});
+async function expectFrames(ws: FakeSocket, count: number) {await expect.poll(() => ws.inputFrames().length).toBe(count);}
+async function wsOutcome(app: App, ws: FakeSocket, fields: object) {
+  ws.receive(fields);
+  await Promise.all([...(app._inputOutcomes as Map<string, Promise<unknown>>).values()]);
+}
+async function committed(app: App) {await (app._inputAcceptTail as Promise<unknown>);}
+/** The keyboard fixture's synthetic server explicitly confirms each actual
+ * frame. This never changes the journal's pending/uncertain transition rules. */
+async function confirmKeyboardFrames(ws: FakeSocket) {
+  const app = windowStub.app as App;
+  await committed(app);
+  for (let count = 0; count < 256 && app._pendingDeliveries.get('s-tile')?.length; count++) {
+    if (!app._inputFlights.has('s-tile')) {
+      app._inputRetryAt.set('s-tile', 0);
+      await app._drainSession('s-tile');
+    }
+    const seq = app._inputFlights.get('s-tile')?.record.seq;
+    await expect.poll(() => ws.inputFrames().find(frame => frame.seq === seq)).toBeDefined();
+    const frame = ws.inputFrames().find(frame => frame.seq === seq);
+    expect(frame?.seq).toBeTypeOf('number');
+    await wsOutcome(app, ws, {t: 'ia', seq: frame!.seq, confirmed: true});
+  }
+  expect(app._pendingDeliveries.get('s-tile')?.length || 0, JSON.stringify({frames: ws.inputFrames(),
+    flight: app._inputFlights.get('s-tile'), held: app._inputRecoveryHolds?.has('s-tile'), storage: app._inputStorageUnavailable})).toBe(0);
+}
 
-  it('polls an HTTP pending receipt with its original tag before sending later queued text', async () => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean;
-      _redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
-    const posts: Array<{input: string; seq: number}> = [];
-    let settled = false;
-    // Closed synthetic backend: the first tagged request starts one effect;
-    // identical retries only look up that original receipt.
-    const effects = new Set<number>();
-    fetchMock.mockImplementation(async (_url, options) => {
-      const body = JSON.parse(options.body); posts.push(body); effects.add(body.seq);
-      return {ok: true, status: 200, json: async () => ({success: true, data: body.seq === 1 && !settled ? {pending: true} : {}})};
+describe('TerminalTile input through committed journal custody', () => {
+  it('holds a pending receipt barrier and later text until actual confirmation, never retransmitting', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open();
+    term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ip', seq: 1}); term.type('later'); await committed(app);
+    expect(app._pendingDeliveries.get('s-tile')?.map(row => row.data)).toEqual(['original', 'later']);
+    expect(ws.inputFrames()).toHaveLength(1); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true}); await expectFrames(ws, 2);
+    expect(ws.inputFrames().map(row => [row.seq, row.d])).toEqual([[1, 'original'], [2, 'later']]);
+    expect(app.markIdleAlertSeen).toHaveBeenCalledExactlyOnceWith('s-tile');
+    await wsOutcome(app, ws, {t: 'ia', seq: 2, confirmed: true});
+  });
+  it('pending HTTP polls the exact receipt GET and issues later text only after confirmation', async () => {
+    const app = await makeApp(), posts: {input: string; seq: number}[] = [], reads: string[] = [];
+    let confirmed = false;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url.includes('/input-receipt?')) {reads.push(url); const q = new URL(url, 'http://fixture').searchParams;
+        return inputReply({version: 1, clientId: q.get('clientId'), seq: Number(q.get('seq')), fingerprint: q.get('fingerprint'), state: confirmed ? 'confirmed' : 'pending'});}
+      posts.push(JSON.parse(String(options?.body))); return inputReply(posts.length === 1 ? {pending: true} : {});
     });
-    vi.useFakeTimers();
-    try {
-      expect(app._sendInputAsync('s-http', 'original input')).toBe(true);
-      await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
-      expect(app._pendingDeliveries.get('s-http')?.map(frame => frame.data)).toEqual(['original input']);
-      app._sendInputAsync('s-http', 'later text');
-      expect(posts.map(post => post.seq)).toEqual([1]); expect(effects.size).toBe(1);
-      expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-      settled = true; vi.advanceTimersByTime(1001); app._redeliverSweep();
-      await vi.waitFor(() => expect(app._pendingDeliveries.get('s-http')).toBeUndefined());
-      expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original input'], [1, 'original input'], [2, 'later text']]);
-      expect(effects.size).toBe(2);
-    } finally {vi.useRealTimers();}
+    await app._sendInputAsync('s-http', 'original'); await app._drainSession('s-http');
+    await app._sendInputAsync('s-http', 'later');
+    await app._drainSession('s-http'); // Settle the acceptance-triggered backoff task first.
+    expect(posts.map(row => row.seq)).toEqual([1]);
+    app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http'); expect(reads).toHaveLength(1); expect(posts).toHaveLength(1);
+    confirmed = true; app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http');
+    await expect.poll(() => posts.map(row => [row.seq, row.input])).toEqual([[1, 'original'], [2, 'later']]);
+    expect(reads).toHaveLength(2);
   });
-
-  it('finalizes a compatible HTTP typed-unsent response negatively before a manual new Enter', async () => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
-    const posts: Array<{input: string; seq: number}> = [];
-    fetchMock.mockImplementation(async (_url, options) => {
-      const body = JSON.parse(options.body); posts.push(body);
-      return {ok: true, status: 200, json: async () => ({success: true, data: {typedUnsent: true, delivered: false}})};
-    });
-    app._sendInputAsync('s-http', 'original text\r');
-    await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
-    expect(app._pendingDeliveries.get('s-http')).toBeUndefined();
-    expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    app._sendInputAsync('s-http', '\r');
-    await vi.waitFor(() => expect(posts).toHaveLength(2));
-    expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original text\r'], [2, '\r']]);
+  it('a typed-unsent original response warns but never spends an idle alert or sends Enter automatically', async () => {
+    const app = await makeApp(), posts: object[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {posts.push(JSON.parse(options.body)); return posts.length === 1 ? inputReply({typedUnsent: true, delivered: false}, 409) : inputReply();});
+    await app._sendInputAsync('s-http', 'text\r'); await app._drainSession('s-http');
+    expect(posts).toHaveLength(1); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect((app.showToast as ReturnType<typeof vi.fn>).mock.calls.flat().join(' ')).toMatch(/withheld/);
+    await app._sendInputAsync('s-http', '\r');
+    await expect.poll(() => {app._redeliverSweep(); return posts.length;}).toBe(2);
+    expect(posts).toEqual([{input: 'text\r', seq: 1, clientId: app._inputJournal.issuer}, {input: '\r', seq: 2, clientId: app._inputJournal.issuer}]);
   });
-
-  it('retains a compatible HTTP known-not-delivered response and retries the same tag after backoff', async () => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _redeliverSweep: () => void;
-      _sessionInputHeld: (id: string) => boolean};
-    const posts: Array<{input: string; seq: number}> = [];
-    fetchMock.mockImplementation(async (_url, options) => {
-      posts.push(JSON.parse(options.body));
-      return {ok: true, status: 200, json: async () => ({success: true, data: {delivered: false}})};
-    });
-    vi.useFakeTimers();
-    try {
-      app._sendInputAsync('s-http', 'original');
-      await vi.waitFor(() => expect((app._postDraining as Set<string>).size).toBe(0));
-      app._sendInputAsync('s-http', 'later');
-      expect(posts.map(post => post.seq)).toEqual([1]);
-      expect(app._pendingDeliveries.get('s-http')?.map(record => record.seq)).toEqual([1, 2]);
-      expect(app._sessionInputHeld('s-http')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1001); app._redeliverSweep();
-      await vi.waitFor(() => expect(posts).toHaveLength(2));
-      expect(posts.map(post => [post.seq, post.input])).toEqual([[1, 'original'], [1, 'original']]);
-    } finally {vi.useRealTimers();}
+  it('known-before-effect HTTP refusal backs off, then retries only the original exact tag', async () => {
+    const app = await makeApp(), posts: object[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {posts.push(JSON.parse(options.body)); return posts.length === 1 ? inputReply({delivered: false}, 409) : inputReply();});
+    await app._sendInputAsync('s-http', 'original'); await app._drainSession('s-http');
+    await app._drainSession('s-http'); expect(posts).toHaveLength(1);
+    app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http');
+    expect(posts).toHaveLength(2); expect(posts[1]).toEqual(posts[0]);
   });
-
-  it.each([{recoveryRequired: true}, {unconfirmed: true}, {held: true}])('keeps HTTP uncertainty dominant over typed-unsent compatibility: %j', async denial => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
-    fetchMock.mockResolvedValue({ok: true, status: 200, json: async () => ({success: true,
-      data: {typedUnsent: true, delivered: false, ...denial}})});
-    app._sendInputAsync('s-http', 'original');
-    await vi.waitFor(() => expect(app._sessionInputHeld('s-http')).toBe(true));
-    app._sendInputAsync('s-http', '\r');
-    expect(fetchMock).toHaveBeenCalledOnce(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  it.each([{recoveryRequired: true}, {unconfirmed: true}, {held: true}])('HTTP uncertainty dominates typed-unsent: %j', async denial => {
+    const app = await makeApp(); fetchMock.mockResolvedValue(inputReply({...denial, typedUnsent: true, delivered: false}, 409));
+    await app._sendInputAsync('s-http', 'original'); await app._drainSession('s-http');
+    expect(app._inputRecoveryHolds?.has('s-http')).toBe(true); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect(await app._sendInputAsync('s-http', 'blocked')).toBe(false); expect(fetchMock).toHaveBeenCalledOnce();
   });
-
-  it('does not let malformed or mismatched pending replies settle a frame or clear another hold', async () => {
-    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
-    ws.receive({t: 'ip', seq: '1'}); ws.receive({t: 'ip', seq: 999});
-    ws.receive({t: 'ip', seq: 1, confirmed: true});
-    expect(app._pendingDeliveries.get('s-tile')?.[0]).not.toHaveProperty('receiptPending');
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    ws.receive({t: 'ia', seq: 1, held: true}); ws.receive({t: 'ip', seq: 1});
-    ws.receive({t: 'ia', seq: 1, dup: true, last: 99}); term.type('blocked');
-    expect(app._sessionInputHeld('s-tile')).toBe(true);
-    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]);
-    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  it('malformed or mismatched pending replies cannot settle the original frame or clear another hold', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    for (const msg of [{t: 'ip', seq: 2}, {t: 'ip', seq: 1, unexpected: true}]) await wsOutcome(app, ws, msg);
+    expect(app._inputFlights.get('s-tile')?.record.phase).toBe('may-issued');
+    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original'); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
   });
-
-  it('does not settle an explicit pending receipt from a legacy watermark or plain ACK', async () => {
-    const app = makeApp(); const {ws, term} = await connectTile(app); ws.open();
-    term.type('original'); ws.receive({t: 'ip', seq: 1});
-    ws.receive({t: 'ia', seq: 1, dup: true, last: 99}); ws.receive({t: 'ia', seq: 1});
+  it('plain ACK is not confirmation and a late confirmed reply cannot clear uncertainty', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ip', seq: 1}); await wsOutcome(app, ws, {t: 'ia', seq: 1});
+    expect(app._inputRecoveryHolds?.has('s-tile')).toBe(true);
+    await wsOutcome(app, ws, {t: 'ip', seq: 1}); await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true});
+    expect(app._inputRecoveryHolds?.has('s-tile')).toBe(true); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
     expect(ws.inputFrames()).toHaveLength(1);
-    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.seq)).toEqual([1]);
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
   });
-
-  it('keeps unknown sticky after pending even if a late pending or confirmed reply arrives', async () => {
-    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open();
-    term.type('original'); ws.receive({t: 'ip', seq: 1}); term.type('later text');
-    ws.receive({t: 'ia', seq: 1, unconfirmed: true});
-    ws.receive({t: 'ip', seq: 1}); ws.receive({t: 'ia', seq: 1, confirmed: true});
-    app._redeliverSweep(); term.type('blocked');
-    expect(app._sessionInputHeld('s-tile')).toBe(true);
-    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['later text']);
-    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]);
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  it.each([{typedUnsent: true, delivered: true}, {typedUnsent: true, delivered: false, confirmed: true}, {typedUnsent: false, delivered: false}])('contradictory negative ACK holds the original: %j', async fields => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, ...fields});
+    expect(app._inputRecoveryHolds?.has('s-tile')).toBe(true); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    expect((await app._inputJournal.snapshot()).retained.concat((await app._inputJournal.snapshot()).records).map(row => row.data)).toEqual(['original']);
   });
-
-  it('finishes a known typed-unsent pending frame negatively and allows one explicit new-sequence Enter', async () => {
-    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open();
-    term.type('original text\r'); ws.receive({t: 'ip', seq: 1});
-    ws.receive({t: 'ia', seq: 1, typedUnsent: true, delivered: false});
-    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
-    expect(app._sessionInputHeld('s-tile')).toBe(false); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original text\r']]);
-    term.type('\r');
-    expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original text\r'], [2, '\r']]);
+  it('a restored pending receipt and later text are held under their original tags without pipelining', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ip', seq: 1}); term.type('later'); await committed(app);
+    const issuer = app._inputJournal.issuer; app._inputJournal.close();
+    const restored = await makeApp(), next = await connectTile(restored); next.ws.open();
+    expect(await restored._sendInputAsync('s-tile', 'blocked')).toBe(false);
+    expect(next.ws.inputFrames()).toEqual([]); const state = await restored._inputJournal.snapshot();
+    const retained = [...state.records, ...state.retained];
+    expect(retained.every(row => row.issuer === issuer)).toBe(true);
+    expect(retained.map(row => row.data)).toEqual(['original', 'later']);
+    expect(state.holds.some(row => row.sid === 's-tile')).toBe(true);
   });
-
-  it('does not let typed-unsent clear an existing hold or acknowledge its queued text', async () => {
-    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
-    ws.receive({t: 'ia', seq: 1, held: true});
-    ws.receive({t: 'ia', seq: 1, typedUnsent: true, delivered: false}); term.type('\r');
-    expect(app._sessionInputHeld('s-tile')).toBe(true);
-    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
-    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1]); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-  });
-
-  it.each([{typedUnsent: true, delivered: true}, {typedUnsent: true, delivered: false, confirmed: true},
-    {typedUnsent: false, delivered: false}])('ignores a contradictory typed-unsent reply without positive ACK: %j', fields => {
-    const app = makeApp();
-    return connectTile(app).then(({ws, term}) => {
-      ws.open(); term.type('original'); ws.receive({t: 'ia', seq: 1, ...fields});
-      expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
-      expect(ws.inputFrames()).toHaveLength(1); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    });
-  });
-
-  it('restores the pending-receipt barrier and later queued text without pipelining later input', async () => {
-    const stored = new Map<string, string>([['reverie:clientId', 'c-test']]);
-    storageMock.getItem.mockImplementation((key: string) => stored.get(key) ?? null);
-    storageMock.setItem.mockImplementation((key: string, value: string) => {stored.set(key, value);});
-    const prototype = ReverieApp.prototype as {_persistReliableNow: () => void; _loadReliableState: () => void};
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean};
-    app._persistReliableNow = prototype._persistReliableNow;
-    const {ws, term} = await connectTile(app); ws.open();
-    term.type('original'); ws.receive({t: 'ip', seq: 1}); term.type('later text');
-    const snapshot = JSON.parse(stored.get('reverie:pendingInput')!);
-    expect(snapshot.pending['s-tile'][0].receiptPending).toBe(true);
-    expect(snapshot.pending['s-tile'].map((record: {data: string}) => record.data)).toEqual(['original', 'later text']);
-    const restored = makeApp(); prototype._loadReliableState.call(restored);
-    const next = await connectTile(restored); next.ws.open();
-    expect(next.ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'original']]);
-    expect(restored._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['original', 'later text']);
-  });
-
-  it.each(['malformed-pending', 'unreadable', 'failed-envelope'] as const)('holds a %s HTTP result without acknowledging or replaying its frame', async failure => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean; _sessionInputHeld: (id: string) => boolean};
-    fetchMock.mockResolvedValue({ok: true, status: 200, json: async () => {
-      if (failure === 'unreadable') throw new Error('Synthetic truncated response');
-      if (failure === 'failed-envelope') return {success: false, error: 'Synthetic uncertain input'};
-      return {success: true, data: {pending: 'invalid'}};
+  it.each(['malformed-pending', 'unreadable', 'failed-envelope'] as const)('HTTP %s never acknowledges or replays its frame', async failure => {
+    const app = await makeApp(); fetchMock.mockResolvedValue({ok: true, status: 200, json: async () => {
+      if (failure === 'unreadable') throw Error('Synthetic truncated response');
+      return failure === 'failed-envelope' ? {success: false} : {success: true, data: {pending: 'invalid'}};
     }});
-    app._sendInputAsync('s-http', 'original');
-    await vi.waitFor(() => expect(app._sessionInputHeld('s-http')).toBe(true));
-    app._sendInputAsync('s-http', 'blocked');
-    expect(fetchMock).toHaveBeenCalledOnce(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+    await app._sendInputAsync('s-http', 'original'); await app._drainSession('s-http');
+    expect(app._inputRecoveryHolds?.has('s-http')).toBe(true); expect(fetchMock).toHaveBeenCalledOnce();
+    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
   });
-
-  it('carries the same mux selection in a queued WebSocket frame as its HTTP fallback', async () => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string, options: {useMux: boolean}) => boolean};
-    const {ws} = await connectTile(app);
-    ws.open();
-    expect(app._sendInputAsync('s-tile', 'one prompt\r', {useMux: true})).toBe(true);
-    expect(ws.inputFrames()).toEqual([{t: 'i', d: 'one prompt\r', seq: 1, cid: 'c-test', useMux: true}]);
+  it('carries explicit mux choice on the actual tile socket, not just the HTTP fallback', async () => {
+    const app = await makeApp(), {ws} = await connectTile(app); ws.open();
+    await app._sendInputAsync('s-tile', 'original', {useMux: true}); await expectFrames(ws, 1);
+    expect(ws.inputFrames()[0]).toMatchObject({cid: app._inputJournal.issuer, seq: 1, useMux: true});
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true});
   });
-
-  it('backs off a known-never-issued capacity refusal and retries the same frame and sequence', async () => {
-    const app = makeApp() as App & {_redeliverSweep: () => void; _onWsReady: (id: string) => void};
-    const {ws, term} = await connectTile(app);
-    ws.open();
-    vi.useFakeTimers();
-    try {
-      term.type('retained frame');
-      ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'capacity'});
-      term.type('later frame');
-      app._onWsReady('s-tile'); app._redeliverSweep();
-      expect(ws.inputFrames()).toHaveLength(1);
-      expect(app._pendingDeliveries.get('s-tile')).toHaveLength(2);
-      expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(1001); app._redeliverSweep();
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([
-        [1, 'retained frame'], [1, 'retained frame'], [2, 'later frame'],
-      ]);
-    } finally {vi.useRealTimers();}
+  it.each(['capacity', 'unavailable'])('known-never-issued %s retries the exact same frame after backoff', async reason => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ir', seq: 1, retryable: true, reason});
+    await app._drainSession('s-tile'); expect(ws.inputFrames()).toHaveLength(1);
+    app._inputRetryAt.set('s-tile', 0); await app._drainSession('s-tile'); await expectFrames(ws, 2);
+    expect(ws.inputFrames()[1]).toEqual(ws.inputFrames()[0]); await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true});
   });
-
-  it('warns once for unavailable input, then retries its original tag when the terminal is ready', async () => {
-    const app = makeApp() as App & {_redeliverSweep: () => void; _sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open();
-    vi.useFakeTimers();
-    try {
-      term.type('retained frame');
-      const unavailable = {t: 'ir', seq: 1, retryable: true, reason: 'unavailable'};
-      ws.receive(unavailable); ws.receive(unavailable);
-      expect(app.showToast).toHaveBeenCalledExactlyOnceWith('Terminal not ready; input remains queued', 'warning');
-      expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('retained frame');
-      expect(app.markIdleAlertSeen).not.toHaveBeenCalled(); expect(app._sessionInputHeld('s-tile')).toBe(false);
-      app._redeliverSweep(); expect(ws.inputFrames()).toHaveLength(1);
-      vi.advanceTimersByTime(1001); app._redeliverSweep();
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'retained frame'], [1, 'retained frame']]);
-      ws.receive({t: 'ia', seq: 1, confirmed: true});
-      expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
-      expect(app.markIdleAlertSeen).toHaveBeenCalledOnce();
-      expect(app.showToast).toHaveBeenCalledOnce();
-    } finally {vi.useRealTimers();}
+  it('a contradictory refusal cannot refund an unknown effect or clear its hold', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('original'); await expectFrames(ws, 1);
+    await wsOutcome(app, ws, {t: 'ie', held: true});
+    await wsOutcome(app, ws, {t: 'ir', seq: 1, retryable: true, reason: 'unavailable', confirmed: true});
+    app._inputRetryAt.set('s-tile', 0); await app._drainSession('s-tile');
+    expect(app._inputRecoveryHolds?.has('s-tile')).toBe(true); expect(ws.inputFrames()).toHaveLength(1);
   });
-
-  it('does not let an unavailable refusal clear unknown holds or accept contradictory positive flags', async () => {
-    const app = makeApp() as App & {_sessionInputHeld: (id: string) => boolean};
-    const {ws, term} = await connectTile(app); ws.open(); term.type('original');
-    ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'unavailable', confirmed: true});
-    expect(app.showToast).not.toHaveBeenCalled(); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    ws.receive({t: 'ia', seq: 1, held: true});
-    ws.receive({t: 'ir', seq: 1, retryable: true, reason: 'unavailable'}); term.type('blocked');
-    expect(app._sessionInputHeld('s-tile')).toBe(true);
-    expect(app._pendingDeliveries.get('s-tile')?.[0].data).toBe('original');
+  it.each([404, 410])('HTTP%s cannot acknowledge an idle alert or silently delete the original', async status => {
+    const app = await makeApp(); fetchMock.mockResolvedValue(inputReply({}, status));
+    await app._sendInputAsync('s-http', 'original'); await app._drainSession('s-http');
+    expect(app._inputRecoveryHolds?.has('s-http')).toBe(true); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+  it('an unmatched old ACK cannot spend a new idle alert', async () => {
+    const app = await makeApp(), {ws} = await connectTile(app); ws.open();
+    await wsOutcome(app, ws, {t: 'ia', seq: 99, confirmed: true}); expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  });
+  it('unconfirmed ACK holds later text and a confirmed duplicate never mints another sequence', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open();
+    term.type('original'); await expectFrames(ws, 1); term.type('later'); await committed(app);
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, unconfirmed: true}); await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true, dup: true});
+    expect(app._inputRecoveryHolds?.has('s-tile')).toBe(true); expect(ws.inputFrames()).toHaveLength(1);
+    expect(app._pendingDeliveries.get('s-tile')?.map(row => row.seq)).toEqual([1, 2]);
+  });
+  it('confirmed duplicate settles only the original sequence and acknowledges its session alert', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); term.type('q'); await expectFrames(ws, 1);
+    expect(ws.inputFrames()[0]).toMatchObject({d: 'q', seq: 1, cid: app._inputJournal.issuer});
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true, dup: true});
+    expect(app._pendingDeliveries.has('s-tile')).toBe(false); expect(app.markIdleAlertSeen).toHaveBeenCalledExactlyOnceWith('s-tile');
     expect(ws.inputFrames()).toHaveLength(1);
-    expect(app.showToast).toHaveBeenCalledExactlyOnceWith('Input is held. Inspect the terminal and refresh its status before continuing.', 'warning');
   });
-
-  it('stages every split draft frame before its first transport dispatch', async () => {
-    const app = makeApp() as App & {_sendInputAsync: (id: string, text: string) => boolean};
-    const {ws} = await connectTile(app);
-    ws.open();
-    const oldLimit = windowStub.ReverieInputLimit;
-    const observed: number[] = [];
-    const send = ws.send.bind(ws);
-    ws.send = data => {observed.push(app._pendingDeliveries.get('s-tile')?.length ?? 0); return send(data);};
-    windowStub.ReverieInputLimit = {FRAME_MAX_CHARS: 3, PASTE_MAX_CHARS: 12, split: () => ['abc', 'def']};
-    try {
-      expect(app._sendInputAsync('s-tile', 'abcdef')).toBe(true);
-      expect(observed).toEqual([2, 2]);
-      expect(ws.inputFrames().map(frame => [frame.seq, frame.d])).toEqual([[1, 'abc'], [2, 'def']]);
-    } finally {windowStub.ReverieInputLimit = oldLimit;}
+  it('the first dispatch sees every split frame committed, rather than a partial paste', async () => {
+    const app = await makeApp(), {ws} = await connectTile(app); ws.open(); const text = 'x'.repeat(65536) + 'tail';
+    await app._sendInputAsync('s-tile', text); await expectFrames(ws, 1);
+    expect((await app._inputJournal.snapshot()).records.map(row => row.data).join('')).toBe(text);
+    await wsOutcome(app, ws, {t: 'ia', seq: 1, confirmed: true}); await expectFrames(ws, 2);
+    expect(ws.inputFrames().map(row => row.d).join('')).toBe(text); await wsOutcome(app, ws, {t: 'ia', seq: 2, confirmed: true});
   });
-
-  it.each([404, 410])('does not acknowledge an idle alert for a refused HTTP frame (%s)', async status => {
-    const app = makeApp();
-    const {term} = await connectTile(app);
-    fetchMock.mockImplementation(async () => ({ok: false, status, json: async () => ({})}));
-    term.type('refused input');
-    await vi.waitFor(() => expect(app._pendingDeliveries.size).toBe(0));
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
+  it('input accepted before socket readiness is retained, then dispatched once through a current transport', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); const posts: object[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {posts.push(JSON.parse(options.body)); return inputReply();});
+    term.type('before open'); await committed(app); await app._drainSession('s-tile'); ws.open();
+    expect(posts).toHaveLength(1); expect(ws.inputFrames()).toEqual([]);
+    expect(app._pendingDeliveries.has('s-tile')).toBe(false);
   });
-
-  it('does not acknowledge a new idle alert from an unmatched or rejected old ACK', async () => {
-    const app = makeApp();
-    const {ws} = await connectTile(app);
-    ws.open();
-    ws.receive({t: 'ia', seq: 99, confirmed: true});
-    ws.receive({t: 'ia', seq: 99, err: 'too_large'});
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-  });
-
-  it('holds later input after an unconfirmed ACK without reissuing the first frame', async () => {
-    const app = makeApp();
-    const {ws, term} = await connectTile(app);
-    ws.open();
-    term.type('first');
-    ws.receive({t: 'ia', seq: 1, unconfirmed: true});
-    term.type('later');
-    ws.receive({t: 'ia', seq: 1, dup: true, last: 1, held: true});
-    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['first']);
-    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
-    expect(app.markIdleAlertSeen).not.toHaveBeenCalled();
-    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/input'))).toHaveLength(0);
-  });
-
-  it('retains a refused pending frame while a held ACK prevents redelivery', async () => {
-    const app = makeApp();
-    const {ws, term} = await connectTile(app);
-    ws.open();
-    term.type('keep this pending');
-    ws.receive({t: 'ia', seq: 1, held: true});
-    ws.receive({t: 'ia', seq: 1, held: true});
-    expect(app._pendingDeliveries.get('s-tile')?.map(frame => frame.data)).toEqual(['keep this pending']);
-    term.type('blocked');
-    expect(ws.inputFrames().map(frame => frame.d)).toEqual(['keep this pending']);
-  });
-
-  it('drops an original confirmed duplicate without minting a new sequence', async () => {
-    const app = makeApp();
-    const {ws, term} = await connectTile(app);
-    ws.open();
-    term.type('one original input');
-    ws.receive({t: 'ia', seq: 1, confirmed: true});
-    expect(ws.inputFrames()).toHaveLength(1);
-    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
-    term.type('next input');
-    expect(ws.inputFrames().map(frame => frame.seq)).toEqual([1, 2]);
-  });
-
-  it('sends typed input as seq-tagged frames with the bare clientId once the socket opens', async () => {
-    const app = makeApp();
-    const { ws, term } = await connectTile(app);
-    ws.open();
-
-    term.type('h');
-    term.type('i');
-
-    expect(ws.inputFrames().map((f) => [f.d, f.seq, f.cid])).toEqual([
-      ['h', 1, 'c-test'],
-      ['i', 2, 'c-test'],
-    ]);
-  });
-
-  it('drops a record on its ACK and acknowledges the session idle alert', async () => {
-    const app = makeApp();
-    const { ws, term } = await connectTile(app);
-    ws.open();
-    term.type('x');
-    expect(app._pendingDeliveries.get('s-tile')).toHaveLength(1);
-
-    ws.receive({ t: 'ia', seq: 1 });
-
-    expect(app._pendingDeliveries.get('s-tile')).toBeUndefined();
-    expect(app.markIdleAlertSeen).toHaveBeenCalledWith('s-tile');
-  });
-
-  it('flushes input typed before the socket opened, in order, once it does', async () => {
-    const app = makeApp();
-    // POSTs fail, as they would while the server restarts, so the input waits.
-    const { ws, term } = await connectTile(app);
-    fetchMock.mockImplementation(async () => ({ ok: false, status: 503, json: async () => ({}) }));
-    term.type('a');
-    term.type('b');
-    await new Promise((r) => setTimeout(r, 0));
-    expect(ws.inputFrames()).toEqual([]);
-
-    ws.open();
-
-    expect(ws.inputFrames().map((f) => [f.d, f.seq])).toEqual([
-      ['a', 1],
-      ['b', 2],
-    ]);
-  });
-
-  it('keeps queuing after the socket closes (HTTP fallback), instead of dropping keystrokes', async () => {
-    const app = makeApp();
-    const { ws, term } = await connectTile(app);
-    ws.open();
-    ws.readyState = 3;
-    ws.onclose?.({ code: 1006 });
-    const posts: Array<{ input: string; seq: number }> = [];
-    fetchMock.mockImplementation(async (_url: string, init?: { body?: string }) => {
-      if (init?.body) posts.push(JSON.parse(init.body));
-      return { ok: true, status: 200, json: async () => ({}) };
-    });
-
-    term.type('z');
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(posts.map((p) => [p.input, p.seq])).toEqual([['z', 1]]);
-    expect(ws.inputFrames()).toEqual([]);
+  it('typing after a closed tile socket uses HTTP once without dropping the input', async () => {
+    const app = await makeApp(), {ws, term} = await connectTile(app); ws.open(); ws.drop(); const posts: object[] = [];
+    fetchMock.mockImplementation(async (_url, options) => {posts.push(JSON.parse(options.body)); return inputReply();});
+    term.type('z'); await committed(app); await app._drainSession('s-tile');
+    expect(posts).toEqual([{input: 'z', clientId: app._inputJournal.issuer, seq: 1}]); expect(ws.inputFrames()).toEqual([]);
   });
 });
 
 describe('what xterm generates never enters the durable queue', () => {
+  it('fatal storage failure retains the first event and fences existing and newly created owned tiles', async () => {
+    const app = await makeApp(), current = await connectTile(app);
+    app._splitPane = current.tile; current.ws.open(); fixture.refuseStrict('ignored');
+    current.term.type('first tile draft 😀'); await committed(app);
+    expect(app._inputStorageUnavailable).toBe(true); expect(current.term.options.disableStdin).toBe(true);
+    for (let count = 0; count < 100; count++) current.term.type('later raw keystroke');
+    expect(app._unsavedInputDrafts.map(row => row.text)).toEqual(['first tile draft 😀']);
+    const next = await connectTile(app); next.ws.open(); next.term.type('also fenced');
+    expect(next.term.options.disableStdin).toBe(true); expect(current.ws.inputFrames()).toEqual([]); expect(next.ws.inputFrames()).toEqual([]);
+    expect(app._unsavedInputDrafts.map(row => row.text)).toEqual(['first tile draft 😀']);
+  });
   it('drops a DA query reply entirely', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { ws, term } = await connectTile(app);
     ws.open();
 
@@ -586,7 +373,7 @@ describe('what xterm generates never enters the durable queue', () => {
   });
 
   it('sends a mouse report once, without a seq, and never persists it', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { ws, term } = await connectTile(app);
     ws.open();
 
@@ -597,7 +384,7 @@ describe('what xterm generates never enters the durable queue', () => {
   });
 
   it('sends a focus report once, without a seq', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { ws, term } = await connectTile(app);
     ws.open();
 
@@ -610,7 +397,7 @@ describe('what xterm generates never enters the durable queue', () => {
 
 describe('TerminalTile leaves the input-socket map', () => {
   it('on close, so a later keystroke cannot be written into a dead socket', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { ws } = await connectTile(app);
     ws.open();
     expect((app._extraInputSockets as Map<string, unknown>).has('s-tile')).toBe(true);
@@ -621,10 +408,11 @@ describe('TerminalTile leaves the input-socket map', () => {
   });
 
   it('on destroy, while pending input stays queued for the HTTP sweep', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { tile, ws, term } = await connectTile(app);
     ws.open();
     term.type('q');
+    await expectFrames(ws, 1);
 
     tile.destroy();
 
@@ -646,8 +434,8 @@ async function settle() {
 
 describe('TerminalTile reconnects after a transient drop', () => {
   it('reopens on the backoff, refreshes the buffer, and leaves no stale marker', async () => {
-    vi.useFakeTimers();
-    const app = makeApp();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const app = await makeApp();
     const { tile, ws, term } = await connectTile(app);
     ws.open();
     fetchMock.mockImplementation(async () => ({
@@ -682,8 +470,8 @@ describe('TerminalTile reconnects after a transient drop', () => {
   });
 
   it('counts failed attempts and resets the count only on a successful open', async () => {
-    vi.useFakeTimers();
-    const { tile, ws } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
 
     ws.onclose?.({ code: 1006 });
@@ -697,8 +485,8 @@ describe('TerminalTile reconnects after a transient drop', () => {
   });
 
   it('reconnects after the redelivery sweep force-closes a silent socket (1005)', async () => {
-    vi.useFakeTimers();
-    const { ws } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws } = await connectTile(await makeApp());
     ws.open();
 
     ws.onclose?.({ code: 1005 });
@@ -708,8 +496,8 @@ describe('TerminalTile reconnects after a transient drop', () => {
   });
 
   it('reconnectNow() skips the backoff, but never replaces an open socket', async () => {
-    vi.useFakeTimers();
-    const { tile, ws } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
 
     tile.reconnectNow();
@@ -732,7 +520,7 @@ describe("the server's {t:'c'} frame refreshes the tile (a Claude pane's first p
   // clear(), which kept only the cursor's row: banner and transcript gone, and an
   // idle Claude never repaints them.
   it('refetches the capture and replays it, never a bare clear', async () => {
-    const { ws, term } = await connectTile(makeApp());
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     fetchMock.mockImplementation(async () => ({
@@ -751,7 +539,7 @@ describe("the server's {t:'c'} frame refreshes the tile (a Claude pane's first p
   });
 
   it('two clear frames during one refresh fetch once more, not twice', async () => {
-    const { ws } = await connectTile(makeApp());
+    const { ws } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     let release!: () => void;
@@ -781,9 +569,9 @@ describe('TerminalTile stops for good on codes that cannot get better', () => {
     [4003, 'the server refused this connection'],
     [4010, 'another connection took over this pane'],
   ])('close %i: no reconnect, onExit once, marker says why', async (code, reason) => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const onExit = vi.fn();
-    const { tile, ws, term } = await connectTile(makeApp(), { onExit });
+    const { tile, ws, term } = await connectTile(await makeApp(), { onExit });
     ws.open();
 
     ws.onclose?.({ code });
@@ -799,9 +587,9 @@ describe('TerminalTile stops for good on codes that cannot get better', () => {
 
 describe('TerminalTile ignores a socket it already replaced', () => {
   it('a late close (4010) from the old socket neither stops the pane nor unregisters its successor', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const onExit = vi.fn();
-    const app = makeApp();
+    const app = await makeApp();
     const { ws, term } = await connectTile(app, { onExit });
     ws.open();
     const lateClose = ws.onclose!;
@@ -816,15 +604,16 @@ describe('TerminalTile ignores a socket it already replaced', () => {
 
     expect(onExit).not.toHaveBeenCalled();
     term.type('still typing');
+    await expectFrames(ws2, 1);
     expect(ws2.inputFrames().map((f) => f.d)).toEqual(['still typing']);
   });
 });
 
 describe('TerminalTile destroy()', () => {
   it('cancels a pending reconnect and never reports an exit afterwards', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const onExit = vi.fn();
-    const { tile, ws } = await connectTile(makeApp(), { onExit });
+    const { tile, ws } = await connectTile(await makeApp(), { onExit });
     ws.open();
 
     ws.onclose?.({ code: 1006 });
@@ -840,14 +629,14 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   const resizeFrames = (ws: FakeSocket) => ws.sent.filter((f) => f.t === 'z');
 
   it('announces its size as a desktop viewer when the socket opens', async () => {
-    const { ws } = await connectTile(makeApp());
+    const { ws } = await connectTile(await makeApp());
     ws.open();
 
     expect(resizeFrames(ws)).toEqual([{ t: 'z', c: 80, r: 24, v: 'desktop' }]);
   });
 
   it('does not resend an unchanged size, sends a changed one, and force resends', async () => {
-    const { tile, ws } = await connectTile(makeApp());
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
 
     expect(tile.fit()).toBe(false); // unchanged: nothing sent
@@ -865,7 +654,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('force on a closed socket sends nothing and says so', async () => {
-    const { tile, ws } = await connectTile(makeApp());
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
     ws.drop(1006);
 
@@ -881,7 +670,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
     };
 
     it('forces the resize through to the server and reports the size it sent', async () => {
-      const app = makeApp() as RedrawApp;
+      const app = await makeApp() as RedrawApp;
       const { tile, ws } = await connectTile(app);
       ws.open();
       app._noteFocusedTile(tile);
@@ -893,7 +682,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
     });
 
     it('with the socket down, sends nothing and does not report a success', async () => {
-      const app = makeApp() as RedrawApp;
+      const app = await makeApp() as RedrawApp;
       const { tile, ws } = await connectTile(app);
       ws.open();
       app._noteFocusedTile(tile);
@@ -910,7 +699,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
     });
 
     it('for a session popped out to its own window, says that window sizes it', async () => {
-      const app = makeApp() as RedrawApp;
+      const app = await makeApp() as RedrawApp;
       const detached = new Set<string>();
       app.detachedSessions = detached;
       const { tile, ws } = await connectTile(app, { detachedSessions: detached });
@@ -927,8 +716,8 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('re-announces an unchanged size on a reconnected socket', async () => {
-    vi.useFakeTimers();
-    const { ws } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws } = await connectTile(await makeApp());
     ws.open();
     ws.onclose?.({ code: 1006 });
     await vi.advanceTimersByTimeAsync(300);
@@ -940,7 +729,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('applies no 40-column floor: a pane at the divider clamp gets its real width on both sides', async () => {
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
 
     FakeFit.proposed = { cols: 28, rows: 30 };
@@ -951,7 +740,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('paneStarted() resends an unchanged size: the first one went out before there was a PTY', async () => {
-    const { tile, ws } = await connectTile(makeApp());
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
     tile.paneStarted();
     expect(resizeFrames(ws)).toEqual([
@@ -964,7 +753,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('paneStarted() on a hidden tile sends nothing, and its next fit sends the size', async () => {
-    const { tile, ws } = await connectTile(makeApp());
+    const { tile, ws } = await connectTile(await makeApp());
     ws.open();
     FakeFit.proposed = { cols: NaN, rows: NaN };
     tile.paneStarted();
@@ -976,7 +765,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('paneStarted() before the socket opens sends nothing; the open sends the size once', async () => {
-    const { tile, ws } = await connectTile(makeApp());
+    const { tile, ws } = await connectTile(await makeApp());
     tile.paneStarted();
     expect(resizeFrames(ws)).toHaveLength(0);
     ws.open();
@@ -984,7 +773,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('reports nothing while hidden (the fit addon measures NaN)', async () => {
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
 
     FakeFit.proposed = { cols: NaN, rows: NaN };
@@ -995,7 +784,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('stands aside for a session detached into its own window', async () => {
-    const { tile, ws } = await connectTile(makeApp(), { detachedSessions: new Set(['s-tile']) });
+    const { tile, ws } = await connectTile(await makeApp(), { detachedSessions: new Set(['s-tile']) });
     ws.open();
     FakeFit.proposed = { cols: 120, rows: 40 };
 
@@ -1005,7 +794,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('adopts the column count the PTY reports, keeping its own rows', async () => {
-    const { ws, term } = await connectTile(makeApp());
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
 
     ws.receive({ t: 'zc', c: 132, r: 50 });
@@ -1014,7 +803,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
   });
 
   it('leaves the pane alone when the PTY agrees on width', async () => {
-    const { ws, term } = await connectTile(makeApp());
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     const before = term.resizes.length;
 
@@ -1026,7 +815,7 @@ describe('TerminalTile geometry (#464: the pane and its PTY never disagree)', ()
 
 describe('TerminalTile links and paste follow THIS pane', () => {
   it('registers the shared link provider on its own terminal, resolving its own session', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const register = vi.fn();
     app.registerFilePathLinkProvider = register;
 
@@ -1039,7 +828,7 @@ describe('TerminalTile links and paste follow THIS pane', () => {
   });
 
   it("routes Ctrl+V into the paste trap with this pane's terminal and session", async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const paste = vi.fn();
     app._handleImagePaste = paste;
     const { term } = await connectTile(app);
@@ -1051,7 +840,7 @@ describe('TerminalTile links and paste follow THIS pane', () => {
   });
 
   it('leaves Ctrl+Shift+V (voice input) out of the paste trap', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const paste = vi.fn();
     app._handleImagePaste = paste;
     const { term } = await connectTile(app);
@@ -1073,7 +862,7 @@ describe("TerminalTile Ctrl+C copies through the primary pane's copy helpers", (
   });
 
   it("copies THIS pane's selection; a failed write keeps it and focus returns to this pane", async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const copyText = vi.fn(async () => false);
     app._copyText = copyText;
     const { term } = await connectTile(app);
@@ -1094,7 +883,7 @@ describe("TerminalTile Ctrl+C copies through the primary pane's copy helpers", (
   });
 
   it('a successful write clears the selection (a second Ctrl+C interrupts) and refocuses this pane', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     app._copyText = vi.fn(async () => true);
     const { term } = await connectTile(app);
     term.selection = 'npm run build';
@@ -1108,7 +897,7 @@ describe("TerminalTile Ctrl+C copies through the primary pane's copy helpers", (
   });
 
   it('with nothing selected, Ctrl+C reaches the PTY and Ctrl+Shift+C does not', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const copyText = vi.fn(async () => true);
     app._copyText = copyText;
     const { term } = await connectTile(app);
@@ -1125,7 +914,7 @@ describe("TerminalTile Ctrl+C copies through the primary pane's copy helpers", (
 
 describe('TerminalTile claims the keyboard for the app-level shortcuts', () => {
   it('focusing its terminal makes it the focused pane; destroy() hands the keyboard back', async () => {
-    const app = makeApp();
+    const app = await makeApp();
     const { tile, term } = await connectTile(app);
     expect(app._focusedTile ?? null).toBeNull();
 
@@ -1166,8 +955,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
   it("the budget is a few MB, not the primary pane's 128 KB: a 1 MiB burst xterm has not parsed yet is still written", async () => {
     expect(defaultBudget).toBeGreaterThanOrEqual(2 * 1024 * 1024);
     expect(defaultBudget).toBeLessThanOrEqual(16 * 1024 * 1024);
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     serve('');
     term.holdParse = true;
@@ -1181,7 +970,7 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('counts output until xterm has parsed it, so parsed bytes no longer hold the budget', async () => {
     TileStatics.LIVE_BACKLOG_BUDGET = 100;
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
     term.holdParse = true;
 
@@ -1197,8 +986,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('stops writing past the budget, and ONE debounced refresh recaptures the screen', async () => {
     TileStatics.LIVE_BACKLOG_BUDGET = 100;
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     serve('recovered screen');
     term.holdParse = true; // xterm falls behind
@@ -1227,8 +1016,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
   });
 
   it("a write xterm refuses (its 50M throw) is a drop that schedules the same recovery, never a swallowed 'malformed frame'", async () => {
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     serve('recovered screen');
     term.throwOnWrite = 'boom';
@@ -1245,8 +1034,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('frames held behind a replay count against the budget too, and a hole there is recovered by another refresh', async () => {
     TileStatics.LIVE_BACKLOG_BUDGET = 100;
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     let answer!: (body: string) => void;
@@ -1283,8 +1072,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
   });
 
   it('a recovery that keeps failing is retried a bounded number of times, then lets live output through again', async () => {
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     fetchMock.mockImplementation(async () => {
@@ -1308,8 +1097,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('a recovery cut off at its deadline is not retried (a stalled link), and lets live output through again', async () => {
     windowStub.AbortController = AbortController;
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     fetchMock.mockImplementation(
@@ -1334,8 +1123,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('a reconnect starts the count over, and callbacks from before it count nothing', async () => {
     TileStatics.LIVE_BACKLOG_BUDGET = 100;
-    vi.useFakeTimers();
-    const { tile, ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
     term.holdParse = true;
     out(ws, 'a'.repeat(60));
@@ -1350,8 +1139,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
   });
 
   it('a reconnect drops a pending recovery: its own refresh replaces the screen', async () => {
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     serve('');
     term.throwOnWrite = 'boom';
@@ -1370,8 +1159,8 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
   });
 
   it('destroy() cancels a pending recovery', async () => {
-    vi.useFakeTimers();
-    const { tile, ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
     fetchMock.mockClear();
     term.throwOnWrite = 'boom';
@@ -1392,7 +1181,7 @@ describe('TerminalTile live-output flow control: a flood cannot pile up in xterm
 
   it('destroy() starts the count over: a write callback xterm still owed counts nothing', async () => {
     TileStatics.LIVE_BACKLOG_BUDGET = 100;
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     ws.open();
     term.holdParse = true;
     out(ws, 'a'.repeat(60));
@@ -1521,7 +1310,7 @@ type ControllerTile = Tile & { _keyCode229Recovery: unknown };
 describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, #541)", () => {
   it("installs on THIS tile's composition helper and textarea, and destroy() restores xterm's own", async () => {
     const helpers = withCompositionHelpers();
-    const { tile, term } = await connectTile(makeApp());
+    const { tile, term } = await connectTile(await makeApp());
     const helper = helpers[0];
     expect((tile as ControllerTile)._keyCode229Recovery).not.toBeNull();
 
@@ -1539,9 +1328,9 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
   });
 
   it('an autocorrect on space is sent as an edit, not a duplicated line', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const helpers = withCompositionHelpers();
-    const app = makeApp();
+    const app = await makeApp();
     app.activeSessionId = 'some-other-session';
     const { tile, ws, term } = await connectTile(app);
     expect((tile as ControllerTile)._keyCode229Recovery).not.toBeNull();
@@ -1556,23 +1345,24 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
     kb.key229();
     kb.edit('testing the prompt ');
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     const frames = ws.inputFrames();
     expect(lineOf(frames)).toBe('testing the prompt ');
     expect(frames.filter((f) => f.d === '\x7f')).toHaveLength(5);
     // Every byte went to THIS tile's session through the exactly-once queue, never the active one.
     expect(frames.every((f) => Number.isInteger(f.seq))).toBe(true);
-    expect(app._pendingDeliveries.get('s-tile')?.map((r) => r.data)).toEqual(frames.map((f) => f.d));
+    expect(app._pendingDeliveries.has('s-tile')).toBe(false);
     expect(app._pendingDeliveries.has('some-other-session')).toBe(false);
   });
 
   it('control: without the controller, xterm alone duplicates the line exactly as the device did', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const helpers = withCompositionHelpers();
     const saved = windowStub.ReverieKeyCode229Recovery;
     delete windowStub.ReverieKeyCode229Recovery;
     try {
-      const { tile, ws, term } = await connectTile(makeApp());
+      const { tile, ws, term } = await connectTile(await makeApp());
       expect((tile as ControllerTile)._keyCode229Recovery).toBeNull();
       ws.open();
       const kb = softKeyboard(term, helpers[0]);
@@ -1583,6 +1373,7 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
       kb.key229();
       kb.edit('testing the prompt ');
       vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
       expect(lineOf(ws.inputFrames())).toBe('testing the peompttesting the prompt rompt ');
     } finally {
@@ -1591,9 +1382,9 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
   });
 
   it('a 229 last character in the same task as Enter goes out ahead of the \\r (#441 + #541)', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const helpers = withCompositionHelpers();
-    const { ws, term } = await connectTile(makeApp());
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     const kb = softKeyboard(term, helpers[0]);
 
@@ -1603,18 +1394,20 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
     kb.edit('hello');
     kb.enter();
     // Settled synchronously at the Enter keydown, not by its timer.
+    await confirmKeyboardFrames(ws);
     expect(wireOf(ws)).toBe('hello\r');
 
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
     const wire = wireOf(ws);
     expect(wire).toBe('hello\r');
     expect(wire).not.toContain('\x7f');
   });
 
   it('an autocorrect plus Enter in one task submits the corrected line', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const helpers = withCompositionHelpers();
-    const { ws, term } = await connectTile(makeApp());
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
     const kb = softKeyboard(term, helpers[0]);
 
@@ -1625,6 +1418,7 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
     kb.edit('testing the prompt ');
     kb.enter();
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     const frames = ws.inputFrames();
     expect(lineOf(frames)).toBe('testing the prompt \r');
@@ -1632,9 +1426,9 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
   });
 
   it('a 229 keystroke xterm diffed itself is delivered once, not again by the recovery', async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
     const helpers = withCompositionHelpers();
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     expect((tile as ControllerTile)._keyCode229Recovery).not.toBeNull();
     ws.open();
     const kb = softKeyboard(term, helpers[0]);
@@ -1643,6 +1437,7 @@ describe("TerminalTile wires the primary pane's soft-keyboard controller (#441, 
     kb.edit('y');
     term.textarea.fire('input', { inputType: 'insertText', data: 'y', isComposing: false });
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     expect(ws.inputFrames().map((f) => f.d)).toEqual(['y']);
   });
@@ -1656,8 +1451,8 @@ describe("the tile's onData tells the controller only about what a human typed",
   };
 
   it('recovers a refused insertText through a query reply and a focus report, to this tile', async () => {
-    vi.useFakeTimers();
-    const app = makeApp();
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const app = await makeApp();
     const { tile, ws, term } = await connectTile(app);
     expect((tile as ControllerTile)._keyCode229Recovery).not.toBeNull();
     ws.open();
@@ -1666,38 +1461,42 @@ describe("the tile's onData tells the controller only about what a human typed",
     term.type('\x1b[?1;2c'); // a DA reply xterm answers on its own: dropped, and not "xterm spoke"
     term.type('\x1b[I'); // a focus report: sent ephemeral, and not "xterm spoke" either
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     const frames = ws.inputFrames();
     expect(frames.map((f) => f.d)).toEqual(['\x1b[I', 'x']);
     const recovered = frames.find((f) => f.d === 'x')!;
     expect(Number.isInteger(recovered.seq)).toBe(true);
-    expect(app._pendingDeliveries.get('s-tile')?.map((r) => r.data)).toEqual(['x']);
+    expect(app._pendingDeliveries.has('s-tile')).toBe(false);
+    expect(app.markIdleAlertSeen).toHaveBeenCalledExactlyOnceWith('s-tile');
   });
 
   it("never counts the controller's own recovered bytes as xterm's: two refused inserts after one keydown both arrive", async () => {
     // Pins WHERE the notify lives: in the onData lambda, not in _onTerminalData(), which the
     // recovered bytes also go through. Counted there, the first recovery would read as "xterm
     // spoke" for the second candidate, which shares its keydown snapshot, and drop it.
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
 
     term.keyHandler!({ type: 'keydown', key: 'Unidentified', keyCode: 65 });
     term.textarea.fire('input', { inputType: 'insertText', data: 'a', isComposing: false });
     term.textarea.fire('input', { inputType: 'insertText', data: 'b', isComposing: false });
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     expect(ws.inputFrames().map((f) => f.d)).toEqual(['a', 'b']);
   });
 
   it('stands down when xterm really did deliver the keystroke', async () => {
-    vi.useFakeTimers();
-    const { ws, term } = await connectTile(makeApp());
+    vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
+    const { ws, term } = await connectTile(await makeApp());
     ws.open();
 
     orphan(term, 'x');
     term.type('x'); // xterm's own canonical emission for this keystroke
     vi.advanceTimersByTime(1);
+    await confirmKeyboardFrames(ws);
 
     expect(ws.inputFrames().map((f) => f.d)).toEqual(['x']);
   });
@@ -1730,11 +1529,12 @@ describe('the controller can never break a tile', () => {
         throw new Error('broken');
       },
     };
-    const { tile, ws, term } = await connectTile(makeApp());
+    const { tile, ws, term } = await connectTile(await makeApp());
     expect((tile as ControllerTile)._keyCode229Recovery).toBeNull();
     ws.open();
 
     term.type('a');
+    await expectFrames(ws, 1);
 
     expect(ws.inputFrames().map((f) => f.d)).toEqual(['a']);
   });
@@ -1746,7 +1546,7 @@ describe('the controller can never break a tile', () => {
       }),
     });
     windowStub.ReverieKeyCode229Recovery = { create: () => controller };
-    const { term } = await connectTile(makeApp());
+    const { term } = await connectTile(await makeApp());
 
     expect(term.keyHandler!({ type: 'keydown', key: '1', code: 'Digit1', altKey: true })).toBe(false);
     expect(term.keyHandler!({ type: 'keydown', key: 'z', code: 'KeyZ', ctrlKey: true })).toBe(false);
@@ -1763,7 +1563,7 @@ describe('the controller can never break a tile', () => {
       }),
     });
     windowStub.ReverieKeyCode229Recovery = { create: () => controller };
-    const { tile, term } = await connectTile(makeApp());
+    const { tile, term } = await connectTile(await makeApp());
     const dispose = vi.spyOn(term, 'dispose');
 
     tile.destroy();
@@ -1782,7 +1582,7 @@ describe('the controller can never break a tile', () => {
         return controller;
       },
     };
-    const app = makeApp();
+    const app = await makeApp();
     const a = await connectTile(app);
     const b = await connectTile(app);
 

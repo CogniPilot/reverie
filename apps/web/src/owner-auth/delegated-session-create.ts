@@ -3,6 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { isDeepStrictEqual } from 'node:util';
 import type { FastifyRequest } from 'fastify';
 import { ownerFor } from '../web/route-helpers.js';
+import type { OwnerVerifier } from './marks.js';
 
 interface Grant {
   sessionId: string;
@@ -70,6 +71,33 @@ export function consumeDelegatedSessionCreate(req: FastifyRequest): boolean | un
   grant.consumed = true;
   return ownerFor(req) === grant.owner && req.headers['x-reverie-parent-session'] === grant.sessionId &&
     isDeepStrictEqual(req.body, grant.payload) && grant.authorized();
+}
+
+/** Continue only the exact creation that the policy actually claimed and consumed.
+ * This never authorizes a raw employee replacement or another nested request. */
+export function delegatedSessionCreateAdmission(req: FastifyRequest): (() => boolean) | undefined {
+  const grant = grants.getStore();
+  if (!grant || grant.targetSessionId) return undefined;
+  return () =>
+    grant.claimed === req &&
+    grant.consumed &&
+    !grant.closed &&
+    req.method === 'POST' &&
+    req.url === '/api/sessions' &&
+    req.routeOptions.url === '/api/sessions' &&
+    ownerFor(req) === grant.owner &&
+    req.headers['x-reverie-parent-session'] === grant.sessionId &&
+    isDeepStrictEqual(req.body, grant.payload) &&
+    grant.authorized();
+}
+
+/** Employee replacement requires a real owner or the already approved private migration.
+ * A self header or Move own plan permission alone never substitutes for that operation. */
+export function employeeReplacementAuthority(req: FastifyRequest, verifiedOwner: OwnerVerifier): () => boolean {
+  const delegated = delegatedSessionCreateAdmission(req);
+  return req.headers['x-reverie-parent-session'] !== undefined
+    ? () => delegated?.() === true
+    : () => verifiedOwner(req);
 }
 
 /** Carry only this consumed private start's fresh authority through slow setup.

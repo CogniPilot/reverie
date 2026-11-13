@@ -236,8 +236,8 @@ it('reads bounded viewer reason/backoff on demand without repairing or changing 
  };
  await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-viewer-status').click();await h.flush(80);
  expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect/status',method:'POST',body:{sessionId:SID,sessionGeneration:2}}]);
- expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('native health unavailable');
- expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('retry in 5s');
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('native health is unconfirmed');
+ expect(h.document.querySelector('.ca-viewer-status-report').textContent).toContain('Retry the viewer connection in 5s');
  expect(session.isWorking).toBe(true);expect(session.runtimeHealth).toBe('disconnected');
  expect(h.document.querySelector('.ca-company-state').textContent).toContain('Viewer unavailable');
 });
@@ -251,9 +251,63 @@ it('shows a refused reconnect status without replaying or treating it as provide
   return original(path,options);
  };
  await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-reconnect-viewer').click();await h.flush(80);
- expect(calls).toHaveLength(1);expect(h.app.toasts.at(-1).text).toContain('backoff');
- expect(h.app.toasts.at(-1).text).toContain('retry in 5s');expect(session.runtimeHealth).toBe('disconnected');
+ expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect',method:'POST',body:{sessionId:SID,sessionGeneration:2}}]);
+ expect(h.app.toasts.at(-1).text).toContain('waiting before another reconnect attempt');
+ expect(h.app.toasts.at(-1).text).toContain('Retry the viewer connection in 5s');expect(session.runtimeHealth).toBe('disconnected');
+ expect(h.app.toasts.at(-1).text).not.toContain('..');
  expect(h.app.toasts.some((t:any)=>t.text.includes('Terminal reconnected'))).toBe(false);
+});
+
+it('retains the native-health reason and connection retry delay even after an outer viewer response',async()=>{
+ const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal'});
+ Object.assign(employee,{workerViewerReconnect:true,sessionGeneration:2});Object.assign(session,{workerViewerReconnect:true});
+ const calls:Array<{path:string;method:string;body:unknown}>=[], original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:{method:string;body:unknown})=>{
+  if(path.endsWith('/reconnect/status')){calls.push({path,...options});return{ok:true,data:{reconnect:{state:'blocked',
+   reason:'native-health-unavailable',observation:'outer-pane-responsive',attempts:2,retryAfterMs:4500}}};}
+  return original(path,options);
+ };
+ await h.shell.openCompany();h.document.querySelector('.ca-company-person .ca-viewer-status').click();await h.flush(80);
+ const report=h.document.querySelector('.ca-viewer-status-report').textContent;
+ expect(report).toContain('native health is unconfirmed');expect(report).toContain('terminal viewer responded');
+ expect(report).toContain('Retry the viewer connection in 5s');
+ expect(report).not.toMatch(/pressure|provider (?:died|stopped)|native-health-unavailable|attempts 2/);
+ expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect/status',method:'POST',body:{sessionId:SID,sessionGeneration:2}}]);
+ expect(session.isWorking).toBe(true);expect(session.runtimeHealth).toBe('disconnected');expect(posts).toHaveLength(0);
+});
+
+it('keeps every known viewer reason meaningful and unknown pressure-like or prototype keys unconfirmed',async()=>{
+ const{h,employee,session,posts}=await fixture({health:'disconnected',scope:'terminal'});
+ const cases:Array<[string,RegExp]>=[
+  ['native-health-unavailable',/native health is unconfirmed/],['backoff',/waiting before another reconnect attempt/],
+  ['in-progress',/reconnect is already in progress/],['viewer-closing',/viewer is closing/],
+  ['lifecycle-in-progress',/session action is already in progress/],['input-in-progress',/input is still being processed/],
+  ['move-in-progress',/session move is in progress/],['binding-migration',/moving to another session/],
+  ['readiness-unconfirmed',/connection was attempted.*readiness could not be confirmed/],
+  ['diagnostic-requested-readiness-unconfirmed-input-held',/inspection was requested.*input remains paused/],
+  ['pane-observation-unconfirmed',/viewer could not be checked/],['viewer-subject-changed',/original terminal viewer changed/],
+  ['stale-binding',/employee's session changed/],['binding-or-health-changed',/session or native health evidence changed/],
+  ['binding-or-authority-changed',/session or your recovery access changed/],['authority-changed',/recovery access changed/],
+  ['admission-unavailable',/current session could not be verified/],['server-not-ready',/server is not ready/],
+  ['not-running',/employee is not set to run/],['viewer-unavailable',/no current terminal viewer/],
+  ['not-attempted',/reconnect has not been attempted/],['viewer-not-disconnected',/not reported a disconnected viewer/],
+  ['connected',/viewer connection was confirmed/],['viewer-endpoint-custody-unavailable',/original terminal connection could not be verified/],
+  ['viewer-endpoint-configuration-invalid',/viewer configuration is invalid/],
+ ];
+ for(const[reason,expected]of cases){
+  const status=h.shell.viewerReconnectStatus(employee,{state:'blocked',reason,attempts:2,retryAfterMs:0});
+  expect(status).not.toBeNull();const description=h.shell.viewerReconnectDescription(status);expect(description).toMatch(expected);
+  expect(description).not.toMatch(/blocked:|attempts 2/);
+ }
+ for(const reason of ['memory-pressure','kernel-pressure-timeout','unknown-native-failure','constructor','__proto__','toString']){
+  const status=h.shell.viewerReconnectStatus(employee,{state:'blocked',reason,observation:'outer-pane-responsive',attempts:0,retryAfterMs:0});
+  expect(status).not.toBeNull();expect(h.shell.viewerReconnectDescription(status)).toBe('The terminal viewer could not be confirmed. Employee and chat readiness are still unconfirmed.');
+ }
+ for(const[ms,seconds]of [[1,1],[4500,5],[60000,60]]){
+  const status=h.shell.viewerReconnectStatus(employee,{state:'blocked',reason:'backoff',attempts:3,retryAfterMs:ms});
+  expect(h.shell.viewerReconnectDescription(status)).toContain(`Retry the viewer connection in ${seconds}s`);
+ }
+ expect(session.runtimeHealth).toBe('disconnected');expect(session.isWorking).toBe(true);expect(posts).toHaveLength(0);
 });
 
 it('does not paint a stale status after the binding or browser permission changes during a read',async()=>{

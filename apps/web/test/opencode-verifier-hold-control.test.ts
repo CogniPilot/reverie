@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import { expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { typeIntoOpencode } from '../src/opencode-input.js';
@@ -7,10 +7,10 @@ it.each(['before-verifier', 'inside-opencode'] as const)('retains the agent move
   vi.useFakeTimers();
   const keys: string[] = [];
   let composer = '', verifying = false;
-  let session!: Session;
   let release: (() => void) | undefined;
   const screen = () => `┃ ${composer}\n────────────────────`;
-  const mux = { capturePaneText: screen,
+  const registry = registeredMuxFixture({mode: 'opencode',  muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 });
+  const mux = { ...registry, capturePaneText: screen,
     sendInput: async (_id: string, data: string) => {
       const outcome = await typeIntoOpencode({ capture: screen,
         sleep: async () => { if (verifying && holdAt === 'inside-opencode' && !release) release = session.pauseCapacityRetry(); },
@@ -21,9 +21,8 @@ it.each(['before-verifier', 'inside-opencode'] as const)('retains the agent move
           paste: false, buffer: 'owned', confirm: { glyph: '┃' } });
       return outcome !== 'not-written';
     } };
-  session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'opencode', useMux: true,
-    mux: mux as never, muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
-  registerMuxFixture(session);
+  const session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'opencode', useMux: true,
+    mux: mux as never, muxSession: registry.subject });
   try {
     await session.writeViaMux('synthetic note\r', { agentInput: true, opencodeGuard: true });
     expect(keys).toEqual(['text', 'initialEnter', 'initialEnter']);

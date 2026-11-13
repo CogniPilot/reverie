@@ -2190,7 +2190,7 @@ Object.assign(ReverieApp.prototype, {
     "html[data-reverie-view='chat'] .loading-skeleton { display: none !important; }",
     "html[data-reverie-view='chat'] .app { display: block !important; height: 0 !important; min-height: 0 !important; padding: 0 !important; overflow: visible !important; }",
     "html[data-reverie-view='chat'] .app > :not(.modal):not(.notification-drawer):not(#filePreviewOverlay.visible) { display: none !important; }",
-    "html[data-reverie-view='debug']:not([data-reverie-legacy]) body > :not(.app):not(.ca-back):not(script):not(style) { display: none !important; }",
+    "html[data-reverie-view='debug']:not([data-reverie-legacy]) body > :not(.app):not(.ca-back):not(#statePublicationBanner):not(script):not(style) { display: none !important; }",
     "html[data-reverie-view='debug']:not([data-reverie-legacy]) .app > :not(.main):not(#filePreviewOverlay.visible) { display: none !important; }",
     "html[data-reverie-view='debug']:not([data-reverie-legacy]) .main > :not(.terminal-wrap) { display: none !important; }",
   ].join('\n');

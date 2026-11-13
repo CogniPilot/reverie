@@ -274,6 +274,17 @@ export class OwnerAuthService {
     return Object.freeze({ accountId: account.accountId, personId: 'owner', sessionEpoch: account.epoch });
   }
 
+  /** Registration DATA for an independently authenticated, owner-scoped service.
+   * No login, enrollment or grant is created. Undefined explicitly selects this
+   * primary account; it never selects an invited office owner.
+   */
+  registeredResourceOwner(owner: string | undefined): OwnerRegistrationIdentity {
+    const parsed = RegistrationAccountSchema.safeParse(this.deps.store.readCurrent());
+    if (!parsed.success || !parsed.data.accountId || (owner !== undefined && owner !== parsed.data.username))
+      throw new OwnerAuthError('Current registered resource owner is unavailable', 403);
+    return Object.freeze({ accountId: parsed.data.accountId, personId: 'owner', sessionEpoch: parsed.data.epoch });
+  }
+
   /** Read-only journal provenance. Legacy sign-ins work without implicit enrollment. */
   inputIdentity(token: string | undefined): BrowserInputIdentity {
     const { account, session } = this.registrationAccount(token);
@@ -655,9 +666,10 @@ export class OwnerAuthService {
     return token;
   }
 
-  /** The session behind a cookie, refreshed, or undefined (expired, logged out, older epoch). */
-  session(token: string | undefined): OwnerSession | undefined {
-    return token ? this.sessionByHash(sha256(token), true) : undefined;
+  /** The current cookie session, or undefined. Read continuations pass false so
+   * background frames cannot extend the original user's idle deadline. */
+  session(token: string | undefined, touch = true): OwnerSession | undefined {
+    return token ? this.sessionByHash(sha256(token), touch) : undefined;
   }
 
   private sessionByHash(key: string, touch: boolean): { restricted: boolean } | undefined {

@@ -173,6 +173,8 @@ HTMLCanvasElement.prototype.getContext = function(type, ...args) {
 const _SSE_HANDLER_MAP = [
   // Core
   [SSE_EVENTS.INIT, '_onInit'],
+  [SSE_EVENTS.STATE_PUBLICATION_HELD, '_observeStatePublication'],
+  [SSE_EVENTS.MUX_METADATA_PUBLICATION, '_observeMuxMetadataPublication'],
 
   // Session lifecycle
   [SSE_EVENTS.SESSION_CREATED, '_onSessionCreated'],
@@ -1007,28 +1009,23 @@ class ReverieApp {
     // per-session seq, persisted to localStorage, and only dropped once the
     // server ACKs that exact seq — so a half-open socket silently dropping a
     // frame, a reconnect, or a page reload can never lose a typed prompt.
-    // Exactly-once: the server applies each (clientId, seq) at most once.
+    // Durable browser custody is independent of process-local backend receipts.
     this._connectionStatus = 'connected';
     this._clientId = '';
-    this._seqCounters = new Map(); // sessionId -> last issued seq
     this._pendingDeliveries = new Map(); // sessionId -> [{seq,data,useMux,ts,tries,sentAt}]
     // Last rendered connection-indicator tuple; the hot input path skips DOM
     // writes when the freshly computed descriptor is identical (COD-136).
     this._lastIndicatorDescriptor = null;
     this._lastIndicatorLanguage = null; // the UI language it was rendered in
-    this._postDraining = new Set(); // sessionIds with an in-flight POST drainer
     // Terminal sockets OTHER than the primary one (`this._ws`), keyed by the
     // session they are bound to: the split pane's second terminal registers its
     // socket here so its input rides the same exactly-once queue. Values are
     // `{ ws, lastRecvAt }` handles owned by that terminal (see _inputSocketFor).
     this._extraInputSockets = new Map();
-    this._persistReliableTimer = null;
-    this._reliableAckTimeoutMs = 4000; // unacked WS frame older than this ⇒ socket likely dead
-    this._reliableMaxBytes = 256 * 1024; // cap on the persisted backlog
     this._loadReliableState();
     this._reliableSweepTimer = setInterval(() => this._redeliverSweep(), 2000);
-    // Flush the durable queue synchronously when the page is hidden/closed —
-    // debounced persistence may have a pending write we mustn't lose on reload.
+    // Each input acceptance already committed its rows. Persist newly observed
+    // deny-only flags on pagehide without issuing or replaying terminal input.
     window.addEventListener('pagehide', () => this._persistReliableNow());
     // Tab group edits not yet confirmed by the server survive a reload.
     window.addEventListener('pagehide', () => this._persistPendingTabLayoutEdits());
@@ -1604,27 +1601,57 @@ class ReverieApp {
     return sessionId;
   }
 
-  /**
-   * POST a live subscription update so the server filters terminal events
-   * to the given session(s) for this client. Fire-and-forget: failures
-   * are non-fatal because we'll still get every event we don't want
-   * (just at higher cost), and the next reconnect carries the filter via
-   * the SSE query string.
-   */
+  /** A live stream belongs to this page; the persistent device/input issuer is shared by tabs. */
+  _liveStreamClientId() {
+    return this._wsTabNonce;
+  }
+
   _updateSseSubscription(sessionId) {
-    try {
-      const filterId = this._sseFilterSessionId(sessionId);
-      const body = JSON.stringify({
-        clientId: this._clientId,
-        sessions: filterId ? [filterId] : null,
-      });
-      fetch('/api/events/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        keepalive: true,
-      }).catch(() => { /* non-fatal */ });
-    } catch { /* non-fatal */ }
+    const source = this.eventSource;
+    const state = this._sseSubscriptions?.get(source);
+    if (!state) return Promise.resolve();
+    state.desired = this._sseFilterSessionId(sessionId) || null;
+    if (state.running) return state.running;
+    state.running = (async () => {
+      // One original request and one replaceable desired value per connection.
+      // Selection changes cannot create out-of-order filter publications.
+      while (this.eventSource === source && state.confirmed !== state.desired) {
+        const requested = state.desired;
+        const controller = new AbortController();
+        state.controller = controller;
+        const timer = setTimeout(() => controller.abort(), 5000);
+        let response;
+        try {
+          response = await fetch('/api/events/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              clientId: this._liveStreamClientId(),
+              streamNonce: state.nonce,
+              sessions: requested ? [requested] : null,
+            }),
+            signal: controller.signal,
+          });
+        } catch { /* The metadata update may have taken effect. Reconnect read-only. */ }
+        finally {
+          clearTimeout(timer);
+          if (state.controller === controller) state.controller = null;
+        }
+        if (this.eventSource !== source) return;
+        if (response?.status === 204) {
+          state.confirmed = requested;
+          continue;
+        }
+        if (response?.status === 401 || response?.status === 403) {
+          this.showToast('Sign in again to refresh terminal output. Unsaved drafts are kept.', 'error');
+        }
+        // No POST replay: the new stream requests the latest selection with a
+        // fresh connection nonce and the browser's current authentication.
+        this.connectSSE();
+        return;
+      }
+    })().finally(() => { state.running = null; });
+    return state.running;
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -2156,6 +2183,7 @@ class ReverieApp {
 
     // Close existing EventSource before creating new one to prevent duplicate connections
     if (this.eventSource) {
+      this._sseSubscriptions?.get(this.eventSource)?.controller?.abort();
       this.eventSource.close();
       this.eventSource = null;
     }
@@ -2171,10 +2199,14 @@ class ReverieApp {
     // filter so the server only streams session:terminal events for the
     // session we're rendering. Lifecycle/metadata events are sent globally
     // regardless of filter (server side).
-    const _sseParams = new URLSearchParams({ clientId: this._clientId });
+    const nonce = `${this._liveStreamClientId()}-${this._sseConnectionSequence = (this._sseConnectionSequence || 0) + 1}`;
+    const _sseParams = new URLSearchParams({ clientId: this._liveStreamClientId(), streamNonce: nonce });
     const _sseFilterId = this._sseFilterSessionId(this.activeSessionId);
     if (_sseFilterId) _sseParams.set('sessions', _sseFilterId);
     this.eventSource = new EventSource(ReverieBase.url(`/api/events?${_sseParams.toString()}`));
+    const source = this.eventSource;
+    this._sseSubscriptions ||= new WeakMap();
+    this._sseSubscriptions.set(source, { nonce, confirmed: _sseFilterId || null, desired: _sseFilterId || null, running: null, controller: null });
 
     // Store all event listeners for cleanup on reconnect.
     //
@@ -2185,24 +2217,24 @@ class ReverieApp {
     const listeners = [];
     const addListener = (event, handler) => {
       const stamped = (e) => {
+        if (this.eventSource !== source) return;
         this._sseLastMessageAt = Date.now();
         handler(e);
       };
-      this.eventSource.addEventListener(event, stamped);
+      source.addEventListener(event, stamped);
       listeners.push({ event, handler: stamped });
     };
 
     // Create cleanup function to remove all listeners
     this._sseListenerCleanup = () => {
       for (const { event, handler } of listeners) {
-        if (this.eventSource) {
-          this.eventSource.removeEventListener(event, handler);
-        }
+        source.removeEventListener(event, handler);
       }
       listeners.length = 0;
     };
 
     this.eventSource.onopen = () => {
+      if (this.eventSource !== source) return;
       this.reconnectAttempts = 0;
       // Start the liveness clock here, not at the first frame: the watchdog
       // only ever fires while the status is 'connected', and this is the
@@ -2211,6 +2243,7 @@ class ReverieApp {
       this.setConnectionStatus('connected');
     };
     this.eventSource.onerror = () => {
+      if (this.eventSource !== source) return;
       this.reconnectAttempts++;
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
         this.setConnectionStatus('disconnected');
@@ -2218,10 +2251,10 @@ class ReverieApp {
         this.setConnectionStatus('reconnecting');
       }
       // Close the failed connection before scheduling reconnect
-      if (this.eventSource) {
-        this.eventSource.close();
-        this.eventSource = null;
-      }
+      // Retain the actual closed original as current until its successor is
+      // constructed. An original pending metadata response can still explain
+      // the failure; its object check will refuse it after any replacement.
+      source.close();
       // Clear any existing reconnect timeout before setting new one (prevents orphaned timeouts)
       this._clearTimer('sseReconnectTimeout');
       // Exponential backoff: 200ms, 500ms, 1s, 2s, 4s, ... up to 30s
@@ -3826,7 +3859,7 @@ class ReverieApp {
     // up to the limit).
     const cid = this._clientId ? `${this._clientId}:${this._wsTabNonce}` : '';
     const cidQuery = cid ? `?cid=${encodeURIComponent(cid)}` : '';
-    const url = `${proto}//${location.host}${ReverieBase.base}/ws/sessions/${sessionId}/terminal${cidQuery}`;
+    const url = `${proto}//${location.host}${ReverieBase.base}/ws/sessions/${sessionId}/terminal${cidQuery}${cidQuery ? "&" : "?"}inputProtocol=2`;
     const ws = new WebSocket(url);
     this._ws = ws;
     this._wsSessionId = sessionId;
@@ -3885,7 +3918,8 @@ class ReverieApp {
           // the durable queue so it can never be re-delivered/lost.
           this._onWsInputAck(msg.seq, msg, sessionId);
         } else if (msg.t === 'ie' && (msg.unconfirmed === true || msg.held === true)) {
-          this._holdInputRecovery(sessionId);
+          if (msg.reloadRequired === true) this._noteInputReloadRequired(sessionId);
+          else this._holdInputRecovery(sessionId);
         } else if (msg.t === 'ir') {
           this._onWsInputRefusal(msg.seq, msg, sessionId);
         } else if (msg.t === 'ip') {
@@ -4049,7 +4083,7 @@ class ReverieApp {
    */
   _sessionInputHeld(sessionId) {
     const session = this.sessions?.get?.(sessionId);
-    return this._inputRecoveryHolds?.has(sessionId) === true || session?.terminalInputHeld === true ||
+    return this._inputGlobalHold === true || this._inputRecoveryHolds?.has(sessionId) === true || session?.terminalInputHeld === true ||
       session?.providerDispatchHeld === true;
   }
 
@@ -4063,15 +4097,27 @@ class ReverieApp {
     this._inputRecoveryHolds ||= new Set();
     if (this._inputRecoveryHolds.has(sessionId)) return;
     this._inputRecoveryHolds.add(sessionId);
-    this._persistReliableNow();
+    void this._persistReliableNow()?.catch?.(() => {});
   }
 
   _observeInputRecovery(session) {
+    if (session?.id && session.providerDispatchHeld === true) {
+      // Retain this observed diagnostic just like the deny-only input hold.
+      // A later partial DTO or status read cannot disprove the original launch.
+      this._inputStartupRecoveryHolds ||= new Set();
+      this._inputStartupRecoveryHolds.add(session.id);
+    }
     if (session?.id && (session.terminalInputHeld === true || session.providerDispatchHeld === true))
       this._rememberInputRecovery(session.id);
   }
 
   _renderInputRecoveryBanner() {
+    this._syncRawInputAvailability?.();
+    if (this._inputStorageUnavailable) {
+      this._renderInputStorageFailure();
+      this._renderUnqueuedInput();
+      return;
+    }
     const banner = document.getElementById?.('inputRecoveryBar');
     if (!banner) return;
     const id = this.activeSessionId;
@@ -4079,11 +4125,23 @@ class ReverieApp {
     if (!id || !this._sessionInputHeld(id)) {
       banner.hidden = true;
       delete banner.dataset.recoveryKey;
+      this._renderUnqueuedInput?.();
       return;
     }
-    const startup = this.sessions?.get?.(id)?.providerDispatchHeld === true;
+    const startup = this._inputStartupRecoveryHolds?.has(id) === true;
+    const reasonText = this._inputReloadRequired?.has(id)
+      ? 'Reload this browser to update input handling. Unconfirmed input is retained and will not be sent again.'
+      : startup
+      ? 'Employee startup is unconfirmed. Input is held to avoid repeating the startup. Terminal output remains available.'
+      : 'An earlier operation has an unknown outcome. Input is held to prevent a repeat. Terminal output remains available.';
     const key = id;
-    if (banner.dataset.recoveryKey === key && !banner.hidden) return;
+    if (banner.dataset.recoveryKey === key && !banner.hidden) {
+      // Update the diagnostic in place: rebuilding drops a focused refresh
+      // control and its last observation; an unchanged SID can gain new facts.
+      const reason = banner.querySelector('.input-recovery-message > span');
+      if (reason && reason.textContent !== reasonText) reason.textContent = reasonText;
+      return;
+    }
     banner.dataset.recoveryKey = key;
     banner.replaceChildren();
     const text = document.createElement('div');
@@ -4091,9 +4149,7 @@ class ReverieApp {
     const title = document.createElement('strong');
     title.textContent = 'Input held — terminal is read-only';
     const reason = document.createElement('span');
-    reason.textContent = startup
-      ? 'Employee startup is unconfirmed. Input is held to avoid repeating the startup. Terminal output remains available.'
-      : 'An earlier operation has an unknown outcome. Input is held to prevent a repeat. Terminal output remains available.';
+    reason.textContent = reasonText;
     const status = document.createElement('span');
     status.className = 'input-recovery-status';
     status.setAttribute('aria-live', 'polite');
@@ -4105,6 +4161,7 @@ class ReverieApp {
     refresh.onclick = () => this._refreshInputRecovery(id, refresh, status);
     banner.append(text, refresh);
     banner.hidden = false;
+    this._renderUnqueuedInput?.();
   }
 
   async _refreshInputRecovery(id, button, status) {
@@ -4132,34 +4189,6 @@ class ReverieApp {
       if (wasFocused && button.isConnected && this.activeSessionId === id && document.activeElement === document.body)
         button.focus({preventScroll: true});
     }
-  }
-
-  _sendInputAsync(sessionId, input, opts) {
-    if (!sessionId || !input) return false;
-    if (this._sessionInputHeld(sessionId)) {
-      this._renderInputRecoveryBanner();
-      this.showToast?.('Input is held. Inspect the terminal and refresh its status before continuing.', 'warning');
-      return false;
-    }
-    const useMux = opts?.useMux === true;
-    // Both transports refuse a frame over the server's limit (issue #484), and a
-    // refused frame used to sit at the head of the durable queue for good. So an
-    // oversized paste goes out as several in-limit frames, delivered in seq order
-    // as one contiguous stream. A mux write is line-oriented (it strips newlines
-    // and sends Enter on its own), so it is never split: refuse it instead.
-    const limit = window.ReverieInputLimit;
-    if (limit && input.length > limit.FRAME_MAX_CHARS) {
-      if (useMux || input.length > limit.PASTE_MAX_CHARS) {
-        const max = useMux ? limit.FRAME_MAX_CHARS : limit.PASTE_MAX_CHARS;
-        this.showToast?.(
-          `Input too large (${Math.ceil(input.length / 1024)} KB, limit ${Math.floor(max / 1024)} KB); not sent`,
-          'error'
-        );
-        return false;
-      }
-      return this._queueInputFrames(sessionId, limit.split(input), false);
-    }
-    return this._reliableSend(sessionId, input, useMux);
   }
 
   /**
@@ -4216,7 +4245,7 @@ class ReverieApp {
    */
   _sendInputEphemeral(sessionId, input) {
     if (!sessionId || !input) return;
-    if (this._sessionInputHeld(sessionId)) return;
+    if (this._sessionInputHeld(sessionId) || this._inputGlobalHold || !this._inputJournal || this._inputStorageUnavailable) return;
     const sock = this._inputSocketFor(sessionId);
     if (sock) {
       try {
@@ -4231,7 +4260,7 @@ class ReverieApp {
     try {
       fetch(`/api/sessions/${sessionId}/input`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Reverie-Input-Protocol': '2' },
         body: JSON.stringify({ input }),
         keepalive: true,
       }).catch(() => {});
@@ -4240,492 +4269,7 @@ class ReverieApp {
     }
   }
 
-  /** Record one input frame and kick delivery. The record lives until ACKed. */
-  _reliableSend(sessionId, data, useMux) {
-    return this._queueInputFrames(sessionId, [data], useMux);
-  }
-
-  /** Queue a split draft as one synchronous local decision, before any drain. */
-  _queueInputFrames(sessionId, frames, useMux) {
-    if (this._sessionInputHeld(sessionId)) return false;
-    const records = frames.map(data => ({seq: this._nextSeq(sessionId), data,
-      useMux: !!useMux, ts: Date.now(), tries: 0, sentAt: 0}));
-    let list = this._pendingDeliveries.get(sessionId);
-    if (!list) {
-      list = [];
-      this._pendingDeliveries.set(sessionId, list);
-    }
-    list.push(...records);
-    // ⚠️ SYNCHRONOUS, not the debounced writer: the seq counter is precisely the
-    // thing that must survive a crash, and a debounce puts it on the path most
-    // likely to be lost. A counter that comes back BELOW the server's watermark
-    // makes every later keystroke a silently-dropped duplicate (see _onWsInputAck).
-    this._persistReliableNow();
-    this._updateConnectionIndicator();
-    this._drainSession(sessionId);
-    return true;
-  }
-
-  _nextSeq(sessionId) {
-    const next = (this._seqCounters.get(sessionId) || 0) + 1;
-    this._seqCounters.set(sessionId, next);
-    return next;
-  }
-
-  /** Deliver all unacked records for a session, in seq order. */
-  _drainSession(sessionId) {
-    if (this._sessionInputHeld(sessionId)) return;
-    if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) return;
-    const list = this._pendingDeliveries.get(sessionId);
-    if (!list || list.length === 0) return;
-
-    // Fast path: WebSocket open for this session — fire each not-yet-sent record
-    // over the single ordered stream. They stay pending until the server ACKs
-    // them ({t:'ia'}); a frame swallowed by a half-open socket is re-sent after
-    // the sweep force-reconnects (which resets sentAt=0 in _onWsReady).
-    const sock = this._inputSocketFor(sessionId);
-    if (sock) {
-      for (const rec of list) {
-        if (rec.sentAt !== 0) {
-          if (rec.receiptPending === true) break;
-          continue;
-        }
-        try {
-          sock.ws.send(JSON.stringify({ t: 'i', d: rec.data, seq: rec.seq, cid: this._clientId,
-            ...(rec.useMux ? {useMux: true} : {}) }));
-          rec.sentAt = Date.now();
-          rec.tries++;
-        } catch {
-          break; // socket died mid-send — reconnect/POST drainer retries
-        }
-        if (rec.receiptPending === true) break; // Only look up the original; later text waits for its receipt.
-      }
-      return;
-    }
-
-    // Slow path: no WS — POST records in order, awaiting each (the HTTP 2xx is
-    // the ACK). Serialized per session so seq order survives async fetches.
-    if (this._postDraining.has(sessionId)) return;
-    this._postDraining.add(sessionId);
-    (async () => {
-      try {
-        for (;;) {
-          if (this._sessionInputHeld(sessionId)) break;
-          if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) break;
-          const cur = this._pendingDeliveries.get(sessionId);
-          if (!cur || cur.length === 0) break;
-          // If the WebSocket came back mid-drain, yield to it (the acked stream)
-          // so we don't redundantly re-POST what onopen is already re-sending.
-          if (this._inputSocketFor(sessionId)) {
-            break;
-          }
-          const rec = cur[0];
-          rec.tries++;
-          rec.sentAt = Date.now();
-          let resp = null;
-          try {
-            const body = { input: rec.data, seq: rec.seq, clientId: this._clientId };
-            if (rec.useMux) body.useMux = true;
-            resp = await fetch(`/api/sessions/${sessionId}/input`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body),
-              keepalive: rec.data.length < 65536,
-            });
-          } catch {
-            resp = null;
-          }
-          if (resp && resp.ok) {
-            let payload;
-            try {payload = await resp.json();} catch {
-              // A 2xx may be only a pending receipt. An unreadable body cannot
-              // confirm delivery or authorize replay of the original input.
-              this._dropUnconfirmedInput(sessionId, rec);
-              break;
-            }
-            if (payload?.success === false || payload?.recoveryRequired === true || payload?.data?.recoveryRequired === true
-              || payload?.data?.unconfirmed === true || payload?.data?.held === true || this._sessionInputHeld(sessionId)) {
-              this._dropUnconfirmedInput(sessionId, rec);
-              break;
-            }
-            if (payload?.data?.typedUnsent === true) {
-              this._dropUnconfirmedInput(sessionId, rec,
-                payload.data.delivered === false && payload.data.confirmed !== true && !payload.data.pending);
-              break;
-            }
-            if (payload?.data?.delivered === false) {
-              if (payload.data.confirmed === true || payload.data.pending === true) this._dropUnconfirmedInput(sessionId, rec);
-              else {
-                rec.sentAt = 0;
-                this._inputRetryAt ||= new Map();
-                this._inputRetryAt.set(sessionId, Date.now() + 1000);
-              }
-              break;
-            }
-            if (payload?.data && Object.prototype.hasOwnProperty.call(payload.data, 'pending')) {
-              if (payload.success === true && payload.data.pending === true && Object.keys(payload.data).length === 1)
-                this._rememberPendingInput(sessionId, rec.seq, rec);
-              else this._dropUnconfirmedInput(sessionId, rec);
-              break;
-            }
-            this._ackDelivery(sessionId, rec.seq);
-          } else if (resp && (resp.status === 404 || resp.status === 410)) {
-            // Session no longer exists — the input can never land. Drop it
-            // rather than retry forever (not a "lost" prompt: the target is gone).
-            this._ackDelivery(sessionId, rec.seq, false);
-          } else if (resp && resp.status === 422) {
-            // This input's outcome is final but may be unknown. Re-POSTing its
-            // spent seq cannot resolve it and would wedge every later frame.
-            this._dropUnconfirmedInput(sessionId, rec);
-          } else if (resp && resp.status === 409) {
-            let typedUnsent = false;
-            let recoveryRequired = false;
-            try {
-              const body = await resp.json();
-              recoveryRequired = body?.recoveryRequired === true;
-              typedUnsent = body?.success === false && body.errorCode === 'SESSION_BUSY' &&
-                body.data?.typedUnsent === true && body.data?.delivered === false;
-            } catch { /* Unknown/busy refusals stay queued for a later retry. */ }
-            if (recoveryRequired) this._dropUnconfirmedInput(sessionId, rec);
-            else if (typedUnsent) this._dropUnconfirmedInput(sessionId, rec, true);
-            else break;
-          } else if (resp && (resp.status === 400 || resp.status === 413)) {
-            // The frame itself was refused, so a retry gets the same answer. Kept
-            // queued, it was re-POSTed every 2 s forever and blocked every later
-            // input for this session behind it (issue #484). 401/403 stay
-            // transient: an expired login delivers fine once the user signs in.
-            this._dropRejectedInput(sessionId, rec);
-          } else {
-            break; // offline / 5xx — leave queued; sweep + reconnect retry later
-          }
-        }
-      } finally {
-        this._postDraining.delete(sessionId);
-      }
-    })();
-  }
-
-  /** Drop a frame the server refused for good, and say so once. */
-  _dropRejectedInput(sessionId, rec) {
-    this._ackDelivery(sessionId, rec.seq, false);
-    this.showToast?.(`Input refused by the server (${Math.ceil(rec.data.length / 1024)} KB); not sent`, 'error');
-  }
-
-  /** Finalize this queue entry without claiming its input was delivered. */
-  _dropUnconfirmedInput(sessionId, rec, typedUnsent = false) {
-    if (!typedUnsent) this._holdInputRecovery(sessionId);
-    else this._inputRetryAt?.delete(sessionId); // The pending lookup ended; a manual Enter is a new user request.
-    this._ackDelivery(sessionId, rec.seq, false);
-    // Persist even while later frames remain: a reload must not replay the
-    // uncertain/unsent frame during the normal debounce window.
-    this._persistReliableNow();
-    this.showToast?.(typedUnsent
-      ? 'Input text remains unsent; Enter was withheld. Check the session before sending again.'
-      : 'Input delivery is unconfirmed; check the session before sending again.', 'warning');
-  }
-
-  /** Drop an ACKed record (by exact seq) and persist. */
-  _ackDelivery(sessionId, seq, delivered = true) {
-    let matched = false;
-    let resumePending = false;
-    const list = this._pendingDeliveries.get(sessionId);
-    if (list) {
-      const idx = list.findIndex((r) => r.seq === seq);
-      if (idx !== -1) {
-        matched = true;
-        resumePending = delivered && list[idx].receiptPending === true;
-        list.splice(idx, 1);
-        if (resumePending) this._inputRetryAt?.delete(sessionId);
-        if (list.length === 0) this._pendingDeliveries.delete(sessionId);
-        // When nothing is left pending anywhere, flush durable state immediately
-        // (not debounced) so a reload in the next 250ms can't redeliver an
-        // already-delivered frame — otherwise localStorage briefly still shows it.
-        if (this._pendingDeliveries.size === 0) this._persistReliableNow();
-        else this._persistReliableState();
-        this._updateConnectionIndicator();
-      }
-    }
-    // ⚠️ IDLE ONLY, and acknowledged server-side rather than cleared in memory.
-    // Delivering input answers "Claude is waiting for a prompt" by definition,
-    // so this is the same "I am on it" signal as opening the tab. It does NOT
-    // answer a permission/question dialog: those ignore any keystroke that is
-    // not one of their options, so the dialog is still up and still needs you.
-    // Clearing action alerts here hid a LIVE alert on this device alone (the
-    // other devices stayed red and a reload re-seeded it straight back).
-    if (delivered && matched) this.markIdleAlertSeen?.(sessionId);
-    if (resumePending) this._drainSession(sessionId);
-  }
-
-  /**
-   * Server input-ACK frame ({t:'ia',seq}) over the WebSocket.
-   *
-   * `dup:true` means the server REJECTED the frame as already-seen rather than
-   * applying it, and `last` is its watermark for this clientId. That combination
-   * is the escape hatch from a rolled-back counter: our seqs persist on a
-   * debounced write, so a tab killed between a send and that write comes back
-   * counting from BELOW the server's watermark, and from then on every keystroke
-   * is dropped-but-ACKed — a silently dead terminal that a reload cannot fix,
-   * because the stale counter is restored from localStorage too.
-   *
-   * ⚠️ Only a FIRST-attempt record is re-queued. A retry (`tries > 1`) being
-   * called a duplicate is the mechanism working as designed — the original did
-   * land — and re-sending it would type the same thing twice.
-   */
-  _onWsInputRefusal(seq, msg, sessionId) {
-    if (msg?.t !== 'ir' || msg.seq !== seq || msg.retryable !== true || !['capacity', 'unavailable'].includes(msg.reason)
-      || !Number.isSafeInteger(seq) || seq < 0 || msg.confirmed === true || msg.unconfirmed === true || msg.held === true
-      || this._sessionInputHeld(sessionId)) return;
-    const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
-    if (!rec) return;
-    rec.sentAt = 0;
-    this._inputRetryAt ||= new Map();
-    this._inputRetryAt.set(sessionId, Date.now() + 1000);
-    if (msg.reason === 'unavailable' && rec.unavailableWarned !== true) {
-      rec.unavailableWarned = true;
-      this._persistReliableNow();
-      this.showToast?.('Terminal not ready; input remains queued', 'warning');
-    }
-  }
-
-  /** A pending receipt is no delivery proof and no uncertainty-clear grant. */
-  _rememberPendingInput(sessionId, seq, original) {
-    if (!sessionId || !Number.isSafeInteger(seq) || seq < 0 || this._sessionInputHeld(sessionId)) return false;
-    const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
-    if (!rec || (original && rec !== original)) return false;
-    rec.receiptPending = true;
-    rec.sentAt = 0;
-    this._inputRetryAt ||= new Map();
-    this._inputRetryAt.set(sessionId, Date.now() + 1000);
-    this._persistReliableNow();
-    return true;
-  }
-
-  _onWsInputPending(seq, msg, sessionId) {
-    if (msg?.t !== 'ip' || msg.seq !== seq || Object.keys(msg).some(key => key !== 't' && key !== 'seq')) return;
-    this._rememberPendingInput(sessionId, seq);
-  }
-
-  _onWsInputAck(seq, msg, sessionId = this._wsSessionId) {
-    // `sessionId` is the session of the socket the ACK arrived on: `{t:'ia'}`
-    // frames carry none, and with a second terminal's socket in play
-    // `this._wsSessionId` is no longer the only candidate.
-    if (!sessionId || !Number.isInteger(seq)) return;
-    if (msg?.unconfirmed === true || msg?.held === true) {
-      this._holdInputRecovery(sessionId);
-      const rec = (this._pendingDeliveries.get(sessionId) || []).find((r) => r.seq === seq);
-      if (rec && msg.unconfirmed === true) this._dropUnconfirmedInput(sessionId, rec);
-      return;
-    }
-    if (msg && (Object.prototype.hasOwnProperty.call(msg, 'typedUnsent') || msg.delivered === false)) {
-      if (this._sessionInputHeld(sessionId) || msg.typedUnsent !== true || msg.delivered !== false
-        || msg.confirmed === true || msg.dup || msg.err) return;
-      const rec = this._pendingDeliveries.get(sessionId)?.find(record => record.seq === seq);
-      if (rec) this._dropUnconfirmedInput(sessionId, rec, true);
-      return;
-    }
-    if (msg?.confirmed === true) {
-      this._ackDelivery(sessionId, seq);
-      return;
-    }
-    if (this._sessionInputHeld(sessionId)) return;
-    // A legacy watermark/plain ACK cannot settle a receipt the server explicitly
-    // reported pending. Only its positive confirmed receipt resumes later text.
-    if (this._pendingDeliveries.get(sessionId)?.some(record => record.seq === seq && record.receiptPending === true)) return;
-    if (msg && msg.err) {
-      // Refused for good (e.g. over the size limit): retrying cannot help.
-      const rec = (this._pendingDeliveries.get(sessionId) || []).find((r) => r.seq === seq);
-      if (rec) this._dropRejectedInput(sessionId, rec);
-      else this._ackDelivery(sessionId, seq, false);
-      return;
-    }
-    if (msg && msg.dup) {
-      const list = this._pendingDeliveries.get(sessionId);
-      const rec = list && list.find((r) => r.seq === seq);
-      const watermark = Number.isInteger(msg.last) ? msg.last : seq;
-      // Lift the counter clear of the server's watermark before anything else, so
-      // the re-queue below (and every later keystroke) gets an acceptable seq.
-      if ((this._seqCounters.get(sessionId) || 0) <= watermark) {
-        this._seqCounters.set(sessionId, watermark);
-        this._persistReliableNow();
-      }
-      const lost = rec && rec.tries <= 1 ? rec.data : null;
-      this._ackDelivery(sessionId, seq);
-      if (lost !== null) this._reliableSend(sessionId, lost, rec.useMux);
-      return;
-    }
-    this._ackDelivery(sessionId, seq);
-  }
-
-  /** Called from ws.onopen — flush everything pending over the fresh socket. */
-  _onWsReady(sessionId) {
-    const list = this._pendingDeliveries.get(sessionId);
-    if (list) for (const r of list) r.sentAt = 0; // fresh socket ⇒ re-send all
-    this._drainSession(sessionId);
-  }
-
-  /**
-   * Periodic retry. For the active WS session, an oldest frame unacked past the
-   * timeout means the socket is (half-)dead — close it to force a fast reconnect
-   * (onclose → reconnect → onopen → _onWsReady re-sends). Other sessions just
-   * (re)drain over POST.
-   */
-  _redeliverSweep() {
-    if (this._pendingDeliveries.size === 0) return;
-    for (const sessionId of [...this._pendingDeliveries.keys()]) {
-      if (this._sessionInputHeld(sessionId)) continue;
-      if ((this._inputRetryAt?.get(sessionId) || 0) > Date.now()) continue;
-      const list = this._pendingDeliveries.get(sessionId);
-      if (!list || list.length === 0) continue;
-      const sock = this._inputSocketFor(sessionId);
-      if (sock) {
-        const oldest = list[0];
-        // Only tear the socket down when the oldest unacked frame is stale AND the
-        // socket has been silent for the timeout: a connection still delivering
-        // output/ACKs is alive (the ACK is just behind), so force-closing it would
-        // cause needless WS↔HTTP flapping. A truly half-open socket goes quiet.
-        // Silence is measured on THIS socket: the primary's last frame says
-        // nothing about a second terminal's connection, and the reverse.
-        const stale = oldest && oldest.sentAt && Date.now() - oldest.sentAt > this._reliableAckTimeoutMs;
-        const silent = Date.now() - (sock.lastRecvAt || 0) > this._reliableAckTimeoutMs;
-        if (stale && silent) {
-          try {
-            sock.ws.close(); // half-open: never recovers on its own — force reconnect
-          } catch {
-            /* ignore */
-          }
-          continue;
-        }
-        if (stale) {
-          // Stale but the socket is still delivering output: the ACK was lost,
-          // not the connection. Force-closing isn't warranted (the link is fine),
-          // but the fast path skips anything with sentAt!==0, so the stranded
-          // frame would never re-send. Reset sentAt=0 on every stale unacked
-          // frame so the _drainSession below re-drives them over the live socket
-          // (server dedups by seq, so a re-sent lost-ACK frame is harmless).
-          // Frames sent recently (not yet stale) are left untouched.
-          for (const rec of list) {
-            if (rec.sentAt && Date.now() - rec.sentAt > this._reliableAckTimeoutMs) rec.sentAt = 0;
-          }
-        }
-      }
-      this._drainSession(sessionId);
-    }
-  }
-
-  /** Total bytes/count still awaiting ACK across all sessions (for the indicator). */
-  _pendingBytes() {
-    let bytes = 0;
-    let count = 0;
-    for (const list of this._pendingDeliveries.values()) {
-      for (const r of list) {
-        bytes += r.data.length;
-        count++;
-      }
-    }
-    return { bytes, count };
-  }
-
-  // ---- durable persistence (localStorage; quota- and disabled-storage-safe) --
-
-  _loadReliableState() {
-    // Stable client identity for server-side dedup across reconnects/reloads.
-    try {
-      this._clientId = localStorage.getItem('reverie:clientId') || '';
-    } catch {
-      this._clientId = '';
-    }
-    if (!this._clientId) {
-      this._clientId = 'c-' + Math.random().toString(36).slice(2) + '-' + Date.now().toString(36);
-      try {
-        localStorage.setItem('reverie:clientId', this._clientId);
-      } catch {
-        /* storage disabled — dedup degrades to per-load, still no loss */
-      }
-    }
-    try {
-      const raw = localStorage.getItem('reverie:pendingInput');
-      if (!raw) return;
-      const saved = JSON.parse(raw);
-      if (Array.isArray(saved?.heldSessions)) {
-        this._inputRecoveryHolds = new Set(saved.heldSessions.filter((id) => typeof id === 'string'));
-      }
-      if (saved && saved.seqs) {
-        for (const [s, n] of Object.entries(saved.seqs)) {
-          if (Number.isFinite(n)) this._seqCounters.set(s, n);
-        }
-      }
-      if (saved && saved.pending) {
-        for (const [s, recs] of Object.entries(saved.pending)) {
-          if (Array.isArray(recs) && recs.length) {
-            const frameMax = window.ReverieInputLimit?.FRAME_MAX_CHARS ?? Infinity;
-            const kept = recs
-              .filter((r) => r && typeof r.data === 'string' && Number.isInteger(r.seq))
-              // A frame over the server's limit can never be ACKed; one persisted
-              // by an older build would otherwise come back on every load (#484).
-              .filter((r) => r.data.length <= frameMax)
-              // Reset sentAt so they re-deliver promptly on this fresh load.
-              .map((r) => ({
-                seq: r.seq,
-                data: r.data,
-                useMux: !!r.useMux,
-                ts: r.ts || Date.now(),
-                tries: 0,
-                sentAt: 0,
-                ...(r.receiptPending === true ? {receiptPending: true} : {}),
-                ...(r.unavailableWarned === true ? {unavailableWarned: true} : {}),
-              }));
-            if (kept.length) this._pendingDeliveries.set(s, kept);
-          }
-        }
-      }
-    } catch {
-      /* corrupt/parse error — start clean rather than throw */
-    }
-  }
-
-  _persistReliableState() {
-    // Debounced — typing without local echo calls this per keystroke.
-    if (this._persistReliableTimer) return;
-    this._persistReliableTimer = setTimeout(() => {
-      this._persistReliableTimer = null;
-      this._persistReliableNow();
-    }, 250);
-  }
-
-  _persistReliableNow() {
-    if (this._persistReliableTimer) {
-      clearTimeout(this._persistReliableTimer);
-      this._persistReliableTimer = null;
-    }
-    try {
-      const seqs = {};
-      for (const [s, n] of this._seqCounters) seqs[s] = n;
-      const pending = {};
-      let bytes = 0;
-      for (const [s, list] of this._pendingDeliveries) {
-        if (!list.length) continue;
-        pending[s] = list.map((r) => ({
-          seq: r.seq,
-          data: r.data,
-          useMux: r.useMux,
-          ts: r.ts,
-          tries: r.tries,
-          ...(r.receiptPending === true ? {receiptPending: true} : {}),
-          ...(r.unavailableWarned === true ? {unavailableWarned: true} : {}),
-        }));
-        for (const r of list) bytes += r.data.length;
-      }
-      // Bound the persisted backlog. On extreme overflow keep the seq counters
-      // (so future input stays monotonic and dedup-safe) but skip the payloads —
-      // the in-memory queue still delivers; only cross-reload durability is lost.
-      const heldSessions = [...(this._inputRecoveryHolds || [])];
-      const payload =
-        bytes > this._reliableMaxBytes ? { seqs, heldSessions } : { seqs, pending, heldSessions };
-      localStorage.setItem('reverie:pendingInput', JSON.stringify(payload));
-    } catch {
-      /* QuotaExceeded or disabled storage — in-memory delivery is unaffected */
-    }
-  }
+  // Durable input is owned by input-delivery.js and browser-input-journal.js.
 
   // Pure render of the header connection indicator: reads only `this.*` state,
   // touches NO DOM. Returns the exact { display, dotClass, text, title } tuple the
@@ -5164,7 +4708,135 @@ class ReverieApp {
     }
   }
 
+  /** Page-local warning: stale/partial snapshots cannot erase an observed publication failure. */
+  _observeStatePublication(status) {
+    if (status && typeof status === 'object' && !Array.isArray(status) &&
+        Object.keys(status).length === 2 && status.version === 1 && status.kind === 'unconfirmed') {
+      this._statePublicationHoldObserved = true;
+    }
+    this._presentPublicationNotice();
+  }
+
+  /** Denial/presentation correlation only. A receipt never changes an input or provider fence. */
+  _observeMuxMetadataPublication(status) {
+    if (!status || typeof status !== 'object' || Array.isArray(status) || status.version !== 1) return;
+    const uuid = value => typeof value === 'string' && value.length === 36 &&
+      /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value) && value !== '00000000-0000-0000-0000-000000000000';
+    const ordinal = value => typeof value === 'string' && !/[\r\n]/.test(value) && /^[1-9][0-9]{0,99}$/.test(value);
+    if (!uuid(status.writerId)) return;
+    const original = this._muxMetadataIncident;
+    if (status.kind === 'unconfirmed' && Object.keys(status).length === 5 &&
+        uuid(status.incidentId) && ordinal(status.incidentOrdinal)) {
+      if (original && original.writerId !== status.writerId) this._muxMetadataWriterChanged = true;
+      else if (!original || BigInt(status.incidentOrdinal) > BigInt(original.incidentOrdinal)) {
+        const receipt = this._muxMetadataReceipt;
+        if (!receipt || receipt.writerId !== status.writerId ||
+            BigInt(receipt.repairedThrough) < BigInt(status.incidentOrdinal)) {
+          this._muxMetadataIncident = Object.freeze({ ...status });
+        }
+      }
+    } else if (status.kind === 'reconciled' && Object.keys(status).length === 5 &&
+        uuid(status.repairedIncidentId) && ordinal(status.repairedThrough)) {
+      if (!this._muxMetadataReceipt || this._muxMetadataReceipt.writerId !== status.writerId ||
+          BigInt(status.repairedThrough) > BigInt(this._muxMetadataReceipt.repairedThrough)) {
+        this._muxMetadataReceipt = Object.freeze({ ...status });
+      }
+      if (original?.writerId === status.writerId && !this._muxMetadataWriterChanged &&
+          BigInt(status.repairedThrough) >= BigInt(original.incidentOrdinal)) this._muxMetadataIncident = null;
+    } else if (original && original.writerId !== status.writerId) this._muxMetadataWriterChanged = true;
+    this._presentPublicationNotice();
+  }
+
+  async _requestMuxMetadataReconciliation(write) {
+    const original = this._muxMetadataIncident;
+    if (!original || this._muxMetadataNoticeFlight) return;
+    const flight = {};
+    this._muxMetadataNoticeFlight = flight;
+    const output = document.getElementById('muxMetadataPublicationResult');
+    let failureText = write ? 'Reconciliation may already have saved current metadata. Refresh metadata status before an explicit retry.'
+      : 'Metadata status could not be confirmed.';
+    if (output) output.textContent = write ? 'Reconciling current metadata…' : 'Reading metadata status…';
+    this._presentPublicationNotice();
+    try {
+      const response = await fetch(write ? '/api/mux/metadata/reconcile' : '/api/mux/metadata/status', write ? {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ writerId: original.writerId, expectedIncidentId: original.incidentId })
+      } : undefined);
+      const body = await response.json();
+      if (this._muxMetadataNoticeFlight !== flight || this._muxMetadataIncident !== original) return;
+      if (!response.ok || body?.success !== true) {
+        if (response.status === 401 || response.status === 403) failureText = 'Sign in as the company owner to reconcile metadata.';
+        else if (response.status === 409 && body?.code === 'MUX_METADATA_SELECTION_CHANGED')
+          failureText = 'Reconciliation was refused. Refresh metadata status before an explicit retry.';
+        throw new Error('Metadata request not confirmed');
+      }
+      const status = body.data?.muxMetadataPublication;
+      this._observeMuxMetadataPublication(status);
+      if (output) output.textContent = this._muxMetadataIncident
+        ? this._muxMetadataWriterChanged ? 'The original metadata writer changed. Administrator review is required.'
+          : 'The original metadata incident remains unconfirmed.' : 'Current metadata was reconciled.';
+    } catch {
+      if (this._muxMetadataNoticeFlight === flight && this._muxMetadataIncident === original && output)
+        output.textContent = failureText;
+    } finally {
+      if (this._muxMetadataNoticeFlight === flight) this._muxMetadataNoticeFlight = null;
+      this._presentPublicationNotice();
+    }
+  }
+
+  _presentPublicationNotice() {
+    const banner = this._statePublicationBanner ||= document.getElementById('statePublicationBanner');
+    const main = document.getElementById('mainStatePublicationNotice');
+    const mux = document.getElementById('muxMetadataPublicationNotice');
+    if (main) main.hidden = this._statePublicationHoldObserved !== true;
+    if (mux) mux.hidden = !this._muxMetadataIncident;
+    const refresh = document.getElementById('muxMetadataRefresh');
+    const reconcile = document.getElementById('muxMetadataReconcile');
+    if (!this._publicationWarningActionsBound && refresh && reconcile) {
+      this._publicationWarningActionsBound = true;
+      refresh.addEventListener('click', () => void this._requestMuxMetadataReconciliation(false));
+      reconcile.addEventListener('click', () => void this._requestMuxMetadataReconciliation(true));
+    }
+    if (refresh) refresh.disabled = !!this._muxMetadataNoticeFlight;
+    if (reconcile) reconcile.disabled = !!this._muxMetadataNoticeFlight || !!this._muxMetadataWriterChanged;
+    if (banner) banner.hidden = this._statePublicationHoldObserved !== true && !this._muxMetadataIncident;
+    if (banner && !banner.hidden) {
+      banner.hidden = false;
+      const measure = () => document.documentElement.style.setProperty(
+        '--state-publication-warning-height', Math.ceil(banner.getBoundingClientRect().height) + 'px'
+      );
+      // Native modal dialogs occupy the top layer and make body siblings inert. Keep the
+      // same read-only warning in the active dialog, without copying it or moving focus.
+      const place = () => {
+        // Native hit testing/focus follows the top layer, even when DOM order differs.
+        const hit = document.elementFromPoint(window.innerWidth / 2, window.innerHeight / 2)?.closest('dialog:modal');
+        const focused = document.activeElement?.closest('dialog:modal');
+        const parent = hit || focused || document.body;
+        if (banner.parentElement !== parent) parent.appendChild(banner);
+        measure();
+      };
+      place();
+      if (!this._statePublicationResize && typeof ResizeObserver === 'function') {
+        this._statePublicationResize = new ResizeObserver(measure);
+        this._statePublicationResize.observe(banner);
+      }
+      if (!this._statePublicationDialogs && typeof MutationObserver === 'function') {
+        this._statePublicationDialogs = new MutationObserver(records => {
+          if (!banner.isConnected || records.some(record => record.attributeName === 'open' ||
+              [...record.addedNodes, ...record.removedNodes].some(node => node.nodeName === 'DIALOG'))) place();
+        });
+        this._statePublicationDialogs.observe(document.documentElement, {
+          subtree: true, childList: true, attributes: true, attributeFilter: ['open']
+        });
+      }
+    } else if (banner) {
+      document.documentElement.style.setProperty('--state-publication-warning-height', '0px');
+    }
+  }
+
   handleInit(data) {
+    this._observeStatePublication(data?.statePublication);
+    this._observeMuxMetadataPublication(data?.muxMetadataPublication);
     // Clear the init fallback timer since we got data
     this._clearTimer('_initFallbackTimer');
     // A different frontend build than this page loaded with: offer a reload (update-notice.js).
@@ -9267,6 +8939,7 @@ class ReverieApp {
   // `skipSnapshot`: the tile grid opening on the session it parks
   // (tile-grid.js openTileGrid), whose snapshot closing the grid discards.
   _cleanupPreviousSession(newSessionId, { skipSnapshot = false } = {}) {
+    if (this._localEchoOverlay?.pendingText) return false;
     // Snapshot the OUTGOING session's xterm rendered state (viewport + scrollback +
     // colors/attrs) before the terminal gets cleared/reset. Lets us restore the
     // exact view on switch-back rather than replaying codex's byte stream, which
@@ -9371,7 +9044,6 @@ class ReverieApp {
         if (ta) ta.dispatchEvent(new CompositionEvent('compositionend', { data: '' }));
       }
     } catch {}
-    this._flushLocalEchoTo(this.activeSessionId);
     this._localEchoOverlay?.clear();
     // Predictions are ephemeral + already sent: nothing to save/restore
     // across a tab switch (unlike the buffer overlay's setFlushed machinery)
@@ -9384,6 +9056,7 @@ class ReverieApp {
     if (this._localEchoOverlay && !this._flushedOffsets?.has(newSessionId)) {
       this._localEchoOverlay.suppressBufferDetection();
     }
+    return true;
   }
 
   /**
@@ -9407,22 +9080,38 @@ class ReverieApp {
    * @param {string|null} sessionId
    */
   _flushLocalEchoTo(sessionId) {
-    if (!sessionId) return;
-    const echoText = this._localEchoOverlay?.pendingText || '';
-    // Include buffer-detected flushed text (from Tab completion, etc.)
-    // so it's preserved across tab switches.
-    const existingFlushed = this._localEchoOverlay?.getFlushed()?.count || 0;
-    const existingFlushedText = this._localEchoOverlay?.getFlushed()?.text || '';
-    if (echoText) {
-      this._sendInputAsync(sessionId, echoText);
-    }
-    const totalOffset = existingFlushed + echoText.length;
-    if (totalOffset > 0) {
-      if (!this._flushedOffsets) this._flushedOffsets = new Map();
-      if (!this._flushedTexts) this._flushedTexts = new Map();
-      this._flushedOffsets.set(sessionId, totalOffset);
-      this._flushedTexts.set(sessionId, existingFlushedText + echoText);
-    }
+    if (!sessionId) return Promise.resolve(true);
+    const overlay = this._localEchoOverlay;
+    if (!overlay?.pendingText) return Promise.resolve(true);
+    const existing = this._overlayAccepting;
+    if (existing?.overlay === overlay && existing.sid === sessionId) return existing.promise;
+    const draft = overlay.claimPendingDraft?.();
+    if (!draft) return Promise.resolve(false);
+    const rawOwner = this._pendingInputOwner, originalSession = this.sessions.get(sessionId);
+    const operation = {overlay, sid: sessionId, promise: null};
+    let accepted = false;
+    operation.promise = (async () => {
+      try {
+        if (!await overlay.waitDraftReceipt(draft) || this.activeSessionId !== sessionId
+          || this._localEchoOverlay !== overlay || this._pendingInputOwner !== rawOwner
+          || this.sessions.get(sessionId) !== originalSession || !overlay.beginDraftReceipt(draft)) return false;
+        // This backend-delivery receipt remains distinct from the editor claim.
+        accepted = !draft.text || !!await this._queueOverlayInput(sessionId, draft.text);
+        return accepted;
+      } finally {
+        overlay.settleDraftReceipt(draft, accepted, 'flushed');
+        if (accepted && this.activeSessionId === sessionId && this._localEchoOverlay === overlay) {
+          const flushed = overlay.getFlushed();
+          this._flushedOffsets ||= new Map(); this._flushedTexts ||= new Map();
+          this._flushedOffsets.set(sessionId, flushed.count);
+          this._flushedTexts.set(sessionId, flushed.text);
+        }
+      }
+    })().then(queued => queued && this.activeSessionId === sessionId && this._localEchoOverlay === overlay
+      && this._pendingInputOwner === rawOwner && this.sessions.get(sessionId) === originalSession && !overlay.pendingText)
+      .finally(() => {if (this._overlayAccepting === operation) this._overlayAccepting = null;});
+    this._overlayAccepting = operation;
+    return operation.promise;
   }
 
   /**
@@ -9862,8 +9551,8 @@ class ReverieApp {
       // hides this one from it. Flush first or the characters are cleared
       // unread. The geometry replay re-enters here with no gesture behind it,
       // so on a touch device this fires while the user is still typing.
-      this._flushLocalEchoTo(sessionId);
-      this.activeSessionId = null;
+      // The outgoing draft is accepted below, after synchronous focus and
+      // before any terminal/overlay cleanup.
     }
     // Focus terminal SYNCHRONOUSLY before any await — iOS Safari only honors
     // programmatic focus() within the user-gesture call stack (e.g. tab click).
@@ -9881,6 +9570,10 @@ class ReverieApp {
 
     const selectGen = ++this._selectGeneration;
     this._setTerminalLoadState(sessionId, selectGen, 'resizing');
+    if (!await this._flushLocalEchoTo(this.activeSessionId)) {
+      this._clearTerminalLoadState(sessionId, selectGen);
+      return;
+    }
 
     if (selectGen !== this._selectGeneration) {
       this._clearTerminalLoadState(sessionId, selectGen);
@@ -9890,7 +9583,7 @@ class ReverieApp {
     // A session tab takes the stage back from any active web tab.
     this._hideWebviewLayer?.();
 
-    this._cleanupPreviousSession(sessionId);
+    if (this._cleanupPreviousSession(sessionId) === false) return;
     this.activeSessionId = sessionId;
     this._renderInputRecoveryBanner();
     this._activateFileBrowserSession?.(sessionId);

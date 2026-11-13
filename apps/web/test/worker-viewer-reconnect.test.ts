@@ -1,13 +1,16 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { getStore } from '../src/state-store.js';
 import {WorkerProviderHealth} from '../src/worker-provider-health.js';
 import Fastify from 'fastify';
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { randomUUID, webcrypto } from 'node:crypto';
+import { IDBFactory } from 'fake-indexeddb';
 import { Session } from '../src/session.js';
-import type {RespawnPaneOptions} from '../src/mux-interface.js';
+import type {MuxSession, RespawnPaneOptions} from '../src/mux-interface.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import type { CompanyEmployee } from '../src/company-types.js';
@@ -17,6 +20,9 @@ import { SseEvent } from '../src/web/sse-events.js';
 import { PlanMoves, type PlanMovePort, type PlanMoveRecord } from '../src/plan-move.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
+import {frontendClassMethods} from './helpers/frontend-declarations.js';
+import { TmuxManager } from '../src/tmux-manager.js';
+import { FixtureLocks } from './helpers/browser-input-fixture.js';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks();
@@ -26,13 +32,16 @@ async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'viewer-'));
   cleanups.push(() => rm(dir, { recursive: true, force: true }));
   let dead = true;
+  const registered = new Map<string,MuxSession>();
   const mux = { isAvailable: () => true, muxSessionExists: () => true,
-    isPaneDead: vi.fn(() => dead), readPaneLiveness: vi.fn(async () => dead ? { state: 'dead' } : { state: 'live', pid: 42 }),
+    getSession: (id:string) => registered.get(id),
+    isPaneDead: vi.fn(() => dead), readPaneLiveness: vi.fn(async (_name:string) => dead ? { state: 'dead' } : { state: 'live', pid: 42 }),
     respawnPane: vi.fn(async (_options: RespawnPaneOptions) => { dead = false; return 42; }), clearPaneExit: vi.fn(),
     capturePaneText: vi.fn(() => '›\nGPT-6.1-Sol high · /work\n? for shortcuts'), sendInput: vi.fn(), setAttached: vi.fn() };
-  const session = new Session({ workingDir: dir, mode: 'codex', useMux: true, mux: mux as never,
-    muxSession: { muxName: 'reverie-owned', sessionId: 'owned', pid: 41 } as never });
-  registerMuxFixture(session);
+  const id = randomUUID(), subject = {muxName:'reverie-owned',sessionId:id,pid:41} as MuxSession;
+  const session = new Session({id, workingDir: dir, mode: 'codex', useMux: true, mux: mux as never,
+    muxSession: subject });
+  registered.set(id,subject);
   Object.assign(session, { ptyProcess: { pid: 123 }, _pid: 123 });
   cleanups.push(async () => {
     const client = (session as any).ptyProcess;
@@ -56,7 +65,7 @@ async function fixture() {
     moveGuard: vi.fn(async () => () => !blocked), pause, publish, now: () => clock };
   const controller = new WorkerViewerReconnect(deps);
   const expected = { sessionId: session.id, sessionGeneration: employee.sessionGeneration };
-  return { dir, session, mux, store, company, employee, controller, deps, expected, release,
+  return { dir, session, mux, registered, store, company, employee, controller, deps, expected, release,
     block: () => { blocked = true; }, drain: () => { ready = false; },
     health: (value: boolean) => { healthy = value; }, advance: (ms = 20_000) => { clock += ms; } };
 }
@@ -72,6 +81,43 @@ it('repairs only the saved viewer with an atomic attach-only respawn and fresh l
   expect(f.session.toState().codexConfig).toEqual(before.codexConfig);
   expect(hooks).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
   expect(f.deps.publish).toHaveBeenCalledOnce(); expect(f.release).toHaveBeenCalledOnce();
+});
+
+it.each(['missing','invalid'] as const)('reports %s original viewer custody with unknown provider health through the authorized API and GUI without clearing input holds', async kind => {
+  const f = await fixture();
+  f.health(false); diagnosticEndpoint(f);
+  const original = {...(f.session as unknown as {_muxSession:MuxSession})._muxSession};
+  const manager = new TmuxManager(); cleanups.push(async () => manager.destroy());
+  // A manually/restored record has no product launch provenance, even when all
+  // public fields and current global configuration look plausible.
+  if (kind === 'missing') manager.registerSession(original);
+  else {
+    vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','invalid-relative.sock');
+    // Actual ordinary creation still needs the original Session's canonical
+    // acknowledgement, even though only the physical mux is synthetic here.
+    const publication = getStore().stageProviderLaunch(f.session, {
+      transport: 'native-ordinary', brokerSocket: process.env.REVERIE_WORKER_SOCKET,
+      current: () => true, snapshot: () => f.session.toPersistedState(),
+    });
+    await manager.createSession({sessionId:f.session.id,workingDir:f.dir,mode:'codex',
+      owner:f.session.owner,providerLaunch:publication,providerSubject:f.session,
+      onProviderDispatch:()=>publication.claim()});
+  }
+  f.mux.respawnPane.mockImplementationOnce(options => manager.respawnPane(options) as Promise<number>);
+  const app = Fastify(); cleanups.push(() => app.close());
+  registerWorkerViewerReconnect(app, f.controller, () => true);
+  const response = await app.inject({method:'POST', url:`/api/company/employees/${f.employee.id}/reconnect`, payload:f.expected});
+  expect(response.statusCode).toBe(409);
+  const reason = kind === 'missing' ? 'viewer-endpoint-custody-unavailable' : 'viewer-endpoint-configuration-invalid';
+  expect(response.json()).toMatchObject({success:false,reconnect:{reason}});
+  expect(response.json().error).toContain(kind === 'missing' ? 'original viewer endpoint' : 'endpoint is invalid');
+  expect(f.session.viewerInputHeld).toBe(true); expect(f.session.paneExit).toBeDefined();
+  expect(f.mux.sendInput).not.toHaveBeenCalled(); expect(f.deps.publish).not.toHaveBeenCalled();
+  const describe = frontendClassMethods(readFileSync(resolve('src/web/public/chat-app.js'),'utf8'), 'ReverieChatApp', ['viewerReconnectDescription']);
+  const render = new Function(`return ({${describe}}).viewerReconnectDescription;`)();
+  expect(render(response.json().reconnect)).toBe(kind === 'missing'
+    ? 'The original terminal connection could not be verified. Recovery needs operator attention; the employee was not restarted.'
+    : 'The terminal viewer configuration is invalid. Recovery needs operator attention; the employee was not restarted.');
 });
 
 function diagnosticEndpoint(f: Awaited<ReturnType<typeof fixture>>, inspect = vi.fn(async () =>
@@ -275,6 +321,7 @@ it('refuses repair while an earlier actual mux write is still settling', async (
   const f = await fixture(); let finish!: (sent: boolean) => void;
   f.mux.sendInput.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
   const write = f.session.writeViaMux('one existing write');
+  expect(finish).toBeTypeOf('function'); expect(f.mux.sendInput).toHaveBeenCalledOnce();
   expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('unavailable');
   expect(f.mux.respawnPane).not.toHaveBeenCalled(); finish(false); await write;
 });
@@ -424,7 +471,14 @@ it('does not leave a failed viewer reconnect in attach-only mode when the owner 
   vi.spyOn(f.session as any, '_buildRespawnPaneOptionsWithResumePin').mockResolvedValue({ sessionId: f.session.id, workingDir: f.dir, mode: 'opencode' });
   // Avoid the Codex hook installer: the saved runtime is unchanged by reconnect.
   vi.spyOn(f.session, 'mode', 'get').mockReturnValue('opencode');
-  f.mux.respawnPane.mockImplementationOnce(async options => { options.onProviderDispatch?.(); return 42; });
+  f.mux.respawnPane.mockImplementationOnce(async options => {
+    await acknowledgeMuxFixture(options);
+    // The successful physical fixture advances its own original registry row
+    // and observable pane, just as the actual manager does after respawn.
+    f.mux.getSession(f.session.id)!.pid = 42;
+    f.mux.readPaneLiveness.mockResolvedValue({state:'live',pid:42});
+    return 42;
+  });
   expect(await f.session.restartDeadCli(() => true)).toBe(true);
   expect(f.mux.respawnPane.mock.calls[1][0]).not.toHaveProperty('workerAttachOnly');
   expect(f.session.paneExit).toBeUndefined(); expect(f.session.canAcceptChatInput()).toBe(true);
@@ -457,6 +511,49 @@ it('returns a distinct requested response without claiming diagnostic readiness 
   expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
+async function installSessionUpdateCapabilities(h: Awaited<ReturnType<typeof createHarness>>) {
+  const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
+  const methods = frontendClassMethods(source,'ReverieApp',['_onSessionUpdated','_observeInputRecovery',
+    '_rememberInputRecovery','_renderInputRecoveryBanner','_sessionInputHeld']);
+  h.window.eval(`Object.assign(window.ReverieApp.prototype,{${methods}});`);
+  const context = {indexedDB:new IDBFactory(),navigator:{locks:new FixtureLocks()},crypto:webcrypto};
+  const delivery = ['browser-input-journal.js','input-delivery.js']
+    .map(name=>readFileSync(resolve(import.meta.dirname,'../src/web/public',name),'utf8')).join('\n');
+  // fake-indexeddb returns records in this Node realm. Keep the actual journal
+  // and delivery module in the same realm, with the harness's real DOM and app.
+  // Browser storage and cross-page lease behavior have their Chromium runner.
+  new Function('window','globalThis','ReverieApp','document','localStorage','fetch',delivery)(
+    h.window,context,h.window.ReverieApp,h.document,h.window.localStorage,
+    async (url:string)=>{
+      expect(url).toBe('/api/input-identity');
+      return Response.json({success:true,data:{version:1,kind:'session',scopeId:'viewer-projection',epoch:1}});
+    }
+  );
+  expect(await h.app._loadReliableState()).toBe(true);
+  cleanups.push(async()=>h.app._inputJournal.close());
+}
+
+it('runs the real recovery observation and persistence when full session updates remove a held flag',async()=>{
+  const id=randomUUID();
+  const h=await createHarness({loadShell:false,sessions:[{id,name:'Original employee',status:'idle',terminalInputHeld:true}],
+    rooms:[room('r1','Office',[member(id,'Original employee')])]});
+  cleanups.push(async()=>h.dom.window.close());
+  await installSessionUpdateCapabilities(h);
+  Object.assign(h.app,{activeSessionId:id,renderSessionTabs(){},updateCost(){},updateSubagentParentNames(){},
+    recheckOrphanSubagents(){},updateConnectionLines(){}});
+  const banner=h.document.createElement('div');banner.id='inputRecoveryBar';banner.hidden=true;h.document.body.append(banner);
+  await h.startShell();await h.flush(80);
+  h.app._chatEls.input.value='retained unsent draft';
+  h.app._onSessionUpdated({session:{id,name:'Original employee',status:'idle',terminalInputHeld:false}});
+  expect(h.app.sessions.get(id).terminalInputHeld).toBe(false);
+  expect(h.app._sessionInputHeld(id)).toBe(true);
+  expect((await h.app._inputJournal.snapshot()).holds).toEqual([{sid:id,reason:'server-unconfirmed'}]);
+  expect(h.window.localStorage.getItem('reverie:pendingInput')).toBeNull();
+  expect(banner.hidden).toBe(false);expect(banner.textContent).toContain('Input held');
+  expect(h.app._chatEls.input.value).toBe('retained unsent draft');
+  expect(h.app._pendingDeliveries.size).toBe(0);expect(h.server.posts).toEqual([]);
+});
+
 it.each(['idle','busy'] as const)('carries a repaired %s viewer through persistence and SSE without claiming unproven provider health', async status => {
   const f = await fixture(); Object.assign(f.session,{_status:status}); const web = new WebServer(0, false, true) as any;
   cleanups.push(() => web.stop()); web.sessions.set(f.session.id, f.session);
@@ -465,9 +562,7 @@ it.each(['idle','busy'] as const)('carries a repaired %s viewer through persiste
     rooms: [room('r1', 'Office', [member(f.session.id, 'Alex')])] });
   cleanups.push(async () => h.dom.window.close());
   // Install the actual full-state browser handler, not the harness's partial-state merger.
-  const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
-  const method = source.slice(source.indexOf('  _onSessionUpdated(data) {'), source.indexOf('  _onSessionDeleted(data) {'));
-  h.window.eval(`window.ReverieApp.prototype._onSessionUpdated = function(data) ${method.slice(method.indexOf('{'))};`);
+  await installSessionUpdateCapabilities(h);
   Object.assign(h.app, { renderSessionTabs() {}, updateCost() {}, updateSubagentParentNames() {}, recheckOrphanSubagents() {}, updateConnectionLines() {} });
   const shell = await h.startShell(); await h.flush(120); shell.humanSelf = { role: 'owner' }; shell.phoneStatus = { self: 'owner', canSetOwn: true };
   const memberRow = () => h.document.querySelector(`[data-key="member:${f.session.id}"]`)!;
@@ -541,9 +636,7 @@ it('carries independent native health through the real server SSE projection and
  (f.company as any).deps.providerHealth=(employee:CompanyEmployee)=>health.read(employee);
  const h=await createHarness({loadShell:false,sessions:[f.session.toState()],company:{canManage:true,...f.company.view()},
   rooms:[room('r1','Office',[member(f.session.id,'Alex',{alive:false,pendingDeliveries:3})])]});cleanups.push(async()=>h.dom.window.close());
- const source=readFileSync(resolve(import.meta.dirname,'../src/web/public/app.js'),'utf8');
- const method=source.slice(source.indexOf('  _onSessionUpdated(data) {'),source.indexOf('  _onSessionDeleted(data) {'));
- h.window.eval(`window.ReverieApp.prototype._onSessionUpdated = function(data) ${method.slice(method.indexOf('{'))};`);
+ await installSessionUpdateCapabilities(h);
  Object.assign(h.app,{renderSessionTabs(){},updateCost(){},updateSubagentParentNames(){},recheckOrphanSubagents(){},updateConnectionLines(){}});
  const shell=await h.startShell();await h.flush(80);shell.renderMembers();
  expect(h.document.querySelector('.ca-member').textContent).toContain('Viewer unavailable');
@@ -589,15 +682,15 @@ it('rechecks owner authority and healthy provider after asynchronous admission b
 });
 it('rechecks an explicit recovery grant after asynchronous admission and during attach readiness', async () => {
   for (const during of ['admission','readback']) {
-    const f = await fixture(); await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:true}} as never);
+    const f = await fixture(); await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:true}} as never, () => {});
     const principal = {employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,
       owner:undefined,assertCurrent:()=>{},assertIssued:()=>{}};
     const authorized = f.controller.delegated(principal);
     if(during==='admission') f.deps.moveGuard.mockImplementationOnce(async () => {
-      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never); return () => true;
+      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never, () => {}); return () => true;
     });
     else f.mux.readPaneLiveness.mockImplementationOnce(async () => {
-      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never); return {state:'dead'};
+      await f.company.update(f.employee.id, undefined, {permissions:{recoverEmployees:false}} as never, () => {}); return {state:'dead'};
     });
     expect(await f.controller.reconnect(f.employee.id,f.expected,undefined,false,authorized)).not.toBe('connected');
     expect(f.deps.publish).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
@@ -608,10 +701,11 @@ it('status distinguishes a current move hold without attempting repair and reche
   expect((await f.controller.diagnostics(f.employee.id,f.expected)).reason).toBe('move-in-progress');
   expect(f.mux.respawnPane).not.toHaveBeenCalled();
   f.deps.moveGuard.mockImplementationOnce(async()=>{await f.company.setDesiredRunning(f.session.id,false);return()=>true;});
-  expect((await f.controller.diagnostics(f.employee.id,f.expected)).reason).toBe('not-running');
+  expect((await f.controller.diagnostics(f.employee.id,f.expected)).reason).toBe('viewer-subject-changed');
+  expect(f.mux.readPaneLiveness).not.toHaveBeenCalled();
 });
 it('a native-authenticated delegate can repair its own missing website client while the provider stays healthy',async()=>{
-  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}});
+  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}}, () => {});
   Object.assign(f.session,{ptyProcess:null,_pid:null,_viewerClientLost:true});
   const authority={employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,owner:undefined,
     assertCurrent:()=>{},assertIssued:()=>{}};
@@ -620,7 +714,7 @@ it('a native-authenticated delegate can repair its own missing website client wh
   expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 it('native recovery HTTP status rechecks revoked grants after read-only move inspection',async()=>{
-  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}});
+  const f=await fixture();await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}}, () => {});
   const app=Fastify();cleanups.push(()=>app.close());
   const authority={employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,owner:undefined,
     assertCurrent:()=>{},assertIssued:()=>{}};
@@ -629,10 +723,119 @@ it('native recovery HTTP status rechecks revoked grants after read-only move ins
     headers:{'x-reverie-recovery-assertion':'fixture-authenticated-by-private-adapter'},payload:f.expected};
   expect((await app.inject(req)).statusCode).toBe(200);
   f.deps.moveGuard.mockImplementationOnce(async()=>{
-    await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:false}});return()=>true;
+    await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:false}}, () => {});return()=>true;
   });
   expect((await app.inject(req)).statusCode).toBe(403);expect(f.mux.respawnPane).not.toHaveBeenCalled();
 });
+it.each(['idle','busy'] as const)('reads a live %s outer viewer without claiming native readiness or clearing holds', async state => {
+  const f = await fixture();
+  Object.assign(f.session,{_paneExit:null,_status:state,_viewerInputHeld:true});
+  f.health(false); f.mux.readPaneLiveness.mockResolvedValue({state:'live',pid:41});
+  const original = f.registered.get(f.session.id), before = f.session.toState();
+  expect(await f.controller.diagnostics(f.employee.id,f.expected)).toMatchObject({
+    state:'idle',reason:'viewer-not-disconnected',observation:'outer-pane-responsive',attempts:0,
+  });
+  expect(f.registered.get(f.session.id)).toBe(original);
+  expect(f.session.toState()).toMatchObject({id:before.id,pid:before.pid,mode:before.mode,status:before.status});
+  expect(f.session.viewerInputHeld).toBe(true);
+  expect(f.mux.respawnPane).not.toHaveBeenCalled(); expect(f.mux.sendInput).not.toHaveBeenCalled();
+  expect(f.deps.pause).not.toHaveBeenCalled(); expect(f.deps.publish).not.toHaveBeenCalled();
+});
+
+it('carries a real manager query timeout through the original Session and owner status API as unconfirmed only', async () => {
+  const f = await fixture(), app = Fastify(); cleanups.push(()=>app.close());
+  const muxName=`reverie-${f.session.id}`;
+  f.registered.get(f.session.id)!.muxName=muxName;
+  const bin=join(f.dir,'bin'), done=join(f.dir,'query-done'), calls=join(f.dir,'query-args');
+  await mkdir(bin);
+  // A finite owned Node executable, never the host tmux or a provider. Without
+  // the real manager's 5s deadline its late valid pane reply would be responsive.
+  await writeFile(join(bin,'tmux'),`#!${process.execPath}\nconst fs=require('node:fs');\nfs.writeFileSync(${JSON.stringify(calls)},JSON.stringify(process.argv.slice(2)));\nprocess.on('SIGTERM',()=>{fs.writeFileSync(${JSON.stringify(done)},'TERM');process.exit(0)});\nsetTimeout(()=>{fs.writeFileSync(${JSON.stringify(done)},'late');process.stdout.write(${JSON.stringify(`0 41 ${muxName}\n`)});process.exit(0)},6500);\n`,{mode:0o700});
+  vi.stubEnv('PATH',`${bin}:${process.env.PATH}`);
+  const manager=new TmuxManager(); cleanups.push(async()=>manager.destroy());
+  f.mux.readPaneLiveness.mockImplementation(name=>manager.readPaneLiveness(name));
+  Object.assign(f.session,{_paneExit:null,_status:'busy',_viewerInputHeld:true});
+  registerWorkerViewerReconnect(app,f.controller,()=>true);
+  const before=f.registered.get(f.session.id);
+  const reply=await app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect/status`,payload:f.expected});
+  expect(reply.statusCode).toBe(200);
+  expect(reply.json().data.reconnect).toMatchObject({state:'blocked',reason:'pane-observation-unconfirmed',observation:'pane-observation-unconfirmed'});
+  expect(JSON.parse(readFileSync(calls,'utf8'))).toContain('list-panes');
+  expect(readFileSync(done,'utf8')).toBe('TERM');
+  expect(f.registered.get(f.session.id)).toBe(before); expect(f.session.pid).toBe(123);
+  expect(f.session.status).toBe('busy'); expect(f.session.viewerInputHeld).toBe(true);
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();
+  expect(f.deps.publish).not.toHaveBeenCalled(); expect(f.deps.pause).not.toHaveBeenCalled();
+});
+
+it.each(['owner','delegate','binding','session','mux-owner','mux-subject','provider-epoch','mode'] as const)(
+  'rechecks %s after the original pane read and discloses no stale observation',async change=>{
+    const f=await fixture(), app=Fastify();cleanups.push(()=>app.close());let allowed=true;
+    let finish!:(value:{state:'live';pid:number})=>void, entered!:()=>void;
+    const started=new Promise<void>(resolve=>{entered=resolve;});
+    f.mux.readPaneLiveness.mockImplementationOnce(async()=>{entered();return new Promise(resolve=>{finish=resolve;});});
+    await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:true}}, () => {});
+    const authority={employeeId:f.employee.id,sessionId:f.session.id,sessionGeneration:f.expected.sessionGeneration,owner:undefined,
+      assertCurrent:()=>{if(!allowed)throw Error('revoked');},assertIssued:()=>{}};
+    registerWorkerViewerReconnect(app,f.controller,()=>allowed,change==='delegate'?{authenticate:async()=>authority}as never:undefined);
+    const pending=app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect/status`,payload:f.expected,
+      ...(change==='delegate'?{headers:{'x-reverie-recovery-assertion':'fixture-authenticated-by-private-adapter'}}:{})});
+    await started;
+    if(change==='owner')allowed=false;
+    if(change==='delegate')await f.company.update(f.employee.id,undefined,{permissions:{recoverEmployees:false}}, () => {});
+    if(change==='binding')await f.store.update(s=>{s.employees[0].sessionGeneration++;});
+    if(change==='session')f.deps.session=()=>undefined;
+    if(change==='mux-owner')f.registered.get(f.session.id)!.owner='foreign';
+    if(change==='mux-subject')f.registered.set(f.session.id,{...f.registered.get(f.session.id)!});
+    if(change==='provider-epoch')(f.session as unknown as {_invalidateWorkspaceHooks():void})._invalidateWorkspaceHooks();
+    if(change==='mode')Object.assign(f.session,{_mode:'claude'});
+    finish({state:'live',pid:41});const response=await pending;
+    expect(response.statusCode).toBe(change==='owner'||change==='delegate'?403:change==='binding'||change==='session'?409:200);
+    expect(response.body).not.toContain('outer-pane-responsive');
+    if(change.startsWith('mux-')||change==='provider-epoch'||change==='mode')expect(response.json().data.reconnect).toMatchObject({reason:'viewer-subject-changed'});
+    expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();expect(f.deps.publish).not.toHaveBeenCalled();
+  });
+
+it('does not publish a responsive read after a real PlanMoves preparation invalidates its original inspection lease',async()=>{
+  const f=await fixture(),app=Fastify();cleanups.push(()=>app.close());
+  let finishRead!:(value:{state:'live';pid:number})=>void,readEntered!:()=>void;
+  let finishSnapshot!:()=>void,snapshotEntered!:()=>void;
+  const reading=new Promise<void>(resolve=>{readEntered=resolve;}),preparing=new Promise<void>(resolve=>{snapshotEntered=resolve;});
+  const save=vi.fn(), snapshot=vi.fn(async()=>{snapshotEntered();await new Promise<void>(resolve=>{finishSnapshot=resolve;});throw Error('Owned snapshot fixture refused');});
+  const moves=new PlanMoves({load:async()=>[],save,snapshot}as unknown as PlanMovePort);
+  diagnosticEndpoint(f,vi.fn(async()=>moves.viewerInspectionGuard(f.employee.id)));
+  f.mux.readPaneLiveness.mockImplementationOnce(async()=>{readEntered();return new Promise(resolve=>{finishRead=resolve;});});
+  registerWorkerViewerReconnect(app,f.controller,()=>true);
+  const request=app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect/status`,payload:f.expected});
+  await reading;
+  const move=moves.begin({id:randomUUID(),employeeId:f.employee.id,sessionId:f.session.id,fromAccount:'before',toAccount:'after',forceBusy:false,handoff:''})
+    .then(()=>{throw Error('Unexpected move success');},error=>error);
+  await preparing;finishRead({state:'live',pid:41});
+  const response=await request;
+  finishSnapshot();expect((await move).message).toBe('Owned snapshot fixture refused');
+  expect(response.statusCode).toBe(200);
+  expect(response.json().data.reconnect).toMatchObject({state:'blocked',reason:'move-in-progress'});
+  expect(response.json().data.reconnect.observation).toBeUndefined();
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
+});
+
+it.each(['current','revoked','moved'] as const)('sanitizes a failed repair with %s authority and binding',async change=>{
+  const f=await fixture(),app=Fastify();cleanups.push(()=>app.close());let allowed=true;
+  registerWorkerViewerReconnect(app,f.controller,()=>allowed);
+  f.deps.moveGuard.mockImplementationOnce(async()=>{
+    if(change==='revoked')allowed=false;
+    if(change==='moved')await f.store.update(s=>{s.employees[0].sessionGeneration++;});
+    throw Error('private host endpoint and conversation must not be echoed');
+  });
+  const reply=await app.inject({method:'POST',url:`/api/company/employees/${f.employee.id}/reconnect`,payload:f.expected});
+  expect(reply.statusCode).toBe(change==='current'?503:change==='revoked'?403:409);
+  if(change==='current')expect(reply.json().reconnect).toMatchObject({state:'blocked',reason:'admission-unavailable'});
+  else expect(reply.json().reconnect).toBeUndefined();
+  expect(reply.body).not.toContain('private host');
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
 it.each(['applyFullAccessDefault','_prepareSelectedClaudeProfile','_prepareManagedCodexTrust','_prepareCodexHookTrust'])(
   'delegated interactive start rechecks authority after awaited %s preparation before any mux or PTY effect',async preparation=>{
     const f=await fixture();Object.assign(f.session,{ptyProcess:null,_pid:null});let allowed=true;

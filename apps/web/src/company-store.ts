@@ -5,12 +5,14 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanyStateSchema, type CompanyEmployee, type CompanyState } from './company-types.js';
 import { restMetadataId, restMetadataSessionId, type RestEmployeeMetadata } from './rest-canonical-metadata.js';
+import {EmployeeRecoveryAttempt} from './employee-recovery-attempt.js';
+import { recoveryDataDigest, supersedeStoppedRecoveryHistory } from './employee-recovery-operation.js';
 
 /** Commit sensitive state and launch intent across process crashes and power loss. */
 export async function writeCompanyStateFile(
   file: string,
   data: string,
-  beforeCommit: () => void = () => {}
+  beforeCommit: () => void | Promise<void> = () => {}
 ): Promise<void> {
   return writeCanonicalState(file, data, beforeCommit, () => {});
 }
@@ -18,7 +20,7 @@ export async function writeCompanyStateFile(
 async function writeCanonicalState(
   file: string,
   data: string,
-  beforeCommit: () => void,
+  beforeCommit: () => void | Promise<void>,
   beforeRename: () => void
 ): Promise<void> {
   const directory = dirname(file);
@@ -32,7 +34,9 @@ async function writeCanonicalState(
     } finally {
       await handle.close();
     }
-    beforeCommit();
+    // Preserve the existing same-turn publication boundary for synchronous guards.
+    const validation = beforeCommit();
+    if (validation !== undefined) await validation;
     beforeRename();
     await fs.rename(temporary, file);
     const parent = await fs.open(directory, 'r');
@@ -85,6 +89,100 @@ export function serviceAuthorityFits(state: Pick<CompanyState, 'serviceGrants' |
 }
 
 export class CompanyStore {
+  #unconfirmedRecoveryObservation?: {
+    owner: EmployeeRecoveryAttempt; before: string; attempted: string; receipt: CompanyPublicationUnconfirmed;
+  };
+  /** Only this same writer's genuine observation attempt may bridge its own
+   * before/attempted rows for a fresh read. This never repairs the writer. */
+  matchesEmployeeRecoveryObservation(attempt: EmployeeRecoveryAttempt, state: CompanyState): boolean {
+    const original = EmployeeRecoveryAttempt.prototype.observationMetadataOwner.call(attempt, this);
+    const matched=this.matchesRetainedEmployeeRecoveryObservation(attempt,state);
+    if(matched&&!original.readOnly)throw Error('Unconfirmed observation cannot admit another effect');
+    return matched;
+  }
+  /** Read-only selector equality; never an effect/current-context allowance. */
+  matchesRetainedEmployeeRecoveryObservation(attempt: EmployeeRecoveryAttempt, state: CompanyState): boolean {
+    const original = EmployeeRecoveryAttempt.prototype.observationMetadataOwner.call(attempt, this);
+    const retained = this.#unconfirmedRecoveryObservation;
+    if (!retained || retained.owner !== original.owner) return false;
+    const serialized = JSON.stringify(CompanyStateSchema.parse(state));
+    if (!this.writeUncertain || (serialized !== retained.before && serialized !== retained.attempted))
+      throw Error('Original observation writer state changed; preserve the uncertainty');
+    return true;
+  }
+  async employeeAfterRecoveryObservation(attempt:EmployeeRecoveryAttempt,employeeId:string,owner:string|undefined):Promise<CompanyEmployee|undefined> {
+    const original=this.chain;
+    await original;
+    return this.locked(async()=>{
+      const state=this.snapshot();
+      if(!this.matchesRetainedEmployeeRecoveryObservation(attempt,state))throw Error('Original observation writer required');
+      const rows=state.employees.filter(row=>row.id===employeeId);
+      return rows.length===1&&rows[0]!.owner===owner?rows[0]:undefined;
+    });
+  }
+  publishEmployeeRecoveryObservation(attempt: EmployeeRecoveryAttempt): Promise<CompanyUpdateOutcome<void>> {
+    const {before, attempted} = EmployeeRecoveryAttempt.prototype.observationPublication.call(attempt, this);
+    return this.#updateOutcome(state => {
+      EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt, state);
+      const rows = state.employeeRecoveryOperations;
+      const index = rows?.findIndex(row => row.approval.operationId === before.approval.operationId) ?? -1;
+      if (!rows || index < 0 || recoveryDataDigest(rows[index]) !== recoveryDataDigest(before))
+        throw Error('Original observation metadata changed');
+      rows[index] = attempted;
+    }, () => EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt), undefined, undefined, attempt);
+  }
+  #stoppedAcknowledgements = new WeakMap<EmployeeRecoveryAttempt, { stage: 'intent' | 'terminal'; digest: string }>();
+  #reconciledRecoveryEvidence = new WeakMap<EmployeeRecoveryAttempt, CompanyPublicationUnconfirmed[]>();
+  publishStoppedEmployeeRecovery(
+    attempt: EmployeeRecoveryAttempt,
+    stage: 'intent' | 'terminal'
+  ): Promise<CompanyUpdateOutcome<void>> {
+    const projection = EmployeeRecoveryAttempt.prototype.stoppedPublication.call(attempt, this, stage);
+    return this.#updateOutcome(
+      (state) => {
+        EmployeeRecoveryAttempt.prototype.assertStoppedPublicationBinding.call(attempt, this, state);
+        const rows = state.employeeRecoveryOperations;
+        const index =
+          rows?.findIndex((row) => row.approval.operationId === projection.before.approval.operationId) ?? -1;
+        if (
+          !rows ||
+          index < 0 ||
+          (recoveryDataDigest(rows[index]) !== recoveryDataDigest(projection.before) &&
+            recoveryDataDigest(rows[index]) !== recoveryDataDigest(projection.attempted))
+        )
+          throw Error('Original stopped publication row changed');
+        const targets = state.employees.filter((row) => row.id === projection.before.employeeId),
+          target = targets[0];
+        if (
+          targets.length !== 1 ||
+          !target ||
+          target.owner !== projection.before.owner ||
+          target.sessionId !== projection.before.approval.sessionId ||
+          String(target.sessionGeneration) !== projection.before.approval.sessionGeneration ||
+          state.employees.filter((row) => row.sessionId === target.sessionId).length !== 1
+        )
+          throw Error('Original stopped target changed');
+        target.desiredRunning = false;
+        rows[index] = projection.attempted;
+      },
+      () => EmployeeRecoveryAttempt.prototype.assertStoppedPublication.call(attempt, this),
+      undefined,
+      undefined,
+      undefined,
+      { attempt, stage, digest: recoveryDataDigest(projection.attempted) }
+    );
+  }
+  consumeStoppedEmployeeAcknowledgement(attempt: EmployeeRecoveryAttempt, stage: 'intent' | 'terminal'): void {
+    const ack = this.#stoppedAcknowledgements.get(attempt);
+    if (
+      !ack ||
+      ack.stage !== stage ||
+      ack.digest !== EmployeeRecoveryAttempt.prototype.stoppedPublicationDigest.call(attempt, this, stage)
+    )
+      throw Error('Actual stopped writer acknowledgement required');
+    this.#stoppedAcknowledgements.delete(attempt);
+  }
+  readonly #recoveryAcknowledgements=new WeakMap<EmployeeRecoveryAttempt,string>();
   private state: CompanyState = {
     version: 1,
     employees: [],
@@ -238,6 +336,17 @@ export class CompanyStore {
     this.refreshState();
     return structuredClone(this.state);
   }
+  /** Permission and recovery reads join earlier writes under the canonical writer lock. */
+  async employeeAfterPublications(employeeId: string, owner: string | undefined): Promise<CompanyEmployee | undefined> {
+    const original = this.chain;
+    await original;
+    this.assertWritable();
+    return this.locked(async () => {
+      this.assertWritable();
+      const matches = this.snapshot().employees.filter((employee) => employee.id === employeeId);
+      return matches.length === 1 && matches[0]!.owner === owner ? matches[0] : undefined;
+    });
+  }
 
   /** Fresh, unambiguous binding without cloning other employees, goals or memories. */
   employeeForSession(sessionId: string, owner: string | undefined): CompanyEmployee | undefined {
@@ -335,7 +444,7 @@ export class CompanyStore {
 
   update<T>(
     mutate: (state: CompanyState) => T,
-    validateAuthority: () => void = () => {},
+    validateAuthority: () => void | Promise<void> = () => {},
     beforeSave?: (result: T) => void | Promise<void>
   ): Promise<T> {
     return this.updateOutcome(mutate, validateAuthority, beforeSave).then((outcome) => {
@@ -347,8 +456,55 @@ export class CompanyStore {
   /** The current call's closed writer outcome; a recycled exception never supplies publication authority. */
   updateOutcome<T>(
     mutate: (state: CompanyState) => T,
-    validateAuthority: () => void = () => {},
+    validateAuthority: () => void | Promise<void> = () => {},
     beforeSave?: (result: T) => void | Promise<void>
+  ): Promise<CompanyUpdateOutcome<T>> {
+    return this.#updateOutcome(mutate,validateAuthority,beforeSave);
+  }
+  publishEmployeeRecovery(attempt: EmployeeRecoveryAttempt): Promise<CompanyUpdateOutcome<void>> {
+    void this.#recoveryAcknowledgements;
+    const row = EmployeeRecoveryAttempt.prototype.publicationRow.call(attempt, this);
+    const original = EmployeeRecoveryAttempt.prototype.existingPublicationRow.call(attempt, this);
+    return this.#updateOutcome(
+      (state) => {
+        EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt, state);
+        const rows = (state.employeeRecoveryOperations ??= []);
+        if (original) {
+          const index = rows.findIndex((value) => value.approval.operationId === original.approval.operationId);
+          if (index < 0 || rows[index]!.component || recoveryDataDigest(rows[index]) !== recoveryDataDigest(original))
+            throw Error('Original recovery component row changed');
+          rows[index] = row;
+          return;
+        }
+        if (
+          rows.some(
+            (value) =>
+              (value.employeeId === row.employeeId && value.application?.state !== 'completed-stopped') ||
+              value.approval.operationId === row.approval.operationId
+          )
+        )
+          throw Error('Original employee recovery row is already retained');
+        supersedeStoppedRecoveryHistory(rows, row.employeeId, row.owner, row.approval.operationId);
+        rows.push(row);
+      },
+      () => EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt),
+      undefined,
+      { attempt, digest: recoveryDataDigest(row) }
+    );
+  }
+  consumeEmployeeRecoveryAcknowledgement(attempt:EmployeeRecoveryAttempt):void {
+    const row=EmployeeRecoveryAttempt.prototype.publicationRow.call(attempt,this);
+    const digest=this.#recoveryAcknowledgements.get(attempt);
+    if(digest===undefined||digest!==recoveryDataDigest(row))throw Error('Original durable recovery acknowledgement is unavailable');
+    this.#recoveryAcknowledgements.delete(attempt);
+  }
+  #updateOutcome<T>(
+    mutate: (state: CompanyState) => T,
+    validateAuthority: () => void | Promise<void>,
+    beforeSave?: (result: T) => void | Promise<void>,
+    recovery?: { attempt: EmployeeRecoveryAttempt; digest: string },
+    observation?: EmployeeRecoveryAttempt,
+    stopped?: { attempt: EmployeeRecoveryAttempt; stage: 'intent' | 'terminal'; digest: string }
   ): Promise<CompanyUpdateOutcome<T>> {
     if (this.queued >= 128)
       return Promise.resolve({ state: 'not-issued', cause: new Error('Canonical company transaction queue is full') });
@@ -356,10 +512,25 @@ export class CompanyStore {
     const run = this.chain
       .then(async (): Promise<CompanyUpdateOutcome<T>> => {
         let issued = false;
-        try {
-          this.assertWritable();
-          const value = await this.locked(async () => {
+        let acknowledgedWrite = false;
+        let observationBefore: string | undefined, observationAttempted: string | undefined;
+        const priorPublication = this.#unconfirmedRecoveryObservation;
+        const writable = () => {
+          if (!this.writeUncertain) return;
+          if (
+            !stopped ||
+            !priorPublication ||
+            this.#unconfirmedRecoveryObservation !== priorPublication ||
+            EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(stopped.attempt, this) !==
+              priorPublication.owner
+          )
             this.assertWritable();
+          this.matchesRetainedEmployeeRecoveryObservation(stopped!.attempt, this.snapshot());
+        };
+        try {
+          writable();
+          const value = await this.locked(async () => {
+            writable();
             let current: CompanyState;
             try {
               current = CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
@@ -367,7 +538,9 @@ export class CompanyStore {
               if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
               current = structuredClone(this.state);
             }
-            validateAuthority();
+            if (observation || stopped) observationBefore = JSON.stringify(current);
+            const validation = validateAuthority();
+            if (validation !== undefined) await validation;
             const result = mutate(current);
             CompanyStateSchema.parse(current);
             const goalBytes = Buffer.byteLength(
@@ -380,9 +553,12 @@ export class CompanyStore {
             // lock. It receives a copy and cannot mutate the pending company.
             if (beforeSave) {
               await beforeSave(structuredClone(result));
-              validateAuthority();
+              const validation = validateAuthority();
+              if (validation !== undefined) await validation;
             }
-            await writeCanonicalState(this.file, JSON.stringify(current), validateAuthority, () => {
+            const serialized = JSON.stringify(current);
+            if (observation || stopped) observationAttempted = JSON.stringify(CompanyStateSchema.parse(current));
+            await writeCanonicalState(this.file, serialized, validateAuthority, () => {
               issued = true;
             });
             this.state = current;
@@ -391,13 +567,51 @@ export class CompanyStore {
             this.readStamp = undefined;
             // This transaction still owns the canonical cross-process writer lock.
             this.rememberHealth(this.possibleHealthStamp());
+            acknowledgedWrite = true;
             return structuredClone(result);
           });
+          if (recovery) {
+            if (!acknowledgedWrite) throw Error('Actual canonical recovery writer did not acknowledge publication');
+            const validation = validateAuthority();
+            if (validation !== undefined) await validation;
+            this.#recoveryAcknowledgements.set(recovery.attempt, recovery.digest);
+          }
+          if (stopped) {
+            if (!acknowledgedWrite) throw Error('Actual stopped writer did not acknowledge publication');
+            const validation = validateAuthority();
+            if (validation !== undefined) await validation;
+            this.#stoppedAcknowledgements.set(stopped.attempt, { stage: stopped.stage, digest: stopped.digest });
+            if (priorPublication && this.#unconfirmedRecoveryObservation === priorPublication) {
+              const evidence = this.#reconciledRecoveryEvidence.get(priorPublication.owner) ?? [];
+              evidence.push(priorPublication.receipt);
+              this.#reconciledRecoveryEvidence.set(priorPublication.owner, evidence);
+              this.#unconfirmedRecoveryObservation = undefined;
+              this.writeUncertain = false;
+            }
+          }
           return { state: 'committed', value };
         } catch (cause) {
           if (!issued) return { state: 'not-issued', cause };
+          const receipt = new CompanyPublicationUnconfirmed(this, cause);
+          if (
+            (observation || stopped) &&
+            observationBefore !== undefined &&
+            observationAttempted !== undefined &&
+            (!this.writeUncertain || priorPublication === this.#unconfirmedRecoveryObservation)
+          ) {
+            const owner = EmployeeRecoveryAttempt.prototype.observationMetadataOwner.call(
+              stopped?.attempt ?? observation!,
+              this
+            ).owner;
+            this.#unconfirmedRecoveryObservation = {
+              owner,
+              before: observationBefore,
+              attempted: observationAttempted,
+              receipt: priorPublication?.receipt ?? receipt,
+            };
+          }
           this.writeUncertain = true;
-          return { state: 'unconfirmed', receipt: new CompanyPublicationUnconfirmed(this, cause) };
+          return { state: 'unconfirmed', receipt };
         }
       })
       .finally(() => {

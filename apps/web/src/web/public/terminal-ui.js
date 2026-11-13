@@ -722,6 +722,7 @@ Object.assign(ReverieApp.prototype, {
     this._destroyKeyCode229Recovery();
     const fontSettings = this.loadAppSettingsFromStorage?.() || {};
     this.terminal = new Terminal({
+      disableStdin: this._rawInputBlocked?.(this.activeSessionId) === true,
       theme: { ...window.reverieCurrentXtermTheme() },
       fontFamily: window.ReverieTerminalFont.resolve(fontSettings.terminalFontFamily),
       // Both weight slots, each falling back to xterm's own default for that
@@ -926,30 +927,7 @@ Object.assign(ReverieApp.prototype, {
       // Shift+Enter's keypress sends a bare \r (submit) after the newline. Only keydown sends.
       if (ev.key === 'Enter' && (ev.shiftKey || ev.ctrlKey)) {
         if (ev.type === 'keydown' && this.activeSessionId) {
-          if (this._localEchoEnabled) {
-            const text = this._localEchoOverlay?.pendingText || '';
-            this._localEchoOverlay?.clear();
-            this._localEchoOverlay?.suppressBufferDetection();
-            this._flushedOffsets?.delete(this.activeSessionId);
-            this._flushedTexts?.delete(this.activeSessionId);
-            if (text) {
-              this._pendingInput += text;
-              flushInput();
-            }
-            setTimeout(() => {
-              fetch(`/api/sessions/${this.activeSessionId}/send-key`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ key: ev.ctrlKey ? 'C-Enter' : 'S-Enter' }),
-              });
-            }, text ? 80 : 0);
-          } else {
-            fetch(`/api/sessions/${this.activeSessionId}/send-key`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ key: ev.ctrlKey ? 'C-Enter' : 'S-Enter' }),
-            });
-          }
+          void this._sendModifiedEnter(ev.ctrlKey ? 'C-Enter' : 'S-Enter');
         }
         return false;
       }
@@ -1684,19 +1662,20 @@ Object.assign(ReverieApp.prototype, {
 
     // Handle keyboard input — send to PTY immediately, no local echo.
     // PTY/Ink handles all character echoing to avoid desync ("typing visible below" bug).
+    void this._pendingInputOwner?.flush?.();
     this._pendingInput = '';
+    const createInputOwner = sessionId => this._createRawInputBuffer(sessionId, owner => {
+      if (this._pendingInputOwner === owner) this._pendingInput = owner.data;
+    });
+    let inputOwner = this._pendingInputOwner = createInputOwner(this.activeSessionId);
     this._inputFlushTimeout = null;
     this._lastKeystrokeTime = 0;
 
     const flushInput = () => {
       this._inputFlushTimeout = null;
-      if (this._pendingInput && this.activeSessionId) {
-        const input = this._pendingInput;
-        const sessionId = this.activeSessionId;
-        this._pendingInput = '';
-        this._sendInputAsync(sessionId, input);
-      }
+      return inputOwner.flush();
     };
+    const retainRawAction = (sessionId, data, action) => this._performRawInput(sessionId, data, action);
 
     // Local echo mode: buffer keystrokes locally (shown in overlay) and only
     // send to PTY on Enter.  Avoids out-of-order delivery on high-latency
@@ -1704,6 +1683,7 @@ Object.assign(ReverieApp.prototype, {
     // survives tab switches and reconnects.
 
     const handleTerminalData = (data) => {
+      if (this._rawInputBlocked?.(this.activeSessionId)) return;
       // Before anything can rewrite `data`: is this chunk the IME's commit?
       const isImeCommit = this._consumeMobileImeTerminalData(data);
       // Mouse SGR reports (tap-to-position) are NOT IME input — they must reach
@@ -1763,7 +1743,8 @@ Object.assign(ReverieApp.prototype, {
           KeyboardAccessoryBar.isModifierArmed?.() &&
           !window.ReverieTerminalInput?.isTerminalFocusOrMouseReport(data)
         ) {
-          data = KeyboardAccessoryBar.consumeModifiers(data);
+          void retainRawAction(this.activeSessionId, data, (raw, sid) => this._acceptTerminalDraftAction(sid, data, true, raw));
+          return;
         }
 
         this._lastTerminalData = { data, time: performance.now() };
@@ -1787,202 +1768,22 @@ Object.assign(ReverieApp.prototype, {
         // An IME commit takes the same printable/paste branch as typed text,
         // and the overlay then shows it in place of the preview.
         if (this._localEchoEnabled && !echoPassthrough) {
-          if (data === '\x7f') {
-            const source = this._localEchoOverlay?.removeChar();
-            if (source === 'flushed') {
-              // Sync app-level flushed Maps (per-session state for tab switching)
-              const { count, text } = this._localEchoOverlay.getFlushed();
-              if (this._flushedOffsets?.has(this.activeSessionId)) {
-                if (count === 0) {
-                  this._flushedOffsets.delete(this.activeSessionId);
-                  this._flushedTexts?.delete(this.activeSessionId);
-                } else {
-                  this._flushedOffsets.set(this.activeSessionId, count);
-                  this._flushedTexts?.set(this.activeSessionId, text);
-                }
-              }
-              this._pendingInput += data;
-              flushInput();
-            } else if (source === false) {
-              // Nothing pending, nothing flushed, nothing detected. The
-              // composer may still hold text the overlay cannot see (buffer
-              // detection is suppressed after a control-char flush), so
-              // forward the backspace instead of swallowing it (issue #218);
-              // an empty composer ignores it.
-              this._pendingInput += data;
-              flushInput();
-            }
-            // 'pending' = removed unsent text (no PTY backspace needed)
+          // Text stays editable until the whole storage transaction accepts
+          // the pending draft and its explicit control/paste action.
+          if (data !== '\x7f' && (data.charCodeAt(0) < 32)) {
+            void retainRawAction(this.activeSessionId, data, (raw, sid) => this._acceptTerminalDraftAction(sid, data, false, raw));
             return;
           }
-          if (/^[\r\n]+$/.test(data)) {
-            // Enter: send full buffered text + \r to PTY in one shot
-            const text = this._localEchoOverlay?.pendingText || '';
-            this._localEchoOverlay?.clear();
-            // Suppress detection so PTY-echoed text isn't re-detected as user input
-            this._localEchoOverlay?.suppressBufferDetection();
-            // Clear flushed offset and text — Enter commits all text
-            this._flushedOffsets?.delete(this.activeSessionId);
-            this._flushedTexts?.delete(this.activeSessionId);
-            if (this._inputFlushTimeout) {
-              clearTimeout(this._inputFlushTimeout);
-              this._inputFlushTimeout = null;
-            }
-            if (text) {
-              this._pendingInput += text;
-              flushInput();
-            }
-            // Send \r after a short delay so text arrives first
-            setTimeout(() => {
-              this._pendingInput += '\r';
-              flushInput();
-            }, 80);
+          if (data === '\x7f') {
+            const overlay = this._localEchoOverlay;
+            if (overlay?.pendingText) overlay.removeChar(); // Local edit only.
+            else void retainRawAction(this.activeSessionId, data, (raw, sid) => this._acceptOverlayBackspace(sid, overlay, raw));
             return;
           }
           if (data.length > 1 && data.charCodeAt(0) >= 32) {
             // Paste: append to overlay only (sent on Enter)
             this._localEchoOverlay?.appendText(data);
             if (isImeCommit && this._localEchoOverlay) this._transferMobileImeCommitToLocalEcho();
-            return;
-          }
-          if (data.charCodeAt(0) < 32) {
-            // Skip xterm-generated terminal responses.
-            // These arrive via triggerDataEvent when the terminal processes
-            // buffer data (DA responses, OSC color queries, mode reports, etc.).
-            // They are NOT user input and must not clear flushed text state.
-            // Covers: CSI (\x1b[), OSC (\x1b]), DCS (\x1bP), APC (\x1b_),
-            // PM (\x1b^), SOS (\x1bX), and any other multi-byte ESC sequence.
-            // Single-byte ESC (user pressing Escape) still falls through to
-            // the control char handler below.
-            if (data.length > 1 && data.charCodeAt(0) === 27) {
-              // Bracketed paste (terminal.paste() while DECSET 2004 is on):
-              // flush typed-but-unsent overlay text FIRST so the pasted block
-              // lands after it in the composer, not before it (issue #219).
-              // The paste sequence gets its own delayed write: Codex's
-              // paste-burst handling drops keystrokes that arrive in the SAME
-              // PTY read as a bracketed paste (verified against codex 0.147),
-              // mirroring the delayed \r in the Enter branch above.
-              if (data.startsWith(window.ReverieTerminalInput.BRACKETED_PASTE_START)) {
-                const hadPending = !!this._localEchoOverlay?.pendingText;
-                this._flushLocalEchoPending();
-                if (hadPending) {
-                  flushInput();
-                  setTimeout(() => {
-                    this._pendingInput += data;
-                    flushInput();
-                  }, 80);
-                } else {
-                  this._pendingInput += data;
-                  flushInput();
-                }
-                return;
-              }
-              // Composer nav keys (arrows, Home/End, Delete, PgUp/PgDn):
-              // flush unsent text so the key edits the real composer state,
-              // then hand the session to plain PTY echo until Enter/Ctrl+C.
-              // The cursor may now sit mid-text, where append-only buffering
-              // cannot track edits (issue #218).
-              if (window.ReverieTerminalInput.isComposerNavKey(data)) {
-                this._flushLocalEchoPending();
-                if (!this._echoPassthroughSessions) this._echoPassthroughSessions = new Set();
-                this._echoPassthroughSessions.add(this.activeSessionId);
-                this._pendingInput += data;
-                flushInput();
-                return;
-              }
-              // Multi-byte escape sequence — forward to PTY without clearing
-              // overlay/flushed state (terminal response, not user input)
-              this._pendingInput += data;
-              flushInput();
-              return;
-            }
-            // During buffer load (tab switch), stray control chars from
-            // terminal response processing must not wipe the flushed state
-            // that selectSession() is actively restoring.
-            if (this._restoringFlushedState) {
-              this._pendingInput += data;
-              flushInput();
-              return;
-            }
-            // Tab key: send pending text + Tab to PTY for tab completion.
-            // Set a flag so flushPendingWrites() re-detects buffer text when
-            // the PTY response arrives (event-driven, no fixed timer).
-            if (data === '\t') {
-              const text = this._localEchoOverlay?.pendingText || '';
-              this._localEchoOverlay?.clear();
-              this._flushedOffsets?.delete(this.activeSessionId);
-              this._flushedTexts?.delete(this.activeSessionId);
-              if (text) {
-                this._pendingInput += text;
-              }
-              this._pendingInput += data;
-              if (this._inputFlushTimeout) {
-                clearTimeout(this._inputFlushTimeout);
-                this._inputFlushTimeout = null;
-              }
-              // Snapshot prompt line text BEFORE flushing — used to distinguish
-              // real Tab completions from pre-existing Claude UI text.
-              let baseText = '';
-              try {
-                const p = this._localEchoOverlay?.findPrompt?.();
-                if (p) {
-                  const buf = this.terminal.buffer.active;
-                  const line = buf.getLine(buf.viewportY + p.row);
-                  if (line)
-                    baseText = line
-                      .translateToString(true)
-                      .slice(p.col + 2)
-                      .trimEnd();
-                }
-              } catch {}
-              this._tabCompletionBaseText = baseText;
-              flushInput();
-              this._tabCompletionSessionId = this.activeSessionId;
-              this._tabCompletionRetries = 0;
-              // Fallback: if flushPendingWrites() detection misses the completion
-              // (e.g., flicker filter delays data, or xterm hasn't processed writes
-              // by the time the callback fires), retry detection after a delay.
-              // This ensures the overlay renders even without further terminal data.
-              if (this._tabCompletionFallback) clearTimeout(this._tabCompletionFallback);
-              const selfTab = this;
-              this._tabCompletionFallback = setTimeout(() => {
-                selfTab._tabCompletionFallback = null;
-                if (!selfTab._tabCompletionSessionId || selfTab._tabCompletionSessionId !== selfTab.activeSessionId)
-                  return;
-                const ov = selfTab._localEchoOverlay;
-                if (!ov || ov.pendingText) return;
-                selfTab.terminal.write('', () => {
-                  if (!selfTab._tabCompletionSessionId) return;
-                  ov.resetBufferDetection();
-                  const detected = ov.detectBufferText();
-                  if (detected && detected !== selfTab._tabCompletionBaseText) {
-                    selfTab._tabCompletionSessionId = null;
-                    selfTab._tabCompletionRetries = 0;
-                    selfTab._tabCompletionBaseText = null;
-                    ov.rerender();
-                  }
-                });
-              }, 300);
-              return;
-            }
-            // Control chars (Ctrl+C, single ESC): send buffered text + control char immediately
-            const text = this._localEchoOverlay?.pendingText || '';
-            this._localEchoOverlay?.clear();
-            // Suppress detection so PTY-echoed text isn't re-detected as user input
-            this._localEchoOverlay?.suppressBufferDetection();
-            // Clear flushed offset and text — control chars (Ctrl+C, Escape) change
-            // cursor position or abort readline, making flushed text tracking invalid.
-            this._flushedOffsets?.delete(this.activeSessionId);
-            this._flushedTexts?.delete(this.activeSessionId);
-            if (text) {
-              this._pendingInput += text;
-            }
-            this._pendingInput += data;
-            if (this._inputFlushTimeout) {
-              clearTimeout(this._inputFlushTimeout);
-              this._inputFlushTimeout = null;
-            }
-            flushInput();
             return;
           }
           if (data.length === 1 && data.charCodeAt(0) >= 32) {
@@ -2001,7 +1802,11 @@ Object.assign(ReverieApp.prototype, {
         this._predictHookOnData(data);
 
         // ── Normal Mode (echo disabled) ──
-        this._pendingInput += data;
+        if (inputOwner.sessionId !== this.activeSessionId || this._pendingInputOwner !== inputOwner) {
+          void inputOwner.flush();
+          inputOwner = this._pendingInputOwner = createInputOwner(this.activeSessionId);
+        }
+        if (!inputOwner.append(data)) return;
 
         // Control chars (Enter, Ctrl+C, escape sequences) — flush immediately
         if (data.charCodeAt(0) < 32 || data.length > 1) {
@@ -4208,23 +4013,6 @@ Object.assign(ReverieApp.prototype, {
   },
 
   /**
-   * Flush the local-echo overlay's unsent text into `_pendingInput` (no
-   * trailing Enter) and reset overlay + flushed-state tracking. Used before
-   * forwarding sequences that must arrive AFTER the typed text (bracketed
-   * paste, composer nav keys). The caller forwards its own sequence: nav keys
-   * ride the same write, pastes get a delayed second write because codex
-   * drops keys that share a PTY read with a bracketed paste.
-   */
-  _flushLocalEchoPending() {
-    const text = this._localEchoOverlay?.pendingText || '';
-    this._localEchoOverlay?.clear();
-    this._localEchoOverlay?.suppressBufferDetection();
-    this._flushedOffsets?.delete(this.activeSessionId);
-    this._flushedTexts?.delete(this.activeSessionId);
-    if (text) this._pendingInput += text;
-  },
-
-  /**
    * Update local echo overlay state based on settings.
    * Enabled whenever the setting is on — works during idle AND busy.
    * Position is tracked dynamically by _findPrompt() on every render.
@@ -4354,7 +4142,133 @@ Object.assign(ReverieApp.prototype, {
 
   // CJK textarea already provides visual feedback — bypass local echo
   // buffering so each composed word reaches the PTY immediately.
+  _acceptOverlayBackspace(sessionId, overlay, raw) {
+    const receipt = overlay?.claimFlushedDraft?.(true), rawOwner = this._pendingInputOwner, session = this.sessions.get(sessionId);
+    const result = (this._terminalDraftTail || Promise.resolve()).then(async () => {
+      let accepted = false;
+      try {
+        if (receipt && !await overlay.waitDraftReceipt(receipt)) return false;
+        if (!receipt || this.activeSessionId !== sessionId || this._localEchoOverlay !== overlay
+          || this._pendingInputOwner !== rawOwner || this.sessions.get(sessionId) !== session
+          || this._sessionInputHeld?.(sessionId) || !overlay.beginDraftReceipt(receipt)) {
+          this.showToast?.('The original prompt marker is unavailable. Your draft is preserved.', 'warning');
+          return false;
+        }
+        accepted = await (raw ? this._sendRawInput(sessionId, '\x7f', raw) : this._sendInputAsync(sessionId, '\x7f')) !== false;
+        return accepted;
+      } finally {
+        overlay?.settleDraftReceipt?.(receipt, accepted);
+        if (accepted && this.activeSessionId === sessionId && this._localEchoOverlay === overlay) {
+          const flushed = overlay.getFlushed();
+          if (this._flushedOffsets?.has(sessionId)) {
+            this._flushedOffsets.set(sessionId, flushed.count);
+            this._flushedTexts?.set(sessionId, flushed.text);
+          }
+        }
+      }
+    });
+    this._terminalDraftTail = result.catch(() => false);
+    return result;
+  },
+
+  async _sendModifiedEnter(key) {
+    const id = this.activeSessionId, original = this.sessions.get(id);
+    if (!id || !['C-Enter', 'S-Enter'].includes(key)) return false;
+    try {
+      if (this._sessionInputHeld?.(id)) return false;
+      if (this._pendingInput) {
+        this.showToast?.('Text is still being queued. Try this key again after input is confirmed.', 'warning');
+        return false;
+      }
+      if (this._localEchoEnabled && !await this._flushLocalEchoTo(id)) return false;
+      if (!await this._confirmOverlayInput(id)) return false;
+      if (this._pendingDeliveries.get(id)?.length) {
+        this.showToast?.('Earlier input remains queued. Try this key again after delivery is confirmed.', 'warning');
+        return false;
+      }
+      if (this.activeSessionId !== id || this.sessions.get(id) !== original || this._sessionInputHeld?.(id)) return false;
+      // Existing physical key API, with a separate effect owner. This response
+      // cannot settle journal input or prove native process identity.
+      const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/send-key`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({key}),
+      });
+      const body = await response.json();
+      if (!response.ok || body?.success !== true) throw new Error('Key outcome unavailable');
+      return true;
+    } catch {
+      this._holdInputRecovery?.(id);
+      this.showToast?.('Key delivery is unconfirmed. Check the terminal before sending again.', 'warning');
+      return false;
+    }
+  },
+
+  _acceptTerminalDraftAction(sessionId, suffix, modifiers = false, raw) {
+    const overlay = this.activeSessionId === sessionId && this._localEchoEnabled && !this._echoPassthroughSessions?.has(sessionId) ? this._localEchoOverlay : null;
+    const receipt = overlay?.claimPendingDraft?.();
+    if (overlay && !receipt) return Promise.resolve(false);
+    const modifier = modifiers && typeof KeyboardAccessoryBar !== 'undefined' ? KeyboardAccessoryBar.stageModifiers(suffix) : null;
+    const owner = Object.freeze({
+      sessionId, suffix: modifier?.data ?? suffix, modifier, overlay, receipt, raw,
+      currentOverlay: this._localEchoOverlay,
+      rawOwner: this._pendingInputOwner,
+      session: this.sessions.get(sessionId),
+    });
+    const result = (this._terminalDraftTail || Promise.resolve()).then(() => this._acceptTerminalDraftActionNow(owner));
+    this._terminalDraftTail = result.catch(() => false);
+    return result;
+  },
+
+  async _acceptTerminalDraftActionNow(owner) {
+    const {sessionId, suffix, modifier, overlay, receipt} = owner;
+    let accepted = false;
+    try {
+      if (overlay && !await overlay.waitDraftReceipt(receipt)) return false;
+      if (this.activeSessionId !== sessionId || this.sessions.get(sessionId) !== owner.session
+        || this._localEchoOverlay !== owner.currentOverlay || this._pendingInputOwner !== owner.rawOwner
+        || this._sessionInputHeld?.(sessionId) || (modifier && !modifier.isCurrent())
+        || (overlay && !overlay.beginDraftReceipt(receipt))) {
+        this.showToast?.('Input changed before this key could be queued. Your draft is preserved.', 'warning');
+        return false;
+      }
+      const text = receipt?.text || '';
+      accepted = await this._queueInputFrames(sessionId, text ? [text, suffix] : [suffix], null, owner.raw) !== false;
+      if (!accepted) return false;
+      modifier?.commit();
+      if (this.activeSessionId === sessionId && this._localEchoOverlay === owner.currentOverlay
+        && this._pendingInputOwner === owner.rawOwner && this.sessions.get(sessionId) === owner.session) {
+        this._predictiveEcho?.clearPredictions();
+        if (suffix === '\t') {
+          this._tabCompletionSessionId = sessionId;
+          this._tabCompletionRetries = 0;
+          this._tabCompletionBaseText = text;
+        }
+        if (window.ReverieTerminalInput?.isComposerNavKey?.(suffix)) {
+          this._echoPassthroughSessions ||= new Set(); this._echoPassthroughSessions.add(sessionId);
+        }
+      }
+      return true;
+    } finally {
+      if (!accepted && (this.activeSessionId !== sessionId || this._localEchoOverlay !== owner.currentOverlay
+        || this._pendingInputOwner !== owner.rawOwner || this.sessions.get(sessionId) !== owner.session))
+        this._retainEditorDraft?.(sessionId, overlay, receipt);
+      overlay?.settleDraftReceipt(receipt, accepted);
+      if (accepted && this.activeSessionId === sessionId && this._localEchoOverlay === owner.currentOverlay
+        && this._pendingInputOwner === owner.rawOwner && this.sessions.get(sessionId) === owner.session) {
+        const flushed = overlay?.getFlushed?.();
+        if (flushed?.count) {
+          this._flushedOffsets?.set(sessionId, flushed.count);
+          this._flushedTexts?.set(sessionId, flushed.text);
+        } else {
+          this._flushedOffsets?.delete(sessionId); this._flushedTexts?.delete(sessionId);
+        }
+      }
+    }
+  },
+
   _handleCjkInput(text) {
+    // A fatal journal failure keeps this editable draft local. Repeated IME
+    // edits must not become an unbounded list of failed raw-terminal events.
+    if (this._inputStorageUnavailable) return false;
     if (!this.activeSessionId) {
       _crashDiag.log(`CJK send DROP no-session len=${text.length}`);
       return false;
@@ -4372,13 +4286,19 @@ Object.assign(ReverieApp.prototype, {
     // covers typed characters, IME flushes, Enter, backspace and arrows at once.
     // Same policy as the onData hook: the next single character is modified,
     // anything longer merely spends the modifier.
-    if (typeof KeyboardAccessoryBar !== 'undefined' && KeyboardAccessoryBar.isModifierArmed?.()) {
-      text = KeyboardAccessoryBar.consumeModifiers(text);
-    }
-    // Bypasses onData (like insertTerminalText): predictions cannot see this
-    if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
+    const modifier = typeof KeyboardAccessoryBar !== 'undefined' && KeyboardAccessoryBar.isModifierArmed?.()
+      ? KeyboardAccessoryBar.stageModifiers(text) : null;
+    if (modifier) text = modifier.data;
     _crashDiag.log(`CJK send→${this.activeSessionId.slice(0, 8)} len=${text.length}`);
-    return this._sendInputAsync(this.activeSessionId, text);
+    const result = this._sendInputAsync(this.activeSessionId, text);
+    const accepted = value => {
+      if (value !== false) {
+        modifier?.commit();
+        if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
+      }
+      return value;
+    };
+    return result?.then ? result.then(accepted) : accepted(result);
   },
 
   /**
@@ -4910,7 +4830,7 @@ Object.assign(ReverieApp.prototype, {
    * Clear only the current editable prompt. This is intentionally distinct
    * from Ctrl+L (clear display) and the agent's destructive `/clear` command.
    */
-  clearTerminalInput() {
+  async clearTerminalInput() {
     if (!this.activeSessionId) return;
 
     if (typeof CjkInput !== 'undefined') CjkInput.clear();
@@ -4919,8 +4839,8 @@ Object.assign(ReverieApp.prototype, {
     // never in the parked main pane's.
     const pane = this._focusedPane?.();
     if (pane && !pane.isPrimary) {
-      this._sendInputAsync(pane.sessionId, '\x15');
-      this.showToast?.('Input cleared', 'success');
+      if (await this._sendInputAsync(pane.sessionId, '\x15') === false) return;
+      this.showToast?.('Clear input queued', 'success');
       pane.terminal?.focus();
       return;
     }
@@ -4928,28 +4848,45 @@ Object.assign(ReverieApp.prototype, {
       clearTimeout(this._inputFlushTimeout);
       this._inputFlushTimeout = null;
     }
-    this._pendingInput = '';
+    const sessionId = this.activeSessionId;
+    const rawOwner = this._pendingInputOwner;
+    const rawRevision = rawOwner?.revision;
+    const overlay = this._localEchoEnabled ? this._localEchoOverlay : null;
+    const revision = overlay?.draftRevision;
+    const flushed = overlay?.getFlushed?.() || {count: 0, text: ''};
+    const flushedLength = Array.from(flushed.text || '').length;
+    const control = overlay ? (flushedLength > 0 ? '\x7f'.repeat(flushedLength) : '') : '\x15';
+    if (this._pendingInput && !rawOwner?.flush) {
+      this.showToast?.('Text is still being queued. Try Clear again after input settles.', 'warning');
+      return false;
+    }
+    while (rawOwner?.data) {
+      if (!await rawOwner.flush()) return false;
+      if (rawOwner.revision !== rawRevision) break;
+    }
+    if (this.activeSessionId !== sessionId || this._pendingInputOwner !== rawOwner || rawOwner?.revision !== rawRevision
+      || (this._localEchoEnabled ? this._localEchoOverlay : null) !== overlay
+      || (overlay && overlay.draftRevision !== revision)) {
+      this.showToast?.('Input changed while preparing Clear. Check your draft before trying again.', 'warning');
+      return false;
+    }
+    if (control && await this._sendInputAsync(sessionId, control) === false) return;
+    if (this.activeSessionId !== sessionId || this._pendingInputOwner !== rawOwner || rawOwner?.revision !== rawRevision
+      || (this._localEchoEnabled ? this._localEchoOverlay : null) !== overlay
+      || (overlay && (!Number.isSafeInteger(revision) || overlay.draftRevision !== revision))) return;
     // Composer content is about to change out from under any predictions
     if (this._localEchoPolicy === 'predict') this._predictiveEcho?.clearPredictions();
 
-    if (this._localEchoEnabled && this._localEchoOverlay) {
-      const flushed = this._localEchoOverlay.getFlushed?.() || { count: 0, text: '' };
-      this._localEchoOverlay.clear();
-      this._localEchoOverlay.suppressBufferDetection();
-      this._flushedOffsets?.delete(this.activeSessionId);
-      this._flushedTexts?.delete(this.activeSessionId);
-      const flushedLength = Array.from(flushed.text || '').length;
-      if (flushedLength > 0) {
-        this.sendInput('\x7f'.repeat(flushedLength)).catch(() => {});
-      }
-    } else {
-      // In non-local-echo mode the TUI already owns the editable buffer. Ctrl+U
-      // is the conventional kill-line key supported by shells and agent TUIs.
-      this.sendInput('\x15').catch(() => {});
+    if (overlay) {
+      overlay.clear();
+      overlay.suppressBufferDetection();
+      this._flushedOffsets?.delete(sessionId);
+      this._flushedTexts?.delete(sessionId);
     }
 
-    this.showToast?.('Input cleared', 'success');
+    this.showToast?.(control ? 'Clear input queued' : 'Input cleared', 'success');
     this.terminal?.focus();
+    return true;
   },
 
   /**
@@ -6772,11 +6709,11 @@ Object.assign(ReverieApp.prototype, {
    * @returns {Promise<void>}
    */
   async sendInput(input) {
-    if (!this.activeSessionId || !input) return;
+    if (!this.activeSessionId || !input) return false;
     // Route through the durable, exactly-once delivery layer (useMux for the
     // POST fallback) so voice / keyboard-accessory / paste input also survives a
     // dropped link instead of being lost in a single best-effort fetch.
-    this._sendInputAsync(this.activeSessionId, input, { useMux: true });
+    return this._sendInputAsync(this.activeSessionId, input, { useMux: true });
   },
 
   // ═══════════════════════════════════════════════════════════════

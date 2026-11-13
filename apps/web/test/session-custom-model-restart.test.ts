@@ -1,3 +1,4 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 /**
  * @fileoverview Custom Model Endpoint Profiles, the Session half of applying and
  * clearing a selection against a live pane (`Session.setCustomModel()` +
@@ -67,9 +68,12 @@ function liveSession(mode: SessionMode, extra: Record<string, unknown> = {}) {
     attached: false,
   };
   const session = new Session({ workingDir, mode, mux, useMux: true, muxSession, ...extra });
+  muxSession.sessionId = session.id;
+  muxSession.owner = session.owner;
+  mux.registerSession(muxSession);
   sessions.push(session);
   vi.spyOn(mux, 'muxSessionExists').mockReturnValue(true);
-  const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => {options.onProviderDispatch?.(); return 4242;});
+  const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => {await acknowledgeMuxFixture(options); return 4242;});
   return { session, respawn };
 }
 

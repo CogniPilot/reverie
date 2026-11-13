@@ -1,3 +1,4 @@
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 /**
  * @fileoverview Auto-naming a session after its first prompt (#376).
  *
@@ -11,7 +12,6 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { Session } from '../src/session.js';
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
 import {
   SubmittedPromptTracker,
   deriveAutoSessionName,
@@ -260,16 +260,17 @@ describe('Session promptSubmitted', () => {
     const session = new Session({ workingDir: '/tmp', name: 'w1-demo' });
     const prompts: string[] = [];
     session.on('promptSubmitted', (p: string) => prompts.push(p));
+    const registry = registeredMuxFixture({mode: 'claude', sessionId: session.id, muxName: 'owned-auto-name', pid: 42, owner: session.owner});
     const sendInput = vi.fn(async () => false);
-    (session as unknown as { _mux: unknown; _muxSession: unknown })._mux = { sendInput };
-    (session as unknown as { _mux: unknown; _muxSession: unknown })._muxSession = { sessionId: session.id };
-    registerMuxFixture(session);
+    (session as unknown as { _mux: unknown; _muxSession: unknown })._mux = { ...registry, sendInput };
+    (session as unknown as { _mux: unknown; _muxSession: unknown })._muxSession = registry.subject;
 
     expect(await session.writeViaMux('dropped\r', { fromUser: true })).toBe(false);
     expect(prompts).toEqual([]);
     sendInput.mockResolvedValue(true);
     expect(await session.writeViaMux('delivered\r', { fromUser: true })).toBe(true);
     expect(prompts).toEqual(['delivered']);
+    expect(sendInput).toHaveBeenCalledTimes(2);
     expect(await session.writeViaMux('/clear\r')).toBe(true);
     expect(prompts).toEqual(['delivered']);
   });

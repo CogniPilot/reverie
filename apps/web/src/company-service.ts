@@ -1,7 +1,14 @@
 import { viewerHealth, type ProviderHealth } from './worker-provider-health.js';
 import { displayTime } from './display-time.js';
 import { RuntimeRecipeSchema, resourceSessionSourceFacts, type RuntimeRecipe } from './expert-runtime-recipe.js';
-import type { Session } from './session.js';
+import { Session } from './session.js';
+import {EmployeeRecoveryAttempt,type EmployeeRecoverySubject} from './employee-recovery-attempt.js';
+import {
+  EmployeeRecoveryApproval,
+  recoveryDataDigest,
+  completedStoppedRecovery,
+  supersedeStoppedRecoveryHistory,
+} from './employee-recovery-operation.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import {
   assertResourceOperation,
@@ -33,6 +40,7 @@ import {
   type CompanyEmployee,
   type CompanyEmployeeInput,
   type CompanySettings,
+  type CompanySettingsPatch,
   type CompanyState,
   type ResearchResult,
   type SelfProfile,
@@ -42,9 +50,10 @@ import {
 export class CompanyError extends Error {
   constructor(
     message: string,
-    readonly status = 400
+    readonly status = 400,
+    options?: ErrorOptions
   ) {
-    super(message);
+    super(message, options);
   }
 }
 
@@ -220,6 +229,138 @@ export class CompanyService {
   private ticking = false;
   private wakeFlights = new Map<string, { cancelled: boolean }>();
   private runtimeRestarts = new Map<string, { cancelled: boolean; closed: boolean }>();
+  readonly #employeeRecoveries=new Map<string,EmployeeRecoveryAttempt>();
+  employeeRecoveryAvailable(employeeId: string, owner: string | undefined, state = this.store.snapshot()): boolean {
+    // owner is intentionally not used to reveal another principal's held row.
+    void owner;
+    const original = this.#employeeRecoveries.get(employeeId);
+    return (
+      (!original || EmployeeRecoveryAttempt.prototype.releasedStoppedFor.call(original, this)) &&
+      !state.employeeRecoveryOperations?.some((row) => row.employeeId === employeeId && !completedStoppedRecovery(row))
+    );
+  }
+  assertEmployeeRecoveryAvailable(employeeId:string,owner?:string,state?:CompanyState):void {
+    if(!this.employeeRecoveryAvailable(employeeId,owner,state))
+      throw new CompanyError('This employee has an original recovery operation requiring inspection',409);
+  }
+  claimEmployeeRecovery(attempt:EmployeeRecoveryAttempt):void {
+    EmployeeRecoveryAttempt.prototype.assertCompany.call(attempt,this);
+    this.assertEmployeeRecoveryAvailable(attempt.employeeId,attempt.owner);
+    Session.prototype.retainEmployeeRecovery.call(attempt.session,attempt);
+    this.#employeeRecoveries.set(attempt.employeeId,attempt);
+  }
+  /** Denial-only loaded observation; no writer or effect admission is recovered. */
+  claimRetainedEmployeeRecoveryObservation(attempt:EmployeeRecoveryAttempt,row:import('./employee-recovery-operation.js').EmployeeRecoveryOperation):void {
+    EmployeeRecoveryAttempt.prototype.assertLoadedObservation.call(attempt,this,row);
+    if(this.#employeeRecoveries.has(attempt.employeeId))throw new CompanyError('Original recovery owner already retained',409);
+    Session.prototype.retainEmployeeRecovery.call(attempt.session,attempt);
+    this.#employeeRecoveries.set(attempt.employeeId,attempt);
+  }
+  releaseStoppedEmployeeRecovery(attempt: EmployeeRecoveryAttempt): void {
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt, this.store);
+    this.assertEmployeeRecoveryClaim(root);
+    if (!EmployeeRecoveryAttempt.prototype.completedStoppedFor.call(attempt, this))
+      throw Error('Original terminal ACK required');
+    Session.prototype.releaseStoppedEmployeeRecovery.call(attempt.session, attempt, this);
+    // Retain the private historical owner for Inspect; it is no longer an
+    // active denial and a genuinely NEW admission may replace this map slot.
+  }
+  assertEmployeeRecoveryClaim(attempt:EmployeeRecoveryAttempt):void {
+    EmployeeRecoveryAttempt.prototype.assertCompany.call(attempt,this);
+    if(this.#employeeRecoveries.get(attempt.employeeId)!==attempt)
+      throw new CompanyError('Original recovery owner changed',409);
+  }
+  releaseUnissuedEmployeeRecovery(attempt:EmployeeRecoveryAttempt):void {
+    this.assertEmployeeRecoveryClaim(attempt);
+    EmployeeRecoveryAttempt.prototype.assertUnissuedRefusal.call(attempt);
+    Session.prototype.releaseUnissuedEmployeeRecovery.call(attempt.session,attempt);
+    this.#employeeRecoveries.delete(attempt.employeeId);
+  }
+  /** One global canonical target, shared by read and effect admission. */
+  private employeeRecoveryTarget(state: CompanyState, employeeId: string, owner: string | undefined): CompanyEmployee {
+    const rows = state.employees.filter(row => row.id === employeeId), employee = rows[0];
+    if (rows.length !== 1 || !employee || employee.owner !== owner || employee.bindingMigration ||
+      state.employees.filter(row => row.sessionId === employee.sessionId).length !== 1 ||
+      !Number.isSafeInteger(employee.sessionGeneration) || employee.sessionGeneration < 1)
+      throw new CompanyError('Unambiguous original employee recovery binding is unavailable',409);
+    return employee;
+  }
+  /** Original application referents only, never native death/readiness or action authority. */
+  captureEmployeeRecoverySubject(employeeId:string,owner:string|undefined,input:EmployeeRecoveryApproval,
+    callerSessionId?:string):EmployeeRecoverySubject {
+    return this.captureEmployeeRecoverySubjectFor('live', employeeId, owner, input, callerSessionId);
+  }
+  /** Loaded denial referents only; the caller still needs a private observe-only Attempt. */
+  captureLoadedEmployeeRecoverySubject(employeeId:string,owner:string|undefined,input:EmployeeRecoveryApproval,
+    callerSessionId?:string):EmployeeRecoverySubject {
+    return this.captureEmployeeRecoverySubjectFor('loaded-observe', employeeId, owner, input, callerSessionId);
+  }
+  private captureEmployeeRecoverySubjectFor(origin:'live'|'loaded-observe',employeeId:string,owner:string|undefined,
+    input:EmployeeRecoveryApproval,callerSessionId?:string):EmployeeRecoverySubject {
+    // Reading the private map also rejects prototype-shaped fake CompanyService objects.
+    void this.#employeeRecoveries;
+    const approval=EmployeeRecoveryApproval.parse(input),action=this.recoveryAction(employeeId,owner,callerSessionId);
+    const employee=this.employeeRecoveryTarget(this.store.snapshot(),employeeId,owner);
+    if(employee.sessionId!==approval.sessionId||
+      !Number.isSafeInteger(employee.sessionGeneration)||String(employee.sessionGeneration)!==approval.sessionGeneration)
+      throw new CompanyError('Original employee recovery binding is unavailable',409);
+    const session=this.deps.getSession(employee.sessionId);
+    if(!(session instanceof Session)||session.owner!==owner)
+      throw new CompanyError('Original application Session is unavailable',409);
+    const original=Session.prototype.captureEmployeeRecoveryCurrent.call(session);
+    const retained=origin==='live'?Session.prototype.captureEmployeeRecoveryRetention.call(session):
+      Session.prototype.captureEmployeeRecoveryLoadedRetention.call(session);
+    const caller=callerSessionId===undefined?undefined:this.deps.getSession(callerSessionId);
+    if(callerSessionId!==undefined&&!(caller instanceof Session))
+      throw new CompanyError('Original recovery caller Session is unavailable',409);
+    const callerCurrent=caller instanceof Session?Session.prototype.captureEmployeeRecoveryCurrent.call(caller):undefined;
+    const selected=(row:CompanyEmployee)=>recoveryDataDigest([row.id,row.owner??null,row.sessionId,
+      row.sessionGeneration,row.runtimeRecipe??null,session.mode]);
+    const resourceDigest=selected(employee);
+    const requireRetained=(state=this.store.snapshot())=>{
+      const current=this.employeeRecoveryTarget(state,employeeId,owner);
+      if(selected(current)!==resourceDigest||
+        this.deps.getSession(employee.sessionId)!==session||!retained()||
+        this.runtimeRestarts.has(employee.sessionId)||this.wakeFlights.has(employee.sessionId))
+        throw new CompanyError('Original employee lifecycle or recovery binding changed',409);
+    };
+    const requireTarget=(state=this.store.snapshot())=>{
+      requireRetained(state);
+      if(!original())throw new CompanyError('Original employee lifecycle changed',409);
+    };
+    return Object.freeze({employeeId,owner,session,resourceDigest,requireTarget,requireRetained,require:(state=this.store.snapshot())=>{
+      action.require(state);
+      if(callerSessionId!==undefined)this.recoveryAction(employeeId,owner,callerSessionId).require(state);
+      if(callerSessionId!==undefined&&(this.deps.getSession(callerSessionId)!==caller||!callerCurrent?.()))
+        throw new CompanyError('Original recovery caller lifecycle changed',409);
+      requireTarget(state);
+    }});
+  }
+  /** Current read subject only. No provider/attempt is recreated from saved selectors. */
+  captureEmployeeRecoverySelection(employeeId:string,owner:string|undefined,callerSessionId?:string) {
+    void this.#employeeRecoveries;
+    const action=this.recoveryAction(employeeId,owner,callerSessionId);
+    const employee=this.employeeRecoveryTarget(this.store.snapshot(),employeeId,owner);
+    const session=this.deps.getSession(employee.sessionId);
+    if(session&&(!(session instanceof Session)||session.owner!==owner))
+      throw new CompanyError('Current employee recovery Session is unavailable',409);
+    const current=session?Session.prototype.captureEmployeeRecoveryCurrent.call(session):undefined;
+    const retained=session?Session.prototype.captureEmployeeRecoveryReadRetention.call(session):undefined;
+    const caller=callerSessionId?this.deps.getSession(callerSessionId):undefined;
+    const callerCurrent=caller instanceof Session?Session.prototype.captureEmployeeRecoveryCurrent.call(caller):undefined;
+    const selected=(value:CompanyEmployee)=>recoveryDataDigest([value.id,value.owner??null,value.sessionId,value.sessionGeneration,value.runtimeRecipe??null]);
+    const original=selected(employee);
+    return Object.freeze({employeeId,sessionId:employee.sessionId,sessionGeneration:String(employee.sessionGeneration),session,
+      require:()=>{
+        const state=this.store.snapshot(),currentEmployee=this.employeeRecoveryTarget(state,employeeId,owner);
+        action.require(state);
+        if(selected(currentEmployee)!==original||
+          this.deps.getSession(employee.sessionId)!==session||(session&&(!current?.()||!retained?.()))||
+          (callerSessionId&&(this.deps.getSession(callerSessionId)!==caller||!callerCurrent?.())))
+          throw new CompanyError('Employee recovery read binding changed',409);
+      },
+    });
+  }
   /** Canonical Goal records shared by routines, dispatch and status projections. */
   readonly goals: GoalLifecycle;
   constructor(
@@ -234,24 +375,54 @@ export class CompanyService {
       deps.memoryScopes
     );
   }
+  #runtimePublicationEpochs = new WeakMap<() => boolean, { session: Session; current: () => boolean }>();
+  private runtimePublicationCurrent(sessionId: string, current: () => boolean): () => boolean {
+    const session = this.deps.getSession(sessionId);
+    let original = this.#runtimePublicationEpochs.get(current);
+    if (original && original.session !== session) throw new CompanyError('Original runtime publication changed', 409);
+    if (!original && session instanceof Session) {
+      original = { session, current: Session.prototype.captureRuntimePublicationCurrent.call(session) };
+      this.#runtimePublicationEpochs.set(current, original);
+    }
+    return () => {
+      if (original && !original.current()) throw new CompanyError('Original runtime publication epoch changed', 409);
+      return current();
+    };
+  }
+  private assertRuntimePublicationAvailable(sessionId: string, state = this.store.snapshot()): void {
+    const employee = state.employees.find((row) => row.sessionId === sessionId);
+    if (!employee) return;
+    const original = this.#employeeRecoveries.get(employee.id);
+    if (
+      (original && !EmployeeRecoveryAttempt.prototype.releasedStoppedFor.call(original, this)) ||
+      state.employeeRecoveryOperations?.some(
+        (row) =>
+          row.employeeId === employee.id && (!completedStoppedRecovery(row) || !row.application?.supersededByIntent)
+      )
+    )
+      throw new CompanyError('A newer explicit lifecycle admission is required after recovery', 409);
+  }
   private now(): number {
     return (this.deps.now ?? Date.now)();
   }
-
   async saveRuntimeRecipe(
     sessionId: string,
     recipe: RuntimeRecipe,
     stillCurrent: () => boolean = () => true
   ): Promise<void> {
     const safe = RuntimeRecipeSchema.parse(recipe);
+    this.assertRuntimePublicationAvailable(sessionId);
+    const current = this.runtimePublicationCurrent(sessionId, stillCurrent);
     await this.store.update(
       (state) => {
         const employee = state.employees.find((e) => e.sessionId === sessionId);
-        if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication', 409);
+        this.assertRuntimePublicationAvailable(sessionId, state);
+        if (!current()) throw new CompanyError('Employee changed during runtime publication', 409);
         if (employee) employee.runtimeRecipe = safe;
       },
       () => {
-        if (!stillCurrent()) throw new CompanyError('Employee changed during runtime publication', 409);
+        this.assertRuntimePublicationAvailable(sessionId);
+        if (!current()) throw new CompanyError('Employee changed during runtime publication', 409);
       }
     );
   }
@@ -273,7 +444,6 @@ export class CompanyService {
   recoveryAction(employeeId: string, owner: string | undefined, callerSessionId?: string) {
     return this.employeeAction(employeeId, owner, callerSessionId, 'recoverEmployees');
   }
-
   private employeeAction(
     employeeId: string,
     owner: string | undefined,
@@ -307,7 +477,9 @@ export class CompanyService {
         ));
     if (!actorMatches(initial))
       throw new CompanyError(
-        permission === 'manageOffice' ? 'Office management permission is required' : 'Employee recovery permission is required',
+        permission === 'manageOffice'
+          ? 'Office management permission is required'
+          : 'Employee recovery permission is required',
         403
       );
     const recipe = JSON.stringify(target.runtimeRecipe);
@@ -335,7 +507,6 @@ export class CompanyService {
       },
     };
   }
-
   /** Only the verified-owner runtime route calls this; ordinary wake never changes stopped intent. */
   prepareRuntimeRestart(
     sessionId: string,
@@ -347,6 +518,7 @@ export class CompanyService {
       .snapshot()
       .employees.find((e) => e.sessionId === sessionId && sameOwner(e.owner, owner));
     if (!original) return undefined;
+    this.assertEmployeeRecoveryAvailable(original.id, owner);
     if (
       original.onVacation ||
       original.bindingMigration ||
@@ -355,6 +527,7 @@ export class CompanyService {
     )
       throw new CompanyError('This expert changed or is already restarting', 409);
     const transaction = { cancelled: false, closed: false };
+    const nextIntentId = randomUUID();
     this.runtimeRestarts.set(sessionId, transaction);
     let claimed = false;
     const matches = (employee: CompanyEmployee | undefined): employee is CompanyEmployee =>
@@ -374,6 +547,7 @@ export class CompanyService {
         const employee = this.store.snapshot().employees.find((e) => e.id === original.id);
         return (
           authorized() &&
+          this.employeeRecoveryAvailable(original.id, owner) &&
           current() &&
           matches(employee) &&
           employee.desiredRunning === (claimed ? true : original.desiredRunning)
@@ -382,6 +556,7 @@ export class CompanyService {
       claim: async () => {
         await this.store.update(
           (state) => {
+            this.assertEmployeeRecoveryAvailable(original.id, owner, state);
             const employee = state.employees.find((e) => e.id === original.id);
             if (
               !authorized(state) ||
@@ -391,8 +566,15 @@ export class CompanyService {
             )
               throw new CompanyError('This expert changed or stopped while runtime settings were being validated', 409);
             employee.desiredRunning = true;
+            supersedeStoppedRecoveryHistory(
+              state.employeeRecoveryOperations,
+              employee.id,
+              employee.owner,
+              nextIntentId
+            );
           },
           () => {
+            this.assertEmployeeRecoveryAvailable(original.id, owner);
             if (!authorized()) throw new CompanyError('Office permission or employee binding changed', 409);
           }
         );
@@ -418,6 +600,7 @@ export class CompanyService {
     const employee = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
     if (
       !employee ||
+      !this.employeeRecoveryAvailable(employeeId,employee.owner) ||
       employee.bindingMigration ||
       employee.onVacation ||
       employee.desiredRunning === false ||
@@ -432,6 +615,7 @@ export class CompanyService {
         const current = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
         return (
           this.wakeFlights.get(sessionId) === flight &&
+          this.employeeRecoveryAvailable(employeeId,employee.owner) &&
           !flight.cancelled &&
           !!current &&
           sameOwner(current.owner, employee.owner) &&
@@ -446,7 +630,6 @@ export class CompanyService {
       },
     };
   }
-
   view(owner?: string) {
     const state = this.store.snapshot();
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
@@ -476,13 +659,15 @@ export class CompanyService {
       retired: state.retired.filter((e) => sameOwner(e.owner, owner)),
     };
   }
-
   /** Record running intent atomically; a late observation cannot overwrite an intentional stop. */
   async setDesiredRunning(
     sessionId: string,
     running: boolean,
     stillCurrent: () => boolean = () => true
   ): Promise<void> {
+    if (running) this.assertRuntimePublicationAvailable(sessionId);
+    const publicationCurrent = running ? this.runtimePublicationCurrent(sessionId, stillCurrent) : stillCurrent;
+    if (!publicationCurrent()) return;
     const restart = this.runtimeRestarts.get(sessionId);
     const wake = this.wakeFlights.get(sessionId);
     if (
@@ -491,16 +676,23 @@ export class CompanyService {
       !this.store.snapshot().employees.some((e) => e.sessionId === sessionId && e.desiredRunning !== running)
     )
       return;
-    await this.store.update((state) => {
-      // Persistence and onRuntimeSaved may finish after an owner stop. Neither may revive it.
-      if (!stillCurrent() || (running && restart && (restart.cancelled || restart.closed))) return;
-      if (!running) {
-        if (restart) restart.cancelled = true;
-        if (wake) wake.cancelled = true;
+    await this.store.update(
+      (state) => {
+        // Persistence and onRuntimeSaved may finish after an owner stop. Neither may revive it.
+        if (running) this.assertRuntimePublicationAvailable(sessionId, state);
+        if (!publicationCurrent() || (running && restart && (restart.cancelled || restart.closed))) return;
+        if (!running) {
+          if (restart) restart.cancelled = true;
+          if (wake) wake.cancelled = true;
+        }
+        const employee = state.employees.find((e) => e.sessionId === sessionId);
+        if (employee) employee.desiredRunning = employee.onVacation ? false : running;
+      },
+      () => {
+        if (running) this.assertRuntimePublicationAvailable(sessionId);
+        publicationCurrent();
       }
-      const employee = state.employees.find((e) => e.sessionId === sessionId);
-      if (employee) employee.desiredRunning = employee.onVacation ? false : running;
-    }, () => { stillCurrent(); });
+    );
   }
 
   /** A live observation may fill missing intent, never reverse an owner stop or binding migration. */
@@ -520,7 +712,6 @@ export class CompanyService {
       employee.desiredRunning = true;
     });
   }
-
   /** A durable, bounded automatic-start claim. No identity or title confers a grant. */
   async claimWake(
     employeeId: string,
@@ -531,6 +722,7 @@ export class CompanyService {
   ): Promise<boolean> {
     const original = this.store.snapshot().employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
     if (!original) return false;
+    if (!this.employeeRecoveryAvailable(employeeId, original.owner)) return false;
     const matches = (employee: CompanyEmployee | undefined) =>
       !!employee &&
       employee.owner === original.owner &&
@@ -540,40 +732,48 @@ export class CompanyService {
       !employee.onVacation &&
       employee.desiredRunning !== false;
     let claimed = false;
-    return this.store.update((state) => {
-      const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
-      if (!employee || !matches(employee) || !stillCurrent() || this.runtimeRestarts.has(sessionId))
-        return false;
-      const settings = state.settings.find((s) => s.owner === employee.owner);
-      if (automatic && settings?.autoWakeEnabled === false) return false;
-      const attempts = employee.wakeAttempts.filter((at) => at > now - 15 * 60_000);
-      if (attempts.length >= 3) return false;
-      employee.wakeAttempts = [...attempts, now];
-      employee.desiredRunning = true;
-      claimed = true;
-      return true;
-    }, () => {
-      if (
-        claimed &&
-        (!stillCurrent() || this.runtimeRestarts.has(sessionId) ||
-          !matches(this.store.snapshot().employees.find((e) => e.id === employeeId)))
-      )
-        throw new CompanyError('Recovery authority or employee binding changed before claim commit', 409);
-    });
+    return this.store.update(
+      (state) => {
+        this.assertEmployeeRecoveryAvailable(employeeId, original.owner, state);
+        const employee = state.employees.find((e) => e.id === employeeId && e.sessionId === sessionId);
+        if (!employee || !matches(employee) || !stillCurrent() || this.runtimeRestarts.has(sessionId)) return false;
+        const settings = state.settings.find((s) => s.owner === employee.owner);
+        if (automatic && settings?.autoWakeEnabled === false) return false;
+        const attempts = employee.wakeAttempts.filter((at) => at > now - 15 * 60_000);
+        if (attempts.length >= 3) return false;
+        employee.wakeAttempts = [...attempts, now];
+        employee.desiredRunning = true;
+        claimed = true;
+        return true;
+      },
+      () => {
+        this.assertEmployeeRecoveryAvailable(employeeId, original.owner);
+        if (
+          claimed &&
+          (!stillCurrent() ||
+            this.runtimeRestarts.has(sessionId) ||
+            !matches(this.store.snapshot().employees.find((e) => e.id === employeeId)))
+        )
+          throw new CompanyError('Recovery authority or employee binding changed before claim commit', 409);
+      }
+    );
   }
-
   async setVacation(
     employeeId: string,
     owner: string | undefined,
     enabled: boolean,
     guard?: (state?: CompanyState) => void
   ): Promise<CompanyEmployee> {
+    guard?.();
+    if (!enabled) this.assertEmployeeRecoveryAvailable(employeeId, owner);
+    const nextIntentId = enabled ? undefined : randomUUID();
     const before = this.store.snapshot().employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
     const employee = await this.store.update(
       (state) => {
         const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
         if (!employee) throw new CompanyError('Unknown employee', 404);
         guard?.(state);
+        if (!enabled) this.assertEmployeeRecoveryAvailable(employeeId, owner, state);
         if (
           guard &&
           (!before ||
@@ -591,10 +791,16 @@ export class CompanyService {
         if (wake) wake.cancelled = true;
         employee.onVacation = enabled;
         employee.desiredRunning = !enabled;
-        if (!enabled) employee.wakeAttempts = [];
+        if (!enabled) {
+          employee.wakeAttempts = [];
+          supersedeStoppedRecoveryHistory(state.employeeRecoveryOperations, employee.id, employee.owner, nextIntentId!);
+        }
         return employee;
       },
-      () => guard?.()
+      () => {
+        guard?.();
+        if (!enabled) this.assertEmployeeRecoveryAvailable(employeeId, owner);
+      }
     );
     const currentIntent = () => {
       guard?.();
@@ -645,8 +851,10 @@ export class CompanyService {
    */
   async retire(
     employeeId: string,
-    owner: string | undefined
+    owner: string | undefined,
+    validateAuthority: () => void | Promise<void>
   ): Promise<{ employee: CompanyEmployee; rooms: string[]; failed: string[] }> {
+    await validateAuthority();
     const employee = await this.store.update((state) => {
       const done = state.retired.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (done) return done;
@@ -664,17 +872,23 @@ export class CompanyService {
       const retired = { ...current, desiredRunning: false, retiredAt: this.now() };
       state.retired.push(retired);
       return retired;
-    });
+    }, validateAuthority);
+    await validateAuthority();
     await this.deps.stopSession?.(employee.sessionId);
+    await validateAuthority();
     for (const cycle of this.store
       .snapshot()
       .cycles.filter((c) => c.employeeId === employee.id && ['claimed', 'running'].includes(c.state))) {
+      await validateAuthority();
       await this.deps.research.stop(cycle.id);
-      await this.finish(cycle, 'expired', this.now(), undefined, 'Employee retired');
+      await validateAuthority();
+      await this.finish(cycle, 'expired', this.now(), undefined, 'Employee retired', validateAuthority);
+      await validateAuthority();
     }
     const rooms: string[] = [];
     const failed: string[] = [];
     for (const room of this.deps.chatrooms.rooms()) {
+      await validateAuthority();
       if (!sameOwner(room.owner, owner) || !room.members.some((m) => m.sessionId === employee.sessionId)) continue;
       try {
         if (this.deps.chatrooms.removeMember?.(room.id, employee.sessionId)) rooms.push(room.id);
@@ -687,7 +901,8 @@ export class CompanyService {
   }
 
   /** Put a retired employee back on the org chart (not back in rooms: the owner invites them again). Refused if their session or name is now someone else's. */
-  async restore(employeeId: string, owner: string | undefined): Promise<CompanyEmployee> {
+  async restore(employeeId: string, owner: string | undefined, validateAuthority: () => void | Promise<void>): Promise<CompanyEmployee> {
+    await validateAuthority();
     const employee = await this.store.update((state) => {
       const index = state.retired.findIndex((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (index < 0) throw new CompanyError('Unknown retired employee', 404);
@@ -704,7 +919,8 @@ export class CompanyService {
       state.employees.push(record);
       validateReportingLine(state, record);
       return record;
-    });
+    }, validateAuthority);
+    await validateAuthority();
     this.deps.bindIdentity?.(employee);
     return employee;
   }
@@ -749,13 +965,15 @@ export class CompanyService {
     return hired;
   }
 
-  async configure(owner: string | undefined, input: Partial<Omit<CompanySettings, 'owner'>>): Promise<CompanySettings> {
+  async configure(owner: string | undefined, input: CompanySettingsPatch): Promise<CompanySettings> {
     // The owner's picture link is set by its own route only: a settings update neither sets nor clears it.
     const { ownerAvatar: _ignored, ...rest } = input;
     void _ignored;
     return this.store.update((state) => {
       const previous = state.settings.find((value) => sameOwner(value.owner, owner));
-      const parsed = CompanySettingsSchema.safeParse({ ...previous, ...rest, owner });
+      const merged = { ...previous, ...rest, owner };
+      if (rest.crashWakeEmployeeId === null) delete merged.crashWakeEmployeeId;
+      const parsed = CompanySettingsSchema.safeParse(merged);
       if (!parsed.success) throw new CompanyError('Invalid company settings', 400);
       const settings = parsed.data;
       if (settings.nightHour >= settings.morningHour)
@@ -855,8 +1073,13 @@ export class CompanyService {
     /** Bug 19: the owner replacement spawn's own restart transaction (RuntimeRestartIntent.token) survives the rebind;
      * every other in-flight restart or wake of the previous session is still cancelled. */
     keep?: object,
-    expected?: ExpectedCompanyBinding
+    expected?: ExpectedCompanyBinding,
+    /** Internal pre-publication admission only. A committed migration then owns
+     * its continuation; the old target's generation no longer authorizes it. */
+    admitReservation?: (state?: CompanyState) => void
   ): Promise<CompanyEmployee> {
+    admitReservation?.();
+    this.assertEmployeeRecoveryAvailable(employeeId,owner);
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
     const recipe = this.deps.runtimeRecipeOf?.(sessionId);
@@ -868,6 +1091,11 @@ export class CompanyService {
     const validateCandidate = () => {
       if (this.deps.getSession(sessionId) !== session || !sameOwner(session.owner, owner))
         throw new CompanyError('Replacement session or owner changed', 409);
+      if (admitReservation && nextRecipe) {
+        const currentRecipe = this.deps.runtimeRecipeOf?.(sessionId);
+        if (!currentRecipe || !isDeepStrictEqual(persistedRecipe(currentRecipe), persistedRecipe(nextRecipe)))
+          throw new CompanyError('Replacement runtime recipe changed', 409);
+      }
       const resource = expected?.resourceOperation;
       if (resource) {
         const source = resource.source;
@@ -914,6 +1142,8 @@ export class CompanyService {
     let subject: BindingAttemptSubject | undefined;
     const migrationId = randomUUID();
     const reservation = await this.store.updateOutcome((state) => {
+      admitReservation?.(state);
+      this.assertEmployeeRecoveryAvailable(employeeId,owner,state);
       const employee = state.employees.find((e) => e.id === employeeId && sameOwner(e.owner, owner));
       if (!employee) throw new CompanyError('Unknown employee', 404);
       if (expectedEmployee && !isDeepStrictEqual(persistedEmployee(employee), expectedEmployee))
@@ -940,7 +1170,11 @@ export class CompanyService {
       const thread = this.deps.threadOf?.(sessionId);
       if (thread) employee.threadId = thread;
       return employee;
-    }, validateCandidate);
+    }, () => {
+      admitReservation?.();
+      this.assertEmployeeRecoveryAvailable(employeeId,owner);
+      validateCandidate();
+    });
     if (reservation.state === 'not-issued') throw reservation.cause;
     const retained = (cause: unknown): BindingPublicationUnconfirmed => {
       if (!subject) throw new CompanyError('Canonical binding subject is unavailable; inspect the original session', 409);
@@ -954,6 +1188,7 @@ export class CompanyService {
     // The employee is the identity and the session only its current runtime: room seats, DMs and undelivered lines follow it, and
     // the replaced session leaves every room at once instead of lingering as a second copy of the same person.
     try {
+      validateCandidate();
       if (previous && previous !== sessionId) {
         await this.deps.chatrooms.replaceSession?.(previous, sessionId, by, (room) => sameOwner(room.owner, owner));
       }
@@ -964,8 +1199,13 @@ export class CompanyService {
               !employee ||
               (expected && !isDeepStrictEqual(persistedEmployee(employee), persistedEmployee(bound))) ||
               employee.bindingMigration?.id !== migrationId ||
+              employee.bindingMigration.from !== previous ||
+              employee.bindingMigration.to !== sessionId ||
               employee.sessionId !== bound.sessionId ||
-              employee.sessionGeneration !== bound.sessionGeneration
+              employee.sessionGeneration !== bound.sessionGeneration ||
+              (admitReservation && !isDeepStrictEqual(
+                persistedEmployee(employee).runtimeRecipe, persistedEmployee(bound).runtimeRecipe
+              ))
             )
               throw new CompanyError('Binding migration ownership changed', 409);
             employee.sessionId = sessionId;
@@ -1001,7 +1241,8 @@ export class CompanyService {
     callerSessionId: string,
     sessionId: string
   ): Promise<CompanyEmployee> {
-    const employees = this.store.snapshot().employees.filter((e) => sameOwner(e.owner, owner));
+    const original = this.store.snapshot();
+    const employees = original.employees.filter((e) => sameOwner(e.owner, owner));
     const delegate = employees.find((e) => e.sessionId === callerSessionId);
     if (!delegate || !delegate.permissions.recoverEmployees || !this.deps.getSession(callerSessionId))
       throw new CompanyError(
@@ -1011,19 +1252,31 @@ export class CompanyService {
     const target = employees.find((e) => e.id === employeeId);
     if (!target) throw new CompanyError('Unknown employee', 404);
     if (target.id === delegate.id) throw new CompanyError('An agent may not recover itself; ask the owner', 403);
+    const action = this.recoveryAction(employeeId, owner, callerSessionId);
+    action.require(original);
     if (this.deps.getSession(target.sessionId))
       throw new CompanyError("That employee's session is still open; only the owner may move it", 409);
     const session = this.deps.getSession(sessionId);
     if (!session || !sameOwner(session.owner, owner)) throw new CompanyError('Bind an existing owned session');
     const predecessor = this.deps.chatrooms
       .retiredSessions?.((o) => sameOwner(o, owner))
-      .some((r) => r.sessionId === sessionId && r.successorId === target.sessionId);
+      .find((r) => r.sessionId === sessionId && r.successorId === target.sessionId);
     if (!predecessor)
       throw new CompanyError(
         `Only ${target.name}'s retired previous session may take the place back; ask the owner for any other`,
         409
       );
-    return this.rebind(employeeId, owner, sessionId);
+    const retiredAt = predecessor.at;
+    const admitted = (state?: CompanyState) => {
+      action.require(state);
+      if (this.deps.getSession(target.sessionId))
+        throw new CompanyError('Recovery source resumed before binding publication', 409);
+      if (!this.deps.chatrooms.retiredSessions?.((o) => sameOwner(o, owner)).some((row) =>
+        row === predecessor && row.sessionId === sessionId && row.successorId === target.sessionId &&
+        row.at === retiredAt && sameOwner(row.owner, owner)))
+        throw new CompanyError('Original recovery predecessor changed before binding publication', 409);
+    };
+    return this.rebind(employeeId, owner, sessionId, callerSessionId, undefined, undefined, admitted);
   }
 
   /** Owner choice of the conversation thread an employee resumes on every replacement (`null` clears it). */
@@ -1056,8 +1309,11 @@ export class CompanyService {
       sleepEnabled?: boolean;
       dreamEnabled?: boolean;
     },
+    validateAuthority: () => void | Promise<void>,
     audit?: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
   ): Promise<CompanyEmployee> {
+    const admission = validateAuthority();
+    if (admission !== undefined) await admission;
     // Pronouns: a value sets them, null removes the field.
     const parsed = EmployeeSchema.pick({
       position: true,
@@ -1107,9 +1363,27 @@ export class CompanyService {
         validateReportingLine(state, employee);
         return { before, employee };
       },
-      undefined,
-      audit ? ({ before, employee }) => audit(before, employee) : undefined
+      validateAuthority,
+      audit ? async ({ before, employee }) => {
+        const beforeAudit = validateAuthority();
+        if (beforeAudit !== undefined) await beforeAudit;
+        await audit(before, employee);
+        const afterAudit = validateAuthority();
+        if (afterAudit !== undefined) await afterAudit;
+      } : undefined
     );
+    // The canonical writer has already acknowledged this change. Loss of
+    // response authority cannot roll it back or expose an employee projection.
+    try {
+      const completion = validateAuthority();
+      if (completion !== undefined) await completion;
+    } catch (cause) {
+      throw new CompanyError(
+        'This change may already be saved. Sign in again, then refresh before retrying.',
+        503,
+        { cause }
+      );
+    }
     this.deps.bindIdentity?.(result.employee);
     return result.employee;
   }
@@ -1120,8 +1394,11 @@ export class CompanyService {
     owner: string | undefined,
     tokenId: string,
     enabled: boolean,
+    validateAuthority: () => void | Promise<void>,
     audit: (before: CompanyEmployee, after: CompanyEmployee) => Promise<void>
   ): Promise<CompanyEmployee> {
+    const admission = validateAuthority();
+    if (admission !== undefined) await admission;
     if (
       !z.object({ tokenId: z.string().uuid(), enabled: z.boolean() }).strict().safeParse({ tokenId, enabled }).success
     )
@@ -1138,9 +1415,27 @@ export class CompanyService {
         employee.permissions.publicationTokenIds = checked.data;
         return { before, employee };
       },
-      undefined,
-      ({ before, employee }) => audit(before, employee)
+      validateAuthority,
+      async ({ before, employee }) => {
+        const beforeAudit = validateAuthority();
+        if (beforeAudit !== undefined) await beforeAudit;
+        await audit(before, employee);
+        const afterAudit = validateAuthority();
+        if (afterAudit !== undefined) await afterAudit;
+      }
     );
+    // The canonical writer has already acknowledged this change. Loss of
+    // response authority cannot roll it back or expose an employee projection.
+    try {
+      const completion = validateAuthority();
+      if (completion !== undefined) await completion;
+    } catch (cause) {
+      throw new CompanyError(
+        'This change may already be saved. Sign in again, then refresh before retrying.',
+        503,
+        { cause }
+      );
+    }
     return result.employee;
   }
 
@@ -1307,6 +1602,7 @@ export class CompanyService {
     if (input.employeeId) {
       replaces = employees.find((e) => e.id === input.employeeId);
       if (!replaces) throw new CompanyError('Unknown employee', 404);
+      this.assertEmployeeRecoveryAvailable(replaces.id,owner);
       // Not a security check: a missing parent header counts as the owner and agent headers are self-asserted until agent tokens v3.
       if ((parentSessionId || input.agentCaller) && parentSessionId !== replaces.sessionId)
         throw new CompanyError("Only the owner or the employee's own session may replace its session", 403);
@@ -1349,11 +1645,15 @@ export class CompanyService {
     sessionId: string,
     plan: { channelId?: string; name: string; icon: string; employeeId?: string; replacesSessionId?: string },
     by = 'owner',
-    keep?: object
+    keep?: object,
+    /** Exact route/private-grant admission through first binding publication only. */
+    admitReservation?: (state?: CompanyState) => void
   ): Promise<void> {
     // A replacement session takes over the employee: record, room seats and deliveries move in one step, no temporary record.
     if (plan.employeeId) {
-      await this.rebind(plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId, by, keep);
+      await this.rebind(
+        plan.employeeId, this.deps.getSession(sessionId)?.owner, sessionId, by, keep, undefined, admitReservation
+      );
       return;
     }
     // At the cap, refuse (never drop another agent's record to make room), and before the join, so a refusal
@@ -1520,7 +1820,8 @@ export class CompanyService {
     state: CompanyCycle['state'],
     now: number,
     result?: ResearchResult,
-    error?: string
+    error?: string,
+    validateAuthority?: () => void | Promise<void>
   ): Promise<void> {
     await this.store.update((data) => {
       const saved = data.cycles.find((c) => c.id === cycle.id)!;
@@ -1535,6 +1836,6 @@ export class CompanyService {
           cycleId: cycle.id,
           text: result.summary,
         });
-    });
+    }, validateAuthority);
   }
 }

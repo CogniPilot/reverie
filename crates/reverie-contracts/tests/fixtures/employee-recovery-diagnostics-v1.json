@@ -1,0 +1,128 @@
+[
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"diagnostics\":{\"primaryCode\":\"WORKER_RECOVERY_OFFICE_UNCONFIRMED\",\"secondaryCode\":null},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"unconfirmed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "primary-only",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "diagnostics": {
+          "primaryCode": "WORKER_RECOVERY_OFFICE_UNCONFIRMED",
+          "secondaryCode": null
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "unconfirmed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery-observe"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"diagnostics\":{\"primaryCode\":null,\"secondaryCode\":\"WORKER_TELEMETRY_CLOSE_UNCONFIRMED\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"unconfirmed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "secondary-only",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "diagnostics": {
+          "primaryCode": null,
+          "secondaryCode": "WORKER_TELEMETRY_CLOSE_UNCONFIRMED"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "unconfirmed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery-observe"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"diagnostics\":{\"primaryCode\":\"WORKER_RECOVERY_OFFICE_UNCONFIRMED\",\"secondaryCode\":\"WORKER_TELEMETRY_CLOSE_UNCONFIRMED\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"unconfirmed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "primary-and-secondary",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "diagnostics": {
+          "primaryCode": "WORKER_RECOVERY_OFFICE_UNCONFIRMED",
+          "secondaryCode": "WORKER_TELEMETRY_CLOSE_UNCONFIRMED"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "unconfirmed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery-observe"
+    }
+  }
+]

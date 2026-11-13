@@ -29,6 +29,14 @@ export class TerminalInputAttempt {
     this.#state = {phase: 'settled'};
     return accepted;
   }
+  /** A successful original text RPC whose private composer gate withheld Enter. */
+  finishTypedUnsent(admitted: boolean): false {
+    if (this.#state.phase === 'unconfirmed') throw this.#state.error;
+    if (this.#state.phase !== 'issued') throw new Error('No original issued text to leave unsent');
+    if (!admitted) throw this.fail(new Error('Original terminal input authority changed'))!;
+    this.#state = {phase: 'settled'};
+    return false;
+  }
 }
 
 // Process-local capabilities: no SID, DTO, timestamp or restored JSON can mint a subject.

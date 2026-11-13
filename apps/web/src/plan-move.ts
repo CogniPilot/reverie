@@ -165,10 +165,21 @@ export class PlanMoveComposerNotReady extends PlanMoveError {
 }
 
 export class PlanMoves {
+  readonly #recoveryOwner=true;
   private records = new Map<string, PlanMoveRecord>();
   private locked = new Set<string>();
   private intents = new Set<string>();
   private aborts = new Map<string, AbortController>();
+  /** Actual original move owner only. This is a denial lease, never permission
+   * to stop/start, complete a held move, or reconstruct a native owner. */
+  async employeeRecoveryGuard(employeeId:string,owner:string|undefined,access:'effect'|'observe'):Promise<PlanViewerReconnectLease> {
+    if(!this.#recoveryOwner)throw new PlanMoveError('Original move owner is unavailable');
+    if(access==='observe')return PlanMoves.prototype.viewerInspectionGuard.call(this,employeeId,owner);
+    await this.init();
+    const end=performance.now()+10_000;let closed=false;
+    const current=()=>!closed&&performance.now()<end&&!this.locked.has(employeeId);
+    return Object.assign(current,{revalidate:async()=>current(),close:()=>{closed=true;}});
+  }
   private loaded: Promise<void> | undefined;
 
   constructor(private readonly port: PlanMovePort) {}

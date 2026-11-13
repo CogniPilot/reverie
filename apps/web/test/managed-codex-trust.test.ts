@@ -1,3 +1,4 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -58,7 +59,7 @@ describe('managed Codex workspace trust', () => {
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ codexTrustWorkspace: cwd, codexConfig: { model: 'gpt-5.4', reasoningEffort: 'high', dangerouslyBypassApprovals: true } }));
     expect(session.toState()).not.toHaveProperty('codexTrustWorkspace');
     vi.spyOn(mux, 'muxSessionExists').mockReturnValue(true);
-    const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => { options.onProviderDispatch?.(); return 1234; });
+    const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => { await acknowledgeMuxFixture(options); return 1234; });
     expect(await session.restartCli()).toBe(true);
     const options = respawn.mock.calls[0][0];
     expect(options.codexTrustWorkspace).toBe(cwd);

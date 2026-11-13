@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest';
 // Long text goes to Codex as a bracketed paste (pastesInsteadOfKeys): load-buffer stages it, paste-buffer types it. A plan
 // move that takes the composer while the buffer is staged must get nothing pasted; one that takes it after the paste gets the
 // text left unsent (Enter withheld) and never replayed. Real route -> Session -> TmuxManager; only child_process is synthetic.
-const port = vi.hoisted(() => ({ calls: [] as string[], at: '' as 'load-buffer' | 'paste-buffer' | '', hold: (() => {}) as () => void, composer: '' }));
+const port = vi.hoisted(() => ({ calls: [] as string[], at: '' as 'load-buffer' | 'paste-buffer' | '', hold: (() => {}) as () => void, composer: '', failPaste: false }));
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
   return { ...actual,
@@ -18,7 +18,7 @@ vi.mock('node:child_process', async () => {
         if (verb === port.at) port.hold();
         break;
       }
-      if (typeof callback === 'function') setImmediate(() => callback(null, '', ''));
+      if (typeof callback === 'function') setImmediate(() => callback(port.failPaste && cmd.includes('paste-buffer') ? new Error('Synthetic paste RPC failed') : null, '', ''));
       return { on: vi.fn(), kill: vi.fn(), pid: 42 };
     }),
     execSync: vi.fn(() => ''), spawn: vi.fn(() => ({ on: vi.fn(), unref: vi.fn(), pid: 42 })),
@@ -34,8 +34,11 @@ import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 it.each([
   ['load-buffer', [], true],
   ['paste-buffer', ['paste-buffer'], false],
+  ['paste-buffer-rpc-failure', ['paste-buffer'], false],
+  ['paste-buffer-subject-replaced', ['paste-buffer'], false],
 ] as const)('a move hold taken at %s: Codex gets only %j typed, seq handed back: %s', async (at, typed, handedBack) => {
-  port.calls.length = 0; port.composer = ''; port.at = at;
+  port.calls.length = 0; port.composer = ''; port.at = at === 'load-buffer' ? 'load-buffer' : 'paste-buffer';
+  port.failPaste = at === 'paste-buffer-rpc-failure';
   const priorVitest = process.env.VITEST;
   delete process.env.VITEST;
   let TmuxManager: typeof import('../src/tmux-manager.js').TmuxManager;
@@ -48,7 +51,10 @@ it.each([
   vi.spyOn(mux, 'capturePaneText').mockImplementation(() => `› ${port.composer}\n\n  gpt-6.1-sol high · /owned/fixture`);
   const session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'codex', useMux: true, mux, muxSession: binding as never });
   let release: (() => void) | undefined;
-  port.hold = () => { release ??= session.pauseCapacityRetry(); };
+  port.hold = () => {
+    release ??= session.pauseCapacityRetry();
+    if (at === 'paste-buffer-subject-replaced') (mux as unknown as {sessions: Map<string, unknown>}).sessions.set(session.id, {...binding});
+  };
   const app = Fastify({ logger: false }); await app.register(fastifyCookie);
   const ctx = createMockRouteContext(); ctx.sessions.set(session.id, session as never);
   registerSessionRoutes(app, ctx as never, { verifiedOwner: trustedFixtureOwner, remoteWake: { hasWakeTarget: vi.fn(async () => false) } as never });
@@ -59,11 +65,24 @@ it.each([
     expect(session.composerHeldByMove).toBe(true);
     expect(port.calls.filter(c => c === 'paste-buffer' || c.startsWith('send-keys'))).toEqual(typed); // never an Enter
     expect(session.shouldApplyInput('codex-paste', 1)).toBe(handedBack);
-    expect(result.json().errorCode).toBe('SESSION_BUSY');
-    if (handedBack) expect(result.json().error).toContain('nothing was typed');
-    if (!handedBack) expect(result.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false, typedUnsent: true } });
+    const uncertain = at === 'paste-buffer-rpc-failure' || at === 'paste-buffer-subject-replaced';
+    if (uncertain) {
+      expect(result.json()).toMatchObject({success: false, errorCode: 'OPERATION_FAILED', recoveryRequired: true});
+      expect(session.terminalInputHeld).toBe(true);
+    } else {
+      expect(result.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY'});
+      expect(result.json().recoveryRequired).toBeUndefined();
+      expect(session.terminalInputHeld).toBe(false);
+      if (!handedBack) expect(result.json().data).toEqual({delivered: false, typedUnsent: true});
+    }
+    if (!handedBack) {
+      const commands = [...port.calls];
+      const duplicate = await app.inject({method: 'POST', url: '/api/sessions/test-session-1/input', headers: {'x-reverie-parent-session': 'another-agent'}, payload: {input: `${LONG}\r`, clientId: 'codex-paste', seq: 1}});
+      expect(port.calls).toEqual(commands);
+      expect(duplicate.json()).toMatchObject(uncertain ? {recoveryRequired: true} : {data: {delivered: false, typedUnsent: true}});
+    }
   } finally {
-    release?.(); port.hold = () => {}; port.at = '';
+    release?.(); port.hold = () => {}; port.at = ''; port.failPaste = false;
     Object.assign(session, { ptyProcess: null, _muxSession: null }); await session.stop(false);
     mux.destroy(); await app.close();
   }

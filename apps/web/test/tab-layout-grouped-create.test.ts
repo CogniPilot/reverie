@@ -9,11 +9,12 @@
  * in server.ts (the session joins the live map inside the layout owner lock and
  * the placement commits with it) against the real routes and StateStore.
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, beforeAll, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WebServer } from '../src/web/server.js';
+import { Session } from '../src/session.js';
 
 type Ref = { kind: string; id: string; placement?: string };
 type Layout = {
@@ -146,30 +147,94 @@ describe('grouped session creation through the server', () => {
 
 describe('server.ts addSession wiring', () => {
   it("keys the placement on the SESSION's owner and registers it only inside the layout call", async () => {
-    const sessions = new Map<string, unknown>();
-    let registered: (() => void | (() => void)) | undefined;
-    const sessionCreated = vi.fn(async (_owner: string, _id: string, _placement: unknown, register: () => unknown) => {
-      expect(sessions.has('bob-new')).toBe(false);
-      registered = register as never;
-      const rollback = register() as () => void;
-      expect(sessions.get('bob-new')).toBe(session);
-      rollback();
-      return { version: 1 };
-    });
-    const server = Object.create(WebServer.prototype) as any;
-    server.sessions = sessions;
-    server.tabLayouts = { sessionCreated };
-    const session = { id: 'bob-new', owner: 'bob' };
+    const workingDir = mkdtempSync(join(tmpdir(), 'layout-owner-wiring-'));
+    const server = new WebServer(0, false, true);
+    const sessions = server['sessions'],
+      layouts = server['tabLayouts'],
+      store = server['store'];
+    const make = (id: string, owner: string) => new Session({ id, owner, mode: 'shell', workingDir, useMux: false });
+    const bob = make('bob-original', 'bob'),
+      alice = make('alice-original', 'alice'),
+      session = make('bob-new', 'bob'),
+      rejected = make('bob-rejected', 'bob'),
+      replacement = make(rejected.id, 'bob');
+    const owned = [bob, alice, session, rejected, replacement];
+    let release = () => {};
+    let held: Promise<void> | undefined;
+    let registration: ReturnType<WebServer['registerSessionWithLayout']> | undefined;
+    let publication: MockInstance<typeof store.commitTabLayoutProjection> | undefined;
+    try {
+      await server['registerSessionWithLayout'](bob);
+      await server['registerSessionWithLayout'](alice);
+      for (const seed of [bob, alice]) {
+        const current = await layouts.get(seed.owner!);
+        expect(
+          (
+            await layouts.put(
+              seed.owner!,
+              {
+                ...current,
+                groups: [{ id: 'g1', name: seed.owner + ' group', refs: [{ kind: 'session', id: seed.id }] }],
+                ungrouped: [],
+              },
+              current.version
+            )
+          ).status
+        ).toBe('updated');
+      }
+      const aliceBefore = await layouts.get('alice');
+      let entered!: () => void;
+      const holding = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      held = layouts['withOwner']('bob', async () => {
+        entered();
+        await gate;
+      });
+      await holding;
+      registration = server['registerSessionWithLayout'](session, { tabGroupId: 'g1' });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // A wrong-owner call would have registered outside Bob's actual lock.
+      expect(sessions.has(session.id)).toBe(false);
+      expect(await layouts.get('alice')).toEqual(aliceBefore);
+      release();
+      await held;
+      const accepted = await registration;
+      expect(sessions.get(session.id)).toBe(session);
+      expect(accepted.groups.find((group) => group.id === 'g1')?.refs.map((ref) => ref.id)).toEqual([
+        bob.id,
+        session.id,
+      ]);
+      expect(await layouts.get('bob')).toEqual(accepted);
+      expect(await layouts.get('alice')).toEqual(aliceBefore);
 
-    await server.registerSessionWithLayout(session, { tabGroupId: 'g1' });
-
-    expect(sessionCreated).toHaveBeenCalledWith('bob', 'bob-new', { tabGroupId: 'g1' }, expect.any(Function));
-    // The rollback removed it; a rollback never removes a DIFFERENT session under that id.
-    expect(sessions.has('bob-new')).toBe(false);
-    const rollback = registered!() as () => void;
-    const replacement = { id: 'bob-new', owner: 'bob' };
-    sessions.set('bob-new', replacement);
-    rollback();
-    expect(sessions.get('bob-new')).toBe(replacement);
+      // A real failed tentative publication invokes the canonical rollback.
+      // Its original callback must preserve a different Session under that SID.
+      const beforeFailure = store.getTabLayout('bob');
+      const failure = new Error('layout unavailable after original registration');
+      publication = vi.spyOn(store, 'commitTabLayoutProjection').mockImplementationOnce(() => {
+        expect(sessions.get(rejected.id)).toBe(rejected);
+        expect(layouts['ownerQueues'].has('bob')).toBe(true);
+        sessions.set(rejected.id, replacement);
+        throw failure;
+      });
+      await expect(server['registerSessionWithLayout'](rejected, { tabGroupId: 'g1' })).rejects.toBe(failure);
+      expect(publication).toHaveBeenCalledOnce();
+      expect(sessions.get(rejected.id)).toBe(replacement);
+      expect(store.getTabLayout('bob')).toEqual(beforeFailure);
+      expect(await layouts.get('alice')).toEqual(aliceBefore);
+      for (const original of owned) expect(original.pid).toBeNull();
+    } finally {
+      release();
+      await held?.catch(() => {});
+      await registration?.catch(() => {});
+      publication?.mockRestore();
+      for (const original of owned) await original.stop(false);
+      await server.stop();
+      rmSync(workingDir, { recursive: true, force: true });
+    }
   });
 });

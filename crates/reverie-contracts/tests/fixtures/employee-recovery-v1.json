@@ -1,0 +1,458 @@
+[
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"reconcile-owned\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"original-handler-pending\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "original-handler-pending",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "reconcile-owned",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "original-handler-pending",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "reconcile-owned",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"reconcile-owned\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"original-handler-reconciled\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "original-handler-reconciled",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "reconcile-owned",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "original-handler-reconciled",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "reconcile-owned",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"provider-stop-pending\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "provider-stop-pending",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "provider-stop-pending",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"provider-stopped-viewer-pending\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "provider-stopped-viewer-pending",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "provider-stopped-viewer-pending",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"provider-stopped\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "provider-stopped",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "provider-stopped",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"close-viewer\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"viewer-close-pending\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "viewer-close-pending",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "close-viewer",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "viewer-close-pending",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "close-viewer",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"close-viewer\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"viewer-closed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "viewer-closed",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "close-viewer",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "viewer-closed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "close-viewer",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"not-attempted\",\"outcome\":\"custody-unavailable\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "custody-unavailable",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "not-attempted",
+        "outcome": "custody-unavailable",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"not-attempted\",\"outcome\":\"refused-before-new-effect\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "refused-before-new-effect",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "not-attempted",
+        "outcome": "refused-before-new-effect",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"stop-provider\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":null,\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"unconfirmed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "unconfirmed",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "stop-provider",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": null,
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "unconfirmed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "stop-provider",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": null,
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"close-viewer\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"viewer-close-pending\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "retained-viewer-component-pending",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "close-viewer",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "viewer-close-pending",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "close-viewer",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  },
+  {
+    "canonicalReply": "{\"kind\":\"resource-result\",\"requestId\":\"21111111-2222-4333-8444-555555555555\",\"value\":{\"approval\":{\"action\":\"close-viewer\",\"operationId\":\"31111111-2222-4333-8444-555555555555\",\"originalAttemptId\":null,\"parentOperationId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\",\"sessionGeneration\":\"9007199254740993\",\"sessionId\":\"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\"},\"earlierEffects\":\"unproved\",\"employeeId\":\"11111111-2222-4333-8444-555555555555\",\"newDispatch\":\"attempted\",\"outcome\":\"viewer-closed\",\"purpose\":\"employee-recovery-v1\",\"version\":1}}",
+    "case": "retained-viewer-component-closed",
+    "reply": {
+      "kind": "resource-result",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "value": {
+        "approval": {
+          "action": "close-viewer",
+          "operationId": "31111111-2222-4333-8444-555555555555",
+          "originalAttemptId": null,
+          "parentOperationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "sessionGeneration": "9007199254740993",
+          "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        },
+        "earlierEffects": "unproved",
+        "employeeId": "11111111-2222-4333-8444-555555555555",
+        "newDispatch": "attempted",
+        "outcome": "viewer-closed",
+        "purpose": "employee-recovery-v1",
+        "version": 1
+      }
+    },
+    "request": {
+      "approval": {
+        "action": "close-viewer",
+        "operationId": "31111111-2222-4333-8444-555555555555",
+        "originalAttemptId": null,
+        "parentOperationId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        "sessionGeneration": "9007199254740993",
+        "sessionId": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+      },
+      "employeeId": "11111111-2222-4333-8444-555555555555",
+      "kind": "resource-operation",
+      "requestId": "21111111-2222-4333-8444-555555555555",
+      "verb": "employee-recovery"
+    }
+  }
+]

@@ -1,6 +1,7 @@
 /** Actual process/CAS/crash and migration-await controls; private synthetic files and inert chat port only. */
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fork, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { build } from 'esbuild';
@@ -60,6 +61,9 @@ describe('Goal canonical transactions and session fences', () => {
       packages: 'external',
       platform: 'node',
       format: 'cjs',
+      // This explicit CommonJS fixture must preserve its actual module URL for
+      // transitive ESM owners; esbuild otherwise replaces import.meta with {}.
+      define: { 'import.meta.url': JSON.stringify(pathToFileURL(path).href) },
       outfile: path,
       logLevel: 'silent',
     });

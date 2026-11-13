@@ -92,6 +92,16 @@ it('a valid assertion yields a lease that is current only for in-scope targets o
   expect(Object.isFrozen(lease)).toBe(true);
 });
 
+it('retains the authenticating instance and original assertion deadline privately, never from a structural lease', async () => {
+  const f = fixture(), other = fixture();
+  const lease = await f.auth.authenticate({assertion:f.sign()}, 'RESUME_SERVICE');
+  expect(f.auth.leaseDeadline(lease!)).toBe(NOW + 5000);
+  expect(() => f.auth.leaseDeadline({...lease!})).toThrow();
+  expect(() => other.auth.leaseDeadline(lease!)).toThrow();
+  expect(() => f.auth.leaseDeadline({current:()=>true, currentFor:()=>true} as never)).toThrow();
+  expect(() => ServiceGrantAuthentication.prototype.leaseDeadline.call({}, lease!)).toThrow();
+});
+
 it('refuses forged, malformed, over-long, expired, future and cross-purpose assertions', async () => {
   const f = fixture();
   const bad = [

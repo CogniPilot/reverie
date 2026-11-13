@@ -112,6 +112,24 @@
   <!-- onclick scrolls/focuses directly: with <base href="/"> a bare href="#..." would
        navigate to /#... (the dashboard) from a /session/:id solo window. -->
   <a href="#terminalContainer" class="skip-link" onclick="event.preventDefault(); var t=document.getElementById('terminalContainer'); if(t){t.scrollIntoView(); var f=t.querySelector('textarea,[tabindex]'); (f||t).focus&&(f||t).focus();}">Skip to terminal</a>
+    <div class="state-publication-banner" id="statePublicationBanner" role="alert" hidden>
+      <div id="mainStatePublicationNotice" hidden>
+      <strong>App state saving is blocked</strong>
+      <span>A state write could not be confirmed. Recent changes may already be saved.</span>
+      <span>Keep unsaved drafts for administrator review. This page cannot clear the block or retry the write.</span>
+      </div>
+      <div id="muxMetadataPublicationNotice" hidden>
+        <strong>Terminal metadata saving is unconfirmed</strong>
+        <span>Terminal observations may already be saved. This does not stop providers or change input permissions.</span>
+        <span>Refresh status first. The company owner may explicitly reconcile current metadata without replaying the old write.</span>
+        <div class="publication-warning-actions">
+          <button type="button" id="muxMetadataRefresh">Refresh metadata status</button>
+          <button type="button" id="muxMetadataReconcile">Reconcile current metadata</button>
+        </div>
+        <span id="muxMetadataPublicationResult" role="status"></span>
+      </div>
+    </div>
+
   <div class="app">
     <!-- Compact Header with Session Tabs -->
     <header class="header">
@@ -4183,6 +4201,8 @@
   <script defer src="tab-layout-browser.js"></script>
   <script defer src="display-time.js"></script>
   <script defer src="app.js"></script>
+  <script defer src="browser-input-journal.js"></script>
+  <script defer src="input-delivery.js"></script>
   <script defer src="tab-rail-resize.js"></script>
   <script defer src="terminal-ui.js"></script>
   <script defer src="terminal-tile.js"></script>
@@ -4203,6 +4223,7 @@
   <script defer src="session-ui.js"></script>
   <script defer src="subscription-ui.js"></script>
   <script defer src="company-resources.js"></script>
+  <script defer src="employee-recovery.js"></script>
   <script defer src="chatroom-ui.js"></script>
   <script defer src="company-ui.js"></script>
   <script defer src="vendor/highlight-11.12.0.min.js"></script>

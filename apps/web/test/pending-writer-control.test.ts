@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import {afterEach, expect, it, vi} from 'vitest';
 import {Session} from '../src/session.js';
 const FOOTER='  gpt-6.1-sol high · /owned/fixture';
@@ -9,15 +9,15 @@ afterEach(async()=>{release?.(false);await pending;if(session){Object.assign(ses
 it('a delayed gated Enter cannot spend the claim of a different ordinary write still in flight',async()=>{
  vi.useFakeTimers();vi.stubEnv('REVERIE_WORKER_SOCKET','/owned/inert/no-real-socket');
  let screen=`›\n${FOOTER}`;const calls:string[]=[];
- const mux={capturePaneText:()=>screen,sendInput:vi.fn(async(_id:string,input:string)=>{
+ const registry = registeredMuxFixture({mode: 'codex', muxName:'reverie-owned-writer',sessionId:'test-session-1',pid:42});
+  const mux={ ...registry,capturePaneText:()=>screen,sendInput:vi.fn(async(_id:string,input:string)=>{
   if(input==='wake\r'){calls.push('wakeTextAndInitialEnter');screen=`› wake\n${FOOTER}`;return true;}
   if(input==='ordinary\r'){calls.push('ordinaryWritePending');return await new Promise<boolean>(resolve=>{release=resolve;});}
   if(input==='\r'){calls.push('lateVerifierEnter');return true;}
   throw new Error('Unexpected key shape');
  })};
  session=new Session({id:'test-session-1',workingDir:'/owned/fixture',mode:'codex',useMux:true,mux:mux as never,
-  muxSession:{muxName:'reverie-owned-writer',sessionId:'test-session-1',pid:42}as never});
- registerMuxFixture(session);
+  muxSession: registry.subject});
  expect(await session.writeViaMux('wake\r',{requireIdle:true,requireEmptyComposer:true})).toBe(true);
  pending=session.writeViaMux('ordinary\r');
  await Promise.resolve();

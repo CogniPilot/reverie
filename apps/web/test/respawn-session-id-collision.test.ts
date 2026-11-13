@@ -1,3 +1,4 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 /**
  * @fileoverview Relaunching a pane must resume its conversation, not collide
  * with it, and must not resume somebody else's.
@@ -44,7 +45,10 @@ import type {
 /** Captures the options each respawn is invoked with. */
 function recordingMux() {
   const calls: RespawnPaneOptions[] = [];
+  const registered = new Map<string, MuxSession>();
   const mux = {
+    getSession: (id: string) => registered.get(id),
+    registerSession: (subject: MuxSession) => { registered.set(subject.sessionId, subject); },
     isAvailable: () => true,
     muxSessionExists: () => true,
     isPaneDead: () => true,
@@ -54,7 +58,7 @@ function recordingMux() {
     setAttached: () => {},
     respawnPane: async (options: RespawnPaneOptions) => {
       calls.push(options);
-      options.onProviderDispatch?.();
+      await acknowledgeMuxFixture(options);
       return 4242;
     },
   };
@@ -71,7 +75,10 @@ const muxSession = (muxName = 'reverie-aaaa') => ({ muxName, sessionId: 'aaaa' }
  */
 function failingRespawnMux() {
   const calls: CreateSessionOptions[] = [];
+  const registered = new Map<string, MuxSession>();
   const mux = {
+    getSession: (id: string) => registered.get(id),
+    registerSession: (subject: MuxSession) => { registered.set(subject.sessionId, subject); },
     isAvailable: () => true,
     muxSessionExists: () => true,
     isPaneDead: () => true,
@@ -79,8 +86,12 @@ function failingRespawnMux() {
     respawnPane: async () => 0,
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
-      options.onProviderDispatch?.();
-      return muxSession('reverie-recreated');
+      await acknowledgeMuxFixture(options);
+      const subject: MuxSession = { sessionId: options.sessionId, owner: options.owner,
+        muxName: 'reverie-recreated', pid: 4242, createdAt: Date.now(),
+        workingDir: options.workingDir, mode: options.mode, attached: false };
+      registered.set(subject.sessionId, subject);
+      return subject;
     },
   };
   return { mux: mux as unknown as TerminalMultiplexer, calls };
@@ -95,20 +106,27 @@ function failingRespawnMux() {
 function vanishedSessionMux() {
   const calls: CreateSessionOptions[] = [];
   const respawns: RespawnPaneOptions[] = [];
+  const registered = new Map<string, MuxSession>();
   const mux = {
+    getSession: (id: string) => registered.get(id),
+    registerSession: (subject: MuxSession) => { registered.set(subject.sessionId, subject); },
     isAvailable: () => true,
     muxSessionExists: () => false,
     isPaneDead: () => false,
     setAttached: () => {},
     respawnPane: async (options: RespawnPaneOptions) => {
       respawns.push(options);
-      options.onProviderDispatch?.();
+      await acknowledgeMuxFixture(options);
       return 4242;
     },
     createSession: async (options: CreateSessionOptions) => {
       calls.push(options);
-      options.onProviderDispatch?.();
-      return muxSession('reverie-recreated');
+      await acknowledgeMuxFixture(options);
+      const subject: MuxSession = { sessionId: options.sessionId, owner: options.owner,
+        muxName: 'reverie-recreated', pid: 4242, createdAt: Date.now(),
+        workingDir: options.workingDir, mode: options.mode, attached: false };
+      registered.set(subject.sessionId, subject);
+      return subject;
     },
   };
   return { mux: mux as unknown as TerminalMultiplexer, calls, respawns };
@@ -143,15 +161,24 @@ function giveTranscript(conversationId: string): void {
 }
 
 function localSession(extra: Record<string, unknown> = {}, mux?: TerminalMultiplexer) {
-  return new Session({
+  const subject = muxSession();
+  const result = new Session({
     workingDir: '/tmp',
     mode: 'claude',
     useMux: true,
     mux,
-    muxSession: muxSession(),
+    muxSession: subject,
     envOverrides: { CLAUDE_CONFIG_DIR: configDir },
     ...extra,
   });
+  subject.sessionId = result.id;
+  subject.owner = result.owner;
+  subject.remote = result.toState().remote;
+  subject.docker = result.toState().docker;
+  subject.mode = result.mode;
+  subject.workingDir = result.workingDir;
+  mux?.registerSession?.(subject);
+  return result;
 }
 
 describe('legacy custom profile: pinning a conversation onto a relaunch', () => {

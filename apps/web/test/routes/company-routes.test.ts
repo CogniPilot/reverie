@@ -5,10 +5,12 @@ import { appendAdminAudit } from '../../src/web/admin-audit.js';
 vi.mock('../../src/web/admin-audit.js', () => ({ appendAdminAudit: vi.fn(async () => {}) }));
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerCompanyRoutes } from '../../src/web/routes/company-routes.js';
+import { registerAuthMiddleware } from '../../src/web/middleware/auth.js';
 import { CompanyService } from '../../src/company-service.js';
 import { CompanyStore } from '../../src/company-store.js';
 import { ChatroomStore } from '../../src/chatroom-store.js';
 import { mkdtemp, rm } from 'node:fs/promises';
+import storage from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
@@ -57,6 +59,7 @@ describe('company HTTP ownership and expert invites', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
+    registerAuthMiddleware(app, false);
     registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, wake, {
       verifiedOwner: trustedFixtureOwner,
       boardCoordinator: (sessionId) => isBoardCoordinator(rooms.list(), sessionId),
@@ -104,6 +107,87 @@ describe('company HTTP ownership and expert invites', () => {
       expect((await app.inject({ method: 'PUT', url, payload: { permissions: patch } })).statusCode).toBe(400);
       expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
     }
+  });
+
+  it('restricts permission refresh to the real owner and returns only the permission projection', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}/permissions`;
+    const before = await storage.readFile(service.store.file, 'utf8');
+    for (const headers of [{ 'x-reverie-parent-session': employee.sessionId }, { 'x-reverie-service-token': 'service' }])
+      expect((await app.inject({ url, headers })).statusCode).toBe(403);
+    expect((await app.inject({ url: '/api/company/employees/missing/permissions' })).statusCode).toBe(404);
+    const response = await app.inject({ url });
+    expect(response.statusCode).toBe(200);
+    expect(Object.keys(response.json().data).sort()).toEqual([
+      'boardPermissionSources', 'effectiveBoardPermissions', 'employeeId', 'permissions',
+    ]);
+    expect(response.json().data).toMatchObject({ employeeId: employee.id, permissions: { recoverEmployees: false } });
+    expect(await storage.readFile(service.store.file, 'utf8')).toBe(before);
+  });
+
+  it.each(['same writer', 'other writer'] as const)('joins an earlier permission publication from the %s without replaying it', async (which) => {
+    const employee = await service.hire(hireBody);
+    const writer = which === 'same writer' ? service.store : new CompanyStore(service.store.file);
+    if (writer !== service.store) await writer.init();
+    let entered!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const write = writer.update(state => {
+      state.employees[0].permissions.recoverEmployees = true;
+    }, undefined, async () => { entered(); await held; });
+    await started;
+    expect(service.store.snapshot().employees[0].permissions.recoverEmployees).toBe(false);
+    let settled = false;
+    const reading = app.inject({ url: `/api/company/employees/${employee.id}/permissions` }).then(response => {
+      settled = true;
+      return response;
+    });
+    try {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+    } finally {
+      release();
+      await Promise.all([write, reading]);
+    }
+    const committed = await storage.readFile(service.store.file, 'utf8');
+    const response = await reading;
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.permissions.recoverEmployees).toBe(true);
+    expect(await storage.readFile(service.store.file, 'utf8')).toBe(committed);
+  });
+
+  it('keeps an uncertain canonical permission writer held during a read-only refresh', async () => {
+    const employee = await service.hire(hireBody);
+    const originalRename = storage.rename.bind(storage);
+    const rename = vi.spyOn(storage, 'rename').mockImplementationOnce(async (...args) => {
+      await originalRename(...args);
+      throw new Error('Synthetic answer lost after actual company rename');
+    });
+    try {
+      await expect(service.store.update(state => {
+        state.employees[0].permissions.recoverEmployees = true;
+      })).rejects.toThrow('publication is unconfirmed');
+    } finally {
+      rename.mockRestore();
+    }
+    expect(service.store.publicationUnconfirmed).toBe(true);
+    const before = await storage.readFile(service.store.file, 'utf8');
+    expect(JSON.parse(before).employees[0].permissions.recoverEmployees).toBe(true);
+    const response = await app.inject({ url: `/api/company/employees/${employee.id}/permissions` });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ success: false, error: 'Current permissions could not be confirmed. Refresh status before changing them.' });
+    expect(service.store.publicationUnconfirmed).toBe(true);
+    expect(await storage.readFile(service.store.file, 'utf8')).toBe(before);
+  });
+
+  it('refuses ambiguous employee identity instead of choosing an owner subset', async () => {
+    const employee = await service.hire(hireBody);
+    await service.store.update(state => {
+      state.employees.push({ ...employee, owner: 'another-owner' });
+    });
+    const before = await storage.readFile(service.store.file, 'utf8');
+    expect((await app.inject({ url: `/api/company/employees/${employee.id}/permissions` })).statusCode).toBe(404);
+    expect(await storage.readFile(service.store.file, 'utf8')).toBe(before);
   });
 
   it('reports current inherited Board grants without saving them, and returns explicit revocation after an owner edit', async () => {
@@ -194,6 +278,70 @@ describe('company HTTP ownership and expert invites', () => {
     expect((await app.inject({ method: 'PUT', url, payload: { enabled: true } })).statusCode).toBe(500);
     expect(service.store.snapshot()).toEqual(previous);
     expect((await app.inject({ method: 'PUT', url, payload: { enabled: 'yes' } })).statusCode).toBe(400);
+  });
+
+  it('explicitly clears only the crash recovery expert while preserving unrelated company settings and OFF intent', async () => {
+    const employee = await service.hire(hireBody);
+    await service.store.update(state => {
+      state.employees[0].desiredRunning = false;
+      state.employees[0].onVacation = true;
+    });
+    await service.configure(undefined, { crashWakeEmployeeId: employee.id, timeZone: 'Europe/London' });
+    const response = await app.inject({ method: 'PUT', url: '/api/company/settings',
+      payload: { autoWakeEnabled: false, crashWakeEmployeeId: null } });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.settings).toMatchObject({ autoWakeEnabled: false, timeZone: 'Europe/London' });
+    expect(response.json().data.settings).not.toHaveProperty('crashWakeEmployeeId');
+    const reloaded = new CompanyStore(join(directory, 'company.json'));
+    await reloaded.init();
+    expect(reloaded.snapshot().settings[0]).not.toHaveProperty('crashWakeEmployeeId');
+    expect(reloaded.snapshot().employees[0]).toMatchObject({ desiredRunning: false, onVacation: true });
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it('preserves an omitted crash expert and rejects malformed or unauthorized recovery patches atomically', async () => {
+    const employee = await service.hire(hireBody);
+    await service.store.update(state => {
+      state.employees[0].desiredRunning = false;
+      state.employees[0].onVacation = true;
+    });
+    await service.configure(undefined, { crashWakeEmployeeId: employee.id, timeZone: 'Europe/London' });
+    const omitted = await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { autoWakeEnabled: false } });
+    expect(omitted.statusCode).toBe(200);
+    expect(omitted.json().data.settings.crashWakeEmployeeId).toBe(employee.id);
+    const before = service.store.snapshot();
+    for (const payload of [null, [], { crashWakeEmployeeId: '' }, { crashWakeEmployeeId: 3 },
+      { crashWakeEmployeeId: {} }, { crashWakeEmployeeId: 'missing' }, { timeZone: null },
+      { ownerAvatar: null }, { owner: null }, { coordinatorEmployeeId: null },
+      { crashWakeEmployeeId: null, autoWakeEnabled: 'false' }, { unknownRecoveryField: true }]) {
+      const response = await app.inject({ method: 'PUT', url: '/api/company/settings',
+        headers: { 'content-type': 'application/json' }, payload: JSON.stringify(payload) });
+      expect(response.statusCode, JSON.stringify(payload)).toBe(400);
+      expect(service.store.snapshot()).toEqual(before);
+    }
+    for (const headers of [{ 'x-reverie-parent-session': employee.sessionId }, { 'x-reverie-service-token': 'service' }]) {
+      const denied = await app.inject({ method: 'PUT', url: '/api/company/settings', headers,
+        payload: { crashWakeEmployeeId: null, autoWakeEnabled: true } });
+      expect(denied.statusCode).toBe(403);
+      expect(service.store.snapshot()).toEqual(before);
+    }
+    expect(wake).not.toHaveBeenCalled();
+  });
+
+  it('rejects another owner recovery expert without changing settings or waking either OFF employee', async () => {
+    const employee = await service.hire(hireBody);
+    const foreign = await service.hire({ ...hireBody, name: 'Other reviewer', sessionId: 'parent-session' });
+    await service.store.update(state => {
+      for (const row of state.employees) { row.desiredRunning = false; row.onVacation = true; }
+      state.employees.find(row => row.id === foreign.id)!.owner = 'another-owner';
+    });
+    await service.configure(undefined, { crashWakeEmployeeId: employee.id });
+    const before = service.store.snapshot();
+    const response = await app.inject({ method: 'PUT', url: '/api/company/settings',
+      payload: { crashWakeEmployeeId: foreign.id } });
+    expect(response.statusCode).toBe(400);
+    expect(service.store.snapshot()).toEqual(before);
+    expect(wake).not.toHaveBeenCalled();
   });
 
   it('keeps vanilla core beliefs empty and preserves unrelated settings when the owner changes the company core', async () => {
@@ -302,7 +450,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect((await app.inject({ method: 'PUT', url, payload, headers })).statusCode).toBe(403);
     expect((await app.inject({ method: 'POST', url: '/api/company/self', payload, headers: { 'x-reverie-parent-session': 'expert-session' } })).statusCode).toBe(400);
     expect((await app.inject({ method: 'PUT', url, payload })).statusCode).toBe(200);
-    await service.update(employee.id, undefined, { position: 'Researcher' });
+    await service.update(employee.id, undefined, { position: 'Researcher' }, () => {});
     await service.rebind(employee.id, undefined, 'parent-session');
     const reloaded = new CompanyStore(service.store.file); await reloaded.init();
     expect(reloaded.snapshot().employees[0]).toMatchObject({ avatarBackground: '#12abcd', sessionId: 'parent-session', position: 'Researcher' });
@@ -332,7 +480,7 @@ describe('company HTTP ownership and expert invites', () => {
       payload: { permissions: { recoverEmployees: true } },
     });
     expect(selfGrant.statusCode).toBe(403);
-    await service.update(lead.id, undefined, { position: 'Engineer', permissions: { recoverEmployees: true } });
+    await service.update(lead.id, undefined, { position: 'Engineer', permissions: { recoverEmployees: true } }, () => {});
     expect((await app.inject(request)).statusCode).toBe(200);
     expect(wake).toHaveBeenCalledWith(target.id, { stillCurrent: expect.any(Function) });
     expect((await app.inject({ method: 'POST', url: request.url })).statusCode).toBe(200);

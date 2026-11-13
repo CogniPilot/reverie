@@ -1,8 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { workerLaunchCommand, workerPtyCommand } from '../src/worker-execution.js';
+import { workerLaunchCommand, workerPtyCommand, WorkerViewerEndpoint } from '../src/worker-execution.js';
 
 afterEach(() => vi.unstubAllEnvs());
+it.each(['viewer', 'broker'] as const)('retains the original trusted %s route without exposing it as serialized authority', kind => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET', '/run/original.sock');
+  vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', kind === 'viewer' ? "/run/viewer 'safe'.sock" : '');
+  const route = WorkerViewerEndpoint.capture('original')!;
+  vi.stubEnv('REVERIE_WORKER_SOCKET', '');
+  vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', '/run/changed.sock');
+  expect(JSON.stringify(route)).toBe('{}');
+  const command = route.command('never executed', '/workspace', 'original');
+  expect(command).toContain('--attach-only');
+  expect(command).not.toContain('/run/changed.sock');
+  expect(() => route.command('cli', '/workspace', 'successor')).toThrow('original viewer endpoint');
+  expect(() => Object.create(WorkerViewerEndpoint.prototype).command('cli', '/workspace', 'original')).toThrow();
+  expect(() => Reflect.construct(WorkerViewerEndpoint,[Symbol('forged'),'/run/client-selected.sock','original'])).toThrow('original viewer endpoint');
+});
 describe('isolated worker execution', () => {
   it('keeps native deployments available', () => {
     vi.stubEnv('REVERIE_WORKER_SOCKET', '');
@@ -59,4 +73,10 @@ it('does not turn viewer-only configuration into local execution when the worker
   vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', '/run/viewer.sock');
   expect(() => workerLaunchCommand('cli', '/workspace', 'session', true)).toThrow('configured native worker broker');
   expect(workerLaunchCommand('cli', '/workspace', 'session')).toBe('cli');
+});
+it('refuses an initial attach-only command without worker configuration instead of returning a host provider command', () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET',''); vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','');
+  expect(() => workerLaunchCommand('never launch provider','/workspace','session',true))
+    .toThrow('original viewer endpoint');
+  expect(workerLaunchCommand('normal local provider','/workspace','session',false)).toBe('normal local provider');
 });

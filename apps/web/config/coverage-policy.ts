@@ -19,6 +19,7 @@ export const webCoverage = {
     functions: 80,
     lines: 82,
     // Global averages must not hide regressions in these lifecycle authorities.
+    'src/state-store.ts': { statements: 80, branches: 69, functions: 88, lines: 81 },
     'src/company-wake.ts': { statements: 90, branches: 88, functions: 90, lines: 90 },
     'src/worker-provider-health.ts': { statements: 96, branches: 95, functions: 100, lines: 97 },
     'src/resource-fleet-native-data.ts': { statements: 100, branches: 100, functions: 100, lines: 100 },

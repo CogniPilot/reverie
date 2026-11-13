@@ -261,7 +261,7 @@ it('inventories real owner screens and converges GUI/API state without starting 
           expect(await refresh.isEnabled()).toBe(true);
           const response = p.waitForResponse(
             (reply) =>
-              new URL(reply.url()).pathname === `/api/company/resources/employees/${employee.id}` &&
+              new URL(reply.url()).pathname === `/api/company/resources/employees/${employee.id}/memory-diagnostics` &&
               reply.request().method() === 'GET'
           );
           await refresh.click();

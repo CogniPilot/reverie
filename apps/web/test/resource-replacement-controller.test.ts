@@ -1,8 +1,9 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 /** Actual owner/Company/PlanMoves/Session stores and private IPC.
  * The host/kernel boundary is an owned controlled wire fixture, NOT a native
  * receipt or installed-authority proof. No provider or engine is contacted.
  */
-import Fastify, {type FastifyInstance} from 'fastify';
+import Fastify, {type FastifyInstance, type InjectOptions} from 'fastify';
 import cookie from '@fastify/cookie';
 import {createHarness, member, room} from './helpers/chat-app-harness.mjs';
 import {createServer, type Server, type Socket} from 'node:net';
@@ -30,6 +31,7 @@ import {buildSpawnCommand} from '../src/tmux-manager.js';
 import {workerLaunchCommand} from '../src/worker-execution.js';
 import type {SessionPort} from '../src/web/ports/session-port.js';
 import type {TerminalMultiplexer, CreateSessionOptions, MuxSession} from '../src/mux-interface.js';
+import type {PaneLiveness} from '../src/signal-target.js';
 
 let directory: string, path: string, app: FastifyInstance, server: Server, auth: OwnerAuthService, token: string;
 let company: CompanyService, companyStore: CompanyStore, chat: ChatroomService, source: Session;
@@ -39,13 +41,14 @@ let eid: string, draft: Record<string, unknown>, reference: string, options: Map
 let rejectAt: string | undefined;
 let nativeSettled: boolean;
 let occupyCandidate: boolean, composerBodies: Map<string, string>, handoffScreens: string[], handoffMuxCalls: string[];
+let candidatePaneState: 'live' | 'dead' | 'unreadable', paneReads: string[];
 const codexPane = (body: string) => `› ${body}\n\nGPT-6.1-Sol high · /owned/resource-fixture\n? for shortcuts`;
 let restartController: (options?: {socket?: string}) => Promise<void>;
 type Frame = Record<string, unknown>;
 const encoded = (value: unknown) => {const raw = Buffer.from(JSON.stringify(value)), header = Buffer.alloc(4);
   header.writeUInt32BE(raw.length); return Buffer.concat([header, raw]);};
 const headers = () => ({host: 'localhost', origin: 'http://localhost', cookie: 'reverie_owner=' + token});
-const post = (kind: string, payload: unknown, extra = {}) => app.inject({method: 'POST',
+const post = (kind: string, payload: InjectOptions['payload'], extra = {}) => app.inject({method: 'POST',
   url: '/api/company/resources/' + kind, headers: {...headers(), ...extra}, payload});
 async function until<T>(action: () => Promise<T>, complete: (value: T) => boolean): Promise<T> {
   const end = Date.now() + 12_000;
@@ -62,6 +65,7 @@ beforeEach(async () => {
   sessions = new Map(); options = new Map(); peers = new Set(); verbs = []; handoffs = []; candidateCommands = [];
   rejectAt = undefined; nativeSettled = false;
   occupyCandidate = false; composerBodies = new Map(); handoffScreens = []; handoffMuxCalls = [];
+  candidatePaneState = 'live'; paneReads = [];
   // Harmless OWN child supplies a real start identity for the existing normal
   // process-survivor checks. Only this exact fixture child is ever terminated.
   child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {stdio: 'ignore'});
@@ -69,6 +73,16 @@ beforeEach(async () => {
   const mux = new Proxy({backend: 'tmux',
     getSession: (id: string) => options.get(id),
     isPaneDead: (name: string) => ![...options.values()].some(row => row.muxName === name),
+    readPaneLiveness: async (name: string): Promise<PaneLiveness> => {
+      paneReads.push(name);
+      const rows = [...options.values()].filter(row => row.muxName === name);
+      if (!rows.length) return {state: 'missing'};
+      if (rows.length !== 1) return {state: 'ambiguous'};
+      const row = rows[0];
+      if (!Number.isSafeInteger(row.pid) || row.pid <= 0) return {state: 'unreadable'};
+      if (row.sessionId === draft.targetSid && candidatePaneState !== 'live') return {state: candidatePaneState};
+      return {state: 'live', pid: row.pid};
+    },
     createSession: async (value: CreateSessionOptions) => {
       expect(verbs).toContain('source-stop');
       expect(child.exitCode !== null || child.signalCode !== null).toBe(true);
@@ -77,8 +91,8 @@ beforeEach(async () => {
       const command = buildSpawnCommand(value);
       candidateCommands.push(workerLaunchCommand(command, value.workingDir, value.sessionId, false, value.workerResourceLaunch));
       const row = {sessionId: value.sessionId, muxName: 'fixture-' + value.sessionId.slice(0,8), pid: 654,
-        createdAt: Date.now(), workingDir: value.workingDir, mode: value.mode, attached: false};
-      value.onProviderDispatch?.();
+        createdAt: Date.now(), workingDir: value.workingDir, mode: value.mode, owner: value.owner, attached: false};
+      await acknowledgeMuxFixture(value);
       options.set(value.sessionId, row); return row;
     },
     capturePaneText: (name: string) => {
@@ -334,7 +348,7 @@ it('runs normal metadata, explicit source stop, Session readiness, handoff and p
   const applied = await post('apply', {previewId: preview.draftId, handoff: 'Resume the preserved work and inspect its checkpoint.'});
   expect(applied.statusCode).toBe(200);
   const record = await until(async () => (await post('result', {operationId: draft.operationId})).json().data as PlanMoveRecord,
-    value => ['completed','recovery-required'].includes(value?.phase));
+    value => ['completed','recovery-required','failed'].includes(value?.phase));
   expect(record.phase, record.error).toBe('completed');
   expect(record).toMatchObject({blocksFurtherChanges: false});
   expect(verbs).toEqual(['draft','claim','publication','prepare','source-stop','start','verify','finalize']);
@@ -362,6 +376,30 @@ it('retains native recovery without typing over a candidate owner draft or reach
   const before = [...verbs];
   expect((await post('apply', {previewId: preview.draftId, handoff: 'Retry'})).statusCode).toBe(503);
   expect(verbs).toEqual(before);
+}, 20_000);
+
+it.each(['dead', 'unreadable'] as const)('retains an actually reported %s candidate pane without handoff, verification or replay', async state => {
+  candidatePaneState = state;
+  const preview = (await post('preview', {employeeId: eid, memoryMiB: 3072})).json().data;
+  expect((await post('apply', {previewId: preview.draftId, handoff: 'Keep the original handoff unissued.'})).statusCode).toBe(200);
+  const record = await until(async () => (await post('result', {operationId: draft.operationId})).json().data as PlanMoveRecord,
+    value => value?.phase === 'recovery-required');
+  expect(record).toMatchObject({phase: 'recovery-required', blocksFurtherChanges: true,
+    sourceStopRequested: true, sourceCleanupVerified: true});
+  expect(record.error).toContain('Provider launch outcome is unconfirmed');
+  const candidate = sessions.get(String(draft.targetSid));
+  const registered = options.get(String(draft.targetSid));
+  expect(candidate).toBeDefined(); expect(registered).toBeDefined();
+  expect(candidate!.providerDispatchHeld).toBe(true);
+  expect(paneReads).toContain(registered!.muxName);
+  expect(company.registeredEmployees()[0].sessionId).toBe(draft.targetSid);
+  expect(handoffMuxCalls).toEqual([]); expect(handoffs).toEqual([]); expect(handoffScreens).toEqual([]);
+  expect(verbs.filter(verb => verb !== 'completion')).toEqual(['draft','claim','publication','prepare','source-stop','start']);
+  expect(nativeSettled).toBe(false);
+  const before = [...verbs];
+  expect((await post('apply', {previewId: preview.draftId, handoff: 'Retry must not issue.'})).statusCode).toBe(503);
+  expect(verbs).toEqual(before);
+  expect(candidateCommands).toHaveLength(1);
 }, 20_000);
 
 it.each(['verify','finalize'])('a host %s refusal retains durable recovery and never uses generic candidate cleanup', async fault => {
@@ -450,7 +488,7 @@ it('the real profile keeps a lost Apply reply fenced and discovers its server re
       rooms: [room('office', 'Office', [member(source.id, 'Worker')])], company: data});
     screens.push(h);
     const previous = h.app._chatApi.bind(h.app);
-    h.app._chatApi = async (url: string, opts: {body?: unknown}) => {
+    h.app._chatApi = async (url: string, opts: {body?: InjectOptions['payload']}) => {
       if (url === '/api/company') return {ok: true, data};
       if (url === '/api/chatrooms/phone-status') return {ok: true, data: {self: 'owner', canSetOwn: true}};
       if (url === '/api/company/hire-options') return {ok: true, data: {sources: [], harnesses: []}};

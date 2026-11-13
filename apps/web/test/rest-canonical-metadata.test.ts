@@ -30,6 +30,9 @@ vi.mock('../src/session.js', () => ({
     getCustomModelForPersist() {
       return undefined;
     }
+    toPersistedState() {
+      return this.toState();
+    }
     toState() {
       return { id: this.id, owner: this.owner, status: 'stopped', pid: null };
     }

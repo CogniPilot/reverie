@@ -121,11 +121,11 @@ describe('company identities and genuine research lifecycle', () => {
     const first = await hire();
     const original = sessions.get(first.sessionId)!;
     sessions.delete(first.sessionId);
-    try { await service.retire(first.id, undefined); }
+    try { await service.retire(first.id, undefined, () => {}); }
     finally { sessions.set(first.sessionId, original); }
     await service.hire({ name: 'Ábe', icon: 'A', position: 'Engineer', expertise: ['systems'],
       sessionId: 'parent-agent', researchEnabled: false });
-    await expect(service.restore(first.id, undefined)).rejects.toMatchObject({ status: 409 });
+    await expect(service.restore(first.id, undefined, () => {})).rejects.toMatchObject({ status: 409 });
     expect(store.snapshot().retired[0].id).toBe(first.id);
   });
 
@@ -140,13 +140,13 @@ describe('company identities and genuine research lifecycle', () => {
   it('preserves other grants when changing a single permission through the service', async () => {
     const employee = await hire();
     expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });
-    await service.update(employee.id, undefined, { permissions: { moveOwnPlan: true, manageBoard: true, manageGoals: true } });
-    await service.update(employee.id, undefined, { permissions: { managePlans: true } });
+    await service.update(employee.id, undefined, { permissions: { moveOwnPlan: true, manageBoard: true, manageGoals: true } }, () => {});
+    await service.update(employee.id, undefined, { permissions: { managePlans: true } }, () => {});
     expect(store.snapshot().employees[0].permissions).toEqual({
       recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: true, manageBoard: true, manageGoals: true,
     });
-    await service.update(employee.id, undefined, { permissions: { recoverEmployees: true } });
-    await service.update(employee.id, undefined, { permissions: { managePlans: false } });
+    await service.update(employee.id, undefined, { permissions: { recoverEmployees: true } }, () => {});
+    await service.update(employee.id, undefined, { permissions: { managePlans: false } }, () => {});
     const reloaded = new CompanyStore(store.file); await reloaded.init();
     expect(reloaded.snapshot().employees[0].permissions).toEqual({
       recoverEmployees: true, manageOffice: false, moveOwnPlan: true, managePlans: false, manageBoard: true, manageGoals: true,
@@ -215,7 +215,7 @@ describe('company identities and genuine research lifecycle', () => {
     });
     service = new CompanyService(store, { getSession: (id) => sessions.get(id), stopSession,
       chatrooms: { rooms: () => rooms.list(), room: (id) => rooms.get(id), addMember: (id, sessionId, options) => rooms.addMember(id, sessionId, options).member }, research: backend });
-    await service.retire(employee.id, undefined);
+    await service.retire(employee.id, undefined, () => {});
     expect(stopSession).toHaveBeenCalledWith(employee.sessionId);
     expect(store.snapshot().memories[0].text).toBe('Keep this');
     expect(store.snapshot().retired[0].id).toBe(employee.id);
@@ -369,13 +369,13 @@ describe('company identities and genuine research lifecycle', () => {
     rooms.addMember(other.id, 'alice-1');
     rooms.post(lounge.id, { kind: 'agent', sessionId: 'alice-1', name: 'Alice' }, 'Morning, all');
 
-    await expect(service.retire(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    await expect(service.retire(alice.id, undefined, () => {})).rejects.toMatchObject({ status: 409 });
     expect(service.view().employees.map((e) => e.id)).toContain(alice.id);
-    await expect(service.retire('nobody', undefined)).rejects.toMatchObject({ status: 404 });
-    await expect(service.retire(alice.id, 'another-owner')).rejects.toMatchObject({ status: 404 });
+    await expect(service.retire('nobody', undefined, () => {})).rejects.toMatchObject({ status: 404 });
+    await expect(service.retire(alice.id, 'another-owner', () => {})).rejects.toMatchObject({ status: 404 });
 
     sessions.delete('alice-1');
-    const { employee, rooms: left, failed } = await service.retire(alice.id, undefined);
+    const { employee, rooms: left, failed } = await service.retire(alice.id, undefined, () => {});
     expect(employee).toMatchObject({ id: alice.id, sessionId: 'alice-1', name: 'Alice', retiredAt: night });
     expect(left).toEqual([lounge.id]);
     expect(failed).toEqual([]);
@@ -395,15 +395,15 @@ describe('company identities and genuine research lifecycle', () => {
 
     // A second call is harmless: nothing left to remove, the record stays retired once.
     removeMember.mockClear();
-    expect((await service.retire(alice.id, undefined)).rooms).toEqual([]);
+    expect((await service.retire(alice.id, undefined, () => {})).rooms).toEqual([]);
     expect(removeMember).not.toHaveBeenCalledWith(lounge.id, 'alice-1');
     expect(store.snapshot().retired).toHaveLength(1);
 
-    const back = await service.restore(alice.id, undefined);
+    const back = await service.restore(alice.id, undefined, () => {});
     expect(back).not.toHaveProperty('retiredAt');
     expect(service.view().employees.map((e) => e.id)).toContain(alice.id);
     expect(service.view().retired).toEqual([]);
-    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 404 });
+    await expect(service.restore(alice.id, undefined, () => {})).rejects.toMatchObject({ status: 404 });
   });
 
   it('reports a room it could not leave and retries it on the next call', async () => {
@@ -434,10 +434,10 @@ describe('company identities and genuine research lifecycle', () => {
     const lounge = rooms.create('Lounge', undefined);
     rooms.addMember(lounge.id, 'alice-1');
     sessions.delete('alice-1');
-    expect(await service.retire(alice.id, undefined)).toMatchObject({ rooms: [], failed: [lounge.id] });
+    expect(await service.retire(alice.id, undefined, () => {})).toMatchObject({ rooms: [], failed: [lounge.id] });
     expect(service.view().employees.map((e) => e.id)).not.toContain(alice.id);
     refuse = false;
-    expect(await service.retire(alice.id, undefined)).toMatchObject({ rooms: [lounge.id], failed: [] });
+    expect(await service.retire(alice.id, undefined, () => {})).toMatchObject({ rooms: [lounge.id], failed: [] });
     expect(rooms.get(lounge.id)?.members.map((m) => m.sessionId)).not.toContain('alice-1');
   });
 
@@ -453,7 +453,7 @@ describe('company identities and genuine research lifecycle', () => {
       researchEnabled: false,
     });
     sessions.delete('alice-1');
-    await service.retire(alice.id, undefined);
+    await service.retire(alice.id, undefined, () => {});
     await service.hire({
       name: 'alice',
       icon: '🌱',
@@ -462,7 +462,7 @@ describe('company identities and genuine research lifecycle', () => {
       sessionId: 'alice-2',
       researchEnabled: false,
     });
-    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    await expect(service.restore(alice.id, undefined, () => {})).rejects.toMatchObject({ status: 409 });
     expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
   });
 
@@ -477,7 +477,7 @@ describe('company identities and genuine research lifecycle', () => {
       researchEnabled: false,
     });
     sessions.delete('alice-1');
-    await service.retire(alice.id, undefined);
+    await service.retire(alice.id, undefined, () => {});
     sessions.set('alice-1', { id: 'alice-1', name: 'Nora', owner: undefined });
     await service.hire({
       name: 'Nora',
@@ -487,7 +487,7 @@ describe('company identities and genuine research lifecycle', () => {
       sessionId: 'alice-1',
       researchEnabled: false,
     });
-    await expect(service.restore(alice.id, undefined)).rejects.toMatchObject({ status: 409 });
+    await expect(service.restore(alice.id, undefined, () => {})).rejects.toMatchObject({ status: 409 });
     expect(service.view().retired.map((e) => e.id)).toEqual([alice.id]);
   });
 
@@ -783,7 +783,7 @@ describe('company identities and genuine research lifecycle', () => {
 
   it('observes another writer permission revocation and session rebind on the next read', async () => {
     const employee = await hire();
-    await service.update(employee.id, undefined, { permissions: { managePlans: true } });
+    await service.update(employee.id, undefined, { permissions: { managePlans: true } }, () => {});
     expect(service.employeeForSession(employee.sessionId, undefined)?.permissions.managePlans).toBe(true);
     const other = new CompanyStore(store.file);
     await other.init();

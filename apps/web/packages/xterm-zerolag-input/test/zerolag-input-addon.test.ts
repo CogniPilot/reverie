@@ -28,6 +28,262 @@ function tracked(lines?: string[], promptChar?: string) {
 }
 
 describe('ZerolagInputAddon', () => {
+  it('distinguishes equal draft bytes after erase/retype and composition ownership changes', () => {
+    const { addon } = tracked();
+    addon.appendText('same draft');
+    const original = addon.draftRevision;
+    addon.clear();
+    addon.appendText('same draft');
+    expect(addon.pendingText).toBe('same draft');
+    expect(addon.draftRevision).toBeGreaterThan(original);
+    const replaced = addon.draftRevision;
+    addon.setComposition('new provisional intent');
+    addon.setComposition('');
+    expect(addon.pendingText).toBe('same draft');
+    expect(addon.draftRevision).toBeGreaterThan(replaced);
+    expect(addon.draftRevision).toBe(addon.draftRevision);
+  });
+
+  describe('editor-owned draft receipts', () => {
+    it('claims original characters once across consecutive Enter gestures', () => {
+      const { addon } = tracked();
+      addon.appendText('original');
+      const first = addon.claimPendingDraft(),
+        second = addon.claimPendingDraft();
+      expect(first.text).toBe('original');
+      expect(second.text).toBe('');
+      expect(addon.beginDraftReceipt(second)).toBe(false);
+      expect(addon.beginDraftReceipt(first)).toBe(true);
+      expect(addon.beginDraftReceipt(first)).toBe(false);
+      expect(addon.settleDraftReceipt(first, true)).toBe(true);
+      expect(addon.beginDraftReceipt(second)).toBe(true);
+      expect(addon.settleDraftReceipt(second, true)).toBe(true);
+      expect(addon.pendingText).toBe('');
+    });
+
+    it('consumes A only while appended B remains reserved for its own later Enter', () => {
+      const { addon } = tracked();
+      addon.appendText('A😀');
+      const first = addon.claimPendingDraft();
+      expect(addon.beginDraftReceipt(first)).toBe(true);
+      addon.appendText('B😺');
+      const second = addon.claimPendingDraft();
+      expect(second.text).toBe('B😺');
+      expect(addon.settleDraftReceipt(first, true)).toBe(true);
+      expect(addon.pendingText).toBe('B😺');
+      expect(addon.beginDraftReceipt(second)).toBe(true);
+      addon.settleDraftReceipt(second, true);
+      expect(addon.pendingText).toBe('');
+    });
+
+    it('never sends a dependent B after its original A was refused', () => {
+      const { addon } = tracked();
+      addon.appendText('A');
+      const first = addon.claimPendingDraft();
+      expect(addon.beginDraftReceipt(first)).toBe(true);
+      addon.appendText('B');
+      const second = addon.claimPendingDraft();
+      addon.settleDraftReceipt(first, false);
+      expect(addon.beginDraftReceipt(second)).toBe(false);
+      addon.settleDraftReceipt(second, false);
+      expect(addon.pendingText).toBe('AB');
+      expect(addon.claimPendingDraft().text).toBe('AB');
+    });
+
+    it('acceptance cannot consume equal bytes deleted and retyped after dispatch', () => {
+      const { addon } = tracked();
+      addon.appendText('😀');
+      const first = addon.claimPendingDraft();
+      expect(addon.beginDraftReceipt(first)).toBe(true);
+      addon.removeChar();
+      expect(addon.pendingText).toBe('');
+      addon.appendText('😀');
+      addon.settleDraftReceipt(first, true);
+      expect(addon.pendingText).toBe('😀');
+      expect(addon.claimPendingDraft().text).toBe('😀');
+    });
+
+    it('a deleted original unit invalidates a not-yet-dispatched claim', () => {
+      const { addon } = tracked();
+      addon.appendText('old');
+      const receipt = addon.claimPendingDraft();
+      addon.removeChar();
+      addon.appendText('d');
+      expect(addon.beginDraftReceipt(receipt)).toBe(false);
+      addon.settleDraftReceipt(receipt, false);
+      expect(addon.pendingText).toBe('old');
+    });
+
+    it('an accepted original receipt cannot clear a new editor incarnation', () => {
+      const { addon } = tracked();
+      addon.appendText('same');
+      const receipt = addon.claimPendingDraft();
+      addon.beginDraftReceipt(receipt);
+      addon.clear();
+      addon.appendText('same');
+      expect(addon.settleDraftReceipt(receipt, true)).toBe(true);
+      expect(addon.pendingText).toBe('same');
+    });
+
+    it('rejects foreign, cloned and already settled receipts', () => {
+      const { addon } = tracked(),
+        other = tracked().addon;
+      addon.appendText('original');
+      const receipt = addon.claimPendingDraft();
+      expect(other.recoverDraftText(receipt)).toBeNull();
+      expect(addon.recoverDraftText({ ...receipt })).toBeNull();
+      expect(addon.recoverDraftText(receipt)).toBe('original');
+      expect(other.beginDraftReceipt(receipt)).toBe(false);
+      expect(addon.beginDraftReceipt({ ...receipt })).toBe(false);
+      expect(addon.settleDraftReceipt(receipt, true)).toBe(false);
+      expect(addon.beginDraftReceipt(receipt)).toBe(true);
+      addon.settleDraftReceipt(receipt, true);
+      expect(addon.settleDraftReceipt(receipt, true)).toBe(false);
+      expect(addon.recoverDraftText(receipt)).toBeNull();
+    });
+
+    it('consumes only an original flushed Unicode character while new pending text survives', () => {
+      const { addon } = tracked();
+      addon.setFlushed(2, '😀');
+      const receipt = addon.claimFlushedDraft(true)!;
+      expect(receipt.text).toBe('😀');
+      expect(addon.beginDraftReceipt(receipt)).toBe(true);
+      addon.appendText('new draft');
+      addon.settleDraftReceipt(receipt, true);
+      expect(addon.getFlushed()).toEqual({ count: 0, text: '' });
+      expect(addon.pendingText).toBe('new draft');
+    });
+
+    it('reserves separate original flushed characters for consecutive backspaces', () => {
+      const { addon } = tracked();
+      addon.setFlushed(2, 'AB');
+      const first = addon.claimFlushedDraft(true)!,
+        second = addon.claimFlushedDraft(true)!;
+      expect([first.text, second.text]).toEqual(['B', 'A']);
+      addon.beginDraftReceipt(first);
+      addon.settleDraftReceipt(first, true);
+      expect(addon.getFlushed().text).toBe('A');
+      expect(addon.beginDraftReceipt(second)).toBe(true);
+      addon.settleDraftReceipt(second, true);
+      expect(addon.getFlushed()).toEqual({ count: 0, text: '' });
+    });
+
+    it('an accepted old flushed receipt never consumes an equal-byte replacement marker', () => {
+      const { addon } = tracked();
+      addon.setFlushed(1, 'A');
+      const receipt = addon.claimFlushedDraft(true)!;
+      addon.beginDraftReceipt(receipt);
+      addon.setFlushed(1, 'A');
+      addon.settleDraftReceipt(receipt, true);
+      expect(addon.getFlushed()).toEqual({ count: 1, text: 'A' });
+    });
+
+    it('transfers accepted pending identities into flushed tracking without replacing older marker ownership', () => {
+      const { addon } = tracked();
+      addon.setFlushed(3, 'old');
+      addon.appendText('A');
+      const backspace = addon.claimFlushedDraft(true)!,
+        pending = addon.claimPendingDraft();
+      addon.beginDraftReceipt(backspace);
+      addon.beginDraftReceipt(pending);
+      addon.settleDraftReceipt(pending, true, 'flushed');
+      expect(addon.getFlushed()).toEqual({ count: 4, text: 'oldA' });
+      addon.settleDraftReceipt(backspace, true);
+      expect(addon.getFlushed()).toEqual({ count: 3, text: 'olA' });
+    });
+
+    it('refuses malformed legacy marker counts before creating a deletion claim', () => {
+      const { addon } = tracked();
+      addon.setFlushed(4, 'bad');
+      expect(addon.claimFlushedDraft()).toBeNull();
+      addon.appendText('pending');
+      const pending = addon.claimPendingDraft();
+      expect(addon.beginDraftReceipt(pending)).toBe(false);
+      addon.settleDraftReceipt(pending, false);
+      expect(addon.pendingText).toBe('pending');
+      expect(addon.getFlushed()).toEqual({ count: 4, text: 'bad' });
+    });
+
+    it('marker reset and detection rollback invalidate the original deletion identities', () => {
+      const { addon } = tracked();
+      for (const reset of [() => addon.clearFlushed(), () => addon.undoDetection()]) {
+        addon.setFlushed(1, 'A');
+        const receipt = addon.claimFlushedDraft()!;
+        reset();
+        expect(addon.beginDraftReceipt(receipt)).toBe(false);
+        addon.settleDraftReceipt(receipt, false);
+      }
+    });
+
+    it('waits for an original flush and consumes only its causally produced marker on Enter', async () => {
+      const { addon } = tracked();
+      addon.appendText('A');
+      const flush = addon.claimPendingDraft();
+      addon.beginDraftReceipt(flush);
+      const enter = addon.claimPendingDraft();
+      addon.appendText('B');
+      let resolved = false;
+      const waiting = addon.waitDraftReceipt(enter).then((value) => {
+        resolved = true;
+        return value;
+      });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+      addon.settleDraftReceipt(flush, true, 'flushed');
+      expect(await waiting).toBe(true);
+      expect(addon.getFlushed().text).toBe('A');
+      expect(addon.beginDraftReceipt(enter)).toBe(true);
+      addon.settleDraftReceipt(enter, true);
+      expect(addon.pendingText).toBe('B');
+      expect(addon.getFlushed()).toEqual({ count: 0, text: '' });
+    });
+
+    it('a causal predecessor marker never authorizes clearing a replacement marker', async () => {
+      const { addon } = tracked();
+      addon.appendText('A');
+      const flush = addon.claimPendingDraft();
+      addon.beginDraftReceipt(flush);
+      const enter = addon.claimPendingDraft();
+      addon.settleDraftReceipt(flush, true, 'flushed');
+      expect(await addon.waitDraftReceipt(enter)).toBe(true);
+      addon.beginDraftReceipt(enter);
+      addon.setFlushed(1, 'Y');
+      addon.settleDraftReceipt(enter, true);
+      expect(addon.getFlushed()).toEqual({ count: 1, text: 'Y' });
+    });
+
+    it('retains the full original transfer after accepted erasure and a later edit', () => {
+      const { addon } = tracked();
+      addon.setFlushed(1, 'X');
+      addon.appendText('A');
+      const pending = addon.claimPendingDraft(),
+        erased = addon.claimFlushedDraft()!;
+      expect(addon.bindDraftTransfer(pending, erased)).toBe(true);
+      expect(addon.bindDraftTransfer({ ...pending }, erased)).toBe(false);
+      addon.beginDraftReceipt(pending);
+      addon.beginDraftReceipt(erased);
+      addon.appendText('B');
+      addon.settleDraftReceipt(erased, true);
+      addon.settleDraftReceipt(pending, false);
+      expect(addon.pendingText).toBe('AB');
+      expect(addon.getFlushed().text).toBe('');
+      expect(addon.recoverDraftText(pending, true)).toBe('XA');
+      expect(addon.recoverDraftText({ ...pending }, true)).toBeNull();
+    });
+
+    it('preserves newer provisional and flushed state after original acceptance', () => {
+      const { addon } = tracked();
+      addon.appendText('original');
+      const receipt = addon.claimPendingDraft();
+      addon.beginDraftReceipt(receipt);
+      addon.setComposition('新');
+      addon.setFlushed(1, 'B');
+      addon.settleDraftReceipt(receipt, true);
+      expect(addon.composition).toBe('新');
+      expect(addon.getFlushed()).toEqual({ count: 1, text: 'B' });
+    });
+  });
+
   describe('lifecycle', () => {
     it('creates overlay element in .xterm-screen', () => {
       const { addon, mock } = tracked();

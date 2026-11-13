@@ -1,3 +1,6 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { randomUUID } from 'node:crypto';
+import { StateStore } from '../src/state-store.js';
 /** Owned metadata, inert mux and real API/auth controls; no provider/account access. */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -22,6 +25,7 @@ import * as registry from '../src/config/cli-registry/registry.js';
 import * as remoteHosts from '../src/remote-hosts.js';
 import { buildRemoteLaunchCommand } from '../src/tmux-manager.js';
 import type { MuxSession, TerminalMultiplexer } from '../src/mux-interface.js';
+import type { SessionDocker } from '../src/types.js';
 const originalGetCli = registry.getCli;
 const SID = '00000008-0008-4000-8000-000000000008';
 const TAIL = '00000009-0009-4000-8000-000000000009';
@@ -29,19 +33,31 @@ const SEED = '00000010-0010-4000-8000-000000000010';
 const AUTH = 'Basic ' + Buffer.from('admin:owned-hook-fixture').toString('base64');
 let app: FastifyInstance, ctx: ReturnType<typeof createMockRouteContext>, config: string, cwd: string;
 let sessions: Session[];
+let publicationStore: StateStore;
 let generation: string | undefined;
 let authState: ReturnType<typeof registerAuthMiddleware>;
 function mux(dead = true, onRespawn?: () => Promise<void>) {
+  const registered = new Map<string, MuxSession>();
   return { isAvailable: () => true, muxSessionExists: () => true, isPaneDead: () => dead,
+    getSession: (id: string) => registered.get(id),
+    registerSession: (subject: MuxSession) => { registered.set(subject.sessionId, subject); },
     setAttached: () => {}, killSession: () => true,
-    respawnPane: vi.fn(async (options) => {options.onProviderDispatch?.(); generation = options.envOverrides?.REVERIE_HOOK_GENERATION; await onRespawn?.(); return 4242;}),
-    createSession: vi.fn(async (options) => {options.onProviderDispatch?.(); generation = options.envOverrides?.REVERIE_HOOK_GENERATION; return {muxName: 'owned-fixture', sessionId: SID};}),
+    respawnPane: vi.fn(async (options) => {await acknowledgeMuxFixture(options); generation = options.envOverrides?.REVERIE_HOOK_GENERATION; await onRespawn?.(); return 4242;}),
+    createSession: vi.fn(async (options) => {await acknowledgeMuxFixture(options); generation = options.envOverrides?.REVERIE_HOOK_GENERATION;
+      const subject: MuxSession = {muxName: 'owned-fixture', sessionId: options.sessionId, owner: options.owner,
+        remote: options.remote, docker: options.docker, mode: options.mode, workingDir: options.workingDir,
+        pid: 4242, createdAt: Date.now(), attached: false};
+      registered.set(subject.sessionId, subject); return subject;}),
   } as unknown as TerminalMultiplexer;
 }
-async function session(dead = true, extra = {}, onRespawn?: () => Promise<void>) {
+async function session(dead = true, extra: Partial<ConstructorParameters<typeof Session>[0]> = {}, onRespawn?: () => Promise<void>) {
   const workspaceHookPreparation = await prepareWorkspaceHooks(cwd, 'install', {scaffold: false, enabled: async () => true});
-  const s = new Session({workspaceHookPreparation, id: SID, workingDir: cwd, mode: 'claude', useMux: true, mux: mux(dead, onRespawn),
-    muxSession: { muxName: 'owned-fixture', sessionId: SID } as MuxSession,
+  const selectedMux = extra.mux ?? mux(dead, onRespawn);
+  const subject = { muxName: 'owned-fixture', sessionId: SID, owner: extra.owner, remote: extra.remote, docker: extra.docker,
+    workingDir: cwd, mode: extra.mode ?? 'claude' } as MuxSession;
+  selectedMux.registerSession(subject);
+  const s = new Session({publicationStore, workspaceHookPreparation, id: SID, workingDir: cwd, mode: 'claude', useMux: true, mux: selectedMux,
+    muxSession: subject,
     envOverrides: { CLAUDE_CONFIG_DIR: config }, resumeSessionId: SEED, claudeSessionChain: [TAIL], ...extra });
   sessions.push(s); ctx.sessions.clear(); ctx.sessions.set(SID, s as never); return s;
 }
@@ -51,6 +67,11 @@ function transcript(id: string, text: string) {
   writeFileSync(path, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n');
   return path;
 }
+function dockerFixture(): SessionDocker {
+  return {hostId: 'synthetic-docker', label: 'Synthetic', engine: 'docker', image: 'synthetic',
+    containerName: 'owned-container', hostWorkspacePath: cwd, containerWorkdir: '/work', network: 'none',
+    hooksEnabled: false, mountCredentials: false, resumeOnStart: false};
+}
 async function hook(id = SEED, secret?: string) {
   return app.inject({ method: 'POST', url: '/api/hook-event',
     headers: {...(secret === undefined ? {} : {[HOOK_SECRET_HEADER]: secret}),
@@ -58,6 +79,7 @@ async function hook(id = SEED, secret?: string) {
     payload: { event: 'prompt_submitted', sessionId: SID, data: { session_id: id, hook_event_name: 'UserPromptSubmit' } } });
 }
 beforeEach(async () => {
+  publicationStore = new StateStore(join(homedir(), 'launch-intent-' + randomUUID() + '.json'));
   process.env.REVERIE_PASSWORD = 'owned-hook-fixture'; process.env.REVERIE_USERNAME = 'admin';
   config = join(homedir(), '.claude'); cwd = join(homedir(), 'owned-work'); mkdirSync(cwd, { recursive: true });
   vi.spyOn(remoteHosts, 'probeRemoteCliVersion').mockResolvedValue('owned-fixture-version');
@@ -108,27 +130,35 @@ describe('actual runtime selection remains unknown until its existing authentica
   it('does not persist a guessed Docker launch seed; the actual hook updates the existing case', async () => {
     const dir = getDataDir();
     await writeDockerCases(dir, [{ name: 'owned-fixture', container: 'owned-container', lastClaudeSessionId: 'owned-previous-case-seed' } as never]);
-    const s = await session(true, { docker: { containerName: 'owned-container', hostWorkspacePath: cwd, workspacePath: cwd, hooksEnabled: false } });
+    const s = await session(true, { docker: dockerFixture() });
     await s.startInteractive(); await persistDockerLaunchConversation(s, dir);
     expect((await readDockerCases(dir))[0].lastClaudeSessionId).toBe('owned-previous-case-seed');
     await hook(SEED, getHookSecret());
     expect(s.claudeSessionIdPending).toBe(true);
     expect((await readDockerCases(dir))[0].lastClaudeSessionId).toBe('owned-previous-case-seed');
-    // A separately restored unchanged provider retains the legacy non-wait report contract.
+    // Recreating this Session cannot turn its durable uncertain intent into a
+    // legacy hook grant or an observed Docker conversation.
     const attached = await session(false, {docker: s.docker, claudeSessionIdPending: true});
     await attached.startInteractive();
     await hook(SEED, getHookSecret());
-    // The existing hook route intentionally persists the case asynchronously.
+    expect(attached.providerDispatchHeld).toBe(true);
+    expect((await readDockerCases(dir))[0].lastClaudeSessionId).toBe('owned-previous-case-seed');
+  });
+  it('persists a first-hand Docker conversation from an unchanged legacy attachment', async () => {
+    const dir = getDataDir();
+    await writeDockerCases(dir, [{name:'owned-fixture',container:'owned-container',lastClaudeSessionId:'owned-previous-case-seed'} as never]);
+    const attached = await session(false, {docker:dockerFixture(),claudeSessionIdPending:true});
+    await attached.startInteractive();
+    expect(attached.providerDispatchHeld).toBe(false);
+    await hook(SEED, getHookSecret());
     await vi.waitFor(async () => expect((await readDockerCases(dir))[0].lastClaudeSessionId).toBe(SEED));
   });
-  it('new or vanished mux sessions also withhold candidate attribution', async () => {
-    for (const vanished of [false, true]) {
+  it.each([false, true])('new or vanished mux sessions withhold candidate attribution (vanished=%s)', async vanished => {
       const m = mux();
       if (vanished) m.muxSessionExists = () => false;
       const s = await session(true, { mux: m, ...(vanished ? {} : { muxSession: undefined }) });
       await s.startInteractive(); expect(s.claudeSessionId).toBeNull(); expect(s.claudeSessionIdPending).toBe(true);
       await s.stop();
-    }
   });
   it('does not record pending resume intent as a newly observed account thread', async () => {
     const s = await session(); await s.startInteractive();
@@ -163,14 +193,17 @@ describe('actual runtime selection remains unknown until its existing authentica
     s.adoptClaudeSessionId(TAIL, { firstHand: true }); await s.startInteractive();
     expect(await s.restartCli()).toBe(true); expect(s.claudeSessionIdIsFirstHand).toBe(false); expect(s.claudeSessionIdPending).toBe(true);
   });
-  it('keeps non-Claude and explicitly legacy custom profile behavior', async () => {
-    const other = await session(true, { mode: 'codex', codexConfig: { resumeSessionId: SEED } });
-    await other.startInteractive(); expect(other.claudeSessionIdPending).toBe(false); expect(other.claudeSessionId).toBe(TAIL); // preexisting restored-chain semantics, no selector
-    vi.spyOn(registry, 'getCli').mockImplementation((id) => {
-      const entry = originalGetCli(id); return entry?.launch.resumeSelection ? { ...entry, launch: { ...entry.launch, resumeSelection: undefined } } : entry;
-    });
-    transcript(TAIL, 'legacy fixture'); const legacy = await session(); await legacy.startInteractive();
-    expect(legacy.claudeSessionIdPending).toBe(false); expect(legacy.claudeSessionId).toBe(TAIL);
+  it.each(['non-Claude', 'legacy-custom'] as const)('keeps %s profile behavior', async kind => {
+    if (kind === 'non-Claude') {
+      const other = await session(true, { mode: 'codex', codexConfig: { resumeSessionId: SEED } });
+      await other.startInteractive(); expect(other.claudeSessionIdPending).toBe(false); expect(other.claudeSessionId).toBe(TAIL);
+    } else {
+      vi.spyOn(registry, 'getCli').mockImplementation((id) => {
+        const entry = originalGetCli(id); return entry?.launch.resumeSelection ? { ...entry, launch: { ...entry.launch, resumeSelection: undefined } } : entry;
+      });
+      transcript(TAIL, 'legacy fixture'); const legacy = await session(); await legacy.startInteractive();
+      expect(legacy.claudeSessionIdPending).toBe(false); expect(legacy.claudeSessionId).toBe(TAIL);
+    }
   });
   it('does not turn archived aliases or same-directory history into a pending current conversation', () => {
     const inputs = { persisted: [{ id: SID, name: 'owned', workingDir: cwd, claudeSessionId: SEED }],

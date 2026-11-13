@@ -2137,36 +2137,51 @@ Object.assign(ReverieApp.prototype, {
 
   /** Send Ctrl+C to the active session to stop the current operation.
    *  Requires double-tap: first tap turns button amber, second tap within 2s sends Ctrl+C. */
-  stopClaude() {
-    if (!this.activeSessionId) return;
+  async stopClaude() {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) return false;
     const btn = document.querySelector('.btn-toolbar.btn-stop');
-    if (!btn) return;
+    if (!btn) return false;
 
     if (this._stopConfirmTimer) {
       // Second tap — send Ctrl+C
       clearTimeout(this._stopConfirmTimer);
       this._stopConfirmTimer = null;
+      const confirmedSession = this._stopConfirmSessionId;
+      this._stopConfirmSessionId = null;
       btn.innerHTML = btn.dataset.origHtml;
       delete btn.dataset.origHtml;
       btn.classList.remove('confirming');
-      fetch(`/api/sessions/${this.activeSessionId}/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: '\x03' })
-      });
+      if (confirmedSession !== sessionId) {
+        this.showToast?.('Session changed. Confirm Stop again for the selected session.', 'warning');
+        return false;
+      }
+      try {
+        const accepted = await this._sendInputAsync(sessionId, '\x03', {useMux: false});
+        if (!accepted) this.showToast?.('Interrupt was not queued. Check browser input status.', 'warning');
+        return accepted;
+      } catch {
+        this.showToast?.('Interrupt queue outcome is unconfirmed. Check the terminal before trying again.', 'warning');
+        return false;
+      }
     } else {
       // First tap — enter confirm state
       btn.dataset.origHtml = btn.innerHTML;
       btn.textContent = 'Tap again';
       btn.classList.add('confirming');
-      this._stopConfirmTimer = setTimeout(() => {
+      this._stopConfirmSessionId = sessionId;
+      const timer = setTimeout(() => {
+        if (this._stopConfirmTimer !== timer) return;
         this._stopConfirmTimer = null;
+        this._stopConfirmSessionId = null;
         if (btn.dataset.origHtml) {
           btn.innerHTML = btn.dataset.origHtml;
           delete btn.dataset.origHtml;
         }
         btn.classList.remove('confirming');
       }, 2000);
+      this._stopConfirmTimer = timer;
+      return false;
     }
   },
 

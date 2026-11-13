@@ -30,9 +30,19 @@ describe('importsBrowserDriver', () => {
     fromImport('playwright-core').replace(/'/g, '"'),
     fromImport('@playwright/test'),
     fromImport('puppeteer'),
-    `import type { Page } from '${'playwright'}';`,
+    `import '${'playwright'}';`,
+    `import {type Page, chromium} from '${'playwright'}';`,
+    `export {chromium} from '${'playwright'}';`,
+    `import pw = require('${'playwright'}');`,
+    `module.require('${'playwright'}');`,
     `const { chromium } = require('${'playwright'}');`,
     `const pw = await import('${'playwright'}');`,
+    fromImport('play\\x77right'),
+    fromImport('play\\u0077right'),
+    fromImport('play\\u{77}right'),
+    fromImport('play\\wright'),
+    fromImport('play\\\nwright'),
+    `const pw = await import(\`${'playwright'}\`);`,
   ])('flags %s', (src) => {
     expect(importsBrowserDriver(src)).toBe(true);
   });
@@ -42,6 +52,13 @@ describe('importsBrowserDriver', () => {
     "// needs ms-playwright's cache dir\nconst dir = '.cache/ms-playwright';",
     fromImport('./playwright-helpers'),
     fromImport('playwright-extra-thing'),
+    `import type {Page} from '${'playwright'}';`,
+    `import {type Page, type Browser} from '${'playwright'}';`,
+    `export type {Page} from '${'playwright'}';`,
+    `export {type Page} from '${'playwright'}';`,
+    `type Page = import('${'playwright'}').Page;`,
+    `// ${fromImport('playwright')}`,
+    `const example = ${JSON.stringify(fromImport('playwright'))};`,
   ])('ignores %s', (src) => {
     expect(importsBrowserDriver(src)).toBe(false);
   });

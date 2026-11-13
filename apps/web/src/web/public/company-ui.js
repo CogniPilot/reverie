@@ -277,7 +277,7 @@ Object.assign(ReverieApp.prototype, {
           );
           ownerControls.append(
             button('Assign briefing coordinator', async () => {
-              await this._companyApi('/settings', 'PUT', { ...data.settings, coordinatorEmployeeId: employee.id });
+              await this._companyApi('/settings', 'PUT', { coordinatorEmployeeId: employee.id });
               await this._renderCompany();
             })
           );
@@ -392,7 +392,6 @@ Object.assign(ReverieApp.prototype, {
         ownerForm.append(
           button('Save owner record', async () => {
             await this._companyApi('/settings', 'PUT', {
-              ...data.settings,
               ownerName: ownerNameInput.value.trim(),
               ownerTitle: ownerTitleInput.value.trim(),
             });
@@ -419,7 +418,7 @@ Object.assign(ReverieApp.prototype, {
           button('Save timezone', async () => {
             const timeZone = zoneInput.value.trim();
             new Intl.DateTimeFormat('en-US', { timeZone });
-            await this._companyApi('/settings', 'PUT', { ...data.settings, timeZone });
+            await this._companyApi('/settings', 'PUT', { timeZone });
             globalThis.ReverieTime?.setTimeZone(timeZone);
             await this._renderCompany();
           })
@@ -451,7 +450,7 @@ Object.assign(ReverieApp.prototype, {
         settings.addEventListener('submit', (event) => event.preventDefault());
         settings.append(
           button('Save research schedule', async () => {
-            const changes = { ...data.settings, enabled: enabled.checked };
+            const changes = { enabled: enabled.checked };
             for (const [key, input] of Object.entries(controls))
               changes[key] = input.type === 'number' ? Number(input.value) : input.value;
             await this._companyApi('/settings', 'PUT', changes);

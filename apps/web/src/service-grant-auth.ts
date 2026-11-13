@@ -19,6 +19,7 @@ import {
 } from './company-types.js';
 import type { GoalAuthentication } from './goal-access.js';
 import type { ResumeGrantLease } from './recovery-authority.js';
+import { EmployeeRecoveryApproval } from './employee-recovery-operation.js';
 
 export type ServicePurpose = string;
 export const SERVICE_ASSERTION_MAX_LIFETIME_MS = 10_000;
@@ -105,7 +106,7 @@ function inScope(grant: ServiceGrant, target: string, ports: ServiceGrantPorts, 
   if (scope !== 'employees') return false;
   return employeeCurrent(grant, target, ports);
 }
-function employeeCurrent(grant: ServiceGrant, target: string, ports: ServiceGrantPorts): boolean {
+function employeeCurrent(grant: ServiceGrant, target: string, ports: Pick<ServiceGrantPorts, 'binding'>): boolean {
   const granted = grant.employees.filter((e) => e.employeeId === target);
   if (granted.length !== 1) return false;
   const current = ports.binding(target);
@@ -156,14 +157,66 @@ export function signServiceAssertion(
 }
 
 export class ServiceGrantAuthentication {
+  readonly #issued = new WeakMap<object, number>();
   constructor(
     private readonly ports?: ServiceGrantPorts,
     /** The same deployment-configured purpose registry the owner issues grants under. */
-    private readonly purposes: ServicePurposes = DEFAULT_SERVICE_PURPOSES
+    private readonly purposes: ServicePurposes = DEFAULT_SERVICE_PURPOSES,
+    /** Retained binding is available only through the closed recovery method.
+     * Ordinary authentication always keeps its active-only reader. */
+    private readonly retainedScope?: {
+      readonly reconcilePurpose?: ServicePurpose;
+      readonly closeViewerPurpose?: ServicePurpose;
+      readonly binding: ServiceGrantPorts['binding'];
+    }
   ) {}
 
   /** context: an object whose own `assertion` property is the assertion text. Null on any doubt; never echoes input. */
   async authenticate(context: unknown, purpose: ServicePurpose): Promise<ServiceGrantLease | null> {
+    try {
+      return await this.#authenticate(context, purpose, false);
+    } catch {
+      return null;
+    }
+  }
+  /** Only a closed recovery selection may read a retained target. This is
+   * configured grant authentication, never ownership of a native parent/job. */
+  async authenticateRecovery(
+    context: unknown,
+    purpose: ServicePurpose,
+    input: EmployeeRecoveryApproval,
+    access: 'effect' | 'observe'
+  ): Promise<ServiceGrantLease | null> {
+    try {
+      void this.#issued;
+    } catch {
+      return null;
+    }
+    const parsed = EmployeeRecoveryApproval.safeParse(input);
+    if (!parsed.success || (access !== 'effect' && access !== 'observe')) return null;
+    const approval = parsed.data;
+    const reconcile = access === 'observe' || approval.action === 'reconcile-owned';
+    const component = !reconcile && approval.action === 'close-viewer' && approval.parentOperationId !== null;
+    if (
+      (reconcile && this.retainedScope?.reconcilePurpose !== purpose) ||
+      (component && this.retainedScope?.closeViewerPurpose !== purpose)
+    )
+      return null;
+    try {
+      return await this.#authenticate(context, purpose, reconcile || component);
+    } catch {
+      return null;
+    }
+  }
+  async authenticateRecoverySelection(context: unknown, purpose: ServicePurpose): Promise<ServiceGrantLease | null> {
+    try {
+      if (!this.#issued || this.retainedScope?.reconcilePurpose !== purpose) return null;
+      return await this.#authenticate(context, purpose, true);
+    } catch {
+      return null;
+    }
+  }
+  async #authenticate(context: unknown, purpose: ServicePurpose, retained: boolean): Promise<ServiceGrantLease | null> {
     try {
       const p = this.ports;
       if (!p || !servicePurposeScope(this.purposes, purpose) || !context || typeof context !== 'object') return null;
@@ -255,8 +308,16 @@ export class ServiceGrantAuthentication {
         exact(canonicalId, employeeId) &&
         exact(canonicalId, resourceId) &&
         scopeKind === 'employees+resources' &&
-        fenced(() => grant.resources.includes(resourceId) && employeeCurrent(grant, employeeId, p));
-      return Object.freeze({
+        fenced(
+          () =>
+            grant.resources.includes(resourceId) &&
+            employeeCurrent(
+              grant,
+              employeeId,
+              retained && this.retainedScope ? { binding: this.retainedScope.binding } : p
+            )
+        );
+      const lease = Object.freeze({
         kind: purpose,
         ownerId: grant.owner ?? '',
         principal: grant.principal,
@@ -266,9 +327,20 @@ export class ServiceGrantAuthentication {
         current,
         currentFor,
       });
+      this.#issued.set(lease, fields[8]);
+      return lease;
     } catch {
       return null;
     }
+  }
+
+  /** Denial-only proof that THIS actual authenticator issued the retained lease.
+   * A structural object/current callback cannot supply its original deadline.
+   */
+  leaseDeadline(lease: ServiceGrantLease): number {
+    const deadline = this.#issued.get(lease);
+    if (deadline === undefined) throw new Error('Original service authentication is unavailable');
+    return deadline;
   }
 
   /** Exact RecoveryAuthoritySources.authenticate adapter: only a RESUME_SERVICE grant can yield a lease. */
@@ -301,6 +373,8 @@ export function canonicalServiceGrantSource(options: CanonicalServiceGrantOption
 > & {
   /** Canonical data for a named publisher to select a record; never authority. */
   grantsFor(purpose: ServicePurpose): readonly ServiceGrant[];
+  /** No grant by itself; only configured reconcile-owned authentication uses it. */
+  retainedBinding(employeeId: string): ServiceEmployeeBinding | undefined;
 } {
   const snapshot = (): CompanyState => {
     const settle = (value: unknown) => {
@@ -312,7 +386,28 @@ export function canonicalServiceGrantSource(options: CanonicalServiceGrantOption
     return state;
   };
   const one = <T>(items: T[]): T | undefined => (items.length === 1 ? items[0] : undefined);
+  const binding = (employeeId: string, retained: boolean): ServiceEmployeeBinding | undefined => {
+    const state = snapshot(),
+      employee = one(state.employees.filter((e) => e.id === employeeId));
+    if (
+      !employee ||
+      employee.bindingMigration ||
+      (!retained && (employee.onVacation || employee.desiredRunning === false)) ||
+      !exact(session, employee.sessionId) ||
+      !Number.isSafeInteger(employee.sessionGeneration) ||
+      employee.sessionGeneration < 1 ||
+      state.employees.filter((e) => e.sessionId === employee.sessionId).length !== 1
+    )
+      return;
+    return Object.freeze({
+      owner: employee.owner,
+      employeeId: employee.id,
+      sessionId: employee.sessionId,
+      sessionGeneration: employee.sessionGeneration,
+    });
+  };
   return {
+    retainedBinding: (employeeId: string) => binding(employeeId, true),
     grantsFor: (purpose) => snapshot().serviceGrants.filter((grant) => grant.purpose === purpose),
     grant: (grantId) => one(snapshot().serviceGrants.filter((g) => g.id === grantId)),
     revoked: (grantId) => {
@@ -321,26 +416,6 @@ export function canonicalServiceGrantSource(options: CanonicalServiceGrantOption
       if (!grant) return undefined;
       return state.serviceGrantRevocations.some((r) => r.grantId === grantId && r.owner === grant.owner);
     },
-    binding: (employeeId) => {
-      const state = snapshot();
-      const employee = one(state.employees.filter((e) => e.id === employeeId));
-      if (
-        !employee ||
-        employee.bindingMigration ||
-        employee.onVacation ||
-        employee.desiredRunning === false ||
-        !exact(session, employee.sessionId) ||
-        !Number.isSafeInteger(employee.sessionGeneration) ||
-        employee.sessionGeneration < 1 ||
-        state.employees.filter((e) => e.sessionId === employee.sessionId).length !== 1
-      )
-        return undefined;
-      return Object.freeze({
-        owner: employee.owner,
-        employeeId: employee.id,
-        sessionId: employee.sessionId,
-        sessionGeneration: employee.sessionGeneration,
-      });
-    },
+    binding: (employeeId) => binding(employeeId, false),
   };
 }

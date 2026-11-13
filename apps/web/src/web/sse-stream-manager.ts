@@ -19,6 +19,8 @@ import type { FastifyReply } from 'fastify';
 import type { BackgroundTask } from '../session.js';
 import type { SessionOrderProjectionChange } from '../tab-layout-service.js';
 import type { AuthUser } from '../types.js';
+import type { OwnerEventReadAdmission } from '../owner-auth/policy.js';
+import type { AuthSessionRecord } from './ports/auth-port.js';
 import { CleanupManager, StaleExpirationMap } from '../utils/index.js';
 import { SseEvent } from './sse-events.js';
 import { sessionOrderPayloadFor } from './session-order-sse.js';
@@ -64,6 +66,30 @@ export interface SseRoutingHint {
   sessionScoped?: boolean;
 }
 
+/** Trusted internal authentication observation; never decoded from client-supplied principal data. */
+export type SseSubscriptionBinding =
+  | { readonly kind: 'unverified'; readonly identity?: Readonly<AuthUser> }
+  | { readonly kind: 'public'; readonly scope: object; readonly identity?: undefined }
+  | { readonly kind: 'owner'; readonly cookieDigest: string; readonly identity?: Readonly<AuthUser> }
+  | { readonly kind: 'basic'; readonly credentialFingerprint: string; readonly identity?: Readonly<AuthUser> }
+  | { readonly kind: 'browser'; readonly record: AuthSessionRecord; readonly identity?: Readonly<AuthUser> };
+function sameSubscriptionBinding(
+  original: SseSubscriptionBinding | undefined,
+  requester: SseSubscriptionBinding
+): boolean {
+  if (!original || !requester || original.kind === 'unverified' || requester.kind === 'unverified') return false;
+  if (
+    original.identity?.username !== requester.identity?.username ||
+    original.identity?.role !== requester.identity?.role
+  )
+    return false;
+  if (original.kind === 'public' && requester.kind === 'public') return original.scope === requester.scope;
+  if (original.kind === 'owner' && requester.kind === 'owner') return original.cookieDigest === requester.cookieDigest;
+  if (original.kind === 'basic' && requester.kind === 'basic')
+    return original.credentialFingerprint === requester.credentialFingerprint;
+  return original.kind === 'browser' && requester.kind === 'browser' && original.record === requester.record;
+}
+
 export class SseStreamManager {
   // ─── SSE Client Tracking ────────────────────────────────
   /**
@@ -74,14 +100,21 @@ export class SseStreamManager {
   private sseClients: Map<FastifyReply, Set<string> | null> = new Map();
   /** Optional client-supplied IDs → reply, for live filter updates without reconnecting */
   private sseClientsById: Map<string, FastifyReply> = new Map();
+  private sseSubscriptionBindings = new Map<FastifyReply, SseSubscriptionBinding>();
+  /** Selector freshness, separate from verified caller authority. */
+  private sseStreamNonces = new Map<FastifyReply, string>();
   /** Per-client identity (multi-user); absent for single-user clients → no filtering. */
   private sseClientIdentity: Map<FastifyReply, AuthUser> = new Map();
+  /** Original owner-policy continuation, independent of user identity routing. */
+  private ownerReadAdmissions = new Map<FastifyReply, OwnerEventReadAdmission>();
   /** SSE clients connecting from non-localhost (i.e. through tunnel) */
   private remoteSseClients: Set<FastifyReply> = new Set();
   /** Clients with backpressure — skip writes until 'drain' fires */
   private backpressuredClients: Set<FastifyReply> = new Set();
   /** Latest already recipient-filtered legacy order frame awaiting a client's drain. */
   private pendingSessionOrderFrames: Map<FastifyReply, string> = new Map();
+  /** At most one frame per independent fixed writer axis, bound to this original reply. */
+  private pendingPublicationWarningFrames = new Map<FastifyReply, Map<string, string>>();
   /** Latest owner-filtered tab-layout invalidation per affected owner awaiting a client's drain. */
   private pendingTabLayoutFrames: Map<FastifyReply, Map<string | symbol, string>> = new Map();
 
@@ -135,14 +168,53 @@ export class SseStreamManager {
     this._isTunnelActive = active;
   }
 
+  /** Production registration binds a selector to the exact authenticated login/session. */
+  addBoundClient(
+    reply: FastifyReply,
+    sessionFilter: Set<string> | null,
+    isRemote: boolean,
+    clientId: string | undefined,
+    binding: SseSubscriptionBinding,
+    streamNonce?: string,
+    ownerReadAdmission?: OwnerEventReadAdmission
+  ): void {
+    if (this.sseClients.has(reply)) throw new Error('SSE client already registered');
+    const identity = binding.identity && Object.freeze({ ...binding.identity });
+    const captured: SseSubscriptionBinding =
+      binding.kind === 'public'
+        ? Object.freeze({ kind: 'public', scope: binding.scope })
+        : Object.freeze({ ...binding, identity });
+    const previous = clientId ? this.sseClientsById.get(clientId) : undefined;
+    // A guessed foreign selector cannot evict its original stream or disclose its existence.
+    // The new stream keeps normal data-owner routing, but cannot mutate that selector.
+    const mappedId =
+      previous && !sameSubscriptionBinding(this.sseSubscriptionBindings.get(previous), captured) ? undefined : clientId;
+    if (previous && mappedId && previous !== reply) {
+      this.removeClient(previous);
+      try {
+        previous.raw.end();
+      } catch {
+        /* The replaced original is already detached. */
+      }
+    }
+    this.addClient(reply, sessionFilter, isRemote, mappedId, identity, ownerReadAdmission);
+    this.sseSubscriptionBindings.set(reply, captured);
+    if (streamNonce !== undefined) this.sseStreamNonces.set(reply, streamNonce);
+  }
+
+  /** Read-only transport fixture seam; it does not authorize filter mutation. */
   addClient(
     reply: FastifyReply,
     sessionFilter: Set<string> | null,
     isRemote: boolean,
     clientId?: string,
-    identity?: AuthUser
+    identity?: AuthUser,
+    ownerReadAdmission?: OwnerEventReadAdmission
   ): void {
+    this.sseSubscriptionBindings.delete(reply);
+    this.sseStreamNonces.delete(reply);
     this.sseClients.set(reply, sessionFilter);
+    if (ownerReadAdmission) this.ownerReadAdmissions.set(reply, ownerReadAdmission);
     if (identity) this.sseClientIdentity.set(reply, identity);
     if (isRemote) {
       this.remoteSseClients.add(reply);
@@ -162,12 +234,31 @@ export class SseStreamManager {
     this.remoteSseClients.delete(reply);
     this.backpressuredClients.delete(reply);
     this.pendingSessionOrderFrames.delete(reply);
+    this.pendingPublicationWarningFrames.delete(reply);
     this.pendingTabLayoutFrames.delete(reply);
     this.sseClientIdentity.delete(reply);
+    this.ownerReadAdmissions.delete(reply);
+    this.sseSubscriptionBindings.delete(reply);
+    this.sseStreamNonces.delete(reply);
     // Clear any clientId mappings pointing at this reply
     for (const [id, r] of this.sseClientsById) {
       if (r === reply) this.sseClientsById.delete(id);
     }
+  }
+
+  /** Revocation closes only this original read transport, never a provider. */
+  private ownerReadCurrent(reply: FastifyReply): boolean {
+    if (!this.sseClients.has(reply)) return false;
+    const original = this.ownerReadAdmissions.get(reply);
+    if (!original) return true; // Direct transport fixtures have no policy owner.
+    try {
+      if (original.current()) return true;
+    } catch {
+      // An unavailable current policy is no read grant.
+    }
+    this.removeClient(reply);
+    try { reply.raw.end(); } catch { /* original stream already unavailable */ }
+    return false;
   }
 
   /**
@@ -192,9 +283,21 @@ export class SseStreamManager {
    * Update an existing client's session subscription filter without forcing
    * an SSE reconnect. Returns true if the client was found and updated.
    */
-  updateClientFilter(clientId: string, sessions: string[] | null): boolean {
+  updateClientFilter(
+    clientId: string,
+    sessions: string[] | null,
+    requester: SseSubscriptionBinding,
+    streamNonce?: string
+  ): boolean {
     const reply = this.sseClientsById.get(clientId);
-    if (!reply || !this.sseClients.has(reply)) return false;
+    if (
+      !reply ||
+      !this.sseClients.has(reply) ||
+      this.sseStreamNonces.get(reply) !== streamNonce ||
+      !sameSubscriptionBinding(this.sseSubscriptionBindings.get(reply), requester) ||
+      !this.ownerReadCurrent(reply)
+    )
+      return false;
     const filter = sessions && sessions.length > 0 ? new Set(sessions) : null;
     this.sseClients.set(reply, filter);
     return true;
@@ -202,6 +305,7 @@ export class SseStreamManager {
 
   /** Send a single SSE event to a specific client. */
   sendSSE(reply: FastifyReply, event: string, data: unknown): void {
+    if (!this.ownerReadCurrent(reply)) return;
     try {
       reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     } catch {
@@ -211,6 +315,7 @@ export class SseStreamManager {
 
   /** Send pre-formatted tunnel padding to a specific client. */
   sendPadding(reply: FastifyReply): void {
+    if (!this.ownerReadCurrent(reply)) return;
     if (!this._isTunnelActive) return;
     try {
       reply.raw.write(SSE_PADDING);
@@ -225,7 +330,7 @@ export class SseStreamManager {
   }
 
   private flushBackpressuredClient(reply: FastifyReply): void {
-    if (!this.sseClients.has(reply)) return;
+    if (!this.sseClients.has(reply) || !this.ownerReadCurrent(reply)) return;
     this.backpressuredClients.delete(reply);
     try {
       const drainPadding = this._isTunnelActive ? SSE_PADDING : '';
@@ -233,6 +338,15 @@ export class SseStreamManager {
       if (!recovered) {
         this.markBackpressured(reply);
         return;
+      }
+      const warnings = this.pendingPublicationWarningFrames.get(reply);
+      if (warnings) for (const [event, warning] of warnings) {
+        // write(false) still accepts bytes. Consume before writing, so renewed
+        // backpressure cannot replay this warning on the next drain.
+        warnings.delete(event);
+        if (warnings.size === 0) this.pendingPublicationWarningFrames.delete(reply);
+        this.sendSSEPreformatted(reply, warning);
+        if (!this.sseClients.has(reply) || this.backpressuredClients.has(reply)) return;
       }
       const pendingLayouts = this.pendingTabLayoutFrames.get(reply);
       if (pendingLayouts) {
@@ -259,6 +373,7 @@ export class SseStreamManager {
   // Optimized: send pre-formatted SSE message to a client
   // Returns false if client is backpressured or dead
   private sendSSEPreformatted(reply: FastifyReply, message: string): void {
+    if (!this.ownerReadCurrent(reply)) return;
     // Skip backpressured clients to prevent unbounded memory growth.
     // Terminal data dropped here is recovered via session:needsRefresh on drain.
     if (this.backpressuredClients.has(reply)) return;
@@ -285,7 +400,9 @@ export class SseStreamManager {
     // Recovery events need immediate proxy flush; low-frequency metadata events
     // (session:created, ralph:*, respawn:*, etc.) don't need padding.
     // Note: session:terminal has its own padding in flushSessionTerminalBatch().
-    const needsPadding = this._isTunnelActive && event === SseEvent.SessionNeedsRefresh;
+    const needsPadding =
+      this._isTunnelActive && (event === SseEvent.SessionNeedsRefresh || event === SseEvent.StatePublicationHeld ||
+        event === SseEvent.MuxMetadataPublication);
     const padding = needsPadding ? SSE_PADDING : '';
     let message: string;
     try {
@@ -305,6 +422,12 @@ export class SseStreamManager {
     for (const [client] of this.sseClients) {
       // Multi-user ownership routing (no-op for identity-less single-user clients).
       if (!this.canDeliver(client, hint)) continue;
+      if ((event === SseEvent.StatePublicationHeld || event === SseEvent.MuxMetadataPublication) && this.backpressuredClients.has(client)) {
+        const pending = this.pendingPublicationWarningFrames.get(client) ?? new Map<string, string>();
+        pending.set(event, message);
+        this.pendingPublicationWarningFrames.set(client, pending);
+        continue;
+      }
       if (event === SseEvent.TabLayoutChanged && this.backpressuredClients.has(client)) {
         const owner =
           data !== null &&
@@ -545,6 +668,7 @@ export class SseStreamManager {
     const heartbeat = `event: ${SseEvent.Heartbeat}\ndata: ${JSON.stringify({ t: Date.now() })}\n\n`;
 
     for (const [client] of this.sseClients) {
+      if (!this.ownerReadCurrent(client)) continue;
       try {
         // Check if the underlying socket is still writable
         const socket = client.raw.socket;
@@ -608,9 +732,15 @@ export class SseStreamManager {
       }
     }
     this.sseClients.clear();
+    this.ownerReadAdmissions.clear();
+    this.sseClientsById.clear();
+    this.sseClientIdentity.clear();
+    this.sseSubscriptionBindings.clear();
+    this.sseStreamNonces.clear();
     this.remoteSseClients.clear();
     this.backpressuredClients.clear();
     this.pendingSessionOrderFrames.clear();
+    this.pendingPublicationWarningFrames.clear();
     this.pendingTabLayoutFrames.clear();
 
     // Clear per-session batch timers

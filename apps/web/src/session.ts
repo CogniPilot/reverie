@@ -1,7 +1,12 @@
+import { getStore, type StateStore } from './state-store.js';
+import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
+import { captureLaunchProtocolAdmission, completeInitialLaunchAdmission, initialLaunchAdmitted } from './initial-launch-admission.js';
+import {EmployeeRecoveryAttempt} from './employee-recovery-attempt.js';
+import { legacySubscriptionThreadKey, legacyThreadBinding } from './legacy-thread-binding.js';
 import {issueInputAdmission, TerminalInputUnconfirmedError} from './terminal-input-outcome.js';
 import {issueSessionProviderLease, type SessionProviderLease} from './session-provider-lease.js';
 import {prepareWorkspaceHooks, workspaceHookPolicy, consumeWorkspaceHookPreparation, type WorkspaceHookPreparation, type WorkspaceHookConfiguration} from './workspace-hook-policy.js';
-import { applyCodexTurnSummaryHooks } from './hooks-config.js';
+import { prepareWorkspaceSummaryHooks } from './workspace-summary-hooks.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
 import { managedCodexTrust } from './managed-codex-trust.js';
@@ -38,12 +43,14 @@ import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
  */
 
 import { guardShellKey } from './opencode-input.js';
+import { captureCliInputProtocol, cliInputProtocol } from './cli-input-protocol.js';
 import { EventEmitter } from 'node:events';
 import { basename } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { execSync, execFileSync } from 'node:child_process';
 import { v4 as uuidv4 } from 'uuid';
 import * as pty from 'node-pty';
-import { workerPtyCommand } from './worker-execution.js';
+import { workerPtyCommand, WorkerViewerEndpointCustodyError, WorkerViewerProviderLaunchError } from './worker-execution.js';
 import {
   SessionState,
   SessionStatus,
@@ -84,6 +91,7 @@ import { matchesPattern } from './config/cli-registry/patterns.js';
 import { probeDockerCliVersion } from './docker-hosts.js';
 import { probeRemoteCliVersion } from './remote-hosts.js';
 import type { TerminalMultiplexer, MuxSession } from './mux-interface.js';
+import { MuxMutationRefusedError } from './mux-interface.js';
 import { TaskTracker, type BackgroundTask } from './task-tracker.js';
 import { RalphTracker } from './ralph-tracker.js';
 import { BashToolParser } from './bash-tool-parser.js';
@@ -518,8 +526,10 @@ export class ProviderDispatchUnconfirmedError extends Error {
 }
 
 interface HookProviderDispatch {
+  publication?: ProviderLaunchPublication;
   envOverrides: Record<string, string>;
-  onProviderDispatch(): void;
+  onDispatch(): void;
+  adoptCreatedMuxSession(subject: MuxSession): void;
   attempted(): boolean;
   providerAttempted(): boolean;
   current(): boolean;
@@ -814,6 +824,247 @@ export class Session extends EventEmitter {
   private _envOverrides: Record<string, string> | undefined;
   #workspaceHookPreparation?: WorkspaceHookPreparation;
   #providerDispatchUncertainty?: ProviderDispatchUnconfirmedError;
+  #employeeRecoveryHold:EmployeeRecoveryAttempt|undefined;
+  retainEmployeeRecovery(attempt:EmployeeRecoveryAttempt):void {
+    EmployeeRecoveryAttempt.prototype.assertSession.call(attempt,this);
+    if(this.#employeeRecoveryHold&&this.#employeeRecoveryHold!==attempt)
+      throw Error('An original employee recovery already owns this Session');
+    this.#employeeRecoveryHold=attempt;
+  }
+  releaseUnissuedEmployeeRecovery(attempt:EmployeeRecoveryAttempt):void {
+    EmployeeRecoveryAttempt.prototype.assertSession.call(attempt,this);
+    EmployeeRecoveryAttempt.prototype.assertUnissuedRefusal.call(attempt);
+    if(this.#employeeRecoveryHold!==attempt)throw Error('Original employee recovery owner changed');
+    this.#employeeRecoveryHold=undefined;
+  }
+  #stoppedRetirements = new WeakMap<
+    EmployeeRecoveryAttempt,
+    {
+      pending: ProviderLaunchPublication | undefined;
+      last: ProviderLaunchPublication | undefined;
+      providerError: ProviderDispatchUnconfirmedError | undefined;
+      hook: HookStartAttempt | undefined;
+      epoch?: { from: number; to: number };
+      released: boolean;
+    }
+  >();
+  #stoppedEpoch: { owner: EmployeeRecoveryAttempt; from: number; to: number } | undefined;
+  #retiredStartAttempts = new WeakSet<HookStartAttempt>();
+  captureStoppedEmployeeRetirement(attempt: EmployeeRecoveryAttempt): void {
+    EmployeeRecoveryAttempt.prototype.assertSession.call(attempt, this);
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt);
+    if (this.#employeeRecoveryHold !== root) throw Error('Original stopped recovery claim changed');
+    const previous = this.#stoppedRetirements.get(root);
+    if (previous) {
+      if (
+        previous.pending !== this.#pendingProviderLaunch ||
+        previous.last !== this.#lastProviderLaunch ||
+        previous.providerError !== this.#providerDispatchUncertainty
+      )
+        throw Error('Original provider retirement changed');
+    } else {
+      const approval = EmployeeRecoveryAttempt.prototype.stoppedApproval.call(attempt),
+        last = this.#lastProviderLaunch;
+      if (last) {
+        const row = ProviderLaunchPublication.prototype.retainedDenial.call(last, this);
+        if (row.transport !== 'native-ordinary' || row.attemptId !== approval.originalAttemptId)
+          throw Error('The stopped proof does not own the current native launch intent');
+      }
+      const pending = this.#pendingProviderLaunch;
+      if (pending && pending !== last && !this.#providerLaunchStore.unusedProviderIntentRetired(this, pending))
+        throw Error('An independent provider preparation remains unresolved');
+      this.#stoppedRetirements.set(root, {
+        pending,
+        last,
+        providerError: this.#providerDispatchUncertainty,
+        hook: this.#hookStartAttempt,
+        released: false,
+      });
+    }
+    this.#providerLaunchStore.captureStoppedProviderRetirement(this, attempt);
+  }
+  retainedStoppedProviderPublication(
+    attempt: EmployeeRecoveryAttempt,
+    store: StateStore
+  ): ProviderLaunchPublication | undefined {
+    EmployeeRecoveryAttempt.prototype.assertSession.call(attempt, this);
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt),
+      plan = this.#stoppedRetirements.get(root);
+    if (
+      store !== this.#providerLaunchStore ||
+      this.#employeeRecoveryHold !== root ||
+      !plan ||
+      plan.pending !== this.#pendingProviderLaunch ||
+      plan.last !== this.#lastProviderLaunch ||
+      plan.providerError !== this.#providerDispatchUncertainty ||
+      (this.#hookStartAttempt && this.#hookStartAttempt !== plan.hook)
+    )
+      throw Error('Original stopped Session changed');
+    return plan.last;
+  }
+  stoppedEmployeeSnapshot(attempt: EmployeeRecoveryAttempt): import('./types.js').SessionState {
+    this.retainedStoppedProviderPublication(attempt, this.#providerLaunchStore);
+    const snapshot = this.toPersistedState();
+    Reflect.deleteProperty(snapshot, 'providerDispatchHeld');
+    return snapshot;
+  }
+  async retireStoppedEmployeeLaunch(attempt: EmployeeRecoveryAttempt): Promise<void> {
+    this.retainedStoppedProviderPublication(attempt, this.#providerLaunchStore);
+    await this.#providerLaunchStore.retireStoppedProviderLaunch(this, attempt);
+  }
+  stoppedEmployeeRetirementKnown(attempt: EmployeeRecoveryAttempt): boolean {
+    this.retainedStoppedProviderPublication(attempt, this.#providerLaunchStore);
+    return this.#providerLaunchStore.stoppedProviderRetirementKnown(this, attempt);
+  }
+  invalidateStoppedEmployeeEpoch(attempt: EmployeeRecoveryAttempt): void {
+    EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt);
+    if (!this.stoppedEmployeeRetirementKnown(attempt))
+      throw Error('Original stopped main publication is not acknowledged');
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt),
+      plan = this.#stoppedRetirements.get(root)!;
+    plan.epoch = { from: this.#workspaceHookEpoch, to: this.#workspaceHookEpoch + 1 };
+    this.#stoppedEpoch = { owner: root, ...plan.epoch };
+    this._invalidateWorkspaceHooks();
+    // Listener code is allowed to run, but cannot turn a changed owner/epoch
+    // into a completion acknowledgement or a revived old input lease.
+    this.retainedStoppedProviderPublication(attempt, this.#providerLaunchStore);
+    EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt);
+    if (this.#workspaceHookEpoch !== plan.epoch.to) throw Error('Stopped lifecycle epoch changed');
+  }
+  releaseStoppedEmployeeRecovery(
+    attempt: EmployeeRecoveryAttempt,
+    company: import('./company-service.js').CompanyService
+  ): void {
+    EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt);
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt),
+      plan = this.#stoppedRetirements.get(root);
+    if (
+      !plan?.epoch ||
+      this.#workspaceHookEpoch !== plan.epoch.to ||
+      !EmployeeRecoveryAttempt.prototype.completedStoppedFor.call(attempt, company) ||
+      !this.stoppedEmployeeRetirementKnown(attempt)
+    )
+      throw Error('Original stopped acknowledgement is unavailable');
+    if (plan.hook) {
+      this.#retiredStartAttempts.add(plan.hook);
+      if (this.#hookStartAttempt === plan.hook) this.#hookStartAttempt = undefined;
+    }
+    if (this.#providerDispatchUncertainty === plan.providerError) this.#providerDispatchUncertainty = undefined;
+    plan.released = true;
+    this.#employeeRecoveryHold = undefined;
+  }
+  stoppedEmployeeRecoveryReleased(attempt: EmployeeRecoveryAttempt): boolean {
+    EmployeeRecoveryAttempt.prototype.assertSession.call(attempt, this);
+    const root = EmployeeRecoveryAttempt.prototype.originalRecoveryOwner.call(attempt);
+    return this.#stoppedRetirements.get(root)?.released === true && this.#employeeRecoveryHold !== root;
+  }
+  readonly #providerLaunchStore: StateStore;
+  #lastProviderLaunch?: ProviderLaunchPublication;
+  // Prepared but unused is distinct from the provider that may still be running.
+  #pendingProviderLaunch?: ProviderLaunchPublication;
+  static retainProviderLaunchPublication(subject: Session, store: StateStore, publication: ProviderLaunchPublication): void {
+    if (!Session.usesProviderLaunchStore(subject, store) || !store.ownsProviderLaunchStaging(subject, publication) || !publication.owns(subject))
+      throw new Error('Original Session publication custody required');
+    const pending = subject.#pendingProviderLaunch;
+    if (pending && pending !== subject.#lastProviderLaunch && store.ownsProviderLaunchDenial(subject, pending) &&
+      !pending.permitsNextLocal(subject)) return;
+    subject.#pendingProviderLaunch = publication;
+  }
+  static ownsPendingProviderLaunch(subject: Session, store: StateStore, publication: ProviderLaunchPublication): boolean {
+    return Session.usesProviderLaunchStore(subject, store) && subject.#pendingProviderLaunch === publication;
+  }
+  /** Stable retirement selection only: neither execution permission nor native closure. */
+  captureEmployeeRecoveryRetention(): () => boolean {
+    const pending = this.#pendingProviderLaunch, last = this.#lastProviderLaunch;
+    const owner = this.owner, mode = this.mode;
+    const storeCurrent = this.#providerLaunchStore.captureProviderLaunchRetention(this);
+    return () => this.owner === owner && this.mode === mode &&
+      this.#pendingProviderLaunch === pending && this.#lastProviderLaunch === last && storeCurrent();
+  }
+  /** Read-only selector continuity chooses actual live ownership or loaded denial. */
+  captureEmployeeRecoveryReadRetention(): () => boolean {
+    return this.#pendingProviderLaunch || this.#lastProviderLaunch
+      ? this.captureEmployeeRecoveryRetention() : this.captureEmployeeRecoveryLoadedRetention();
+  }
+  /** Restart observation only. Never reconstruct private launch ownership from disk. */
+  captureEmployeeRecoveryLoadedRetention(): () => boolean {
+    if (this.#pendingProviderLaunch || this.#lastProviderLaunch)
+      throw new Error('Loaded observation cannot replace a live provider publication');
+    const owner = this.owner, mode = this.mode;
+    const current = this.#providerLaunchStore.captureLoadedProviderLaunchDenial(this);
+    return () => this.owner === owner && this.mode === mode &&
+      !this.#pendingProviderLaunch && !this.#lastProviderLaunch && current();
+  }
+  employeeRecoveryIntentSelector(): string | null {
+    return (
+      this.#providerLaunchStore.providerLaunchDenialSelector(this)?.attemptId ??
+      this.#lastProviderLaunch?.retainedDenial(this).attemptId ??
+      null
+    );
+  }
+  /** A known retained native launch cannot be retargeted to another endpoint.
+   * No retained native endpoint means no comparison proof, never native custody. */
+  employeeRecoveryEndpointCompatible(configuredSocket: string | undefined): boolean {
+    const original = this.#lastProviderLaunch;
+    if (!original || original.retainedDenial(this).transport !== 'native-ordinary') return true;
+    return original.matchesRetainedNativeEndpoint(this, configuredSocket);
+  }
+  /** Sanitized selector DATA, never native prefix acceptance/readiness or an effect permit. */
+  employeeRecoverySelectors(): Pick<
+    import('./employee-recovery-operation.js').EmployeeRecoverySelection,
+    'provider' | 'unusedIntent'
+  > & { nativeTarget: boolean } {
+    const last = this.#lastProviderLaunch?.retainedDenial(this),
+      pending = this.#pendingProviderLaunch;
+    const retired = pending && this.#providerLaunchStore.unusedProviderIntentRetired(this, pending);
+    const saved = this.#providerLaunchStore.providerLaunchDenialSelector(this);
+    return Object.freeze({
+      provider: Object.freeze({
+        source:
+          last?.transport === 'native-ordinary'
+            ? 'retained-native-dispatch'
+            : saved?.transport === 'native-ordinary'
+              ? 'saved-native-denial'
+              : 'unavailable',
+        originalAttemptId:
+          last?.transport === 'native-ordinary'
+            ? last.attemptId
+            : saved?.transport === 'native-ordinary'
+              ? saved.attemptId
+              : null,
+        providerExecution: 'unproved',
+      }),
+      unusedIntent: pending?.acknowledgedNeverClaimed(this)
+        ? 'acknowledged-never-claimed'
+        : pending && pending !== this.#lastProviderLaunch && pending.fenced && !retired
+          ? 'unconfirmed'
+          : 'none',
+      nativeTarget:
+        this._workerBacked &&
+        !this._remote &&
+        !this._docker &&
+        !this._workerAttachOnly &&
+        (!last || last.transport === 'native-ordinary' || last.transport === 'protected-resource'),
+    });
+  }
+  assertUnusedProviderRetirement(attempt: EmployeeRecoveryAttempt, store: StateStore,
+    pending: ProviderLaunchPublication, last?: ProviderLaunchPublication): void {
+    if (store !== this.#providerLaunchStore || pending !== this.#pendingProviderLaunch || last !== this.#lastProviderLaunch)
+      throw new Error('Original provider retirement custody changed');
+    EmployeeRecoveryAttempt.prototype.assertUnusedLaunchRetirement.call(attempt,this);
+  }
+  async retireUnusedEmployeeLaunch(attempt: EmployeeRecoveryAttempt): Promise<boolean> {
+    EmployeeRecoveryAttempt.prototype.assertUnusedLaunchRetirement.call(attempt,this);
+    const pending = this.#pendingProviderLaunch;
+    if (!pending?.acknowledgedNeverClaimed(this)) return false;
+    await this.#providerLaunchStore.retireUnusedProviderLaunch(this,attempt,pending,this.#lastProviderLaunch);
+    return true;
+  }
+  /** Deny-only brand/store join; property getters and prototype shape cannot supply custody. */
+  static usesProviderLaunchStore(subject: unknown, store: StateStore): subject is Session {
+    return typeof subject === 'object' && subject !== null && #providerLaunchStore in subject &&
+      subject.#providerLaunchStore === store;
+  }
   #terminalInputUncertainty?: TerminalInputUnconfirmedError;
   #inputSubject?: {identity: () => boolean; token: object};
   get terminalInputHeld(): boolean {return this.#terminalInputUncertainty !== undefined;}
@@ -827,13 +1078,28 @@ export class Session extends EventEmitter {
     return this.#terminalInputUncertainty;
   }
   get providerDispatchHeld(): boolean {return this.#providerDispatchUncertainty !== undefined;}
-  private _holdUnconfirmedProvider(cause?: unknown): ProviderDispatchUnconfirmedError {
-    return this.#providerDispatchUncertainty ??= cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause);
+  private _holdUnconfirmedProvider(
+    cause?: unknown,
+    publication?: ProviderLaunchPublication
+  ): ProviderDispatchUnconfirmedError {
+    if (publication?.retiredStoppedFor(this)) return new ProviderDispatchUnconfirmedError(cause);
+    return (this.#providerDispatchUncertainty ??=
+      cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause));
   }
   /** Canonical deny-only provider-effect admission; viewer attachment is separate. */
-  private _providerEffectsAdmitted(): boolean {return this.#providerDispatchUncertainty === undefined && this.#terminalInputUncertainty === undefined;}
+  private _providerEffectsAdmitted(): boolean {return this.#employeeRecoveryHold===undefined && this.#providerDispatchUncertainty === undefined && this.#terminalInputUncertainty === undefined && initialLaunchAdmitted(this);}
   private _assertProviderEffectAdmission(): void {
-    if (!this._providerEffectsAdmitted()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty!;
+    if (!this._providerEffectsAdmitted()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty ??
+      new Error(this.#employeeRecoveryHold?'Employee recovery requires original settlement before another provider start':
+        'Initial launch protocol changed; no new provider was admitted');
+  }
+  /** Deny-only preflight; callers still need current authority and final dispatch admission. */
+  assertProviderLaunchAdmission(): void {
+    this._assertProviderLaunchAdmission();
+  }
+  private _assertProviderLaunchAdmission(): void {
+    this._assertProviderEffectAdmission();
+    if (this._workerAttachOnly) throw new WorkerViewerProviderLaunchError();
   }
   #workspaceHookEvidence: {configuration: 'fenced' | 'legacy-attachment' | 'opted-out'}
     | {configuration: 'preparing' | 'prepared'; generation: string} = {configuration: 'fenced'};
@@ -907,24 +1173,63 @@ export class Session extends EventEmitter {
     const mode = this.mode;
     const generation = configuration === 'prepared' && !viewerOnly && !this._remote && !this._docker
       ? uuidv4() : undefined;
-    let phase: {state: 'staged'} | {state: 'dispatched' | 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
-    const current = () => authority() && (viewerOnly || this._providerEffectsAdmitted()) && !this._closing && !this._isStopped && mode === this.mode
+    let phase: {state: 'staged'} | {state: 'dispatched'; epoch: number; handoff: 'pending' | 'adopted'}
+      | {state: 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
+    const originalMux = this._mux, originalSubject = this._muxSession;
+    let identity = originalSubject ? this._captureMuxSessionIdentity() : undefined;
+    const contextCurrent = () => authority() && (viewerOnly || this._providerEffectsAdmitted()) && !this._closing && !this._isStopped && mode === this.mode
+      && this._mux === originalMux
       && (phase.state === 'staged' ? initialEpoch : phase.epoch) === this.#workspaceHookEpoch;
+    const current = () => contextCurrent() && (identity ? identity.current() : !originalSubject);
+    if (this.#lastProviderLaunch && !this.#lastProviderLaunch.owns(this)) throw new Error('Original launch owner changed');
+    const resourceLaunch = this._workerResourceLaunch;
+    const configurationSnapshot = this._providerLaunchConfiguration();
+    const protocolCurrent = captureLaunchProtocolAdmission(mode);
+    const socket = process.env.REVERIE_WORKER_SOCKET;
+    const configurationCurrent = () => protocolCurrent() && configurationSnapshot === this._providerLaunchConfiguration()
+      && this._workerResourceLaunch === resourceLaunch && socket === process.env.REVERIE_WORKER_SOCKET;
+    const transport: ProviderLaunchTransport = this._workerResourceLaunch ? 'protected-resource' :
+      this._remote ? 'remote' : this._docker ? 'docker' : socket ? 'native-ordinary' : this._useMux ? 'local-mux' : 'local-pty';
+    const publication = viewerOnly ? undefined : this.#providerLaunchStore.stageProviderLaunch(this, {
+      transport, brokerSocket: socket,
+      current: () => current() && configurationCurrent(),
+      snapshot: () => this.toPersistedState(),
+    });
     return {
+      publication,
       envOverrides: {...this._envOverrides, REVERIE_HOOK_GENERATION: generation ?? ''},
-      onProviderDispatch: () => {
+      onDispatch: () => {
         if (phase.state !== 'staged') throw new Error('Session launch dispatch was already settled');
         if (!current() || !eligible()) {phase = {state: 'refused', epoch: initialEpoch}; throw new Error('Session launch generation changed');}
+        publication?.claim();
+        if (publication) this.#lastProviderLaunch = publication;
         const epoch = viewerOnly ? initialEpoch : initialEpoch + 1;
-        phase = {state: 'dispatched', epoch};
+        phase = {state: 'dispatched', epoch, handoff: 'pending'};
         if (!viewerOnly) this._invalidateWorkspaceHooks();
         if (!current()) throw new Error('Session launch generation changed');
         if (generation) this.#workspaceHookEvidence = {configuration: 'preparing', generation};
       },
-      attempted: () => phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded',
-      providerAttempted: () => !viewerOnly && (phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded'),
+      adoptCreatedMuxSession: (subject) => {
+        const refused = () => viewerOnly ? new MuxMutationRefusedError('changed')
+          : this._holdUnconfirmedProvider(new Error('The original mux creation result was not confirmed'));
+        if (phase.state !== 'dispatched' || phase.handoff !== 'pending' || !contextCurrent() || !configurationCurrent()
+          || typeof subject !== 'object' || subject === null || this._muxSession !== originalSubject
+          || !originalMux || originalMux.getSession?.(this.id) !== subject
+          || subject.sessionId !== this.id || subject.owner !== this.owner || subject.mode !== mode
+          || subject.workingDir !== this.workingDir || !isDeepStrictEqual(subject.remote, this._remote)
+          || !isDeepStrictEqual(subject.docker, this._docker)) throw refused();
+        // Only the result of this dispatched creation may replace the selected
+        // row. The row itself supplies no native readiness or execution permit.
+        this._muxSession = subject;
+        identity = this._captureMuxSessionIdentity();
+        if (!identity?.current()) throw refused();
+        phase = {...phase, handoff: 'adopted'};
+      },
+      attempted: () => publication?.fenced === true || phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded',
+      providerAttempted: () => !viewerOnly && (publication?.fenced === true || phase.state === 'dispatched' || phase.state === 'failed' || phase.state === 'succeeded'),
       current,
       settle: (success) => {
+        publication?.settle(success);
         if (phase.state !== 'staged' && phase.state !== 'dispatched') return phase.state === 'succeeded';
         if (phase.state === 'staged') {
           // A known refusal made no dispatch. An adapter claiming success without
@@ -952,32 +1257,55 @@ export class Session extends EventEmitter {
     if (attempt.operation?.attempted()) throw new Error('A provider dispatch is already unsettled');
     const operation = this._stageProviderHookDispatch(attempt.configuration,
       () => this.#hookStartAttempt === attempt && this.mode === attempt.mode,
-      undefined, this._workerAttachOnly || !!(this._remote?.owned === false && this._remote.remoteSessionName));
+      undefined, this._workerAttachOnly || this._remote?.owned === false);
     attempt.operation = operation;
     return operation;
   }
-
+  private _muxDispatchOptions(dispatch: HookProviderDispatch) {
+    const notify = () => {
+      dispatch.onDispatch();
+      this._beginClaudeConversationSelection();
+    };
+    return {
+      providerLaunch: dispatch.publication,
+      providerSubject: dispatch.publication ? this : undefined,
+      envOverrides: dispatch.envOverrides,
+      onProviderDispatch: dispatch.publication ? notify : undefined,
+      onViewerDispatch: dispatch.publication ? undefined : notify,
+    };
+  }
   private async _withWorkspaceHookStart(start: () => Promise<void>): Promise<void> {
+    if (!initialLaunchAdmitted(this)) throw new Error('Initial launch protocol changed; no new provider was admitted');
     if (this.#hookStartAttempt) throw new Error('Session launch is already in progress');
     const preparation = this.#workspaceHookPreparation;
     this.#workspaceHookPreparation = undefined;
-    const attempt: HookStartAttempt = {configuration: consumeWorkspaceHookPreparation(preparation, this.workingDir),
-      mode: this.mode, initialEpoch: this.#workspaceHookEpoch};
+    const attempt: HookStartAttempt = {
+      configuration: consumeWorkspaceHookPreparation(preparation, this.workingDir),
+      mode: this.mode,
+      initialEpoch: this.#workspaceHookEpoch,
+    };
     this.#hookStartAttempt = attempt;
     try {
       await start();
+      if (this.#retiredStartAttempts.has(attempt)) throw new Error('Original provider launch was stopped');
+      const operation = attempt.operation;
+      if (operation?.providerAttempted()) await this._confirmWorkerLaunchPane(() => operation.current());
       if (attempt.operation && !attempt.operation.settle(true)) {
-        if (attempt.operation.providerAttempted()) throw this._holdUnconfirmedProvider();
+        if (attempt.operation.providerAttempted())
+          throw this._holdUnconfirmedProvider(undefined, attempt.operation.publication);
         throw new Error('Terminal attachment outcome is unconfirmed');
       }
+      if (attempt.operation?.providerAttempted() && !completeInitialLaunchAdmission(this))
+        throw this._holdUnconfirmedProvider(undefined, attempt.operation.publication);
     } catch (error) {
+      if (this.#retiredStartAttempts.has(attempt)) throw error;
       const attempted = attempt.operation?.providerAttempted();
       attempt.operation?.settle(false);
-      if (attempted) throw this._holdUnconfirmedProvider(error);
+      if (attempted) throw this._holdUnconfirmedProvider(error, attempt.operation?.publication);
       this._assertProviderEffectAdmission();
       throw error;
     } finally {
-      this.#hookStartAttempt = undefined;
+      if (this.#hookStartAttempt === attempt) this.#hookStartAttempt = undefined;
     }
   }
 
@@ -1108,6 +1436,8 @@ export class Session extends EventEmitter {
       resumeSessionId?: string;
       /** Extra env vars exported to the CLI at spawn time (no disk persistence) */
       envOverrides?: Record<string, string>;
+      /** Internal canonical writer dependency; never accepted from HTTP or persisted JSON. */
+      publicationStore?: StateStore;
       workerAttachOnly?: boolean;
       /** Private, single-start filesystem configuration receipt; never restored from JSON. */
       workspaceHookPreparation?: WorkspaceHookPreparation;
@@ -1437,6 +1767,8 @@ export class Session extends EventEmitter {
         log: (message) => console.log(`[Session ${this.id.slice(0, 8)}] ${message}`),
       });
     }
+    this.#providerLaunchStore = config.publicationStore ?? getStore();
+    if (this.#providerLaunchStore.providerLaunchHeldFor(this)) this._holdUnconfirmedProvider();
   }
 
   get status(): SessionStatus {
@@ -1568,6 +1900,7 @@ export class Session extends EventEmitter {
 
   /** Set the owning username (used by recovery to restore ownership). */
   set owner(username: string | undefined) {
+    if (username !== this._owner) this._invalidateWorkspaceHooks();
     this._owner = username;
   }
 
@@ -2276,7 +2609,7 @@ export class Session extends EventEmitter {
       delete next.continueSession; delete next.resumeSessionId; delete next.forkSession; delete next.configContent;
       next.model = options.model;
       if (options.effortField) next[options.effortField] = options.effort;
-      if (targetThread) next[getCli(options.mode)?.launch.legacyConfigAliases?.resumeId ?? 'resumeSessionId'] = targetThread;
+      if (targetThread) next[legacySubscriptionThreadKey(options.mode)] = targetThread;
       record['_' + field] = next;
     } else this._resumeSessionId = targetThread;
     return () => {
@@ -2487,7 +2820,7 @@ export class Session extends EventEmitter {
    * because every start would fork the thread again.
    */
   setOpenCodeThread(thread: string): void {
-    if (getCli(this.mode)?.launch.threadStateProfile !== 'forkable-continue-v1') throw new Error('Only an OpenCode session has a thread');
+    if (legacyThreadBinding(this.mode)?.kind !== 'forkable-continue') throw new Error('Only an OpenCode-compatible session has a thread');
     if (this._openCodeConfig?.forkSession === true) throw new Error('This session forks its thread on every start');
     this._openCodeConfig = { ...this._openCodeConfig, continueSession: thread };
   }
@@ -2616,6 +2949,24 @@ export class Session extends EventEmitter {
       // can carry secrets). For disk persistence, session-manager calls
       // getEnvOverridesForPersist() and writes alongside state.
     };
+  }
+
+  /** Complete Session-owned disk snapshot; this must never be used by API/SSE serializers. */
+  toPersistedState(): SessionState {
+    return { ...this.toState(),
+      __envOverrides: this.getEnvOverridesForPersist(),
+      __attachmentHistory: this.getAttachmentHistoryForPersist(),
+      __customModel: this.getCustomModelForPersist() } as SessionState;
+  }
+
+  private _providerLaunchConfiguration(): string {
+    const state = this.toState();
+    const fields = ['mode', 'owner', 'workingDir', 'subscriptionProfile', 'claudeMode', 'model', 'allowedTools',
+      'effort', 'advisorModel', 'niceEnabled', 'niceValue', 'resumeSessionId', 'openCodeConfig', 'codexConfig',
+      'geminiConfig', 'antigravityConfig', 'piConfig', 'grokConfig', 'deepSeekConfig', 'ompConfig', 'remote', 'docker'];
+    return JSON.stringify([fields.map(key => (state as unknown as Record<string, unknown>)[key]),
+      this._envOverrides, this._customModel, this._runtimeThreads, this._useMux,
+      this._claudeMode, this._allowedTools, this._model, this._niceConfig, this._resumeSessionId]);
   }
 
   /**
@@ -2762,6 +3113,7 @@ export class Session extends EventEmitter {
     let muxSessionVanished = false;
     if (this._muxSession && !mux.muxSessionExists(this._muxSession.muxName)) {
       this._assertProviderEffectAdmission();
+      if (this._workerAttachOnly) throw new WorkerViewerEndpointCustodyError();
       console.log('[Session] Stale mux session detected (tmux gone):', this._muxSession.muxName);
       this._muxSession = null;
       muxSessionVanished = true;
@@ -2785,12 +3137,13 @@ export class Session extends EventEmitter {
       this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
       const dispatch = this._stageStartHookDispatch();
-      Object.assign(respawnOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
+      Object.assign(respawnOptions, this._muxDispatchOptions(dispatch));
       const newPid = await mux.respawnPane({ ...respawnOptions, admitted: () => admitted() && (!respawnOptions.admitted || respawnOptions.admitted()) });
       assertAdmission();
       if (!newPid) {
         if (dispatch.attempted()) throw new Error('Provider respawn outcome is unconfirmed');
         dispatch.settle(false);
+        if (this._workerAttachOnly) throw new WorkerViewerEndpointCustodyError();
         console.error('[Session] Failed to respawn pane, will create new session');
         needsNewSession = true;
       } else {
@@ -2846,11 +3199,12 @@ export class Session extends EventEmitter {
       this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
       const dispatch = this._stageStartHookDispatch();
-      Object.assign(options.createSessionOptions, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {dispatch.onProviderDispatch(); this._beginClaudeConversationSelection();}});
-      this._muxSession = await mux.createSession({ ...options.createSessionOptions,
+      Object.assign(options.createSessionOptions, this._muxDispatchOptions(dispatch));
+      const created = await mux.createSession({ ...options.createSessionOptions,
         admitted: () => admitted() && (!options.createSessionOptions.admitted || options.createSessionOptions.admitted()) });
+      dispatch.adoptCreatedMuxSession(created);
       assertAdmission();
-      console.log('[Session] Created mux session:', this._muxSession.muxName);
+      console.log('[Session] Created mux session:', created.muxName);
       // No extra sleep — createSession() already waits for tmux readiness
     }
 
@@ -2906,10 +3260,8 @@ export class Session extends EventEmitter {
    * `TmuxManager` remote-reconnect watcher (via `remoteSessionDropped`): the
    * watcher detects a dead remote pane, the session owner reassembles the SAME
    * `RespawnPaneOptions` used for Claude-idle respawns and calls
-   * `respawnPane()` directly. For a remote session that re-runs
-   * `buildRemoteSessionCommand` (owned → `new-session -A`, non-owned →
-   * `attach`), which idempotently REATTACHES the still-running durable remote
-   * tmux session — scrollback + agent intact (proven COD-104/105).
+   * `respawnPane()` directly with a strict attach-only remote command. It never
+   * creates a missing remote provider, and only replaces a dead local client.
    *
    * Deliberately does NOT route through the Claude-idle respawn-controller —
    * this is a transport re-establish, not a `/clear`/`/compact` cycle.
@@ -2917,7 +3269,7 @@ export class Session extends EventEmitter {
    * @returns true if the pane was respawned (reattach issued), false otherwise.
    */
   async reattachRemote(): Promise<boolean> {
-    if (!this._providerEffectsAdmitted()) return false;
+    if (this._workerAttachOnly) return false;
     if (!this._remote) return false; // not a remote session
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     const mux = this._mux;
@@ -2930,16 +3282,29 @@ export class Session extends EventEmitter {
     }
 
     if (ownerStopPending(this.id)) return false;  // an unsettled owner stop: no new process in this pane yet
-    // Confirmed the mux session (and thus the pane) exists but this reattach
-    // is about to respawn it — safe to resolve/pin now.
-    const originalRemote = this._remote, originalMode = this.mode, originalOwner = this.owner;
+    // Keep the existing local client and remote target bound across awaited
+    // command preparation. Reattachment must never select a new provider.
+    const originalRemote = this._remote, originalMode = this.mode, originalOwner = this.owner, originalWorkingDir = this.workingDir;
+    const originalSubject = this._muxSession;
+    const identity = this._captureMuxSessionIdentity();
+    if (!identity || originalSubject.workingDir !== originalWorkingDir || originalSubject.mode !== originalMode
+      || !isDeepStrictEqual(originalSubject.remote, originalRemote) || !isDeepStrictEqual(originalSubject.docker, this._docker)) return false;
+    const remoteSnapshot = JSON.stringify(originalRemote);
+    const subjectFingerprint = () => JSON.stringify([originalSubject.sessionId, originalSubject.owner, originalSubject.muxName,
+      originalSubject.workingDir, originalSubject.mode, originalSubject.remote, originalSubject.docker]);
+    const subjectSnapshot = subjectFingerprint();
     const originalEpoch = this.#workspaceHookEpoch;
-    const current = () => this._providerEffectsAdmitted() && !ownerStopPending(this.id) && !this._closing && !this._isStopped
+    const current = () => !ownerStopPending(this.id) && !this._closing && !this._isStopped
       && this._remote === originalRemote && this.mode === originalMode && this.owner === originalOwner
+      && this.workingDir === originalWorkingDir
+      && identity.current()
+      && JSON.stringify(this._remote) === remoteSnapshot
+      && subjectFingerprint() === subjectSnapshot
       && this.#workspaceHookEpoch === originalEpoch;
     if (!current()) return false;
-    this._pinOmpRespawnId();
-    const newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), admitted: current });
+    let newPid: number | null;
+    try {newPid = await mux.respawnPane({ ...this._buildRespawnPaneOptions(), remoteAttachOnly: true, onlyIfDead: true, admitted: current });}
+    catch (error) {if (error instanceof MuxMutationRefusedError) return false; throw error;}
     if (!current()) return false;
     if (!newPid) {
       console.error('[Session] reattachRemote: respawnPane failed for', this._muxSession.muxName);
@@ -2988,6 +3353,103 @@ export class Session extends EventEmitter {
     if (this.paneLifecycleInFlight) return 'lifecycle-in-progress';
     if (this._muxWritesInFlight > 0) return 'input-in-progress';
     return undefined;
+  }
+  /** Original mux row identity; a manager-owned PID handoff is checked separately. */
+  private _captureMuxSessionIdentity() {
+    const mux = this._mux,
+      subject = this._muxSession,
+      owner = this.owner,
+      id = this.id;
+    if (!mux || !subject || subject.sessionId !== id || subject.owner !== owner || mux.getSession?.(id) !== subject)
+      return undefined;
+    const name = subject.muxName;
+    const current = () =>
+      this._mux === mux &&
+      this._muxSession === subject &&
+      this.owner === owner &&
+      mux.getSession?.(id) === subject &&
+      subject.sessionId === id &&
+      subject.owner === owner &&
+      subject.muxName === name;
+    return { mux, subject, name, current };
+  }
+  /** Denial-only continuity of this original application object. It supplies
+   * neither input authority nor native process/readiness/death evidence. */
+  private captureLifecyclePublication(followOwnStoppedEpoch: boolean): () => boolean {
+    const epoch = this.#workspaceHookEpoch,
+      mode = this.mode,
+      owner = this.owner;
+    const mux = this._mux,
+      subject = this._muxSession,
+      pty = this.ptyProcess;
+    let current = true;
+    return () =>
+      (current &&=
+        !this._closing &&
+        (this.#workspaceHookEpoch === epoch ||
+          (followOwnStoppedEpoch &&
+            this.#stoppedEpoch?.from === epoch &&
+            this.#stoppedEpoch.to === this.#workspaceHookEpoch)) &&
+        this.mode === mode &&
+        this.owner === owner &&
+        this._mux === mux &&
+        this._muxSession === subject &&
+        this.ptyProcess === pty);
+  }
+  captureEmployeeRecoveryCurrent(): () => boolean {
+    return this.captureLifecyclePublication(true);
+  }
+  /** Deny-only lease for the SAME saved-runtime callback, never an effect grant. */
+  captureRuntimePublicationCurrent(): () => boolean {
+    return this.captureLifecyclePublication(false);
+  }
+
+  /** One original website-side pane read. No provider identity/readiness or action authority is supplied. */
+  private _captureMuxPaneObservation(stillCurrent: () => boolean) {
+    const identity = this._captureMuxSessionIdentity();
+    const epoch = this.#workspaceHookEpoch, mode = this.mode;
+    if (!identity || !identity.mux.readPaneLiveness) return undefined;
+    const pid = identity.subject.pid;
+    const current = () => stillCurrent() && identity.current() && !this._isStopped &&
+      this.#workspaceHookEpoch === epoch && this.mode === mode &&
+      identity.subject.pid === pid;
+    return {current, pid, read: () => identity.mux.readPaneLiveness!(identity.name)};
+  }
+
+  /** A dispatched worker command cannot settle successfully with a dead or unconfirmed outer pane.
+   * A live pane remains only a point-in-time observation, never native provider readiness. */
+  private async _confirmWorkerLaunchPane(stillCurrent: () => boolean, expectedPid?: number): Promise<void> {
+    if (!this._workerBacked || this._workerAttachOnly || this._remote || this._docker) return;
+    const original = this._captureMuxPaneObservation(stillCurrent);
+    if (!original || !original.current()) throw new Error('Original worker launch pane is unconfirmed');
+    const observed = await original.read();
+    if (!original.current() || observed.state !== 'live' || !Number.isSafeInteger(original.pid) || original.pid <= 0 ||
+      observed.pid !== original.pid || (expectedPid !== undefined && expectedPid !== original.pid))
+      throw new Error('Original worker launch pane is unconfirmed');
+  }
+
+  /** Read only the original website-side pane. This neither proves native
+   * provider readiness nor clears input/stop holds or admits an attachment. */
+  async inspectWorkerViewer(stillCurrent: () => boolean, beforeRead: () => Promise<boolean>): Promise<
+    'outer-pane-responsive' | 'pane-observation-unconfirmed' | 'viewer-subject-changed'
+  > {
+    const original = this._captureMuxPaneObservation(stillCurrent);
+    if (!this.workerViewerReconnect || !original)
+      return 'pane-observation-unconfirmed';
+    const current = original.current;
+    if (!current()) return 'viewer-subject-changed';
+    if (!await beforeRead()) return current() ? 'pane-observation-unconfirmed' : 'viewer-subject-changed';
+    if (!current()) return 'viewer-subject-changed';
+    try {
+      const observation = await original.read();
+      if (!current()) return 'viewer-subject-changed';
+      return observation.state === 'live' && Number.isSafeInteger(original.pid) && original.pid > 0 &&
+        observation.pid === original.pid ? 'outer-pane-responsive' : 'pane-observation-unconfirmed';
+    } catch {
+      // No producer-owned timeout receipt exists here: an error is unknown,
+      // never evidence of a deadline, pressure, missing provider or death.
+      return current() ? 'pane-observation-unconfirmed' : 'viewer-subject-changed';
+    }
   }
 
   async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>, diagnostic = false): Promise<boolean> {
@@ -3063,7 +3525,7 @@ export class Session extends EventEmitter {
 
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
     explicitRecovery = false, dispatchAdmitted: () => boolean = stillCurrent): Promise<boolean> {
-    this._assertProviderEffectAdmission();
+    this._assertProviderLaunchAdmission();
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);
@@ -3088,9 +3550,7 @@ export class Session extends EventEmitter {
     await this.applyFullAccessDefault();
     await this._prepareSelectedClaudeProfile();
     await this._prepareManagedCodexTrust();
-    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
-      await applyCodexTurnSummaryHooks(this.workingDir);
-    }
+    await this._prepareWorkspaceSummaryHooks();
     await this._prepareCodexHookTrust();
     const options = await this._buildRespawnPaneOptionsWithResumePin();
     if (!current() || !dispatchAdmitted() || (onlyIfDead && this._respawnBlocked && !explicitRecovery)) return false;
@@ -3102,14 +3562,13 @@ export class Session extends EventEmitter {
     const admitted = () => !ownerStopPending(this.id) && current() && dispatchAdmitted();
     this.#workspaceHookPreparation = undefined;
     const configuration = consumeWorkspaceHookPreparation(preparation, this.workingDir);
-    const dispatch = this._stageProviderHookDispatch(configuration, current, admitted);
-    Object.assign(options, {envOverrides: dispatch.envOverrides, onProviderDispatch: () => {
-      dispatch.onProviderDispatch();
-      this._beginClaudeConversationSelection();
-    }});
+    const dispatch = this._stageProviderHookDispatch(configuration, current, admitted, this._remote?.owned === false);
+    Object.assign(options, this._muxDispatchOptions(dispatch));
     let newPid: number | null;
     try {
       newPid = await mux.respawnPane(onlyIfDead ? { ...options, onlyIfDead: true, stillCurrent, admitted } : { ...options, admitted });
+      if (newPid && dispatch.providerAttempted())
+        await this._confirmWorkerLaunchPane(() => dispatch.current() && admitted(), newPid);
     } catch (error) {
       const attempted = dispatch.attempted();
       dispatch.settle(false);
@@ -3140,6 +3599,7 @@ export class Session extends EventEmitter {
    */
   private _buildRespawnPaneOptions(): import('./mux-interface.js').RespawnPaneOptions {
     const options: import('./mux-interface.js').RespawnPaneOptions = {
+      ...(this._workerAttachOnly ? {workerAttachOnly:true,onlyIfDead:true} : {}),
       codexTrustWorkspace: this._codexTrustWorkspace,
       codexHookTrust: this._codexHookTrust,
       sessionId: this.id,
@@ -3254,6 +3714,11 @@ export class Session extends EventEmitter {
     this._codexHookTrust = this._codexTrustWorkspace
       ? codexHookTrustArgument(await reverieCodexHookTrust(this.workingDir))
       : undefined;
+  }
+
+  private async _prepareWorkspaceSummaryHooks(): Promise<void> {
+    if (this._remote || this._docker) return;
+    await prepareWorkspaceSummaryHooks(this.mode, this.workingDir);
   }
 
   private async _prepareManagedCodexTrust(): Promise<void> {
@@ -3536,10 +4001,8 @@ export class Session extends EventEmitter {
     assertAdmission();
     await this._prepareManagedCodexTrust();
     assertAdmission();
-    if (getCli(this.mode)?.capabilities.turnSummaryHooks === 'codex-config-v1' && !this._remote && !this._docker) {
-      await applyCodexTurnSummaryHooks(this.workingDir);
-      assertAdmission();
-    }
+    await this._prepareWorkspaceSummaryHooks();
+    assertAdmission();
     await this._prepareCodexHookTrust();
     assertAdmission();
 
@@ -3772,6 +4235,8 @@ export class Session extends EventEmitter {
       } catch (err) {
         assertAdmission();
         this._assertProviderEffectAdmission();
+        if (err instanceof MuxMutationRefusedError) throw err;
+        if (this._workerAttachOnly) throw err;
         if (this._workerResourceLaunch) throw err;
         if (this.#hookStartAttempt?.operation?.attempted()) throw err;
         if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
@@ -3786,9 +4251,7 @@ export class Session extends EventEmitter {
 
     // Fallback to direct PTY if mux is not used
     if (!this.ptyProcess) {
-      if (process.env.REVERIE_WORKER_SOCKET) {
-        throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
-      }
+      this._assertProviderLaunchAdmission();
       // Every external CLI requires tmux and has NO direct-PTY fallback, because its
       // secrets are injected with socket-scoped `tmux setenv` and so must never touch a
       // spawn command line. DeepSeek additionally needs it for the HERDR_* status-bridge
@@ -3820,17 +4283,24 @@ export class Session extends EventEmitter {
         );
         this._refuseNewProviderWhileRecoveryHeld();
         assertAdmission();
+        const dispatch = this._stageStartHookDispatch();
+        const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id, dispatch.publication);
+        const launchArgs = Object.freeze([...launch.args]);
+        const environment = Object.freeze({ ...buildClaudeEnv(this.id), ...dispatch.envOverrides, ...launch.env });
+        const execution = Object.freeze({kind:'pty' as const,sessionId:this.id,owner:this.owner ?? null,mode:this.mode,command:JSON.stringify([launch.binary,launchArgs]),cwd:this.workingDir,environment});
+        await dispatch.publication!.prepare(this, execution);
         this.ptyProcess = spawnPtyWithHelperRepair(() => {
           assertAdmission();
-          const dispatch = this._stageStartHookDispatch();
-          dispatch.onProviderDispatch();
-          return pty.spawn(getClaudeBinaryPath(), args, {
+          this._assertProviderLaunchAdmission();
+          dispatch.onDispatch();
+          dispatch.publication!.assertClaimed(this, execution);
+          return pty.spawn(launch.binary, [...launchArgs], {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
             // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-            env: { ...buildClaudeEnv(this.id), ...dispatch.envOverrides },
+            env: { ...environment },
           });
         });
         this._notePtySpawnGeometry(120, 40);
@@ -4659,6 +5129,8 @@ export class Session extends EventEmitter {
   }
 
   private async _startShell(): Promise<void> {
+    if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
+      throw new Error('Resource replacement requires the normal local native worker multiplexer');
     if (this.ptyProcess) {
       throw new Error('Session already has a running process');
     }
@@ -4681,6 +5153,7 @@ export class Session extends EventEmitter {
       try {
         const { isRestored } = await this._setupOrAttachMuxSession({
           respawnPaneOptions: {
+            ...(this._workerAttachOnly ? {workerAttachOnly:true,onlyIfDead:true} : {}),
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: 'shell',
@@ -4692,6 +5165,7 @@ export class Session extends EventEmitter {
             owner: this._owner,
           },
           createSessionOptions: {
+            workerAttachOnly: this._workerAttachOnly,
             sessionId: this.id,
             workingDir: this.workingDir,
             mode: 'shell',
@@ -4708,7 +5182,7 @@ export class Session extends EventEmitter {
 
         // For NEW sessions: clear by sending 'clear' command to the shell
         // For RESTORED sessions: don't clear - we want to see the existing output
-        if (!isRestored) {
+        if (!isRestored && !this._workerAttachOnly) {
           setTimeout(() => {
             if (this.ptyProcess && !this._inputHeldForRecovery() && !this._viewerInputHeld) {
               this._terminalBuffer.clear();
@@ -4718,6 +5192,8 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         this._assertProviderEffectAdmission();
+        if (err instanceof MuxMutationRefusedError) throw err;
+        if (this._workerAttachOnly) throw err;
         if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
         if (this.#hookStartAttempt?.operation?.attempted()) throw err;
         if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
@@ -4730,20 +5206,25 @@ export class Session extends EventEmitter {
 
     // Fallback to direct PTY if mux is not used
     if (!this.ptyProcess) {
-      if (process.env.REVERIE_WORKER_SOCKET) {
-        throw new Error('Isolated sessions require the worker transport through tmux. Local fallback is disabled.');
-      }
+      this._assertProviderLaunchAdmission();
       try {
         this._refuseNewProviderWhileRecoveryHeld();
+        const dispatch = this._stageStartHookDispatch();
+        const launch = workerPtyCommand(shell, [], this.workingDir, this.id, dispatch.publication);
+        const launchArgs = Object.freeze([...launch.args]);
+        const environment = Object.freeze({...buildShellEnv(this.id), ...dispatch.envOverrides, ...launch.env});
+        const execution = Object.freeze({kind:'pty' as const,sessionId:this.id,owner:this.owner ?? null,mode:this.mode,command:JSON.stringify([launch.binary,launchArgs]),cwd:this.workingDir,environment});
+        await dispatch.publication!.prepare(this, execution);
         this.ptyProcess = spawnPtyWithHelperRepair(() => {
-          const dispatch = this._stageStartHookDispatch();
-          dispatch.onProviderDispatch();
-          return pty.spawn(shell, [], {
+          this._assertProviderLaunchAdmission();
+          dispatch.onDispatch();
+          dispatch.publication!.assertClaimed(this, execution);
+          return pty.spawn(launch.binary, [...launchArgs], {
             name: 'xterm-256color',
             cols: 120,
             rows: 40,
             cwd: this.workingDir,
-            env: {...buildShellEnv(this.id), ...dispatch.envOverrides},
+            env: { ...environment },
           });
         });
         this._notePtySpawnGeometry(120, 40);
@@ -4822,8 +5303,25 @@ export class Session extends EventEmitter {
     prompt: string,
     options?: { model?: string; onProgress?: (info: { tokens?: number; status?: string }) => void }
   ): Promise<{ result: string; cost: number }> {
-    this._assertProviderEffectAdmission();
+    this._assertProviderLaunchAdmission();
+    if (this._workerResourceLaunch) throw new Error('Protected resource launch requires its original normal multiplexer path');
     if (this._inputHeldForRecovery()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty ?? new Error('Session input is held for recovery');
+    if (this._viewerInputHeld || this.paneLifecycleInFlight) throw new Error('The terminal viewer is reconnecting');
+    if (this.ptyProcess) throw new Error('Session already has a running process');
+    this.#workspaceHookPreparation = undefined;
+    this._invalidateWorkspaceHooks();
+    const dispatch = this._stageProviderHookDispatch('opted-out', () => !this._closing && !this._isStopped, () => !this.ptyProcess);
+    const args = buildPromptArgs(prompt, options?.model, this._claudeMode, this._allowedTools);
+    const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id, dispatch.publication);
+    const launchArgs = Object.freeze([...launch.args]);
+    const environment = Object.freeze({ ...buildClaudeEnv(this.id), ...dispatch.envOverrides, ...launch.env });
+    const execution = Object.freeze({kind:'pty' as const,sessionId:this.id,owner:this.owner ?? null,mode:this.mode,command:JSON.stringify([launch.binary,launchArgs]),cwd:this.workingDir,environment});
+    try {
+      await dispatch.publication!.prepare(this, execution);
+    } catch (cause) {
+      dispatch.settle(false);
+      throw this._holdUnconfirmedProvider(cause);
+    }
     return new Promise((resolve, reject) => {
       if (this._viewerInputHeld || this.paneLifecycleInFlight) {
         reject(new Error('The terminal viewer is reconnecting'));
@@ -4834,8 +5332,6 @@ export class Session extends EventEmitter {
         return;
       }
 
-      this.#workspaceHookPreparation = undefined;
-      this._invalidateWorkspaceHooks();
       this._resetBuffers();
       this._promptResolved = false; // Reset race condition guard
 
@@ -4851,23 +5347,23 @@ export class Session extends EventEmitter {
           model ? `(model: ${model})` : ''
         );
 
-        const args = buildPromptArgs(prompt, model, this._claudeMode, this._allowedTools);
-        const launch = workerPtyCommand(getClaudeBinaryPath(), args, this.workingDir, this.id);
-
         try {
           this._refuseNewProviderWhileRecoveryHeld();
           this.ptyProcess = spawnPtyWithHelperRepair(() =>
-            {this._assertProviderEffectAdmission(); return pty.spawn(launch.binary, launch.args, {
+            {this._assertProviderLaunchAdmission(); dispatch.onDispatch(); dispatch.publication!.assertClaimed(this, execution); return pty.spawn(launch.binary, [...launchArgs], {
               name: 'xterm-256color',
               cols: 120,
               rows: 40,
               cwd: this.workingDir,
               // Merge envOverrides after buildClaudeEnv so user settings shadow defaults.
-              env: { ...buildClaudeEnv(this.id), ...this._launchEnvOverrides() },
+              env: { ...environment },
             });}
           );
           this._notePtySpawnGeometry(120, 40);
+          dispatch.settle(true);
         } catch (spawnErr) {
+          dispatch.settle(false);
+          this._holdUnconfirmedProvider(spawnErr);
           console.error('[Session] Failed to spawn Claude PTY for runPrompt:', spawnErr);
           this.emit(
             'error',
@@ -5352,10 +5848,11 @@ export class Session extends EventEmitter {
   /** Trusted in-process input lease; never serialized or accepted from HTTP. */
   captureInputAdmission(caller?: () => boolean): () => boolean {
     const epoch = this.#workspaceHookEpoch, mode = this.mode, owner = this.owner;
+    const inputProtocol = captureCliInputProtocol(mode);
     const mux = this._mux, subject = this._muxSession, pty = this.ptyProcess;
     const registered = mux?.getSession?.(this.id);
     const name = subject?.muxName, sessionId = subject?.sessionId, pid = subject?.pid, subjectOwner = subject?.owner;
-    const identity = () => this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === owner
+    const identity = () => this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === owner && inputProtocol.current()
       && this._mux === mux && this._muxSession === subject
       && (!mux || (typeof mux.getSession === 'function' && (registered ?? null) === subject
         && (mux.getSession(this.id) ?? null) === subject && (!subject || (subjectOwner === owner && subject.owner === subjectOwner))))
@@ -5572,7 +6069,7 @@ export class Session extends EventEmitter {
 
   /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
   private _inputHeldForRecovery(): boolean {
-    return this._recoveryHold || this.providerDispatchHeld || this.terminalInputHeld || ownerStopPending(this.id);
+    return this.#employeeRecoveryHold !== undefined || this._recoveryHold || this.providerDispatchHeld || this.terminalInputHeld || ownerStopPending(this.id);
   }
 
   /**
@@ -5656,8 +6153,8 @@ export class Session extends EventEmitter {
   }
 
   canAcceptChatInput(): boolean {
-    if (this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
-    if (!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer) return true;
+    if (this._inputHeldForRecovery() || this._viewerInputHeld || this.paneLifecycleInFlight || (this._workerBacked && this._paneExit)) return false;
+    if (!cliInputProtocol(this.mode).requiresEmptyComposer) return true;
     const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
     return !!this._muxSession && composerIsEmpty(this._mux?.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }), glyph);
   }
@@ -5671,8 +6168,9 @@ export class Session extends EventEmitter {
       options.onMoveHeld?.();
       return false;
     }
-    const fromEmptyComposer = !!getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && this.canAcceptChatInput();
-    if (options.requireEmptyComposer && getCli(this.mode)?.capabilities.input?.requiresEmptyComposer && !fromEmptyComposer) {
+    const protocol = cliInputProtocol(this.mode);
+    const fromEmptyComposer = protocol.requiresEmptyComposer && this.canAcceptChatInput();
+    if (options.requireEmptyComposer && protocol.requiresEmptyComposer && !fromEmptyComposer) {
       if (options.requireIdle) options.onIdleRefused?.();
       return false;
     }
@@ -5695,7 +6193,7 @@ export class Session extends EventEmitter {
     }
     // An agent's or the chat's text in an OpenCode pane: no ASCII "!" (it would flip the composer into shell mode).
     const guard = options.opencodeGuard;
-    const opencode = !!guard && !!getCli(this.mode)?.capabilities.input?.shellKeyGuard;
+    const opencode = !!guard && protocol.shellKeyGuard;
     if (opencode) data = guardShellKey(data, { keepLeading: guard === 'person' });
     this._recheckPaneDialogSoon();
     if (this._mux && this._muxSession) {
@@ -5783,6 +6281,7 @@ export class Session extends EventEmitter {
     const original = this.captureInputAdmission(admitted);
     const unverified = (): void => {try {onOutcome?.('unverified');} catch { /* bookkeeping cannot stop verification */ }};
     const mux = this._mux, subject = this._muxSession, mode = this.mode;
+    const protocol = cliInputProtocol(mode);
     if (!original() || !data.includes('\r') || !mux?.capturePaneText || !subject) return unverified();
     const text = data.replace(/[\r\n]/g, '').trimEnd();
     if (!text) return unverified();
@@ -5801,8 +6300,9 @@ export class Session extends EventEmitter {
           finally {this._muxWriteIds.add(enterId);}
         };
         try {
-          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(getCli(mode)?.capabilities.input?.shellKeyGuard ? {opencode: true} : {})});
-          const sent = gate && getCli(mode)?.capabilities.input?.shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
+          const shellKeyGuard = protocol.shellKeyGuard;
+          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(shellKeyGuard ? {opencode: true} : {})});
+          const sent = gate && shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
           if (!effect()) verifier.cancel();
           return sent;
         } catch (cause) {
@@ -6092,14 +6592,33 @@ export class Session extends EventEmitter {
       pty, ptyStartTime: ptyStat?.startTime, record}); }};
   }
 
-  async stop(killMux: boolean = true, expected?: {admitted: () => boolean; transportCurrent: () => boolean;
-    pty: pty.IPty | null; ptyStartTime: number | undefined; record: MuxSession | undefined}): Promise<void> {
+  async stop(
+    killMux: boolean = true,
+    expected?: {
+      admitted: () => boolean;
+      transportCurrent: () => boolean;
+      pty: pty.IPty | null;
+      ptyStartTime: number | undefined;
+      record: MuxSession | undefined;
+    }
+  ): Promise<void> {
+    const originalPty = this.ptyProcess;
+    let originalExitObserved = false;
     const assertCurrent = () => {
       if (expected && !expected.admitted()) throw new Error('Candidate cleanup required: original session changed');
     };
     const assertTransport = () => {
       assertCurrent();
-      if (expected && (!expected.transportCurrent() || this.ptyProcess !== expected.pty))
+      // Only the captured PTY's actual exit callback plus its verified process
+      // disappearance can consume that original transport. A cleared slot alone
+      // proves nothing, and a replacement PTY is always a different subject.
+      const originalExited =
+        expected &&
+        originalPty &&
+        originalExitObserved &&
+        this.ptyProcess === null &&
+        readProcStat(originalPty.pid)?.startTime !== expected.ptyStartTime;
+      if (expected && (!expected.transportCurrent() || (this.ptyProcess !== expected.pty && !originalExited)))
         throw new Error('Candidate cleanup required: original transport changed');
     };
     assertTransport();
@@ -6131,35 +6650,78 @@ export class Session extends EventEmitter {
     // Remove event listeners from trackers to prevent memory leaks
     this.cleanupTrackerListeners();
 
-    if (this.ptyProcess) {
-      if (killMux) {
-        // Full kill: SIGTERM → wait → SIGKILL the PTY and its children. Every signal,
-        // the first included, goes only to a PTY child verified at that moment (see
-        // stopPtyChild): node-pty's kill() is a bare process.kill(pid), so a zero,
-        // reused or foreign pid must never reach it. Unverified: no signal here; the
-        // mux teardown below still runs.
-        const stopped = await stopPtyChild(this.ptyProcess, {
-          stat: readProcStat,
-          kill: (p, sig) => { assertTransport(); return process.kill(p, sig); },
-          selfPid: process.pid,
-          selfPgid: readProcStat(process.pid)?.pgid ?? null,
-          wait: async (pids) => { await waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS }); assertTransport(); },
-          warn: (msg) => console.warn(`[Session] ${msg}`),
-        }, assertTransport, expected?.ptyStartTime);
-        if (expected) {
-          if (stopped !== 'stopped') throw new Error('Candidate cleanup required: original PTY stop was not verified');
-          await waitForProcessesExit([this.ptyProcess.pid], {timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS});
-          assertTransport();
-          if (readProcStat(this.ptyProcess.pid)?.startTime === expected.ptyStartTime)
-            throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
+    if (originalPty) {
+      let observeExit!: () => void;
+      const exited = new Promise<void>((resolve) => {
+        observeExit = resolve;
+      });
+      const exitSubscription = expected
+        ? originalPty.onExit(() => {
+            originalExitObserved = true;
+            observeExit();
+          })
+        : undefined;
+      try {
+        if (killMux) {
+          // Full kill: SIGTERM → wait → SIGKILL the PTY and its children. Every signal,
+          // the first included, goes only to a PTY child verified at that moment (see
+          // stopPtyChild): node-pty's kill() is a bare process.kill(pid), so a zero,
+          // reused or foreign pid must never reach it. Unverified: no signal here; the
+          // mux teardown below still runs.
+          const stopped = await stopPtyChild(
+            originalPty,
+            {
+              stat: readProcStat,
+              kill: (p, sig) => {
+                assertTransport();
+                return process.kill(p, sig);
+              },
+              selfPid: process.pid,
+              selfPgid: readProcStat(process.pid)?.pgid ?? null,
+              wait: async (pids) => {
+                await waitForProcessesExit(pids, { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS });
+                assertTransport();
+              },
+              warn: (msg) => console.warn(`[Session] ${msg}`),
+            },
+            assertTransport,
+            expected?.ptyStartTime
+          );
+          if (expected) {
+            if (stopped !== 'stopped')
+              throw new Error('Candidate cleanup required: original PTY stop was not verified');
+            await waitForProcessesExit([originalPty.pid], { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS });
+            assertTransport();
+            if (readProcStat(originalPty.pid)?.startTime === expected.ptyStartTime)
+              throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
+            // Join the real callback before replacing observers or admitting a
+            // same-ID successor; an old delayed exit must not unwire the new one.
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            try {
+              await Promise.race([
+                exited,
+                new Promise<never>((_resolve, reject) => {
+                  timer = setTimeout(
+                    () => reject(new Error('Candidate cleanup required: original PTY callback is pending')),
+                    GRACEFUL_SHUTDOWN_DELAY_MS
+                  );
+                }),
+              ]);
+            } finally {
+              if (timer) clearTimeout(timer);
+            }
+            assertTransport();
+          }
+        } else {
+          // Server shutdown: just detach — the process lives on inside tmux
+          console.log('[Session] Detaching from PTY (server shutdown) — mux session preserved');
         }
-      } else {
-        // Server shutdown: just detach — the process lives on inside tmux
-        console.log('[Session] Detaching from PTY (server shutdown) — mux session preserved');
-      }
 
-      assertTransport();
-      this.ptyProcess = null;
+        assertTransport();
+        this.ptyProcess = null;
+      } finally {
+        exitSubscription?.dispose();
+      }
     }
     this._pid = null;
     this._status = killMux ? 'stopped' : 'idle';
@@ -6175,11 +6737,17 @@ export class Session extends EventEmitter {
       try {
         assertCurrent();
         const killed = expected
-          ? expected.record ? await this._mux.killSessionIfCurrent!(this.id, expected.record,
-              () => expected.admitted() && expected.transportCurrent()) : false
+          ? expected.record
+            ? await this._mux.killSessionIfCurrent!(
+                this.id,
+                expected.record,
+                () => expected.admitted() && expected.transportCurrent()
+              )
+            : false
           : await this._mux.killSession(this.id);
         assertCurrent();
-        if (expected && expected.record && !killed) throw new Error('Candidate cleanup required: original mux stop was not confirmed');
+        if (expected && expected.record && !killed)
+          throw new Error('Candidate cleanup required: original mux stop was not confirmed');
         if (expected && this._mux.getSession(this.id))
           throw new Error('Candidate cleanup required: a mux record remains after the original stop');
         if (killed) {

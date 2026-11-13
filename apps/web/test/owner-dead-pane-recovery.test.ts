@@ -1,4 +1,6 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { StateStore } from '../src/state-store.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {mkdtemp,rm} from 'node:fs/promises';
@@ -11,18 +13,19 @@ import {CompanyService} from '../src/company-service.js';
 import {registerSessionRuntimeRoutes,resumeOwnerStops,type LaptopAgentStop,type StopBounds} from '../src/web/routes/session-runtime-routes.js';
 import {ownerStopPending,recordOwnerStop,useOwnerStopJournal} from '../src/owner-stop-journal.js';
 import {chmodSync,mkdirSync,readdirSync,statSync} from 'node:fs';
-import type {TerminalMultiplexer,MuxSession,RespawnPaneOptions} from '../src/mux-interface.js';
+import type {TerminalMultiplexer,RespawnPaneOptions} from '../src/mux-interface.js';
 
 const cleanups:Array<()=>Promise<void>>=[];
 afterEach(async()=>{vi.unstubAllEnvs();vi.restoreAllMocks();for(const clean of cleanups.splice(0).reverse())await clean();});
 async function setup(stop?:LaptopAgentStop,waitMs?:number,bounds?:StopBounds){
  const dir=await mkdtemp(join(tmpdir(),'dead-pane-owner-'));cleanups.push(()=>rm(dir,{recursive:true,force:true}));
- const mux={isAvailable:()=>true,muxSessionExists:vi.fn(()=>true),isPaneDead:vi.fn(()=>true),
-  respawnPane:vi.fn(async(options:RespawnPaneOptions)=>{options.onProviderDispatch?.();return 42;}),clearPaneExit:vi.fn()};
- const session=new Session({workingDir:dir,mode:'opencode',useMux:true,mux:mux as unknown as TerminalMultiplexer,
-  muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession,
+ const publicationStore=new StateStore(join(dir,'sessions.json'));
+ const registry=registeredMuxFixture({sessionId:'owned',muxName:'reverie-owned',pid:41,mode:'opencode',workingDir:dir});
+ const mux={...registry,isAvailable:()=>true,muxSessionExists:vi.fn(()=>true),isPaneDead:vi.fn(()=>true),
+  respawnPane:vi.fn(async(options:RespawnPaneOptions)=>{await acknowledgeMuxFixture(options);return 42;}),clearPaneExit:vi.fn()};
+ const session=new Session({publicationStore,id:registry.subject.sessionId,workingDir:dir,mode:'opencode',useMux:true,mux:mux as unknown as TerminalMultiplexer,
+  muxSession:registry.subject,
   subscriptionProfile:{provider:'openai',id:'selected',label:'Selected'},openCodeConfig:{model:'selected/model',continueSession:'ses_selected'}});
- const registry = registerMuxFixture(session);
  cleanups.push(async()=>{Object.assign(session,{ptyProcess:null,_muxSession:null});await session.stop(false);});
  session.setPaneExit({status:137,at:Date.now()});
  const store=new CompanyStore(join(dir,'company.json'));await store.init();
@@ -32,7 +35,7 @@ async function setup(stop?:LaptopAgentStop,waitMs?:number,bounds?:StopBounds){
  const ctx={sessions:new Map([[session.id,session]]),persistSessionStateNow:vi.fn(),getSessionStateWithRespawn:(s:Session)=>s.toState(),broadcast:vi.fn()};
  const app=Fastify();registerSessionRuntimeRoutes(app,ctx as never,req=>req.headers.cookie==='fixture-owner=yes',undefined,company,undefined,stop,waitMs,bounds);
  await app.ready();cleanups.push(()=>app.close());
- return {app,session,mux,registry,store,company,employee,ctx,url:`/api/company/employees/${employee.id}/restart`};
+ return {app,session,mux,registry,publicationStore,store,company,employee,ctx,url:`/api/company/employees/${employee.id}/restart`};
 }
 const headers={cookie:'fixture-owner=yes'};
 describe('verified owner dead-pane recovery',()=>{
@@ -135,13 +138,12 @@ describe('verified owner recovery of a wedged laptop agent (stop-agent)',()=>{
  async function wedged(stopImpl?:(f:Awaited<ReturnType<typeof setup>>,notAfter:number)=>Promise<unknown>,waitMs?:number,
   bounds?:Partial<StopBounds>&Record<string,number>,settleImpl?:(f:Awaited<ReturnType<typeof setup>>)=>Promise<unknown>){
   vi.stubEnv('REVERIE_WORKER_SOCKET','/run/fixture/broker.sock');
-  let f!:Awaited<ReturnType<typeof setup>>;
   const fences:string[]=[];
   const stop=vi.fn(async(id:string,notAfter:number,fence:string)=>{expect(id).toBe(f.session.id);fences.push(fence);return stopImpl?stopImpl(f,notAfter):(f.mux.isPaneDead.mockReturnValue(true),{stopped:true});});
   let ended=false;
   const settle=vi.fn(async(id:string,fence:string)=>{expect([id,fence]).toEqual([f.session.id,fences.at(-1)]);
    if(ended)return {signalled:false};if(settleImpl)return settleImpl(f);throw new Error('the laptop has not answered');});
-  f=await setup({stop,settle},waitMs,{dispatchMs:bounds?.dispatchMs??25_000,settleRetryMs:bounds?.settleRetryMs??20});
+  const f:Awaited<ReturnType<typeof setup>>=await setup({stop,settle},waitMs,{dispatchMs:bounds?.dispatchMs??25_000,settleRetryMs:bounds?.settleRetryMs??20});
   f.mux.isPaneDead.mockReturnValue(false);
   cleanups.push(async()=>{ended=true;await new Promise(resolve=>setTimeout(resolve,60));});  // the laptop finally fences any open stop
   vi.spyOn(f.session,'isBusy').mockReturnValue(true);
@@ -229,6 +231,7 @@ describe('verified owner recovery of a wedged laptop agent (stop-agent)',()=>{
   const f=await wedged();let finish!:(sent:boolean)=>void;
   Object.assign(f.mux,{sendInput:vi.fn(()=>new Promise<boolean>(resolve=>{finish=resolve;}))});
   const typing=f.session.writeViaMux('typing now\r',{fromUser:true});
+  expect(f.mux.sendInput).toHaveBeenCalledOnce();expect(finish).toBeTypeOf('function');
   const response=await f.app.inject({method:'POST',url:f.url,headers,payload:confirm(f)});
   expect(response.statusCode).toBe(409);expect(response.json().error).toContain('being typed');
   expect(f.stop).not.toHaveBeenCalled();expect(f.recover).not.toHaveBeenCalled();
@@ -375,9 +378,10 @@ describe('an unsettled owner stop across a website restart',()=>{
  // A fresh website process: a new Session for the same id and live pane, and the stop journal read again from disk.
  async function restartedWebsite(f:Awaited<ReturnType<typeof setup>>){
   useOwnerStopJournal(journal);
-  const restored=new Session({...f.session.toState(),id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
-   muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession});
-  f.registry.set(restored.id, (restored as unknown as {_muxSession: MuxSession})._muxSession);
+  const subject={...f.registry.subject};
+  f.registry.sessions.set(f.session.id,subject);
+  const restored=new Session({publicationStore:f.publicationStore,...f.session.toState(),id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
+   muxSession:subject});
   cleanups.push(async()=>{Object.assign(restored,{ptyProcess:null,_muxSession:null});await restored.stop(false);});
   f.ctx.sessions.set(f.session.id,restored);
   return restored;
@@ -471,9 +475,10 @@ describe('an unsettled owner stop across a website restart',()=>{
   // same mux/session id and saved recipe. Execute that actual Session constructor/serialization boundary, without
   // starting a real website, provider, tmux, broker or model. The fake remote request remains accepted and unsettled.
   const saved=f.session.toState();
-  const restored=new Session({...saved,id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
-   muxSession:{sessionId:'owned',muxName:'reverie-owned',pid:41}as MuxSession});
-  f.registry.set(restored.id, (restored as unknown as {_muxSession: MuxSession})._muxSession);
+  const subject={...f.registry.subject};
+  f.registry.sessions.set(f.session.id,subject);
+  const restored=new Session({publicationStore:f.publicationStore,...saved,id:f.session.id,useMux:true,mux:f.mux as unknown as TerminalMultiplexer,
+   muxSession:subject});
   cleanups.push(async()=>{Object.assign(restored,{ptyProcess:null,_muxSession:null});await restored.stop(false);});
   f.ctx.sessions.set(f.session.id,restored);
   const wrote=await restored.writeViaMux('new work after website restoration\r',{fromUser:true});

@@ -37,18 +37,61 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import ts from 'typescript';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CI_CONFIG = join('config', 'vitest.ci.config.ts');
 const SUITES_FILE = join('config', 'test-suites.ts');
 
-/** Importing any one of these means the test needs a real browser binary. */
-const BROWSER_DRIVER =
-  /\bfrom\s+['"](?:playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)['"]|\b(?:require|import)\(\s*['"](?:playwright|playwright-core|@playwright\/test|puppeteer|puppeteer-core)['"]\s*\)/;
+/** Runtime imports require the browser runner; erased type imports do not. */
+const BROWSER_DRIVERS = new Set(['playwright', 'playwright-core', '@playwright/test', 'puppeteer', 'puppeteer-core']);
 
 /** @param {string} source */
 export function importsBrowserDriver(source) {
-  return BROWSER_DRIVER.test(source);
+  // No unescaped driver name and no escape can produce a matching string literal.
+  // Escaped sources still use the full parser, including escaped module names.
+  if (!source.includes('\\') && ![...BROWSER_DRIVERS].some((name) => source.includes(name))) return false;
+  // The detector never reads parent links; avoid building them for the entire test tree.
+  const parsed = ts.createSourceFile('test.ts', source, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+  let found = false;
+  const driver = (node) => node && ts.isStringLiteralLike(node) && BROWSER_DRIVERS.has(node.text);
+  const onlyTypes = (bindings) =>
+    bindings &&
+    ts.isNamedImports(bindings) &&
+    bindings.elements.length > 0 &&
+    bindings.elements.every((element) => element.isTypeOnly);
+  function visit(node) {
+    if (found) return;
+    if (ts.isImportDeclaration(node) && driver(node.moduleSpecifier)) {
+      const clause = node.importClause;
+      if (!clause || (!clause.isTypeOnly && (clause.name || !onlyTypes(clause.namedBindings)))) found = true;
+    } else if (ts.isExportDeclaration(node) && driver(node.moduleSpecifier) && !node.isTypeOnly) {
+      if (
+        !node.exportClause ||
+        !ts.isNamedExports(node.exportClause) ||
+        node.exportClause.elements.length === 0 ||
+        node.exportClause.elements.some((element) => !element.isTypeOnly)
+      )
+        found = true;
+    } else if (
+      ts.isImportEqualsDeclaration(node) &&
+      !node.isTypeOnly &&
+      ts.isExternalModuleReference(node.moduleReference) &&
+      driver(node.moduleReference.expression)
+    )
+      found = true;
+    else if (
+      ts.isCallExpression(node) &&
+      driver(node.arguments[0]) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === 'require') ||
+        (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'require'))
+    )
+      found = true;
+    if (!found) ts.forEachChild(node, visit);
+  }
+  visit(parsed);
+  return found;
 }
 
 /** @param {string} dir @returns {string[]} */

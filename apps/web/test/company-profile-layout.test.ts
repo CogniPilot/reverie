@@ -1,9 +1,11 @@
 import { afterEach, expect, it } from 'vitest';
 import { createHarness } from './helpers/chat-app-harness.mjs';
+import { EmployeePermissionsSchema } from '../src/company-types.js';
 const handles: any[] = [];
 afterEach(() => { for (const h of handles.splice(0)) h.window.close(); });
 async function setup() {
   const employee: any = { id: 'river', sessionId: 'runtime', sessionGeneration: 2, name: 'River', position: 'Engineer', expertise: ['Systems'], responsibilities: ['Review work'], personality: 'Careful', pronouns: 'they/them', onVacation: true, desiredRunning: false, permissions: {}, coreBeliefs: ['Preserve\r\nexact text'], sleepEnabled: false, dreamEnabled: false, effectiveBoardPermissions: { editBoardIssues: true, manageBoard: false, manageDecisions: false }, boardPermissionSources: { editBoardIssues: 'legacy', manageBoard: 'legacy', manageDecisions: 'legacy' } };
+  employee.permissions = EmployeePermissionsSchema.parse({});
   const company = { canManage: true, employees: [employee], settings: { coreBeliefs: ['Company first'] } };
   const h = await createHarness({ company }); handles.push(h); const writes: any[] = [];
   const original = h.app._chatApi.bind(h.app);
@@ -26,6 +28,47 @@ async function setup() {
   const dialog = await open();
   return { h, employee, writes, dialog, open };
 }
+
+it('keeps incomplete initial permissions visible and recoverable without losing profile drafts or lifecycle controls', async () => {
+  const { h, employee, writes, dialog, open } = await setup();
+  const permissions = employee.permissions;
+  employee.permissions = null; // An incomplete API response, never an inferred denial.
+  dialog.close();
+  const current = await open();
+  current.querySelector('[name=position]').value = 'Unsaved role';
+  current.querySelector('[data-profile-tab=permissions]').click();
+  const error = current.querySelector('.ca-profile-permission-error');
+  expect(error.textContent).toContain('Current permissions could not be confirmed');
+  const input = current.querySelector('[aria-label="Recovery permission for River"]');
+  expect(input.disabled).toBe(true);
+  expect(input.indeterminate).toBe(true);
+  expect(current.querySelector('[aria-label="Restart session for River"]')).not.toBeNull();
+  const original = h.app._chatApi.bind(h.app);
+  let reads = 0;
+  h.app._chatApi = async (path: string, options?: any) => {
+    if (path === '/api/company/employees/river/permissions') {
+      reads++;
+      return {
+        ok: true,
+        data: {
+          employeeId: employee.id,
+          permissions,
+          effectiveBoardPermissions: employee.effectiveBoardPermissions,
+          boardPermissionSources: employee.boardPermissionSources,
+        },
+      };
+    }
+    return original(path, options);
+  };
+  current.querySelector('[aria-label="Refresh permissions for River"]').click();
+  await h.flush();
+  expect(reads).toBe(1);
+  expect(input.disabled).toBe(false);
+  expect(input.indeterminate).toBe(false);
+  expect(current.querySelector('[name=position]').value).toBe('Unsaved role');
+  expect(writes).toEqual([]);
+});
+
 it('groups existing controls, keeps a real associated save action, and supports keyboard tab navigation', async () => {
   const { h, dialog, writes } = await setup();
   const tabs = [...dialog.querySelectorAll('[role=tab]')];

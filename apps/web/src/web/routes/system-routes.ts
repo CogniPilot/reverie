@@ -7,7 +7,7 @@ import { registerSettingsGet } from './settings-get-route.js';
  * debug/memory, lifecycle logs, screenshots, and various persistence endpoints.
  */
 
-import { FastifyInstance } from 'fastify';
+import { FastifyInstance, type FastifyReply } from 'fastify';
 import { join, dirname } from 'node:path';
 import { existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -877,14 +877,28 @@ export function registerSystemRoutes(
 
   // ========== Config ==========
 
-  app.get('/api/config', async () => {
+  const configUnconfirmed = (reply: FastifyReply) =>
+    reply
+      .code(503)
+      .send(
+        createErrorResponse(
+          ApiErrorCode.OPERATION_FAILED,
+          'Configuration publication is unconfirmed. Keep your requested values and inspect state-publication status before retrying.'
+        )
+      );
+
+  app.get('/api/config', async (_req, reply) => {
+    if (ctx.store.statePublicationHeld) return configUnconfirmed(reply);
     return { config: ctx.store.getConfig() };
   });
 
-  app.put('/api/config', async (req) => {
+  app.put('/api/config', async (req, reply) => {
     const configData = parseBody(ConfigUpdateSchema, req.body, 'Invalid config');
-    ctx.store.setConfig(configData as Partial<ReturnType<typeof ctx.store.getConfig>>);
-    return { config: ctx.store.getConfig() };
+    try {
+      return { config: await ctx.store.commitConfig(configData) };
+    } catch {
+      return configUnconfirmed(reply);
+    }
   });
 
   // ========== Debug/Memory ==========

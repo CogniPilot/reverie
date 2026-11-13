@@ -1,3 +1,5 @@
+import { legacyThreadBinding } from './legacy-thread-binding.js';
+import { matchesPattern } from './config/cli-registry/patterns.js';
 import { isChatRaster, localImageFiles } from './chat-image-paths.js';
 /**
  * @fileoverview `reverie agent …` — session-to-session verbs for the agent running
@@ -608,7 +610,7 @@ export interface SpawnOptions {
   /** Wait for the composer before returning, where the registry gives the mode a ready mark. */
   ready: boolean;
   timeoutMs: number;
-  /** Codex-only launch options; sent as `codexConfig` on the normal create path. */
+  /** Options for a declared Codex-compatible legacy codec; sent as `codexConfig`. */
   reasoningEffort?: string;
   bypassApprovals?: boolean;
   resumeSessionId?: string;
@@ -636,8 +638,10 @@ export async function agentSpawn(deps: AgentDeps, options: SpawnOptions): Promis
   if (options.bypassApprovals) codexConfig.dangerouslyBypassApprovals = true;
   if (options.resumeSessionId !== undefined) codexConfig.resumeSessionId = options.resumeSessionId;
   if (Object.keys(codexConfig).length > 0) {
-    if (getCli(options.mode)?.launch.legacyConfigField !== 'codexConfig') {
-      return fail(deps, '--reasoning-effort, --bypass-approvals and --resume-session apply to --mode codex only');
+    const binding = legacyThreadBinding(options.mode);
+    const launch = getCli(options.mode)?.launch;
+    if (binding?.kind !== 'nested-resume' || !launch) {
+      return fail(deps, '--reasoning-effort, --bypass-approvals and --resume-session require a declared Codex-compatible config codec');
     }
     if (
       options.reasoningEffort !== undefined &&
@@ -648,6 +652,16 @@ export async function agentSpawn(deps: AgentDeps, options: SpawnOptions): Promis
     if (options.resumeSessionId !== undefined && !/^[a-zA-Z0-9_-]{1,100}$/.test(options.resumeSessionId)) {
       return fail(deps, '--resume-session must be a thread id (letters, digits, - and _ only)');
     }
+    const effort = launch.params.reasoningEffort;
+    const bypass = launch.params.bypassApprovals;
+    if ((options.reasoningEffort !== undefined && (effort?.type !== 'enum' || !effort.values.includes(options.reasoningEffort)
+      || (launch.legacyConfigAliases?.reasoningEffort ?? 'reasoningEffort') !== 'reasoningEffort'))
+      || (options.bypassApprovals && (bypass?.type !== 'bool'
+        || launch.legacyConfigAliases?.bypassApprovals !== 'dangerouslyBypassApprovals')))
+      return fail(deps, 'The selected CLI does not declare this legacy launch option');
+    const resume = launch.params[binding.param];
+    if (options.resumeSessionId !== undefined && (resume?.type !== 'token' || !matchesPattern(resume.pattern, options.resumeSessionId)))
+      return fail(deps, '--resume-session does not match the selected CLI thread codec');
   }
   const body: Record<string, unknown> = {
     caseName: options.caseName,

@@ -371,6 +371,11 @@ Object.assign(ReverieApp.prototype, {
    */
   openTileGrid(ids, { focusedId = null, auto = true, mergeSplit = true } = {}) {
     if (!this.canOpenTileGrid()) return false;
+    if (this._localEchoOverlay?.pendingText) {
+      void this._flushLocalEchoTo(this.activeSessionId);
+      this.showToast?.('Saving the current draft. Open tiles again after it is queued.', 'info');
+      return false;
+    }
     const grid = (this._tileGrid ||= new TileGridModel());
     const max = window.ReverieTileGrid.TILE_GRID_MAX;
     // The grid and the split are never open together. An open split becomes the
@@ -409,7 +414,8 @@ Object.assign(ReverieApp.prototype, {
     // main terminal's snapshot of every tiled id (stale by then), so taking one
     // here (a 1000-line serialize and up to 256 KB of localStorage for a
     // non-shell session) only ever produced a copy that was thrown away.
-    this._cleanupPreviousSession(focus, { skipSnapshot: wanted.includes(this.activeSessionId) });
+    if (this._cleanupPreviousSession(focus, { skipSnapshot: wanted.includes(this.activeSessionId) }) === false)
+      return false;
     // A grid closed a moment ago may still be fading out over the stage.
     this._purgeTileGhosts();
     grid.open = true;

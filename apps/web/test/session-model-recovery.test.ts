@@ -1,3 +1,4 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 /**
  * @fileoverview A session's launch model survives recovery.
  *
@@ -169,7 +170,11 @@ describe('a launch model and an advisor survive recovery together', () => {
     async (effort) => {
       const state = persistedRecord(effort);
       const respawns: RespawnPaneOptions[] = [];
+      const subject: MuxSession = { muxName: 'reverie-aaaa', sessionId: state.id, owner: state.owner,
+        pid: 4241, createdAt: Date.now(), workingDir: '/tmp', mode: state.mode ?? 'claude', attached: false };
+      const registered = new Map([[subject.sessionId, subject]]);
       const mux = {
+        getSession: (id: string) => registered.get(id),
         isAvailable: () => true,
         muxSessionExists: () => true,
         isPaneDead: () => true,
@@ -177,7 +182,7 @@ describe('a launch model and an advisor survive recovery together', () => {
         respawnPane: async (options: RespawnPaneOptions) => {
           respawns.push(options);
           if (options.admitted && !options.admitted()) return null;
-          options.onProviderDispatch?.(); // The fake pane now actually dispatches.
+          await acknowledgeMuxFixture(options); // The fake pane now actually dispatches.
           return 4242;
         },
       } as unknown as TerminalMultiplexer;
@@ -189,7 +194,7 @@ describe('a launch model and an advisor survive recovery together', () => {
         mode: state.mode,
         mux,
         useMux: true,
-        muxSession: { muxName: 'reverie-aaaa', sessionId: state.id } as unknown as MuxSession,
+        muxSession: subject,
         effort: state.effort,
         model: state.model,
         advisorModel: state.advisorModel,

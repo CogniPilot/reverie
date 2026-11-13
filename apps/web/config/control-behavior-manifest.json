@@ -1,18 +1,129 @@
 {
   "version": 2,
   "sources": [
-    "src/web/public/chat-app.js",
-    "src/web/public/company-ui.js",
-    "src/web/public/company-resources.js",
-    "src/web/public/plans-ui.js",
-    "src/web/public/workspace-files.js",
-    "src/web/public/index.html",
+    "packages/xterm-zerolag-input/src/cell-dimensions.ts",
+    "packages/xterm-zerolag-input/src/index.ts",
+    "packages/xterm-zerolag-input/src/overlay-renderer.ts",
+    "packages/xterm-zerolag-input/src/prediction-renderer.ts",
+    "packages/xterm-zerolag-input/src/predictive-echo-addon.ts",
+    "packages/xterm-zerolag-input/src/prompt-finder.ts",
+    "packages/xterm-zerolag-input/src/types.ts",
+    "packages/xterm-zerolag-input/src/zerolag-input-addon.ts",
+    "scripts/build.mjs",
+    "scripts/postinstall.js",
+    "scripts/prepare-test-vendor.mjs",
+    "src/web/public/account-ui.js",
+    "src/web/public/admin-ui.js",
+    "src/web/public/api-client.js",
+    "src/web/public/app.js",
+    "src/web/public/approvals-ui.js",
     "src/web/public/board.html",
-    "src/web/public/plans.html",
+    "src/web/public/bots.html",
+    "src/web/public/bots.js",
+    "src/web/public/browser-input-journal.js",
+    "src/web/public/car-mode.js",
+    "src/web/public/chat-app.js",
+    "src/web/public/chat-code-highlighting.js",
+    "src/web/public/chat-language-plugins.js",
+    "src/web/public/chat-math-plugin.js",
+    "src/web/public/chat-math-renderer.js",
+    "src/web/public/chat-math-sanitizer.js",
+    "src/web/public/chat-media.js",
+    "src/web/public/chat-plugins.js",
+    "src/web/public/chatroom-ui.js",
+    "src/web/public/command-failures.html",
+    "src/web/public/command-failures.js",
     "src/web/public/company-plans.html",
-    "src/web/public/workspace-files.html"
+    "src/web/public/company-resources.js",
+    "src/web/public/company-ui.js",
+    "src/web/public/constants.js",
+    "src/web/public/cron-ui.js",
+    "src/web/public/display-time.js",
+    "src/web/public/embassy-invite-bootstrap.js",
+    "src/web/public/employee-recovery.js",
+    "src/web/public/entrance-animations.js",
+    "src/web/public/file-preview-pdf.mjs",
+    "src/web/public/gesture/gesture-reverie.js",
+    "src/web/public/gesture/wasm/vision_wasm_internal.js",
+    "src/web/public/gesture/wasm/vision_wasm_nosimd_internal.js",
+    "src/web/public/git-status-ui.js",
+    "src/web/public/hands-free.js",
+    "src/web/public/home-sessions.js",
+    "src/web/public/host-wake-ui.js",
+    "src/web/public/i18n.js",
+    "src/web/public/image-input.js",
+    "src/web/public/index.html",
+    "src/web/public/input-cjk.js",
+    "src/web/public/input-delivery.js",
+    "src/web/public/keyboard-accessory.js",
+    "src/web/public/mobile-app.js",
+    "src/web/public/mobile-handlers.js",
+    "src/web/public/mobile-ime-preview.js",
+    "src/web/public/mobile-overview.js",
+    "src/web/public/modelica-highlight.js",
+    "src/web/public/notification-manager.js",
+    "src/web/public/office.html",
+    "src/web/public/office.js",
+    "src/web/public/orchestrator-panel.js",
+    "src/web/public/owner-login-guard.js",
+    "src/web/public/owner-terminal-ui.js",
+    "src/web/public/panels-ui.js",
+    "src/web/public/people.html",
+    "src/web/public/people.js",
+    "src/web/public/plans-ui.js",
+    "src/web/public/plans.html",
+    "src/web/public/previews.html",
+    "src/web/public/previews.js",
+    "src/web/public/ralph-panel.js",
+    "src/web/public/ralph-wizard.js",
+    "src/web/public/readmymind-ui.js",
+    "src/web/public/reboot-restore-ui.js",
+    "src/web/public/respawn-ui.js",
+    "src/web/public/sanitize-html.js",
+    "src/web/public/session-lineage.js",
+    "src/web/public/session-switcher.js",
+    "src/web/public/session-ui.js",
+    "src/web/public/settings-ui.js",
+    "src/web/public/spreadsheet-preview-worker.js",
+    "src/web/public/spreadsheet-preview.js",
+    "src/web/public/spreadsheet-xlsx-core.js",
+    "src/web/public/subagent-windows.js",
+    "src/web/public/subscription-ui.js",
+    "src/web/public/sw.js",
+    "src/web/public/tab-families.js",
+    "src/web/public/tab-layout-browser.js",
+    "src/web/public/tab-rail-resize.js",
+    "src/web/public/terminal-keycode229-recovery.js",
+    "src/web/public/terminal-split.js",
+    "src/web/public/terminal-tile.js",
+    "src/web/public/terminal-ui.js",
+    "src/web/public/tile-grid.js",
+    "src/web/public/ultracode-panel.js",
+    "src/web/public/ultracode-windows.js",
+    "src/web/public/update-notice.js",
+    "src/web/public/voice-chat.js",
+    "src/web/public/voice-input.js",
+    "src/web/public/webview-tabs.js",
+    "src/web/public/workspace-files.html",
+    "src/web/public/workspace-files.js"
   ],
   "scenarios": {
+    "mux.metadata.original-repair-readback": {
+      "test": "test/state-publication-status.browser.test.ts",
+      "title": "reconciles actual mux metadata independently after a lost reply and ignores an older repair acknowledgement",
+      "assertions": [
+        "expect(denied.status()).toBe(401)",
+        "expect(metadataRenames()).toBe(beforeRefusals)",
+        "await phone.getByRole('button', { name: 'Reconcile current metadata', exact: true }).click()",
+        "expect(writes).toBe(1)",
+        "await phone.getByRole('button', { name: 'Refresh metadata status', exact: true }).click()",
+        "expect(writes).toBe(1)",
+        "expect(manager.getMuxMetadataPublicationStatus()).toEqual(latest)",
+        "expect(await phone.locator('#mainStatePublicationNotice').isVisible()).toBe(true)",
+        "expect(writes).toBe(3)"
+      ],
+      "outcome": "An actual original manager metadata rename loses its response. Real authenticated GET/SSE expose a separate incident; owner repair commits before its reply is lost, and explicit readback resolves it without replay. A delayed older repair ACK cannot clear the newer incident. Metadata reconciliation leaves an independent actual main-state publication fence intact; all synthetic employees remain OFF with no provider/input effects."
+    },
     "office.owner-details.persisted": {
       "test": "test/office-server.browser.test.ts",
       "title": "inventories real owner screens and converges GUI/API state without starting an employee",
@@ -59,14 +170,14 @@
     },
     "office.owner-details.trim-and-preserve": {
       "test": "test/office-owner-controls.browser.test.ts",
-      "title": "persists trimmed owner details while preserving an unrelated saved setting",
+      "title": "persists owner details while preserving an edit committed between its fresh GET and PUT",
       "assertions": [
         "await api('/api/company/settings', 'PUT', { timeZone: 'Europe/London' })",
         ".fill('  Updated owner  ')",
         ".getByRole('button', { name: 'Save owner details', exact: true }).click()",
         "expect((await api()).settings).toMatchObject({ ownerName: 'Updated owner', ownerTitle: 'Director', timeZone: 'Europe/London', })"
       ],
-      "outcome": "The GUI trims owner fields, persists both, and preserves an independently saved time zone."
+      "outcome": "The GUI trims and saves only owner fields, preserving a time-zone edit committed between its read and write."
     },
     "office.time-zone.invalid-and-retry": {
       "test": "test/office-owner-controls.browser.test.ts",
@@ -87,6 +198,7 @@
       "assertions": [
         "await context.setOffline(true)",
         "await visibleError(dialog.locator(':scope > [role=\"alert\"]'))",
+        "expect(await dialog.locator(':scope > [role=\"alert\"]').textContent()).toContain('No save request was sent.')",
         "expect((await api()).settings.ownerName).toBe('Synthetic owner')",
         "await context.setOffline(false)",
         ".poll(async () => (await api()).settings.ownerName).toBe('Retried owner')",
@@ -183,9 +295,483 @@
         "await expect.poll(async () => (await api<Hiring>(hiringPath())).enabled).toBe(false)"
       ],
       "outcome": "A real stale-value conflict returns 409, holds the checkbox, and recovers through Refresh before a successful explicit retry."
+    },
+    "office.employee-resources.compound-refresh": {
+      "test": "test/company-resource-layout.browser.test.ts",
+      "title": "keeps company resource and employee permission controls usable at ${width}px",
+      "assertions": [
+        "await resourceRefresh.click()",
+        ".__resourceReads)).toBe(2)",
+        "getByText('Unavailable (malformed)', { exact: true }).isVisible()",
+        "getByRole('button', { name: 'Apply RAM and CPU limits', exact: true }).isEnabled()"
+      ],
+      "outcome": "At320,390 and1280px the existing Refresh fetches one new compound API snapshot, displays sample facts and unavailable optional events, and retains enabled verified RAM/CPU controls. This browser uses a closed API fixture; actual authentication/native-framing failures are separately qualified."
+    },
+    "office.recovery.automatic-clear-and-preserve": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "clears the saved recovery expert through Automatic without overwriting a newer unrelated setting",
+      "assertions": [
+        "await api('/api/company/settings', 'PUT', { timeZone: 'Europe/London' })",
+        ".selectOption('')",
+        ".uncheck()",
+        ".getByRole('button', { name: 'Save recovery', exact: true }).click()",
+        ".toEqual({ timeZone: 'Europe/London', expert: undefined, automatic: false, })",
+        "expect(await reopened.getByLabel('Wake after a crash', { exact: true }).inputValue()).toBe('')",
+        "expect(await reopened.getByLabel('Automatic recovery', { exact: true }).isChecked()).toBe(false)"
+      ],
+      "outcome": "The real owner GUI clears the expert with an explicit patch, preserves a newer unrelated setting, and reopens from actual stored state; all synthetic employees remain OFF."
+    },
+    "office.recovery.offline-and-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "reports a disconnected recovery save without writing and confirms one explicit online retry",
+      "assertions": [
+        "await context.setOffline(true)",
+        "await visibleError(error)",
+        "expect((await api()).settings).toMatchObject({ autoWakeEnabled: true, crashWakeEmployeeId: employees[0].id })",
+        "await context.setOffline(false)",
+        "await save.click()",
+        ".toEqual({ automatic: false, expert: undefined })",
+        ".toHaveLength(1)"
+      ],
+      "outcome": "A real offline recovery save is visibly refused while an independent online API verifies no mutation; one manual online retry commits the retained draft once."
+    },
+    "office.hiring-budget.persist-preserve-grant": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "saves company hiring limits through the GUI without replacing a concurrent employee permission",
+      "assertions": [
+        "expect(reply.status()).toBe(200)",
+        "expect(reply.request().postDataJSON()).toEqual({ expected: { maxHiresPerDay: 2, maxActive: 5 }, limits: { maxHiresPerDay: 3, maxActive: 7 }, })",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 3, maxActive: 7, hireEmployeeDelegates: [employees[0].id] })",
+        "expect((await api<Hiring>(hiringPath())).enabled).toBe(true)",
+        "expect(await diskBudget()).toEqual(await budget())"
+      ],
+      "outcome": "The real owner GUI sends only expected caps and new limits; the real API persists them while preserving an employee hiring grant committed after the GUI fresh read. Synthetic employees remain OFF. Canonical schema decoding of the owned saved experts.json independently agrees with the API."
+    },
+    "office.hiring-budget.invalid-and-corrected": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "rejects invalid hiring limits before the GUI write and through the real API without mutation",
+      "assertions": [
+        "input.validity.rangeOverflow",
+        "expect(responses.filter((response) => response.method === 'PATCH' && response.path === hiringLimitsPath)).toEqual([])",
+        "expect(refused.status()).toBe(400)",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 2, maxActive: 5 })",
+        "expect(await diskBudget()).toEqual(await budget())",
+        "await expect.poll(async () => (await budget()).maxHiresPerDay).toBe(3)"
+      ],
+      "outcome": "Browser validation prevents an out-of-range write, an independent real API request also returns400 with no mutation, and a corrected GUI retry persists. Canonical schema decoding of the owned saved experts.json independently agrees with the API."
+    },
+    "office.hiring-budget.stale-refusal-review-retry": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "refuses a hiring budget changed after the fresh read and requires review before the explicit retry",
+      "assertions": [
+        "await setBudget(4, 9)",
+        "expect((await refused).status()).toBe(409)",
+        "expect(await error.textContent()).not.toContain('may already have saved')",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 4, maxActive: 9 })",
+        "expect(await diskBudget()).toEqual(await budget())",
+        "await expect.poll(() => error.textContent()).toContain('changed elsewhere since this page loaded')",
+        ".toHaveLength(1)",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 3, maxActive: 7 })",
+        ".toEqual([409, 200])"
+      ],
+      "outcome": "A real concurrent committed edit after the fresh read causes canonical409 without mutation; the next gesture displays current caps without PATCH, then an explicit reviewed retry succeeds. Canonical schema decoding of the owned saved experts.json independently agrees with the API."
+    },
+    "office.hiring-budget.authority-lost": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "does not change hiring limits after owner browser authority is lost",
+      "assertions": [
+        "await context.clearCookies()",
+        "await page.waitForURL('**/owner/login**')",
+        "response.path === '/api/experts' && response.status === 401",
+        "expect(responses.filter((response) => response.method === 'PATCH' && response.path === hiringLimitsPath)).toEqual([])",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 2, maxActive: 5 })",
+        "expect(await diskBudget()).toEqual(await budget())"
+      ],
+      "outcome": "Actual missing owner cookies return401 during the fresh read and show sign-in; no hiring-limit mutation is issued and the independent owner API confirms unchanged caps. Canonical schema decoding of the owned saved experts.json independently agrees with the API."
+    },
+    "office.hiring-budget.committed-reply-lost": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps a committed hiring budget unconfirmed after a lost reply and reads it on reopening without replay",
+      "assertions": [
+        "expect(actual.status()).toBe(200)",
+        "await route.abort('failed')",
+        "await visibleError(error)",
+        "expect(await error.textContent()).toContain('It may already have saved.')",
+        "expect(await error.textContent()).toContain('Reopen settings to check the saved values before trying again.')",
+        "expect(await form.getByRole('status').textContent()).not.toContain('saved')",
+        "expect(await budget()).toMatchObject({ maxHiresPerDay: 3, maxActive: 7 })",
+        "expect(await diskBudget()).toEqual(await budget())",
+        "expect(patches).toBe(1)",
+        "const reopened = await hiringSettings()",
+        "expect(await reopened.getByLabel('Active hires at most', { exact: true }).inputValue()).toBe('7')",
+        "expect(patches).toBe(1)"
+      ],
+      "outcome": "The real PATCH commits before its browser reply is aborted. The GUI explicitly reports that the save is unconfirmed and may already have saved, retains editable limits, makes no automatic replay or saved claim, and reopening reads the actual committed values. Canonical schema decoding of the owned saved experts.json independently agrees with the API."
+    },
+    "office.hiring-budget.server-response-unconfirmed": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps a committed hiring budget unconfirmed after a server failure response without retrying",
+      "assertions": [
+        "expect(upstream.status()).toBe(200)",
+        "expect(await diskBudget()).toMatchObject({ maxHiresPerDay: 4, maxActive: 8 })",
+        "status: 503",
+        "await expect.poll(() => error.textContent()).toContain('It may already have saved.')",
+        "expect(await error.textContent()).toContain('Reopen settings to check the saved values before trying again.')",
+        "expect(await diskBudget()).toEqual(await budget())",
+        "expect(patches).toBe(1)",
+        "const reopened = await hiringSettings()",
+        "expect(await reopened.getByLabel('Active hires at most', { exact: true }).inputValue()).toBe('8')",
+        "expect(patches).toBe(1)"
+      ],
+      "outcome": "The real PATCH and canonical disk write commit before a controlled503 response fault. The GUI explicitly reports uncertainty, retains its draft, sends no automatic retry, and reopening reads the actual saved caps. This models a response failure; it is not a fabricated native resource outcome."
+    },
+    "employee.memory-pressure.disclosure": {
+      "test": "test/company-resource-layout.browser.test.ts",
+      "title": "shows a server-projected sampled pressure warning and clears its severity on a stale refresh at ${width}px",
+      "assertions": [
+        "expect(await details.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(false)",
+        "await disclosure.focus()",
+        "await page.keyboard.press('Enter')",
+        "expect(await details.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(true)",
+        "expect(await details.textContent()).toContain('9007199254740993 microseconds')",
+        "await resources.getByRole('button', { name: 'Refresh resource status for River', exact: true }).click()",
+        "expect(await details.evaluate((element) => (element as HTMLDetailsElement).open)).toBe(true)",
+        "expect(await page.evaluate(() => (window as unknown as { __writes: unknown[] }).__writes)).toEqual([])"
+      ],
+      "outcome": "The production pressure disclosure starts closed, opens by keyboard to show exact cumulative counters, and stays open across a read-only stale refresh while the server-projected warning becomes unknown. Styled synthetic layout/API-projection fixture only; no native controller or provider authority is implied."
+    },
+    "employee.resources.real-edit": {
+      "test": "test/employee-resource-controls.browser.test.ts",
+      "title": "applies one exact RAM and CPU edit through the real owner API at ${width}px",
+      "assertions": [
+        "await draft(panel, '12288', '180')",
+        "await panel.getByRole('button', { name: 'Apply RAM and CPU limits', exact: true }).click()",
+        "expect(operation.verb).toBe('employee-policy-edit')",
+        "expect(value.requested).toMatchObject({ memoryHighMiB: 12288, cpuWeight: 180 })",
+        "expect(value.observed).toMatchObject({ memoryHighBytes: '12884901888', cpuWeight: 180 })"
+      ],
+      "outcome": "GUI sends one original-session/revision-bound owner edit through the real route, shared service and native client, with independent API readback. Physical actor is synthetic; installed controller/kernel/worker/grant/cgroup acceptance is not qualified."
+    },
+    "employee.resources.invalid-and-stale": {
+      "test": "test/employee-resource-controls.browser.test.ts",
+      "title": "refuses invalid values before dispatch and a stale native revision without changing the draft",
+      "assertions": [
+        "await draft(panel, '49153', '180')",
+        "expect(invalid.status()).toBe(400)",
+        "await draft(panel, '12288', '1.5')",
+        "expect(invalidCpu.status()).toBe(400)",
+        "actor.changeRevision()",
+        "await shownError(panel, 'revision changed')",
+        "await preserved(panel, '12288', '180')",
+        "expect(actor.snapshot()).toEqual(changed)"
+      ],
+      "outcome": "Browser and real API reject invalid RAM/CPU before an edit; synthetic native revision refusal retains the draft and shows the actual phone alert. No installed physical acceptance is implied."
+    },
+    "employee.resources.committed-unconfirmed": {
+      "test": "test/employee-resource-controls.browser.test.ts",
+      "title": "keeps a native committed-lost reply unconfirmed without replay and refreshes explicitly at ${width}px",
+      "assertions": [
+        "actor.outcome('commit-lost-reply')",
+        "await draft(panel, '16384', '240')",
+        "await shownError(panel, 'not confirmed')",
+        "await preserved(panel, '16384', '240')",
+        "expect(actor.snapshot().requested).toMatchObject({ memoryHighMiB: 16384, cpuWeight: 240 })",
+        "await panel.getByRole('button', { name: `Refresh resource status for ${employee.name}`, exact: true }).click()",
+        "expect(editOperations()).toHaveLength(1)"
+      ],
+      "outcome": "Synthetic physical actor commits then drops its response; real client/service returns503. GUI retains fields, visibly reports uncertainty, requires an explicit refresh and never replays the edit. No real native execution is claimed."
+    },
+    "employee.resources.revoked-owner": {
+      "test": "test/employee-resource-controls.browser.test.ts",
+      "title": "rechecks actual owner revocation after request setup before opening the resource channel",
+      "assertions": [
+        "await reached",
+        "const logout = await context.request.post",
+        "expect(logout.status()).toBe(200)",
+        "release()",
+        "await shownError(panel, 'Company owner authorization is required')",
+        "await preserved(panel, '12288', '180')",
+        "expect(editOperations()).toEqual([])",
+        "expect(actor.snapshot()).toEqual(before)"
+      ],
+      "outcome": "Actual owner logout after request setup causes403 before the physical edit; original fields and visible phone refusal remain. Employees stayOFF and no Session/provider work occurs."
+    },
+    "employee.resources.aggregate-gpu-unknown": {
+      "test": "test/employee-resource-controls.browser.test.ts",
+      "title": "keeps the real aggregate unknown and opens the correct Permissions profile with unconfigured GPU refresh at ${width}px",
+      "assertions": [
+        "expect(fleet.canPreview).toBe(false)",
+        "expect(fleet.pool.observed).toBeNull()",
+        "expect((await refreshed).status()).toBe(200)",
+        "expect(reads()).toBe(before + 1)",
+        "await row.getByRole('button', { name: `Resource permissions for ${employee.name}`, exact: true }).click()",
+        "dialog.getByLabel(`Hiring permission for ${employee.name}`, { exact: true }).isVisible()",
+        "expect((await gpuResponse).status()).toBe(503)",
+        "expect(await gpu.getByLabel(`GPU access for ${employee.name}`, { exact: true }).isDisabled()).toBe(true)",
+        "expect(await gpu.getByLabel(`GPU device for ${employee.name}`, { exact: true }).isDisabled()).toBe(true)",
+        "await gpu.getByRole('button', { name: `Save GPU request for ${employee.name}`, exact: true }).isDisabled()",
+        "expect(editOperations()).toEqual([])"
+      ],
+      "outcome": "Real fleet API remains unknown; Refresh rereads and row action opens the correct Permissions tab with hiring control. Unconfigured GPU refresh returns503 and remains disabled, with no GPU policy write. All employeesOFF and Sessions empty; no installed native/GPU authority is claimed."
+    },
+    "office.employee-permission.lost-reply-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps a committed permission save unconfirmed after a lost reply and refreshes without replay",
+      "assertions": [
+        "await permission.check()",
+        "await expect.poll(async () => (await current()).permissions.recoverEmployees).toBe(true)",
+        "expect(await permission.isDisabled()).toBe(true)",
+        "expect(await permission.evaluate((element) => Reflect.get(element, 'indeterminate') === true)).toBe(true)",
+        "expect(puts).toBe(1)",
+        "await dialog.getByRole('button', { name: `Refresh permissions for ${employees[0].name}`, exact: true }).click()",
+        "await expect.poll(() => permission.isEnabled()).toBe(true)",
+        "expect(await permission.isChecked()).toBe(true)",
+        "expect(puts).toBe(1)",
+        "await permission.uncheck()",
+        "await expect.poll(async () => (await current()).permissions.recoverEmployees).toBe(false)",
+        "expect(puts).toBe(2)"
+      ],
+      "outcome": "A genuine owner/API save commits before its response is lost. The profile displays an indeterminate disabled permission and visible error at320px; explicit GET reads the saved projection without a second PUT. A later explicit revoke is the second write."
+    },
+    "office.employee-permission.disconnected-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps a disconnected permission save on hold until an explicit read-only refresh",
+      "assertions": [
+        "await context.setOffline(true)",
+        "await permission.check()",
+        "expect(await permission.isDisabled()).toBe(true)",
+        "expect((await current()).permissions.recoverEmployees).toBe(false)",
+        "await context.setOffline(false)",
+        "await dialog.getByRole('button', { name: `Refresh permissions for ${employees[0].name}`, exact: true }).click()",
+        "await expect.poll(() => permission.isEnabled()).toBe(true)",
+        "expect(await permission.isChecked()).toBe(false)",
+        "expect(await error.textContent()).toBe('')"
+      ],
+      "outcome": "Real browser disconnection leaves the permission visibly uncertain while an independent authenticated API confirms it was not changed. Returning online does not replay a save; an explicit read re-enables the current false value."
+    },
+    "office.employee-permission.malformed-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "does not treat a malformed permission acknowledgement as a confirmed grant",
+      "assertions": [
+        "await permission.check()",
+        "expect(await permission.isDisabled()).toBe(true)",
+        "expect(await permission.evaluate((element) => Reflect.get(element, 'indeterminate') === true)).toBe(true)",
+        "expect((await current()).permissions.recoverEmployees).toBe(true)",
+        "expect(puts).toBe(1)",
+        "await dialog.getByRole('button', { name: `Refresh permissions for ${employees[0].name}`, exact: true }).click()",
+        "await expect.poll(() => permission.isEnabled()).toBe(true)",
+        "expect(await permission.isChecked()).toBe(true)",
+        "expect(puts).toBe(1)"
+      ],
+      "outcome": "A real committed PUT whose response projection is malformed remains unconfirmed; explicit API readback restores the actual permission without replay."
+    },
+    "office.employee-permission.derived-board-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps derived board access unconfirmed with its lost manager permission save",
+      "assertions": [
+        "await manager.check()",
+        "expect(await manager.evaluate((element) => Reflect.get(element, 'indeterminate') === true)).toBe(true)",
+        "expect(await ownWork.evaluate((element) => Reflect.get(element, 'indeterminate') === true)).toBe(true)",
+        "expect(await ownWork.locator('..').textContent()).toContain('Current permission unconfirmed.')",
+        "expect(puts).toBe(1)",
+        "await dialog.getByRole('button', { name: `Refresh permissions for ${employees[0].name}`, exact: true }).click()",
+        "await expect.poll(() => manager.isEnabled()).toBe(true)",
+        "expect(await ownWork.isChecked()).toBe(true)",
+        "expect(await ownWork.locator('..').textContent()).toContain('Included with Manage company board.')",
+        "expect(puts).toBe(1)",
+        "await manager.uncheck()",
+        "await expect.poll(() => ownWork.isEnabled()).toBe(true)",
+        "expect(await ownWork.isChecked()).toBe(false)",
+        "expect(puts).toBe(2)"
+      ],
+      "outcome": "An actual committed manager grant with a lost reply changes effective own-work inclusion. Both inputs and source notes stay explicitly unconfirmed; a joined read restores checked included access without a new PUT, and explicit manager revocation restores the prior independent own-work denial."
+    },
+    "office.recovery.status-refresh.actual-api": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "recovers a lost genuine recovery-selection reply through a read-only refresh while keeping the profile draft",
+      "assertions": [
+        "expect(actual.status()).toBe(200)",
+        "expect(actualReads).toBe(1)",
+        "await refresh.click()",
+        "expect(await draft.inputValue()).toBe('Draft retained after lost recovery reply')",
+        "expect(await panel.getByRole('button').count()).toBe(1)",
+        "r.method === 'POST'",
+        ".toEqual([])"
+      ],
+      "outcome": "The real protected selection API is read, its response is lost, and the actual profile refresh restores the read without POST or draft loss. Phone and desktop layout is checked; no session is started."
+    },
+    "office.recovery.explicit-request.original-id": {
+      "test": "test/employee-recovery-ui.test.ts",
+      "title": "keeps a lost request across profile reopen and explicitly continues with exactly the same operation ID",
+      "assertions": [
+        "x.button('Reconcile session').click()",
+        "expect(x.effects()).toHaveLength(1)",
+        "await x.open()",
+        "expect(x.panel().textContent).toContain('previous request is unconfirmed')",
+        "x.button('Reconcile session').click()",
+        "expect(x.effects()).toHaveLength(2)",
+        "expect(x.effects()[1].body?.approval).toEqual(first)",
+        "expect(x.panel().textContent).not.toMatch(/recovery complete|employee.*running/i)"
+      ],
+      "outcome": "Actual frontend event handlers and DOM preserve the exact original approval across a lost synthetic API reply and profile reopen; only an explicit retry sends another request. This is a thin-client unit contract, not a native-provider effect or installed recovery qualification."
+    },
+    "office.employee-profile.header-close": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "closes unsaved employee profile edits through the header without changing canonical fields",
+      "assertions": [
+        "await close.click()",
+        "await expect.poll(() => dialog.isVisible()).toBe(false)",
+        "expect(await current()).toMatchObject({ position: before.position, expertise: before.expertise, desiredRunning: false, onVacation: true, })",
+        "expect(responses.filter((response) => response.method === 'PUT' && response.path === employeePath)).toEqual([])",
+        "expect(await reopened.getByLabel('Role title', { exact: true }).inputValue()).toBe(role)",
+        "expect(await reopened.getByLabel('Skills and expertise', { exact: true }).inputValue()).toBe(skills)"
+      ],
+      "outcome": "The actual profile header Close discards unsaved profile fields, preserves real canonical role/skills and OFF intent, sends no employee PUT, and reopens the saved values. The header is inspected at 320,390 and1280px."
+    },
+    "office.retirement.cancel": {
+      "test": "test/office-retirement.browser.test.ts",
+      "title": "cancels actual retirement confirmation without posting or saving profile drafts",
+      "assertions": [
+        "await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect(posts).toBe(0)",
+        "expect((await disk()).employees.find((row) => row.id === employee().id)?.position).toBe('Synthetic reviewer')"
+      ],
+      "outcome": "At320/1280 the real in-app confirmation cancels without a POST. The canonical employee and unsaved profile draft remain separate; no Session/provider exists."
+    },
+    "office.retirement.reporting-refusal": {
+      "test": "test/office-retirement.browser.test.ts",
+      "title": "shows the actual reporting-line refusal and retains the employee and unsaved profile",
+      "assertions": [
+        "await update(employees[1]!.id, { reportsTo: employee().id })",
+        "await expect.poll(() => error.textContent()).toContain('Reassign reports before retiring their manager')",
+        "await readableError(dialog, error)",
+        "expect((await disk()).retired.some((row) => row.id === employee().id)).toBe(false)",
+        "expect(await dialog.getByLabel('Role title', { exact: true }).inputValue()).toBe('Unsaved retirement draft')"
+      ],
+      "outcome": "The actual API refuses retiring a manager with reports, preserves canonical membership and unsaved profile fields, and the complete alert fits within the phone profile scroll body above its fixed footer."
+    },
+    "office.retirement.durable-identity": {
+      "test": "test/office-retirement.browser.test.ts",
+      "title": "retires the actual stopped employee once and preserves their durable identity",
+      "assertions": [
+        "await confirmation.getByRole('button', { name: 'Retire', exact: true }).click()",
+        "await expect.poll(() => dialog.isVisible()).toBe(false)",
+        "expect(posts).toBe(1)",
+        "expect(retired).toHaveLength(1)",
+        "expect(saved.employees.some((row) => row.id === employee().id)).toBe(false)"
+      ],
+      "outcome": "One real GUI/API retirement removes the OFF employee from the active company, retains exactly one durable retired identity/session reference, and does not save an unrelated profile draft or create a Session."
+    },
+    "office.retirement.lost-reply": {
+      "test": "test/office-retirement.browser.test.ts",
+      "title": "reports a lost committed retirement reply without automatically repeating the action",
+      "assertions": [
+        "loseReply = true",
+        "await expect.poll(async () => (await error.textContent())?.trim()).toBeTruthy()",
+        "expect(posts).toBe(1)",
+        "expect((await disk()).retired.filter((row) => row.id === employee().id)).toHaveLength(1)",
+        "await readableError(dialog, error)",
+        "await page.getByRole('button', { name: 'Back to chat', exact: true }).click()",
+        "expect(posts).toBe(1)"
+      ],
+      "outcome": "The actual retirement commits before its reply is aborted. A fully visible phone alert reports the failed response; closing/reopening Company reads the retired state without automatically posting the action again."
+    },
+    "office.employee-hiring.committed-reply-lost": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "keeps a committed employee hiring grant unconfirmed after a lost reply and refreshes without replay at ${width}px",
+      "assertions": [
+        "expect(response.status()).toBe(200)",
+        "await route.abort('failed')",
+        "await permission.check()",
+        "expect(await group.getByRole('status').textContent()).toBe('Save is unconfirmed; refresh the current permission.')",
+        "expect((await api<Hiring>(hiringPath())).enabled).toBe(true)",
+        "expect((await diskBudget()).hireEmployeeDelegates).toContain(employees[0].id)",
+        "await errorInViewport(error)",
+        "await refresh.scrollIntoViewIfNeeded()",
+        "expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(footer!.y)",
+        "await group.getByRole('button', { name: `Refresh hiring permission for ${employees[0].name}`, exact: true }).click()",
+        "expect(await permission.isChecked()).toBe(true)",
+        "expect(writes).toBe(1)",
+        "expect(await draft.inputValue()).toBe('Unsubmitted hiring grant draft')"
+      ],
+      "outcome": "At320/1280, the real owner GUI PUT commits through the canonical hiring store before its reply is lost. Independent API and schema-decoded disk agree; the checkbox is held, the draft is preserved, and explicit read-only Refresh reveals the committed grant without replay. Employees remainOFF and Session registries empty. The initial alert is visible without manual scrolling; ordinary profile-body scroll then exposes both alert and Refresh fully above the fixed footer before the same read-only gesture."
+    },
+    "office.employee-lifecycle.enter-cancel": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "cancels Enter office from the real profile without sending an action or changing the draft at ${width}px",
+      "assertions": [
+        "expect(await enter.isChecked()).toBe(false)",
+        "await enter.click()",
+        "await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect(await draft.inputValue()).toBe('Unsubmitted attendance draft')",
+        "expect(await current()).toEqual(before)",
+        "expect(await readFile(dataPath('company.json'), 'utf8')).toBe(diskBefore)",
+        "expect(responses.filter((response) => /\\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([])"
+      ],
+      "outcome": "At320/1280 the real OFF employee profile Enter switch opens its actual confirmation. Cancel restores the switch and preserves draft, canonical employee and exact owned company file; no attendance/wake/restart request is sent. This qualifies cancellation only, not successful startup or stop."
+    },
+    "office.recovery.parent-observe-lost-ack": {
+      "test": "test/employee-recovery-settlement.browser.test.ts",
+      "title": "shows genuine component stopped settlement and lost final reply readback at width%s",
+      "assertions": [
+        "expect(result.data.application.state).toBe('completed-stopped')",
+        "await panel.getByRole('button', { name: 'Inspect original operation for ' + employee.name, exact: true }).click()",
+        ".toContain('original operation has been kept')",
+        "expect(operations.map((row) => row.verb)).toEqual(['employee-recovery', 'employee-recovery-observe'])",
+        "expect(saved.employeeRecoveryOperations[0].application.state).toBe('completed-stopped')",
+        "await panel.getByRole('button', { name: 'Refresh recovery status for ' + employee.name, exact: true }).click()",
+        ".toContain('Recovery completed with its provider stopped. Enter office is a separate action.')",
+        "expect(operations).toHaveLength(2)"
+      ],
+      "outcome": "Existing actual320/1280 component scenario uses real GUI/API/Company/StateStore plus a synthetic framed AF_UNIX native port. Inspect submits the retained parent Observe, app settlement commits before the HTTP reply is lost, and explicit read-only Refresh recovers the closed stopped result without another Q/effect or draft loss. This is component evidence only; installed native/guest execution and readiness remain unqualified."
     }
   },
   "mappings": [
+    {
+      "declaration": "src/web/public/index.html::html::button:muxMetadataRefresh::1",
+      "scenarios": ["mux.metadata.original-repair-readback"],
+      "remaining": "Cross-process/restart original-writer loss, configured delegated transport and all storage failure combinations require separate qualification. This read never establishes provider or disk health."
+    },
+    {
+      "declaration": "src/web/public/index.html::html::button:muxMetadataReconcile::1",
+      "scenarios": ["mux.metadata.original-repair-readback"],
+      "remaining": "Configured delegated scope and authority races are separate application controls; installed kernel/provider execution is not qualified. Main-state/native/provider fences remain independent."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderEdit::input::input:[binding label]",
+      "scenarios": [
+        "employee.resources.real-edit",
+        "employee.resources.invalid-and-stale",
+        "employee.resources.committed-unconfirmed",
+        "employee.resources.revoked-owner"
+      ],
+      "remaining": "Installed controller/kernel execution, bounds extrema, changed employee binding and delegated authority remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderEdit::submit::button:Apply RAM and CPU limits",
+      "scenarios": [
+        "employee.resources.real-edit",
+        "employee.resources.invalid-and-stale",
+        "employee.resources.committed-unconfirmed",
+        "employee.resources.revoked-owner"
+      ],
+      "remaining": "Installed controller/kernel execution and ambiguous native-effect reconciliation remain unqualified; physical actor is synthetic."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::FleetPanel.constructor::inline::button:Refresh laptop fleet status",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Verified configured-controller fleet values, malformed/changed binding and native pool writes remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::FleetPanel.renderEmployeeSummary::open::button:Resource permissions for ${employee.name}",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Concurrent employee removal/rebinding and delegated opening remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::refresh::button:Refresh GPU status for ${employee.name}",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Successful installed GPU/native observation, policy changes and authority/binding races remain unqualified."
+    },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::save::button:Save owner details",
       "remaining": "Length validation, concurrent settings writers, lost replies after commit and other owner fields still need separate qualification.",
@@ -201,15 +787,16 @@
       "remaining": "Delegated actor, denied authority, stale binding, failed write and ambiguous save reconciliation remain gaps.",
       "scenarios": [
         "office.employee-recovery.permission-roundtrip",
-        "office.employee-recovery.cancel-keeps-saved"
+        "office.employee-recovery.cancel-keeps-saved",
+        "office.employee-permission.lost-reply-readback",
+        "office.employee-permission.disconnected-readback",
+        "office.employee-permission.malformed-readback"
       ]
     },
     {
       "declaration": "src/web/public/company-resources.js::EmployeePanel.constructor::inline::button:Refresh resource status for ${employee.name}",
-      "remaining": "Healthy native observations, stale replies, timeout, reconnect and changed authority remain to be qualified.",
-      "scenarios": [
-        "office.employee-resources.unconfigured-refresh"
-      ]
+      "remaining": "Actual installed native cgroup sampling and delegated-agent resource authority remain unqualified. Browser close/move/stale controls and strict API failure outcomes are covered separately; no provider liveness or policy decision is derived from pressure.",
+      "scenarios": ["office.employee-resources.unconfigured-refresh", "office.employee-resources.compound-refresh"]
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::input::input:[binding label]",
@@ -223,31 +810,22 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::close::button:Close company settings",
-      "scenarios": [
-        "office.owner-details.cancel"
-      ],
+      "scenarios": ["office.owner-details.cancel"],
       "remaining": "Escape, backdrop, in-flight saves and already-saved immediate changes remain separate closing states."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompany::paint::button:Company settings",
-      "scenarios": [
-        "office.owner-details.cancel",
-        "office.time-zone.invalid-and-retry"
-      ],
+      "scenarios": ["office.owner-details.cancel", "office.time-zone.invalid-and-retry"],
       "remaining": "Non-owner opening, unavailable company reads, phone authority failures and duplicate-open focus remain gaps."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::input::input:[binding label]",
-      "scenarios": [
-        "office.time-zone.invalid-and-retry"
-      ],
+      "scenarios": ["office.time-zone.invalid-and-retry"],
       "remaining": "Empty values, browser/server timezone disagreement, concurrent saves, authority loss and ambiguous committed replies remain gaps."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyTimeZoneForm::save::button:Save time zone",
-      "scenarios": [
-        "office.time-zone.invalid-and-retry"
-      ],
+      "scenarios": ["office.time-zone.invalid-and-retry"],
       "remaining": "Empty values, browser/server timezone disagreement, concurrent saves, authority loss and ambiguous committed replies remain gaps."
     },
     {
@@ -261,32 +839,132 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::cancel::button:Cancel",
-      "scenarios": [
-        "office.employee-profile.cancel",
-        "office.employee-recovery.cancel-keeps-saved"
-      ],
+      "scenarios": ["office.employee-profile.cancel", "office.employee-recovery.cancel-keeps-saved"],
       "remaining": "Unsaved identity/avatar/core fields and in-flight native or permission requests require separate scenarios."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::parent::select:[binding label]",
-      "scenarios": [
-        "office.employee-profile.reporting-cycle-and-retry"
-      ],
+      "scenarios": ["office.employee-profile.reporting-cycle-and-retry"],
       "remaining": "Missing parent, retired employee, default-coordinator changes and actor/session-generation changes remain gaps."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::enabled::input:[binding label]",
-      "scenarios": [
-        "office.employee-hiring.conflict-refresh-and-retry"
-      ],
-      "remaining": "Employee rebinding, legacy-session conversion, denied authority, disconnected refresh and lost replies remain gaps."
+      "scenarios": ["office.employee-hiring.conflict-refresh-and-retry", "office.employee-hiring.committed-reply-lost"],
+      "remaining": "Conflict and real committed-lost-reply/readback are qualified through the owner GUI. Employee rebinding, legacy-session conversion, delegated/denied authority and disconnected Refresh remain gaps."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeHiringFields::inline::button:Refresh hiring permission for ${employee.name}",
+      "scenarios": ["office.employee-hiring.conflict-refresh-and-retry", "office.employee-hiring.committed-reply-lost"],
+      "remaining": "Conflict and real committed-lost-reply/readback are qualified through the owner GUI. Employee rebinding, legacy-session conversion, delegated/denied authority and disconnected Refresh remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::enabled::input:[binding label]",
+      "scenarios": ["office.recovery.automatic-clear-and-preserve", "office.recovery.offline-and-retry"],
+      "remaining": "Available-expert selection, same-field concurrent edits and lost committed replies remain separate states. These OFF-only settings tests qualify no automatic startup, provider recovery or native authority."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::expert::select:[binding label]",
+      "scenarios": ["office.recovery.automatic-clear-and-preserve", "office.recovery.offline-and-retry"],
+      "remaining": "Available-expert selection, same-field concurrent edits and lost committed replies remain separate states. These OFF-only settings tests qualify no automatic startup, provider recovery or native authority."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::save::button:Save recovery",
+      "scenarios": ["office.recovery.automatic-clear-and-preserve", "office.recovery.offline-and-retry"],
+      "remaining": "Available-expert selection, same-field concurrent edits and lost committed replies remain separate states. These OFF-only settings tests qualify no automatic startup, provider recovery or native authority."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::input::input:[binding label]",
       "scenarios": [
-        "office.employee-hiring.conflict-refresh-and-retry"
+        "office.hiring-budget.persist-preserve-grant",
+        "office.hiring-budget.invalid-and-corrected",
+        "office.hiring-budget.stale-refusal-review-retry",
+        "office.hiring-budget.authority-lost",
+        "office.hiring-budget.committed-reply-lost",
+        "office.hiring-budget.server-response-unconfirmed"
       ],
-      "remaining": "Employee rebinding, legacy-session conversion, denied authority, disconnected refresh and lost replies remain gaps."
+      "remaining": "Only the two numeric hiring caps and this save flow are qualified. Active-hire disclosure/history, actual hiring/provider startup, delegated client authority, storage write failure and other setting controls remain separate gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::save::button:Save hiring settings",
+      "scenarios": [
+        "office.hiring-budget.persist-preserve-grant",
+        "office.hiring-budget.invalid-and-corrected",
+        "office.hiring-budget.stale-refusal-review-retry",
+        "office.hiring-budget.authority-lost",
+        "office.hiring-budget.committed-reply-lost",
+        "office.hiring-budget.server-response-unconfirmed"
+      ],
+      "remaining": "Only the two numeric hiring caps and this save flow are qualified. Active-hire disclosure/history, actual hiring/provider startup, delegated client authority, storage write failure and other setting controls remain separate gaps."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderDiagnostics::inline::summary:Pressure details",
+      "scenarios": ["employee.memory-pressure.disclosure"],
+      "remaining": "Actual installed kernel/controller sampling, independent owner-API authority, all engine versions and broader resource changes are outside this disclosure scenario; existing server authority and diagnostics tests remain separate."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::refresh::button:Refresh permissions for ${employee.name}",
+      "scenarios": [
+        "office.employee-permission.lost-reply-readback",
+        "office.employee-permission.disconnected-readback",
+        "office.employee-permission.malformed-readback",
+        "office.employee-permission.derived-board-readback"
+      ],
+      "remaining": "These states exercise recovery and dependent board permissions. Other permission types, cross-account owner loss and stale-dialog responses still require actual browser scenarios; metadata/native recovery authority is separate."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::inline::button:Close profile for ${employee.name}",
+      "scenarios": ["office.employee-profile.header-close"],
+      "remaining": "Closing immediately saved permission/resource operations has its own contract. This scenario covers unsaved profile fields, not those operations."
+    },
+    {
+      "declaration": "src/web/public/employee-recovery.js::RecoveryPanel.constructor::inline::button:Refresh recovery status for ${employee.name}",
+      "scenarios": ["office.recovery.status-refresh.actual-api", "office.recovery.parent-observe-lost-ack"],
+      "remaining": "Installed native completion/restart and all effect-action states remain separate qualification."
+    },
+    {
+      "declaration": "src/web/public/employee-recovery.js::RecoveryPanel.paint::button::button:${label} for ${this.employee.name}",
+      "scenarios": ["office.recovery.explicit-request.original-id", "office.recovery.parent-observe-lost-ack"],
+      "remaining": "This shared dynamic action factory is qualified only for explicit thin-client original-ID retention. Every action-specific native effect, positive installed completion, controller faults and full lifecycle browser states remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::paint::button:Retire ${employee.name}",
+      "scenarios": [
+        "office.retirement.cancel",
+        "office.retirement.reporting-refusal",
+        "office.retirement.durable-identity",
+        "office.retirement.lost-reply"
+      ],
+      "remaining": "Only OFF employees with no live/persisted Session are qualified. Running-worker/native cleanup, partial room cleanup, queued authority revocation, restored-identity ABA, other lifecycle actions and their independent faults remain separate gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::paint::summary:Remove from company",
+      "scenarios": [
+        "office.retirement.cancel",
+        "office.retirement.reporting-refusal",
+        "office.retirement.durable-identity",
+        "office.retirement.lost-reply"
+      ],
+      "remaining": "Only OFF employees with no live/persisted Session are qualified. Running-worker/native cleanup, partial room cleanup, queued authority revocation, restored-identity ABA, other lifecycle actions and their independent faults remain separate gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::enabled::input:[binding label]",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Only actual host-unconfigured503 availability is qualified: indeterminate/disabled access, disabled device/Save and no GPU write. Successful GPU choice/save/apply, authority revocation, lost save replies and installed native/device behavior remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::devices::select:[binding label]",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Only actual host-unconfigured503 availability is qualified: indeterminate/disabled access, disabled device/Save and no GPU write. Successful GPU choice/save/apply, authority revocation, lost save replies and installed native/device behavior remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::save::button:Save GPU request for ${employee.name}",
+      "scenarios": ["employee.resources.aggregate-gpu-unknown"],
+      "remaining": "Only actual host-unconfigured503 availability is qualified: indeterminate/disabled access, disabled device/Save and no GPU write. Successful GPU choice/save/apply, authority revocation, lost save replies and installed native/device behavior remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::officeToggle::input:[binding label]",
+      "scenarios": ["office.employee-lifecycle.enter-cancel"],
+      "remaining": "Only real Enter confirmation cancellation for an OFF employee is qualified. Confirmed Enter/Leave, active employee, native startup/stop, lost replies, permission denial and cross-binding changes remain gaps. Wake/restart handlers remain unmapped."
     }
   ],
   "gaps": [
@@ -355,27 +1033,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::input::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::render::summary:Active hires · ${list.length}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::save::button:Save hiring settings",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::enabled::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::expert::select:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyRecoveryFields::save::button:Save recovery",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -459,40 +1117,12 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::devices::select:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::enabled::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::refresh::button:Refresh GPU status for ${employee.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeGpuFields::save::button:Save GPU request for ${employee.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::leave::button:Leave office for ${employee.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::officeToggle::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::paint::button:Retire ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::paint::semantic-role:officeToggle.setAttribute('role', 'switch')",
       "reason": "Detection gap: semantic-role:officeToggle.setAttribute('role', 'switch')"
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::paint::summary:Remove from company",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::restart::button:Restart session for ${employee.name}",
@@ -788,10 +1418,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openDiskDetails::close::button:Close disk usage",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::inline::button:Close profile for ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1895,19 +2521,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderEdit::input::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderEdit::submit::button:Apply RAM and CPU limits",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/company-resources.js::FleetPanel.constructor::inline::button:Check laptop rollout status",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/company-resources.js::FleetPanel.constructor::inline::button:Refresh laptop fleet status",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1940,10 +2554,6 @@
     },
     {
       "declaration": "src/web/public/company-resources.js::FleetPanel.render::inline::textarea:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/company-resources.js::FleetPanel.renderEmployeeSummary::open::button:Resource permissions for ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -4917,9 +5527,1425 @@
     {
       "declaration": "src/web/public/workspace-files.html::html::summary:ffbaafa6f104::1",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/index.html::external-script::browser-input-journal.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: browser-input-journal.js"
+    },
+    {
+      "declaration": "src/web/public/index.html::external-script::input-delivery.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: input-delivery.js"
+    },
+    {
+      "declaration": "src/web/public/index.html::external-script::employee-recovery.js",
+      "reason": "The module is now scanned explicitly and its listed thin-client/real-read scenarios are linked. Full cross-component runtime, action-specific native effects and installed/restart states remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::b::button:plans-btn",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::cancel::button:plans-link",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::done::button:plans-btn plans-btn--primary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::inline::summary:",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::input::input:signin-input",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::open::a:plans-btn plans-btn--primary signin-open",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::send::button:plans-btn plans-btn--primary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::wrong::button:plans-link",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignInPanel::copy::button:plans-btn::ambiguous-2",
+      "reason": "Detection gap: button:plans-btn"
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignInPanel::input::input:signin-input",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignInPanel::open::a:plans-btn plans-btn--primary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignInPanel::send::button:plans-btn plans-btn--primary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::accountUiEl::node::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::signInAccount::close::button:plans-btn",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::signInAccount::e::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::signInAll::closeBtn::button:plans-btn",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::buildAdminPanel::inline::embedded-control-markup:24ef896822c4",
+      "reason": "Detection gap: embedded-control-markup:24ef896822c4"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::buildChangePasswordModal::inline::embedded-control-markup:9dec6811ddb6",
+      "reason": "Detection gap: embedded-control-markup:9dec6811ddb6"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::injectUsersTab::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::injectUsersTab::inline::embedded-control-markup:4137c52518f3",
+      "reason": "Detection gap: embedded-control-markup:4137c52518f3"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::renderCaseDrawer::items::embedded-control-markup:19bf39f0e8e4",
+      "reason": "Detection gap: embedded-control-markup:19bf39f0e8e4"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::renderPanel::rows::embedded-control-markup:f930cbea89c9",
+      "reason": "Detection gap: embedded-control-markup:f930cbea89c9"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::renderUsers::rows::embedded-control-markup:0993f32a3ad6",
+      "reason": "Detection gap: embedded-control-markup:0993f32a3ad6"
+    },
+    {
+      "declaration": "src/web/public/admin-ui.js::showOneTimePassword::inline::embedded-control-markup:224df8b38360",
+      "reason": "Detection gap: embedded-control-markup:224df8b38360"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._copyText::ta::textarea:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._fullRenderSessionTabs::tabActionsHtml::embedded-control-markup:5d776315b687",
+      "reason": "Detection gap: embedded-control-markup:5d776315b687"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._linkifyFilePaths::link::a:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::button::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::inline::semantic-role:button.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:button.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderHistoryTruncationBanner::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderHistoryTruncationBanner::dismiss::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderInputRecoveryBanner::refresh::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderMarkdown::copyBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderMarkdown::toggle::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderTabFocus::html::embedded-control-markup:f9be8f2ac2e7",
+      "reason": "Detection gap: embedded-control-markup:f9be8f2ac2e7"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._renderTabFocus::items::embedded-control-markup:2452446a86b0",
+      "reason": "Detection gap: embedded-control-markup:2452446a86b0"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._showSoloReleased::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._showSoloSessionGone::inline::embedded-control-markup:50bdfae07191",
+      "reason": "Detection gap: embedded-control-markup:50bdfae07191"
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp.startTabGroupRename::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:070a59753e62",
+      "reason": "Detection gap: embedded-control-markup:070a59753e62"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:0f424d3a161d",
+      "reason": "Detection gap: embedded-control-markup:0f424d3a161d"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:8da2ca9cb65d",
+      "reason": "Detection gap: embedded-control-markup:8da2ca9cb65d"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:aa88172112b6",
+      "reason": "Detection gap: embedded-control-markup:aa88172112b6"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:ae137439b253",
+      "reason": "Detection gap: embedded-control-markup:ae137439b253"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:f16422e315fc",
+      "reason": "Detection gap: embedded-control-markup:f16422e315fc"
+    },
+    {
+      "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:f419745a45e8",
+      "reason": "Detection gap: embedded-control-markup:f419745a45e8"
+    },
+    {
+      "declaration": "src/web/public/bots.html::external-script::bots.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: bots.js"
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::a:897b16abac7a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::2",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::3",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::4",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::5",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::6",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:371dcf3eb6f3::7",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:428c784ec020::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:80c764d69458::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:96aaf154e940::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:a158d6d1e145::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:a1c1c679498b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:ac6b3223fa24::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:add-watch-credential::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:advanced::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:b324c7159364::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:choose-bot-avatar::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:clear-bot-avatar::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:disk-edit::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:disk-toggle::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:ef50dcce0aa4::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:f227727fe47b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:f349e7f1d34c::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:new-bot::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:new-routine::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:new-watch::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:refresh::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:trial-go::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::button:watch-recovery-go::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:009e0d026a49::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:071aee6ea421::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:08ca2e979db4::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:12f703b168c9::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:24c9a398d218::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:3aeb0f9d554b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:58429b13c6c2::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:826d4408aa30::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:8433c41219dd::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:84351fcc5510::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:8e4c66451402::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:9ab968f9bd47::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:a442f213396a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:aa649876eb19::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:c3cdb001c667::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:d5688cc9cc43::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:e2a54d56f0a9::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:e6a8742fcd85::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:e9449e72a81f::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:search::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::input:watch-recovery-ack::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:41e2446c8348::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:5c34c45edd9b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:603b14434bcf::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:6858e2a8959a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:6b62d7655928::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:7eedaa146232::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:a97b25cffe07::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:b24e54c3ced3::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::select:filter::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::textarea:23bb2da23c18::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.html::html::textarea:5cf1d1946f75::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/bots.js::module::element::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/car-mode.js::_buildCarMode::diagBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/car-mode.js::_buildCarMode::exit::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/car-mode.js::_buildCarMode::pad::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/car-mode.js::_buildCarMode::retryAwake::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/car-mode.js::_buildCarMode::voice::select:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-language-plugins.js::module::el::dynamic-constructor:5754ac8dac57",
+      "reason": "Detection gap: dynamic-constructor:5754ac8dac57"
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::element::node::dynamic-constructor:a6833cd24d0c",
+      "reason": "Detection gap: dynamic-constructor:a6833cd24d0c"
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::enhanceEditor::inline::button:Display math",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::enhanceEditor::inline::button:Inline math",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::enhanceEditor::toggle::button:Preview math",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::enhanceMessage::toggle::button:Show source",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-math-plugin.js::enhanceMessage::use::button:Use in composer",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-media.js::_chatAttachmentsEl::inline::semantic-role:img.setAttribute('role', 'button')",
+      "reason": "Detection gap: semantic-role:img.setAttribute('role', 'button')"
+    },
+    {
+      "declaration": "src/web/public/chat-plugins.js::openSettings::close::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chat-plugins.js::openSettings::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chatroom-ui.js::_chatEl::el::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/chatroom-ui.js::_chatPendingRow::inline::button:chatroom-pending-again",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chatroom-ui.js::_chatPendingRow::inline::button:chatroom-pending-dismiss",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chatroom-ui.js::_chatPendingRow::inline::button:chatroom-pending-retry",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/chatroom-ui.js::_toggleChatRoomMenu::item::semantic-role:b.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:b.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/command-failures.html::external-script::command-failures.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: command-failures.js"
+    },
+    {
+      "declaration": "src/web/public/command-failures.html::html::a:2e3266f5f00c::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/command-failures.html::html::button:refresh::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/command-failures.html::html::select:employee::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/command-failures.js::CommandFailureView.node::item::dynamic-constructor:93089810fa32",
+      "reason": "Detection gap: dynamic-constructor:93089810fa32"
+    },
+    {
+      "declaration": "src/web/public/cron-ui.js::renderCronJobs::rows::embedded-control-markup:7d3001c7a5ba",
+      "reason": "Detection gap: embedded-control-markup:7d3001c7a5ba"
+    },
+    {
+      "declaration": "src/web/public/entrance-animations.js::openAnimLab::group::embedded-control-markup:a3d63d5f467d",
+      "reason": "Detection gap: embedded-control-markup:a3d63d5f467d"
+    },
+    {
+      "declaration": "src/web/public/entrance-animations.js::openAnimLab::group::embedded-control-markup:c152e33dbeeb",
+      "reason": "Detection gap: embedded-control-markup:c152e33dbeeb"
+    },
+    {
+      "declaration": "src/web/public/entrance-animations.js::openAnimLab::inline::embedded-control-markup:863a18eaef57",
+      "reason": "Detection gap: embedded-control-markup:863a18eaef57"
+    },
+    {
+      "declaration": "src/web/public/entrance-animations.js::openAnimLab::inline::embedded-control-markup:acae1457b26d",
+      "reason": "Detection gap: embedded-control-markup:acae1457b26d"
+    },
+    {
+      "declaration": "src/web/public/file-preview-pdf.mjs::mountReadOnlyPdf::el::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/gesture/gesture-reverie.js::anonymous.constructor::inline::button:cg-btn",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/gesture/gesture-reverie.js::anonymous.constructor::inline::button:cg-btn cg-btn-icon",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/gesture/gesture-reverie.js::el::node::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/git-status-ui.js::_gitEl::el::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/git-status-ui.js::_gitFileRow::inline::semantic-role:row.setAttribute('role', 'button')",
+      "reason": "Detection gap: semantic-role:row.setAttribute('role', 'button')"
+    },
+    {
+      "declaration": "src/web/public/git-status-ui.js::_gitRepoSection::summary::summary:git-status-repo-summary",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/git-status-ui.js::_renderGitDiffView::back::button:btn-toolbar btn-sm",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/git-status-ui.js::_renderGitDiffView::open::button:btn-toolbar btn-sm",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/home-sessions.js::_buildHomeSessionRow::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/home-sessions.js::_buildHomeSessionsWebviewRow::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/input-delivery.js::_renderUnqueuedInput::copy::textarea:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/input-delivery.js::_renderUnqueuedInput::inline::textarea:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::composePrompt::inline::embedded-control-markup:d080f06364e4",
+      "reason": "Detection gap: embedded-control-markup:d080f06364e4"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::module::KeyboardAccessoryBar::embedded-control-markup:2f7e43c99cdf",
+      "reason": "Detection gap: embedded-control-markup:2f7e43c99cdf"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::module::KeyboardAccessoryBar::embedded-control-markup:503176e88bad",
+      "reason": "Detection gap: embedded-control-markup:503176e88bad"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::module::KeyboardAccessoryBar::embedded-control-markup:603779d91e75",
+      "reason": "Detection gap: embedded-control-markup:603779d91e75"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::module::KeyboardAccessoryBar::embedded-control-markup:79fb7429fe9e",
+      "reason": "Detection gap: embedded-control-markup:79fb7429fe9e"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::module::KeyboardAccessoryBar::embedded-control-markup:f795c75491cb",
+      "reason": "Detection gap: embedded-control-markup:f795c75491cb"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::open::inline::embedded-control-markup:95dacaa3d2f8",
+      "reason": "Detection gap: embedded-control-markup:95dacaa3d2f8"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::openPreview::inline::embedded-control-markup:59255e2633a5",
+      "reason": "Detection gap: embedded-control-markup:59255e2633a5"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::pasteFromClipboard::inline::embedded-control-markup:c0431006ffef",
+      "reason": "Detection gap: embedded-control-markup:c0431006ffef"
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::renderEntries::choose::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::renderEntries::open::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::toggleOverflow::b::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/keyboard-accessory.js::toggleOverflow::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-app.js::open::inline::embedded-control-markup:780232a7bb65",
+      "reason": "Detection gap: embedded-control-markup:780232a7bb65"
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewApprovalStrip::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewPast::toggle::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewPastRow::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewRow::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewRunMenu::add::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewRunMenu::option::button:[binding label]::ambiguous-2",
+      "reason": "Detection gap: button:[binding label]"
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewTop::caret::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/mobile-overview.js::_buildMobileOverviewTop::run::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::external-script::office.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: office.js"
+    },
+    {
+      "declaration": "src/web/public/office.html::html::a:da8cd0a79fb1::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::button:b87256787581::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::button:d685d928228b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::button:logout::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::input:2de4c3141ea2::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::select:4a5b23994e1c::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::summary:ffbaafa6f104::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.html::html::textarea:933cc730f321::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/office.js::module::b::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/orchestrator-panel.js::_renderOrchestratorActions::btn::embedded-control-markup:e7e20ea2b215",
+      "reason": "Detection gap: embedded-control-markup:e7e20ea2b215"
+    },
+    {
+      "declaration": "src/web/public/orchestrator-panel.js::_renderOrchestratorPhase::inline::embedded-control-markup:3a707259e19d",
+      "reason": "Detection gap: embedded-control-markup:3a707259e19d"
+    },
+    {
+      "declaration": "src/web/public/orchestrator-panel.js::_renderOrchestratorPhase::inline::embedded-control-markup:a8acd340a7dd",
+      "reason": "Detection gap: embedded-control-markup:a8acd340a7dd"
+    },
+    {
+      "declaration": "src/web/public/owner-terminal-ui.js::connect::key::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/owner-terminal-ui.js::openOwnerTerminal::close::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/owner-terminal-ui.js::openOwnerTerminal::retry::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_refreshAttachmentClearAll::inline::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderFileBrowserSearchResults::downloadBtn::embedded-control-markup:6c1467dbbad8",
+      "reason": "Detection gap: embedded-control-markup:6c1467dbbad8"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderFolderGrid::chip::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderFolderGrid::tile::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderMuxSessionsImmediate::inline::embedded-control-markup:fc7310c34979",
+      "reason": "Detection gap: embedded-control-markup:fc7310c34979"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderSubagentPanelImmediate::inline::embedded-control-markup:27bcee7d6eb6",
+      "reason": "Detection gap: embedded-control-markup:27bcee7d6eb6"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_renderSubagentPanelImmediate::inline::embedded-control-markup:3b472fa8583c",
+      "reason": "Detection gap: embedded-control-markup:3b472fa8583c"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_showCenterStatus::cancelBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_showCenterStatus::closeBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_showClipboardFallback::closeBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_showClipboardFallback::copyBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::_showClipboardFallback::textarea::textarea:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::addAttachmentCard::inline::embedded-control-markup:e1e635460990",
+      "reason": "Detection gap: embedded-control-markup:e1e635460990"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::ensureAttachmentHistoryDrawer::inline::embedded-control-markup:127acf9b1470",
+      "reason": "Detection gap: embedded-control-markup:127acf9b1470"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::enterFilePreviewEdit::textarea::textarea:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::openFilePreview::inline::embedded-control-markup:f25bc4987668",
+      "reason": "Detection gap: embedded-control-markup:f25bc4987668"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::openImagePopup::inline::embedded-control-markup:948af198ace2",
+      "reason": "Detection gap: embedded-control-markup:948af198ace2"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::openLogViewerWindow::inline::embedded-control-markup:3fbae39f8b70",
+      "reason": "Detection gap: embedded-control-markup:3fbae39f8b70"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::openReadOnlyFilePreview::el::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::openTeammateTerminalWindow::inline::embedded-control-markup:3d6af8ffbb04",
+      "reason": "Detection gap: embedded-control-markup:3d6af8ffbb04"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderAttachmentHistoryItem::inline::embedded-control-markup:c28eb75fa527",
+      "reason": "Detection gap: embedded-control-markup:c28eb75fa527"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderAwayDigestItem::action::embedded-control-markup:b9723c0cf307",
+      "reason": "Detection gap: embedded-control-markup:b9723c0cf307"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderCommandPalette::inline::embedded-control-markup:c56e5465ab16",
+      "reason": "Detection gap: embedded-control-markup:c56e5465ab16"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderFileBrowserTree::downloadBtn::embedded-control-markup:f213ad88f5b3",
+      "reason": "Detection gap: embedded-control-markup:f213ad88f5b3"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderMonitorSubagents::inline::embedded-control-markup:a41858996958",
+      "reason": "Detection gap: embedded-control-markup:a41858996958"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderMonitorSubagents::inline::embedded-control-markup:cfc9ef2023ac",
+      "reason": "Detection gap: embedded-control-markup:cfc9ef2023ac"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderSubagentDetail::activityHtml::embedded-control-markup:26bdbdfbe9b2",
+      "reason": "Detection gap: embedded-control-markup:26bdbdfbe9b2"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderSubagentDetail::activityHtml::embedded-control-markup:e34ad5485ceb",
+      "reason": "Detection gap: embedded-control-markup:e34ad5485ceb"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::renderSubagentDetail::inline::embedded-control-markup:b56b9ea46f8f",
+      "reason": "Detection gap: embedded-control-markup:b56b9ea46f8f"
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::showToast::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::external-script::people.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: people.js"
+    },
+    {
+      "declaration": "src/web/public/people.html::html::a:back-to-chat::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::a:da8cd0a79fb1::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:cancel-edit::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:copy-password::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:d685d928228b::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:d685d928228b::2",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:d685d928228b::3",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::button:dismiss-password::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:2de4c3141ea2::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:4c6f096b4e5a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:4c6f096b4e5a::2",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:7aa161da4344::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:7fc555a67e1a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:one-time-password::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::input:reveal-password::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::select:4a5b23994e1c::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::select:c65c4a41a5db::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.html::html::select:c65c4a41a5db::2",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.js::module::b::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.js::module::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.js::module::refresh::button:Edit access",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/people.js::module::refresh::button:Reset password",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::external-script::previews.js",
+      "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: previews.js"
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::a:2d401bad192a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::a:897b16abac7a::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::button:1ed8cef9028d::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::button:refresh::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::input:1156ae48e644::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::input:47dbaf649cb2::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.html::html::select:4b8cdb03305d::1",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/previews.js::module::node::dynamic-constructor:9332ac7d5042",
+      "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
+    },
+    {
+      "declaration": "src/web/public/ralph-panel.js::createRalphTaskCard::completeBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/ralph-panel.js::createRalphTaskCard::reopenBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/ralph-panel.js::createRalphTaskCard::retryBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/ralph-panel.js::showFixPlanModal::inline::embedded-control-markup:0a265b88f861",
+      "reason": "Detection gap: embedded-control-markup:0a265b88f861"
+    },
+    {
+      "declaration": "src/web/public/ralph-panel.js::showPlanHistoryModal::inline::embedded-control-markup:e3d3ece49db1",
+      "reason": "Detection gap: embedded-control-markup:e3d3ece49db1"
+    },
+    {
+      "declaration": "src/web/public/ralph-wizard.js::renderPlanChecklist::inline::embedded-control-markup:b975d0dc5d17",
+      "reason": "Detection gap: embedded-control-markup:b975d0dc5d17"
+    },
+    {
+      "declaration": "src/web/public/ralph-wizard.js::updateExistingPlanUI::inline::embedded-control-markup:a57d10c6a586",
+      "reason": "Detection gap: embedded-control-markup:a57d10c6a586"
+    },
+    {
+      "declaration": "src/web/public/readmymind-ui.js::_rmmRender::row::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/respawn-ui.js::downloadFile::a::a:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-switcher.js::_ensureSessionSwitcher::help::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-switcher.js::_ensureSessionSwitcher::toggle::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-switcher.js::_renderSessionSwitcherMenu::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::_loadRunModeHistory::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::_openCustomModelPickModal::inline::embedded-control-markup:f0378e399062",
+      "reason": "Detection gap: embedded-control-markup:f0378e399062"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::_refreshCustomModelRunOptions::inline::embedded-control-markup:c3f9de9dc417",
+      "reason": "Detection gap: embedded-control-markup:c3f9de9dc417"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::_renderDiscoveredSessions::rows::embedded-control-markup:e0338738443b",
+      "reason": "Detection gap: embedded-control-markup:e0338738443b"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::refreshDockerExports::inline::embedded-control-markup:8169dfc3b355",
+      "reason": "Detection gap: embedded-control-markup:8169dfc3b355"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderCaseManageList::html::embedded-control-markup:4489bf7cdc6d",
+      "reason": "Detection gap: embedded-control-markup:4489bf7cdc6d"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderCaseManageList::inline::embedded-control-markup:2f39f070a4f5",
+      "reason": "Detection gap: embedded-control-markup:2f39f070a4f5"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderCaseManageList::inline::embedded-control-markup:adf5a185bd5b",
+      "reason": "Detection gap: embedded-control-markup:adf5a185bd5b"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderCasePickerList::actionRows::embedded-control-markup:c197c951f0de",
+      "reason": "Detection gap: embedded-control-markup:c197c951f0de"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderCasePickerList::inline::embedded-control-markup:3df952aa90d0",
+      "reason": "Detection gap: embedded-control-markup:3df952aa90d0"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::renderRegistryRunOptions::option::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::showMobileCasePicker::inline::embedded-control-markup:aacb7ef9473b",
+      "reason": "Detection gap: embedded-control-markup:aacb7ef9473b"
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::startInlineRename::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::syncMessageAgentBar::button::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/session-ui.js::syncMessageAgentBar::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_buildModelCards::card::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_buildSelectSegment::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_buildSettingsJumpMenu::row::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_confirmOfficePower::cancel::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_confirmOfficePower::confirm::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_renderTunnelPanel::inline::embedded-control-markup:59e82b922fc5",
+      "reason": "Detection gap: embedded-control-markup:59e82b922fc5"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_renderTunnelPanel::inline::embedded-control-markup:b03033aa7b61",
+      "reason": "Detection gap: embedded-control-markup:b03033aa7b61"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::_renderTunnelPanel::inline::embedded-control-markup:ec8d375fd550",
+      "reason": "Detection gap: embedded-control-markup:ec8d375fd550"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderCliList::customActions::embedded-control-markup:a57301103c2b",
+      "reason": "Detection gap: embedded-control-markup:a57301103c2b"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderCliList::installBtn::embedded-control-markup:ccbe6b677b45",
+      "reason": "Detection gap: embedded-control-markup:ccbe6b677b45"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderCliList::toggle::embedded-control-markup:9c1b09a08ca8",
+      "reason": "Detection gap: embedded-control-markup:9c1b09a08ca8"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderCustomModelHostsList::inline::embedded-control-markup:f202656e211e",
+      "reason": "Detection gap: embedded-control-markup:f202656e211e"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderShortcutSettingsList::controls::embedded-control-markup:b9509a4f2168",
+      "reason": "Detection gap: embedded-control-markup:b9509a4f2168"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderShortcutSettingsList::inline::embedded-control-markup:383ec86845a4",
+      "reason": "Detection gap: embedded-control-markup:383ec86845a4"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderWelcomeCliActions::chip::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::renderWelcomeCliActions::main::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::showTunnelQR::inline::embedded-control-markup:2b8dc1071033",
+      "reason": "Detection gap: embedded-control-markup:2b8dc1071033"
+    },
+    {
+      "declaration": "src/web/public/settings-ui.js::showTunnelQR::regenBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/spreadsheet-preview.js::renderMetadata::inline::semantic-role:tab.setAttribute('role', 'tab')",
+      "reason": "Detection gap: semantic-role:tab.setAttribute('role', 'tab')"
+    },
+    {
+      "declaration": "src/web/public/spreadsheet-preview.js::renderMetadata::tab::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subagent-windows.js::openSubagentWindow::inline::embedded-control-markup:94b789e9d78c",
+      "reason": "Detection gap: embedded-control-markup:94b789e9d78c"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::addSubscriptionAccount::add::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::addSubscriptionAccount::cancel::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::addSubscriptionAccount::label::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::addSubscriptionAccount::provider::select:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::add::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::help::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::inline::semantic-role:add.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:add.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::inline::semantic-role:help.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:help.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::inline::semantic-role:signIn.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:signIn.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::inline::semantic-role:use.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:use.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::signIn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::openAccountMenu::use::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::renderSubscriptionUsage::inline::semantic-role:chip.setAttribute('role', 'button')",
+      "reason": "Detection gap: semantic-role:chip.setAttribute('role', 'button')"
+    },
+    {
+      "declaration": "src/web/public/subscription-ui.js::showSubscriptionLogin::done::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tab-families.js::_applyTabFamilies::inline::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tab-families.js::_ensureTabStripToggle::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tab-families.js::_renderTabFamily::b::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tab-rail-resize.js::openTabRailActionMenu::button::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tab-rail-resize.js::openTabRailActionMenu::inline::semantic-role:button.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:button.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/terminal-split.js::openSplitPane::close::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-split.js::openSplitPicker::inline::embedded-control-markup:daf35b74b45c",
+      "reason": "Detection gap: embedded-control-markup:daf35b74b45c"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_buildHistoryItem::expandBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_buildHistoryItem::viewAllBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_buildSearchResultCard::inline::semantic-role:card.setAttribute('role', 'button')",
+      "reason": "Detection gap: semantic-role:card.setAttribute('role', 'button')"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_ensureTouchSelectionBar::inline::embedded-control-markup:9a8a71e10b3a",
+      "reason": "Detection gap: embedded-control-markup:9a8a71e10b3a"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_ensureTouchSelectionBar::inline::embedded-control-markup:9bc9b31ea30a",
+      "reason": "Detection gap: embedded-control-markup:9bc9b31ea30a"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_ensureTouchSelectionBar::inline::embedded-control-markup:c7b9d07d8c0a",
+      "reason": "Detection gap: embedded-control-markup:c7b9d07d8c0a"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_loadFolderHistoryPage::moreBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_openSessionRowMenu::addItem::semantic-role:btn.setAttribute('role', 'menuitem')",
+      "reason": "Detection gap: semantic-role:btn.setAttribute('role', 'menuitem')"
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_openSessionRowMenu::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_renderHistoryList::lessBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::_renderHistoryList::moreBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/terminal-ui.js::openFolderHistoryModal::closeBtn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::_buildTileHeader::b::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::_buildTileHeader::inline::button:tile-menu",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::_buildTileHeader::inline::button:tile-remove",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::_buildTileHeader::zoomBtn::button:tile-zoom",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::_renderTileOverlay::btn::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::openTileCountMenu::item::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/tile-grid.js::startTileRename::input::input:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/ultracode-windows.js::createUltracodeAgentWindow::inline::embedded-control-markup:187acdb938bc",
+      "reason": "Detection gap: embedded-control-markup:187acdb938bc"
+    },
+    {
+      "declaration": "src/web/public/ultracode-windows.js::createUltracodeWindow::inline::embedded-control-markup:5009fe529ad7",
+      "reason": "Detection gap: embedded-control-markup:5009fe529ad7"
+    },
+    {
+      "declaration": "src/web/public/update-notice.js::_showUpdateNotice::dismiss::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/update-notice.js::_showUpdateNotice::reload::button:[binding label]",
+      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
+    },
+    {
+      "declaration": "src/web/public/voice-input.js::_showComposeOverlay::inline::embedded-control-markup:152cfb2447ec",
+      "reason": "Detection gap: embedded-control-markup:152cfb2447ec"
+    },
+    {
+      "declaration": "src/web/public/webview-tabs.js::_renderWebviewIconPicker::inline::embedded-control-markup:89a509f1b0fb",
+      "reason": "Detection gap: embedded-control-markup:89a509f1b0fb"
+    },
+    {
+      "declaration": "src/web/public/webview-tabs.js::_webviewFailureHtml::inline::embedded-control-markup:087ab308ea47",
+      "reason": "Detection gap: embedded-control-markup:087ab308ea47"
+    },
+    {
+      "declaration": "src/web/public/webview-tabs.js::renderWebviewMenuItems::inline::embedded-control-markup:02300ea81d62",
+      "reason": "Detection gap: embedded-control-markup:02300ea81d62"
     }
   ],
-  "gapBudget": 1157,
+  "gapBudget": 1494,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
@@ -4927,6 +6953,33 @@
     "Mappings qualify only their named assertion scenario. The remaining state gaps on each mapping are unresolved; no control or whole-site completeness is claimed.",
     "Scenario title and ordered assertion tokens are static integrity anchors, not proof the test passed. CI must execute the actual associated test runner.",
     "New or changed declarations fail without manifest registration. The explicit gap list and budget are reviewed configuration, not an immutable promise that gaps can never increase.",
-    "A declaration may link several reviewed state scenarios. None of these links removes the explicit remaining state gaps or qualifies an unresolved constructor."
-  ]
+    "A declaration may link several reviewed state scenarios. None of these links removes the explicit remaining state gaps or qualifies an unresolved constructor.",
+    "Parameterized scenario recognition is limited to direct top-level expression statements calling it.each/test.each with a nonempty static finite numeric literal table; nested/function/short-circuit/conditional/skipped/runtime tables remain unknown. Anchors are source integrity only, and every linked scenario still needs actual runner evidence.",
+    "Filesystem discovery inventories every supported JS/HTML source under src/web/public, including nested files and the owned gesture bundle, and every owned TypeScript source under packages/xterm-zerolag-input/src. It needs no Git metadata and runs against the flattened Nix web root.",
+    "Only exact reviewed third-party distributions and the two compiled duplicate xterm outputs are excluded. Their entire owned TypeScript source tree is included; unknown vendor/generated neighbors and missing primary sources fail the scope ratchet. No additional behavior is inferred from these inputs.",
+    "Newly discovered declarations remain explicit gaps. Existing36 behavioral mappings, their scenario assertions and remaining state limits are preserved; broader source presence is not whole-site behavioral coverage.",
+    "The three exact owned generator scripts are also parsed as authored input for their appended browser alias constructors; those outputs are not described as third-party. Source discovery does not execute those scripts or qualify their bundle behavior.",
+    "Supported script formats are JS/MJS/CJS/JSX and TS/MTS/CTS/TSX; HTM and HTML use the HTML scanner. JSX/TSX markup is retained only as unresolved detection gaps, never inferred behavioral mappings."
+  ],
+  "sourceExclusions": {
+    "src/web/public/vendor/dompurify.min.js": "Third-party DOMPurify browser bundle; committed upstream distribution, not Reverie control source.",
+    "src/web/public/vendor/marked.min.js": "Third-party Marked Markdown parser browser bundle; committed upstream distribution.",
+    "src/web/public/vendor/katex-0.19.0/katex.min.js": "Pinned third-party KaTeX0.19.0 browser distribution; vendor/katex-0.19.0/LICENSE.",
+    "src/web/public/vendor/highlight-11.12.0.min.js": "Pinned third-party Highlight.js11.12.0 distribution; vendor/highlight-LICENSE.txt.",
+    "src/web/public/vendor/embassy-qr-code.min.js": "Third-party qrcode1.5.4 browser entry bundled with esbuild; exact origin/licenses in vendor/EMBASSY-QR-NOTICES.md.",
+    "src/web/public/vendor/embassy-qr-scan.min.js": "Third-party jsQR1.4.0 browser bundle; exact origin/integrity/licenses in vendor/EMBASSY-QR-NOTICES.md.",
+    "src/web/public/vendor/pdfjs-6.4.299/pdf.mjs": "Pinned third-party PDF.js6.4.299 distribution; vendor/pdfjs-6.4.299/PINS.json and LICENSE.",
+    "src/web/public/vendor/pdfjs-6.4.299/pdf.worker.mjs": "Pinned third-party PDF.js6.4.299 worker distribution; vendor/pdfjs-6.4.299/PINS.json and LICENSE.",
+    "src/web/public/vendor/pdfjs-6.4.299/wasm/openjpeg_nowasm_fallback.js": "Pinned third-party PDF.js OpenJPEG fallback; vendor/pdfjs-6.4.299/wasm/LICENSE_OPENJPEG.",
+    "src/web/public/vendor/pdfjs-6.4.299/wasm/jbig2_nowasm_fallback.js": "Pinned third-party PDF.js JBIG2 fallback; vendor/pdfjs-6.4.299/wasm/LICENSE_JBIG2.",
+    "src/web/public/vendor/xterm.min.js": "Generated third-party @xterm/xterm distribution from node_modules; scripts/prepare-test-vendor.mjs ASSETS.",
+    "src/web/public/vendor/xterm-addon-fit.min.js": "Generated third-party @xterm/addon-fit distribution; scripts/prepare-test-vendor.mjs ASSETS.",
+    "src/web/public/vendor/xterm-addon-serialize.min.js": "Generated third-party @xterm/addon-serialize distribution; scripts/prepare-test-vendor.mjs ASSETS.",
+    "src/web/public/vendor/xterm-addon-unicode11.min.js": "Generated third-party @xterm/addon-unicode11 distribution; scripts/prepare-test-vendor.mjs ASSETS.",
+    "src/web/public/vendor/xterm-addon-webgl.min.js": "Generated third-party @xterm/addon-webgl distribution; scripts/prepare-test-vendor.mjs ASSETS.",
+    "src/web/public/vendor/exceljs.min.js": "Generated third-party ExcelJS browser distribution; scripts/prepare-spreadsheet-assets.mjs copies pinned package bytes.",
+    "src/web/public/vendor/fflate.min.js": "Generated third-party fflate browser bundle; scripts/prepare-spreadsheet-assets.mjs bundles pinned package.",
+    "src/web/public/vendor/xterm-zerolag-input.js": "Generated duplicate of owned packages/xterm-zerolag-input/src/zerolag-input-addon.ts and its siblings, ALL inventoried as TypeScript; appended alias glue from scripts/prepare-test-vendor.mjs, scripts/build.mjs and scripts/postinstall.js is also inventoried. Producer: scripts/prepare-test-vendor.mjs; separate behavior suite: npm --prefix packages/xterm-zerolag-input test (not qualified by inventory).",
+    "src/web/public/vendor/xterm-predictive-echo.js": "Generated duplicate of owned packages/xterm-zerolag-input/src/predictive-echo-addon.ts and its siblings, ALL inventoried as TypeScript; appended alias glue from scripts/prepare-test-vendor.mjs, scripts/build.mjs and scripts/postinstall.js is also inventoried. Producer: scripts/prepare-test-vendor.mjs; separate behavior suite: npm --prefix packages/xterm-zerolag-input test (not qualified by inventory)."
+  }
 }

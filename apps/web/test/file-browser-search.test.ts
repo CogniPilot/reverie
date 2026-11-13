@@ -1642,13 +1642,11 @@ describe('File Viewer server search', () => {
       const selectStart = appJs.indexOf('async selectSession(sessionId, options = {})');
       const activeAssignment = appJs.indexOf('this.activeSessionId = sessionId;', selectStart);
       const activation = appJs.indexOf('this._activateFileBrowserSession?.(sessionId);', activeAssignment);
-      const firstTerminalAwait = appJs.indexOf('await ', activeAssignment);
+      const firstTerminalAwait = appJs.indexOf('await this.sendResize(', activeAssignment);
       const retainedIdleLoad = appJs.indexOf('this.loadFileBrowser(sessionId);', firstTerminalAwait);
 
       expect(selectStart).toBeGreaterThanOrEqual(0);
-      expect(appJs.slice(activeAssignment, activation + 53)).toMatch(
-        /this\.activeSessionId = sessionId;\s*this\._renderInputRecoveryBanner\(\);\s*this\._activateFileBrowserSession\?\.\(sessionId\);/
-      );
+      expect(appJs.slice(activeAssignment, activation)).toContain('this._renderInputRecoveryBanner();');
       expect(activeAssignment).toBeLessThan(activation);
       expect(activation).toBeLessThan(firstTerminalAwait);
       expect(firstTerminalAwait).toBeLessThan(retainedIdleLoad);
@@ -1658,6 +1656,8 @@ describe('File Viewer server search', () => {
       const { app, filePending, terminalBoundary } = loadRealSelectSessionHarness({ terminalFailure: true });
 
       const selection = app.selectSession('session/B');
+      // The actual empty-draft flush resolves before selection changes ownership.
+      await Promise.resolve();
       const immediateState = {
         activationCalls: app._activateFileBrowserSession.mock.calls.length,
         activeSessionId: app.activeSessionId,
@@ -1690,6 +1690,7 @@ describe('File Viewer server search', () => {
       const { app, elements, filePending, idleCallbacks, terminalBoundary } = loadRealSelectSessionHarness();
 
       const selection = app.selectSession('session/B');
+      await Promise.resolve();
       const immediateActivationCalls = app._activateFileBrowserSession.mock.calls.length;
       const immediateLoadCalls = app.loadFileBrowser.mock.calls.length;
       const immediateLoad = app.loadFileBrowser.mock.results[0]?.value;

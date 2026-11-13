@@ -25,7 +25,7 @@
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, unlinkSync, copyFileSync, openSync, closeSync, fsyncSync } from 'node:fs';
-import { writeFile, rename, unlink, copyFile, access } from 'node:fs/promises';
+import { rename, unlink, copyFile, access, open as openAsync, type FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   AppState,
@@ -41,6 +41,9 @@ import { Debouncer, MAX_SESSION_TOKENS } from './utils/index.js';
 import { dataPath } from './config/instance.js';
 import { normalizeSessionOrder } from './session-order.js';
 import { validateTabLayout, type TabLayout } from './tab-layout.js';
+import { Session } from './session.js';
+import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
+import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
 
 /** Debounce delay for batching state writes (ms) */
 const SAVE_DEBOUNCE_MS = 500;
@@ -69,8 +72,249 @@ const SAVE_DEBOUNCE_MS = 500;
 /** Maximum consecutive save failures before circuit breaker opens */
 const MAX_CONSECUTIVE_FAILURES = 3;
 
+/** A main-state publication may have reached disk. Retrying this cached writer is unsafe. */
+export class StatePublicationUnconfirmedError extends Error {
+  readonly code = 'STATE_PUBLICATION_UNCONFIRMED';
+  readonly #evidence: unknown;
+  constructor(evidence?: unknown) {
+    super('State publication is unconfirmed; this writer is held for reconciliation.');
+    this.#evidence = evidence;
+    this.name = 'StatePublicationUnconfirmedError';
+  }
+  /** Trusted backend inspection only. Private state must never enter an API response or automatic error log. */
+  getPrivateEvidenceForReconciliation(): unknown { return this.#evidence; }
+}
+
+/** Acknowledgement authority stays in this canonical writer module. */
+const providerAcknowledgements = new WeakMap<object, {
+  operation: ProviderLaunchPublication; subject: object; row: ProviderLaunchIntent;
+  phase: 'issued' | 'prepared' | 'consumed' | 'retired-unused'; current(): boolean;
+}>();
+/** Read/consume only: no exported mint exists, and caller data cannot register an entry. */
+export function verifyProviderLaunchAcknowledgement(ack: unknown, operation: ProviderLaunchPublication,
+  subject: object, row: ProviderLaunchIntent, stage: 'prepare' | 'claim' | 'unused' | 'retire-unused'): boolean {
+  if (!ack || typeof ack !== 'object') return false;
+  const entry = providerAcknowledgements.get(ack);
+  if (!entry || entry.operation !== operation || entry.subject !== subject || entry.row !== row) return false;
+  if (stage === 'unused') return entry.phase === 'prepared';
+  if (stage === 'retire-unused' && entry.phase === 'prepared') { entry.phase = 'retired-unused'; return true; }
+  if (!entry.current()) return false;
+  if (stage === 'prepare' && entry.phase === 'issued') { entry.phase = 'prepared'; return true; }
+  if (stage === 'claim' && entry.phase === 'prepared') { entry.phase = 'consumed'; return true; }
+  return false;
+}
+
+/** Serialized state/effect evidence is never an ordinary Error cause or enumerable field. */
+export class AcknowledgedStateWriteError extends Error {
+  readonly #evidence: unknown;
+  constructor(message: string, evidence: unknown) {
+    super(message);
+    this.name = 'AcknowledgedStateWriteError';
+    this.#evidence = evidence;
+  }
+  getPrivateEvidenceForReconciliation(): unknown { return this.#evidence; }
+}
+/** Diagnostic only: no-hold-observed is not disk health or permission to retry. */
+export type StatePublicationStatus = Readonly<{
+  version: 1;
+  kind: 'unconfirmed' | 'no-hold-observed';
+}>;
+
+/** Explicit Config patches preserve the schema's nested respawn partial-update contract. */
+export type ConfigPatch = Omit<Partial<AppState['config']>, 'respawn'> & {
+  respawn?: Partial<AppState['config']['respawn']>;
+};
+interface StoppedProviderWrite {
+  owner: EmployeeRecoveryAttempt;
+  session: Session;
+  row: ProviderLaunchIntent | undefined;
+  publication: ProviderLaunchPublication | undefined;
+  acknowledged: boolean;
+  beforeCaptured: boolean;
+  before: string | undefined;
+  attempted: string | undefined;
+  uncertainty: StatePublicationUnconfirmedError | undefined;
+  snapshot: import('./types.js').SessionState | undefined;
+}
+
 export class StateStore {
+  #stoppedProviderWrites = new WeakMap<EmployeeRecoveryAttempt, StoppedProviderWrite>();
+  #stoppedProviderRetirements = new WeakMap<
+    Session,
+    {
+      owner: EmployeeRecoveryAttempt;
+      row: ProviderLaunchIntent | undefined;
+      publication: ProviderLaunchPublication | undefined;
+    }
+  >();
+  private stoppedDiskBytes(): string | undefined {
+    try {
+      return readFileSync(this.filePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+  private assertStoppedDisk(plan: StoppedProviderWrite): void {
+    const disk = this.stoppedDiskBytes();
+    if (plan.beforeCaptured && disk !== plan.before && disk !== plan.attempted)
+      throw Error('The original stopped writer revision changed; preserve newer state');
+  }
+  private assertStoppedDiskIntent(session: Session, row: ProviderLaunchIntent | undefined): void {
+    const raw = this.stoppedDiskBytes();
+    const value =
+      raw === undefined ? undefined : (JSON.parse(raw) as Record<string, unknown>)[PROVIDER_LAUNCH_DISK_KEY];
+    let diskRow: ProviderLaunchIntent | undefined;
+    if (value !== undefined) {
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        throw Error('Invalid original native intent file');
+      const record = value as Record<string, unknown>;
+      if (
+        record.version !== 1 ||
+        record.kind !== 'observed' ||
+        Object.keys(record).sort().join(',') !== 'kind,rows,version'
+      )
+        throw Error('Unconfirmed original native intent file');
+      diskRow = decodeProviderLaunchIntents(record.rows)[session.id];
+    }
+    if (JSON.stringify(diskRow) !== JSON.stringify(row)) throw Error('The current native intent file changed');
+  }
+  captureStoppedProviderRetirement(session: Session, attempt: EmployeeRecoveryAttempt): void {
+    EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt);
+    if (!Session.usesProviderLaunchStore(session, this)) throw Error('Original stopped state-store custody required');
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt);
+    const publication = Session.prototype.retainedStoppedProviderPublication.call(session, attempt, this);
+    const approval = EmployeeRecoveryAttempt.prototype.stoppedApproval.call(attempt);
+    const previous = this.#stoppedProviderWrites.get(root),
+      row = this.#providerLaunchIntents[session.id];
+    if (this.#publicationUncertainty && previous?.uncertainty !== this.#publicationUncertainty)
+      throw this.#publicationUncertainty;
+    if (previous) {
+      if (
+        previous.session !== session ||
+        previous.publication !== publication ||
+        (previous.acknowledged
+          ? row !== undefined || this.#stoppedProviderRetirements.get(session)?.owner !== root
+          : row !== previous.row)
+      )
+        throw Error('Original stopped main intent changed');
+      if (previous.acknowledged) this.assertStoppedDiskIntent(session, undefined);
+      else if (previous.uncertainty === this.#publicationUncertainty && previous.uncertainty)
+        this.assertStoppedDisk(previous);
+      else if (!this.#mainDiskRevisionKnown || this.stoppedDiskBytes() !== this.#mainDiskRevision)
+        throw Error('Original main writer revision changed');
+      return;
+    }
+    if (!this.#mainDiskRevisionKnown || this.stoppedDiskBytes() !== this.#mainDiskRevision)
+      throw Error('Original main writer revision changed');
+    this.assertStoppedDiskIntent(session, row);
+    if (this.#providerLaunchHistory !== 'observed') throw Error('Unconfirmed native launch history cannot be retired');
+    if (row) {
+      if (
+        row.transport !== 'native-ordinary' ||
+        row.attemptId !== approval.originalAttemptId ||
+        row.owner !== (session.owner ?? null) ||
+        row.mode !== session.mode ||
+        this.#providerLaunchOwners.get(session.id)?.deref() !== publication ||
+        (publication && ProviderLaunchPublication.prototype.retainedDenial.call(publication, session) !== row)
+      )
+        throw Error('The stopped proof does not match the current native intent');
+      if (!publication && !EmployeeRecoveryAttempt.prototype.loadedObservationOnly.call(attempt))
+        throw Error('Original live publication owner is unavailable');
+    } else if (
+      publication ||
+      (approval.originalAttemptId !== null &&
+        (!EmployeeRecoveryAttempt.prototype.loadedObservationOnly.call(attempt) || !attempt.row?.application))
+    )
+      throw Error('An absent row cannot stand in for an unrelated native intent');
+    this.#stoppedProviderWrites.set(root, {
+      owner: root,
+      session,
+      row,
+      publication,
+      acknowledged: false,
+      beforeCaptured: false,
+      before: undefined,
+      attempted: undefined,
+      uncertainty: undefined,
+      snapshot: undefined,
+    });
+  }
+  stoppedProviderRetirementKnown(session: Session, attempt: EmployeeRecoveryAttempt): boolean {
+    const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt),
+      plan = this.#stoppedProviderWrites.get(root);
+    return (
+      !!plan &&
+      plan.session === session &&
+      plan.acknowledged &&
+      this.#providerLaunchIntents[session.id] === undefined &&
+      this.#providerLaunchOwners.get(session.id)?.deref() === undefined &&
+      this.#stoppedProviderRetirements.get(session)?.owner === root
+    );
+  }
+  retireStoppedProviderLaunch(session: Session, attempt: EmployeeRecoveryAttempt): Promise<void> {
+    return this.serializeWrite(() => {
+      this.captureStoppedProviderRetirement(session, attempt);
+      const root = EmployeeRecoveryAttempt.prototype.stoppedMetadataOwner.call(attempt),
+        plan = this.#stoppedProviderWrites.get(root)!;
+      if (plan.acknowledged) return;
+      const validate = () => {
+        EmployeeRecoveryAttempt.prototype.assertCurrent.call(attempt);
+        Session.prototype.retainedStoppedProviderPublication.call(session, attempt, this);
+        if (
+          this.#providerLaunchHistory !== 'observed' ||
+          this.#providerLaunchIntents[session.id] !== plan.row ||
+          this.#providerLaunchOwners.get(session.id)?.deref() !== plan.publication
+        )
+          throw Error('Original native intent changed');
+        this.assertStoppedDisk(plan);
+      };
+      // The strict writer performs the queued-entry authority check after
+      // this private projection, and again before publication/after close.
+      // Retained bytes establish the exact prior writer revision only.
+      // Reconciliation projects CURRENT owned observations, never replays an
+      // old whole-file snapshot over newer in-memory observations.
+      plan.before = this.stoppedDiskBytes();
+      if (plan.row && plan.before === undefined) throw Error('Original native intent file is unavailable');
+      plan.beforeCaptured = true;
+      plan.attempted = undefined;
+      plan.snapshot = Session.prototype.stoppedEmployeeSnapshot.call(session, attempt);
+      this.acknowledgeMainState(
+        () => {},
+        validate,
+        () => {},
+        'recovery-stopped',
+        () => {
+          const serialized = this.serializeState();
+          if (serialized === null) return null;
+          const projected = JSON.parse(serialized) as AppState & Record<string, unknown>;
+          const rows = { ...this.#providerLaunchIntents };
+          delete rows[session.id];
+          projected[PROVIDER_LAUNCH_DISK_KEY] = { version: 1, kind: this.#providerLaunchHistory, rows };
+          projected.sessions[session.id] = plan.snapshot!;
+          plan.attempted = JSON.stringify(projected);
+          return plan.attempted;
+        },
+        plan
+      );
+      plan.acknowledged = true;
+      delete this.#providerLaunchIntents[session.id];
+      this.#providerLaunchOwners.delete(session.id);
+      this.#stoppedProviderRetirements.set(session, { owner: root, row: plan.row, publication: plan.publication });
+      if (plan.uncertainty && this.#publicationUncertainty === plan.uncertainty)
+        this.#publicationUncertainty = undefined;
+      this.state.sessions[session.id] = plan.snapshot!;
+      this.cachedSessionJsons.set(session.id, JSON.stringify(plan.snapshot));
+      this.dirtySessions.delete(session.id);
+      this.dirty = this.serializeState() !== plan.attempted;
+      if (plan.publication)
+        ProviderLaunchPublication.prototype.consumeStoppedRetirement.call(plan.publication, session, attempt);
+    });
+  }
+
   private state: AppState;
+  #mainDiskRevision: string | undefined;
+  #mainDiskRevisionKnown = false;
   private filePath: string;
   private saveDeb = new Debouncer(SAVE_DEBOUNCE_MS);
   private dirty: boolean = false;
@@ -88,12 +332,245 @@ export class StateStore {
   private circuitBreakerOpen: boolean = false;
 
   // Guard against concurrent saveNowAsync() calls (debounce can race with in-flight write)
-  private _saveInFlight: Promise<void> | null = null;
+  private _saveInFlight: Promise<unknown> | null = null;
+  // Separate from the retryable circuit breaker. No reset, backup or successful write clears it.
+  #publicationUncertainty?: StatePublicationUnconfirmedError;
+  // Serialized in the SAME main file, kept out of public AppState and DTOs.
+  #providerLaunchIntents: Record<string, ProviderLaunchIntent> = Object.create(null) as Record<string, ProviderLaunchIntent>;
+  #providerLaunchHistory: 'observed' | 'unconfirmed' = 'observed';
+  #providerLaunchOwners = new Map<string, WeakRef<ProviderLaunchPublication>>();
+  #providerLaunchStaged = new WeakMap<ProviderLaunchPublication, Session>();
+  #unusedProviderRetirements = new WeakMap<ProviderLaunchPublication, {
+    original: ProviderLaunchIntent; replacement?: ProviderLaunchIntent; owner?: ProviderLaunchPublication;
+  }>();
+  /** Saved selector DATA only: it supplies no publication/dispatch acknowledgement. */
+  providerLaunchDenialSelector(
+    session: Session
+  ): Readonly<{ attemptId: string; transport: ProviderLaunchIntent['transport'] }> | undefined {
+    if (!Session.usesProviderLaunchStore(session, this)) throw Error('Original Session store custody required');
+    const row = this.#providerLaunchIntents[session.id];
+    return row && row.owner === (session.owner ?? null) && row.mode === session.mode
+      ? Object.freeze({ attemptId: row.attemptId, transport: row.transport })
+      : undefined;
+  }
+  providerLaunchHeldFor(session: Session): boolean {
+    if (!Session.usesProviderLaunchStore(session, this)) throw new Error('Original Session state-store custody required');
+    return this.#providerLaunchHistory === 'unconfirmed' ||
+      !!this.#providerLaunchIntents[session.id] && !this.#providerLaunchOwners.get(session.id)?.deref()?.owns(session);
+  }
 
+  /** Only the actual live Session is bound; saved IDs and false fields are never receipts. */
+  stageProviderLaunch(session: Session, source: Omit<ProviderLaunchSource, 'subject' | 'sessionId' | 'owner' | 'mode' | 'workingDir'>): ProviderLaunchPublication {
+    if (!Session.usesProviderLaunchStore(session, this)) throw new Error('Original Session state-store custody required');
+    const owner = session.owner, mode = session.mode;
+    const publication = stageProviderLaunch({ ...source, subject: session, sessionId: session.id, owner: owner ?? null, mode, workingDir: session.workingDir,
+      current: () => !this.statePublicationHeld && this.#providerLaunchHistory === 'observed' && session.owner === owner && session.mode === mode && source.current() },
+    (operation, row) => this.commitProviderLaunch(session, operation, row));
+    this.#providerLaunchStaged.set(publication, session);
+    Session.retainProviderLaunchPublication(session, this, publication);
+    return publication;
+  }
+
+  ownsProviderLaunchDenial(session: Session, publication: ProviderLaunchPublication): boolean {
+    return Session.usesProviderLaunchStore(session, this) && !!this.#providerLaunchIntents[session.id] &&
+      this.#providerLaunchOwners.get(session.id)?.deref() === publication;
+  }
+  ownsProviderLaunchStaging(session: Session, publication: ProviderLaunchPublication): boolean {
+    return Session.usesProviderLaunchStore(session, this) && this.#providerLaunchStaged.get(publication) === session;
+  }
+  unusedProviderIntentRetired(session: Session, publication: ProviderLaunchPublication): boolean {
+    if (!Session.usesProviderLaunchStore(session, this))
+      throw new Error('Original Session state-store custody required');
+    return this.#unusedProviderRetirements.has(publication) && publication.owns(session);
+  }
+  /** Original private row/object join, deliberately independent of old execution currentness. */
+  captureProviderLaunchRetention(session: Session): () => boolean {
+    if (!Session.usesProviderLaunchStore(session, this))
+      throw new Error('Original Session state-store custody required');
+    const row = this.#providerLaunchIntents[session.id];
+    const publication = this.#providerLaunchOwners.get(session.id)?.deref();
+    return () => {
+      const replacement = publication && this.#unusedProviderRetirements.get(publication);
+      const stopped = this.#stoppedProviderRetirements.get(session);
+      const stoppedRow = stopped && stopped.row === row && stopped.publication === publication;
+      const expectedRow = stoppedRow
+        ? undefined
+        : replacement && replacement.original === row
+          ? replacement.replacement
+          : row;
+      const expectedOwner = stoppedRow
+        ? undefined
+        : replacement && replacement.original === row
+          ? replacement.owner
+          : publication;
+      return (
+        this.#providerLaunchIntents[session.id] === expectedRow &&
+        this.#providerLaunchOwners.get(session.id)?.deref() === expectedOwner &&
+        (expectedRow ? expectedOwner?.owns(session) === true : expectedOwner === undefined)
+      );
+    };
+  }
+  /** Loaded denial continuity for read-only recovery. Saved rows never supply
+   * a publication owner, execution acknowledgement or retirement permission. */
+  captureLoadedProviderLaunchDenial(session: Session): () => boolean {
+    if (!Session.usesProviderLaunchStore(session, this))
+      throw new Error('Original Session state-store custody required');
+    const row = this.#providerLaunchIntents[session.id],
+      history = this.#providerLaunchHistory;
+    if (this.#providerLaunchOwners.get(session.id)?.deref())
+      throw new Error('Loaded provider denial requires no live publication owner');
+    return () =>
+      Session.usesProviderLaunchStore(session, this) &&
+      this.#providerLaunchIntents[session.id] ===
+        (this.#stoppedProviderRetirements.get(session)?.row === row ? undefined : row) &&
+      this.#providerLaunchHistory === history &&
+      this.#providerLaunchOwners.get(session.id)?.deref() === undefined;
+  }
+
+  /** Retire ONLY the original genuinely acknowledged but never-claimed intent.
+   * The older provider row is restored as a denial, not execution authority. */
+  retireUnusedProviderLaunch(session: Session, attempt: import('./employee-recovery-attempt.js').EmployeeRecoveryAttempt,
+    pending: ProviderLaunchPublication, last?: ProviderLaunchPublication): Promise<void> {
+    return this.serializeWrite(() => {
+      const original = ProviderLaunchPublication.prototype.retainedDenial.call(pending,session);
+      const replacement = last ? ProviderLaunchPublication.prototype.retainedDenial.call(last,session) : undefined;
+      const validate = () => {
+        Session.prototype.assertUnusedProviderRetirement.call(session, attempt, this, pending, last);
+        if (this.#providerLaunchHistory !== 'observed' || !this.ownsProviderLaunchStaging(session,pending) ||
+          !ProviderLaunchPublication.prototype.acknowledgedNeverClaimed.call(pending,session) || this.#providerLaunchIntents[session.id] !== original ||
+          this.#providerLaunchOwners.get(session.id)?.deref() !== pending ||
+          (last && (last === pending || !this.ownsProviderLaunchStaging(session,last))))
+          throw new Error('Original unused provider intent changed');
+      };
+      validate();
+      // Keep all live identity checks on the original state until the actual
+      // writer acknowledges the projected replacement, including consuming close.
+      this.acknowledgeMainState(() => {}, validate, () => {}, 'provider', () => {
+        const serialized = this.serializeState();
+        if (serialized === null) return null;
+        const state = JSON.parse(serialized) as Record<string,unknown>;
+        const rows = {...this.#providerLaunchIntents};
+        if (replacement) rows[session.id] = replacement; else delete rows[session.id];
+        state[PROVIDER_LAUNCH_DISK_KEY] = {version:1,kind:this.#providerLaunchHistory,rows};
+        return JSON.stringify(state);
+      });
+      ProviderLaunchPublication.prototype.consumeUnusedRetirement.call(pending,session);
+      if (replacement && last) {
+        this.#providerLaunchIntents[session.id] = replacement;
+        this.#providerLaunchOwners.set(session.id,new WeakRef(last));
+      } else {
+        delete this.#providerLaunchIntents[session.id];
+        this.#providerLaunchOwners.delete(session.id);
+      }
+      this.#unusedProviderRetirements.set(pending,{original,replacement,owner:last});
+    });
+  }
+
+  private commitProviderLaunch(session: Session, operation: ProviderLaunchPublication, row: ProviderLaunchIntent): Promise<object> {
+    return this.serializeWrite(() => {
+      const validate = () => {
+        if (!Session.ownsPendingProviderLaunch(session, this, operation))
+          throw new Error('An earlier provider launch intent remains unresolved');
+        operation.assertCurrent();
+        if (!operation.owns(session) || this.#providerLaunchHistory !== 'observed')
+          throw new Error('Original provider publication owner is unavailable');
+      };
+      validate();
+      const old = this.#providerLaunchIntents[session.id];
+      if (old && (old.owner !== row.owner || !this.#providerLaunchOwners.get(session.id)?.deref()?.permitsNextLocal(session)))
+        throw new Error('An earlier provider launch intent remains unresolved');
+      this.acknowledgeMainState(() => {
+        validate();
+        this.#providerLaunchIntents[session.id] = row;
+        this.#providerLaunchOwners.set(session.id, new WeakRef(operation));
+        this.setSessionFromOwner(session, operation.snapshot(), 'preserve');
+      }, validate, () => { /* The conservative denial/candidate must not roll back. */ }, 'provider');
+      // This is the only mint: every write/fsync/consuming close and final guard above succeeded.
+      const acknowledgement = Object.freeze({});
+      providerAcknowledgements.set(acknowledgement, { operation, subject: session, row, phase: 'issued',
+        current: () => !this.statePublicationHeld && this.#providerLaunchHistory === 'observed' &&
+          this.#providerLaunchIntents[session.id] === row && this.#providerLaunchOwners.get(session.id)?.deref() === operation &&
+          (session.owner ?? null) === row.owner && session.mode === row.mode });
+      return acknowledgement;
+    });
+  }
+
+  private privateProviderState(): unknown {
+    return { version: 1, kind: this.#providerLaunchHistory, rows: this.#providerLaunchIntents };
+  }
+
+  private loadProviderState(parsed: unknown, backup: boolean): void {
+    try {
+      const value = (parsed as Record<string, unknown>)[PROVIDER_LAUNCH_DISK_KEY];
+      if (value !== undefined) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid provider launch history');
+        const record = value as Record<string, unknown>;
+        if (Object.keys(record).sort().join(',') !== 'kind,rows,version' || record.version !== 1 ||
+          (record.kind !== 'observed' && record.kind !== 'unconfirmed')) throw new Error('Invalid provider launch history');
+        const rows = decodeProviderLaunchIntents(record.rows);
+        for (const [id, row] of Object.entries(rows)) {
+          const original = this.#providerLaunchIntents[id];
+          if (original && JSON.stringify(original) !== JSON.stringify(row)) this.#providerLaunchHistory = 'unconfirmed';
+          else this.#providerLaunchIntents[id] = row;
+        }
+        if (record.kind === 'unconfirmed') this.#providerLaunchHistory = 'unconfirmed';
+      }
+    } catch {
+      this.#providerLaunchHistory = 'unconfirmed';
+    }
+    if (backup) this.#providerLaunchHistory = 'unconfirmed';
+  }
+
+
+  #publicationSubscribers = new Set<(status: StatePublicationStatus) => void>();
+
+  get statePublicationHeld(): boolean { return this.#publicationUncertainty !== undefined; }
+
+  getStatePublicationStatus(): StatePublicationStatus {
+    return Object.freeze({ version: 1, kind: this.statePublicationHeld ? 'unconfirmed' : 'no-hold-observed' });
+  }
+
+  onStatePublicationHold(listener: (status: StatePublicationStatus) => void): () => void {
+    this.#publicationSubscribers.add(listener);
+    return () => {
+      this.#publicationSubscribers.delete(listener);
+    };
+  }
+
+  private assertMainPublication(): void {
+    if (this.#publicationUncertainty) throw this.#publicationUncertainty;
+  }
+  private holdMainPublication(cause: unknown): StatePublicationUnconfirmedError {
+    if (!this.#publicationUncertainty) {
+      this.#publicationUncertainty = new StatePublicationUnconfirmedError(cause);
+      this.saveDeb.cancel();
+      const diagnostic = (message: string) => {
+        // A failed diagnostic cannot replace the original private evidence or skip notices.
+        try {
+          console.error(message);
+        } catch {
+          /* original failure retained */
+        }
+      };
+      diagnostic('[StateStore] STATE_PUBLICATION_UNCONFIRMED: main-state writes held; reconciliation required');
+      const status = this.getStatePublicationStatus();
+      const observerFailed = () => diagnostic('[StateStore] Publication-hold observer failed');
+      for (const listener of [...this.#publicationSubscribers]) {
+        try {
+          void Promise.resolve(listener(status)).catch(observerFailed);
+        } catch {
+          observerFailed();
+        }
+      }
+    }
+    return this.#publicationUncertainty;
+  }
   constructor(filePath?: string) {
     // Reverie never relocates or adopts another product's state automatically.
     this.filePath = filePath || dataPath('state.json');
-    this.ralphStatePath = this.filePath.replace('.json', '-inner.json');
+    this.ralphStatePath = this.filePath.endsWith('.json')
+      ? this.filePath.slice(0, -5) + '-inner.json'
+      : this.filePath + '-inner.json';
     this.state = this.load();
     this.state.config.stateFilePath = this.filePath;
     // Pre-populate session cache for loaded state
@@ -105,9 +582,11 @@ export class StateStore {
 
   private _mergeWithInitialState(parsed: Partial<AppState>): AppState {
     const initial = createInitialState();
+    const publicState = { ...parsed };
+    Reflect.deleteProperty(publicState, PROVIDER_LAUNCH_DISK_KEY);
     return {
       ...initial,
-      ...parsed,
+      ...publicState,
       sessions: { ...parsed.sessions },
       tasks: { ...parsed.tasks },
       ralphLoop: { ...initial.ralphLoop, ...parsed.ralphLoop },
@@ -136,17 +615,30 @@ export class StateStore {
     // Try main file first, then .bak fallback
     for (const path of [this.filePath, this.filePath + '.bak']) {
       try {
-        if (existsSync(path)) {
-          const data = readFileSync(path, 'utf-8');
-          const parsed = JSON.parse(data) as Partial<AppState>;
-          const result = this._mergeWithInitialState(parsed);
-          if (path !== this.filePath) {
-            console.warn(`[StateStore] Recovered state from backup: ${path}`);
-            this.fenceBackupCronJobs(result);
-          }
-          return result;
+        let data: string;
+        try {
+          data = readFileSync(path, 'utf-8');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          if (path === this.filePath) this.#mainDiskRevisionKnown = true;
+          continue;
         }
+        const parsed = JSON.parse(data) as Partial<AppState>;
+        this.loadProviderState(parsed, path !== this.filePath);
+        const result = this._mergeWithInitialState(parsed);
+        // The parsed state and owned disk revision must come from the SAME read.
+        // A later read could accidentally authorize old memory over a newer writer.
+        if (path === this.filePath) {
+          this.#mainDiskRevision = data;
+          this.#mainDiskRevisionKnown = true;
+        }
+        if (path !== this.filePath) {
+          console.warn(`[StateStore] Recovered state from backup: ${path}`);
+          this.fenceBackupCronJobs(result);
+        }
+        return result;
       } catch (err) {
+        this.#providerLaunchHistory = 'unconfirmed';
         console.error(`Failed to load state from ${path}:`, err);
       }
     }
@@ -179,6 +671,7 @@ export class StateStore {
    */
   save(): void {
     this.dirty = true;
+    if (this.#publicationUncertainty) return;
     if (this.saveDeb.isPending) return; // Already scheduled
     this.saveDeb.schedule(() => {
       this.saveNowAsync().catch((err) => {
@@ -200,50 +693,114 @@ export class StateStore {
   }
 
   /** All main-state writers share this queue, including acknowledged watcher intents. */
-  private async serializeWrite(write: () => void | Promise<void>): Promise<void> {
+  private async serializeWrite<T>(write: () => T | Promise<T>): Promise<T> {
     const task = (this._saveInFlight ?? Promise.resolve()).catch(() => undefined).then(write);
     this._saveInFlight = task;
-    try { await task; }
+    try { return await task; }
     finally { if (this._saveInFlight === task) this._saveInFlight = null; }
   }
-
   /** Existing state file, not a second ledger. The callback fences current job generation at commit. */
   async commitCronWatch(mutate: () => void): Promise<void> {
-    return this.serializeWrite(() => {
-      if (this.circuitBreakerOpen) throw new Error('Watcher state unavailable');
+    return this.serializeWrite(() =>
+      this.acknowledgeMainState(
+        mutate,
+        () => {},
+        (before) => {
+          const previous = JSON.parse(before) as AppState;
+          this.state.cronJobs = previous.cronJobs;
+          this.state.cronJobRuns = previous.cronJobRuns;
+        },
+        'watcher'
+      )
+    );
+  }
+  /** Sole strict acknowledged writer, under the existing main-state queue. */
+  private acknowledgeMainState(
+    mutate: () => void,
+    validate: () => void,
+    restore: (before: string) => void,
+    purpose: 'watcher' | 'provider' | 'config' | 'recovery-stopped',
+    projection?: () => string | null,
+    recovery?: StoppedProviderWrite
+  ): void {
+    if (this.#publicationUncertainty) {
+      if (!recovery || recovery.uncertainty !== this.#publicationUncertainty) throw this.#publicationUncertainty;
+      this.assertStoppedDisk(recovery);
+    } else this.assertMainPublication();
+    if (this.circuitBreakerOpen) throw new Error('Acknowledged state publication unavailable');
+    validate();
+    this.saveDeb.cancel();
+    const before = this.serializeState();
+    if (before === null) throw new Error('Acknowledged state publication unavailable');
+    const temp = `${this.filePath}.${process.pid}.${Date.now()}.${purpose}.tmp`;
+    let fd: number | undefined;
+    let renameIssued = false;
+    let temporaryOwned = false;
+    let attempted: string | null = null;
+    const close = () => {
+      const owned = fd;
+      fd = undefined;
+      if (owned !== undefined) closeSync(owned);
+    };
+    try {
+      mutate();
       this.saveDeb.cancel();
-      const before = this.serializeState();
-      if (before === null) throw new Error('Watcher state unavailable');
-      const temp = `${this.filePath}.${process.pid}.${Date.now()}.watch.tmp`;
-      let fd: number | undefined;
-      try {
-        mutate();
-        this.dirty = true;
-        this.ensureDir();
-        const json = this.serializeState();
-        if (json === null) throw new Error('Watcher state unavailable');
-        fd = openSync(temp, 'wx', 0o600);
-        writeFileSync(fd, json, 'utf8');
-        fsyncSync(fd);
-        closeSync(fd); fd = undefined;
-        renameSync(temp, this.filePath);
-        fd = openSync(dirname(this.filePath), 'r');
-        fsyncSync(fd);
-        closeSync(fd); fd = undefined;
-        this.dirty = false;
-        this._resetCircuitBreaker();
-      } catch {
-        // In particular an acknowledgement write must not leave an uncommitted cursor in memory
-        // for a later ordinary debounce to publish. Restore the previous pending fence.
-        const previous = JSON.parse(before) as AppState;
-        this.state.cronJobs = previous.cronJobs;
-        this.state.cronJobRuns = previous.cronJobRuns;
-        this.dirty = true;
-        if (fd !== undefined) { try { closeSync(fd); } catch { /* refusal remains unconfirmed */ } }
-        try { unlinkSync(temp); } catch { /* renamed or never created */ }
-        throw new Error('Watcher state commit unconfirmed; delivery held');
+      this.dirty = true;
+      this.ensureDir();
+      const json = projection ? projection() : this.serializeState();
+      if (json === null) throw new Error('Acknowledged state publication unavailable');
+      attempted = json;
+      fd = openSync(temp, 'wx', 0o600);
+      temporaryOwned = true;
+      writeFileSync(fd, json, 'utf8');
+      fsyncSync(fd);
+      close();
+      validate();
+      renameIssued = true;
+      renameSync(temp, this.filePath);
+      fd = openSync(dirname(this.filePath), 'r');
+      fsyncSync(fd);
+      close();
+      validate();
+      this.dirty = false;
+      this.#mainDiskRevision = attempted;
+      this.#mainDiskRevisionKnown = true;
+      this._resetCircuitBreaker();
+    } catch (error) {
+      restore(before);
+      this.dirty = true;
+      const cleanupErrors: unknown[] = [];
+      if (fd !== undefined) {
+        try {
+          close();
+        } catch (cleanup) {
+          cleanupErrors.push(cleanup);
+        }
       }
-    });
+      if (temporaryOwned)
+        try {
+          unlinkSync(temp);
+        } catch (cleanup) {
+          if ((cleanup as NodeJS.ErrnoException)?.code !== 'ENOENT') cleanupErrors.push(cleanup);
+        }
+      const cause = Object.freeze({
+        error,
+        cleanupErrors: Object.freeze(cleanupErrors),
+        [purpose + 'Publication']: Object.freeze({ before, attempted }),
+      });
+      if (renameIssued) {
+        const held = this.holdMainPublication(cause);
+        if (recovery) recovery.uncertainty ??= held;
+        throw held;
+      }
+      const message =
+        purpose === 'watcher'
+          ? 'Watcher state commit unconfirmed; delivery held'
+          : purpose === 'provider'
+            ? 'Provider launch publication unconfirmed; dispatch refused'
+            : 'Configuration publication unconfirmed; save not acknowledged';
+      throw new AcknowledgedStateWriteError(message, cause);
+    }
   }
 
   /**
@@ -304,6 +861,7 @@ export class StateStore {
       `"tasks":${JSON.stringify(this.state.tasks)}`,
       `"ralphLoop":${JSON.stringify(this.state.ralphLoop)}`,
       `"config":${JSON.stringify(this.state.config)}`,
+      `${JSON.stringify(PROVIDER_LAUNCH_DISK_KEY)}:${JSON.stringify(this.privateProviderState())}`,
     ];
 
     // Optional fields
@@ -328,7 +886,6 @@ export class StateStore {
 
     return `{${parts.join(',')}}`;
   }
-
   private serializeState(): string | null {
     try {
       return this.assembleStateJson();
@@ -338,7 +895,7 @@ export class StateStore {
       this.cachedSessionJsons.clear();
       this.dirtySessions.clear();
       try {
-        return JSON.stringify(this.state);
+        return JSON.stringify({ ...this.state, [PROVIDER_LAUNCH_DISK_KEY]: this.privateProviderState() });
       } catch (err) {
         console.error('[StateStore] Failed to serialize state (circular reference or invalid data):', err);
         this.consecutiveSaveFailures++;
@@ -350,8 +907,8 @@ export class StateStore {
       }
     }
   }
-
   private async _doSaveAsync(): Promise<void> {
+    this.assertMainPublication();
     this.saveDeb.cancel();
     if (!this.dirty) {
       return;
@@ -384,41 +941,79 @@ export class StateStore {
       // Backup failed or file doesn't exist yet - continue with write
     }
 
-    // Step 3: Atomic write: write to temp file, then rename (async)
+    // Every replacement preserves the durability of previously acknowledged intents.
+    let renameIssued = false;
+    let file: FileHandle | undefined;
+    const close = async () => {
+      const original = file;
+      file = undefined; // consuming close; an error never permits a reused-FD retry.
+      if (original) await original.close();
+    };
     try {
-      await writeFile(tempPath, json, 'utf-8');
+      file = await openAsync(tempPath, 'wx', 0o600);
+      await file.writeFile(json, 'utf8');
+      await file.sync();
+      await close();
+      renameIssued = true;
       await rename(tempPath, this.filePath);
+      file = await openAsync(dirname(this.filePath), 'r');
+      await file.sync();
+      await close();
+      this.#mainDiskRevision = json;
+      this.#mainDiskRevisionKnown = true;
 
       this._resetCircuitBreaker();
     } catch (err) {
-      console.error('[StateStore] Failed to write state file:', err);
+      try {
+        console.error('[StateStore] Failed to write state file:', err);
+      } catch {
+        /* Logging cannot replace the original write outcome. */
+      }
       // Re-mark dirty so the data is retried on the next save cycle
       this.dirty = true;
       this.consecutiveSaveFailures++;
 
-      // Try to clean up temp file on error
+      // Cleanup never retries a consumed descriptor or replaces the original uncertainty.
+      let cleanupError: unknown;
+      if (file) {
+        try {
+          await close();
+        } catch (cause) {
+          cleanupError = cause;
+        }
+      }
       try {
         await unlink(tempPath);
-      } catch {
-        // Temp file may not exist
+      } catch (cleanup) {
+        if ((cleanup as NodeJS.ErrnoException)?.code !== 'ENOENT')
+          cleanupError = cleanupError === undefined ? cleanup : { close: cleanupError, unlink: cleanup };
       }
+
+      if (renameIssued) throw this.holdMainPublication(Object.freeze({ error: err, cleanupError }));
 
       // Check circuit breaker threshold
       if (this.consecutiveSaveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error('[StateStore] Circuit breaker OPEN - writes failing repeatedly');
         this.circuitBreakerOpen = true;
+        try {
+          console.error('[StateStore] Circuit breaker OPEN - writes failing repeatedly');
+        } catch {
+          /* Denial remains installed. */
+        }
       }
     }
   }
-
   /**
    * Synchronous immediate write to disk using atomic write pattern.
    * Used by flushAll() during shutdown when async is not appropriate.
    * Prefer saveNowAsync() for normal operation.
    */
   saveNow(): void {
+    this.assertMainPublication();
     // A synchronous shutdown/save must not overtake an older asynchronous snapshot.
-    if (this._saveInFlight) { this.save(); return; }
+    if (this._saveInFlight) {
+      this.save();
+      return;
+    }
     this.saveDeb.cancel();
     if (!this.dirty) {
       return;
@@ -446,23 +1041,56 @@ export class StateStore {
       // Backup failed - continue with write
     }
 
+    let renameIssued = false;
+    let fd: number | undefined;
+    const close = () => {
+      const owned = fd;
+      fd = undefined;
+      if (owned !== undefined) closeSync(owned);
+    };
     try {
-      writeFileSync(tempPath, json, 'utf-8');
+      fd = openSync(tempPath, 'wx', 0o600);
+      writeFileSync(fd, json, 'utf8');
+      fsyncSync(fd);
+      close();
+      renameIssued = true;
       renameSync(tempPath, this.filePath);
+      fd = openSync(dirname(this.filePath), 'r');
+      fsyncSync(fd);
+      close();
       // Clear dirty flag only AFTER successful write
       this.dirty = false;
+      this.#mainDiskRevision = json;
+      this.#mainDiskRevisionKnown = true;
       this._resetCircuitBreaker();
     } catch (err) {
-      console.error('[StateStore] Failed to write state file:', err);
+      try {
+        console.error('[StateStore] Failed to write state file:', err);
+      } catch {
+        /* Logging cannot replace the original write outcome. */
+      }
       this.consecutiveSaveFailures++;
+      let cleanupError: unknown;
+      if (fd !== undefined) {
+        try {
+          close();
+        } catch (cause) {
+          cleanupError = cause;
+        }
+      }
       try {
         if (existsSync(tempPath)) unlinkSync(tempPath);
-      } catch {
-        /* ignore */
+      } catch (cleanup) {
+        cleanupError = cleanupError === undefined ? cleanup : { close: cleanupError, unlink: cleanup };
       }
+      if (renameIssued) throw this.holdMainPublication(Object.freeze({ error: err, cleanupError }));
       if (this.consecutiveSaveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.error('[StateStore] Circuit breaker OPEN - writes failing repeatedly');
         this.circuitBreakerOpen = true;
+        try {
+          console.error('[StateStore] Circuit breaker OPEN - writes failing repeatedly');
+        } catch {
+          /* Denial remains installed. */
+        }
       }
     }
   }
@@ -474,12 +1102,13 @@ export class StateStore {
   recoverFromBackup(): boolean {
     // This synchronous API cannot await the shared writer. Refuse rather than let an old snapshot
     // or a queued intent race the restore. A later explicit retry uses the same fence below.
-    if (this._saveInFlight) return false;
+    if (this._saveInFlight || this.#publicationUncertainty) return false;
     const backupPath = this.filePath + '.bak';
     try {
       if (existsSync(backupPath)) {
         const backupContent = readFileSync(backupPath, 'utf-8');
         const parsed = JSON.parse(backupContent) as Partial<AppState>;
+        this.loadProviderState(parsed, true);
         const recovered = this._mergeWithInitialState(parsed);
         this.fenceBackupCronJobs(recovered, this.state);
         recovered.config.stateFilePath = this.filePath;
@@ -504,6 +1133,7 @@ export class StateStore {
    * Reset the circuit breaker (for manual intervention).
    */
   resetCircuitBreaker(): void {
+    this.assertMainPublication();
     this.circuitBreakerOpen = false;
     this.consecutiveSaveFailures = 0;
     console.log('[StateStore] Circuit breaker manually reset');
@@ -527,6 +1157,18 @@ export class StateStore {
   /** Returns a session state by ID, or null if not found. */
   getSession(id: string) {
     return this.state.sessions[id] ?? null;
+  }
+
+  /** Preserve ONLY separately owned respawn metadata, never stale Session private fields. */
+  setSessionFromOwner(session: Session, snapshot: AppState['sessions'][string], respawn: 'preserve' | 'authoritative'): void {
+    if (snapshot.id !== session.id || snapshot.owner !== session.owner) throw new Error('Original persisted Session changed');
+    const next = { ...snapshot };
+    const previous = this.state.sessions[session.id];
+    if (respawn === 'preserve' && previous) {
+      if (!Object.hasOwn(snapshot, 'respawnConfig') && previous.respawnConfig !== undefined) next.respawnConfig = previous.respawnConfig;
+      if (!Object.hasOwn(snapshot, 'respawnEnabled') && previous.respawnEnabled !== undefined) next.respawnEnabled = previous.respawnEnabled;
+    }
+    this.setSession(session.id, next);
   }
 
   /** Sets a session state and triggers a debounced save. */
@@ -709,6 +1351,31 @@ export class StateStore {
     return this.state.config;
   }
 
+  /** Explicit configuration saves join the canonical writer and acknowledge only checked publication. */
+  commitConfig(config: ConfigPatch): Promise<AppState['config']> {
+    const patch = structuredClone(config);
+    return this.serializeWrite(() => {
+      const previous = this.state.config;
+      const { respawn, ...update } = patch;
+      this.acknowledgeMainState(
+        () => {
+          this.state.config = {
+            ...previous,
+            ...update,
+            ...(respawn ? { respawn: { ...previous.respawn, ...respawn } } : {}),
+          };
+        },
+        () => {},
+        () => {
+          this.state.config = previous;
+        },
+        'config'
+      );
+      // A later observer/configuration update cannot alter this acknowledgement.
+      return structuredClone(this.state.config);
+    });
+  }
+
   /** Updates configuration (partial merge) and triggers a debounced save. */
   setConfig(config: Partial<AppState['config']>) {
     this.state.config = { ...this.state.config, ...config };
@@ -763,11 +1430,14 @@ export class StateStore {
 
   /** Resets all state to initial values and saves immediately. */
   reset(): void {
+    this.assertMainPublication();
+    if (this._saveInFlight) throw new Error('State write is in progress; reset refused');
     this.state = createInitialState();
     this.state.config.stateFilePath = this.filePath;
     this.ralphStates.clear();
     this.cachedSessionJsons.clear();
     this.dirtySessions.clear();
+    this.dirty = true;
     this.saveNow(); // Immediate save for reset operations
     this.saveRalphStatesNow();
   }

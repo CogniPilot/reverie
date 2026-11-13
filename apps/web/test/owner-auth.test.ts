@@ -438,6 +438,14 @@ describe('owner sign-in', () => {
     ).toBe(false);
   });
 
+  it('read-only session observations do not extend the original idle deadline', async () => {
+    const session = await signedIn();
+    clock += SESSION_IDLE_MS - 1000;
+    expect(service.session(session, false)).toBeDefined();
+    clock += 1001;
+    expect(service.session(session, false)).toBeUndefined();
+  });
+
   it('never writes a password, code or token to the audit log', async () => {
     const session = await signedIn();
     const { secret, recovery } = await enrol(session);

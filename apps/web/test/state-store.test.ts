@@ -295,6 +295,21 @@ describe('StateStore', () => {
   });
 
   describe('reset', () => {
+    it('persists reset of a freshly loaded clean store before a new reader observes it', () => {
+      const before = new StateStore(testFilePath);
+      before.setConfig({ maxConcurrentSessions: 19 });
+      before.setSession('old-session', createMockSessionState('old-session'));
+      before.saveNow();
+      const loaded = new StateStore(testFilePath);
+      expect(loaded.getConfig().maxConcurrentSessions).toBe(19);
+      loaded.reset();
+      const after = new StateStore(testFilePath);
+      expect(after.getConfig().maxConcurrentSessions).toBe(5);
+      expect(after.getSessions()).toEqual({});
+      expect(JSON.parse(readFileSync(testFilePath,'utf8')).__providerLaunchIntentsV1)
+        .toEqual({version:1,kind:'observed',rows:{}});
+    });
+
     it('should reset state to initial values', () => {
       const store = new StateStore(testFilePath);
 
@@ -507,7 +522,9 @@ describe('StateStore', () => {
       const persisted = JSON.parse(readFileSync(testFilePath, 'utf-8'));
       const fullStringify = JSON.parse(JSON.stringify(store.getState()));
 
-      expect(persisted).toEqual(fullStringify);
+      expect(persisted).toEqual({ ...fullStringify,
+        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} } });
+      expect(Object.hasOwn(store.getState(), '__providerLaunchIntentsV1')).toBe(false);
     });
 
     it('should correctly persist all sessions after partial update', () => {
@@ -562,7 +579,9 @@ describe('StateStore', () => {
 
       // Verify round-trip: state in memory matches what's on disk
       const fullStringify = JSON.parse(JSON.stringify(store.getState()));
-      expect(persisted).toEqual(fullStringify);
+      expect(persisted).toEqual({ ...fullStringify,
+        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} } });
+      expect(Object.hasOwn(store.getState(), '__providerLaunchIntentsV1')).toBe(false);
     });
 
     it('should persist the last value after rapid updates to the same session', () => {

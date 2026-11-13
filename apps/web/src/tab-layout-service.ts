@@ -402,10 +402,12 @@ export class TabLayoutService {
 
   private async getUnlocked(
     owner: string,
-    adjust?: (layout: TabLayout, metadata: readonly TabRefMetadata[]) => TabLayout
+    adjust?: (layout: TabLayout, metadata: readonly TabRefMetadata[]) => TabLayout,
+    beforePublish: () => void = () => {}
   ): Promise<TabLayout> {
     const prepared = await this.prepareUnlocked(owner);
     const next = adjust ? adjust(prepared.authoritative, prepared.metadata) : prepared.authoritative;
+    beforePublish();
     if (!prepared.needsReconciliationCommit && sameLayout(next, prepared.authoritative)) {
       const publication = {
         owner,
@@ -546,7 +548,8 @@ export class TabLayoutService {
     owner: string,
     sessionId?: string,
     placement: SessionPlacementHint = {},
-    register?: RegisterCreatedSession
+    register?: RegisterCreatedSession,
+    beforePublish: () => void = () => {}
   ): Promise<TabLayout> {
     return this.withOwner(owner, async () => {
       const follow = sessionId ? (await this.deps.childrenFollowParent?.()) === true : true;
@@ -560,7 +563,7 @@ export class TabLayoutService {
                 return follow ? placed : pinCreatedChild(placed, sessionId, metadata);
               }
             : undefined;
-        return await this.getUnlocked(owner, adjust);
+        return await this.getUnlocked(owner, adjust, beforePublish);
       } catch (error) {
         if (typeof rollback === 'function') rollback();
         throw error;
@@ -629,26 +632,48 @@ export class TabLayoutService {
     if (owners.size !== 1) throw new Error('A session deletion transaction must contain exactly one owner');
     const owner = owners.values().next().value as string;
     const ids = removed.map((item) => item.id);
-    return this.withOwner(owner, async () => {
-      const prepared = await this.prepareUnlocked(owner);
-      const current = prepared.current;
-      // Prepare while the soon-to-be-deleted sessions are still known, so
-      // direct children can be materialized before their parent ref is removed.
-      const next = materializeOrphans(prepared.authoritative, ids, prepared.metadata);
-      const stored = current && !sameLayout(current, next) ? this.prepareCommit(current, next) : null;
-      const result = await action();
-      beforePublish();
-      this.publish(stored ? { [owner]: stored } : {}, [
-        {
-          owner,
-          previous: current,
-          next: stored ?? next,
-          metadata: prepared.metadata,
-          excludedSessionIds: new Set(ids),
-        },
-      ]);
-      return result;
-    });
+    return this.withOwner(owner, () => this.runSessionDeletionUnlocked(owner, ids, action, beforePublish));
+  }
+
+  /** The caller holds the owner lock across preparation, cleanup and publication. */
+  private async runSessionDeletionUnlocked<T>(
+    owner: string,
+    ids: readonly string[],
+    action: () => Promise<T>,
+    beforePublish: () => void
+  ): Promise<T> {
+    const prepared = await this.prepareUnlocked(owner);
+    const current = prepared.current;
+    // Prepare while the soon-to-be-deleted sessions are still known, so
+    // direct children can be materialized before their parent ref is removed.
+    const next = materializeOrphans(prepared.authoritative, ids, prepared.metadata);
+    const stored = current && !sameLayout(current, next) ? this.prepareCommit(current, next) : null;
+    const result = await action();
+    beforePublish();
+    this.publish(stored ? { [owner]: stored } : {}, [
+      {
+        owner,
+        previous: current,
+        next: stored ?? next,
+        metadata: prepared.metadata,
+        excludedSessionIds: new Set(ids),
+      },
+    ]);
+    return result;
+  }
+
+  /** Failed construction may roll back before startup layout reconciliation finishes. */
+  async runFailedSessionRollback<T>(
+    removed: RemovedTabLayoutSession,
+    action: () => Promise<T>,
+    beforePublish: () => void = () => {}
+  ): Promise<T> {
+    // The subject is one failed construction already registered by this server,
+    // rather than a stale session inferred from incomplete startup observations.
+    // Always prepare its projection under the same lock as registration, so a
+    // concurrent startup transition cannot leave a removed session's tab behind.
+    const owner = ownerOf(removed);
+    return this.withOwner(owner, () => this.runSessionDeletionUnlocked(owner, [removed.id], action, beforePublish));
   }
 
   /**

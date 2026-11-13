@@ -470,6 +470,7 @@ export class MockSession extends EventEmitter {
   noteDesktopActivity = vi.fn();
 
   /** Stub for runPrompt */
+  assertProviderLaunchAdmission = vi.fn(() => {});
   runPrompt = vi.fn(async () => {});
 
   /** Stub for startInteractive */

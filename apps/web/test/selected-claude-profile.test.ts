@@ -1,3 +1,4 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
@@ -96,8 +97,12 @@ describe('selected Claude account preparation', () => {
     const mux = new TmuxManager();
     const create = vi.spyOn(mux, 'createSession').mockImplementation(async options => {
       expect((await read()).hasCompletedOnboarding).toBe(true);
-      options.onProviderDispatch?.();
-      return { sessionId: 'selected-session', muxName: 'reverie-selected', pid: 1234 } as never;
+      await acknowledgeMuxFixture(options);
+      const subject = { sessionId: options.sessionId, owner: options.owner,
+        muxName: 'reverie-selected', pid: 1234, workingDir: options.workingDir,
+        mode: options.mode, createdAt: Date.now(), attached: false };
+      mux.registerSession(subject);
+      return subject;
     });
     const session = new Session({ workingDir: dir, mode: 'claude', claudeMode: 'normal', useMux: true, mux,
       subscriptionProfile: selection, envOverrides: { CLAUDE_CONFIG_DIR: dir } });
@@ -108,7 +113,7 @@ describe('selected Claude account preparation', () => {
     vi.spyOn(mux, 'muxSessionExists').mockReturnValue(true);
     const respawn = vi.spyOn(mux, 'respawnPane').mockImplementation(async options => {
       expect((await read()).projects[dir].hasTrustDialogAccepted).toBe(true);
-      options.onProviderDispatch?.();
+      await acknowledgeMuxFixture(options);
       return 5678;
     });
     expect(await session.restartCli()).toBe(true);

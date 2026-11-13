@@ -57,6 +57,9 @@ const CjkInput = (() => {
   let _dictationActive = false;
   let _dictationDecayTimer = null;
   let _printableKeydownAt = null;
+  let _accepting = null;
+  let _generation = 0;
+  let _draftRevision = 0;
   const _listeners = {};
 
   const PHANTOM = '​';
@@ -179,6 +182,31 @@ const CjkInput = (() => {
   }
 
   /** Flush textarea: send real text to PTY and reset to phantom */
+  function _sendDraft(value, wire) {
+    if (_accepting) return false;
+    const field = _textarea, generation = _generation, revision = _draftRevision;
+    const complete = accepted => {
+      if (accepted === false || field !== _textarea || generation !== _generation || revision !== _draftRevision) return false;
+      const current = _strip(field.value);
+      // Only remove the exact accepted prefix. Edits and newer IME text belong
+      // to the user and must not be cleared by an older transaction finishing.
+      if (current === value) _resetToPhantom();
+      else if (value && current.startsWith(value)) {
+        field.value = PHANTOM + current.slice(value.length);
+        field.setSelectionRange(field.value.length, field.value.length);
+      }
+      return true;
+    };
+    let result;
+    try {result = _send(wire);} catch {return false;}
+    if (!result?.then) return complete(result);
+    const pending = Promise.resolve(result).then(complete, () => false).finally(() => {
+      if (_accepting === pending) _accepting = null;
+    });
+    _accepting = pending;
+    return pending;
+  }
+
   function _flush() {
     // Never flush mid-composition: reading the value would send the IME's
     // provisional text, and resetting the textarea cancels the in-progress
@@ -193,9 +221,9 @@ const CjkInput = (() => {
     _t(`flush ${val ? 'send len=' + val.length : 'empty'}`);
     // Explicit false means this draft was never accepted into the input queue.
     // Keep it locally; the completed timer must not retry it automatically.
-    if (val && _send(val) === false) return false;
-    _resetToPhantom();
-    return true;
+    if (val) return _sendDraft(val, val);
+    if (!_accepting) _resetToPhantom();
+    return !_accepting;
   }
 
   /** Cancel any pending debounced flush */
@@ -290,6 +318,7 @@ const CjkInput = (() => {
 
       // ── Composition tracking (keyboard IME — works for CJK typing) ──
       _listeners.compositionstart = () => {
+        _draftRevision++;
         _t(`compstart ${_vdesc(_textarea.value)}`);
         _composing = true;
         _printableKeydownAt = null;
@@ -298,6 +327,7 @@ const CjkInput = (() => {
         // compositionstart cancel the IME composition on iOS Safari.
       };
       _listeners.compositionend = () => {
+        _draftRevision++;
         _t(`compend ${_vdesc(_textarea.value)}`);
         _composing = false;
         _cancelDebouncedFlush();
@@ -318,13 +348,15 @@ const CjkInput = (() => {
       _listeners.keydown = (e) => {
         _t(`keydown ${_kdesc(e.key)} kc=${e.keyCode} ic=${e.isComposing} c=${_composing}`);
         _printableKeydownAt = null;
+        // While storage owns an earlier draft, edits belong to this textarea.
+        // They must not become terminal backspace/arrows against untyped text.
+        if (_accepting && e.key !== 'Enter') return;
         if (e.key === 'Enter') {
           e.preventDefault();
           _composing = false;
           _cancelDebouncedFlush();
           const val = _strip(_textarea.value);
-          if (_send(val ? val + '\r' : '\r') === false) return;
-          _resetToPhantom();
+          _sendDraft(val, val ? val + '\r' : '\r');
           return;
         }
 
@@ -385,6 +417,8 @@ const CjkInput = (() => {
 
       // ── Input event: primary path for virtual keyboards + dictation ──
       _listeners.input = (e) => {
+        _draftRevision++;
+        if (_accepting) {_cancelDebouncedFlush(); return;}
         _t(`input ${e.inputType || '?'} ic=${e.isComposing} c=${_composing} ${_vdesc(_textarea.value)}`);
         const printableKeydownAt = _printableKeydownAt;
         _printableKeydownAt = null;
@@ -471,6 +505,7 @@ const CjkInput = (() => {
       _compositionFlushTimer = null;
       _composing = false;
       _printableKeydownAt = null;
+      _generation++;
       _resetToPhantom();
     },
 
@@ -480,6 +515,8 @@ const CjkInput = (() => {
     },
 
     destroy() {
+      _generation++;
+      _accepting = null;
       _cancelDebouncedFlush();
       clearTimeout(_compositionFlushTimer);
       _compositionFlushTimer = null;

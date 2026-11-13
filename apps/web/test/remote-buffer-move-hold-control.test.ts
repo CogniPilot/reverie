@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { expect, it, vi } from 'vitest';
@@ -17,13 +17,13 @@ it.each([true, false])('buffered remote input keeps its agent origin through a p
   const io = { capture: screen, sleep: async () => {},
     typeText: async (text: string) => { keys.push(text); composer += text; },
     sendEnter: async () => { keys.push('Enter'); composer = ''; } };
-  const mux = { capturePaneText: screen,
+  const muxRegistry = registeredMuxFixture({mode: 'claude',  muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 });
+  const mux = { ...muxRegistry, capturePaneText: screen,
     sendInput: vi.fn(async (_id: string, input: string, options: { requireEmptyComposer?: boolean } = {}) =>
       (await typeAndSubmit(io, input.replace(/\r/g, ''), { glyph: '❯', workingLine: 'esc to interrupt' }, 'remote-hold', options.requireEmptyComposer)) !== 'not-written') };
   const session = new Session({ id: 'test-session-1', workingDir: '/owned/fixture', mode: 'claude', useMux: true,
     remote: { hostId: 'owned-host', label: 'Owned fixture', host: '192.0.2.1', wakeCommand: 'synthetic-wake' } as never,
-    mux: mux as never, muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
-  registerMuxFixture(session);
+    mux: mux as never, muxSession: muxRegistry.subject });
   Object.assign(session, { reattachRemote: vi.fn(async () => true) });
   let ready!: (value: boolean) => void;
   const readiness = new Promise<boolean>(resolve => { ready = resolve; });

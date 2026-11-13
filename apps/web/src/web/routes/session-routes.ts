@@ -1,6 +1,9 @@
+import { bindInitialLaunchAdmission, captureLaunchProtocolAdmission } from '../../initial-launch-admission.js';
+import { incompatibleLegacyThreadBinding, legacyThreadBinding } from '../../legacy-thread-binding.js';
 import {TerminalInputUnconfirmedError} from '../../terminal-input-outcome.js';
+import {WorkerViewerProviderLaunchError} from '../../worker-execution.js';
 import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
-import { delegatedSessionStartAdmission } from '../../owner-auth/delegated-session-create.js';
+import { delegatedSessionStartAdmission, employeeReplacementAuthority } from '../../owner-auth/delegated-session-create.js';
 import { sessionCreateAdmission } from '../../owner-auth/session-create-admission.js';
 import type { TabLayout } from '../../tab-layout.js';
 import { runtimeSwitches } from './session-runtime-routes.js';
@@ -12,7 +15,10 @@ import { clampExternalCliBypassForOwner } from '../../session-config-clamp.js';
  */
 
 import { guardShellKey } from '../../opencode-input.js';
+import { cliInputProtocol } from '../../cli-input-protocol.js';
+import { dockerLaunchConversationSeed } from '../../utils/docker-conversation-seed.js';
 import { registerInputReceiptRoutes } from './input-receipt-routes.js';
+import { browserInputNeedsReload, INPUT_PROTOCOL_HEADER, INPUT_RELOAD_MESSAGE } from '../browser-input-protocol.js';
 import { prepareWorkspaceHooks, workspaceHookPolicy, type WorkspaceHookPreparation } from '../../workspace-hook-policy.js';
 import { FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -219,6 +225,7 @@ import { readDeepSeekLastResponse } from '../../deepseek-transcript.js';
 import { appendClaudeCustomTitle } from '../../claude-session-title.js';
 import { UPLOADS_DIR } from '../paste-image-gc.js';
 import { CompanyError, type CompanyService, type RuntimeRestartIntent } from '../../company-service.js';
+import type { CompanyState } from '../../company-types.js';
 import { normalizeIcon } from '../../chatroom-store.js';
 
 // Path to linked-cases registry (same file used by case-routes resolveCasePath)
@@ -953,9 +960,9 @@ function wakeableHost(host: RemoteHost): WakeableRemote {
 
 /** Persist a launch seed only once that runtime's conversation is known. */
 export async function persistDockerLaunchConversation(session: Session, configDir: string): Promise<void> {
-  if (!session.docker || getCli(session.mode)?.launch.resumeSelection !== 'claude-transcript' || session.claudeSessionIdPending) return;
-  await persistDockerCaseClaudeSessionId(configDir, session.docker.containerName,
-    session.claudeSessionId || session.id);
+  const seed = dockerLaunchConversationSeed(session);
+  if (!seed) return;
+  await persistDockerCaseClaudeSessionId(configDir, seed.containerName, seed.conversationId);
 }
 
 export function registerSessionRoutes(
@@ -1005,6 +1012,48 @@ export function registerSessionRoutes(
     !!options.company?.registeredEmployees().some((e) => e.sessionId === sessionId && e.desiredRunning === false);
   const stoppedByOwner = () =>
     createErrorResponse(ApiErrorCode.CONFLICT, 'This expert was stopped by the owner. Restart it from the Company page.');
+  const replacementAdmission = (req: FastifyRequest, employeeId: string | undefined) => {
+    if (!employeeId) return undefined;
+    const owner = ownerFor(req),
+      authorized = employeeReplacementAuthority(req, options.verifiedOwner ?? NO_OWNER);
+    const assertAuthority = () => {
+      if (!authorized() || ownerFor(req) !== owner)
+        throw new CompanyError(
+          'Employee replacement requires the verified owner or an approved plan operation; ask the owner or use the plan-move workflow',
+          403
+        );
+    };
+    assertAuthority();
+    const original = options.company
+      ?.registeredEmployees()
+      .find((employee) => employee.id === employeeId && employee.owner === owner);
+    const assert = (state?: CompanyState) => {
+      assertAuthority();
+      if (!original) return; // Ordinary identity validation still owns the unknown-employee response.
+      const current = (state?.employees ?? options.company?.registeredEmployees() ?? []).find(
+        (employee) => employee.id === employeeId && employee.owner === owner
+      );
+      if (
+        !current ||
+        current.sessionId !== original.sessionId ||
+        current.sessionGeneration !== original.sessionGeneration ||
+        current.bindingMigration
+      )
+        throw new CompanyError('The original employee binding changed before replacement', 409);
+    };
+    assert();
+    return {
+      assert,
+      current: () => {
+        try {
+          assert();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    };
+  };
   /** Bug 19: a VERIFIED OWNER replacing an employee's session (employeeId: POST /api/sessions, quick-start) is an
    * explicit start onto a NEW session id. It records running intent through the same guarded transaction as ownerRestart,
    * claimed AFTER the thread claim has stopped the old session (that stop records false) and BEFORE the launch. rebind()
@@ -1243,6 +1292,21 @@ export function registerSessionRoutes(
     if (capMsg) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, capMsg);
 
     const body = parseBody(CreateSessionSchema, req.body);
+    let replacement: ReturnType<typeof replacementAdmission>;
+    try {
+      replacement = replacementAdmission(req, body.employeeId);
+    } catch (error) {
+      return reply.code(error instanceof CompanyError ? error.status : 403)
+        .send(createErrorResponse(spawnRefusalCode(error), getErrorMessage(error)));
+    }
+    const mode = body.mode || 'claude';
+    const protocolAdmitted = captureLaunchProtocolAdmission(mode);
+    const operationAdmitted = () => protocolAdmitted() && (!admitted || admitted()) && (!replacement || replacement.current());
+    const assertLaunchAdmission = () => {
+      replacement?.assert();
+      if (!operationAdmitted()) throw new Error('Session launch protocol or admission changed during preparation');
+    };
+    assertLaunchAdmission();
     const parentSessionId = resolveParentSessionId(ctx, req, body.parentSessionId, owner);
     // An agent may only resume a conversation of its OWN (its row id, its native thread or an earlier one in its chain). A row created
     // "resuming" another agent's thread would pass for that agent's successor, so it is refused at the source.
@@ -1503,7 +1567,8 @@ export function registerSessionRoutes(
 
     const globalNice = await ctx.getGlobalNiceConfig();
     const modelConfig = await ctx.getModelConfig();
-    const mode = body.mode || 'claude';
+    if (incompatibleLegacyThreadBinding(mode)) return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'The selected CLI has an incompatible legacy thread config codec');
+    const launchBinding = legacyThreadBinding(mode);
     // Synced App Settings launch defaults (capabilities.launchDefaults, codex's model and
     // effort today) fill the CLI's own config object where the caller left it unset.
     // Local launches only: a remote attach runs whatever the remote pane already runs.
@@ -1551,16 +1616,23 @@ export function registerSessionRoutes(
     const terminalHistoryConfig = await ctx.getTerminalHistoryConfig();
     // The thread is decided once, before anything is stopped: the stop removes the old record the employee's thread may come from.
     const launchThread =
-      getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1'
+      launchBinding?.kind === 'forkable-continue'
         ? typeof launchBody.openCodeConfig?.continueSession === 'string'
           ? launchBody.openCodeConfig.continueSession
           : employeeThread(ctx, spawnIdentity)
         : undefined;
+    try {
+      replacement?.assert();
+    } catch (error) {
+      return reply.code(error instanceof CompanyError ? error.status : 403)
+        .send(createErrorResponse(spawnRefusalCode(error), getErrorMessage(error)));
+    }
     const claim = await claimEmployeeThread(
       ctx,
       spawnIdentity,
       launchThread,
-      req.headers['x-reverie-parent-session'] !== undefined
+      req.headers['x-reverie-parent-session'] !== undefined,
+      operationAdmitted
     );
     if (claim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, claim.refusal);
     let replacementIntent: RuntimeRestartIntent | undefined;
@@ -1577,7 +1649,7 @@ export function registerSessionRoutes(
     try {
       // Await every option before the final construction guard. Constructor argument evaluation must not yield afterward.
       const envOverrides = { ...(await clampEnvOverridesForOwner(owner, body.envOverrides)), ...subscriptionLaunch(req).env };
-      assertAdmission();
+      assertLaunchAdmission();
       const session = new Session({
         workspaceHookPreparation,
         workingDir,
@@ -1589,8 +1661,8 @@ export function registerSessionRoutes(
         model,
         claudeMode: effectiveClaudeMode,
         allowedTools: claudeModeConfig.allowedTools,
-        openCodeConfig: mode === 'opencode' ? withEmployeeThread(launchBody.openCodeConfig, launchThread) : undefined,
-        codexConfig: mode === 'codex' ? gatedCodexConfig : undefined,
+        openCodeConfig: launchBinding?.kind === 'forkable-continue' ? withEmployeeThread(launchBody.openCodeConfig, launchThread) : undefined,
+        codexConfig: launchBinding?.kind === 'nested-resume' ? gatedCodexConfig : undefined,
         geminiConfig: mode === 'gemini' ? gatedGeminiConfig : undefined,
         antigravityConfig: mode === 'antigravity' ? gatedAntigravityConfig : undefined,
         piConfig: mode === 'pi' ? gatedPiConfig : undefined,
@@ -1608,13 +1680,12 @@ export function registerSessionRoutes(
         parentSessionId,
       });
 
+      bindInitialLaunchAdmission(session, protocolAdmitted);
       createdSession = session;
       let tabLayout: TabLayout;
       try {
         const placement = body.tabGroupId ? { tabGroupId: body.tabGroupId } : undefined;
-        tabLayout = admitted
-          ? await ctx.addSession(session, placement, admitted)
-          : placement ? await ctx.addSession(session, placement) : await ctx.addSession(session);
+        tabLayout = await ctx.addSession(session, placement, operationAdmitted);
       } catch (error) {
         // This newly-owned object has never launched. Dispose its local trackers only; never signal any provider/mux.
         if (ctx.sessions.get(session.id) !== session) await session.stop(false);
@@ -1622,8 +1693,10 @@ export function registerSessionRoutes(
       }
       ctx.store.incrementSessionsCreated();
       ctx.persistSessionState(session);
+      assertLaunchAdmission();
       if (!claim.admitDispatch()) throw new Error('The original replacement claim is no longer current; no provider start was admitted');
       await ctx.setupSessionListeners(session);
+      assertLaunchAdmission();
       if (spawnIdentity) {
         try {
           // The audit names the agent that asked (its header, not the body lineage); an owner's own request stays 'owner'.
@@ -1631,7 +1704,8 @@ export function registerSessionRoutes(
             session.id,
             spawnIdentity,
             auditActor(ctx, req, owner),
-            replacementIntent?.token
+            replacementIntent?.token,
+            replacement?.assert
           );
         } catch (error) {
           const retained = retainUnconfirmedLaunch(error, session, claim, spawnIdentity, ownerFor(req));
@@ -2044,6 +2118,16 @@ export function registerSessionRoutes(
       return createErrorResponse(ApiErrorCode.SESSION_BUSY, 'Session is busy');
     }
 
+    try { session.assertProviderLaunchAdmission(); }
+    catch (error) {
+      if (error instanceof WorkerViewerProviderLaunchError) return createErrorResponse(ApiErrorCode.CONFLICT, error.message);
+      // Preserve the unexpected cause internally; the public body must not dump it.
+      throw Object.assign(new Error('Provider launch admission could not be confirmed', {cause:error}), {
+        statusCode:500,
+        body:createErrorResponse(ApiErrorCode.OPERATION_FAILED,'Provider launch admission could not be confirmed; no provider launch was requested.'),
+      });
+    }
+
     // Run async, don't wait
     session.runPrompt(prompt).catch((err) => {
       ctx.broadcast(SseEvent.SessionError, { id, error: err.message });
@@ -2242,6 +2326,12 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const { input, useMux, seq, clientId, wait, waitTimeout, ifIdle } = parseBody(SessionInputWithLimitSchema, req.body);
     const session = findSessionOrFail(ctx, id, req);
+    if (browserInputNeedsReload(req, req.headers[INPUT_PROTOCOL_HEADER]))
+      return reply.code(409).send({
+        ...createErrorResponse(ApiErrorCode.CONFLICT, INPUT_RELOAD_MESSAGE),
+        reloadRequired: true,
+        recoveryRequired: true,
+      });
     if (session.providerDispatchHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
     if (session.terminalInputHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message), recoveryRequired: true};
     const agentCaller =
@@ -2289,7 +2379,7 @@ export function registerSessionRoutes(
     });
     const idleRefusal = () => createErrorResponse(ApiErrorCode.SESSION_BUSY,
       'Session is busy or has a draft in its composer; nothing was typed.');
-    const rawInput = agentCaller && getCli(session.mode)?.capabilities.input?.shellKeyGuard ? guardShellKey(inputStr) : inputStr;
+    const rawInput = agentCaller && cliInputProtocol(session.mode).shellKeyGuard ? guardShellKey(inputStr) : inputStr;
     const admission = ctx.terminalInput.begin(session, {input: inputStr, rawInput, clientId, seq, useMux, ifIdle: ifIdle ?? undefined, agentInput: agentCaller},
       () => ctx.sessions.get(id) === session);
     if (admission.state === 'held') return unconfirmedInput();
@@ -4304,7 +4394,19 @@ export function registerSessionRoutes(
       customModel,
       tabGroupId,
     } = parseBody(QuickStartSchema, req.body);
+    let replacement: ReturnType<typeof replacementAdmission>;
+    try {
+      replacement = replacementAdmission(req, employeeId);
+    } catch (error) {
+      return reply.code(error instanceof CompanyError ? error.status : 403)
+        .send(createErrorResponse(spawnRefusalCode(error), getErrorMessage(error)));
+    }
+    const qsProtocol = captureLaunchProtocolAdmission(mode);
+    const qsProtocolAdmitted = () => qsProtocol() && (!replacement || replacement.current());
+    if (!qsProtocolAdmitted()) return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'The selected launch protocol is unavailable');
     if (pinned && !(options.verifiedOwner ?? NO_OWNER)(req)) return reply.code(403).send(createErrorResponse(ApiErrorCode.FORBIDDEN, 'Only the verified owner may pin an expert runtime'));
+    if (incompatibleLegacyThreadBinding(mode)) return createErrorResponse(ApiErrorCode.INVALID_INPUT, 'The selected CLI has an incompatible legacy thread config codec');
+    const qsBinding = legacyThreadBinding(mode);
     let openCodeConfig = requestedOpenCodeConfig;
 
     // Resolved ONCE here: the same value labels a case directory this request creates
@@ -4741,7 +4843,7 @@ export function registerSessionRoutes(
     // Decided once, here; the old session is stopped only just before the new one starts (claimEmployeeThread below), after every
     // check that can still refuse the request.
     let qsThread: string | undefined;
-    if (getCli(mode)?.launch.threadStateProfile === 'forkable-continue-v1') {
+    if (qsBinding?.kind === 'forkable-continue') {
       qsThread =
         typeof openCodeConfig?.continueSession === 'string'
           ? openCodeConfig.continueSession
@@ -4958,8 +5060,8 @@ export function registerSessionRoutes(
       claudeMode: qsEffectiveClaudeMode,
       allowedTools: qsClaudeModeConfig.allowedTools,
       owner,
-      openCodeConfig: mode === 'opencode' ? qsLaunchConfigs.openCodeConfig : undefined,
-      codexConfig: mode === 'codex' ? qsGatedCodexConfig : undefined,
+      openCodeConfig: qsBinding?.kind === 'forkable-continue' ? qsLaunchConfigs.openCodeConfig : undefined,
+      codexConfig: qsBinding?.kind === 'nested-resume' ? qsGatedCodexConfig : undefined,
       geminiConfig: mode === 'gemini' ? qsGatedGeminiConfig : undefined,
       antigravityConfig: mode === 'antigravity' ? qsGatedAntigravityConfig : undefined,
       piConfig: mode === 'pi' ? qsGatedPiConfig : undefined,
@@ -4993,14 +5095,23 @@ export function registerSessionRoutes(
         qsSessionOptions.model = qsCustomModelLaunchModel;
       }
     }
+    try {
+      replacement?.assert();
+    } catch (error) {
+      return reply.code(error instanceof CompanyError ? error.status : 403)
+        .send(createErrorResponse(spawnRefusalCode(error), getErrorMessage(error)));
+    }
     const qsClaim = await claimEmployeeThread(
       ctx,
       qsSpawnIdentity,
       qsThread,
-      req.headers['x-reverie-parent-session'] !== undefined
+      req.headers['x-reverie-parent-session'] !== undefined,
+      qsProtocolAdmitted
     );
     if (qsClaim.refusal) return createErrorResponse(ApiErrorCode.CONFLICT, qsClaim.refusal);
+    if (!qsProtocolAdmitted()) {qsClaim.release(); return createErrorResponse(ApiErrorCode.CONFLICT, 'The original launch protocol changed before construction');}
     const session = new Session(qsSessionOptions);
+    bindInitialLaunchAdmission(session, qsProtocolAdmitted);
     if (pinned) session.setPinned(true);
 
     // Records the selection for session.customModel/getCustomModelForPersist() and future
@@ -5022,7 +5133,7 @@ export function registerSessionRoutes(
       }
     }
 
-    const tabLayout = tabGroupId ? await ctx.addSession(session, { tabGroupId }) : await ctx.addSession(session);
+    const tabLayout = await ctx.addSession(session, tabGroupId ? { tabGroupId } : undefined, qsProtocolAdmitted);
     ctx.store.incrementSessionsCreated();
     ctx.persistSessionState(session);
     await ctx.setupSessionListeners(session);
@@ -5057,6 +5168,7 @@ export function registerSessionRoutes(
     }
     // Start in the appropriate mode
     try {
+      if (!qsProtocolAdmitted()) throw new Error('The original launch protocol changed before start');
       if (!qsClaim.admitDispatch()) throw new Error('The original replacement claim is no longer current; no provider start was admitted');
       if (getCli(mode)?.capabilities.startMode === 'shell') {
         await session.startShell();
@@ -5069,7 +5181,7 @@ export function registerSessionRoutes(
         ctx.broadcast(SseEvent.SessionInteractive, { id: session.id, mode: 'shell' });
       } else {
         // every non-shell mode ('claude', the external CLIs) uses startInteractive()
-        await session.startInteractive();
+        await session.startInteractive(qsProtocolAdmitted);
         getLifecycleLog().log({
           event: 'started',
           sessionId: session.id,
@@ -5083,7 +5195,8 @@ export function registerSessionRoutes(
           session.id,
           qsSpawnIdentity,
           auditActor(ctx, req, owner),
-          qsReplacementIntent?.token
+          qsReplacementIntent?.token,
+          replacement?.assert
         );
       ctx.broadcast(SseEvent.SessionUpdated, { session: ctx.getSessionStateWithRespawn(session) });
 
@@ -6390,7 +6503,8 @@ async function claimEmployeeThread(
   },
   identity: { employeeId?: string; replacesSessionId?: string } | undefined,
   thread: string | undefined,
-  agentCaller: boolean
+  agentCaller: boolean,
+  admitted: () => boolean
 ): Promise<ThreadClaim> {
   const noop = () => {};
   const stopped: string[] = [];
@@ -6428,7 +6542,7 @@ async function claimEmployeeThread(
   if (employeeId) replacementsInFlight.set(employeeId, lease);
   if (thread) threadsInFlight.set(thread, lease);
   const claim: ThreadClaim = {
-    admitDispatch: () => (!employeeId || lease.owns(replacementsInFlight, employeeId))
+    admitDispatch: () => admitted() && (!employeeId || lease.owns(replacementsInFlight, employeeId))
       && (!thread || lease.owns(threadsInFlight, thread)) && lease.beginDispatch(),
     retainUnconfirmed: () => {
       lease.retainUnconfirmed();
@@ -6446,14 +6560,18 @@ async function claimEmployeeThread(
     released: false,
   };
   const release = claim.release;
+  const refuseChanged = () => {claim.refusal = 'The original launch protocol or admission changed; no further stop or launch was admitted'; release(); return claim;};
+  if (!admitted()) return refuseChanged();
   if (!thread) return claim;
   const busy = (s: { id: string; name: string }) =>
     `Stop ${s.name} (${s.id}) first: it is still running this conversation thread`;
   let blocking = holders();
   if (blocking.length && !agentCaller && blocking.every((s) => s.id === identity?.replacesSessionId)) {
     for (const old of blocking) {
+      if (!admitted()) return refuseChanged();
       await ctx.cleanupSession(old.id, true, 'employee_replaced');
       stopped.push(old.id);
+      if (!admitted()) return refuseChanged();
     }
     blocking = holders();
   }

@@ -72,10 +72,20 @@
   }
 
   class EmployeePanel {
+    #editObservation = null;
+    #bindingLost = false;
     constructor(shell, container, dialog, employee) {
       this.shell = shell;
       this.dialog = dialog;
       this.employee = employee;
+      this.binding = Object.freeze({
+        id: employee.id,
+        sessionId: employee.sessionId,
+        generation: employee.sessionGeneration,
+      });
+      const cached = shell.company?.employees?.find((row) => row.id === employee.id);
+      this.cachedBinding =
+        cached && Object.freeze({ sessionId: cached.sessionId, generation: cached.sessionGeneration });
       this.path = `/api/company/resources/employees/${encodeURIComponent(employee.id)}`;
       this.sequence = 0;
       this.busy = false;
@@ -86,10 +96,18 @@
       this.error = shell.el('p', 'ca-company-error');
       this.error.setAttribute('role', 'alert');
       this.content = shell.el('div');
+      this.diagnostics = shell.el('div');
       this.refresh = shell.button('ca-btn', `Refresh resource status for ${employee.name}`, () => this.load(), {
         text: 'Refresh resource status',
       });
-      this.host.append(shell.el('h4', '', 'RAM and CPU'), this.status, this.error, this.content, this.refresh);
+      this.host.append(
+        shell.el('h4', '', 'RAM and CPU'),
+        this.status,
+        this.content,
+        this.error,
+        this.diagnostics,
+        this.refresh
+      );
       container.append(this.host);
       dialog.addEventListener(
         'close',
@@ -145,10 +163,26 @@
     current(sequence) {
       return this.host.isConnected && sequence === this.sequence;
     }
+    bindingCurrent() {
+      const cached = this.shell.company?.employees?.find((row) => row.id === this.binding.id);
+      // The freshly owner-checked profile may be newer than the fleet cache. That cache
+      // can revoke this view when it changes; it cannot replace the original binding.
+      const unchanged =
+        (!this.cachedBinding ||
+          (cached?.sessionId === this.cachedBinding.sessionId &&
+            cached.sessionGeneration === this.cachedBinding.generation)) &&
+        this.employee.sessionId === this.binding.sessionId &&
+        this.employee.sessionGeneration === this.binding.generation;
+      if (!unchanged) this.#bindingLost = true;
+      return !this.#bindingLost;
+    }
     start(message) {
+      this.#editObservation = null;
       this.busy = true;
       this.refresh.disabled = true;
-      this.content.querySelector('form')?.remove();
+      this.content.querySelectorAll('form input, form button').forEach((control) => {
+        control.disabled = true;
+      });
       this.status.textContent = message;
       this.error.textContent = '';
       return ++this.sequence;
@@ -159,12 +193,159 @@
       this.refresh.disabled = false;
     }
     async readStatus(sequence) {
-      const reply = await this.shell.app._chatApi(this.path);
+      const reply = await this.shell.app._chatApi(this.path + '/memory-diagnostics');
       if (!this.current(sequence)) return;
+      if (!this.bindingCurrent())
+        throw new Error('The employee session changed. Close and reopen this profile to check its current limits.');
       if (!reply.ok) throw new Error(reply.error || 'Running resource limits are unavailable. Refresh to try again.');
-      if (!this.valid(reply.data))
+      const value = reply.data;
+      if (
+        value?.version !== 1 ||
+        value.employeeId !== this.binding.id ||
+        value.sessionId !== this.binding.sessionId ||
+        value.sessionGeneration !== String(this.binding.generation) ||
+        !['native-compound', 'independent-status-read'].includes(value.source) ||
+        !this.valid(value.resources) ||
+        (value.source === 'native-compound'
+          ? value.diagnostics?.kind !== 'snapshot'
+          : value.diagnostics?.kind !== 'unavailable' || value.diagnostics.reason !== 'native-observation-unconfirmed')
+      )
         throw new Error('The current employee resource status could not be verified. Refresh the profile.');
-      this.render(reply.data);
+      this.render(value.resources);
+      this.renderDiagnostics(value);
+    }
+    renderDiagnostics(value) {
+      const section = this.diagnostics,
+        shell = this.shell;
+      const expanded = section.querySelector('.ca-memory-details')?.open === true;
+      section.replaceChildren(shell.el('h5', '', 'Memory pressure sample'));
+      const details = shell.el('details', 'ca-memory-details');
+      details.open = expanded;
+      details.append(shell.el('summary', '', 'Pressure details'));
+      const note = (text) => details.append(shell.el('p', 'ca-hint', text));
+      this.renderAdvisory(value, details);
+      const sample = value.source === 'native-compound' ? value.diagnostics.value?.observation : null;
+      if (sample) {
+        const sampled = new Date(sample.sampledAtEpochMs);
+        if (Number.isFinite(sampled.getTime()))
+          section.append(
+            shell.el(
+              'p',
+              'ca-hint ca-memory-sample-time',
+              `Sampled ${sampled.toISOString()}. Snapshot only; refresh to check again.`
+            )
+          );
+      }
+      section.append(details);
+      if (value.source === 'independent-status-read') {
+        note(
+          'Pressure diagnostics are unconfirmed. Running limits came from a separate authorized status read; the original diagnostic query was not confirmed.'
+        );
+        return;
+      }
+      if (!sample) {
+        note('No memory pressure sample is available for this resource observation.');
+        return;
+      }
+      const timestamp = new Date(sample.sampledAtEpochMs),
+        displayable = Number.isFinite(timestamp.getTime()),
+        age = Date.now() - sample.sampledAtEpochMs;
+      note(
+        (displayable
+          ? `Sampled ${timestamp.toISOString()}. `
+          : 'Sample timestamp is outside this browser’s clock range. ') +
+          (displayable && Number.isFinite(age) && age >= 0
+            ? `${Math.floor(age / 1000)} seconds old when checked. `
+            : 'Sample age cannot be compared to this browser clock. ') +
+          `Read duration: ${sample.sampleDurationUs} microseconds. Files are read sequentially.`
+      );
+      const table = shell.el('table', 'ca-fleet-table'),
+        body = shell.el('tbody');
+      const row = (label, text) => {
+        const tr = shell.el('tr');
+        tr.append(shell.el('th', '', label), shell.el('td', '', text));
+        body.append(tr);
+      };
+      const pressure = sample.pressure;
+      if (pressure.state === 'available')
+        for (const key of ['some', 'full']) {
+          const metric = pressure[key],
+            percent = (n) => (n / 100).toFixed(2) + '%';
+          row(
+            key === 'some' ? 'Some tasks stalled' : 'All tasks stalled',
+            `10s ${percent(metric.avg10Hundredths)} · 60s ${percent(metric.avg60Hundredths)} · 300s ${percent(metric.avg300Hundredths)}; cumulative ${metric.totalUs} microseconds`
+          );
+        }
+      else row('Stall pressure', `Unavailable (${pressure.reason})`);
+      const events = sample.events;
+      if (events.state === 'available')
+        for (const [key, label] of [
+          ['low', 'Below-low reclaim'],
+          ['high', 'Soft-limit reclaim'],
+          ['max', 'Hard-limit encounters'],
+          ['oom', 'OOM encounters'],
+          ['oomKill', 'OOM kills'],
+          ['oomGroupKill', 'OOM group kills'],
+        ])
+          row(label, events[key] === null ? 'Not provided by this kernel' : events[key]);
+      else row('Memory events', `Unavailable (${events.reason})`);
+      table.append(body);
+      details.append(table);
+      note(
+        'Event counts are cumulative for this cgroup. This sample does not identify a recent incident, its cause, or whether the employee’s model is alive. Ancestor and host pressure are not included.'
+      );
+    }
+    renderAdvisory(value, details) {
+      const advisory = value.advisory,
+        timestamp = (n) => Number.isSafeInteger(n) && n > 0 && n <= 8640000000000000,
+        sample = value.source === 'native-compound' ? value.diagnostics.value?.observation : null;
+      const unknownReasons = [
+        'native-observation-unconfirmed',
+        'no-sample',
+        'pressure-unavailable',
+        'stale-sample',
+        'future-sample',
+        'sample-time-unavailable',
+        'server-clock-unavailable',
+      ];
+      let text = 'Memory stall advisory is unavailable from this response. Refresh resource status to check again.';
+      let warning = false;
+      let timing = '';
+      if (
+        advisory?.state === 'unknown' &&
+        unknownReasons.includes(advisory.reason) &&
+        (advisory.sampledAtEpochMs === null || timestamp(advisory.sampledAtEpochMs)) &&
+        (advisory.evaluatedAtEpochMs === null || timestamp(advisory.evaluatedAtEpochMs))
+      ) {
+        text = `Memory stall advisory is unknown (${advisory.reason}). Refresh resource status to check again.`;
+      } else if (
+        sample &&
+        advisory?.sampledAtEpochMs === sample.sampledAtEpochMs &&
+        timestamp(advisory.sampledAtEpochMs) &&
+        timestamp(advisory.evaluatedAtEpochMs) &&
+        advisory.evaluatedAtEpochMs >= advisory.sampledAtEpochMs
+      ) {
+        const evaluated = new Date(advisory.evaluatedAtEpochMs).toISOString();
+        if (advisory.state === 'warning' && advisory.code === 'high-memory-stall') {
+          warning = true;
+          text =
+            'High memory stalls were observed. Reclaim can delay the agent and terminal even when host RAM is free; inspect current jobs before taking action.';
+          timing = `Server evaluated ${evaluated}.`;
+        } else if (advisory.state === 'not-observed') {
+          text =
+            'High memory stalls were not observed in this sample. This is not proof of health or capacity for another job.';
+          timing = `Server evaluated ${evaluated}.`;
+        }
+      }
+      const message = this.shell.el('p', warning ? 'ca-company-error' : 'ca-hint', text);
+      message.setAttribute('data-memory-advisory', '');
+      message.setAttribute('role', warning ? 'alert' : 'status');
+      this.diagnostics.append(message);
+      if (timing) {
+        const detail = this.shell.el('p', 'ca-hint', timing);
+        detail.setAttribute('data-memory-advisory-time', '');
+        details.append(detail);
+      }
     }
     async load() {
       if (this.busy || !this.host.isConnected) return;
@@ -173,8 +354,12 @@
         await this.readStatus(sequence);
       } catch (error) {
         if (this.current(sequence)) {
-          this.content.replaceChildren();
-          this.status.textContent = 'Running limits are unconfirmed.';
+          this.status.textContent = this.content.childNodes.length
+            ? 'Previously shown running limits are stale and unconfirmed.'
+            : 'Running limits are unconfirmed.';
+          this.diagnostics.replaceChildren(
+            this.shell.el('p', 'ca-hint', 'Memory pressure diagnostics are unavailable. Refresh to check again.')
+          );
           this.error.textContent = error.message || 'Resource status is unavailable. Refresh to try again.';
         }
       } finally {
@@ -212,7 +397,7 @@
       return form;
     }
     async apply(value, memoryHighMiB, cpuWeight) {
-      if (this.busy || !this.host.isConnected) return;
+      if (this.busy || !this.host.isConnected || !this.bindingCurrent() || this.#editObservation !== value) return;
       const sequence = this.start('Applying RAM and CPU limits…');
       let applied = false;
       try {
@@ -247,12 +432,16 @@
             ? 'Change applied. Running limits could not be refreshed.'
             : 'Refresh the running limits before making another change.';
           this.error.textContent = error.message || 'The RAM and CPU change was not confirmed.';
+          // Keep the actual active panel's refusal beside the submitted form
+          // and reveal it without replacing the draft or moving keyboard focus.
+          this.error.scrollIntoView({ block: 'nearest' });
         }
       } finally {
         this.finish(sequence);
       }
     }
     render(value) {
+      this.#editObservation = value;
       const s = this.shell,
         requested = value.requested,
         observed = value.observed;

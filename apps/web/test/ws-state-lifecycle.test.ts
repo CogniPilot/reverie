@@ -60,6 +60,7 @@ function loadHarness() {
   let nextTimerId = 1;
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
+  const delivery = readFileSync(resolve(import.meta.dirname, '../src/web/public/input-delivery.js'), 'utf8');
   const context = vm.createContext({
     console,
     performance,
@@ -90,7 +91,7 @@ function loadHarness() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  vm.runInContext(`${constants}\n${source}\n${delivery}\nglobalThis.__ReverieApp = ReverieApp;`, context);
   const ReverieApp = (context as { __ReverieApp: new () => unknown }).__ReverieApp;
   return { ReverieApp, timers };
 }

@@ -16,6 +16,8 @@
  * Wrapping `window.fetch` covers every caller, including the notification-click / focus path
  * (settings-ui.js handles the service worker's `notification-click` message and its fetches run
  * through here) and chat-app.js (it calls `defaultView.fetch` at call time).
+ * Recovery and live-subscription transports show authentication refusals in place,
+ * preserving editable drafts while the caller signs in and refreshes status.
  *
  * @dependency none (loaded first among the app scripts in index.html)
  */
@@ -106,9 +108,34 @@
     api.navigate(loginUrl());
   }
 
-  function guardedFetch(input) {
+  // These transports own an explicit sign-in notice and status refresh.
+  // Navigating here would discard editable drafts and uncertain operation references.
+  function hasLocalAuthenticationNotice(input, options) {
+    try {
+      const raw = typeof input === 'string' ? input : input.url;
+      const url = new URL(raw, global.location.href);
+      const method = String(options?.method || input?.method || 'GET').toUpperCase();
+      if (url.origin !== global.location.origin) return false;
+      const path = appPath(url.pathname);
+      if (path === '/api/events/subscribe' && method === 'POST') return true;
+      if (
+        (path === '/api/mux/metadata/status' && method === 'GET') ||
+        (path === '/api/mux/metadata/reconcile' && method === 'POST')
+      )
+        return true;
+      const recovery =
+        /^\/api\/company\/employees\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/recovery(-selection|\/observe)?$/.exec(
+          path
+        );
+      return !!recovery && (recovery[1] === '-selection' ? method === 'GET' : method === 'POST');
+    } catch {
+      return false;
+    }
+  }
+
+  function guardedFetch(input, options) {
     const result = nativeFetch.apply(global, arguments);
-    if (isApiRequest(input)) {
+    if (isApiRequest(input) && !hasLocalAuthenticationNotice(input, options)) {
       result.then(inspect, () => {}).catch(() => {});
     }
     return result;

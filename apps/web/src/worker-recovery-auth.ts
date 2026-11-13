@@ -21,9 +21,9 @@ const integer = (value: unknown): value is number => Number.isSafeInteger(value)
 export function recoveryRequestTarget(method: string, target: string): boolean {
   return (
     method === 'POST' &&
-    (target === '/api/plans/moves/force' ||
+    (target === '/api/plans/moves/force' || target === '/api/mux/metadata/reconcile' ||
       /^\/api\/plans\/moves\/[A-Za-z0-9_-]{1,100}\/(?:status|resolve|cancel)$/.test(target) ||
-      new RegExp('^/api/company/employees/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/reconnect(?:/status)?$').test(
+      new RegExp('^/api/company/employees/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/(?:reconnect(?:/status)?|recovery(?:/observe)?|recovery-selection)$').test(
         target
       )) &&
     !/[\r\n]/.test(target)
@@ -86,8 +86,8 @@ function privateFile(file: string, maximum = MAX_BODY): { bytes: Buffer; identit
 /** Fixed instance path, never request/env key material. Provisioning is an explicit
  * owner host action; absence or damaged/partial state denies delegated recovery. */
 export class WorkerRecoveryAuthentication {
-  private readonly bodies = new WeakMap<FastifyRequest, Buffer>();
-  private readonly principals = new WeakMap<FastifyRequest, Promise<RecoveryAuthority>>();
+  readonly #bodies = new WeakMap<FastifyRequest, Buffer>();
+  readonly #principals = new WeakMap<FastifyRequest, Promise<RecoveryAuthority>>();
   constructor(
     private readonly directory: string,
     private readonly employees: () => readonly CompanyEmployee[],
@@ -109,22 +109,22 @@ export class WorkerRecoveryAuthentication {
         chunks.push(bytes);
       }
       const body = Buffer.concat(chunks);
-      this.bodies.set(request, body);
+      this.#bodies.set(request, body);
       return Readable.from(body);
     });
   }
 
   authenticate(request: FastifyRequest): Promise<RecoveryAuthority> {
-    const prior = this.principals.get(request);
+    const prior = this.#principals.get(request);
     if (prior) return prior;
     const flight = this.verify(request);
-    this.principals.set(request, flight);
+    this.#principals.set(request, flight);
     return flight;
   }
 
   private async verify(request: FastifyRequest): Promise<RecoveryAuthority> {
     const header = request.headers[RECOVERY_HEADER],
-      body = this.bodies.get(request);
+      body = this.#bodies.get(request);
     if (
       request.headers['x-reverie-service-token'] !== undefined ||
       request.cookies?.reverie_owner !== undefined ||
@@ -177,8 +177,12 @@ export class WorkerRecoveryAuthentication {
     if (!timingSafeEqual(expected, Buffer.from(signature, 'hex'))) throw Error('Recovery proof refused');
     const accepted = this.now();
     if (!integer(accepted) || fields[9] > accepted || fields[10] <= accepted) throw Error('Recovery proof expired');
-    const caller = this.employees().find((e) => e.sessionId === fields[4] && e.sessionGeneration === fields[5]);
-    if (!caller || caller.bindingMigration || caller.onVacation || caller.desiredRunning !== true)
+    const employees = this.employees();
+    const callers = employees.filter((e) => e.sessionId === fields[4]);
+    const caller = callers[0];
+    if (callers.length !== 1 || !caller || caller.sessionGeneration !== fields[5] ||
+      employees.filter((e) => e.id === caller.id).length !== 1 ||
+      caller.bindingMigration || caller.onVacation || caller.desiredRunning !== true)
       throw Error('Recovery caller unavailable');
     const identity = Object.freeze({
       employeeId: caller.id,
@@ -233,8 +237,12 @@ export class WorkerRecoveryAuthentication {
       },
       assertCurrent: () => {
         principal.assertIssued();
-        const current = this.employees().find((e) => e.id === identity.employeeId);
+        const employees = this.employees();
+        const matches = employees.filter((e) => e.id === identity.employeeId);
+        const current = matches[0];
         if (
+          matches.length !== 1 ||
+          employees.filter((e) => e.sessionId === identity.sessionId).length !== 1 ||
           !current ||
           current.owner !== identity.owner ||
           current.sessionId !== identity.sessionId ||

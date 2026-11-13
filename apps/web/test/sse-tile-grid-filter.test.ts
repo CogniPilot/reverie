@@ -27,7 +27,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { WebServer } from '../src/web/server.js';
 import { TmuxManager } from '../src/tmux-manager.js';
-import { createUser, invalidateUsersCache } from '../src/user-store.js';
+import { createUser, invalidateUsersCache, setPassword, updateUser } from '../src/user-store.js';
 
 vi.spyOn(TmuxManager, 'isTmuxAvailable').mockReturnValue(true);
 
@@ -95,11 +95,13 @@ const until = async (fn: () => boolean, ms = 3000) => {
 let server: WebServer;
 let dataDir: string;
 let spacesDir: string;
+let pausedMutation: { entered(): void; released: Promise<void> } | undefined;
 const saved: Record<string, string | undefined> = {};
 type Internals = {
   sessions: Map<string, unknown>;
   broadcast(event: string, data: unknown): void;
   batchTerminalData(sessionId: string, data: string): void;
+  sse: { flushSessionTerminalBatch(sessionId: string): void };
 };
 
 beforeAll(async () => {
@@ -124,7 +126,73 @@ beforeAll(async () => {
   await createUser({ username: 'alice', role: 'user', password: 'alicepass1' });
   await createUser({ username: 'bob', role: 'user', password: 'bobpass1234' });
   server = new WebServer(0, false, true);
+  server['app'].addHook('preHandler', async (request) => {
+    if (request.method !== 'POST' || request.url !== '/api/events/subscribe' || !pausedMutation) return;
+    const original = pausedMutation;
+    pausedMutation = undefined;
+    original.entered();
+    await original.released;
+  });
   await server.start();
+});
+
+it('rechecks the original verified credential, role and cookie after a metadata mutation waits', async () => {
+  const exercise = async (username: string, revoke: () => Promise<unknown>, cookie = false) => {
+    await createUser({ username, role: 'user', password: 'originalpass1' });
+    const verified = { Authorization: basic(username, 'originalpass1') };
+    const login = await fetch(url('/api/me'), { headers: verified });
+    expect(login.status).toBe(200);
+    const headers = cookie ? { Cookie: login.headers.get('set-cookie')!.split(';')[0] } : verified;
+    const key = `paused-${username}`;
+    const original = await openStream(`?clientId=${key}&sessions=${FILTER}`, headers);
+    let release!: () => void;
+    let entered!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let request: Promise<Response> | undefined;
+    try {
+      await until(() => original.received.some((frame) => frame.event === 'init'));
+      expect(original.status).toBe(200);
+      pausedMutation = { entered, released };
+      request = fetch(url('/api/events/subscribe'), {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: key, sessions: null }),
+      });
+      await reached; // Actual preHandler: verifier and JSON body parsing already completed.
+      if (cookie) {
+        expect((await fetch(url('/api/logout'), { method: 'POST', headers })).status).toBe(200);
+      } else {
+        await revoke();
+      }
+      release();
+      expect((await request).status).toBe(404);
+      const internals = server as unknown as Internals;
+      internals.sessions.set(key, { id: key, owner: username, toState: () => ({ id: key, owner: username }) });
+      try {
+        internals.batchTerminalData(key, 'refused update must not clear the original filter');
+        internals.sse.flushSessionTerminalBatch(key);
+        internals.broadcast('session:updated', { id: key, session: { id: key } });
+        await until(() => original.received.some((frame) => frame.event === 'session:updated'));
+        expect(original.received.some((frame) => frame.event === 'session:updated')).toBe(true);
+        expect(original.received.some((frame) => frame.event === 'session:terminal')).toBe(false);
+      } finally {
+        internals.sessions.delete(key);
+      }
+    } finally {
+      release();
+      pausedMutation = undefined;
+      await request?.catch(() => {});
+      await original.close();
+    }
+  };
+  await exercise('paused-password', () => setPassword('paused-password', 'replacementpass1'));
+  await exercise('paused-role', () => updateUser('paused-role', { role: 'admin' }));
+  await exercise('paused-cookie', async () => {}, true);
 });
 
 afterAll(async () => {
@@ -208,4 +276,75 @@ describe('the tile grid SSE filter, multi-user', () => {
     await grid.close();
     await plain.close();
   });
+});
+
+it('keeps stateless verified Basic subscriptions usable and rejects other current principals or credential epochs', async () => {
+  await createUser({ username: 'headless', role: 'user', password: 'headlesspass1' });
+  const credentials = { Authorization: basic('headless', 'headlesspass1') };
+  const stream = await openStream('?clientId=headless-original', credentials);
+  const subscribe = (headers: Record<string, string>, clientId = 'headless-original') =>
+    fetch(url('/api/events/subscribe'), {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, sessions: [FILTER] }),
+    });
+  try {
+    await until(() => stream.received.some((frame) => frame.event === 'init'));
+    expect((await subscribe(credentials)).status).toBe(204); // No cookie jar: actual Basic is verified again.
+    expect((await subscribe(alice)).status).toBe(404);
+    expect((await subscribe(alice, 'missing-headless')).status).toBe(404);
+    expect((await subscribe({ Authorization: basic('headless', 'wrong-password') })).status).toBe(401);
+    expect((await subscribe(credentials)).status).toBe(204);
+    await updateUser('headless', { role: 'admin' });
+    expect((await subscribe(credentials)).status).toBe(404); // Current verified role no longer owns the original user stream.
+    await setPassword('headless', 'headlesspass2');
+    expect((await subscribe(credentials)).status).toBe(401);
+    expect((await subscribe({ Authorization: basic('headless', 'headlesspass2') })).status).toBe(404);
+    const next = await openStream('?clientId=headless-fresh', { Authorization: basic('headless', 'headlesspass2') });
+    try {
+      await until(() => next.received.some((frame) => frame.event === 'init'));
+      expect((await subscribe({ Authorization: basic('headless', 'headlesspass2') }, 'headless-fresh')).status).toBe(
+        204
+      );
+    } finally {
+      await next.close();
+    }
+  } finally {
+    await stream.close();
+  }
+});
+
+it('binds cookie subscriptions to the original verified login and preserves original routing on wrong-owner attempts', async () => {
+  const login = async (username: string, password: string) => {
+    const response = await fetch(url('/api/me'), { headers: { Authorization: basic(username, password) } });
+    expect(response.status).toBe(200);
+    return { Cookie: response.headers.get('set-cookie')!.split(';')[0] };
+  };
+  const original = await login('alice', 'alicepass1'),
+    other = await login('bob', 'bobpass1234');
+  const stream = await openStream('?clientId=cookie-original', original);
+  const subscribe = (headers: Record<string, string>, clientId = 'cookie-original') =>
+    fetch(url('/api/events/subscribe'), {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clientId, sessions: null }),
+    });
+  const internals = server as unknown as Internals;
+  try {
+    await until(() => stream.received.some((frame) => frame.event === 'init'));
+    expect((await subscribe(other)).status).toBe(404);
+    expect((await subscribe(other, 'missing-cookie-key')).status).toBe(404);
+    expect((await subscribe(original)).status).toBe(204);
+    internals.sessions.set('alice-cookie', {
+      id: 'alice-cookie',
+      owner: 'alice',
+      toState: () => ({ id: 'alice-cookie' }),
+    });
+    internals.batchTerminalData('alice-cookie', 'original route remains');
+    await until(() => stream.received.some((frame) => frame.event === 'session:terminal'));
+    expect(stream.received.some((frame) => frame.event === 'session:terminal')).toBe(true);
+  } finally {
+    internals.sessions.delete('alice-cookie');
+    await stream.close();
+  }
 });

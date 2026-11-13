@@ -98,3 +98,160 @@ export const EmployeeResourceStatus = z
     }
   });
 export type EmployeeResourceStatus = z.infer<typeof EmployeeResourceStatus>;
+
+const Generation = z.string().regex(/^[1-9][0-9]*$/);
+const UnavailableMetric = z
+  .object({
+    state: z.literal('unavailable'),
+    reason: z.enum(['missing', 'permission-denied', 'malformed', 'read-error']),
+  })
+  .strict();
+const Stall = z
+  .object({
+    avg10Hundredths: z.number().int().min(0).max(10000),
+    avg60Hundredths: z.number().int().min(0).max(10000),
+    avg300Hundredths: z.number().int().min(0).max(10000),
+    totalUs: Decimal,
+  })
+  .strict();
+const MemoryObservation = z
+  .object({
+    binding: z
+      .object({
+        containerId: Revision,
+        initPid: z.number().int().min(2).max(4294967295),
+        initProcessStart: Decimal,
+        leafDevice: Decimal,
+        leafInode: Decimal,
+      })
+      .strict(),
+    sampledAtEpochMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    sampleDurationUs: Decimal,
+    pressure: z.discriminatedUnion('state', [
+      UnavailableMetric,
+      z.object({ state: z.literal('available'), some: Stall, full: Stall }).strict(),
+    ]),
+    events: z.discriminatedUnion('state', [
+      UnavailableMetric,
+      z
+        .object({
+          state: z.literal('available'),
+          low: Decimal,
+          high: Decimal,
+          max: Decimal,
+          oom: Decimal,
+          oomKill: Decimal,
+          oomGroupKill: Decimal.nullable(),
+        })
+        .strict(),
+    ]),
+  })
+  .strict();
+
+/** Native compound DATA, never a status, policy or provider-liveness grant. */
+export const EmployeeMemoryDiagnostics = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('employee-memory-diagnostics-v1'),
+    employeeId: NativeOwnerId,
+    sessionId: NativeOwnerId,
+    sessionGeneration: Generation,
+    state: z.enum(['observed', 'uninstalled', 'absent', 'stopped', 'controller-unavailable']),
+    observation: MemoryObservation.nullable(),
+    resources: EmployeeResourceStatus,
+    readOnly: z.literal(true),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const resource = value.resources,
+      observed = resource.observed,
+      sample = value.observation;
+    if (
+      resource.employeeId !== value.employeeId ||
+      resource.sessionId !== value.sessionId ||
+      (value.state === 'observed'
+        ? resource.state !== 'running' || !sample
+        : resource.state !== value.state || sample !== null) ||
+      (sample &&
+        (!observed ||
+          sample.binding.containerId !== observed.containerId ||
+          sample.binding.initPid !== observed.pid ||
+          sample.binding.initProcessStart !== observed.processStart ||
+          sample.binding.leafDevice !== observed.leafDevice ||
+          sample.binding.leafInode !== observed.leafInode))
+    )
+      context.addIssue({ code: 'custom', message: 'Memory sample and original resource binding disagree' });
+  });
+export type EmployeeMemoryDiagnostics = z.infer<typeof EmployeeMemoryDiagnostics>;
+
+const AdvisoryTime = z.number().int().positive().max(8_640_000_000_000_000);
+const AdvisoryTimes = { sampledAtEpochMs: AdvisoryTime, evaluatedAtEpochMs: AdvisoryTime };
+/** Application-only diagnostic; no native protocol, liveness or policy authority. */
+export const EmployeeMemoryAdvisory = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('warning'), code: z.literal('high-memory-stall'), ...AdvisoryTimes }).strict(),
+  z.object({ state: z.literal('not-observed'), ...AdvisoryTimes }).strict(),
+  z
+    .object({
+      state: z.literal('unknown'),
+      reason: z.enum([
+        'native-observation-unconfirmed',
+        'no-sample',
+        'pressure-unavailable',
+        'stale-sample',
+        'future-sample',
+        'sample-time-unavailable',
+        'server-clock-unavailable',
+      ]),
+      sampledAtEpochMs: AdvisoryTime.nullable(),
+      evaluatedAtEpochMs: AdvisoryTime.nullable(),
+    })
+    .strict(),
+]);
+export type EmployeeMemoryAdvisory = z.infer<typeof EmployeeMemoryAdvisory>;
+
+/** Heuristic only: >=50% recent stalls, sampled no more than 30 seconds before evaluation.
+ * Cumulative events never establish recent pressure or a cause. Bad clocks stay unknown. */
+export function memoryPressureAdvisory(
+  snapshot: EmployeeMemoryDiagnostics | null,
+  evaluatedAt: number
+): EmployeeMemoryAdvisory {
+  const time = (value: number | undefined) =>
+    value !== undefined && Number.isSafeInteger(value) && value > 0 && value <= 8_640_000_000_000_000 ? value : null;
+  const sample = snapshot?.observation,
+    evaluatedAtEpochMs = time(evaluatedAt),
+    sampledAtEpochMs = time(sample?.sampledAtEpochMs);
+  const unknown = (
+    reason: Extract<EmployeeMemoryAdvisory, { state: 'unknown' }>['reason']
+  ): EmployeeMemoryAdvisory => ({ state: 'unknown', reason, sampledAtEpochMs, evaluatedAtEpochMs });
+  if (evaluatedAtEpochMs === null) return unknown('server-clock-unavailable');
+  if (!snapshot) return unknown('native-observation-unconfirmed');
+  if (!sample) return unknown('no-sample');
+  if (sampledAtEpochMs === null) return unknown('sample-time-unavailable');
+  const age = evaluatedAtEpochMs - sampledAtEpochMs;
+  if (age < 0) return unknown('future-sample');
+  if (age > 30_000) return unknown('stale-sample');
+  if (sample.pressure.state !== 'available') return unknown('pressure-unavailable');
+  const timing = { sampledAtEpochMs, evaluatedAtEpochMs };
+  return sample.pressure.some.avg10Hundredths >= 5000 || sample.pressure.full.avg10Hundredths >= 5000
+    ? { state: 'warning', code: 'high-memory-stall', ...timing }
+    : { state: 'not-observed', ...timing };
+}
+
+/** Application projection distinguishes an independent fallback read from the native compound. */
+export type EmployeeMemoryView = {
+  version: 1;
+  employeeId: string;
+  sessionId: string;
+  sessionGeneration: string;
+  resources: EmployeeResourceStatus;
+  advisory: EmployeeMemoryAdvisory;
+} & (
+  | {
+      source: 'native-compound';
+      diagnostics: { kind: 'snapshot'; value: EmployeeMemoryDiagnostics };
+    }
+  | {
+      source: 'independent-status-read';
+      diagnostics: { kind: 'unavailable'; reason: 'native-observation-unconfirmed' };
+    }
+);

@@ -1,10 +1,11 @@
+import { legacyThreadBinding } from '../legacy-thread-binding.js';
 import {TerminalInputService} from './terminal-input-service.js';
 import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
 import { cliPublicDescriptor } from '../config/cli-registry/public-descriptor.js';
 import { displayTimeZone } from '../display-time.js';
 import { registerBrowserJobEvidence } from '../browser-job-evidence.js';
 import { restSessionMetadataFromRegistry } from '../rest-canonical-metadata.js';
-import { OWNER_COOKIE } from '../owner-auth/policy.js';
+import { OWNER_COOKIE, SERVICE_HEADER, ownerEventReadAdmission } from '../owner-auth/policy.js';
 import { OfficeAuthService } from '../owner-auth/office.js';
 import { registerInputIdentityRoutes } from './routes/input-identity-routes.js';
 import { registerOfficeRoutes } from './routes/office-routes.js';
@@ -17,6 +18,7 @@ import { registerBuiltinEmbassyRoutes } from './routes/embassy-builtin-routes.js
 import { reattachLaptops } from '../laptop-reconnect.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../worker-viewer-reconnect.js';
 import { WorkerRecoveryAuthentication } from '../worker-recovery-auth.js';
+import { EmployeeRecoveryService, registerEmployeeRecoveryRoutes, isEmployeeRecoveryTransport } from '../employee-recovery-service.js';
 import { agentPlanJournalRecovery } from '../agent-plan-journal-recovery.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
@@ -128,6 +130,9 @@ import type { ClaudeMode, SessionAttachmentHistoryItem, SessionState, WorkflowRu
 import { RespawnController, RespawnConfig } from '../respawn-controller.js';
 import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
+import { TmuxManager } from '../tmux-manager.js';
+import { OfficeScopedActionPublisher } from '../office-scoped-action-publisher.js';
+import { MuxMetadataReconciliationService, registerMuxMetadataReconciliation, isMuxMetadataTransport } from '../mux-metadata-reconciliation.js';
 import { getStore } from '../state-store.js';
 import { envValue } from '../config/reverie-env.js';
 import { routineAnnouncementRoomId } from '../config/routine-announcement-room.js';
@@ -249,6 +254,10 @@ import type { CronPort, ScheduledRun } from './ports/index.js';
 import { RoutinesGrants } from '../routines-grants.js';
 import {
   registerAuthMiddleware,
+  browserAuthSession,
+  verifiedBasicAuthentication,
+  acknowledgedPublicTransport,
+  recheckTransportAuthentication,
   isCapabilityRequest,
   registerSecurityHeaders,
   registerHostGuard,
@@ -521,6 +530,10 @@ export class WebServer extends EventEmitter {
   private remoteWake: RemoteWakeRegistry | null = null;
   private sse: SseStreamManager;
   private store = getStore();
+  private statePublicationUnsubscribe?: () => void;
+  private muxMetadataUnsubscribe?: () => void;
+  private muxMetadataService?: MuxMetadataReconciliationService;
+  private muxMetadataPublisher?: OfficeScopedActionPublisher;
   private tabLayouts!: TabLayoutService;
   private port: number;
 
@@ -958,15 +971,55 @@ export class WebServer extends EventEmitter {
    * the placement it asked for (`tabGroupId`) lands in the same versioned write
    * that first records it.
    */
-  private async registerSessionWithLayout(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout> {
-    return this.tabLayouts.sessionCreated(ownerLayoutKey(session.owner), session.id, placement, () => {
-      if (admitted && !admitted()) throw new Error('Session creation admission changed before registration');
-      if (admitted && this.sessions.has(session.id)) throw new Error('Fresh session identity is already registered');
-      this.sessions.set(session.id, session);
-      return () => {
-        if (this.sessions.get(session.id) === session) this.sessions.delete(session.id);
-      };
-    });
+  private async registerSessionWithLayout(
+    session: Session,
+    placement?: SessionPlacementHint,
+    admitted?: () => boolean
+  ): Promise<TabLayout> {
+    const id = session.id;
+    const owner = session.owner;
+    const original = this.sessions.get(id);
+    const requireCurrent = () => {
+      if (this.cleaningUp.has(id)) throw new Error('Session cleanup is in progress');
+      if (
+        session.id !== id ||
+        session.owner !== owner ||
+        (original && original !== session) ||
+        this.sessions.get(id) !== original
+      )
+        throw new Error('Original session registration changed');
+    };
+    const requirePublished = () => {
+      if (
+        this.cleaningUp.has(id) ||
+        session.id !== id ||
+        session.owner !== owner ||
+        this.sessions.get(id) !== session ||
+        (admitted && !admitted())
+      )
+        throw new Error('Original session registration changed before publication');
+    };
+    requireCurrent();
+    const layout = await this.tabLayouts.sessionCreated(
+      ownerLayoutKey(owner),
+      id,
+      placement,
+      () => {
+        requireCurrent();
+        if (admitted && !admitted()) throw new Error('Session creation admission changed before registration');
+        if (admitted && this.sessions.has(session.id)) throw new Error('Fresh session identity is already registered');
+        this.sessions.set(session.id, session);
+        return () => {
+          if (this.sessions.get(session.id) === session) {
+            if (original) this.sessions.set(session.id, original);
+            else this.sessions.delete(session.id);
+          }
+        };
+      },
+      requirePublished
+    );
+    requirePublished();
+    return layout;
   }
 
   /**
@@ -1111,7 +1164,7 @@ export class WebServer extends EventEmitter {
       store: new OwnerAuthStore(dataPath('owner-auth.json')),
       auditFile: dataPath('owner-auth-audit.jsonl'),
     }, () => ({ name: this.companyService?.view().settings.ownerName, avatar: this.companyService?.view().settings.ownerAvatar }));
-    const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth);
+    const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth, this.allowUnauthenticatedNetwork);
     if (authState) {
       this.authSessions = authState.authSessions;
       this.authFailures = authState.authFailures;
@@ -1143,7 +1196,7 @@ export class WebServer extends EventEmitter {
         keepers: () => ownerAuth.keepers(),
         admins: () => ownerAuth.admins(),
       }),
-      isCapabilityRequest: (req) => isCapabilityRequest(req, this.basePath),
+      isCapabilityRequest: (req) => isCapabilityRequest(req, this.basePath) || isEmployeeRecoveryTransport(req, this.basePath) || isMuxMetadataTransport(req, this.basePath),
       basePath: this.basePath,
     });
     registerOwnerRoutes(this.app, ownerAuth, this.https);
@@ -1254,8 +1307,30 @@ export class WebServer extends EventEmitter {
       },
     });
 
+    const subscriptionBinding = (req: FastifyRequest): import('./sse-stream-manager.js').SseSubscriptionBinding => {
+      const identity = req.authUser;
+      if (req.headers['x-reverie-parent-session'] !== undefined || req.headers[SERVICE_HEADER] !== undefined)
+        return { kind: 'unverified', identity };
+      const record = browserAuthSession(req);
+      const basicFingerprint = verifiedBasicAuthentication(req);
+      if (basicFingerprint) return { kind: 'basic', credentialFingerprint: basicFingerprint, identity };
+      if (isMultiUserMode())
+        return record && identity ? { kind: 'browser', record, identity } : { kind: 'unverified', identity };
+      const token = req.cookies?.[OWNER_COOKIE];
+      if (token && verifiedOwner(req) && ownerAuth.session(token))
+        return { kind: 'owner', cookieDigest: createHash('sha256').update(token).digest('hex'), identity };
+      if (record) return { kind: 'browser', record, identity };
+      const publicScope = acknowledgedPublicTransport(req);
+      return publicScope ? { kind: 'public', scope: publicScope } : { kind: 'unverified', identity };
+    };
+
     // SSE endpoint for real-time updates
     this.app.get('/api/events', (req, reply) => {
+      const readAdmission = ownerEventReadAdmission(req);
+      if (!readAdmission || !readAdmission.current()) {
+        reply.code(401).send(createErrorResponse(ApiErrorCode.UNAUTHORIZED, 'Current owner policy refuses this event stream'));
+        return;
+      }
       // Enforce SSE client limit to prevent memory exhaustion from too many connections
       if (this.sse.clientCount >= MAX_SSE_CLIENTS) {
         reply.code(503).send('Too many SSE connections');
@@ -1267,7 +1342,14 @@ export class WebServer extends EventEmitter {
       //   events for those sessions (other events broadcast to all clients).
       // /api/events?clientId=<uuid> — enables live filter updates via
       //   POST /api/events/subscribe without reconnecting.
-      const query = req.query as { sessions?: string; clientId?: string };
+      const query = req.query as { sessions?: string; clientId?: string; streamNonce?: string };
+      if (
+        query.streamNonce !== undefined &&
+        (typeof query.streamNonce !== 'string' || !SSE_CLIENT_ID_RE.test(query.streamNonce))
+      ) {
+        reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid stream nonce'));
+        return;
+      }
       let sessionFilter: Set<string> | null = null;
       if (query.sessions) {
         const ids = query.sessions
@@ -1308,7 +1390,7 @@ export class WebServer extends EventEmitter {
       // Track tunnel clients — cloudflared proxies locally so req.ip is always
       // 127.0.0.1; detect tunnel traffic via Cf-Connecting-Ip header instead.
       const isRemote = !!req.headers['cf-connecting-ip'];
-      this.sse.addClient(reply, sessionFilter, isRemote, clientId, req.authUser);
+      this.sse.addBoundClient(reply, sessionFilter, isRemote, clientId, subscriptionBinding(req), query.streamNonce, readAdmission);
 
       // Send initial state
       // Use light state for SSE init to avoid sending 2MB+ terminal buffers
@@ -1326,8 +1408,15 @@ export class WebServer extends EventEmitter {
     // Live subscription update — change a connected client's session filter
     // without forcing an SSE reconnect. Body: { clientId, sessions: string[] | null }
     // Empty/null sessions array = remove filter (receive all session:terminal events).
-    this.app.post('/api/events/subscribe', (req, reply) => {
-      const body = (req.body || {}) as { clientId?: string; sessions?: string[] | null };
+    this.app.post('/api/events/subscribe', async (req, reply) => {
+      const body = (req.body || {}) as { clientId?: string; sessions?: string[] | null; streamNonce?: string };
+      if (
+        body.streamNonce !== undefined &&
+        (typeof body.streamNonce !== 'string' || !SSE_CLIENT_ID_RE.test(body.streamNonce))
+      ) {
+        reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'Invalid stream nonce'));
+        return;
+      }
       if (typeof body.clientId !== 'string' || !SSE_CLIENT_ID_RE.test(body.clientId)) {
         reply.code(400).send(createErrorResponse(ApiErrorCode.INVALID_INPUT, 'clientId required'));
         return;
@@ -1335,7 +1424,12 @@ export class WebServer extends EventEmitter {
       const sessions = Array.isArray(body.sessions)
         ? body.sessions.filter((s) => typeof s === 'string' && s.length > 0 && s.length <= 128).slice(0, 64)
         : null;
-      const updated = this.sse.updateClientFilter(body.clientId, sessions);
+      const original = subscriptionBinding(req);
+      if ((original.kind === 'basic' || original.kind === 'browser') && !(await recheckTransportAuthentication(req))) {
+        reply.code(404).send();
+        return;
+      }
+      const updated = this.sse.updateClientFilter(body.clientId, sessions, subscriptionBinding(req), body.streamNonce);
       reply.code(updated ? 204 : 404).send();
     });
 
@@ -2372,8 +2466,20 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
-    const recoveryAuthentication = new WorkerRecoveryAuthentication(getDataDir(), () => this.companyService.registeredEmployees());
+    const recoveryAuthentication = new WorkerRecoveryAuthentication(getDataDir(),
+      () => this.companyService.registeredEmployees(), provisioning?.nonce.flockExecutable);
     recoveryAuthentication.register(this.app);
+    const employeeRecovery = new EmployeeRecoveryService(this.companyService, ownerAuth,
+      process.env.REVERIE_WORKER_SOCKET, planMoves, serviceAuthorization, recoveryAuthentication);
+    registerEmployeeRecoveryRoutes(this.app, employeeRecovery);
+    this.app.addHook('onClose', async () => employeeRecovery.close());
+    if (this.mux instanceof TmuxManager) {
+      this.muxMetadataPublisher = serviceAuthorization
+        ? new OfficeScopedActionPublisher(serviceAuthorization, recoveryAuthentication, ownerAuth) : undefined;
+      this.muxMetadataService = new MuxMetadataReconciliationService(this.mux, this.companyService,
+        verifiedOwner, this.muxMetadataPublisher);
+      registerMuxMetadataReconciliation(this.app, this.muxMetadataService);
+    }
     registerWorkerViewerReconnect(this.app, this.workerViewerReconnect, verifiedOwner, recoveryAuthentication);
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
@@ -2599,9 +2705,10 @@ export class WebServer extends EventEmitter {
 
   /** Debounced wrapper — coalesces rapid persistSessionState calls per session */
   private persistSessionState(session: Session): void {
+    if (this.cleaningUp.has(session.id)) return;
     this.persistDeb.schedule(session.id, () => {
-      // Session may have been removed during debounce
-      if (this.sessions.has(session.id)) {
+      // A same-SID successor is not the original deferred writer.
+      if (this.sessions.get(session.id) === session && !this.cleaningUp.has(session.id)) {
         this._persistSessionStateNow(session);
       }
     });
@@ -2645,20 +2752,7 @@ export class WebServer extends EventEmitter {
   private _persistSessionStateNow(session: Session): void {
     // See session-manager.updateSessionState: __envOverrides is an internal disk-only
     // field kept off SessionState to avoid leaking via API broadcasts.
-    const base = session.toState();
-    const envOverrides = session.getEnvOverridesForPersist();
-    // __attachmentHistory keeps the private (externalPath-bearing) history on disk,
-    // separate from the sanitized public attachmentHistory in toState().
-    const attachmentHistory = session.getAttachmentHistoryForPersist();
-    // __customModel keeps the selection's bookkeeping (injected env KEYS, config dir,
-    // launch model; never the values) so recovery can restore and later clear it.
-    const customModel = session.getCustomModelForPersist();
-    const state = {
-      ...base,
-      ...(envOverrides ? { __envOverrides: envOverrides } : {}),
-      ...(attachmentHistory ? { __attachmentHistory: attachmentHistory } : {}),
-      ...(customModel ? { __customModel: customModel } : {}),
-    } as SessionState;
+    const state = session.toPersistedState();
     const controller = this.respawnControllers.get(session.id);
     if (controller) {
       const config = controller.getConfig();
@@ -2679,7 +2773,7 @@ export class WebServer extends EventEmitter {
         state.respawnEnabled = false;
       }
     }
-    this.store.setSession(session.id, state);
+    this.store.setSessionFromOwner(session, state, 'authoritative');
     if (session.pid !== null && !session.paneExit && !this.cleaningUp.has(session.id)) {
       void this.companyService
         ?.recordObservedRunning(
@@ -3243,12 +3337,17 @@ export class WebServer extends EventEmitter {
   }
 
   private async setupSessionListeners(session: Session): Promise<void> {
+    const current = () => this.sessions.get(session.id) === session && !this.cleaningUp.has(session.id);
+    if (!current()) return;
     // Idempotent: the wiring exit handler detaches ALL listeners on every PTY exit
     // (removeSessionListenerRefs), so the re-attach routes (/interactive,
     // /interactive-respawn, /shell) call this again to restore observability
     // (terminal SSE, error/exit broadcasts, the COD-118 respawnBreakerTripped
     // handler). Skip when the refs are still attached to avoid double-wiring.
     if (this.sessionListenerRefs.has(session.id)) return;
+
+    const imagesEnabled = await this.isImageWatcherEnabled();
+    if (!current() || this.sessionListenerRefs.has(session.id)) return;
 
     // Create run summary tracker for this session
     const summaryTracker = new RunSummaryTracker(session.id, session.name);
@@ -3261,7 +3360,7 @@ export class WebServer extends EventEmitter {
     }
 
     // Start watching for new images in this session's working directory (if enabled globally and per-session)
-    if ((await this.isImageWatcherEnabled()) && session.imageWatcherEnabled) {
+    if (imagesEnabled && session.imageWatcherEnabled) {
       imageWatcher.watchSession(session.id, session.workingDir);
     }
 
@@ -3791,7 +3890,9 @@ export class WebServer extends EventEmitter {
    * to prevent browser freezes. Terminal buffers are fetched on-demand.
    */
   private getLightState(identity?: import('../types/user.js').AuthUser) {
-    const base = this.computeLightState();
+    const base = { ...this.computeLightState(), statePublication: this.store.getStatePublicationStatus(),
+      muxMetadataPublication: this.mux instanceof TmuxManager ? this.mux.getMuxMetadataPublicationStatus()
+        : { version: 1, kind: 'unsupported' } };
     // Multi-user: filter the shared cached blob per connection identity (the plan's
     // "filter AFTER the cache" approach). No-op for admins / single-user.
     if (isMultiUserMode() && identity && identity.role !== 'admin') {
@@ -4401,6 +4502,12 @@ export class WebServer extends EventEmitter {
       const address = this.app.server.address();
       if (address !== null && typeof address === 'object') this.port = address.port;
     }
+    this.statePublicationUnsubscribe ??= this.store.onStatePublicationHold(status => {
+      this.broadcast(SseEvent.StatePublicationHeld, status);
+    });
+    if (this.mux instanceof TmuxManager) this.muxMetadataUnsubscribe ??= this.mux.onMuxMetadataPublicationStatus(status => {
+      this.broadcast(SseEvent.MuxMetadataPublication, status);
+    });
     // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
     try {
       await this.chatroomService.startDelivery();
@@ -4786,7 +4893,8 @@ export class WebServer extends EventEmitter {
     if (dead.length === 0) return 0;
 
     const persisted = this.store.getSessions();
-    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => getCli(saved?.mode ?? '')?.capabilities.transcript === 'codex-rollout');
+    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => saved && getCli(saved.mode ?? 'claude')?.capabilities.transcript === 'codex-rollout'
+      && legacyThreadBinding(saved.mode)?.kind === 'nested-resume');
     if (codexRecords.length) {
       const profiles = await readSubscriptionProfiles();
       const bindings = new Map<string | undefined, Map<string, string>>();
@@ -4794,6 +4902,7 @@ export class WebServer extends EventEmitter {
         const profile = saved.subscriptionProfile?.id;
         if (!bindings.has(profile)) {
           const account = profiles.find((p) => p.id === profile && p.provider === 'openai');
+          if (profile && !account) continue;
           // Only the selected account's own rollout directory; never infer a thread from cwd.
           bindings.set(
             profile,
@@ -4945,8 +5054,46 @@ export class WebServer extends EventEmitter {
   async discardPartiallyBuiltSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    this.sessions.delete(sessionId);
+    const owner = session.owner;
+    const current = () => this.sessions.get(sessionId) === session && session.owner === owner;
+    const requireCurrent = () => {
+      if (!current()) throw new Error('Partial cleanup required: original session changed');
+    };
+    if (this.cleaningUp.has(sessionId)) throw new Error('Partial cleanup required: cleanup is already in progress');
+    // A wrapper or cached health report supplies no native stop authority.
+    // Capture the genuine original local transport before changing observers.
+    const originalStop = session.captureCleanupStop(current);
+    this.cleaningUp.add(sessionId);
+    this.killingSessions.add(sessionId);
+    session.markClosing(true);
+    try {
+      await this.tabLayouts.runFailedSessionRollback(
+        { id: sessionId, owner },
+        async () => {
+          originalStop.require();
+          await originalStop.stop();
+          requireCurrent();
+          this.discardPartialSessionObservers(session);
+          this.sessions.delete(sessionId);
+        },
+        () => {
+          if (this.sessions.has(sessionId))
+            throw new Error('Partial cleanup required: a successor appeared before layout publication');
+        }
+      );
+      if (this.sessions.has(sessionId))
+        throw new Error('Partial cleanup required: a successor appeared before notification');
+      this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
+    } finally {
+      this.cleaningUp.delete(sessionId);
+      this.killingSessions.delete(sessionId);
+      if (current()) session.markClosing(false);
+    }
+  }
 
+  /** Synchronous inverse of original observer registration, after its stop is confirmed. */
+  private discardPartialSessionObservers(session: Session): void {
+    const sessionId = session.id;
     // --- the inverse of setupSessionListeners(), in reverse order ---
     // Listeners first: while they are attached, one of them can still reach a
     // tracker this is about to stop.
@@ -4997,23 +5144,7 @@ export class WebServer extends EventEmitter {
     // `before-spawn` may already have written it. Nothing else would ever remove
     // it: the stale sweep only touches state.json. A retry rewrites it.
     removeConfigDir(customModelConfigDir(sessionId));
-    try {
-      session.removeAllListeners();
-      await session.stop(true);
-    } catch (err) {
-      console.warn(`[Server] stopping a partially built session failed: ${getErrorMessage(err)}`);
-      // `stop()` kills the mux session in its last block, after destroying its
-      // trackers, so a throw on the way there leaves the pane running.
-      await this.mux.killSession(sessionId).catch(() => {});
-    }
-    try {
-      await this.tabLayouts.sessionsRemoved([{ id: sessionId, owner: session.owner }]);
-    } catch (err) {
-      console.warn(`[Server] releasing the tab layout slot failed: ${getErrorMessage(err)}`);
-    }
-    // Any `session:updated` the half-built session emitted before it failed left a
-    // tab on every other open board, and the client's handler is an upsert.
-    this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
+    session.removeAllListeners();
   }
 
   private async restoreMuxSessions(): Promise<boolean> {
@@ -5100,7 +5231,7 @@ export class WebServer extends EventEmitter {
               // Kept whatever the mode: a session switched off OpenCode (POST /api/sessions/:id/mode) still owns its thread,
               // and switching back must resume it. A CLI without a config-content var never reads it.
               openCodeConfig: savedState?.openCodeConfig,
-              codexConfig: muxSession.mode === 'codex' ? savedState?.codexConfig : undefined,
+              codexConfig: legacyThreadBinding(muxSession.mode)?.kind === 'nested-resume' ? savedState?.codexConfig : undefined,
               geminiConfig: muxSession.mode === 'gemini' ? savedState?.geminiConfig : undefined,
               antigravityConfig: muxSession.mode === 'antigravity' ? savedState?.antigravityConfig : undefined,
               piConfig: muxSession.mode === 'pi' ? savedState?.piConfig : undefined,
@@ -5547,6 +5678,14 @@ export class WebServer extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    const unsubscribe = this.statePublicationUnsubscribe;
+    this.statePublicationUnsubscribe = undefined;
+    unsubscribe?.();
+    const muxUnsubscribe = this.muxMetadataUnsubscribe;
+    this.muxMetadataUnsubscribe = undefined;
+    muxUnsubscribe?.();
+    this.muxMetadataService?.close();
+    this.muxMetadataPublisher?.close();
     this.companyWakeReady = false;
     this.workerProviderHealth?.close();
     this.hostResumeStream?.close();

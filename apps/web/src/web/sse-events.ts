@@ -55,6 +55,10 @@
 
 /** Sent to each SSE client on initial connection with full app state. */
 export const Init = 'init' as const;
+/** Fixed read-only notice that the original StateStore writer cannot confirm a publication. */
+export const StatePublicationHeld = 'state:publicationHeld' as const;
+/** Metadata-only incident/known repair observation; never provider or main-state health. */
+export const MuxMetadataPublication = 'mux:metadataPublication' as const;
 
 // ─── Transport ───────────────────────────────────────────────────────────────
 
@@ -515,6 +519,8 @@ export const ChatroomTurn = 'chatroom:turn' as const;
 export const SseEvent = {
   // Core
   Init,
+  StatePublicationHeld,
+  MuxMetadataPublication,
 
   // Transport
   Heartbeat,

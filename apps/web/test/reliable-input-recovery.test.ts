@@ -1,12 +1,10 @@
 /** Current process-local receipt behavior, plus bounded legacy client compatibility. */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { describe, it, expect, vi } from 'vitest';
+import {afterEach, describe, it, expect, vi} from 'vitest';
+import {browserInputFixture} from './helpers/browser-input-fixture.js';
 import {Session} from '../src/session.js';
 import {TerminalInputReceipts} from '../src/terminal-input-outcome.js';
 import {TerminalInputService} from '../src/web/terminal-input-service.js';
 
-const appSource = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
 
 describe('current original-subject receipt contract', () => {
   function harness(service = new TerminalInputService()) {
@@ -67,39 +65,54 @@ describe('current original-subject receipt contract', () => {
   });
 });
 
-describe('legacy client watermark compatibility only; not current server delivery proof', () => {
-  const handler = appSource.slice(
-    appSource.indexOf('_onWsInputAck(seq, msg, sessionId'),
-    appSource.indexOf('/** Called from ws.onopen')
-  );
-
-  it('raises the counter to the watermark it was handed', () => {
-    expect(handler).toMatch(/_seqCounters\.set\(sessionId, watermark\)/);
+let fixture: ReturnType<typeof browserInputFixture>;
+afterEach(async () => {await fixture?.close();});
+describe('legacy counters and watermarks never establish current browser custody', () => {
+  it('a saved high counter cannot rebase a fresh page issuer or overwrite the old snapshot', async () => {
+    fixture = browserInputFixture();
+    const raw = JSON.stringify({pending: {}, seqCounters: {'session-1': 9000}});
+    fixture.storage.set('reverie:clientId', 'legacy-device'); fixture.storage.set('reverie:pendingInput', raw);
+    const app = await fixture.page(), frames: {seq: number; cid: string}[] = [];
+    app._ws = {readyState: 1, send: data => frames.push(JSON.parse(data))}; app._wsSessionId = 'session-1';
+    await app._sendInputAsync('session-1', 'current explicit action'); await expect.poll(() => frames.length).toBe(1);
+    expect(frames[0]).toMatchObject({seq: 1, cid: app._inputJournal.issuer}); expect(app._inputJournal.issuer).not.toBe('legacy-device');
+    expect(fixture.storage.get('reverie:pendingInput')).toBe(raw);
+    await app._onWsInputAck(1, {t: 'ia', seq: 1, confirmed: true}, 'session-1');
   });
-
-  it('re-queues a FIRST-attempt frame, whose input was genuinely lost', () => {
-    expect(handler).toMatch(/rec\.tries <= 1/);
-    expect(handler).toMatch(/this\._reliableSend\(sessionId, lost/);
+  it.each([false, true])('a watermark cannot requeue or retag a possibly-issued frame, prior known-refusal=%s', async retry => {
+    fixture = browserInputFixture(); const app = await fixture.page(), frames: {seq: number; cid: string; d: string}[] = [];
+    app._ws = {readyState: 1, send: data => frames.push(JSON.parse(data))}; app._wsSessionId = 'session-1';
+    await app._sendInputAsync('session-1', 'possibly issued'); await expect.poll(() => frames.length).toBe(1);
+    if (retry) {
+      await app._onWsInputRefusal(1, {t: 'ir', seq: 1, retryable: true, reason: 'capacity'}, 'session-1');
+      app._inputRetryAt.set('session-1', 0); await app._drainSession('session-1');
+      expect(frames).toHaveLength(2); expect(frames[1]).toEqual(frames[0]);
+    }
+    await app._onWsInputAck(1, {t: 'ia', seq: 1, lastSeq: 9000, dup: true}, 'session-1');
+    app._redeliverSweep(); await app._drainSession('session-1');
+    expect(app._inputRecoveryHolds?.has('session-1')).toBe(true); expect(frames).toHaveLength(retry ? 2 : 1);
+    const rows = await app._inputJournal.snapshot();
+    expect([...rows.records, ...rows.retained]).toMatchObject([{seq: 1, issuer: frames[0].cid, data: 'possibly issued', phase: 'unconfirmed'}]);
   });
-
-  it('does NOT re-queue a retry, which the dedup correctly suppressed', () => {
-    // A retry called a duplicate means the original DID land; re-sending it would
-    // type the same thing twice — the exact thing exactly-once delivery prevents.
-    expect(handler).toMatch(/const lost = rec && rec\.tries <= 1 \? rec\.data : null;/);
+  it('a pending receipt is not settled by a bare ACK and later positive metadata cannot clear its hold', async () => {
+    fixture = browserInputFixture(); const app = await fixture.page(), frames: object[] = [];
+    app._ws = {readyState: 1, send: data => frames.push(JSON.parse(data))}; app._wsSessionId = 'session-1';
+    await app._sendInputAsync('session-1', 'pending'); await expect.poll(() => frames.length).toBe(1);
+    await (app as unknown as {_onWsInputPending(seq: number, msg: object, sid: string): Promise<void>})._onWsInputPending(1, {t: 'ip', seq: 1}, 'session-1');
+    await app._onWsInputAck(1, {t: 'ia', seq: 1}, 'session-1');
+    await app._onWsInputAck(1, {t: 'ia', seq: 1, confirmed: true, lastSeq: 9000}, 'session-1');
+    expect(app._inputRecoveryHolds?.has('session-1')).toBe(true); expect(frames).toHaveLength(1);
   });
-
-  it('persists the raised counter immediately, not on the debounce', () => {
-    expect(handler).toContain('this._persistReliableNow()');
-  });
-});
-
-describe('the seq counter is persisted synchronously on every send', () => {
-  it('_reliableSend uses the immediate writer, never the debounced one', () => {
-    // The counter is precisely what must survive a crash, so it cannot ride the
-    // path most likely to be lost. (The queue PAYLOAD may still be debounced.)
-    const send = appSource.slice(appSource.indexOf('_reliableSend(sessionId, data, useMux)'));
-    const body = send.slice(0, send.indexOf('_nextSeq(sessionId) {'));
-    expect(body).toContain('this._persistReliableNow();');
-    expect(body).not.toMatch(/list\.push\(rec\);\s*\n\s*this\._persistReliableState\(\);/);
+  it('a transaction abort allocates neither records nor counters; a component retry keeps the original next sequence', async () => {
+    fixture = browserInputFixture(); let effects = 0;
+    const app = await fixture.page(async () => {effects++; return Response.json({success: true, data: {}});});
+    fixture.abortWrites();
+    expect((await app._inputJournal.accept('session-1', ['first', 'second'])).kind).toBe('not-queued');
+    expect((await app._inputJournal.snapshot()).records).toEqual([]);
+    // This changes only the synthetic IDB fault. It neither clears a UI hold
+    // nor grants recovery: direct journal component acceptance causes no effect.
+    fixture.abortWrites(false);
+    const committed = await app._inputJournal.accept('session-1', ['first', 'second']);
+    expect(committed.kind).toBe('accepted'); expect(committed.records?.map(row => row.seq)).toEqual([1, 2]); expect(effects).toBe(0);
   });
 });

@@ -1,3 +1,8 @@
+import { Session } from '../../src/session.js';
+import { TmuxManager } from '../../src/tmux-manager.js';
+import { getCli, registryFilePath, reloadCliRegistry } from '../../src/config/cli-registry/registry.js';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
@@ -27,6 +32,8 @@ describe('temporary worker creation with company identity and channel inheritanc
   let company: CompanyService;
   let rooms: ChatroomStore;
   const threads = new Map<string, string>();
+  const ownedLaunches: Session[] = [];
+  const ownedMuxes: TmuxManager[] = [];
   const failures: Array<{ employeeId?: string; replacedSessionIds: string[]; error: string }> = [];
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), 'reverie-company-spawn-'));
@@ -53,7 +60,13 @@ describe('temporary worker creation with company identity and channel inheritanc
     await app.ready();
   });
   afterEach(async () => {
+    // These are only this fixture's test-mode mux/echo PTYs. Detaching leaves
+    // their children running until the global safety cleanup; stop our own
+    // verified children here instead.
+    for (const session of ownedLaunches.splice(0)) await session.stop(true);
+    for (const mux of ownedMuxes.splice(0)) mux.destroy();
     await app.close();
+    rmSync(registryFilePath(), {force: true}); reloadCliRegistry();
     await rm(directory, { recursive: true, force: true });
   });
   const spawn = (extra = {}) =>
@@ -67,6 +80,20 @@ describe('temporary worker creation with company identity and channel inheritanc
   // No parent header: the owner, not an agent.
   const owner = (extra = {}) =>
     app.inject({ method: 'POST', url: '/api/sessions', payload: { workingDir: directory, mode: 'claude', ...extra } });
+
+  // These workflows actually launch a Session. The real manager's isolated
+  // test mode runs canonical publication/row ownership while suppressing tmux
+  // effects; an empty mock return cannot acknowledge a provider dispatch.
+  const useOwnedLaunchMux = () => {
+    const mux = new TmuxManager();
+    ownedMuxes.push(mux);
+    ctx.mux = mux as unknown as typeof ctx.mux;
+    const add = ctx.addSession.getMockImplementation()!;
+    ctx.addSession.mockImplementation(async session => {
+      if (session instanceof Session && !ownedLaunches.includes(session)) ownedLaunches.push(session);
+      return add(session);
+    });
+  };
 
   it('gives a generated agent identity and joins the parent’s only channel', async () => {
     const room = rooms.create('Engineering', undefined);
@@ -95,16 +122,18 @@ describe('temporary worker creation with company identity and channel inheritanc
     expect(two.members).toHaveLength(2);
   });
 
-  it('refuses an employee\'s name for a new session, and lets the employee\'s own session replace itself by employee id', async () => {
+  it('refuses an employee\'s name and direct self-replacement, while the verified owner may replace by employee id', async () => {
     const abe = await company.hire({ name: 'Abe', icon: '🔭', position: 'Scientist', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false });
     const before = ctx.sessions.size;
     const byName = await spawn({ name: 'Abe' });
     expect(byName.json().success).toBe(false);
     expect(byName.json().error).toContain('existing employee');
     expect(byName.json().errorCode).toBe('CONFLICT');
-    expect((await spawn({ employeeId: 'no-such-employee' })).json().errorCode).toBe('NOT_FOUND');
+    expect((await spawn({ employeeId: 'no-such-employee' })).json().errorCode).toBe('FORBIDDEN');
     expect(ctx.sessions.size).toBe(before);
-    const replaced = await spawn({ employeeId: abe.id });
+    expect((await spawn({ employeeId: abe.id })).json().errorCode).toBe('FORBIDDEN');
+    expect(ctx.sessions.size).toBe(before);
+    const replaced = await owner({ employeeId: abe.id });
     expect(replaced.statusCode).toBe(200);
     const created = replaced.json().session;
     expect(company.view().employees).toHaveLength(1);
@@ -152,11 +181,11 @@ describe('temporary worker creation with company identity and channel inheritanc
       expect(ctx.sessions.has('test-session-1')).toBe(false);
     });
 
-    it('tells an agent caller, even the employee\'s own session, to stop the old one first', async () => {
+    it('requires an approved plan operation for an agent caller, even the employee\'s own session', async () => {
       const abe = await hire();
       const response = await spawn({ employeeId: abe.id, mode: 'opencode' });
-      expect(response.json().errorCode).toBe('CONFLICT');
-      expect(response.json().error).toContain('Stop');
+      expect(response.json().errorCode).toBe('FORBIDDEN');
+      expect(response.json().error).toContain('approved plan operation');
       expect(ctx.cleanupSession).not.toHaveBeenCalled();
       expect(ctx.addSession).not.toHaveBeenCalled();
       expect(company.view().employees[0].sessionId).toBe('test-session-1');
@@ -237,7 +266,7 @@ describe('temporary worker creation with company identity and channel inheritanc
       // The employee's own session owns that conversation, so the resume guard lets the request through to the thread guard.
       (ctx.sessions.get('test-session-1') as unknown as { claudeSessionId: string }).claudeSessionId = 'ses_chosen';
       const agent = await spawn({ employeeId: abe.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
-      expect(agent.json().errorCode).toBe('CONFLICT');
+      expect(agent.json().errorCode).toBe('FORBIDDEN');
       expect(ctx.addSession).not.toHaveBeenCalled();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       const response = await owner({ employeeId: abe.id, mode: 'opencode', openCodeConfig: { continueSession: 'ses_chosen' } });
@@ -302,7 +331,7 @@ describe('temporary worker creation with company identity and channel inheritanc
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
       const response = await owner({ employeeId: abe.id, mode: 'opencode' });
       expect(response.json().errorCode).toBe('CONFLICT');
-      expect(response.json().recoveryRequired).toBeUndefined();
+      expect(response.json().recoveryRequired, response.body).toBeUndefined();
       const created = ctx.addSession.mock.calls[0][0];
       expect(ctx.cleanupSession).toHaveBeenCalledWith(created.id, true, 'spawn_failed',
         {session: created, owner: created.owner});
@@ -312,6 +341,7 @@ describe('temporary worker creation with company identity and channel inheritanc
     });
 
     it('does the same on quick-start', async () => {
+      useOwnedLaunchMux();
       const abe = await hire();
       ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
       vi.spyOn(company, 'completeSpawn').mockRejectedValue(new CompanyError('Session already bound', 409));
@@ -321,7 +351,7 @@ describe('temporary worker creation with company identity and channel inheritanc
         payload: { caseName: 'abe-restart', mode: 'opencode', employeeId: abe.id },
       });
       expect(response.json().success).toBe(false);
-      expect(response.json().recoveryRequired).toBeUndefined();
+      expect(response.json().recoveryRequired, response.body).toBeUndefined();
       const created = ctx.addSession.mock.calls[0][0];
       expect(ctx.cleanupSession).toHaveBeenCalledWith(created.id, true, 'quick_start_error',
         {session: created, owner: created.owner});
@@ -349,6 +379,7 @@ describe('temporary worker creation with company identity and channel inheritanc
   });
 
   it('applies the same identity/channel workflow to the actual quick-start CLI spawn path', async () => {
+    useOwnedLaunchMux();
     const room = rooms.create('Engineering', undefined);
     rooms.addMember(room.id, 'test-session-1');
     const response = await app.inject({
@@ -358,6 +389,7 @@ describe('temporary worker creation with company identity and channel inheritanc
       payload: { caseName: 'company-worker', mode: 'claude' },
     });
     expect(response.statusCode).toBe(200);
+    expect(response.json().success, response.body).not.toBe(false);
     const { sessionId, identity } = response.json();
     expect(sessionId).toBeTruthy();
     expect(ctx.sessions.get(sessionId)?.name).toBe(identity.name);
@@ -384,4 +416,146 @@ describe('temporary worker creation with company identity and channel inheritanc
     expect(response.json().success).toBe(false);
     expect(ctx.addSession).not.toHaveBeenCalled();
   });
+  it.each(['create', 'quick-start'] as const)('preserves a declared custom thread codec and exclusive employee claim through actual %s construction', async path => {
+    const mux = new TmuxManager(); ownedMuxes.push(mux);
+    ctx.mux = mux as unknown as typeof ctx.mux;
+    const custom = structuredClone(getCli('opencode')!);
+    custom.id = 'custom-code' as typeof custom.id;
+    mkdirSync(dirname(registryFilePath()), {recursive: true});
+    writeFileSync(registryFilePath(), JSON.stringify({schemaVersion: 1, clis: {'custom-code': custom}}), {mode: 0o600});
+    reloadCliRegistry();
+    const employee = await company.hire({name: 'Codec worker', icon: '🔭', position: 'Engineer', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false});
+    await company.setThread(employee.id, undefined, 'ses_codec_original');
+    ctx.cleanupSession.mockImplementation(async (id: string) => void ctx.sessions.delete(id));
+    const response = path === 'create'
+      ? await owner({employeeId: employee.id, mode: 'custom-code'})
+      : await app.inject({method: 'POST', url: '/api/quick-start', payload: {caseName: 'custom-code-replacement', employeeId: employee.id, mode: 'custom-code'}});
+    expect(response.json().success, response.body).not.toBe(false);
+    const sid = response.json().sessionId ?? response.json().session.id;
+    const session = ctx.sessions.get(sid)! as unknown as Session; ownedLaunches.push(session);
+    expect(session.toState().openCodeConfig?.continueSession).toBe('ses_codec_original');
+    expect(ctx.cleanupSession).toHaveBeenCalledWith('test-session-1', true, 'employee_replaced');
+    expect(company.view().employees[0]).toMatchObject({id: employee.id, sessionId: sid});
+    ctx.store.getSession.mockImplementation((id: string) => id === sid ? session.toState() : undefined);
+    const duplicate = await owner({mode: 'custom-code', openCodeConfig: {continueSession: 'ses_codec_original'}});
+    expect(duplicate.json().errorCode).toBe('CONFLICT');
+    expect(ctx.addSession).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['create', 'quick-start'] as const)('rejects an incompatible custom legacy codec before any stop or construction on %s', async path => {
+    const custom = structuredClone(getCli('opencode')!);
+    custom.id = 'custom-incompatible' as typeof custom.id;
+    delete custom.launch.threadStateProfile; delete custom.capabilities.rebootRestore;
+    custom.launch.legacyConfigAliases = {...custom.launch.legacyConfigAliases, resumeId: 'otherThread'};
+    mkdirSync(dirname(registryFilePath()), {recursive: true});
+    writeFileSync(registryFilePath(), JSON.stringify({schemaVersion: 1, clis: {'custom-incompatible': custom}}), {mode: 0o600});
+    reloadCliRegistry();
+    expect(getCli('custom-incompatible')).toBeDefined();
+    const employee = await company.hire({name: 'Kept worker', icon: '🔭', position: 'Engineer', expertise: ['x'], sessionId: 'test-session-1', researchEnabled: false});
+    const response = path === 'create'
+      ? await owner({employeeId: employee.id, mode: 'custom-incompatible'})
+      : await app.inject({method: 'POST', url: '/api/quick-start', payload: {caseName: 'incompatible-codec', employeeId: employee.id, mode: 'custom-incompatible'}});
+    expect(response.json()).toMatchObject({success: false, errorCode: 'INVALID_INPUT'});
+    expect(ctx.cleanupSession).not.toHaveBeenCalled(); expect(ctx.addSession).not.toHaveBeenCalled();
+    expect(company.view().employees[0]).toMatchObject({id: employee.id, sessionId: 'test-session-1'});
+  });
+
+
+  it.each([
+    ["create", "launch"],
+    ["create", "env"],
+    ["create", "cosmetic"],
+    ["quick-start", "launch"],
+    ["quick-start", "env"],
+    ["quick-start", "cosmetic"],
+  ] as const)(
+    "revalidates original launch semantics after awaited config before any employee stop on %s (%s)",
+    async (path, change) => {
+      const original = structuredClone(getCli("opencode")!);
+      original.id = "custom-code" as typeof original.id;
+      mkdirSync(dirname(registryFilePath()), { recursive: true });
+      const publish = (entry: typeof original) => {
+        writeFileSync(
+          registryFilePath(),
+          JSON.stringify({ schemaVersion: 1, clis: { "custom-code": entry } }),
+          { mode: 0o600 },
+        );
+        reloadCliRegistry();
+      };
+      publish(original);
+      const mux = new TmuxManager();
+      ownedMuxes.push(mux);
+      ctx.mux = mux as unknown as typeof ctx.mux;
+      const create = vi.spyOn(mux, "createSession");
+      const employee = await company.hire({
+        name: `Guard ${change}`,
+        icon: "🔭",
+        position: "Engineer",
+        expertise: ["x"],
+        sessionId: "test-session-1",
+        researchEnabled: false,
+      });
+      await company.setThread(employee.id, undefined, `ses_guard_${change}`);
+      let entered!: () => void, release!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const resumed = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      ctx.getGlobalNiceConfig.mockImplementationOnce(async () => {
+        entered();
+        await resumed;
+        return undefined;
+      });
+      ctx.cleanupSession.mockImplementation(
+        async (id: string) => void ctx.sessions.delete(id),
+      );
+      const pending =
+        path === "create"
+          ? owner({ employeeId: employee.id, mode: "custom-code" })
+          : app.inject({
+              method: "POST",
+              url: "/api/quick-start",
+              payload: {
+                caseName: `protocol-${change}`,
+                employeeId: employee.id,
+                mode: "custom-code",
+              },
+            });
+      // Inject is lazy until awaited; start the actual request before waiting on its config callback.
+      const responsePending = Promise.resolve(pending);
+      await waiting;
+      const changed = structuredClone(original);
+      if (change === "launch")
+        changed.launch.variants[0].args.push({ lit: "--changed-protocol" });
+      else if (change === "env")
+        changed.env.exports.push({ name: "CODEC_GUARD_TEST", value: "changed" });
+      else changed.label = "Cosmetic only";
+      publish(changed);
+      release();
+      const response = await responsePending;
+      if (change === "cosmetic") {
+        expect(response.json().success, response.body).not.toBe(false);
+        const sid = response.json().sessionId ?? response.json().session.id;
+        ownedLaunches.push(ctx.sessions.get(sid)! as unknown as Session);
+        expect(ctx.cleanupSession).toHaveBeenCalledOnce();
+        expect(ctx.addSession).toHaveBeenCalledOnce();
+      } else {
+        expect(response.json()).toMatchObject({
+          success: false,
+          errorCode: "CONFLICT",
+        });
+        expect(ctx.cleanupSession).not.toHaveBeenCalled();
+        expect(ctx.addSession).not.toHaveBeenCalled();
+        expect(create).not.toHaveBeenCalled();
+        expect(
+          company.view().employees.find((row) => row.id === employee.id),
+        ).toMatchObject({ sessionId: "test-session-1" });
+      }
+      ctx.cleanupSession.mockClear();
+      ctx.addSession.mockClear();
+    },
+  );
+
 });

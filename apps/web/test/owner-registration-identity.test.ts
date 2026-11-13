@@ -85,6 +85,40 @@ it('uses the real secondary office id alongside the independent durable account 
   expect(await auth.enrollRegistrationIdentity(member.token)).toEqual(root);
 });
 
+it('resolves service owner DATA from the actual primary or named invited registration without enrollment', async () => {
+  const member = await person('owner');
+  const before = await readFile(store.file, 'utf8');
+  const main = auth.registrationIdentity(primary), invited = auth.registrationIdentity(member.token);
+  expect(auth.registeredResourceOwner(undefined)).toEqual(main);
+  expect(auth.registeredResourceOwner('fixture-primary')).toEqual(main);
+  expect(auth.registeredResourceOwner('fixture-member')).toEqual(invited);
+  expect(() => auth.registeredResourceOwner('Member')).toThrow();
+  expect(() => auth.registeredResourceOwner('missing')).toThrow();
+  expect(await readFile(store.file, 'utf8')).toBe(before);
+  await member.store.update(account => { delete account.accountId; });
+  expect(() => auth.registeredResourceOwner('fixture-member')).toThrow();
+  expect(member.store.readCurrent()!.accountId).toBeUndefined();
+  expect(auth.registeredResourceOwner(undefined)).toEqual(main);
+});
+
+it.each(['limited', 'disabled'] as const)('refuses a named service owner after actual %s, retaining explicit primary binding', async change => {
+  const member = await person('owner');
+  const main = auth.registeredResourceOwner(undefined);
+  await auth.update(member.id, change === 'limited' ? {role:'limited'} : {disabled:true});
+  expect(() => auth.registeredResourceOwner('fixture-member')).toThrow();
+  expect(auth.registeredResourceOwner(undefined)).toEqual(main);
+});
+
+it('refuses ambiguous canonical usernames and detects actual account incarnation/epoch changes', async () => {
+  const member = await person('owner');
+  const original = auth.registeredResourceOwner('fixture-member');
+  await member.store.update(account => { account.epoch++; });
+  expect(auth.registeredResourceOwner('fixture-member').sessionEpoch).toBe(original.sessionEpoch + 1);
+  await member.store.update(account => { account.username = 'fixture-primary'; });
+  expect(() => auth.registeredResourceOwner('fixture-primary')).toThrow();
+  expect(auth.registeredResourceOwner(undefined).accountId).not.toBe(original.accountId);
+});
+
 it.each(['limited', 'restricted'] as const)('refuses %s enrollment without assigning a legacy id', async (kind) => {
   const member = await person(kind === 'limited' ? 'limited' : 'owner', kind === 'restricted');
   await member.store.update((account) => {

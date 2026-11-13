@@ -37,6 +37,7 @@ import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {browserInputFixture, type InputApp} from './helpers/browser-input-fixture.js';
 import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 import { FakeFit, FakeSocket, FakeTerminal } from './mocks/terminal-tile-fakes.js';
 
@@ -68,7 +69,7 @@ function loadContext() {
     performance: { now: () => clock.now() },
     setInterval: vi.fn(),
     clearInterval: vi.fn(),
-    // Late-bound, so vi.useFakeTimers() (which swaps the globals) reaches code
+    // Late-bound, so vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']}) (which swaps the globals) reaches code
     // running inside this context.
     setTimeout: (fn: () => void, ms?: number) => globalThis.setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(id),
@@ -99,35 +100,24 @@ function loadContext() {
   };
 }
 
-const { ReverieApp, windowStub } = loadContext();
+const {windowStub} = loadContext();
+let fixture: ReturnType<typeof browserInputFixture> | undefined;
 
 type Session = { mode: string; cliVersion?: string; cliMouseTracking?: boolean };
-type App = Record<string, unknown> & {
+type App = InputApp & Record<string, unknown> & {
   sessions: Map<string, Session>;
   activeSessionId: string | null;
   _linkHovered?: boolean;
   loadAppSettingsFromStorage: () => Record<string, unknown>;
 };
 
-function makeApp(sessions: Record<string, Session>, activeSessionId: string | null = 'other'): App {
-  const app = Object.create(ReverieApp.prototype) as App;
-  app._clientId = 'c-test';
-  app._wsTabNonce = 'nonce-1';
-  app._seqCounters = new Map();
-  app._pendingDeliveries = new Map();
-  app._postDraining = new Set();
-  app._extraInputSockets = new Map();
-  app._persistReliableState = vi.fn();
-  app._persistReliableNow = vi.fn();
-  app._updateConnectionIndicator = vi.fn();
-  app.markIdleAlertSeen = vi.fn();
-  app.showToast = vi.fn();
+async function makeApp(sessions: Record<string, Session>, activeSessionId: string | null = 'other'): Promise<App> {
+  fixture ||= browserInputFixture();
+  const app = await fixture.page(async (url, options) => fetchMock(url, options), ['terminal-ui.js'], {transcriptPageKeys: PAGE_KEY_MODES, now: () => clock.now()}) as App;
+  app._clientId = 'c-test'; app._wsTabNonce = 'nonce-1'; app._extraInputSockets = new Map();
   app.loadAppSettingsFromStorage = () => ({});
-  app._ws = null;
-  app._wsSessionId = null;
   app._estimateReplayRows = (text: string) => text.split('\n').length;
-  app.sessions = new Map(Object.entries(sessions));
-  app.activeSessionId = activeSessionId;
+  app.sessions = new Map(Object.entries(sessions)); app.activeSessionId = activeSessionId;
   return app;
 }
 
@@ -208,7 +198,7 @@ function flushed(ws: FakeSocket) {
 
 beforeEach(() => {
   clock.now = () => performance.now();
-  vi.useFakeTimers();
+  vi.useFakeTimers({toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date']});
   FakeFit.proposed = { cols: 80, rows: 24 };
   FakeSocket.instances = [];
   FakeTerminal.emulateScroll = true;
@@ -216,15 +206,16 @@ beforeEach(() => {
   serveCapture(lines(10), 24);
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const tile of liveTiles.splice(0)) tile.destroy();
   FakeTerminal.emulateScroll = false;
   vi.useRealTimers();
+  await fixture?.close(); fixture = undefined;
 });
 
 describe('a tile pages a hollow buffer through the primary pane gates', () => {
   it('turns half a screen of wheel-up into one ephemeral PageUp on its own socket, and down into PageDown', async () => {
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(term.buffer.active.baseY).toBe(0);
 
     const up = wheelLines(-term.rows / 2);
@@ -241,7 +232,7 @@ describe('a tile pages a hollow buffer through the primary pane gates', () => {
 
   it("reads the TILE's session, not the active one", async () => {
     // Active session is a shell; the tile shows opencode: the tile still pages.
-    const app = makeApp({ other: { mode: 'shell' }, 's-tile': { mode: 'opencode' } }, 'other');
+    const app = await makeApp({ other: { mode: 'shell' }, 's-tile': { mode: 'opencode' } }, 'other');
     const { ws, mount } = await connectTile(app);
 
     mount.fire('wheel', wheelLines(-12));
@@ -252,7 +243,7 @@ describe('a tile pages a hollow buffer through the primary pane gates', () => {
   it.each(['shell', 'gemini', 'antigravity'])(
     'leaves a %s tile to xterm even while the active session is opencode',
     async (mode) => {
-      const app = makeApp({ other: { mode: 'opencode' }, 's-tile': { mode } }, 'other');
+      const app = await makeApp({ other: { mode: 'opencode' }, 's-tile': { mode } }, 'other');
       const { ws, mount } = await connectTile(app, { mode });
 
       const ev = wheelLines(-12);
@@ -265,7 +256,7 @@ describe('a tile pages a hollow buffer through the primary pane gates', () => {
   );
 
   it('still pulls history on a wheel-up at the top of a shell tile', async () => {
-    const { mount } = await connectTile(makeApp({ 's-tile': { mode: 'shell' } }), { mode: 'shell' });
+    const { mount } = await connectTile(await makeApp({ 's-tile': { mode: 'shell' } }), { mode: 'shell' });
     expect(fetchMock).toHaveBeenCalledTimes(1); // the initial load
 
     mount.fire('wheel', wheelLines(-3));
@@ -276,7 +267,7 @@ describe('a tile pages a hollow buffer through the primary pane gates', () => {
   });
 
   it('never pages Shift, a tracking xterm, the alternate buffer, real history or a horizontal swipe', async () => {
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     const fireAndCheck = (ev: ReturnType<typeof wheel>) => {
       mount.fire('wheel', ev);
       expect(ev.preventDefault).not.toHaveBeenCalled();
@@ -312,7 +303,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   const DOWN = '\x1b[<65;21;6M';
 
   it("sends ephemeral reports on the tile's socket, from the tile's own geometry, and keeps xterm out", async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
 
     const up = wheelLines(-3, AT);
     mount.fire('wheel', up);
@@ -327,7 +318,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('forwards a Chrome-on-Windows notch (100 px) as four ticks and caps a fling at five', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
 
     mount.fire('wheel', wheel(-100, AT));
     expect(flushed(ws)).toEqual([{ t: 'i', d: UP.repeat(4) }]);
@@ -337,7 +328,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('moves a precision touchpad delta one line, and consumes a pure horizontal swipe without sending', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
 
     mount.fire('wheel', wheel(-3, AT)); // 0.12 of a line
     expect(flushed(ws)).toEqual([{ t: 'i', d: UP }]);
@@ -349,7 +340,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('coalesces the reports of wheels within 40 ms into one frame', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
 
     mount.fire('wheel', wheelLines(-2, AT));
     vi.advanceTimersByTime(20);
@@ -359,7 +350,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('snaps a scrolled-up viewport home before reporting, since SGR rows address the live screen', async () => {
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
     term.buffer.active.baseY = 10;
     term.buffer.active.viewportY = 0;
 
@@ -372,7 +363,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
 
   it("follows the tile session's gate, never the active session's", async () => {
     // Active session is a shell; the tile shows fullscreen Claude: the tile forwards.
-    const forwarded = await connectTile(makeApp({ other: { mode: 'shell' }, 's-tile': FULLSCREEN }, 'other'), {
+    const forwarded = await connectTile(await makeApp({ other: { mode: 'shell' }, 's-tile': FULLSCREEN }, 'other'), {
       mode: 'claude',
     });
     forwarded.mount.fire('wheel', wheelLines(-1, AT));
@@ -381,7 +372,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
     // Active session is fullscreen Claude; the tile shows inline Claude (no
     // tracking): no reports, the hollow buffer is paged instead.
     const inline = await connectTile(
-      makeApp({ other: FULLSCREEN, 's-tile': { ...FULLSCREEN, cliMouseTracking: false } }, 'other'),
+      await makeApp({ other: FULLSCREEN, 's-tile': { ...FULLSCREEN, cliMouseTracking: false } }, 'other'),
       { mode: 'claude' }
     );
     inline.mount.fire('wheel', wheelLines(-12, AT));
@@ -389,7 +380,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('scrolls Shift locally, and leaves a tracking xterm and the alternate buffer to xterm', async () => {
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
     const fireAndCheck = (ev: ReturnType<typeof wheel>) => {
       mount.fire('wheel', ev);
       expect(ev.preventDefault).not.toHaveBeenCalled();
@@ -412,7 +403,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
   });
 
   it('pages, never reports, a Claude older than 2.1.187', async () => {
-    const app = makeApp({ 's-tile': { ...FULLSCREEN, cliVersion: '2.1.100' } });
+    const app = await makeApp({ 's-tile': { ...FULLSCREEN, cliVersion: '2.1.100' } });
     const { ws, mount } = await connectTile(app, { mode: 'claude' });
 
     mount.fire('wheel', wheelLines(-12, AT));
@@ -422,7 +413,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
 
   it('sends exactly the bytes the primary pane sends for the same wheel sequence', async () => {
     const sequence = [-1, -3, 2, -100, 40, -0.2, 7].map((n) => wheelLines(n, AT));
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': FULLSCREEN }), { mode: 'claude' });
     const tileBytes: string[] = [];
     for (const ev of sequence) {
       mount.fire('wheel', ev);
@@ -433,7 +424,7 @@ describe('a fullscreen Claude tile forwards the wheel to the CLI as SGR reports'
       );
     }
 
-    const primary = makeApp({ other: FULLSCREEN }, 'other') as App & {
+    const primary = await makeApp({ other: FULLSCREEN }, 'other') as App & {
       terminal: unknown;
       _sendSyntheticSgrWheel(x: number, y: number, lines: number): void;
       _wheelScrollLines(ev: unknown): number;
@@ -457,7 +448,7 @@ describe("Shift+wheel scrolls the tile's local scrollback itself", () => {
   // macOS, and Chrome on Windows already delivers Shift+wheel as deltaX, so
   // left to xterm the gesture moved nothing.
   it.each(['claude', 'opencode', 'shell'])('scrolls a %s tile with real history, and sends nothing', async (mode) => {
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode } }), { mode });
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode } }), { mode });
     term.write(lines(40));
     const bottom = term.buffer.active.baseY;
     expect(bottom).toBeGreaterThan(5);
@@ -474,7 +465,7 @@ describe("Shift+wheel scrolls the tile's local scrollback itself", () => {
   });
 
   it("reads Chrome-on-Windows' horizontal Shift+wheel (deltaX) as vertical travel", async () => {
-    const { term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'claude' } }), { mode: 'claude' });
+    const { term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'claude' } }), { mode: 'claude' });
 
     mount.fire('wheel', wheel(0, { deltaX: -100, shiftKey: true }));
 
@@ -482,7 +473,7 @@ describe("Shift+wheel scrolls the tile's local scrollback itself", () => {
   });
 
   it('carries sub-line travel to the next event, so a trackpad still scrolls', async () => {
-    const { term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'claude' } }), { mode: 'claude' });
+    const { term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'claude' } }), { mode: 'claude' });
 
     mount.fire('wheel', wheel(-10, { shiftKey: true })); // 0.4 of a line
     mount.fire('wheel', wheel(-10, { shiftKey: true }));
@@ -493,7 +484,7 @@ describe("Shift+wheel scrolls the tile's local scrollback itself", () => {
   });
 
   it('still pulls history on a Shift+wheel-up at the top of a shell tile', async () => {
-    const { mount } = await connectTile(makeApp({ 's-tile': { mode: 'shell' } }), { mode: 'shell' });
+    const { mount } = await connectTile(await makeApp({ 's-tile': { mode: 'shell' } }), { mode: 'shell' });
     expect(fetchMock).toHaveBeenCalledTimes(1); // the initial load
 
     mount.fire('wheel', wheelLines(-3, { shiftKey: true }));
@@ -506,7 +497,7 @@ describe("Shift+wheel scrolls the tile's local scrollback itself", () => {
 
 describe("the forwarding gate behaves as in the primary pane, for the tile's session", () => {
   it('pages that same tile under the "Wheel scrolls local history" opt-out (the footgun rescue)', async () => {
-    const app = makeApp({ 's-tile': { mode: 'claude', cliVersion: '2.1.223', cliMouseTracking: true } });
+    const app = await makeApp({ 's-tile': { mode: 'claude', cliVersion: '2.1.223', cliMouseTracking: true } });
     app.loadAppSettingsFromStorage = () => ({ terminalWheelLocalScrollback: true });
     const { ws, mount } = await connectTile(app, { mode: 'claude' });
 
@@ -516,7 +507,7 @@ describe("the forwarding gate behaves as in the primary pane, for the tile's ses
   });
 
   it('pages a Claude tile whose CLI version is unknown', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'claude', cliMouseTracking: true } }), {
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'claude', cliMouseTracking: true } }), {
       mode: 'claude',
     });
 
@@ -532,7 +523,7 @@ describe('page-key travel, cap and coalescing', () => {
   });
 
   it('accumulates sub-page travel: two wheels of 10 lines are one PageUp', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     mount.fire('wheel', wheelLines(-10));
     expect(flushed(ws)).toEqual([]);
@@ -542,7 +533,7 @@ describe('page-key travel, cap and coalescing', () => {
   });
 
   it('caps one wheel at three PageUps, in one frame', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     mount.fire('wheel', wheelLines(-1000));
 
@@ -550,7 +541,7 @@ describe('page-key travel, cap and coalescing', () => {
   });
 
   it('sends two pages queued within 40 ms as one frame', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     mount.fire('wheel', wheelLines(-18));
     vi.advanceTimersByTime(20);
@@ -561,13 +552,13 @@ describe('page-key travel, cap and coalescing', () => {
 
   it('sends exactly the bytes the primary pane sends for the same wheel sequence', async () => {
     const sequence = [-10, -10, -4, 30, -1000, 7, -18, 200].map((n) => wheelLines(n));
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     for (const ev of sequence) mount.fire('wheel', ev);
     const tileBytes = flushed(ws)
       .map((f) => f.d)
       .join('');
 
-    const primary = makeApp({ other: { mode: 'opencode' } }, 'other') as App & {
+    const primary = await makeApp({ other: { mode: 'opencode' } }, 'other') as App & {
       terminal: unknown;
       _maybePageCliTranscript(ev: unknown, lines: number): boolean;
       _wheelScrollLinesFloat(ev: unknown): number;
@@ -603,7 +594,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
   }
 
   it('pages a Codex tile, which draws on the alternate screen and ignores SGR wheel reports', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
 
     mount.fire('wheel', wheelLines(-18));
 
@@ -612,7 +603,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
 
   it('answers the first trackpad-sized event of a gesture at once, and owes the travel back', async () => {
     manualClock();
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
 
     mount.fire('wheel', wheelLines(-1)); // a trackpad flick opens with a row or so
     expect(flushed(ws)).toEqual([{ t: 'i', d: PAGE_UP }]);
@@ -631,7 +622,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
 
   it('accumulates slow wheel notches instead of paging a screen per notch', async () => {
     const advance = manualClock();
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     // Five notches of 4 rows, each past the gesture gap: 20 rows, one page.
     for (let i = 0; i < 5; i++) {
@@ -643,7 +634,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
   });
 
   it('consumes a pinch and a mostly horizontal swipe without paging', async () => {
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
 
     // Each carries a full page of vertical travel, so either one pages if it
     // reaches the travel math at all.
@@ -676,7 +667,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
     ];
     const events = () => steps.map(([rows, , extra]) => wheelLines(rows, extra));
 
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
     const tileEvents = events();
     steps.forEach(([, gap], i) => {
       mount.fire('wheel', tileEvents[i]);
@@ -686,7 +677,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
       .map((f) => f.d)
       .join('');
 
-    const primary = makeApp({ other: { mode: 'codex' } }, 'other') as App & {
+    const primary = await makeApp({ other: { mode: 'codex' } }, 'other') as App & {
       terminal: unknown;
       _maybePageCliTranscript(ev: unknown, lines: number): boolean;
       _wheelScrollLinesFloat(ev: unknown): number;
@@ -727,7 +718,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
       return acc;
     }, []);
 
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'codex' } }), { mode: 'codex' });
     events().forEach((ev, i) => {
       mount.fire('wheel', ev);
       advance(gaps[i]);
@@ -738,7 +729,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
     // One page for the slow ticks, one for the wobble's opening event, nothing more.
     expect(tileBytes).toBe(PAGE_UP + PAGE_UP);
 
-    const primary = makeApp({ other: { mode: 'codex' } }, 'other') as App & {
+    const primary = await makeApp({ other: { mode: 'codex' } }, 'other') as App & {
       terminal: unknown;
       _maybePageCliTranscript(ev: unknown, lines: number): boolean;
       _wheelScrollLinesFloat(ev: unknown): number;
@@ -762,7 +753,7 @@ describe("gesture handling is the primary pane's, through the shared pure helper
 
 describe("the dialog check reads the TILE's session, never the active tab's", () => {
   it('does not page a tile whose own session has a pending dialog while the active tab is clear', async () => {
-    const app = makeApp({ other: { mode: 'codex' }, 's-tile': { mode: 'codex' } }, 'other');
+    const app = await makeApp({ other: { mode: 'codex' }, 's-tile': { mode: 'codex' } }, 'other');
     (app as App & { tabAlerts: Map<string, string> }).tabAlerts = new Map([['s-tile', 'action']]);
     const { ws, mount } = await connectTile(app, { mode: 'codex' });
 
@@ -775,7 +766,7 @@ describe("the dialog check reads the TILE's session, never the active tab's", ()
   });
 
   it('pages a clear tile while the ACTIVE tab has a pending dialog', async () => {
-    const app = makeApp({ other: { mode: 'codex' }, 's-tile': { mode: 'codex' } }, 'other');
+    const app = await makeApp({ other: { mode: 'codex' }, 's-tile': { mode: 'codex' } }, 'other');
     (app as App & { tabAlerts: Map<string, string> }).tabAlerts = new Map([['other', 'action']]);
     const { ws, mount } = await connectTile(app, { mode: 'codex' });
 
@@ -788,7 +779,7 @@ describe("the dialog check reads the TILE's session, never the active tab's", ()
 describe('rows the tile pushed above the screen itself are not history', () => {
   it('pages after a one-screen capture taken at a taller size (the first load)', async () => {
     serveCapture(lines(40), 40); // the PTY was 40 rows when it was captured
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(term.buffer.active.baseY).toBe(16); // 40 lines into a 24-row xterm
 
     mount.fire('wheel', wheelLines(-12));
@@ -798,7 +789,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
 
   it('does not page a capture that carried real history', async () => {
     serveCapture(lines(60), 24);
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(term.buffer.active.baseY).toBeGreaterThan(0);
 
     const ev = wheelLines(-12);
@@ -810,13 +801,13 @@ describe('rows the tile pushed above the screen itself are not history', () => {
 
   it('falls back to the raw baseY when the server sent no captureRows', async () => {
     serveCapture(lines(40));
-    const tall = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const tall = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(tall.term.buffer.active.baseY).toBe(16);
     tall.mount.fire('wheel', wheelLines(-12));
     expect(flushed(tall.ws)).toEqual([]);
 
     serveCapture(lines(10));
-    const short = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const short = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(short.term.buffer.active.baseY).toBe(0);
     short.mount.fire('wheel', wheelLines(-12));
     expect(flushed(short.ws)).toEqual([{ t: 'i', d: PAGE_UP }]);
@@ -824,7 +815,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
 
   it('keeps paging after a row-shrinking fit pushes more rows up', async () => {
     serveCapture(lines(40), 40);
-    const { tile, ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { tile, ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     FakeFit.proposed = { cols: 80, rows: 20 }; // a zoom-out or a divider drag
     tile.fit();
@@ -836,7 +827,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
 
   it('stops paging once output scrolls real lines above the screen', async () => {
     serveCapture(lines(40), 40);
-    const { ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     ws.receive({ t: 'o', d: 'a\r\nb\r\nc\r\n' }); // three real lines scrolled off
 
@@ -851,7 +842,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
     // in-stream reset leaves nothing above the screen; the fresh capture is one
     // line, so it adds no overflow of its own.
     serveCapture(lines(40), 40);
-    const { ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     expect(term.buffer.active.baseY).toBe(16);
 
     serveCapture('fresh screen', 24);
@@ -875,7 +866,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
     // can. Paging from there would swallow every wheel and keep the stale rows
     // on screen, so xterm gets the wheel and a wheel-down brings it home.
     serveCapture(lines(40), 40);
-    const { tile, ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { tile, ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     const baseY = term.buffer.active.baseY;
     expect(baseY).toBe(16);
     expect((tile as unknown as { _localRows(): number })._localRows()).toBe(0);
@@ -902,7 +893,7 @@ describe('rows the tile pushed above the screen itself are not history', () => {
 
   it('keeps paging when the PTY geometry report reflows the rows above the screen', async () => {
     serveCapture(lines(40), 40);
-    const { tile, ws, term, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { tile, ws, term, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     // A narrower width wraps the overflow rows onto more rows, as xterm's reflow does.
     term.afterResize = () => {
       term.lineCount += 3;
@@ -932,7 +923,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
   const TAP = '\x1b[<0;21;6M\x1b[<0;21;6m';
 
   it("sends one ephemeral SGR press+release on the tile's socket, from the tile's own geometry", async () => {
-    const app = makeApp({ other: { mode: 'shell' }, 's-tile': { mode: 'opencode', cliMouseTracking: true } });
+    const app = await makeApp({ other: { mode: 'shell' }, 's-tile': { mode: 'opencode', cliMouseTracking: true } });
     const { ws, mount } = await connectTile(app);
 
     mount.fire('click', click());
@@ -944,7 +935,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
   });
 
   it('sends nothing without the flag, over a selection, over its own hovered link, or scrolled up', async () => {
-    const app = makeApp({ 's-tile': { mode: 'opencode' } });
+    const app = await makeApp({ 's-tile': { mode: 'opencode' } });
     const { tile, ws, term, mount } = await connectTile(app);
 
     mount.fire('click', click()); // the CLI has no tracking mode on
@@ -970,7 +961,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
   });
 
   it("is not blocked by the primary pane's own link hover", async () => {
-    const app = makeApp({ 's-tile': { mode: 'opencode', cliMouseTracking: true } });
+    const app = await makeApp({ 's-tile': { mode: 'opencode', cliMouseTracking: true } });
     app._linkHovered = true;
     const { ws, mount } = await connectTile(app);
 
@@ -981,7 +972,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
 
   it("follows the tile session's flag, never the active session's", async () => {
     const reported = await connectTile(
-      makeApp({
+      await makeApp({
         other: { mode: 'claude', cliMouseTracking: false },
         's-tile': { mode: 'opencode', cliMouseTracking: true },
       })
@@ -990,7 +981,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
     expect(reported.ws.inputFrames().map((f) => f.d)).toEqual([TAP]);
 
     const silent = await connectTile(
-      makeApp({
+      await makeApp({
         other: { mode: 'claude', cliMouseTracking: true },
         's-tile': { mode: 'opencode', cliMouseTracking: false },
       })
@@ -1002,7 +993,7 @@ describe('a tile reports a plain click to a CLI with mouse tracking on', () => {
 
 describe('destroy()', () => {
   it('drops queued page keys and detaches both listeners it registered', async () => {
-    const { tile, ws, mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { tile, ws, mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
     mount.fire('wheel', wheelLines(-12)); // queued, not yet flushed
     const wheelFn = mount.listeners.wheel[0].fn;
     const clickFn = mount.listeners.click[0].fn;
@@ -1017,7 +1008,7 @@ describe('destroy()', () => {
   });
 
   it('registers the wheel listener non-passive in the capture phase and the click one in the bubble phase', async () => {
-    const { mount } = await connectTile(makeApp({ 's-tile': { mode: 'opencode' } }));
+    const { mount } = await connectTile(await makeApp({ 's-tile': { mode: 'opencode' } }));
 
     expect(mount.listeners.wheel.map((l) => l.opts)).toEqual([{ capture: true, passive: false }]);
     expect(mount.listeners.click.map((l) => l.opts)).toEqual([undefined]);

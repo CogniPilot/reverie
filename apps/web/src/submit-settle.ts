@@ -11,7 +11,7 @@
  * (test/submit-settle.test.ts).
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { getCli } from './config/cli-registry/registry.js';
+import { cliInputProtocol } from './cli-input-protocol.js';
 import { composerIsEmpty, promptStillInComposer } from './session-submit-verifier.js';
 import { stripAnsi } from './utils/index.js';
 
@@ -34,11 +34,11 @@ export const SETTLE_POLL_MS = 50;
  * represents the whole prompt, the verifier cannot claim it and the delivery strands in the composer (the junk owners found in
  * debug terminals). A bracketed paste of the same text is one chip that a single Enter submits, idle or mid-turn.
  */
-export const CODEX_KEY_BURST_MAX_CHARS = 1000;
+export { CODEX_KEY_BURST_MAX_CHARS } from './config/cli-registry/stock.js';
 
 /** Does this text go to a pane of `mode` as a bracketed paste rather than keys? Text with control characters is always typed. */
 export function pastesInsteadOfKeys(mode: string, text: string): boolean {
-  const limit = getCli(mode)?.capabilities.input?.keyBurstMaxChars;
+  const limit = cliInputProtocol(mode).keyBurstMaxChars;
   // eslint-disable-next-line no-control-regex
   return limit !== undefined && text.length > limit && !/[\u0000-\u001f\u007f-\u009f]/.test(text);
 }
@@ -187,8 +187,7 @@ function ownsComposer(stillIdle?: () => boolean): boolean {
 export function writeGateActive(): boolean {
   return writeGate.getStore() !== undefined;
 }
-
-/** Text was positively written but this gate deliberately withheld Enter. */
+/** Only this async write's settled text may be classified as deliberately left unsent. */
 export function writeGateTypedUnsent(): boolean {
   return writeGate.getStore()?.typedUnsent === true;
 }

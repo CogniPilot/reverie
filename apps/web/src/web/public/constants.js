@@ -1670,6 +1670,8 @@ const BUILTIN_RESPAWN_PRESETS = [
 const SSE_EVENTS = {
   // Core
   INIT: 'init',
+  STATE_PUBLICATION_HELD: 'state:publicationHeld',
+  MUX_METADATA_PUBLICATION: 'mux:metadataPublication',
 
   // Transport
   HEARTBEAT: 'sse:heartbeat',

@@ -1,7 +1,10 @@
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
+import { randomUUID } from 'node:crypto';
 import { trustedFixtureOwner } from './helpers/trusted-owner-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
-import type { MuxSession, RespawnPaneOptions, TerminalMultiplexer } from '../src/mux-interface.js';
+import type { RespawnPaneOptions, TerminalMultiplexer } from '../src/mux-interface.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../src/types.js';
 import { createRouteTestHarness } from './routes/_route-test-utils.js';
@@ -14,21 +17,25 @@ afterEach(async () => {
 });
 
 function fixture(extra: Record<string, unknown> = {}) {
+  const registry = registeredMuxFixture({ sessionId: randomUUID(), muxName: 'reverie-aaaaaaaa',
+    pid: 4241, workingDir: '/tmp', mode: 'opencode' });
   const mux = {
+    ...registry,
     isAvailable: () => true,
     muxSessionExists: vi.fn(() => true),
     isPaneDead: vi.fn(() => true),
     respawnPane: vi.fn(async (options: RespawnPaneOptions) => {
       if (options.admitted && !options.admitted()) return null;
-      options.onProviderDispatch?.(); // The synthetic successful launch boundary.
+      await acknowledgeMuxFixture(options); // The synthetic successful launch boundary.
       return 4242 as number | null;
     }),
     clearPaneExit: vi.fn(),
   };
   const session = new Session({
+    id: registry.subject.sessionId,
     workingDir: '/tmp', mode: 'opencode', useMux: true,
     mux: mux as unknown as TerminalMultiplexer,
-    muxSession: { sessionId: 'test-session', muxName: 'reverie-aaaaaaaa', pid: 4241 } as MuxSession,
+    muxSession: registry.subject,
     openCodeConfig: { model: 'local/model', continueSession: 'ses_000000000000000000000001' },
     ...extra,
   });
@@ -104,11 +111,11 @@ describe('interactive recovery with a retained attach client', () => {
 
   it('refuses a concurrent interactive start while the first pane recovery is in flight', async () => {
     const { session, mux } = fixture();
-    let release!: (pid: number) => void;
+    let release!: (pid: number) => Promise<void>;
     mux.respawnPane.mockImplementation(options => new Promise((resolve) => {
-      release = pid => {
+      release = async pid => {
         if (options.admitted && !options.admitted()) {resolve(null); return;}
-        options.onProviderDispatch?.();
+        await acknowledgeMuxFixture(options);
         resolve(pid);
       };
     }));
@@ -118,7 +125,7 @@ describe('interactive recovery with a retained attach client', () => {
       expect(session.paneLifecycleInFlight).toBe(true);
       await expect(session.startInteractive()).rejects.toThrow('Session launch is already in progress');
       expect(mux.respawnPane).toHaveBeenCalledOnce();
-    } finally { release(4242); await first; }
+    } finally { await release(4242); await first; }
   });
 
   it('keeps ordinary restartCli forceful, while interactive recovery asks tmux to refuse a newly live pane', async () => {

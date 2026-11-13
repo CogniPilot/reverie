@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
+import { EmployeePermissionsSchema } from '../src/company-types.js';
 
 const sessionId = '0000002d-0035-4000-8000-000000000047';
 const opened: any[] = [];
@@ -17,7 +18,9 @@ async function setup({ verified = true, canManage = true, onVacation = false, ac
     available: !onVacation,
     reportsTo: 'owner',
     onVacation,
-    permissions: { recoverEmployees: true },
+    permissions: EmployeePermissionsSchema.parse({ recoverEmployees: true }),
+    effectiveBoardPermissions: { editBoardIssues: true, manageBoard: false, manageDecisions: false },
+    boardPermissionSources: { editBoardIssues: 'legacy', manageBoard: 'legacy', manageDecisions: 'legacy' },
   };
   const data: any = {
     canManage,
@@ -104,7 +107,7 @@ it.each([
 });
 
 it('pauses once, blocks competing actions, and refreshes vacation state and recovery controls', async () => {
-  const { h, employee, button, calls, resolve, recoveryChoices } = await setup();
+  const { h, data, employee, button, calls, resolve, recoveryChoices } = await setup();
   const pause = button('Leave office: River');
   const retire = button('Retire River');
   pause.click();
@@ -125,7 +128,12 @@ it('pauses once, blocks competing actions, and refreshes vacation state and reco
   expect((button('Enter office: River') as unknown as HTMLInputElement).checked).toBe(false);
   expect(h.document.querySelector('[aria-label="Recovery permission for River"]')!.disabled).toBe(false);
   const choices = await recoveryChoices();
-  expect([...choices.options].map((option: any) => option.value)).not.toContain(employee.id);
+  const retained = [...choices.options].find((option: HTMLOptionElement) => option.value === employee.id);
+  expect(retained).toBeDefined();
+  expect(retained!.disabled).toBe(true);
+  expect(retained!.textContent).toContain('(unavailable)');
+  expect(choices.value).toBe(employee.id);
+  expect(data.settings.crashWakeEmployeeId).toBe(employee.id);
   expect(choices.textContent).not.toContain('Automatic: River');
   expect(h.document.querySelector('.ca-company > [role="status"]')!.textContent).toBe('River is out of office.');
 });

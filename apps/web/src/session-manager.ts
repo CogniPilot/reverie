@@ -258,17 +258,7 @@ export class SessionManager extends EventEmitter {
     // recovery can restore them without leaking through any API serializer.
     // The key uses the reserved `__` prefix so it is visibly "internal" to any
     // future reader of state.json.
-    const state = session.toState();
-    const envOverrides = session.getEnvOverridesForPersist();
-    // __customModel: same convention, the disk-only bookkeeping of a custom-model
-    // selection (env KEYS, config dir, launch model; never the injected values).
-    const customModel = session.getCustomModelForPersist();
-    const toStore = {
-      ...state,
-      ...(envOverrides ? { __envOverrides: envOverrides } : {}),
-      ...(customModel ? { __customModel: customModel } : {}),
-    };
-    this.store.setSession(session.id, toStore as SessionState);
+    this.store.setSessionFromOwner(session, session.toPersistedState(), 'preserve');
   }
 
   /** Gets all sessions from persistent storage (including stopped). */

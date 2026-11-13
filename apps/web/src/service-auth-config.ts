@@ -12,6 +12,7 @@ import { SERVICE_PURPOSE_NAME, type ServicePurposes } from './company-types.js';
 import type { GoalNonceKey } from './goal-broker-auth.js';
 import type { ServiceIssuer, ServiceNonceKey, ServiceGrantPorts } from './service-grant-auth.js';
 import { MEMORY_READ_PURPOSE, MemoryScopeCatalog, MemoryScopeConfigSchema } from './memory-scope-config.js';
+import { NativeOwnerId } from './native-owner-data.js';
 
 const ID = z.string().regex(/^[A-Za-z0-9_.:-]{1,56}$/); // 'service:' + principal must fit the nonce store's 64-char issuer
 const EPOCH = z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/);
@@ -35,9 +36,13 @@ export const ServiceAuthConfigSchema = z
       )
       .refine((value) => Object.keys(value).length <= 64, 'at most 64 purposes'),
     principals: z
-      .array(z.object({ principal: ID, epoch: EPOCH, key: path }).strict())
+      .array(z.object({ principal: ID, epoch: EPOCH, key: path, officeEmployeeId: NativeOwnerId.optional() }).strict())
       .max(32)
-      .refine((items) => new Set(items.map((p) => p.principal)).size === items.length, 'principals are unique'),
+      .refine((items) => new Set(items.map((p) => p.principal)).size === items.length, 'principals are unique')
+      .refine(items=>{
+        const sources=items.flatMap(item=>item.officeEmployeeId?[item.officeEmployeeId]:[]);
+        return new Set(sources).size===sources.length;
+      },'Office employee issuer associations are unique'),
     /** Explicit installation resource DATA. Existing owner grants remain the only authority. */
     memoryScopes: MemoryScopeConfigSchema.optional(),
     /** Owner setup page rows: proposed grants the owner issues with one click each. Never issued automatically.
@@ -92,6 +97,12 @@ export interface TrustOptions {
   /** Owners trusted for the config and key files; root only by default. */
   readonly trustedUids?: readonly number[];
 }
+const officeSources=new WeakMap<LoadedServiceAuth,(principal:string)=>string|undefined>();
+/** Current ORIGINAL install-time source association. DATA/key selection only;
+ * not a grant, source proof, human session or a native authorization object. */
+export function officeServiceEmployee(loaded:LoadedServiceAuth, principal:string):string|undefined {
+  return officeSources.get(loaded)?.(principal);
+}
 
 /** Regular, not a symlink, trusted owner, no group/other write (keys: no group/other access at all). */
 function readTrusted(
@@ -135,7 +146,7 @@ export function loadServiceAuthConfig(file: string, options: TrustOptions = {}):
     purposes[name] = entry.scope;
     if (entry.action) actions.set(entry.action, name);
   }
-  return Object.freeze({
+  const loaded=Object.freeze({
     config: Object.freeze(config),
     digest: createHash('sha256').update(bytes).digest('hex'),
     purposes: Object.freeze(purposes),
@@ -150,6 +161,16 @@ export function loadServiceAuthConfig(file: string, options: TrustOptions = {}):
       : {}),
     purposeFor: (action: string) => actions.get(action),
   });
+  const declared=JSON.stringify(config),associations=new Map(config.principals.map(row=>[row.principal,row.officeEmployeeId]));
+  officeSources.set(loaded,principal=>{
+    try {
+      if(JSON.stringify(config)!==declared)return undefined;
+      const current=readTrusted(file,64*1024,false,{trustedUids});
+      if(createHash('sha256').update(current).digest('hex')!==loaded.digest)return undefined;
+      return associations.get(principal);
+    }catch{return undefined;}
+  });
+  return loaded;
 }
 
 /** ServiceGrantPorts.issuer from the configured principals. The key file is re-read and re-checked on every call, so a

@@ -39,6 +39,22 @@ const fixtureRooms = () => [
 const labels = (nodes: Iterable<Element>) => [...nodes].map((n) => n.getAttribute('aria-label'));
 const settle = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms));
 
+it('projects a reported input hold without a journal or retransmission in the shell fixture', async () => {
+  const h = await createHarness({ sessions, rooms: fixtureRooms() });
+  try {
+    const before = [...h.server.calls];
+    expect(h.app._inputJournal).toBeUndefined();
+    expect(() => h.app._observeInputRecovery({ id: A, terminalInputHeld: true })).not.toThrow();
+    expect(h.app._sessionInputHeld(A)).toBe(true);
+    await expect(h.app._persistReliableNow()).resolves.toBeUndefined();
+    h.app._observeInputRecovery({ id: A, terminalInputHeld: false });
+    expect(h.app._sessionInputHeld(A)).toBe(true);
+    expect(h.server.calls).toEqual(before);
+  } finally {
+    h.dom.window.close();
+  }
+});
+
 describe('the default view', () => {
   it('exposes the full terminal interface only through the explicit legacy flag', async () => {
     const legacy = await createHarness({ sessions, rooms: fixtureRooms(), hash: '?legacy=1' });
@@ -1714,12 +1730,6 @@ describe('the owner name', () => {
     );
     expect(put.body).toEqual({
       ownerName: 'Pat',
-      ownerTitle: 'Owner',
-      timeZone: 'UTC',
-      nightHour: 1,
-      morningHour: 8,
-      enabled: false,
-      coordinatorEmployeeId: 'c',
     });
     expect(h.document.querySelector('.ca-user-name')?.textContent).toBe('Pat');
   });
@@ -2361,7 +2371,7 @@ describe('workspace menu and settings', () => {
 });
 
 describe('the owner name write-back', () => {
-  it('sends the settings as they are now, not as they were when the page started', async () => {
+  it('patches the name while preserving settings changed since the page started', async () => {
     const start = {
       ownerName: '',
       ownerTitle: 'Owner',
@@ -2389,7 +2399,8 @@ describe('the owner name write-back', () => {
     const put = h.server.calls.find(
       (c: { method: string; path: string }) => c.method === 'PUT' && c.path === '/api/company/settings'
     );
-    expect(put.body).toMatchObject({ ownerName: 'Pat', nightHour: 3, enabled: true });
+    expect(put.body).toEqual({ ownerName: 'Pat' });
+    expect(h.server.company.settings).toMatchObject({ ownerName: 'Pat', nightHour: 3, enabled: true });
   });
 });
 

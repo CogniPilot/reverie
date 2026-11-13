@@ -1,5 +1,6 @@
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
+import { EmployeeRecoveryOperation } from './employee-recovery-operation.js';
 import { OWNER_AVATAR_URL } from './owner-avatar.js';
 import { normalizeIcon } from './chatroom-store.js';
 import { AVATAR_URL } from './agent-avatars.js';
@@ -9,7 +10,8 @@ import { EmployeeVoiceSchema } from './employee-voice.js';
 const text = z.string().trim().min(1).max(100);
 /** Instance-owned belief text, never a repository persona or an authority grant. Text is preserved exactly. */
 export const CoreBeliefsSchema = z.array(z.string().min(1).max(4000).refine(
-  value => value.trim().length > 0 && !/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value), 'Core belief blocks must be nonempty plain text'
+  // Allow tab, LF, CR, printable ASCII and non-ASCII UTF-16 units; reject other controls.
+  value => value.trim().length > 0 && !/[^\t\n\r -~\u0080-\uFFFF]/.test(value), 'Core belief blocks must be nonempty plain text'
 )).max(32).refine(
   values => new TextEncoder().encode(values.join('\n\n')).byteLength <= 16384,
   'Core beliefs must fit within 16 KiB'
@@ -328,6 +330,11 @@ export const CompanySettingsSchema = z.object({
   coordinatorEmployeeId: text.optional(),
 });
 export type CompanySettings = z.infer<typeof CompanySettingsSchema>;
+/** A partial owner edit. Only the crash expert accepts null, as explicit clear;
+ * canonical stored settings continue to use an absent optional string. */
+export type CompanySettingsPatch = Partial<Omit<CompanySettings, 'owner' | 'crashWakeEmployeeId'>> & {
+  crashWakeEmployeeId?: string | null;
+};
 export const FindingSchema = z
   .object({
     text: z.string().min(1).max(8000),
@@ -365,6 +372,11 @@ export const CompanyMemorySchema = z.object({
 });
 export const CompanyStateSchema = z.object({
   version: z.literal(1),
+  /** Private deny-only native recovery correlation; CompanyService.view never projects it. */
+  employeeRecoveryOperations: z.array(EmployeeRecoveryOperation).max(256).refine(
+    rows => new Set(rows.map(row => row.approval.operationId)).size === rows.length,
+    'Recovery operation identifiers must be unique'
+  ).optional(),
   employees: z.array(EmployeeSchema),
   settings: z.array(CompanySettingsSchema),
   cycles: z.array(CompanyCycleSchema),

@@ -1,6 +1,22 @@
 import {expect, it} from 'vitest';
 import vm from 'node:vm';
-import {frontendCallStatements, frontendDeclarations, frontendPrototypeMethods} from './helpers/frontend-declarations.js';
+import {frontendCallStatements, frontendClassMethods, frontendDeclarations, frontendPrototypeMethods} from './helpers/frontend-declarations.js';
+
+it('loads real class methods together without executing constructors or unrelated startup', () => {
+  const source = `class Other { remember(){throw Error('wrong owner');} }
+    class App { constructor(){throw Error('constructor');} remember(value){this.value=value;} observe(value){this.remember(value);} }
+    throw Error('startup');`;
+  const methods = frontendClassMethods(source,'App',['remember','observe']);
+  expect(vm.runInNewContext(`const app={${methods}}; app.observe('original'); app.value`)).toBe('original');
+  expect(methods).not.toContain('constructor');
+  expect(methods).not.toContain('startup');
+});
+it('refuses missing, nested, static-only, duplicate or unrelated class methods', () => {
+  for(const source of ['class Other { wanted(){} }','function nested(){class App{wanted(){}}}',
+    'class App {static wanted(){}}','class App {wanted(){} wanted(){}}'])
+    expect(()=>frontendClassMethods(source,'App',['wanted'])).toThrow();
+  expect(()=>frontendClassMethods('class App{wanted(){}}','App',['wanted','wanted'])).toThrow();
+});
 
 it('extracts complete multiline declarations and requested bindings without running unrelated startup', () => {
   const source = `const unrelated = fail(), esc = (value) =>\n String(value).replace(/</g, '&lt;');\nfunction render(value) { return esc(value); }\nfail();`;
@@ -13,6 +29,16 @@ it('refuses absent, nested-only, duplicate and syntactically broken declaration 
   for (const source of ['', 'function outer(){const wanted=1;}', 'var wanted=1; var wanted=2;', 'const wanted = {',
     'const wanted: number=1;', 'export const wanted = {'])
     expect(() => frontendDeclarations(source, ['wanted'])).toThrow();
+});
+it('selects the actual class without evaluating unrelated module startup or constructing it', () => {
+  const source = `const example='class App {}';
+    class App { constructor(){throw new Error('unexpected construction');} read(){return 7;} }
+    document.addEventListener('DOMContentLoaded', () => new App());`;
+  const selected = frontendDeclarations(source, ['App']);
+  expect(vm.runInNewContext(`${selected}; Object.create(App.prototype).read()`)).toBe(7);
+  expect(selected).not.toContain('addEventListener');
+  for (const input of ['function nested(){class App{}}', 'class Other{}', 'class App{}; function App(){}'])
+    expect(() => frontendDeclarations(input, ['App'])).toThrow();
 });
 it('counts only callable instance declarations on the actual target prototype', () => {
   const source = `class App { _first(){} static _static(){} field=1; _arrow=()=>{} }

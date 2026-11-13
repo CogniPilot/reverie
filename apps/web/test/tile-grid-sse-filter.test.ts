@@ -13,19 +13,26 @@
  *
  * Real code: the shared vm harness (test/mocks/tile-grid-vm.ts). Port: N/A.
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fetchSpy, makeGridApp, resetGridHarness, windowStub, type GridApp } from './mocks/tile-grid-vm.js';
+import {
+  connectGridStream,
+  fetchSpy,
+  makeGridApp,
+  resetGridHarness,
+  windowStub,
+  type GridApp,
+} from './mocks/tile-grid-vm.js';
 
 const IDS = ['s-a', 's-b', 's-c'];
 const FILTER = (windowStub.ReverieTileGrid as { TILE_GRID_SSE_FILTER: string }).TILE_GRID_SSE_FILTER;
 
 /** The app with the REAL _updateSseSubscription, and the filters it posted, in order. */
-function makeApp(): GridApp {
+function makeApp(active: string | null = IDS[0]): GridApp {
   const app = makeGridApp(IDS);
   delete app._updateSseSubscription;
   app._clientId = 'client-1';
+  app.activeSessionId = active;
+  connectGridStream(app);
   return app;
 }
 const posted = () =>
@@ -45,43 +52,53 @@ describe('the SSE filter while tiles own the terminal', () => {
     expect(FILTER).not.toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('opening the grid and every tile focus subscribe with it, never a session id', async () => {
+  it('opening the grid subscribes with its fixed filter and repeated tile focus keeps it without redundant writes', async () => {
     const app = makeApp();
     app.openTileGrid(IDS);
     delete app.selectSession;
     await app.selectSession('s-b');
     await app.selectSession('s-c');
-    expect(posted().length).toBeGreaterThanOrEqual(3);
-    expect(new Set(posted().map((s: string[]) => s.join()))).toEqual(new Set([FILTER]));
+    await app._updateSseSubscription(app.activeSessionId);
+    expect(posted()).toEqual([[FILTER]]);
+    const subscription = fetchSpy.mock.calls.find(([url]) => url === '/api/events/subscribe');
+    expect(subscription).toBeDefined();
+    expect(JSON.parse((subscription![1] as { body: string }).body)).toEqual({
+      clientId: 'grid-page-key',
+      streamNonce: new URL(app.eventSource.url, 'http://reverie.test').searchParams.get('streamNonce'),
+      sessions: [FILTER],
+    });
   });
 
-  it('leaving the grid gives the filter back to the session shown', () => {
+  it('leaving the grid gives the filter back to the session shown', async () => {
     const app = makeApp();
     app.openTileGrid(IDS);
     expect(app._sseFilterSessionId('s-a')).toBe(FILTER);
     app.closeTileGrid({ keepStored: true, reselect: false });
     // What the single view's selectSession (app.js) then posts.
-    app._updateSseSubscription('s-a');
+    await app._updateSseSubscription('s-a');
     expect(posted().at(-1)).toEqual(['s-a']);
     expect(app._sseFilterSessionId('s-b')).toBe('s-b');
   });
 
-  it('a page with no grid open (a reload into the single view) filters on the session as before', () => {
-    const app = makeApp();
+  it('a page with no grid open filters on the session as before', async () => {
+    const app = makeApp(null);
     expect(app._sseFilterSessionId('s-a')).toBe('s-a');
     expect(app._sseFilterSessionId(null)).toBe(null);
-    app._updateSseSubscription('s-a');
+    await app._updateSseSubscription('s-a');
     expect(posted()).toEqual([['s-a']]);
   });
 
   it('the connect URL asks the same question, so an SSE reconnect with the grid open keeps the filter', () => {
-    // connectSSE builds an EventSource, which this harness has none of, so its
-    // URL building is read from source: one place, through the helper.
-    const app = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
-    const start = app.indexOf('const _sseParams = new URLSearchParams(');
-    expect(start).toBeGreaterThan(-1);
-    const block = app.slice(start, app.indexOf('this.eventSource = new EventSource(', start));
-    expect(block).toContain('this._sseFilterSessionId(this.activeSessionId)');
-    expect(block).not.toMatch(/set\('sessions', this\.activeSessionId\)/);
+    const app = makeApp(),
+      original = app.eventSource;
+    const before = new URL(original.url, 'http://reverie.test');
+    expect(before.searchParams.get('sessions')).toBe('s-a');
+    app.openTileGrid(IDS);
+    const successor = connectGridStream(app),
+      after = new URL(successor.url, 'http://reverie.test');
+    expect(original.readyState).toBe(2);
+    expect(after.searchParams.get('sessions')).toBe(FILTER);
+    expect(after.searchParams.get('clientId')).toBe(before.searchParams.get('clientId'));
+    expect(after.searchParams.get('streamNonce')).not.toBe(before.searchParams.get('streamNonce'));
   });
 });

@@ -16,7 +16,7 @@ let
     version = manifest.version;
     src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
-    npmDepsHash = "sha256-gXM3copzdgACtQaPnEYO1n12oHrAfQMPLbXBmhmK1QQ=";
+    npmDepsHash = "sha256-TdGKa0ICVZoFZ996zLhbluJKdnNgb7EgWnhikmQ0XRg=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
     npmFlags = [ "--ignore-scripts" ];
     npmRebuildFlags = [ "--ignore-scripts" ];
@@ -47,6 +47,8 @@ let
       cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v1/cases.json"} test/fixtures/route-frames-v1/cases.json
       mkdir -p test/fixtures/route-frames-v2
       cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/route-frames-v2/cases.json"} test/fixtures/route-frames-v2/cases.json
+      cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/employee-recovery-v1.json"} test/fixtures/employee-recovery-v1.json
+      cp ${consoleFixture "crates/reverie-contracts/tests/fixtures/employee-recovery-diagnostics-v1.json"} test/fixtures/employee-recovery-diagnostics-v1.json
       # The settings handler's TS byte goldens, and the two tables it compiles in.
       mkdir -p test/fixtures/settings test/fixtures/settings-v1
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/settings/cases.json"} test/fixtures/settings/cases.json
@@ -70,16 +72,23 @@ let
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts
       npm test -- test/native-thread-profile.test.ts
+      npm test -- test/legacy-thread-binding.test.ts
+      npm test -- test/legacy-thread-launch.test.ts
+      npm test -- test/reboot-history-account-scope.test.ts
       npm test -- test/hire-launch-selection.test.ts
+      npm test -- test/docker-conversation-seed.test.ts
+      npm test -- test/cli-input-protocol.test.ts
+      npm test -- test/runtime-behavior-profiles.test.ts
       npm test -- test/frontend-declarations.test.ts
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/owned-process.test.ts
-      npm test -- test/operator-viewer-bridge.test.ts
+      npm test -- test/operator-viewer-bridge.test.ts test/operator-viewer-native.test.ts test/operator-viewer-native-io.test.ts test/operator-viewer-native-integration.test.ts
       npm test -- test/native-hook-artifact-selection.test.ts
       npm test -- test/approvals-ui-held.test.ts
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
-      npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts \
+      npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts test/employee-recovery-ui.test.ts \
         test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
+        test/employee-recovery-authority.test.ts test/employee-recovery-service.test.ts test/employee-recovery-diagnostics-wire.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
         test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
         test/control-behavior-inventory.test.ts
@@ -91,6 +100,7 @@ let
         test/chat-bot-presets.test.ts test/cron-post-bot.test.ts test/cron-post-security.test.ts \
         test/chatroom-delivery-modes.test.ts test/routes/polling-membership.test.ts \
         test/company-service.test.ts test/company-office-enforced-auth.test.ts test/company-hierarchy.test.ts \
+        test/retirement-admin-authority.test.ts test/retirement-authority-queue.test.ts \
         test/native-memory-journal-api.test.ts test/installed-memory-access.test.ts \
         test/memory-bridge-settlement.test.ts test/memory-scope-config.test.ts \
         test/owner-auth-admin-grant.test.ts test/owner-auth-review.test.ts \
@@ -131,7 +141,7 @@ let
         test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
-        test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
+        test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/company-settings-patches-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
         test/session-health-provider.test.ts test/session-health-provider-routes.test.ts test/health-canonical-reader.test.ts \
         test/session-runtime.test.ts test/owner-dead-pane-recovery.test.ts test/company-runtime-health-ui.test.ts test/company-runtime-ui.test.ts test/opencode-subscription-auth.test.ts \
         test/selected-claude-profile.test.ts \
@@ -147,7 +157,7 @@ let
         test/plan-move-runtime.test.ts test/plan-move-composer.test.ts test/plan-move-routes.test.ts test/plan-move-company.test.ts test/plan-move-launch.test.ts \
         test/plan-move-resources.test.ts test/plan-move-resource-runtime.test.ts \
         test/resource-owner-authority.test.ts test/resource-owner-office-authority.test.ts test/resource-native-client.test.ts \
-        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts test/browser-input-identity.test.ts test/input-receipt-read.test.ts \
+        test/owner-registration-identity.test.ts test/owner-registration-durability.test.ts test/browser-input-identity.test.ts test/input-receipt-read.test.ts test/browser-input-protocol.test.ts \
         test/company-resource-binding-cas.test.ts test/resource-session-publication.test.ts \
         test/resource-ram-session-publication.test.ts test/resource-ram-owner-incarnation.test.ts \
         test/pool-installation-consent.test.ts \
@@ -214,7 +224,7 @@ let
         test/codex-paste-hold.test.ts test/plan-move-input-hold.test.ts test/opencode-shell-mode.test.ts \
         test/remote-buffer-move-hold-control.test.ts test/opencode-verifier-hold-control.test.ts test/remote-wake.test.ts \
         test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/routes/session-input-delivery.test.ts \
-        test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/chatroom-archived-reply.test.ts \
+        test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/browser-input-intake.test.ts test/browser-input-caller-contracts.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       npm test -- test/case-removal.test.ts test/routes/case-delete-guard.test.ts
       # Every other gate file; test/test-suite-partition.test.ts fails on a gate file that is in neither
@@ -299,7 +309,7 @@ let
         test/mobile-ime-preview.test.ts test/mobile-keyboard-bottom-padding.test.ts test/mobile-phone-row.test.ts \
         test/mobile-prompt-composer.test.ts test/mobile-shell-keyboard.test.ts test/mobile-tab-strip-chips.test.ts \
         test/mobile-tab-tap-zones.test.ts test/mobile-terminal-keys.test.ts test/mocks/mock-route-context-completeness.test.ts \
-        test/multiuser-auth.test.ts test/mux-factory.test.ts test/network-auth-policy.test.ts test/network-host-guard.test.ts \
+        test/multiuser-auth.test.ts test/mux-factory.test.ts test/mux-session-metadata.test.ts test/office-scoped-action-publisher.test.ts test/network-auth-policy.test.ts test/network-host-guard.test.ts \
         test/nice-wrapper.test.ts test/nix-image-build.test.ts test/node-pty-repair.test.ts test/notification-manager-noise.test.ts \
         test/npm-release.test.ts
       npm test -- test/omp-cli-resolver.test.ts test/omp-fresh-run-no-resume.test.ts test/omp-mode.test.ts test/omp-session-resolver.test.ts \
@@ -314,7 +324,7 @@ let
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
-        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
+        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-launch-publication.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
         test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \
@@ -388,10 +398,10 @@ let
         test/split-pane-hidden-button-css.test.ts test/split-pane-per-device-setting.test.ts \
         test/split-pane-picker-listener-leak-unit.test.ts test/spreadsheet-preview.test.ts \
         test/spreadsheet-xlsx-core.test.ts test/sse-cors-headers.test.ts test/sse-dispatch-table.test.ts test/sse-events.test.ts \
-        test/sse-heartbeat.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts \
-        test/sse-subscription-filter.test.ts test/sse-tile-grid-filter.test.ts test/stale-expiration-map.test.ts \
+        test/sse-heartbeat.test.ts test/sse-policy-revocation.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts \
+        test/sse-subscription-filter.test.ts test/sse-subscription-ownership.test.ts test/sse-tile-grid-filter.test.ts test/stale-expiration-map.test.ts \
         test/stalled-seat-alert.test.ts test/stalled-seat-notice-resolution.test.ts test/stalled-seat-notice-routing.test.ts \
-        test/state-store-tab-layout.test.ts test/state-store.test.ts test/static-cache-headers.test.ts \
+        test/state-publication-status.test.ts test/state-store-publication.test.ts test/state-store-tab-layout.test.ts test/state-store.test.ts test/static-cache-headers.test.ts \
         test/status-telemetry-attribution.test.ts
       npm test -- test/string-utilities.test.ts test/strip-ink-redraw-bloat.test.ts test/subagent-watcher.test.ts \
         test/subscription-ui.test.ts test/sw-fetch-skip.test.ts test/sw-precache-manifest.test.ts test/tab-cli-logos-setting.test.ts \

@@ -42,6 +42,8 @@ import {
 import type { OwnerAuthService } from './service.js';
 import type { Relations } from './relations.js';
 import { goalRouteAction, type GoalAction } from '../goal-route-policy.js';
+import { credentiallessTransportCurrent, recheckTransportAuthentication } from '../web/middleware/auth.js';
+import { Session } from '../session.js';
 
 export const OWNER_COOKIE = 'reverie_owner';
 export const DEVICE_COOKIE = 'reverie_owner_device';
@@ -307,10 +309,92 @@ export function callerOf(req: FastifyRequest, deps: Pick<PolicyDeps, 'service' |
 const MAX_LOG_KEYS = 500;
 
 // The admin agent each granted request was let through for (set by the policy hook, read by handlers).
-const adminGrants = new WeakMap<FastifyRequest, string>();
+const adminGrants = new WeakMap<FastifyRequest, { sessionId: string; current(): Promise<boolean> }>();
+
+/** One original request's owner-policy read continuation. This is not Basic/user
+ * authentication or employee authority; those independent checks still apply.
+ * Only the real policy hook records it, after the earlier authentication layer.
+ */
+export interface OwnerEventReadAdmission {
+  current(): boolean;
+}
+const eventReadAdmissions = new WeakMap<FastifyRequest, OwnerEventReadAdmission>();
+export function ownerEventReadAdmission(req: FastifyRequest): OwnerEventReadAdmission | undefined {
+  return eventReadAdmissions.get(req);
+}
 /** The admin agent's session when the policy let this request through on the admin list. */
 export function adminGrant(req: FastifyRequest): string | undefined {
-  return adminGrants.get(req);
+  return adminGrants.get(req)?.sessionId;
+}
+
+/** Only the real policy hook records this original request's continuation. */
+export function adminGrantContinuation(req: FastifyRequest): (() => Promise<boolean>) | undefined {
+  return adminGrants.get(req)?.current;
+}
+
+function captureAdminContinuation(req: FastifyRequest, deps: PolicyDeps, sessionId: string) {
+  const original = deps.ctx.sessions.get(sessionId);
+  const originalOwner = original?.owner;
+  const originalIdentity = req.authUser;
+  const username = originalIdentity?.username,
+    role = originalIdentity?.role;
+  const legacy = credentiallessTransportCurrent(req);
+  let originalEpoch: (() => boolean) | undefined;
+  try {
+    if (original instanceof Session) originalEpoch = Session.prototype.captureRuntimePublicationCurrent.call(original);
+  } catch {
+    /* Missing actual Session custody denies this continuation. */
+  }
+  let account: ReturnType<OwnerAuthService['store']['readCurrent']>;
+  try {
+    account = deps.service.store.readCurrent();
+  } catch {
+    /* Fail closed. */
+  }
+  const incarnation = account && [account.accountId, account.username, account.epoch, account.passwordChangedAt];
+  let revoked = false;
+  const current = () => {
+    try {
+      const caller = callerOf(req, deps),
+        actual = deps.service.store.readCurrent();
+      return (
+        !!original &&
+        !!originalEpoch?.() &&
+        !!incarnation &&
+        !!actual &&
+        deps.ctx.sessions.get(sessionId) === original &&
+        original.id === sessionId &&
+        original.owner === originalOwner &&
+        req.authUser === originalIdentity &&
+        req.authUser?.username === username &&
+        req.authUser?.role === role &&
+        caller.kind === 'agent' &&
+        caller.session === sessionId &&
+        deps.relations.admin(sessionId) &&
+        actual.accountId === incarnation[0] &&
+        actual.username === incarnation[1] &&
+        actual.epoch === incarnation[2] &&
+        actual.passwordChangedAt === incarnation[3]
+      );
+    } catch {
+      return false;
+    }
+  };
+  return Object.freeze({
+    sessionId,
+    current: async () => {
+      if (revoked || !current()) {
+        revoked = true;
+        return false;
+      }
+      const transport = legacy ? credentiallessTransportCurrent(req) : await recheckTransportAuthentication(req);
+      if (!transport || !current()) {
+        revoked = true;
+        return false;
+      }
+      return true;
+    },
+  });
 }
 
 export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): void {
@@ -386,6 +470,15 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     reply.code(status).send(createErrorResponse(status === 401 ? ApiErrorCode.UNAUTHORIZED : code, message));
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
+    const originalToken = req.cookies?.[OWNER_COOKIE];
+    eventReadAdmissions.set(req, Object.freeze({
+      current: () => {
+        const originalSession = deps.service.session(originalToken, false);
+        // Neither a limited nor a password-change login admits the global stream.
+        if (originalSession?.role === 'limited' || originalSession?.restricted) return false;
+        return originalSession !== undefined || deps.service.policy() !== 'enforce';
+      },
+    }));
     // Limited accounts remain limited even when an operator changes the owner policy to off/log.
     const signedIn = deps.service.session(req.cookies?.[OWNER_COOKIE]);
     if (signedIn?.role === 'limited') {
@@ -464,7 +557,7 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
     }
     const admin = caller.kind === 'agent' && ADMIN_ROUTES.has(key) && deps.relations.admin(caller.session!);
     if (admin) {
-      adminGrants.set(req, caller.session!);
+      adminGrants.set(req, captureAdminContinuation(req, deps, caller.session!));
       auditHourly('admin_action', `${caller.session} ${key}`, { caller: caller.session, route: key });
     }
     if (ROUTINE_ROUTES.has(key) && caller.kind === 'service') {

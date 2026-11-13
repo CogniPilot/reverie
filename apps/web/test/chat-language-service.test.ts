@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import { ChatLanguageRequest, ChatLanguageService } from '../src/chat-language-service.js';
@@ -24,16 +24,20 @@ afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-/** Resolves once `file` exists: the fixture server writes its receipt as soon as it has started. */
-async function started(file: string, timeoutMs = 10000) {
+/** Each original child publishes a complete receipt before cancellation. */
+async function started(file: string, count: number, timeoutMs = 10000): Promise<Array<{pid: number}>> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     try {
-      return await readFile(file, 'utf8');
+      const prefix = basename(file) + '.';
+      const names = (await readdir(dirname(file))).filter((name) => name.startsWith(prefix) && name.endsWith('.ready'));
+      if (names.length === count)
+        return await Promise.all(names.map(async (name) => JSON.parse(await readFile(join(dirname(file), name), 'utf8'))));
     } catch (error) {
       if (Date.now() > deadline) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    if (Date.now() > deadline) throw new Error('Original fixture children did not publish readiness');
+    await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
 
@@ -48,7 +52,12 @@ const receipt = ${JSON.stringify(receipt)}, mode = ${JSON.stringify(mode)};
 // A slow start, as on a loaded runner: nothing is written until it has passed.
 if (${startDelayMs} > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${startDelayMs});
 const descendant = mode === 'descendant' ? require('node:child_process').spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'ignore'}) : null;
-fs.writeFileSync(receipt, JSON.stringify({pid: process.pid, child: descendant?.pid, env: process.env, cwd: process.cwd()}));
+const audit = JSON.stringify({pid: process.pid, child: descendant?.pid, env: process.env, cwd: process.cwd()});
+const ready = receipt+'.'+process.pid+'.ready';
+// Another original child may start concurrently. Never expose a truncated
+// receipt or replace the only evidence of the first child's identity.
+fs.writeFileSync(ready+'.tmp', audit); fs.renameSync(ready+'.tmp', ready);
+fs.writeFileSync(receipt+'.'+process.pid+'.tmp', audit); fs.renameSync(receipt+'.'+process.pid+'.tmp', receipt);
 let input = Buffer.alloc(0), uri;
 function send(msg) { const text=JSON.stringify({jsonrpc:'2.0',...msg}); process.stdout.write('Content-Length: '+Buffer.byteLength(text)+'\\r\\n\\r\\n'+text); }
 process.stdin.on('data', data => { input = Buffer.concat([input,data]); while(true) {
@@ -177,13 +186,13 @@ describe('explicit snippet assistance', () => {
     const first = service.assist(request, controller.signal).catch((error) => error);
     const second = service.assist(request).catch((error) => error);
     await expect(service.assist(request)).rejects.toThrow('busy');
-    await started(receipt);
+    const audits = await started(receipt, 2);
+    expect(new Set(audits.map((audit) => audit.pid)).size).toBe(2);
     controller.abort();
     expect((await first).message).toContain('cancelled');
     service.stop();
     expect((await second).message).toContain('cancelled');
-    const audit = JSON.parse(await readFile(receipt, 'utf8'));
-    expect(() => process.kill(audit.pid, 0)).toThrow();
+    for (const audit of audits) expect(() => process.kill(audit.pid, 0)).toThrow();
     const timeout = await fixture('hang', 100);
     await expect(timeout.service.assist(request)).rejects.toThrow(/timed out|deadline/);
   });

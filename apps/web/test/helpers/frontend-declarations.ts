@@ -26,13 +26,29 @@ export function frontendDeclarations(source: string, names: readonly string[]): 
           const kind = flags & ts.NodeFlags.Const ? 'const' : flags & ts.NodeFlags.Let ? 'let' : 'var';
           matches.push(`${kind} ${declaration.getText(file)};`);
         }
-      } else if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) {
+      } else if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) && statement.name?.text === name) {
         matches.push(statement.getText(file));
       }
     }
     if (matches.length !== 1) throw new Error(`Expected one top-level frontend declaration: ${name}; found ${matches.length}`);
     return matches[0];
   }).join('\n');
+}
+
+/** Complete methods from one actual top-level class, without running its constructor/startup. */
+export function frontendClassMethods(source: string, owner: string, names: readonly string[]): string {
+  const file = script(source);
+  const classes = file.statements.filter((statement): statement is ts.ClassDeclaration =>
+    ts.isClassDeclaration(statement) && statement.name?.text === owner);
+  if (classes.length !== 1 || new Set(names).size !== names.length)
+    throw new Error(`Expected one frontend class and unique requested methods: ${owner}`);
+  const selected = classes[0];
+  return names.map(name => {
+    const matches = selected.members.filter(member => ts.isMethodDeclaration(member)
+      && !(ts.getCombinedModifierFlags(member) & ts.ModifierFlags.Static) && property(member.name) === name);
+    if (matches.length !== 1) throw new Error(`Expected one frontend instance method: ${owner}.${name}; found ${matches.length}`);
+    return matches[0].getText(file);
+  }).join(',\n');
 }
 
 /** Complete top-level call statements; comments, strings and nested callbacks cannot impersonate startup. */

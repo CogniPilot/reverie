@@ -63,12 +63,13 @@ async function setup() {
     sessionGeneration: 7,
     desiredRunning: true,
   } as CompanyEmployee;
+  const employees = [caller];
   let now = 1001;
   const app = Fastify();
   clean.push(() => app.close());
   const auth = new WorkerRecoveryAuthentication(
     root,
-    () => [caller],
+    () => employees,
     flock,
     () => now
   );
@@ -118,6 +119,7 @@ async function setup() {
   return {
     root,
     caller,
+    employees,
     write,
     send,
     sign,
@@ -214,3 +216,24 @@ it('limits an accepted operation lease independently from the short request vali
   f.now(301001);
   expect(() => f.principal().assertIssued()).toThrow();
 });
+
+it.each(['employee', 'session'] as const)(
+  'refuses globally duplicate source %s before consuming its nonce',
+  async (kind) => {
+    const f = await setup();
+    const before = fs.readFileSync(join(f.root, 'recovery-nonces.json'));
+    f.employees.push({
+      ...f.caller,
+      ...(kind === 'employee' ? { sessionId: 'different-session' } : { id: 'different-employee' }),
+    });
+    expect((await f.send()).statusCode).toBe(403);
+    expect(fs.readFileSync(join(f.root, 'recovery-nonces.json'))).toEqual(before);
+    f.employees.pop();
+    expect((await f.send()).statusCode).toBe(200);
+    f.employees.push({
+      ...f.caller,
+      ...(kind === 'employee' ? { sessionId: 'different-session' } : { id: 'different-employee' }),
+    });
+    expect(() => f.principal().assertCurrent()).toThrow('caller changed');
+  }
+);

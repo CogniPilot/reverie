@@ -10,7 +10,15 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import ts from 'typescript';
+import { frontendDeclarations } from './helpers/frontend-declarations.js';
+import { browserInputFixture } from './helpers/browser-input-fixture.js';
+import { ZerolagInputAddon } from '../packages/xterm-zerolag-input/src/zerolag-input-addon.js';
+const inputFixtures: ReturnType<typeof browserInputFixture>[] = [];
+afterEach(async () => {
+  for (const fixture of inputFixtures.splice(0)) await fixture.close();
+});
 
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, '..', path), 'utf8');
 const indexSource = read('src/web/public/index.html');
@@ -432,18 +440,32 @@ describe('mobile IME preview lifecycle', () => {
  * Rebuilds the real `handleTerminalData` closure from initTerminal's source,
  * so these cases exercise the shipped routing rather than a copy of it.
  */
-function loadHandleTerminalData(app: App, sent: string[]) {
-  const marker = 'const handleTerminalData = (data) => {';
-  const start = terminalSource.indexOf(marker);
-  if (start < 0) throw new Error('handleTerminalData definition not found');
-  const bodyStart = start + marker.length;
-  const end = terminalSource.indexOf('\n    };', bodyStart);
-  if (end < 0) throw new Error('handleTerminalData boundary not found');
+function loadHandleTerminalData(app: App) {
+  const source = ts.createSourceFile('terminal-ui.js', terminalSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const owners: ts.MethodDeclaration[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === 'initTerminal')
+      owners.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  if (owners.length !== 1 || !owners[0].body) throw new Error('Expected actual initTerminal lexical owner');
+  const declarations = owners[0].body.statements
+    .filter(ts.isVariableStatement)
+    .map((node) => node.getText(source))
+    .join('\n');
+  const closure = frontendDeclarations(declarations, [
+    'createInputOwner',
+    'inputOwner',
+    'flushInput',
+    'retainRawAction',
+    'handleTerminalData',
+  ]);
   const timers: Array<() => void> = [];
-  app._sendInputAsync = (_sessionId: string, data: string) => sent.push(data);
   const context = vm.createContext({
     console,
     performance,
+    __app: app,
     setTimeout: (callback: () => void) => {
       timers.push(callback);
       return timers.length;
@@ -460,24 +482,28 @@ function loadHandleTerminalData(app: App, sent: string[]) {
       },
     },
     _crashDiag: { log: vi.fn() },
-    flushInput: () => {
-      app._inputFlushTimeout = null;
-      if (app._pendingInput && app.activeSessionId) {
-        const input = app._pendingInput;
-        app._pendingInput = '';
-        app._sendInputAsync(app.activeSessionId, input);
-      }
-    },
   });
-  const handler = vm.runInContext(`(function (data) {${terminalSource.slice(bodyStart, end)}\n})`, context) as (
-    this: App,
+  const handler = vm.runInContext('(function(){' + closure + '; return handleTerminalData;}).call(__app)', context) as (
     data: string
   ) => void;
-  return { handle: (data: string) => handler.call(app, data), timers };
+  return { handle: handler, timers };
+}
+
+async function expectDrainedOnce(app: App, sent: string[], original: string[]) {
+  await expect
+    .poll(async () => {
+      await app._drainSession('session-a');
+      return app._pendingDeliveries.get('session-a')?.length || 0;
+    })
+    .toBe(0);
+  expect(sent).toEqual(original);
+  app._redeliverSweep();
+  await app._drainSession('session-a');
+  expect(sent).toEqual(original);
 }
 
 describe('mobile IME commit onData routing', () => {
-  function onDataApp(options: {
+  async function onDataApp(options: {
     localEcho: boolean;
     tagged?: boolean;
     overlayMissing?: boolean;
@@ -485,8 +511,16 @@ describe('mobile IME commit onData routing', () => {
     appendThrows?: boolean;
     consumeThrows?: boolean;
   }) {
-    const { mixin } = loadMixin();
+    const fixture = browserInputFixture();
+    inputFixtures.push(fixture);
     const sent: string[] = [];
+    const base = await fixture.page(
+      async (_url, options) => {
+        sent.push(JSON.parse(String(options?.body)).input);
+        return Response.json({ success: true, data: {} });
+      },
+      ['terminal-ui.js']
+    );
     const controller = {
       consumeTerminalData: options.consumeThrows
         ? vi.fn(() => {
@@ -499,22 +533,20 @@ describe('mobile IME commit onData routing', () => {
       completeCommit: vi.fn(),
       noteAuthoritativeOutput: vi.fn(),
     };
-    const overlay = {
-      pendingText: '',
-      appendText: vi.fn((data: string) => {
-        if (options.appendThrows) throw new Error('overlay failed');
-        overlay.pendingText += data;
-      }),
-      addChar: vi.fn((data: string) => {
-        if (options.addThrows) throw new Error('overlay failed');
-        overlay.pendingText += data;
-      }),
-      clear: vi.fn(() => {
-        overlay.pendingText = '';
-      }),
-      suppressBufferDetection: vi.fn(),
-    };
-    const app: App = Object.assign(Object.create(mixin), {
+    const overlay = new ZerolagInputAddon();
+    const append = vi.spyOn(overlay, 'appendText'),
+      add = vi.spyOn(overlay, 'addChar');
+    vi.spyOn(overlay, 'clear');
+    if (options.appendThrows)
+      append.mockImplementation(() => {
+        throw new Error('overlay failed');
+      });
+    if (options.addThrows)
+      add.mockImplementation(() => {
+        throw new Error('overlay failed');
+      });
+    const app: App = Object.assign(base, {
+      sessions: new Map([['session-a', { id: 'session-a' }]]),
       activeSessionId: 'session-a',
       _localEchoEnabled: options.localEcho,
       _localEchoOverlay: options.overlayMissing ? null : overlay,
@@ -527,11 +559,11 @@ describe('mobile IME commit onData routing', () => {
       _terminalOutputSeq: 5,
       _mobileImePreview: controller,
     });
-    return { app, controller, overlay, sent, ...loadHandleTerminalData(app, sent) };
+    return { app, controller, overlay, sent, ...loadHandleTerminalData(app) };
   }
 
-  it('moves a multi-character commit into local echo and submits it only on Enter', () => {
-    const { app, controller, overlay, sent, handle, timers } = onDataApp({ localEcho: true });
+  it('moves a multi-character commit into local echo and submits it only on Enter', async () => {
+    const { app, controller, overlay, sent, handle, timers } = await onDataApp({ localEcho: true });
     handle('你好');
     expect(controller.consumeTerminalData).toHaveBeenCalledOnce();
     expect(overlay.appendText).toHaveBeenCalledWith('你好');
@@ -540,13 +572,14 @@ describe('mobile IME commit onData routing', () => {
     expect(sent).toEqual([]);
 
     handle('\r');
-    expect(sent).toEqual(['你好']);
-    timers.shift()?.();
-    expect(sent).toEqual(['你好', '\r']);
+    expect(await app._terminalDraftTail).toBe(true);
+    await expectDrainedOnce(app, sent, ['你好', '\r']);
+    expect(overlay.pendingText).toBe('');
+    expect(timers).toEqual([]);
   });
 
-  it('moves a single-character commit into local echo through addChar', () => {
-    const { controller, overlay, sent, handle } = onDataApp({ localEcho: true });
+  it('moves a single-character commit into local echo through addChar', async () => {
+    const { controller, overlay, sent, handle } = await onDataApp({ localEcho: true });
     handle('界');
     expect(overlay.addChar).toHaveBeenCalledWith('界');
     expect(overlay.appendText).not.toHaveBeenCalled();
@@ -557,25 +590,25 @@ describe('mobile IME commit onData routing', () => {
   it.each([
     ['appendText throws', { appendThrows: true }, '失敗'],
     ['addChar throws', { addThrows: true }, '字'],
-  ])('never sends a commit the overlay may already hold when %s', (_label, extra, text) => {
+  ])('never sends a commit the overlay may already hold when %s', async (_label, extra, text) => {
     // One code path with typed text: no send-on-throw fallback, which would
     // double-send if the overlay threw after appending.
-    const { controller, sent, handle } = onDataApp({ localEcho: true, ...extra });
+    const { controller, sent, handle } = await onDataApp({ localEcho: true, ...extra });
     expect(() => handle(text)).toThrow('overlay failed');
     expect(sent).toEqual([]);
     // Nothing shows the text, so the preview keeps it until its fallback.
     expect(controller.completeCommit).not.toHaveBeenCalled();
   });
 
-  it('keeps the preview when the overlay is missing, exactly like typed text', () => {
-    const { controller, sent, handle } = onDataApp({ localEcho: true, overlayMissing: true });
+  it('keeps the preview when the overlay is missing, exactly like typed text', async () => {
+    const { controller, sent, handle } = await onDataApp({ localEcho: true, overlayMissing: true });
     expect(() => handle('日本')).not.toThrow();
     expect(sent).toEqual([]);
     expect(controller.completeCommit).not.toHaveBeenCalled();
   });
 
-  it('completes the commit only after the printable branch has put it in the overlay', () => {
-    const { controller, overlay, handle } = onDataApp({ localEcho: true });
+  it('completes the commit only after the printable branch has put it in the overlay', async () => {
+    const { controller, overlay, handle } = await onDataApp({ localEcho: true });
     controller.completeCommit.mockImplementation(() => {
       expect(overlay.pendingText).toBe('界');
     });
@@ -583,27 +616,29 @@ describe('mobile IME commit onData routing', () => {
     expect(controller.completeCommit).toHaveBeenCalledOnce();
   });
 
-  it('keeps an untagged paste on the existing local echo path', () => {
-    const { controller, overlay, sent, handle } = onDataApp({ localEcho: true, tagged: false });
+  it('keeps an untagged paste on the existing local echo path', async () => {
+    const { controller, overlay, sent, handle } = await onDataApp({ localEcho: true, tagged: false });
     handle('plain paste');
     expect(overlay.pendingText).toBe('plain paste');
     expect(controller.completeCommit).not.toHaveBeenCalled();
     expect(sent).toEqual([]);
   });
 
-  it('sends a commit once without local echo and holds the preview until output arrives', () => {
-    const { app, controller, sent, handle } = onDataApp({ localEcho: false });
+  it('sends a commit once without local echo and holds the preview until output arrives', async () => {
+    const { app, controller, sent, handle } = await onDataApp({ localEcho: false });
     handle('日本語');
     expect(controller.consumeTerminalData).toHaveBeenCalledOnce();
-    expect(sent).toEqual(['日本語']);
+    expect(await app._pendingInputOwner.flush()).toBe(true);
+    await expectDrainedOnce(app, sent, ['日本語']);
     expect(controller.completeCommit).not.toHaveBeenCalled();
     expect(app._mobileImeCommitOutputSeq).toBe(5);
   });
 
-  it('sends the original bytes exactly once when the controller throws', () => {
-    const { sent, handle } = onDataApp({ localEcho: false, consumeThrows: true });
+  it('sends the original bytes exactly once when the controller throws', async () => {
+    const { app, sent, handle } = await onDataApp({ localEcho: false, consumeThrows: true });
     expect(() => handle('你好')).not.toThrow();
-    expect(sent).toEqual(['你好']);
+    expect(await app._pendingInputOwner.flush()).toBe(true);
+    await expectDrainedOnce(app, sent, ['你好']);
   });
 });
 

@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -21,7 +21,6 @@ afterEach(async () => {
 /** A real Session over a mux whose sendInput runs the real typeAndSubmit against a scripted pane. */
 function codexSession(screen: { text: string }, hooks: { onType?: (s: Session) => void; onSleep?: (s: Session) => void } = {}) {
   const keys: string[] = [];
-  let session!: Session;
   const io = {
     capture: () => screen.text,
     typeText: async (text: string) => {
@@ -35,14 +34,14 @@ function codexSession(screen: { text: string }, hooks: { onType?: (s: Session) =
       screen.text = `• Working (esc to interrupt)\n›\n${FOOTER}`;
     },
   };
-  const mux = {
+  const registry = registeredMuxFixture({mode: 'codex',  muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 });
+  const mux = { ...registry,
     capturePaneText: () => screen.text,
     sendInput: vi.fn(async (_id: string, input: string, options: { requireEmptyComposer?: boolean } = {}) =>
       (await typeAndSubmit(io, input.replace(/\r/g, ''), { glyph: '›', workingLine: 'esc to interrupt' }, 'control', options.requireEmptyComposer)) !== 'not-written'),
   };
-  session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'codex', useMux: true, mux: mux as never,
-    muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
-  registerMuxFixture(session);
+  const session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: 'codex', useMux: true, mux: mux as never,
+    muxSession: registry.subject });
   cleanups.push(async () => {
     Object.assign(session, { ptyProcess: null, _muxSession: null });
     await session.stop(false);

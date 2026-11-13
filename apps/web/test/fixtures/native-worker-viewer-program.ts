@@ -70,32 +70,17 @@ let mux: TmuxManager | undefined,
   store: PendingDeliveryStore | undefined;
 let finished = false;
 try {
-  native('-f', '/dev/null', 'new-session', '-d', '-x', '160', '-y', '40', '-s', name, 'exec sleep 90');
-  native('set-option', '-t', name, 'remain-on-exit', 'on');
-  native(
-    'respawn-pane',
-    '-k',
-    '-t',
-    name,
-    `exec ${join(root, 'bin/reverie-worker-exec')} --attach-only --session-id ${sid} --cwd ${work} --command must-never-run`
-  );
+  // Admit the original viewer through the actual product constructor. A
+  // manually registered record cannot recreate private attachment custody.
+  mux = new TmuxManager();
+  const record = await mux.createSession({ sessionId: sid, workingDir: work, mode: 'codex', workerAttachOnly: true });
   await wait(
     () => native('capture-pane', '-p', '-t', name).includes('esc to interrupt'),
     5000,
     'initial live provider screen'
   );
   const firstViewerPID = Number(native('display-message', '-p', '-t', name, '#{pane_pid}'));
-  mux = new TmuxManager();
-  const record: any = {
-    sessionId: sid,
-    muxName: name,
-    pid: firstViewerPID,
-    createdAt: Date.now(),
-    workingDir: work,
-    mode: 'codex',
-    attached: false,
-  };
-  mux.registerSession(record);
+  assert.equal(record.pid, firstViewerPID);
   session = new Session({ id: sid, workingDir: work, mode: 'codex', useMux: true, mux, muxSession: record });
   (session as any)._attachExistingMuxClient('isolated baseline attach');
   (session as any)._bindInteractivePty(false);

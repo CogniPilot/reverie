@@ -13,9 +13,12 @@
 import type { TokenPattern } from './patterns.js';
 import type {
   AccountReplacementProfileName,
+  DockerCaseSeedProfileName,
   LaunchEffortInputName,
   StartupAccountProfileName,
   ThreadStateProfileName,
+  WorkspaceSummaryHookProfileName,
+  RuntimePolicyFallbackProfileName,
 } from './profiles.js';
 
 /**
@@ -142,6 +145,8 @@ export interface CliLaunch {
   threadStateProfile?: ThreadStateProfileName;
   /** Session-level effort codec; requires the shipped engine binding, never inferred from an id. */
   effortInput?: LaunchEffortInputName;
+  /** Persist the fixed Docker pane wrapper's conversation into its existing case seed field. */
+  dockerCaseSeed?: DockerCaseSeedProfileName;
   variants: CliVariant[];
   /**
    * Maps a declared param name to the field name it arrives under on the legacy
@@ -368,14 +373,12 @@ export interface FullAccessDefaults {
 }
 
 export interface CliCapabilities {
-  /** Terminal input protocol, independent of transcript and account support. */
-  input?: {
-    keyBurstMaxChars?: number;
+  /** Measured terminal behavior data. These flags never grant input or lifecycle authority. */
+  terminalInput?: {
     requiresEmptyComposer?: boolean;
-    shellKeyGuard?: boolean;
+    shellKeyGuard?: 'bang-shell';
+    keyBurstMaxChars?: number;
   };
-  /** Local workspace hook codec installed before starting the provider. */
-  turnSummaryHooks?: 'codex-config-v1';
   /** Presentation preference among enabled harnesses with supported local-model injection. */
   localModelPreference?: 'preferred';
   /** Explicit reboot offer policy; never inferred from a transcript reader or resume argument. */
@@ -390,6 +393,10 @@ export interface CliCapabilities {
   accountReplacementRefusal?: string;
   /** Workspace file authoring, independent from runtime lifecycle hook support. */
   workspaceHooks: WorkspaceHookProfile;
+  /** Stock-owned writer for optional project summary hooks; independent of lifecycle hooks/trust. */
+  workspaceSummaryHooks?: WorkspaceSummaryHookProfileName;
+  /** Stock-owned read-only runtime policy codec, never backend mutation authority. */
+  runtimePolicyFallback?: RuntimePolicyFallbackProfileName;
   /** Positive opt-in: reads its server-authorized rooms through the API; never type into its pane. */
   chatDelivery?: 'poll';
   /**

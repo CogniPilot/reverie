@@ -1,3 +1,4 @@
+
 /**
  * The test suites that `npm test` deliberately does NOT run, in one place.
  *
@@ -44,8 +45,14 @@ export const BROWSER_TEST_GLOBS = [
   'test/company-resource-layout.browser.test.ts',
   'test/office-server.browser.test.ts',
   'test/office-owner-controls.browser.test.ts',
+  'test/office-retirement.browser.test.ts',
   'test/approvals-held-layout.browser.test.ts',
   'test/terminal-input-recovery.browser.test.ts',
+  'test/state-publication-status.browser.test.ts',
+  'test/employee-resource-controls.browser.test.ts',
+  'test/employee-recovery-settlement.browser.test.ts',
+  'test/browser-input-journal.browser.test.ts',
+  'test/browser-input-delivery.browser.test.ts',
   'test/browser-coverage-attribution.browser.test.ts',
   'test/office-power.browser.test.ts',
   'test/workspace-gutter-navigation.browser.test.ts',

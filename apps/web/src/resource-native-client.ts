@@ -11,7 +11,13 @@ import { performance } from 'node:perf_hooks';
 import { z } from 'zod';
 import { EmployeeGpuIntentData, EmployeeGpuApplyData } from './employee-gpu-data.js';
 import { EmployeePolicyEditApproval, EmployeePolicyEditResult } from './resource-employee-data.js';
+import {
+  EmployeeRecoveryApproval,
+  parseEmployeeRecoveryResult,
+  type EmployeeRecoveryResult,
+} from './employee-recovery-operation.js';
 import { Session } from './session.js';
+import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { ResourceWorkerLaunch } from './resource-worker-launch.js';
 import { ResourceSessionReadiness } from './resource-readiness.js';
@@ -26,11 +32,13 @@ import {
   type RamResourceOwnerContext,
   type RamResourcePreviewContext,
   type RamResourceStatusContext,
+  type RamMemoryDiagnosticsContext,
   type RamGpuStatusContext,
   type RamGpuApplyStatusContext,
   type RamGpuRequestContext,
   type RamGpuApplyContext,
   type RamEmployeePolicyEditContext,
+  type RamEmployeeRecoveryContext,
 } from './resource-owner-authority.js';
 
 const MAX_FRAME = 64 * 1024;
@@ -67,16 +75,27 @@ const Check = z
   })
   .strict();
 const RamCheck = Check.extend({
-  approval: z.union([RamApproval, EmployeeGpuIntentData, EmployeeGpuApplyData, EmployeePolicyEditApproval]).nullable(),
+  approval: z
+    .union([
+      RamApproval,
+      EmployeeGpuIntentData,
+      EmployeeGpuApplyData,
+      EmployeePolicyEditApproval,
+      EmployeeRecoveryApproval,
+    ])
+    .nullable(),
   stage: z.enum([
     'preview',
     'apply',
     'status',
+    'employee-memory-diagnostics',
     'gpu-status',
     'gpu-apply-status',
     'gpu-request',
     'gpu-apply',
     'employee-policy-edit',
+    'employee-recovery',
+    'employee-recovery-observe',
   ]),
 }).strict();
 const RamDraft = z
@@ -86,6 +105,7 @@ const EmployeeStatus = z.object({ employeeId: UUID, sessionId: UUID }).strict();
 const GpuApply = z.object({ employeeId: UUID, approval: EmployeeGpuApplyData }).strict();
 const GpuRequest = z.object({ employeeId: UUID, approval: EmployeeGpuIntentData }).strict();
 const EmployeePolicyEdit = z.object({ employeeId: UUID, approval: EmployeePolicyEditApproval }).strict();
+const EmployeeRecovery = z.object({ employeeId: UUID, approval: EmployeeRecoveryApproval }).strict();
 const RamClaim = z.object({ approval: RamApproval }).strict();
 const RamReference = z
   .object({
@@ -93,6 +113,21 @@ const RamReference = z
   })
   .strict();
 const Reply = z.object({ kind: z.literal('resource-result'), requestId: UUID, value: z.unknown() }).strict();
+
+const StoppedOriginal = z
+  .object({
+    kind: z.literal('resource-stopped-original'),
+    version: z.literal(1),
+    purpose: z.literal('employee-recovery-stopped-original-v1'),
+    requestId: UUID,
+    ownerNonce: UUID,
+    ownerScopeDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    employeeId: UUID,
+    approval: EmployeeRecoveryApproval,
+    value: z.unknown(),
+  })
+  .strict();
+
 const Refusal = z
   .object({ kind: z.literal('resource-refused'), requestId: UUID, reason: z.string().regex(/^[A-Z][A-Z0-9_]{0,95}$/) })
   .strict();
@@ -306,6 +341,45 @@ export class ResourceSessionLaunchTask {
   }
 }
 
+const STOPPED_MINT = Symbol('original-stopped-response');
+interface StoppedResponseOwner {
+  readonly client: ResourceNativeClient;
+  readonly attempt: EmployeeRecoveryAttempt;
+  readonly current: () => void;
+  readonly native: EmployeeRecoveryResult;
+  valid: boolean;
+  claimed: boolean;
+}
+const stoppedResponseOwners = new WeakMap<object, StoppedResponseOwner>();
+/** Process-private ownership of one complete original-Q terminal response.
+ * Normal EOF does not revoke the known native fact. Current metadata-write
+ * authority and the original application subject are still checked on use. */
+export class OriginalStoppedRecovery {
+  constructor(token: symbol, owner: StoppedResponseOwner) {
+    need(token === STOPPED_MINT && registered.has(owner.client));
+    stoppedResponseOwners.set(this, owner);
+    Object.freeze(this);
+  }
+  /** Identity-only correlation. This cannot authorize a write or mint another receipt. */
+  assertOriginalFor(attempt: EmployeeRecoveryAttempt): void {
+    const owner = stoppedResponseOwners.get(this);
+    need(owner && owner.valid && owner.attempt === attempt);
+  }
+  assertFor(attempt: EmployeeRecoveryAttempt): void {
+    this.assertOriginalFor(attempt);
+    stoppedResponseOwners.get(this)!.current();
+  }
+  claimFor(attempt: EmployeeRecoveryAttempt): void {
+    this.assertFor(attempt);
+    const owner = stoppedResponseOwners.get(this)!;
+    need(!owner.claimed);
+    owner.claimed = true;
+  }
+  toJSON(): never {
+    throw Error('Original stopped recovery evidence is server-private');
+  }
+}
+
 interface Pending {
   readonly id: string;
   readonly deadline: number;
@@ -317,6 +391,7 @@ interface Pending {
   readonly readiness?: ResourceSessionReadiness;
   readonly challenges: Set<string>;
   resultSeen: boolean;
+  lastRecoveryOwnerNonce?: string;
 }
 
 /** Current-cookie proof is evaluated by the real authority for every native
@@ -333,7 +408,10 @@ export class ResourceNativeClient {
   #ready = false;
   #closed = false;
   #pending?: Pending;
+  #recoveryObserver?: EmployeeRecoveryAttempt;
+  #stoppedResponse?: OriginalStoppedRecovery;
   #frames = 0;
+  #readDeadline: number | undefined;
   constructor(token: symbol, socket: Socket, authority: ResourceOwnerAuthority, context: AnyResourceContext) {
     need(token === MINT && socket instanceof Socket && authority instanceof ResourceOwnerAuthority);
     authority.assertContext(context);
@@ -349,7 +427,7 @@ export class ResourceNativeClient {
         this.close(error as Error);
       }
     });
-    socket.on('error', () => this.close());
+    socket.on('error', (error) => this.close(error));
     socket.on('close', () => this.close());
   }
   static async open(
@@ -367,33 +445,53 @@ export class ResourceNativeClient {
       | RamResourceOwnerContext
       | RamResourcePreviewContext
       | RamResourceStatusContext
+      | RamMemoryDiagnosticsContext
       | RamGpuStatusContext
       | RamGpuApplyStatusContext
       | RamGpuRequestContext
       | RamGpuApplyContext
       | RamEmployeePolicyEditContext
+      | RamEmployeeRecoveryContext,
+    readDeadline?: number
   ): Promise<ResourceNativeClient> {
     need(context.purpose === 'resource-ram-pool-v2');
-    return this.#open(path, authority, context);
+    return this.#open(path, authority, context, readDeadline);
   }
   static async #open(
     path: string,
     authority: ResourceOwnerAuthority,
-    context: AnyResourceContext
+    context: AnyResourceContext,
+    readDeadline?: number
   ): Promise<ResourceNativeClient> {
     authority.assertContext(context);
+    if (readDeadline !== undefined)
+      need(
+        Number.isFinite(readDeadline) &&
+          readDeadline > performance.now() &&
+          ['status', 'employee-memory-diagnostics'].includes(context.stage)
+      );
+    if (readDeadline !== undefined) readDeadline = Math.min(readDeadline, performance.now() + 10_000);
     need(isAbsolute(path) && normalize(path) === path && !/[\0\r\n]/.test(path) && process.getuid);
     const before = await lstat(path, { bigint: true });
     need(before.isSocket() && before.uid === BigInt(process.getuid()) && (before.mode & 0o077n) === 0n);
     authority.assertContext(context);
+    if (readDeadline !== undefined) need(readDeadline > performance.now());
     const socket = new Socket(),
       client = new ResourceNativeClient(MINT, socket, authority, context);
+    client.#readDeadline = readDeadline;
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          socket.destroy();
-          reject(new Error('Protected resource connection expired'));
-        }, 3000);
+        const timer = setTimeout(
+          () => {
+            socket.destroy();
+            reject(new Error('Protected resource connection expired'));
+          },
+          Math.min(
+            3000,
+            Math.max(1, context.expiresAtEpochMs - Date.now()),
+            readDeadline === undefined ? 3000 : Math.max(1, readDeadline - performance.now())
+          )
+        );
         socket.once('connect', () => {
           clearTimeout(timer);
           resolve();
@@ -409,6 +507,7 @@ export class ResourceNativeClient {
         before.dev === after.dev && before.ino === after.ino && before.mode === after.mode && before.uid === after.uid
       );
       authority.assertContext(context);
+      if (readDeadline !== undefined) need(readDeadline > performance.now());
       // First-frame purpose has no owner/session values or generic operation.
       const raw = Buffer.from(
         JSON.stringify({ purpose: context.purpose, version: context.purpose === 'resource-ram-pool-v2' ? 2 : 1 })
@@ -423,14 +522,18 @@ export class ResourceNativeClient {
       throw error;
     }
   }
-  close(error = new Error('Protected resource outcome is unavailable; inspect the retained operation')): void {
+  close(error?: Error): void {
+    if (error && this.#stoppedResponse) {
+      const owner = stoppedResponseOwners.get(this.#stoppedResponse);
+      if (owner) owner.valid = false;
+    }
     if (this.#closed) return;
     this.#closed = true;
     const pending = this.#pending;
     this.#pending = undefined;
     if (pending) {
       clearTimeout(pending.timer);
-      pending.reject(error);
+      pending.reject(error ?? new Error('Protected resource outcome is unavailable; inspect the retained operation'));
     }
     this.#untrack();
     this.#socket.destroy();
@@ -556,10 +659,15 @@ export class ResourceNativeClient {
         approval,
       };
       if (this.#context.purpose === 'resource-ram-pool-v2') {
-        this.#write({ ...ownerReply, principal: this.#context.principal });
+        this.#write(
+          this.#context.stage === 'employee-recovery' || this.#context.stage === 'employee-recovery-observe'
+            ? { ...ownerReply, recoveryAuthority: this.#context.recoveryAuthority }
+            : { ...ownerReply, principal: this.#context.principal }
+        );
       } else {
         this.#write(ownerReply);
       }
+      if (this.#context.stage === 'employee-recovery-observe') pending.lastRecoveryOwnerNonce = check.nonce;
     } else if (Readiness.safeParse(value).success) {
       need(this.#context.purpose === 'resource-replacement-v1');
       const check = Readiness.parse(value);
@@ -618,6 +726,37 @@ export class ResourceNativeClient {
         RamResourceSessionLaunchTask.prototype.assertContext.call(pending.launch, this.#context, launch.reference);
       } else need(pending.launch instanceof ResourceSessionLaunchTask);
       pending.launch.begin(launch.reference);
+    } else if (StoppedOriginal.safeParse(value).success) {
+      const context = this.#context,
+        attempt = this.#recoveryObserver,
+        reply = StoppedOriginal.parse(value);
+      need(
+        context.purpose === 'resource-ram-pool-v2' &&
+          context.stage === 'employee-recovery-observe' &&
+          attempt &&
+          context.approval.action === 'stop-provider' &&
+          context.approval.parentOperationId === null &&
+          reply.requestId === pending.id &&
+          pending.lastRecoveryOwnerNonce === reply.ownerNonce &&
+          reply.ownerScopeDigest === context.ownerScopeDigest &&
+          reply.employeeId === context.employeeId &&
+          isDeepStrictEqual(reply.approval, context.approval)
+      );
+      const native = parseEmployeeRecoveryResult(reply.value, context.employeeId, context.approval);
+      need(native.outcome === 'provider-stopped');
+      EmployeeRecoveryAttempt.prototype.assertOriginalObservation.call(attempt, this.#authority, context);
+      const evidence = new OriginalStoppedRecovery(STOPPED_MINT, {
+        client: this,
+        attempt,
+        native,
+        valid: true,
+        claimed: false,
+        current: () => {
+          EmployeeRecoveryAttempt.prototype.assertOriginalObservation.call(attempt, this.#authority, context);
+        },
+      });
+      this.#stoppedResponse = evidence;
+      this.#resolveResult(pending, native);
     } else if (Refusal.safeParse(value).success) {
       const refused = Refusal.parse(value);
       need(refused.requestId === pending.id);
@@ -625,7 +764,17 @@ export class ResourceNativeClient {
     } else {
       const reply = Reply.parse(value);
       need(reply.requestId === pending.id);
-      if (['gpu-status', 'gpu-apply-status', 'gpu-request', 'gpu-apply'].includes(this.#context.stage))
+      if (
+        [
+          'employee-memory-diagnostics',
+          'gpu-status',
+          'gpu-apply-status',
+          'gpu-request',
+          'gpu-apply',
+          'employee-recovery',
+          'employee-recovery-observe',
+        ].includes(this.#context.stage)
+      )
         need(pending.challenges.size > 0);
       if (this.#context.stage === 'employee-policy-edit') {
         const result = EmployeePolicyEditResult.parse(reply.value);
@@ -639,21 +788,77 @@ export class ResourceNativeClient {
             result.cpuWeight === approval.cpuWeight
         );
       }
-      pending.resultSeen = true;
-      void (async () => {
-        try {
-          if (pending.launch) await pending.launch.wait();
-          need(this.#pending === pending && !this.#closed && performance.now() < pending.deadline);
-          this.#authority.assertContext(this.#context);
-          clearTimeout(pending.timer);
-          this.#pending = undefined;
-          pending.resolve(reply.value);
-        } catch (error) {
-          this.close(error as Error);
-        }
-      })();
+      this.#resolveResult(pending, reply.value);
     }
   }
+  /** Same protected Q context and exact original approval. This returns DATA;
+   * a decoded value alone does not provide a settlement/replay capability. */
+  async employeeRecovery(): Promise<EmployeeRecoveryResult> {
+    need(
+      registered.has(this) &&
+        this.#context.purpose === 'resource-ram-pool-v2' &&
+        (this.#context.stage === 'employee-recovery' || this.#context.stage === 'employee-recovery-observe')
+    );
+    const context = this.#context;
+    if (context.stage !== 'employee-recovery' && context.stage !== 'employee-recovery-observe')
+      throw Error('Original recovery context required');
+    const value = await this.request(context.stage, { employeeId: context.employeeId, approval: context.approval });
+    this.#authority.assertContext(context);
+    return parseEmployeeRecoveryResult(value, context.employeeId, context.approval);
+  }
+  /** No caller DTO can enter this factory. Only this actual pending observe
+   * exchange may yield a private terminal-response owner. */
+  async observeEmployeeRecoveryOriginal(attempt: EmployeeRecoveryAttempt): Promise<
+    Readonly<{
+      native: EmployeeRecoveryResult;
+      stopped?: OriginalStoppedRecovery;
+    }>
+  > {
+    need(
+      registered.has(this) &&
+        !this.#closed &&
+        !this.#pending &&
+        !this.#recoveryObserver &&
+        this.#context.purpose === 'resource-ram-pool-v2' &&
+        this.#context.stage === 'employee-recovery-observe'
+    );
+    const context = this.#context;
+    EmployeeRecoveryAttempt.prototype.assertContext.call(attempt, this.#authority, context);
+    this.#recoveryObserver = attempt;
+    this.#stoppedResponse = undefined;
+    try {
+      const value = await this.request(context.stage, { employeeId: context.employeeId, approval: context.approval });
+      const native = parseEmployeeRecoveryResult(value, context.employeeId, context.approval);
+      const stopped = this.#currentStoppedResponse(attempt);
+      // A dedicated receipt checks this same original authority/Attempt once.
+      // Flat DATA keeps the ordinary context check; neither path skips it.
+      if (!stopped) this.#authority.assertContext(context);
+      return Object.freeze({ native, ...(stopped ? { stopped } : {}) });
+    } finally {
+      if (this.#recoveryObserver === attempt) this.#recoveryObserver = undefined;
+    }
+  }
+  #currentStoppedResponse(attempt: EmployeeRecoveryAttempt): OriginalStoppedRecovery | undefined {
+    const stopped = this.#stoppedResponse;
+    stopped?.assertFor(attempt);
+    return stopped;
+  }
+  #resolveResult(pending: Pending, value: unknown): void {
+    pending.resultSeen = true;
+    void (async () => {
+      try {
+        if (pending.launch) await pending.launch.wait();
+        need(this.#pending === pending && !this.#closed && performance.now() < pending.deadline);
+        this.#authority.assertContext(this.#context);
+        clearTimeout(pending.timer);
+        this.#pending = undefined;
+        pending.resolve(value);
+      } catch (error) {
+        this.close(error as Error);
+      }
+    })();
+  }
+
   /** Closed native verbs only; caller references remain non-authorizing. */
   async historicalCompletion(record: Readonly<PlanMoveRecord>): Promise<ResourceHistoricalSettlement> {
     need(
@@ -675,11 +880,14 @@ export class ResourceNativeClient {
   async request(
     verb:
       | 'employee-status'
+      | 'employee-memory-diagnostics'
       | 'gpu-status'
       | 'gpu-apply-status'
       | 'gpu-request'
       | 'gpu-apply'
       | 'employee-policy-edit'
+      | 'employee-recovery'
+      | 'employee-recovery-observe'
       | 'draft'
       | 'claim'
       | 'publication'
@@ -705,7 +913,7 @@ export class ResourceNativeClient {
           this.#context.stage === 'status' && selected.employeeId === this.#context.employeeId && launch === undefined
         );
         selectedFields = Object.freeze(selected);
-      } else if (verb === 'gpu-status' || verb === 'gpu-apply-status') {
+      } else if (verb === 'gpu-status' || verb === 'gpu-apply-status' || verb === 'employee-memory-diagnostics') {
         const selected = EmployeeStatus.parse(fields);
         need(
           this.#context.stage === verb &&
@@ -727,6 +935,15 @@ export class ResourceNativeClient {
         const selected = EmployeePolicyEdit.parse(fields);
         need(
           this.#context.stage === 'employee-policy-edit' &&
+            selected.employeeId === this.#context.employeeId &&
+            isDeepStrictEqual(selected.approval, this.#context.approval) &&
+            launch === undefined
+        );
+        selectedFields = Object.freeze({ employeeId: selected.employeeId, approval: this.#context.approval });
+      } else if (verb === 'employee-recovery' || verb === 'employee-recovery-observe') {
+        const selected = EmployeeRecovery.parse(fields);
+        need(
+          this.#context.stage === verb &&
             selected.employeeId === this.#context.employeeId &&
             isDeepStrictEqual(selected.approval, this.#context.approval) &&
             launch === undefined
@@ -760,11 +977,14 @@ export class ResourceNativeClient {
     need(
       [
         'employee-status',
+        'employee-memory-diagnostics',
         'gpu-status',
         'gpu-apply-status',
         'gpu-request',
         'gpu-apply',
         'employee-policy-edit',
+        'employee-recovery',
+        'employee-recovery-observe',
         'draft',
         'claim',
         'publication',
@@ -777,19 +997,25 @@ export class ResourceNativeClient {
       ].includes(verb) &&
         (![
           'employee-status',
+          'employee-memory-diagnostics',
           'gpu-status',
           'gpu-apply-status',
           'gpu-request',
           'gpu-apply',
           'employee-policy-edit',
+          'employee-recovery',
+          'employee-recovery-observe',
         ].includes(verb) ||
           this.#context.purpose === 'resource-ram-pool-v2') &&
         this.#context.stage ===
-          (verb === 'gpu-status' ||
+          (verb === 'employee-memory-diagnostics' ||
+          verb === 'gpu-status' ||
           verb === 'gpu-apply-status' ||
           verb === 'gpu-request' ||
           verb === 'gpu-apply' ||
-          verb === 'employee-policy-edit'
+          verb === 'employee-policy-edit' ||
+          verb === 'employee-recovery' ||
+          verb === 'employee-recovery-observe'
             ? verb
             : verb === 'employee-status'
               ? 'status'
@@ -807,9 +1033,15 @@ export class ResourceNativeClient {
           : readiness === undefined)
     );
     const id = randomUUID(),
-      remaining = Math.min(180_000, this.#context.expiresAtEpochMs - Date.now());
+      remaining = Math.min(
+        180_000,
+        this.#context.expiresAtEpochMs - Date.now(),
+        this.#readDeadline === undefined ? 180_000 : this.#readDeadline - performance.now()
+      );
     need(remaining > 0);
     if (this.#context.stage === 'employee-policy-edit') this.#authority.consumeEmployeePolicyEdit(this.#context);
+    if (this.#context.stage === 'employee-recovery' || this.#context.stage === 'employee-recovery-observe')
+      this.#authority.consumeEmployeeRecovery(this.#context);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => this.close(new Error('Protected resource outcome expired; do not retry')),

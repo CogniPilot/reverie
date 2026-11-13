@@ -19,7 +19,9 @@ import { readFileSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {ZerolagInputAddon} from '../packages/xterm-zerolag-input/src/zerolag-input-addon.js';
+import {browserInputFixture} from './helpers/browser-input-fixture.js';
 
 type OverlayStub = {
   pendingText: string;
@@ -45,7 +47,6 @@ type AppInstance = {
   loadAppSettingsFromStorage: () => Record<string, unknown>;
   sendInput: ReturnType<typeof vi.fn>;
   _updateLocalEchoState(): void;
-  _flushLocalEchoPending(): void;
   insertTerminalText(text: string): void;
 };
 
@@ -199,22 +200,55 @@ describe('_updateLocalEchoState mode gating', () => {
   });
 });
 
-describe('_flushLocalEchoPending', () => {
-  it('moves pending text into _pendingInput and resets overlay + flushed tracking', () => {
-    const overlay = makeOverlay('hello');
-    const app = makeApp('claude', overlay);
-    app._flushLocalEchoPending();
-    expect(app._pendingInput).toBe('hello');
-    expect(overlay.cleared).toBe(1);
-    expect(overlay.suppressed).toBe(1);
-    expect(app._flushedOffsets!.has('s1')).toBe(false);
-    expect(app._flushedTexts!.has('s1')).toBe(false);
+describe('committed overlay flush ownership', () => {
+  let fixture: ReturnType<typeof browserInputFixture>;
+  afterEach(async () => {await fixture?.close();});
+  async function flushApp(text: string) {
+    fixture = browserInputFixture(); const calls: string[] = [];
+    const base = await fixture.page(async (_url, options) => {calls.push(JSON.parse(String(options?.body)).input); return Response.json({success: true, data: {}});});
+    const overlay = new ZerolagInputAddon(); overlay.appendText(text); overlay.setFlushed(3, 'old');
+    vi.spyOn(overlay, 'clear');
+    const app = Object.assign(base, {activeSessionId: 's1', _localEchoOverlay: overlay, _pendingInput: 'other pending bytes',
+      _flushedOffsets: new Map([['s1', 3]]), _flushedTexts: new Map([['s1', 'old']])}) as typeof base & {
+        _flushLocalEchoTo(id: string): Promise<boolean>; _pendingInput: string;
+        _flushedOffsets: Map<string, number>; _flushedTexts: Map<string, string>;
+      };
+    return {app, overlay, calls};
+  }
+  it('clears only after journal acceptance and keeps exact flushed tracking for that session', async () => {
+    const {app, overlay, calls} = await flushApp('hello');
+    expect(await app._flushLocalEchoTo('s1')).toBe(true);
+    expect(overlay.pendingText).toBe(''); expect(overlay.clear).not.toHaveBeenCalled(); expect(overlay.getFlushed()).toEqual({count: 8, text: 'oldhello'});
+    expect(app._pendingInput).toBe('other pending bytes');
+    expect(app._flushedOffsets.get('s1')).toBe(8); expect(app._flushedTexts.get('s1')).toBe('oldhello');
+    await expect.poll(() => calls).toEqual(['hello']);
   });
-
-  it('appends nothing when the overlay is empty', () => {
-    const app = makeApp('claude', makeOverlay(''));
-    app._flushLocalEchoPending();
-    expect(app._pendingInput).toBe('');
+  it('an empty overlay neither creates a record nor rewrites pending bytes', async () => {
+    const {app, overlay, calls} = await flushApp('');
+    expect(await app._flushLocalEchoTo('s1')).toBe(true);
+    expect(app._pendingInput).toBe('other pending bytes'); expect(overlay.clear).not.toHaveBeenCalled();
+    expect((await app._inputJournal.snapshot()).records).toEqual([]); expect(calls).toEqual([]);
+  });
+  it('an aborted transaction leaves the original draft and tracking intact with no transport effect', async () => {
+    const {app, overlay, calls} = await flushApp('keep this'); fixture.abortWrites();
+    expect(await app._flushLocalEchoTo('s1')).toBe(false); expect(overlay.pendingText).toBe('keep this');
+    expect(overlay.clear).not.toHaveBeenCalled(); expect(app._flushedOffsets.get('s1')).toBe(3); expect(calls).toEqual([]);
+  });
+  it.each(['append', 'retype'] as const)('an accepted original flush consumes only its own text after %s', async mode => {
+    const {app, overlay, calls} = await flushApp('same text');
+    const journal = app._inputJournal, accept = journal.accept.bind(journal);
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(done => {release = done;}), began = new Promise<void>(done => {entered = done;});
+    let first = true;
+    journal.accept = async (...args: Parameters<typeof accept>) => {if (first) {first = false; entered(); await gate;} return accept(...args);};
+    const pending = app._flushLocalEchoTo('s1'); await began;
+    if (mode === 'retype') {overlay.clear(); overlay.appendText('same text');}
+    else overlay.appendText(' new');
+    release(); expect(await pending).toBe(false);
+    expect(overlay.pendingText).toBe(mode === 'retype' ? 'same text' : ' new');
+    expect(await app._flushLocalEchoTo('s1')).toBe(true);
+    await expect.poll(async () => {app._redeliverSweep(); return calls;}).toEqual(['same text', mode === 'retype' ? 'same text' : ' new']);
+    expect(overlay.pendingText).toBe('');
   });
 });
 

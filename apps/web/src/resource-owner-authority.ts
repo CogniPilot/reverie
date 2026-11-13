@@ -15,6 +15,18 @@ import {
   type EmployeeGpuApply,
 } from './employee-gpu-data.js';
 import { EmployeePolicyEditApproval } from './resource-employee-data.js';
+import {
+  EmployeeRecoveryApproval,
+  EmployeeRecoveryRequest,
+  EmployeeRecoverySelectionRequest,
+  recoveryDataDigest,
+} from './employee-recovery-operation.js';
+import { assertServiceAuthorization, type ServiceAuthorization } from './service-authorization.js';
+import { OfficeScopedActionPublisher, type OfficeScopedAction } from './office-scoped-action-publisher.js';
+import { WorkerRecoveryAuthentication, RECOVERY_HEADER } from './worker-recovery-auth.js';
+import { SERVICE_ASSERTION_HEADER } from './service-decision.js';
+import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
+import type { CompanyService } from './company-service.js';
 
 const PURPOSE = 'resource-replacement-v1';
 const RAM_PURPOSE = 'resource-ram-pool-v2';
@@ -32,6 +44,11 @@ const digest = (value: string) => createHash('sha256').update(value).digest('hex
 const MINT = Symbol('resource-owner-binding');
 const bindings = new WeakMap<object, ResourceOwnerContext | RamResourceOwnerContext>();
 export class ResourceOwnerAuthorizationError extends Error {}
+export class ResourceRecoveryWindowExpiredError extends Error {
+  constructor() {
+    super('The original recovery observation window elapsed; inspect the retained operation.');
+  }
+}
 function need(value: unknown): asserts value {
   if (!value)
     throw new ResourceOwnerAuthorizationError('Current resource owner authorization is unavailable or changed');
@@ -84,6 +101,12 @@ export interface RamResourceStatusContext extends ResourceContext<typeof RAM_PUR
   readonly employeeId: string;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+export interface RamMemoryDiagnosticsContext extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly stage: 'employee-memory-diagnostics';
+  readonly employeeId: string;
+  readonly sessionId: string;
+  readonly principal: Readonly<ResourceOwnerPrincipal>;
+}
 export interface RamGpuStatusContext extends ResourceContext<typeof RAM_PURPOSE> {
   readonly stage: 'gpu-status';
   readonly employeeId: string;
@@ -111,6 +134,24 @@ export interface RamEmployeePolicyEditContext extends ResourceContext<typeof RAM
   readonly approval: EmployeePolicyEditApproval;
   readonly principal: Readonly<ResourceOwnerPrincipal>;
 }
+interface RamEmployeeRecoveryFields extends ResourceContext<typeof RAM_PURPOSE> {
+  readonly employeeId: string;
+  readonly approval: EmployeeRecoveryApproval;
+  readonly recoveryAuthority: EmployeeRecoveryAuthority;
+}
+export type RamEmployeeRecoveryContext = RamEmployeeRecoveryFields &
+  ({ readonly stage: 'employee-recovery' } | { readonly stage: 'employee-recovery-observe' });
+export type EmployeeRecoveryAuthority =
+  | { readonly kind: 'human-owner'; readonly principal: Readonly<ResourceOwnerPrincipal> }
+  | {
+      readonly kind: 'delegated-service';
+      /** Delegation issuer correlation, never a human login. */
+      readonly ownerRegistration: Readonly<ResourceOwnerPrincipal>;
+      readonly service: Readonly<{ principal: string; issuerEpoch: string; grantId: string; grantGeneration: string }>;
+      readonly source: Readonly<{ employeeId: string; sessionId: string; sessionGeneration: string }>;
+      readonly resourceId: string;
+      readonly action: `reverie.ops.employee.${EmployeeRecoveryApproval['action']}`;
+    };
 /** Current canonical identity DATA, meaningful only with its actual retained
  * context, cookie/session and attested native channel. */
 export interface ResourceOwnerPrincipal {
@@ -195,11 +236,13 @@ export type AnyResourceContext =
   | RamResourceOwnerContext
   | RamResourcePreviewContext
   | RamResourceStatusContext
+  | RamMemoryDiagnosticsContext
   | RamGpuStatusContext
   | RamGpuApplyStatusContext
   | RamGpuRequestContext
   | RamGpuApplyContext
-  | RamEmployeePolicyEditContext;
+  | RamEmployeePolicyEditContext
+  | RamEmployeeRecoveryContext;
 type AuthorityContext =
   | AnyResourceContext
   | PoolInstallationViewerContext
@@ -342,15 +385,201 @@ export class ResourceOwnerAuthority {
   readonly #consentedFleetViews = new WeakSet<object>();
   readonly #sessions = new WeakMap<object, { account: OwnerAuthService; token: string }>();
   readonly #channels = new Map<Socket, Map<string, { account: OwnerAuthService; count: number }>>();
+  readonly #serviceContexts = new WeakSet<object>();
+  readonly #serviceChannels = new Map<Socket, number>();
+  readonly #recoveryAttempts = new WeakMap<RamEmployeeRecoveryContext, EmployeeRecoveryAttempt>();
+  readonly #recoveryOfficeProofs = new WeakMap<RamEmployeeRecoveryContext, OfficeScopedAction>();
+  readonly #recoveryCompanies = new WeakMap<RamEmployeeRecoveryContext, CompanyService>();
+  readonly #recoveryAuthentications = new WeakMap<
+    FastifyRequest,
+    { key: string; flight: Promise<RamEmployeeRecoveryContext> }
+  >();
   #closed = false;
-  constructor(auth: OwnerAuthService) {
+  readonly #officeActions?: OfficeScopedActionPublisher;
+  constructor(
+    auth: OwnerAuthService,
+    private readonly services?: ServiceAuthorization,
+    recovery?: WorkerRecoveryAuthentication
+  ) {
     need(auth instanceof OwnerAuthService);
     this.#auth = auth;
+    if (services && recovery) this.#officeActions = new OfficeScopedActionPublisher(services, recovery, auth);
   }
   close(): void {
     this.#closed = true;
+    this.#officeActions?.close();
     for (const socket of this.#channels.keys()) socket.destroy();
     this.#channels.clear();
+    for (const socket of this.#serviceChannels.keys()) socket.destroy();
+    this.#serviceChannels.clear();
+  }
+  captureEmployeeRecovery(
+    request: FastifyRequest,
+    employeeId: string,
+    approval: EmployeeRecoveryApproval,
+    access: 'effect' | 'observe' = 'effect'
+  ): RamEmployeeRecoveryContext {
+    need(UUID.test(employeeId));
+    const selected = EmployeeRecoveryRequest.parse(request.body);
+    need(
+      !selected.grantRef &&
+        recoveryDataDigest(selected.approval) === recoveryDataDigest(approval) &&
+        request.headers[RECOVERY_HEADER] === undefined &&
+        request.headers[SERVICE_ASSERTION_HEADER] === undefined
+    );
+    return this.#capture(
+      request,
+      {
+        stage: access === 'effect' ? ('employee-recovery' as const) : ('employee-recovery-observe' as const),
+        employeeId,
+        approval: EmployeeRecoveryApproval.parse(approval),
+      },
+      RAM_PURPOSE
+    );
+  }
+  /** Application read only. This wrapper is never accepted as a native Q context. */
+  async captureRecoverySelection(request: FastifyRequest, employeeId: string, company: CompanyService) {
+    need(UUID.test(employeeId) && !this.#closed);
+    if (request.method === 'GET') {
+      need(request.headers[RECOVERY_HEADER] === undefined && request.headers[SERVICE_ASSERTION_HEADER] === undefined);
+      const end = Date.now() + 10_000;
+      const context = this.#capture(request, { stage: 'status' as const, employeeId }, RAM_PURPOSE, end);
+      return Object.freeze({
+        owner: context.owner,
+        callerSessionId: undefined as string | undefined,
+        delegated: false,
+        require: () => {
+          if (Date.now() >= end) throw new ResourceRecoveryWindowExpiredError();
+          this.assertContext(context);
+        },
+      });
+    }
+    need(request.method === 'POST' && this.#officeActions);
+    const body = EmployeeRecoverySelectionRequest.parse(request.body);
+    const publisher = this.#officeActions;
+    const proof = await OfficeScopedActionPublisher.prototype.capture
+      .call(publisher, request, {
+        kind: 'employee-recovery-selection',
+        employeeId,
+        grantRef: body.grantRef,
+      })
+      .catch((cause: unknown) => {
+        throw new ResourceOwnerAuthorizationError('Current recovery source/grant authorization is required', { cause });
+      });
+    const require = () => {
+      need(!this.#closed);
+      if (Date.now() >= proof.expiresAtEpochMs) throw new ResourceRecoveryWindowExpiredError();
+      try {
+        OfficeScopedActionPublisher.prototype.assertOriginal.call(publisher, proof, company.store);
+      } catch (cause) {
+        throw new ResourceOwnerAuthorizationError('Current recovery source/grant authorization changed', { cause });
+      }
+    };
+    require();
+    return Object.freeze({ owner: proof.owner, callerSessionId: proof.source.sessionId, delegated: true, require });
+  }
+  /** The service assertion is authenticated HERE by the configured original
+   * owner. Callers cannot provide a structural lease or a current() grant.
+   * This context can answer ONLY the distinct employee-recovery Q challenge.
+   */
+  async authenticateEmployeeRecovery(
+    request: FastifyRequest,
+    employeeId: string,
+    input: EmployeeRecoveryApproval,
+    access: 'effect' | 'observe' = 'effect'
+  ): Promise<RamEmployeeRecoveryContext> {
+    const cache = this.#recoveryAuthentications;
+    const key = recoveryDataDigest([
+      employeeId,
+      EmployeeRecoveryApproval.parse(input),
+      access,
+      request.method,
+      request.url,
+      EmployeeRecoveryRequest.parse(request.body),
+      recoveryDataDigest(
+        typeof request.headers[RECOVERY_HEADER] === 'string' ? request.headers[RECOVERY_HEADER] : null
+      ),
+    ]);
+    const original = cache.get(request);
+    if (original) {
+      need(original.key === key);
+      return original.flight;
+    }
+    const flight = this.#authenticateEmployeeRecovery(request, employeeId, input, access);
+    cache.set(request, { key, flight });
+    return flight;
+  }
+  async #authenticateEmployeeRecovery(
+    request: FastifyRequest,
+    employeeId: string,
+    input: EmployeeRecoveryApproval,
+    access: 'effect' | 'observe'
+  ): Promise<RamEmployeeRecoveryContext> {
+    need(UUID.test(employeeId) && !this.#closed);
+    const approval = EmployeeRecoveryApproval.parse(input),
+      publisher = this.#officeActions;
+    need(publisher);
+    const selected = EmployeeRecoveryRequest.parse(request.body);
+    need(selected.grantRef && recoveryDataDigest(selected.approval) === recoveryDataDigest(approval));
+    const proof = await OfficeScopedActionPublisher.prototype.capture.call(publisher, request, {
+      kind: 'employee-recovery',
+      employeeId,
+      access,
+      approval,
+      grantRef: selected.grantRef,
+    });
+    // Only immutable correlation DATA is built here. The final context check
+    // below is the single fresh verifier after capture's await, before export.
+    const action = `reverie.ops.employee.${access === 'observe' ? 'reconcile-owned' : approval.action}` as const;
+    need(proof.action === action);
+    const recoveryAuthority: EmployeeRecoveryAuthority = Object.freeze({
+      kind: 'delegated-service',
+      ownerRegistration: proof.ownerRegistration,
+      service: proof.service,
+      source: proof.source,
+      resourceId: proof.resourceId,
+      action,
+    });
+    const owner = proof.owner;
+    const ownerScopeDigest = recoveryDataDigest([
+      this.#epoch,
+      proof.scopeDigest,
+      access,
+      employeeId,
+      approval,
+      recoveryAuthority,
+    ]);
+    const expiresAtEpochMs = proof.expiresAtEpochMs;
+    const assertCurrent = () => {
+      need(!this.#closed && this.#contexts.has(context));
+      const company = this.#recoveryCompanies.get(context);
+      try {
+        if (company) OfficeScopedActionPublisher.prototype.assertOriginal.call(publisher, proof, company.store);
+        else proof.assertCurrent();
+      } catch (cause) {
+        throw new ResourceOwnerAuthorizationError('Current recovery source/grant authorization changed', { cause });
+      }
+    };
+    const context = Object.freeze({
+      purpose: RAM_PURPOSE,
+      stage: access === 'effect' ? ('employee-recovery' as const) : ('employee-recovery-observe' as const),
+      employeeId,
+      approval,
+      owner,
+      recoveryAuthority,
+      ownerScopeDigest,
+      expiresAtEpochMs,
+      assertCurrent,
+      toJSON: () => {
+        throw new Error('Resource owner context is server-private');
+      },
+      [inspect.custom]: () => '[Private employee recovery context]',
+    });
+    this.#contexts.add(context);
+    this.#serviceContexts.add(context);
+    this.#recoveryOfficeProofs.set(context, proof);
+    assertCurrent();
+    return context;
   }
   #identity(
     request: FastifyRequest,
@@ -446,6 +675,19 @@ export class ResourceOwnerAuthority {
   captureRamStatus(request: FastifyRequest, employeeId: string): RamResourceStatusContext {
     need(typeof employeeId === 'string' && UUID.test(employeeId) && employeeId !== NIL_UUID);
     return this.#capture(request, { stage: 'status' as const, employeeId }, RAM_PURPOSE);
+  }
+  captureRamMemoryDiagnostics(
+    request: FastifyRequest,
+    employeeId: string,
+    sessionId: string
+  ): RamMemoryDiagnosticsContext {
+    need(UUID.test(employeeId) && employeeId !== NIL_UUID && UUID.test(sessionId) && sessionId !== NIL_UUID);
+    return this.#capture(
+      request,
+      { stage: 'employee-memory-diagnostics' as const, employeeId, sessionId },
+      RAM_PURPOSE,
+      Date.now() + 10_000
+    );
   }
   captureRamGpuStatus(request: FastifyRequest, employeeId: string, sessionId: string): RamGpuStatusContext {
     need(UUID.test(employeeId) && employeeId !== NIL_UUID && UUID.test(sessionId) && sessionId !== NIL_UUID);
@@ -702,10 +944,16 @@ export class ResourceOwnerAuthority {
       | { stage: 'apply'; approval: Readonly<ResourceApproval> }
       | { stage: 'preview'; employeeId: string }
       | { stage: 'status'; employeeId: string }
+      | { stage: 'employee-memory-diagnostics'; employeeId: string; sessionId: string }
       | { stage: 'gpu-status' | 'gpu-apply-status'; employeeId: string; sessionId: string }
       | { stage: 'gpu-request'; employeeId: string; approval: Readonly<EmployeeGpuIntent> }
       | { stage: 'gpu-apply'; employeeId: string; approval: Readonly<EmployeeGpuApply> }
       | { stage: 'employee-policy-edit'; employeeId: string; approval: EmployeePolicyEditApproval }
+      | {
+          stage: 'employee-recovery' | 'employee-recovery-observe';
+          employeeId: string;
+          approval: EmployeeRecoveryApproval;
+        }
       | { stage: 'viewer' | 'fleet-viewer'; requestId: string }
       | (PoolInstallationSelection & ({ stage: 'offer' } | { stage: 'consent'; consent: true }))
       | { stage: 'fleet-preview'; requestId: string; approval: Readonly<FleetApproval> }
@@ -722,11 +970,18 @@ export class ResourceOwnerAuthority {
     purpose: P,
     originalExpiry?: number,
     origin?: AuthorityContext
-  ): Readonly<ResourceContext<P> & T> & PrincipalFor<P> {
+  ): Readonly<ResourceContext<P> & T> &
+    PrincipalFor<P> &
+    (T extends { stage: 'employee-recovery' | 'employee-recovery-observe' }
+      ? { readonly recoveryAuthority: EmployeeRecoveryAuthority }
+      : object) {
     const token = request.cookies?.[OWNER_COOKIE];
     need(typeof token === 'string' && token.length > 0 && token.length <= 4096);
     const access =
-      selected.stage === 'status' || selected.stage === 'gpu-status' || selected.stage === 'gpu-apply-status'
+      selected.stage === 'status' ||
+      selected.stage === 'employee-memory-diagnostics' ||
+      selected.stage === 'gpu-status' ||
+      selected.stage === 'gpu-apply-status'
         ? 'employee-status'
         : 'operation';
     const identity = this.#identity(request, token, purpose, access),
@@ -736,7 +991,9 @@ export class ResourceOwnerAuthority {
       need(origin.purpose === purpose);
     }
     const issued = Date.now(),
-      expires = Math.min(issued + 300_000, originalExpiry ?? issued + 300_000);
+      window =
+        selected.stage === 'employee-recovery' || selected.stage === 'employee-recovery-observe' ? 10_000 : 300_000,
+      expires = Math.min(issued + window, originalExpiry ?? issued + window);
     need(Number.isSafeInteger(issued) && Number.isSafeInteger(expires) && expires > issued);
     const assertCurrent = () => {
       need(
@@ -753,13 +1010,20 @@ export class ResourceOwnerAuthority {
         origin?.ownerScopeDigest ?? digest(this.#epoch + identity.key + randomBytes(32).toString('hex')),
       ...(identity.principal === undefined ? {} : { principal: identity.principal }),
       ...selected,
+      ...(selected.stage === 'employee-recovery' || selected.stage === 'employee-recovery-observe'
+        ? { recoveryAuthority: Object.freeze({ kind: 'human-owner' as const, principal: identity.principal! }) }
+        : {}),
       expiresAtEpochMs: expires,
       assertCurrent,
       toJSON: () => {
         throw new Error('Resource owner context is server-private');
       },
       [inspect.custom]: () => '[Private resource owner context]',
-    }) as Readonly<ResourceContext<P> & T> & PrincipalFor<P>;
+    }) as Readonly<ResourceContext<P> & T> &
+      PrincipalFor<P> &
+      (T extends { stage: 'employee-recovery' | 'employee-recovery-observe' }
+        ? { readonly recoveryAuthority: EmployeeRecoveryAuthority }
+        : object);
     this.#contexts.add(context);
     this.#sessions.set(context, { account: this.#auth.forSession(token), token });
     assertCurrent();
@@ -768,7 +1032,58 @@ export class ResourceOwnerAuthority {
   }
   assertContext(context: AuthorityContext): void {
     need(this.#contexts.has(context));
+    if (
+      (context.stage === 'employee-recovery' || context.stage === 'employee-recovery-observe') &&
+      Date.now() >= context.expiresAtEpochMs
+    )
+      throw new ResourceRecoveryWindowExpiredError();
+    if (context.stage === 'employee-recovery' || context.stage === 'employee-recovery-observe') {
+      const attempt = this.#recoveryAttempts.get(context);
+      need(attempt);
+      // This exact original Attempt performs the SAME current-context check.
+      // Repeating context.assertCurrent immediately before it adds no fence.
+      EmployeeRecoveryAttempt.prototype.assertContext.call(attempt, this, context);
+    } else context.assertCurrent();
+  }
+  /** Staging auth only: no native dispatch/transport admission is supplied. */
+  assertRecoveryAuthentication(context: RamEmployeeRecoveryContext): void {
+    need(
+      !this.#closed &&
+        this.#contexts.has(context) &&
+        (context.stage === 'employee-recovery' || context.stage === 'employee-recovery-observe')
+    );
+    if (Date.now() >= context.expiresAtEpochMs) throw new ResourceRecoveryWindowExpiredError();
     context.assertCurrent();
+  }
+  assertEmployeeRecoveryDomain(context: RamEmployeeRecoveryContext, company: CompanyService): void {
+    need(!this.#closed && this.#contexts.has(context));
+    if (context.recoveryAuthority.kind === 'delegated-service') {
+      need(this.services && this.#officeActions);
+      assertServiceAuthorization(this.services, company.store);
+      const proof = this.#recoveryOfficeProofs.get(context);
+      need(proof);
+      const original = this.#recoveryCompanies.get(context);
+      need(!original || original === company);
+      // Join this original domain first. The one fresh check below calls the
+      // publisher's actual assertOriginal, which checks proof/current/domain
+      // together; assertDomain itself already includes full authentication.
+      this.#recoveryCompanies.set(context, company);
+    }
+    this.assertRecoveryAuthentication(context);
+  }
+  bindEmployeeRecoveryAttempt(context: RamEmployeeRecoveryContext, attempt: EmployeeRecoveryAttempt): void {
+    need(this.#contexts.has(context) && !this.#recoveryAttempts.has(context));
+    // The actual original Attempt verifies its context, expiry and authority.
+    EmployeeRecoveryAttempt.prototype.assertContext.call(attempt, this, context);
+    this.#recoveryAttempts.set(context, attempt);
+  }
+  consumeEmployeeRecovery(context: RamEmployeeRecoveryContext): void {
+    need(this.#contexts.has(context));
+    const attempt = this.#recoveryAttempts.get(context);
+    need(attempt);
+    // claimDispatch performs that same fresh original-context check immediately
+    // before the one-use dispatch claim, without an intervening callback/await.
+    EmployeeRecoveryAttempt.prototype.claimDispatch.call(attempt, this, context);
   }
   assertSameSession(left: AuthorityContext, right: AuthorityContext): void {
     this.assertContext(left);
@@ -800,6 +1115,18 @@ export class ResourceOwnerAuthority {
   track(context: AuthorityContext, socket: Socket): () => void {
     this.assertContext(context);
     need(socket instanceof Socket && !socket.destroyed);
+    if (this.#serviceContexts.has(context)) {
+      need(context.stage === 'employee-recovery' || context.stage === 'employee-recovery-observe');
+      this.#serviceChannels.set(socket, (this.#serviceChannels.get(socket) ?? 0) + 1);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        const left = (this.#serviceChannels.get(socket) ?? 1) - 1;
+        if (left) this.#serviceChannels.set(socket, left);
+        else this.#serviceChannels.delete(socket);
+      };
+    }
     const source = this.#sessions.get(context);
     need(source);
     const channels = this.#channels.get(socket) ?? new Map<string, { account: OwnerAuthService; count: number }>();

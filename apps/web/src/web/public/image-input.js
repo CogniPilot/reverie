@@ -179,7 +179,7 @@ Object.assign(ReverieApp.prototype, {
       // No buffer to measure, so lead with a separator unconditionally rather than
       // risk fusing onto whatever the CLI's own composer already holds.
       const out = ` ${text} `;
-      this._sendInputAsync(sessionId, out);
+      if (await this._sendInputAsync(sessionId, out) === false) return;
       // A background session's prompt is tracked in the flushed maps, which is what
       // a later composer open adopts and erases. An untracked write leaves that
       // count short, so the erase would eat the tail of this path instead. Not for
@@ -354,7 +354,7 @@ Object.assign(ReverieApp.prototype, {
       // activeSessionId, and after the awaits above that is whatever tab the
       // user switched to mid-upload, so the paths landed in the wrong session.
       // Same delivery sendInput() uses (durable queue, useMux for the POST path).
-      this._sendInputAsync(sessionId, paths.join(' '), { useMux: true });
+      await this._sendInputAsync(sessionId, paths.join(' '), {useMux: true});
     }
 
     // Final status: successes, plus any failures / cap so nothing is silent.

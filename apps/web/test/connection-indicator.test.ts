@@ -30,10 +30,12 @@ import { performance } from 'node:perf_hooks';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
+import {browserInputFixture} from './helpers/browser-input-fixture.js';
 
 function loadReverieAppClass() {
   const constants = readFileSync(resolve(import.meta.dirname, '../src/web/public/constants.js'), 'utf8');
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
+  const delivery = readFileSync(resolve(import.meta.dirname, '../src/web/public/input-delivery.js'), 'utf8');
   const context = vm.createContext({
     console,
     performance,
@@ -55,7 +57,7 @@ function loadReverieAppClass() {
     window: { addEventListener: vi.fn(), removeEventListener: vi.fn() },
     MobileDetection: {},
   });
-  vm.runInContext(`${constants}\n${source}\nglobalThis.__ReverieApp = ReverieApp;`, context);
+  vm.runInContext(`${constants}\n${source}\n${delivery}\nglobalThis.__ReverieApp = ReverieApp;`, context);
   return (context as { __ReverieApp: new () => unknown }).__ReverieApp;
 }
 
@@ -191,24 +193,21 @@ describe('connection indicator — never throws (the ReferenceError regression)'
 });
 
 describe('durable input delivery is not aborted by the indicator (typing-lag regression)', () => {
-  it('_reliableSend reaches _drainSession after updating the indicator', () => {
-    const { app } = makeApp({ activeSessionId: 's1', _wsState: 'connected' });
-    const a = app as unknown as {
-      _seqCounters: Map<string, number>;
-      _persistReliableState: () => void;
-      _drainSession: (id: string) => void;
-      _reliableSend: (id: string, data: string, useMux: boolean) => void;
-    };
-    a._seqCounters = new Map();
-    a._persistReliableState = vi.fn();
-    const drain = vi.fn();
-    a._drainSession = drain;
-
-    // A single keystroke. The indicator runs first; if it throws, drain is skipped.
-    a._reliableSend('s1', 'x', false);
-
-    expect(drain).toHaveBeenCalledWith('s1');
-    expect(app._pendingDeliveries.get('s1')).toHaveLength(1);
+  it('_reliableSend reaches the actual committed dispatch after updating the real indicator', async () => {
+    const fixture = browserInputFixture(), writes: string[] = [];
+    try {
+      const app = await fixture.page(async (_url, options) => {
+        writes.push(JSON.parse(String(options?.body)).input); return Response.json({success: true, data: {}});
+      });
+      const {els} = makeApp();
+      Object.assign(app, {$: (id: string) => els[id], activeSessionId: 's1', _wsState: 'connected', isOnline: true,
+        _connectionStatus: 'connected', _updateConnectionIndicator: Object.getPrototypeOf(app)._updateConnectionIndicator});
+      const drain = vi.spyOn(app, '_drainSession');
+      expect(await (app as unknown as {_reliableSend(id: string, data: string, mux: boolean): Promise<boolean>})._reliableSend('s1', 'x', false)).toBe(true);
+      await expect.poll(() => writes).toEqual(['x']);
+      expect(drain).toHaveBeenCalledWith('s1'); expect(els.connectionText.textContent).toBe('WS');
+      await expect.poll(() => app._pendingDeliveries.has('s1')).toBe(false);
+    } finally {await fixture.close();}
   });
 });
 

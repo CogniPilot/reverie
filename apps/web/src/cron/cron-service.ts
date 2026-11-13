@@ -744,7 +744,7 @@ export class CronService {
       return run;
     } catch {
       run.status = 'failed'; run.finishedAt = Date.now();
-      run.errorMessage = posting || this.getJob(job.id)?.watchState?.pending
+      run.errorMessage = this.store.statePublicationHeld || posting || this.getJob(job.id)?.watchState?.pending
         ? 'WATCH_DELIVERY_UNCERTAIN: disable watcher; owner reconciliation of retained receipt required. Cursor held; no automatic resend.'
         : 'WATCH_QUERY_INVALID / DELIVERY_FAILED: bounded retry (maximum 3); cursor held. No all-clear.';
       // No upstream titles, response bodies or exception strings enter receipts/logs.

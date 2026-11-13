@@ -1,5 +1,6 @@
 /** Thin owner-authenticated adapter to the actual installed native actor. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { performance } from 'node:perf_hooks';
 import { CompanyService } from './company-service.js';
 import { OwnerAuthService } from './owner-auth/service.js';
 import { ResourceOwnerAuthority, ResourceOwnerAuthorizationError } from './resource-owner-authority.js';
@@ -8,6 +9,9 @@ import {
   EmployeePolicyEditApproval,
   EmployeePolicyEditResult,
   EmployeeResourceStatus,
+  EmployeeMemoryDiagnostics,
+  memoryPressureAdvisory,
+  type EmployeeMemoryView,
 } from './resource-employee-data.js';
 import { NativeOwnerId } from './native-owner-data.js';
 import { ownerFor } from './web/route-helpers.js';
@@ -76,6 +80,73 @@ export class EmployeeResourcesService {
   #sameSession(request: FastifyRequest, employeeId: string, sessionId: string, generation: number): boolean {
     const current = this.#employee(request, employeeId);
     return current?.sessionId === sessionId && current.sessionGeneration === generation;
+  }
+  async memoryDiagnostics(request: FastifyRequest, employeeId: string): Promise<EmployeeMemoryView> {
+    NativeOwnerId.parse(employeeId);
+    const employee = this.#employee(request, employeeId);
+    if (!employee || !this.socket || !Number.isSafeInteger(employee.sessionGeneration))
+      throw new Error('The original employee binding and native resource service are required');
+    const sessionId = NativeOwnerId.parse(employee.sessionId),
+      generation = employee.sessionGeneration;
+    const context = this.#authority.captureRamMemoryDiagnostics(request, employeeId, sessionId);
+    const end = performance.now() + 10_000;
+    const assertOriginal = () => {
+      // Query expiry is unavailable data, not evidence that the owner logged out.
+      // It never opens a fresh fallback window or acknowledges native settlement.
+      if (performance.now() >= end || Date.now() >= context.expiresAtEpochMs)
+        throw new Error('The original memory observation deadline elapsed');
+      this.#authority.assertContext(context);
+      if (!this.#sameSession(request, employeeId, sessionId, generation))
+        throw new Error('The original employee binding changed during memory observation');
+    };
+    const base = { version: 1 as const, employeeId, sessionId, sessionGeneration: String(generation) };
+    try {
+      const client = await ResourceNativeClient.openRam(this.socket, this.#authority, context, end);
+      try {
+        const value = EmployeeMemoryDiagnostics.parse(
+          await client.request('employee-memory-diagnostics', { employeeId, sessionId })
+        );
+        assertOriginal();
+        if (
+          value.employeeId !== employeeId ||
+          value.sessionId !== sessionId ||
+          value.sessionGeneration !== base.sessionGeneration
+        )
+          throw new Error('Memory observation belongs to a different employee binding');
+        return {
+          ...base,
+          source: 'native-compound',
+          resources: value.resources,
+          diagnostics: { kind: 'snapshot', value },
+          advisory: memoryPressureAdvisory(value, Date.now()),
+        };
+      } finally {
+        client.close();
+      }
+    } catch {
+      // A fresh, separately authenticated READ does not settle or replay the original Q owner.
+      assertOriginal();
+      const fallback = this.#authority.captureRamStatus(request, employeeId);
+      const client = await ResourceNativeClient.openRam(this.socket, this.#authority, fallback, end);
+      try {
+        const resources = EmployeeResourceStatus.parse(
+          await client.request('employee-status', { employeeId, sessionId })
+        );
+        this.#authority.assertContext(fallback);
+        assertOriginal();
+        if (resources.employeeId !== employeeId || resources.sessionId !== sessionId)
+          throw new Error('The independent status read belongs to a different employee binding');
+        return {
+          ...base,
+          source: 'independent-status-read',
+          resources,
+          diagnostics: { kind: 'unavailable', reason: 'native-observation-unconfirmed' },
+          advisory: memoryPressureAdvisory(null, Date.now()),
+        };
+      } finally {
+        client.close();
+      }
+    }
   }
   async status(request: FastifyRequest, employeeId: string): Promise<EmployeeResourceStatus> {
     NativeOwnerId.parse(employeeId);
@@ -153,6 +224,25 @@ export function registerEmployeeResourceRoutes(
   verifiedOwner: OwnerVerifier,
   service: EmployeeResourcesService
 ): void {
+  app.get<{ Params: { employeeId: string } }>(
+    '/api/company/resources/employees/:employeeId/memory-diagnostics',
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store');
+      if (!isResourceOwner(verifiedOwner, request))
+        return reply.code(403).send({ success: false, error: 'Company owner authorization is required' });
+      if (!NativeOwnerId.safeParse(request.params.employeeId).success)
+        return reply.code(400).send({ success: false, error: 'Invalid employee identifier' });
+      try {
+        return { success: true, data: await service.memoryDiagnostics(request, request.params.employeeId) };
+      } catch (error) {
+        return reply.code(error instanceof ResourceOwnerAuthorizationError ? 403 : 503).send({
+          success: false,
+          code: 'EMPLOYEE_RESOURCE_OBSERVATION_UNAVAILABLE',
+          error: 'The original employee memory observation is unavailable. Previously shown limits are stale.',
+        });
+      }
+    }
+  );
   app.get<{ Params: { employeeId: string } }>(
     '/api/company/resources/employees/:employeeId',
     async (request, reply) => {

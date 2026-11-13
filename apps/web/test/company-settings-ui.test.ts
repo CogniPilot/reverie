@@ -60,29 +60,34 @@ const submit = (h: any) =>
     .dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
 
 it('switches settings sections with keyboard controls while preserving drafts and never submitting changes', async () => {
-  const { h, calls } = await setup(); await h.shell.openCompanySettings();
+  const { h, calls } = await setup();
+  await h.shell.openCompanySettings();
   const dialog = h.document.querySelector('.ca-company-settings')!;
   const tabs = [...dialog.querySelectorAll('[role="tab"]')] as HTMLButtonElement[];
-  expect(tabs.map(tab => tab.textContent)).toEqual(['Company', 'Employees', 'Hiring', 'Reports']);
+  expect(tabs.map((tab) => tab.textContent)).toEqual(['Company', 'Employees', 'Hiring', 'Reports']);
   expect(tabs[1].getAttribute('aria-selected')).toBe('true');
   tabs[0].click();
-  const draft = dialog.querySelector('[aria-label="Owner display name"]') as HTMLInputElement; draft.value = 'Unsaved company name';
+  const draft = dialog.querySelector('[aria-label="Owner display name"]') as HTMLInputElement;
+  draft.value = 'Unsaved company name';
   tabs[0].dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  expect(tabs[1].getAttribute('aria-selected')).toBe('true'); expect(h.document.activeElement).toBe(tabs[1]);
+  expect(tabs[1].getAttribute('aria-selected')).toBe('true');
+  expect(h.document.activeElement).toBe(tabs[1]);
   expect(draft.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(true);
   tabs[1].dispatchEvent(new h.window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-  expect(draft.value).toBe('Unsaved company name'); expect(draft.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false);
-  expect(calls.filter(call => call.method && call.method !== 'GET')).toEqual([]);
+  expect(draft.value).toBe('Unsaved company name');
+  expect(draft.closest<HTMLElement>('[role="tabpanel"]')!.hidden).toBe(false);
+  expect(calls.filter((call) => call.method && call.method !== 'GET')).toEqual([]);
 });
 
 it('keeps owner resource and hiring sections unavailable to an unverified viewer', async () => {
-  const { h, calls } = await setup(false); await h.shell.openCompanySettings();
+  const { h, calls } = await setup(false);
+  await h.shell.openCompanySettings();
   const dialog = h.document.querySelector('.ca-company-settings')!;
   expect((dialog.querySelector('[data-settings-tab="runtime"]') as HTMLButtonElement).hidden).toBe(true);
   expect((dialog.querySelector('[data-settings-tab="hiring"]') as HTMLButtonElement).hidden).toBe(true);
   expect(dialog.querySelector('[data-settings-tab="general"]')!.getAttribute('aria-selected')).toBe('true');
   expect(dialog.querySelector('.ca-fleet-resources')).toBeNull();
-  expect(calls.some(call => call.path.startsWith('/api/company/resources'))).toBe(false);
+  expect(calls.some((call) => call.path.startsWith('/api/company/resources'))).toBe(false);
 });
 
 it('opens styled settings within Company without the legacy registration or nightly schedule UI', async () => {
@@ -115,7 +120,7 @@ it('opens styled settings within Company without the legacy registration or nigh
   expect(native).not.toHaveBeenCalled();
 });
 
-it('saves owner details using fresh settings without enabling or changing the legacy scheduler', async () => {
+it('patches owner details without sending or changing the legacy scheduler', async () => {
   const { h, data, calls } = await setup();
   await h.shell.openCompanySettings();
   const dialog = h.document.querySelector('.ca-company-settings')!;
@@ -134,12 +139,9 @@ it('saves owner details using fresh settings without enabling or changing the le
     body: {
       ownerName: 'Morgan',
       ownerTitle: 'Owner',
-      enabled: false,
-      nightHour: 2,
-      morningHour: 8,
-      researchMinutes: 45,
     },
   });
+  expect(data.settings).toMatchObject({ enabled: false, nightHour: 2, morningHour: 8, researchMinutes: 45 });
   expect(dialog.querySelector('[role=status]').textContent).toBe('Owner details saved.');
 });
 
@@ -165,7 +167,7 @@ it('preserves owner draft values and surfaces server refusal without enabling a 
   await h.shell.openCompanySettings();
   const api = h.app._chatApi;
   h.app._chatApi = async (path: string, options: any) =>
-    path === '/api/company/settings' ? { ok: false, error: 'Owner sign-in required' } : api(path, options);
+    path === '/api/company/settings' ? { ok: false, status: 403, error: 'Owner sign-in required' } : api(path, options);
   h.document.querySelector('.ca-company-settings [aria-label="Owner display name"]').value = 'Draft';
   submit(h);
   await h.flush();
@@ -181,11 +183,74 @@ it('keeps shared chat plugins in Company settings for a verified owner only', as
     const openSettings = vi.fn(async () => {});
     (h.window as any).ReverieChatPlugins = { openSettings };
     await h.shell.openCompanySettings();
-    const button = [...h.document.querySelectorAll('.ca-company-settings button')].find(b => b.textContent === 'Chat plugins') as HTMLButtonElement | undefined;
-    if (verified) { expect(button).toBeDefined(); button!.click(); expect(openSettings).toHaveBeenCalledTimes(1); }
-    else expect(button).toBeUndefined();
+    const button = [...h.document.querySelectorAll('.ca-company-settings button')].find(
+      (b) => b.textContent === 'Chat plugins'
+    ) as HTMLButtonElement | undefined;
+    if (verified) {
+      expect(button).toBeDefined();
+      button!.click();
+      expect(openSettings).toHaveBeenCalledTimes(1);
+    } else expect(button).toBeUndefined();
     h.document.querySelector('.ca-company-settings')!.remove();
   }
+});
+
+it('sends only the recovery patch and refuses an unconfirmed success without losing its draft', async () => {
+  const { h, data, calls } = await setup();
+  data.settings.autoWakeEnabled = true;
+  data.settings.crashWakeEmployeeId = 'expert';
+  await h.shell.openCompanySettings();
+  const form = h.document.querySelector('.ca-company-recovery')!;
+  const enabled = form.querySelector('[aria-label="Automatic recovery"]') as HTMLInputElement;
+  const expert = form.querySelector('[aria-label="Wake after a crash"]') as HTMLSelectElement;
+  expert.value = '';
+  enabled.checked = false;
+  const api = h.app._chatApi;
+  h.app._chatApi = async (path: string, options?: { method?: string; body?: unknown }) => {
+    if (path !== '/api/company/settings') return api(path, options);
+    calls.push({ path, ...options });
+    return { ok: true, data: {} };
+  };
+  form.dispatchEvent(new h.window.Event('submit', { bubbles: true, cancelable: true }));
+  await h.flush();
+  expect(calls.filter((call) => call.method === 'PUT')).toEqual([
+    {
+      path: '/api/company/settings',
+      method: 'PUT',
+      body: { autoWakeEnabled: false, crashWakeEmployeeId: null },
+    },
+  ]);
+  expect(form.querySelector('[role="alert"]')!.textContent).toContain('It may already have saved.');
+  expect(h.document.querySelector('.ca-company-settings > [role="status"]')!.textContent).toBe('');
+  expect(data.settings.crashWakeEmployeeId).toBe('expert');
+  expect(enabled.checked).toBe(false);
+  expect(expert.value).toBe('');
+  expect(form.querySelector('button')!.disabled).toBe(false);
+});
+
+it('does not infer an Automatic expert by excluding a vacationing structural root', async () => {
+  const { h, data, calls } = await setup();
+  data.settings.autoWakeEnabled = true;
+  data.employees[0].reportsTo = 'owner';
+  data.employees[0].desiredRunning = false;
+  data.employees.push({
+    id: 'vacation-root',
+    name: 'Vacation reviewer',
+    reportsTo: 'owner',
+    onVacation: true,
+    desiredRunning: false,
+    expertise: ['Review'],
+    position: 'Reviewer',
+  });
+  await h.shell.openCompanySettings();
+  const form = h.document.querySelector('.ca-company-recovery')!;
+  const expert = form.querySelector('[aria-label="Wake after a crash"]') as HTMLSelectElement;
+  expect(expert.options[0].textContent).toBe('Automatic');
+  expect(expert.options[0].textContent).not.toContain('River');
+  expect(form.textContent).toContain('single top-level expert when there is exactly one');
+  expect(form.textContent).toContain('Stopped or vacationing experts stay off');
+  expect(data.employees[1]).toMatchObject({ onVacation: true, desiredRunning: false });
+  expect(calls.some((call) => call.method === 'POST' || call.method === 'PUT')).toBe(false);
 });
 
 it('does not expose owner editing when the caller is not verified', async () => {
@@ -211,7 +276,9 @@ it('offers this device’s app install and notifications to every viewer, even w
   (h.window as any).ReverieMobile = { open: vi.fn() };
   h.app._chatApi = vi.fn(async () => ({ ok: false, error: 'Company settings are unavailable.' }));
   await h.shell.openCompanySettings();
-  expect(h.document.querySelector('.ca-company-settings .ca-company-device button')?.textContent).toBe('Install app and notifications');
+  expect(h.document.querySelector('.ca-company-settings .ca-company-device button')?.textContent).toBe(
+    'Install app and notifications'
+  );
 });
 
 it('shows no device section where the phone setup script is not loaded', async () => {

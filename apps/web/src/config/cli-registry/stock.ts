@@ -14,6 +14,9 @@ import type { CliEntry } from './types.js';
 import {THREAD_STATE_BINDINGS} from './profiles.js';
 import { CODEX_REASONING_EFFORTS } from '../../types/session.js';
 
+/** Measured native key-burst limit; legacy consumers re-export this same value. */
+export const CODEX_KEY_BURST_MAX_CHARS = 1000;
+
 const HOME_DIRS = {
   local: '~/.local/bin',
   usrLocal: '/usr/local/bin',
@@ -135,6 +138,7 @@ const CLAUDE: CliEntry = {
     resumeSelection: 'claude-transcript',
     threadStateProfile: 'conversation-chain-v1',
     effortInput: 'session-effort-v1',
+    dockerCaseSeed: 'session-id-resume-v1',
     params: {
       claudeMode: {
         type: 'enum',
@@ -527,7 +531,6 @@ const OPENCODE: CliEntry = {
   capabilities: {
     ...agentDefaults(),
     workspaceHooks: { sessionCreate: 'none', freshCase: 'none', existingCase: 'none' },
-    input: { shellKeyGuard: true },
     ...AGENTS_DIR_SKILL,
     altScreen: 'strip-mux-and-mouse',
     echo: { policy: 'buffer', anchor: { kind: 'cursor' }, predictProfile: undefined },
@@ -554,6 +557,8 @@ const OPENCODE: CliEntry = {
     // last `┃` row on screen is the composer's agent/model row (or the permission box's
     // closing bar), never the prompt text, so the submit verifier stands down.
     composerReadyMark: 'tab agents',
+    terminalInput: { shellKeyGuard: 'bang-shell' },
+    runtimePolicyFallback: 'opencode-local-v1',
     accountReplacementRefusal: 'OpenCode thread moves require a launch-then-stop adapter and are not supported yet',
     rebootRestore: 'native-required',
     fullAccessDefaults: {values: {autoAllowTools: true}, unlessJsonProperty: {configField: 'configContent', property: 'permission'}},
@@ -678,8 +683,6 @@ const CODEX: CliEntry = {
   capabilities: {
     ...agentDefaults(),
     ...AGENTS_DIR_SKILL,
-    input: { keyBurstMaxChars: 1000, requiresEmptyComposer: true },
-    turnSummaryHooks: 'codex-config-v1',
     // Codex draws `› Ask Codex to do anything` on its composer row and
     // `Working (2m 49s • esc to interrupt)` above it while a turn runs. It animates no
     // braille spinner, and it never prints `esc to interrupt` at rest, so that phrase
@@ -715,6 +718,8 @@ const CODEX: CliEntry = {
     // Nothing is misfiled by that (codex raises no idle prompts), and there is no row to
     // match until codex pins one.
     composerReadyMark: '? for shortcuts',
+    terminalInput: { requiresEmptyComposer: true, keyBurstMaxChars: CODEX_KEY_BURST_MAX_CHARS },
+    workspaceSummaryHooks: 'codex-project-v1',
     accountReplacementProfile: 'openai-account-v1',
     startupAccountProfile: 'openai-local-account-v1',
     rebootRestore: 'native-or-new',

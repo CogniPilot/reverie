@@ -23,6 +23,8 @@
 // invitation is held in memory only and never used as a navigation destination.
 let caEmbassyIncomingInvite = typeof window !== 'undefined' ? caEmbassyTakeFragment(window) : null;
 
+const caSettingsSaveUnconfirmed =
+  'Save not confirmed. It may already have saved. Reopen settings to check the saved values before trying again.';
 const caBoardPermissionFields = [
   [
     'editBoardIssues',
@@ -4740,6 +4742,33 @@ class ReverieChatApp {
     content.prepend(host);
   }
 
+  /** Confirm one scoped settings reply; this never retries a save or grants access. */
+  async saveScopedSettings(kind, body, confirmed) {
+    const request =
+      kind === 'company'
+        ? ['/api/company/settings', 'PUT']
+        : kind === 'hiring'
+          ? ['/api/experts-settings/hiring-limits', 'PATCH']
+          : null;
+    if (!request) throw new Error('Unsupported settings form. No save request was sent.');
+    let result;
+    try {
+      result = await this.app._chatApi(request[0], { method: request[1], body });
+    } catch {
+      throw new Error(caSettingsSaveUnconfirmed);
+    }
+    if (result?.ok === false && [400, 401, 403, 404, 409, 422].includes(result.status))
+      throw new Error(result.error || 'The server refused this save.');
+    let matches = false;
+    try {
+      matches = result?.ok === true && confirmed(result.data) === true;
+    } catch {
+      // An incomplete reply cannot confirm an already dispatched save.
+    }
+    if (!matches) throw new Error(caSettingsSaveUnconfirmed);
+    return result.data;
+  }
+
   companyRecoveryFields(container, data, status) {
     const employees = data.employees || [];
     const recovery = this.el('form', 'ca-company-form ca-company-recovery');
@@ -4754,17 +4783,8 @@ class ReverieChatApp {
     expertLabel.append(this.el('span', 'ca-label-text', 'Wake after a crash'));
     const expert = this.el('select', 'ca-field');
     expert.setAttribute('aria-label', 'Wake after a crash');
-    const coordinator = data.settings?.coordinatorEmployeeId;
     const recoveryEmployees = employees.filter((employee) => !employee.onVacation);
-    const roots = recoveryEmployees.filter((employee) => {
-      const parent = employee.reportsTo ?? (employee.id === coordinator ? 'owner' : coordinator);
-      return !parent || parent === 'owner';
-    });
-    const automatic = this.literalText(
-      'option',
-      '',
-      roots.length === 1 ? `Automatic: ${roots[0].name}` : 'Choose an expert'
-    );
+    const automatic = this.literalText('option', '', 'Automatic');
     automatic.value = '';
     expert.append(automatic);
     for (const employee of recoveryEmployees) {
@@ -4772,14 +4792,16 @@ class ReverieChatApp {
       option.value = employee.id;
       expert.append(option);
     }
-    const selected = employees.some(
-      (employee) => employee.id === data.settings?.crashWakeEmployeeId && employee.onVacation
-    )
-      ? ''
-      : data.settings?.crashWakeEmployeeId || '';
-    if (selected && !employees.some((employee) => employee.id === selected)) {
-      const missing = this.el('option', '', 'Unavailable expert');
+    const selected = data.settings?.crashWakeEmployeeId || '';
+    if (selected && !recoveryEmployees.some((employee) => employee.id === selected)) {
+      const unavailable = employees.find((employee) => employee.id === selected);
+      const missing = this.literalText(
+        'option',
+        '',
+        unavailable ? `${unavailable.name} (unavailable)` : 'Unavailable expert'
+      );
       missing.value = selected;
+      missing.disabled = true;
       expert.append(missing);
     }
     expert.value = selected;
@@ -4790,28 +4812,48 @@ class ReverieChatApp {
     expertLabel.append(expert);
     const save = this.el('button', 'ca-btn', 'Save recovery');
     save.type = 'submit';
+    const failure = this.el('p', 'ca-company-error');
+    failure.setAttribute('role', 'alert');
     recovery.append(
       enabledLabel,
       expertLabel,
-      this.el('p', 'ca-hint', 'Only this expert wakes automatically. They can wake reports with permission.'),
+      this.el(
+        'p',
+        'ca-hint',
+        'Automatic uses the single top-level expert when there is exactly one. Stopped or vacationing experts stay off.'
+      ),
+      failure,
       save
     );
     recovery.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (save.disabled) return;
       save.disabled = true;
-      const changes = { ...data.settings, autoWakeEnabled: enabled.checked };
-      if (expert.value) changes.crashWakeEmployeeId = expert.value;
-      else delete changes.crashWakeEmployeeId;
+      enabled.disabled = true;
+      expert.disabled = true;
+      status.textContent = '';
+      failure.textContent = '';
+      const changes = { autoWakeEnabled: enabled.checked, crashWakeEmployeeId: expert.value || null };
       try {
-        const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: changes });
-        status.textContent = result.ok
-          ? 'Recovery settings saved.'
-          : `Could not save recovery settings: ${result.error || 'request failed'}`;
-        if (result.ok) data.settings = result.data?.settings || changes;
-      } catch {
-        status.textContent = 'Could not save recovery settings. Try again.';
+        const result = await this.saveScopedSettings('company', changes, (reply) => {
+          const saved = reply?.settings;
+          return (
+            saved?.autoWakeEnabled === changes.autoWakeEnabled &&
+            (saved.crashWakeEmployeeId === undefined || typeof saved.crashWakeEmployeeId === 'string') &&
+            (saved.crashWakeEmployeeId ?? null) === changes.crashWakeEmployeeId
+          );
+        });
+        const saved = result.settings;
+        data.settings = saved;
+        enabled.checked = saved.autoWakeEnabled;
+        expert.value = saved.crashWakeEmployeeId || '';
+        status.textContent = 'Recovery settings saved.';
+      } catch (error) {
+        failure.textContent = `Could not save recovery settings: ${error.message || 'request failed. Try again.'}`;
       } finally {
         save.disabled = false;
+        enabled.disabled = false;
+        expert.disabled = !enabled.checked;
       }
     });
     container.append(recovery);
@@ -4872,10 +4914,7 @@ class ReverieChatApp {
       error.textContent = '';
       status.textContent = '';
       try {
-        const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { timeZone } });
-        if (!result.ok) throw new Error(result.error || 'The time zone could not be saved.');
-        if (result.data?.settings?.timeZone !== timeZone)
-          throw new Error('Save not confirmed. Reopen Company settings to check the time zone.');
+        await this.saveScopedSettings('company', { timeZone }, (reply) => reply?.settings?.timeZone === timeZone);
         globalThis.ReverieTime?.setTimeZone(timeZone);
         status.textContent = `Company time zone saved: ${timeZone}.`;
         await onSaved?.();
@@ -5034,15 +5073,23 @@ class ReverieChatApp {
           error.textContent = '';
           status.textContent = '';
           try {
-            const fresh = await this.app._chatApi('/api/company');
-            if (!fresh.ok || fresh.data?.canManage !== true || !fresh.data?.settings)
-              throw new Error(fresh.error || 'Owner sign-in is required to save company settings.');
-            const { owner: _owner, ownerAvatar: _avatar, ...settings } = fresh.data.settings;
-            const saved = await this.app._chatApi('/api/company/settings', {
-              method: 'PUT',
-              body: { ...settings, ownerName: name.value.trim(), ownerTitle: title.value.trim() },
-            });
-            if (!saved.ok) throw new Error(saved.error || 'Company settings could not be saved.');
+            let fresh;
+            try {
+              fresh = await this.app._chatApi('/api/company');
+            } catch {
+              throw new Error('Current company settings could not be read. No save request was sent.');
+            }
+            if (!fresh?.ok || fresh.data?.canManage !== true || !fresh.data?.settings)
+              throw new Error(
+                `${fresh?.error || 'Owner sign-in is required to save company settings.'} No save request was sent.`
+              );
+            const changes = { ownerName: name.value.trim(), ownerTitle: title.value.trim() };
+            await this.saveScopedSettings(
+              'company',
+              changes,
+              (reply) =>
+                reply?.settings?.ownerName === changes.ownerName && reply.settings.ownerTitle === changes.ownerTitle
+            );
             status.textContent = 'Owner details saved.';
             await this.loadOwner();
             await onSaved?.();
@@ -5078,10 +5125,11 @@ class ReverieChatApp {
           error.textContent = '';
           try {
             const coreBeliefs = companyCore.values();
-            const result = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { coreBeliefs } });
-            if (!result.ok) throw new Error(result.error || 'Company core beliefs could not be saved.');
-            if (JSON.stringify(result.data?.settings?.coreBeliefs) !== JSON.stringify(coreBeliefs))
-              throw new Error('Save not confirmed. Reopen Company settings to check the current beliefs.');
+            await this.saveScopedSettings(
+              'company',
+              { coreBeliefs },
+              (reply) => JSON.stringify(reply?.settings?.coreBeliefs) === JSON.stringify(coreBeliefs)
+            );
             companyCore.markSaved();
             status.textContent = 'Company core beliefs saved.';
             await onSaved?.();
@@ -5285,9 +5333,16 @@ class ReverieChatApp {
       error.textContent = '';
       status.textContent = '';
       try {
-        const fresh = await this.app._chatApi('/api/experts');
-        if (!fresh.ok || !fresh.data?.settings)
-          throw new Error(fresh.error || 'Hiring settings could not be read before saving. Nothing was changed.');
+        let fresh;
+        try {
+          fresh = await this.app._chatApi('/api/experts');
+        } catch {
+          throw new Error('Hiring settings could not be read before saving. No save request was sent.');
+        }
+        if (!fresh?.ok || !fresh.data?.settings)
+          throw new Error(
+            `${fresh?.error || 'Hiring settings could not be read before saving.'} No save request was sent.`
+          );
         if (hiring(fresh.data.settings) !== shown) {
           render(fresh.data);
           throw new Error(
@@ -5298,8 +5353,13 @@ class ReverieChatApp {
           expected: { maxHiresPerDay: fresh.data.settings.maxHiresPerDay, maxActive: fresh.data.settings.maxActive },
           limits: { maxHiresPerDay: Number(perDay.input.value), maxActive: Number(active.input.value) },
         };
-        const saved = await this.app._chatApi('/api/experts-settings/hiring-limits', { method: 'PATCH', body });
-        if (!saved.ok) throw new Error(saved.error || 'Hiring settings could not be saved.');
+        await this.saveScopedSettings(
+          'hiring',
+          body,
+          (reply) =>
+            reply?.settings?.maxHiresPerDay === body.limits.maxHiresPerDay &&
+            reply.settings.maxActive === body.limits.maxActive
+        );
         status.textContent = 'Hiring settings saved.';
         await load();
       } catch (failure) {
@@ -8882,7 +8942,7 @@ class ReverieChatApp {
       .map((m) => {
         const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
         const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
-        return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}`;
+        return `${m.sessionId}:${this.presenceOf(m)}:${!!health.viewerUnavailable}:${!!health.viewerOnly}:${!!employee && this.canReconnectEmployee(employee)}:${!!employee && this.canInspectEmployeeViewer(employee)}`;
       })
       .join('|');
   }
@@ -8969,8 +9029,8 @@ class ReverieChatApp {
         );
       else if (!canReconnect) reconnect?.remove();
       const status = card.querySelector('.ca-viewer-status');
-      if (this.canReconnectEmployee(employee) && !status) card.append(this.viewerStatusButton(employee));
-      else if (!this.canReconnectEmployee(employee)) status?.remove();
+      if (this.canInspectEmployeeViewer(employee) && !status) card.append(this.viewerStatusButton(employee));
+      else if (!this.canInspectEmployeeViewer(employee)) status?.remove();
     }
   }
 
@@ -8992,6 +9052,17 @@ class ReverieChatApp {
     );
   }
 
+  canInspectEmployeeViewer(employee) {
+    const session = this.app.sessions?.get?.(employee?.sessionId);
+    return (
+      this.canManageOffice() &&
+      Number.isSafeInteger(employee?.sessionGeneration) &&
+      employee.sessionGeneration > 0 &&
+      !employee.bindingMigration &&
+      (session?.workerViewerReconnect === true || employee?.workerViewerReconnect === true)
+    );
+  }
+
   viewerReconnectStatus(employee, value) {
     const key = `${employee?.id}:${employee?.sessionId}:${employee?.sessionGeneration}`;
     if (arguments.length === 1) return this._viewerReconnectStatuses?.get(key);
@@ -9005,7 +9076,11 @@ class ReverieChatApp {
       value.attempts > 1000 ||
       !Number.isSafeInteger(value.retryAfterMs) ||
       value.retryAfterMs < 0 ||
-      value.retryAfterMs > 60000
+      value.retryAfterMs > 60000 ||
+      (value.observation !== undefined &&
+        !['outer-pane-responsive', 'pane-observation-unconfirmed', 'viewer-subject-changed'].includes(
+          value.observation
+        ))
     )
       return null;
     const status = {
@@ -9013,6 +9088,7 @@ class ReverieChatApp {
       reason: value.reason,
       attempts: value.attempts,
       retryAfterMs: value.retryAfterMs,
+      ...(value.observation === undefined ? {} : { observation: value.observation }),
     };
     this._viewerReconnectStatuses ||= new Map();
     if (this._viewerReconnectStatuses.size > 128) this._viewerReconnectStatuses.clear();
@@ -9021,10 +9097,54 @@ class ReverieChatApp {
   }
 
   viewerReconnectDescription(status) {
-    return (
-      `${status.state}: ${status.reason.replace(/[-_]/g, ' ')} · attempts ${status.attempts}` +
-      (status.retryAfterMs ? ` · retry in ${Math.ceil(status.retryAfterMs / 1000)}s` : '')
-    );
+    const reasons = {
+      'native-health-unavailable': "The employee's native health is unconfirmed for this viewer check.",
+      backoff: 'The viewer is waiting before another reconnect attempt.',
+      'in-progress': 'A viewer reconnect is already in progress.',
+      'viewer-closing': 'The terminal viewer is closing. Wait for that action to finish.',
+      'lifecycle-in-progress': 'A session action is already in progress. Wait for it to finish.',
+      'input-in-progress': 'Terminal input is still being processed. Its outcome is unconfirmed.',
+      'move-in-progress': 'A session move is in progress. Check the viewer after it finishes.',
+      'binding-migration': 'The employee is moving to another session. Check the viewer after the move finishes.',
+      'readiness-unconfirmed': 'The viewer connection was attempted, but its readiness could not be confirmed.',
+      'diagnostic-requested-readiness-unconfirmed-input-held':
+        'A viewer inspection was requested. Chat input remains paused.',
+      'pane-observation-unconfirmed': 'The terminal viewer could not be checked.',
+      'viewer-subject-changed': 'The original terminal viewer changed. Refresh Company before checking again.',
+      'stale-binding': "The employee's session changed. Refresh Company before checking the viewer.",
+      'binding-or-health-changed': "The employee's session or native health evidence changed. Refresh Company.",
+      'binding-or-authority-changed': "The employee's session or your recovery access changed. Refresh Company.",
+      'authority-changed': 'Your recovery access changed. Refresh Company before continuing.',
+      'admission-unavailable':
+        'The current session could not be verified for this viewer check. Refresh Company and try again.',
+      'server-not-ready': 'The server is not ready to check terminal viewers. Try again shortly.',
+      'not-running': 'The employee is not set to run. This check did not start them.',
+      'viewer-unavailable': 'The website has no current terminal viewer to check.',
+      'not-attempted': 'A viewer reconnect has not been attempted.',
+      'viewer-not-disconnected': 'The website has not reported a disconnected viewer.',
+      connected: 'The viewer connection was confirmed.',
+      'viewer-endpoint-custody-unavailable':
+        'The original terminal connection could not be verified. Recovery needs operator attention; the employee was not restarted.',
+      'viewer-endpoint-configuration-invalid':
+        'The terminal viewer configuration is invalid. Recovery needs operator attention; the employee was not restarted.',
+    };
+    const known = Object.hasOwn(reasons, status.reason);
+    const reason = known ? reasons[status.reason] : 'The terminal viewer could not be confirmed.';
+    if (['viewer-endpoint-custody-unavailable', 'viewer-endpoint-configuration-invalid'].includes(status.reason))
+      return reason;
+    const responsive =
+      known && status.observation === 'outer-pane-responsive' && status.reason !== 'pane-observation-unconfirmed';
+    const retry = status.retryAfterMs
+      ? `Retry the viewer connection in ${Math.ceil(status.retryAfterMs / 1000)}s.`
+      : '';
+    return [
+      responsive && status.reason === 'viewer-not-disconnected' ? '' : reason,
+      responsive ? 'The terminal viewer responded.' : '',
+      'Employee and chat readiness are still unconfirmed.',
+      retry,
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   viewerStatusButton(employee) {
@@ -9037,13 +9157,19 @@ class ReverieChatApp {
   }
 
   async showEmployeeViewerStatus(employee) {
-    if (!this.canReconnectEmployee(employee)) return;
-    const dialog = this.el('dialog', 'ca-viewer-status-dialog');
-    const report = this.el('p', 'ca-viewer-status-report', 'Reading terminal status…');
+    if (!this.canInspectEmployeeViewer(employee)) return;
+    const target = Object.freeze({
+      id: employee.id,
+      sessionId: employee.sessionId,
+      sessionGeneration: employee.sessionGeneration,
+    });
+    const dialog = this.el('dialog', 'ca-dialog ca-viewer-status-dialog');
+    dialog.setAttribute('aria-label', `Terminal status for ${employee.name}`);
+    const report = this.el('p', 'ca-viewer-status-report', 'Checking the terminal viewer…');
     report.setAttribute('role', 'status');
     report.setAttribute('aria-live', 'polite');
     const refresh = this.button(
-      'ca-btn',
+      'ca-btn is-primary',
       'Refresh terminal status',
       () => {
         void load();
@@ -9055,9 +9181,7 @@ class ReverieChatApp {
     const current = () =>
       this.company?.employees?.some(
         (e) =>
-          e.id === employee.id &&
-          e.sessionId === employee.sessionId &&
-          e.sessionGeneration === employee.sessionGeneration
+          e.id === target.id && e.sessionId === target.sessionId && e.sessionGeneration === target.sessionGeneration
       );
     const load = async () => {
       if (pending || !dialog.isConnected) return;
@@ -9069,10 +9193,10 @@ class ReverieChatApp {
       refresh.disabled = true;
       try {
         const result = await this.app._chatApi(
-          `/api/company/employees/${encodeURIComponent(employee.id)}/reconnect/status`,
+          `/api/company/employees/${encodeURIComponent(target.id)}/reconnect/status`,
           {
             method: 'POST',
-            body: { sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration },
+            body: { sessionId: target.sessionId, sessionGeneration: target.sessionGeneration },
           }
         );
         if (!dialog.isConnected) return;
@@ -9080,7 +9204,7 @@ class ReverieChatApp {
           report.textContent = 'The employee binding or recovery permission changed. Refresh Company.';
           return;
         }
-        const status = this.viewerReconnectStatus(employee, result.data?.reconnect ?? result.reconnect);
+        const status = this.viewerReconnectStatus(target, result.data?.reconnect ?? result.reconnect);
         report.textContent = status
           ? this.viewerReconnectDescription(status)
           : result.error || 'Terminal recovery status is unconfirmed.';
@@ -9092,16 +9216,17 @@ class ReverieChatApp {
         refresh.disabled = false;
       }
     };
+    const actions = this.el('div', 'ca-dialog-actions ca-viewer-status-actions');
+    actions.append(refresh, close);
     dialog.append(
       this.el('h2', '', `Terminal status for ${employee.name}`),
       report,
       this.el(
         'p',
-        'ca-hint',
-        'This status concerns the server terminal viewer. Provider health, browser terminal connection and chat acceptance remain separate. Unknown input and stop holds are preserved.'
+        'ca-hint ca-viewer-status-hint',
+        'This checks the terminal viewer only. It does not restart the employee or resend chat input.'
       ),
-      refresh,
-      close
+      actions
     );
     dialog.addEventListener('close', () => dialog.remove(), { once: true });
     this.doc.body.append(dialog);
@@ -9139,7 +9264,7 @@ class ReverieChatApp {
       if (!result.ok || !['viewer-connected', 'viewer-inspection-requested'].includes(result.data?.state)) {
         this.toast(
           status
-            ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}.`
+            ? `Connection not confirmed: ${this.viewerReconnectDescription(status)}`
             : result.error || 'Connection not confirmed. Check this expert’s status before trying again.',
           'error'
         );
@@ -9925,18 +10050,23 @@ class ReverieChatApp {
         for (const m of section.members) {
           const row = people.has(m) ? this.humanMemberRow(m) : this.memberRow(m);
           const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
-          if (!people.has(m) && employee && this.canReconnectEmployee(employee)) {
+          if (
+            !people.has(m) &&
+            employee &&
+            (this.canReconnectEmployee(employee) || this.canInspectEmployeeViewer(employee))
+          ) {
             const group = this.el('div', 'ca-member-with-actions');
-            group.append(
-              row,
-              this.button(
-                'ca-icon-btn ca-reconnect-viewer',
-                'Reconnect',
-                () => this.reconnectEmployeeViewer(employee),
-                { icon: 'reconnect' }
-              ),
-              this.viewerStatusButton(employee)
-            );
+            group.append(row);
+            if (this.canReconnectEmployee(employee))
+              group.append(
+                this.button(
+                  'ca-icon-btn ca-reconnect-viewer',
+                  'Reconnect',
+                  () => this.reconnectEmployeeViewer(employee),
+                  { icon: 'reconnect' }
+                )
+              );
+            if (this.canInspectEmployeeViewer(employee)) group.append(this.viewerStatusButton(employee));
             box.append(group);
           } else box.append(row);
         }
@@ -10594,7 +10724,7 @@ class ReverieChatApp {
           icon: 'reconnect',
         })
       );
-    if (employee && this.canReconnectEmployee(employee)) actions.append(this.viewerStatusButton(employee));
+    if (employee && this.canInspectEmployeeViewer(employee)) actions.append(this.viewerStatusButton(employee));
     if (!this.app._chatSelf && employee && this.humanSelf?.role === 'owner')
       actions.append(
         this.button('ca-btn', 'Laptop terminal', () => this.openHumanTerminal(employee), { text: 'Laptop terminal' })
@@ -10801,25 +10931,35 @@ class ReverieChatApp {
   }
 
   /**
-   * Store the name as the company's owner name. The settings are replaced as a whole by the server, so the
-   * current ones are sent back with only the name changed.
+   * Patch the company's owner name without writing unrelated settings back.
    */
-  async saveOwnerName(ownerName, { quiet = false } = {}) {
-    // Read the settings again now: the server replaces them as a whole, so the copy from startup could be stale.
-    const fresh = await this.app._chatApi('/api/company');
-    const current = fresh.ok ? fresh.data?.settings : null;
-    if (!current) {
-      if (!quiet) this.toast('Could not read the instance settings, so only this browser has the name', 'error');
+  async saveOwnerName(ownerName, { quiet = false, onFailure } = {}) {
+    const refuse = (message) => {
+      onFailure?.(message);
+      if (!quiet) this.toast(message, 'error');
       return false;
+    };
+    // Refresh the organization context; this snapshot is never a settings write payload.
+    let fresh;
+    try {
+      fresh = await this.app._chatApi('/api/company');
+    } catch {
+      return refuse('Current company settings could not be read. No save request was sent.');
     }
+    const current = fresh?.ok ? fresh.data?.settings : null;
+    if (!current) return refuse('Current company settings could not be read. No save request was sent.');
     this.company = fresh.data;
-    const { owner: _owner, ...rest } = current;
-    const res = await this.app._chatApi('/api/company/settings', { method: 'PUT', body: { ...rest, ownerName } });
-    if (!res.ok) {
-      if (!quiet) this.toast(`Chat: ${res.error} (the name is saved in this browser only)`, 'error');
-      return false;
+    let saved;
+    try {
+      saved = await this.saveScopedSettings(
+        'company',
+        { ownerName },
+        (reply) => reply?.settings?.ownerName === ownerName
+      );
+    } catch (failure) {
+      return refuse(failure.message);
     }
-    this.company = { ...this.company, settings: { ...current, ownerName } };
+    this.company = { ...this.company, settings: saved.settings };
     this.ownerName = ownerName;
     this.renderUser();
     return true;
@@ -12752,7 +12892,7 @@ class ReverieChatApp {
     void load();
   }
 
-  employeePermissionFields(container, employee) {
+  employeePermissionFields(container, employee, dialog) {
     const label = this.el('label', 'ca-hint', ' May recover employees and reconnect terminal viewers');
     label.title =
       'Explicit recovery delegation. Viewer-only repair preserves the provider; current scoped office authentication and native checks still apply. This does not grant provider transfers or owner access.';
@@ -12795,7 +12935,11 @@ class ReverieChatApp {
       planLabels.push(wrap);
     }
     const boardPermissions = {};
-    const boardSaves = new Set();
+    let preferenceState = { kind: 'ready' };
+    const live = () =>
+      dialog.isConnected &&
+      container.isConnected &&
+      (!dialog._companyOrigin || this.companyPage === dialog._companyOrigin);
     const boardProjection = (value) =>
       caBoardPermissionFields.every(
         ([key]) =>
@@ -12809,17 +12953,19 @@ class ReverieChatApp {
         const { input, note } = boardPermissions[key];
         const effective = employee.effectiveBoardPermissions?.[key];
         const included = key === 'editBoardIssues' && employee.effectiveBoardPermissions?.manageBoard === true;
-        input.checked = effective === true;
-        input.disabled = included || typeof effective !== 'boolean' || boardSaves.size > 0;
+        if (preferenceState.kind === 'ready') input.checked = effective === true;
+        input.disabled = included || typeof effective !== 'boolean' || preferenceState.kind !== 'ready';
         const source = employee.boardPermissionSources?.[key];
         note.textContent =
-          typeof effective !== 'boolean'
-            ? 'Current permission unavailable. Reopen Company after updating the server.'
-            : included
-              ? 'Included with Manage company board.'
-              : source === 'legacy'
-                ? 'Inherited current policy. Toggle to set an explicit choice.'
-                : 'Owner-selected permission.';
+          preferenceState.kind !== 'ready'
+            ? 'Current permission unconfirmed. Refresh permissions before changing access.'
+            : typeof effective !== 'boolean'
+              ? 'Current permission unavailable. Reopen Company after updating the server.'
+              : included
+                ? 'Included with Manage company board.'
+                : source === 'legacy'
+                  ? 'Inherited current policy. Toggle to set an explicit choice.'
+                  : 'Owner-selected permission.';
         input.closest('label').title = detail;
       }
     };
@@ -12836,78 +12982,128 @@ class ReverieChatApp {
     renderBoardPermissions();
     const preferenceStatus = this.el('p', 'ca-hint');
     preferenceStatus.setAttribute('role', 'status');
-    container.append(preferenceStatus);
-    let preferenceSaves = 0;
-    let preferenceError = '';
-    const savePreference = async (input, key, permission = false) => {
-      if (input.disabled || !container.isConnected) return;
-      const value = input.checked;
-      const boardPermission = Object.hasOwn(boardPermissions, key);
-      const previous = boardPermission
-        ? employee.effectiveBoardPermissions?.[key] === true
-        : permission
-          ? employee.permissions?.[key] === true
-          : employee[key] === true;
-      if (boardPermission) {
-        boardSaves.add(key);
-        for (const { input: control } of Object.values(boardPermissions)) control.disabled = true;
+    const preferenceError = this.el('p', 'ca-company-error ca-profile-permission-error');
+    preferenceError.setAttribute('role', 'alert');
+    const inputs = {
+      recoverEmployees: recovery,
+      manageOffice,
+      manageGoals,
+      ...planPermissions,
+      ...Object.fromEntries(Object.entries(boardPermissions).map(([key, value]) => [key, value.input])),
+    };
+    const projection = (value) =>
+      boardProjection(value) &&
+      ['recoverEmployees', 'manageOffice', 'manageGoals', 'moveOwnPlan', 'managePlans'].every(
+        (key) => typeof value?.permissions?.[key] === 'boolean'
+      );
+    const readUnconfirmed = 'Current permissions could not be confirmed. Refresh permissions before changing them.';
+    const paint = () => {
+      for (const [key, input] of Object.entries(inputs)) {
+        input.indeterminate = preferenceState.kind !== 'ready';
+        if (preferenceState.kind === 'ready') {
+          if (!Object.hasOwn(boardPermissions, key)) input.checked = employee.permissions[key] === true;
+        }
+        input.disabled = preferenceState.kind !== 'ready';
       }
-      input.disabled = true;
-      if (preferenceSaves === 0) preferenceError = '';
-      preferenceSaves++;
-      preferenceStatus.textContent = 'Saving preferences…';
+      renderBoardPermissions();
+      refresh.disabled = ['saving', 'refreshing', 'closed'].includes(preferenceState.kind);
+    };
+    const applyProjection = (value) => {
+      employee.permissions = value.permissions;
+      employee.effectiveBoardPermissions = value.effectiveBoardPermissions;
+      employee.boardPermissionSources = value.boardPermissionSources;
+    };
+    const fail = (original, text) => {
+      if (!live() || preferenceState !== original) return;
+      preferenceState = { kind: 'unconfirmed' };
+      preferenceStatus.textContent = '';
+      preferenceError.textContent = text;
+      paint();
+      preferenceError.scrollIntoView({ block: 'nearest' });
+    };
+    const refreshPermissions = async () => {
+      if (!live() || !['ready', 'unconfirmed'].includes(preferenceState.kind)) return;
+      const original = { kind: 'refreshing' };
+      preferenceState = original;
+      preferenceStatus.textContent = 'Reading current permissions…';
+      paint();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       try {
-        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
-          method: 'PUT',
-          body: permission ? { permissions: { [key]: value } } : { [key]: value },
-          signal: controller.signal,
-        });
-        const saved = result.data?.employee;
-        if (!result.ok && result.status >= 400 && result.status < 500)
-          throw new Error(result.error || 'Request refused');
-        if (!result.ok || saved?.id !== employee.id || (permission ? saved.permissions?.[key] : saved[key]) !== value)
-          throw new Error('Save not confirmed. Reopen Company to check the current value.');
-        if (permission) employee.permissions = { ...employee.permissions, [key]: value };
-        else employee[key] = value;
-        if (boardPermission) {
-          if (!boardProjection(saved))
-            throw new Error('Permission saved, but current access could not be read. Reopen Company to check it.');
-          employee.effectiveBoardPermissions = saved.effectiveBoardPermissions;
-          employee.boardPermissionSources = saved.boardPermissionSources;
-        }
-      } catch (error) {
-        input.checked = previous;
-        preferenceError = `Could not save preferences: ${error.message}`;
-        preferenceStatus.textContent = preferenceError;
+        const result = await this.app._chatApi(
+          `/api/company/employees/${encodeURIComponent(employee.id)}/permissions`,
+          { signal: controller.signal }
+        );
+        if (!live() || preferenceState !== original) return;
+        if (!result.ok || result.data?.employeeId !== employee.id || !projection(result.data))
+          throw new Error('Current permissions could not be confirmed.');
+        applyProjection(result.data);
+        preferenceState = { kind: 'ready' };
+        preferenceError.textContent = '';
+        preferenceStatus.textContent = 'Current permissions refreshed.';
+        paint();
+      } catch {
+        fail(original, readUnconfirmed);
       } finally {
         clearTimeout(timeout);
-        input.disabled = false;
-        if (boardPermission) {
-          boardSaves.delete(key);
-          renderBoardPermissions();
-        }
-        preferenceSaves--;
-        if (preferenceSaves === 0) preferenceStatus.textContent = preferenceError || 'Preferences saved.';
+      }
+    };
+    const refresh = this.button('ca-btn', `Refresh permissions for ${employee.name}`, () => refreshPermissions(), {
+      text: 'Refresh permissions',
+    });
+    const savePreference = async (input, key) => {
+      if (input.disabled || !live() || preferenceState.kind !== 'ready') return;
+      const value = input.checked;
+      const original = { kind: 'saving' };
+      preferenceState = original;
+      preferenceError.textContent = '';
+      preferenceStatus.textContent = 'Saving preferences…';
+      paint();
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+      let refusal = '';
+      try {
+        const result = await this.app._chatApi(`/api/company/employees/${encodeURIComponent(employee.id)}`, {
+          method: 'PUT',
+          body: { permissions: { [key]: value } },
+          signal: controller.signal,
+        });
+        if (!live() || preferenceState !== original) return;
+        if (!result.ok && result.status >= 400 && result.status < 500) refusal = result.error || 'Request refused';
+        const saved = result.data?.employee;
+        if (!result.ok || saved?.id !== employee.id || saved.permissions?.[key] !== value || !projection(saved))
+          throw new Error('Save not confirmed.');
+        applyProjection(saved);
+        preferenceState = { kind: 'ready' };
+        preferenceStatus.textContent = 'Preferences saved.';
+        paint();
+      } catch {
+        fail(
+          original,
+          refusal
+            ? `Could not save preferences (${refusal}). Refresh permissions before changing them.`
+            : 'Could not save preferences. It may already have saved. Refresh permissions before changing them.'
+        );
+      } finally {
+        clearTimeout(timeout);
       }
     };
     recovery.addEventListener('change', () => {
-      void savePreference(recovery, 'recoverEmployees', true);
+      void savePreference(recovery, 'recoverEmployees');
     });
     manageOffice.addEventListener('change', () => {
-      void savePreference(manageOffice, 'manageOffice', true);
+      void savePreference(manageOffice, 'manageOffice');
     });
     manageGoals.addEventListener('change', () => {
-      void savePreference(manageGoals, 'manageGoals', true);
+      void savePreference(manageGoals, 'manageGoals');
     });
     for (const [key, input] of Object.entries(planPermissions))
       input.addEventListener('change', () => {
-        void savePreference(input, key, true);
+        void savePreference(input, key);
       });
     for (const [key, { input }] of Object.entries(boardPermissions))
       input.addEventListener('change', () => {
-        void savePreference(input, key, true);
+        void savePreference(input, key);
       });
     const general = this.el('fieldset', 'ca-profile-permissions');
     general.append(
@@ -12918,7 +13114,20 @@ class ReverieChatApp {
       goalLabel
     );
     preferenceStatus.classList.add('ca-profile-permission-status');
-    container.append(general, boardFields, preferenceStatus);
+    container.append(general, boardFields, preferenceStatus, preferenceError, refresh);
+    dialog.addEventListener(
+      'close',
+      () => {
+        preferenceState = { kind: 'closed' };
+      },
+      { once: true }
+    );
+    if (!projection(employee)) {
+      preferenceState = { kind: 'unconfirmed' };
+      preferenceError.textContent = readUnconfirmed;
+      container.prepend(preferenceError, refresh);
+    }
+    paint();
   }
 
   employeeLifecycleFields(container, employee, onSaved, dialog) {
@@ -12942,6 +13151,19 @@ class ReverieChatApp {
       const lifecycle = this.el('div', 'ca-company-actions');
       const lifecycleError = this.el('p', 'ca-company-error ca-company-lifecycle-error');
       lifecycleError.setAttribute('role', 'alert');
+      const showLifecycleError = (message) => {
+        lifecycleError.textContent = message;
+        // The fixed profile footer can cover a newly wrapped error below the
+        // clicked control. Keep the complete alert in the scrollable panel.
+        const body = host.closest('.ca-profile-editor-body');
+        if (!dialog.isConnected || !body) return;
+        const clip = body.getBoundingClientRect();
+        const alertBox = lifecycleError.getBoundingClientRect();
+        const top = clip.top + body.clientTop;
+        const bottom = top + body.clientHeight;
+        if (alertBox.bottom > bottom) body.scrollTop += alertBox.bottom - bottom + 4;
+        else if (alertBox.top < top) body.scrollTop -= top - alertBox.top + 4;
+      };
       let changingLifecycle = false;
       const changeLifecycle = async (action) => {
         if (changingLifecycle) return;
@@ -12970,7 +13192,7 @@ class ReverieChatApp {
             !dialog.isConnected
           )
             return;
-          if (returning && action === 'vacation') lifecycleError.textContent = `Starting ${employee.name}…`;
+          if (returning && action === 'vacation') showLifecycleError(`Starting ${employee.name}…`);
           const result = await this.app._chatApi(
             `/api/company/employees/${encodeURIComponent(employee.id)}/${action}`,
             {
@@ -12979,7 +13201,7 @@ class ReverieChatApp {
             }
           );
           if (!result.ok) {
-            lifecycleError.textContent = result.error || `Could not update ${employee.name}.`;
+            showLifecycleError(result.error || `Could not update ${employee.name}.`);
             return;
           }
           applied = true;
@@ -12999,9 +13221,11 @@ class ReverieChatApp {
           if (action === 'retire') dialog.close();
           else paint();
         } catch {
-          lifecycleError.textContent = applied
-            ? `${success} The view could not refresh. Reopen Company to see the updated roster.`
-            : `Could not update ${employee.name}. Try again.`;
+          showLifecycleError(
+            applied
+              ? `${success} The view could not refresh. Reopen Company to see the updated roster.`
+              : `Could not update ${employee.name}. Try again.`
+          );
           if (applied) status.textContent = lifecycleError.textContent;
         } finally {
           if (!applied) {
@@ -13364,7 +13588,8 @@ class ReverieChatApp {
         ])
           if (Object.hasOwn(current, key)) employee[key] = current[key];
         management.replaceChildren();
-        this.employeePermissionFields(management, employee);
+        globalThis.ReverieEmployeeRecovery?.mount(this, management, dialog, employee);
+        this.employeePermissionFields(management, employee, dialog);
         this.employeeHiringFields(management, employee, dialog);
         const resources = this.el('section', 'ca-profile-resources');
         resources.setAttribute('aria-label', 'Laptop resources');
@@ -14214,10 +14439,17 @@ class ReverieChatApp {
         }
         save.disabled = true;
         try {
-          if (await this.saveOwnerName(ownerName, { quiet: true })) dlg.close();
-          else nameError.textContent = 'Your name could not be saved. Try again.';
+          if (
+            await this.saveOwnerName(ownerName, {
+              quiet: true,
+              onFailure: (message) => {
+                nameError.textContent = message;
+              },
+            })
+          )
+            dlg.close();
         } catch {
-          nameError.textContent = 'Your name could not be saved. Try again.';
+          nameError.textContent = caSettingsSaveUnconfirmed;
         } finally {
           save.disabled = false;
         }

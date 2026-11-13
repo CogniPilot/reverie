@@ -46,6 +46,7 @@ import { MAX_INPUT_LENGTH } from '../../config/terminal-limits.js';
 import { isAllowedRequestHost, isAllowedRequestOrigin, type HostPolicy } from '../network-auth-policy.js';
 import { WsConnectionRegistry } from '../ws-connection-registry.js';
 import { canAccessOwned, getAuthUser } from '../route-helpers.js';
+import { browserInputNeedsReload, INPUT_PROTOCOL_QUERY, INPUT_RELOAD_MESSAGE } from '../browser-input-protocol.js';
 
 /** Micro-batch interval for terminal output (ms). Short enough for low latency,
  *  long enough to group Ink's rapid cursor-up redraw sequences into single frames. */
@@ -193,6 +194,14 @@ export function registerWsRoutes(app: FastifyInstance, ctx: SessionPort & Pick<E
         try {
           const msg = JSON.parse(String(raw));
           if (msg.t === 'i' && typeof msg.d === 'string') {
+            if (browserInputNeedsReload(req, (req.query as Record<string, unknown>)[INPUT_PROTOCOL_QUERY])) {
+              // No positive/negative delivery ACK: this original tag may have
+              // been issued by an older process. Keep saved input quarantined.
+              if (socket.readyState === 1) {
+                socket.send(JSON.stringify({ t: 'ie', held: true, reloadRequired: true, error: INPUT_RELOAD_MESSAGE }));
+              }
+              return;
+            }
             if (msg.d.length > MAX_INPUT_LENGTH) {
               // Refused for good, so say so: a silent return left the frame
               // unACKed and the client redelivered it every few seconds forever

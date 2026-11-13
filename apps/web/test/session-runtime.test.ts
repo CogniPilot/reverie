@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { MuxSession, RespawnPaneOptions } from '../src/mux-interface.js';
+import { acknowledgeMuxFixture } from './helpers/acknowledged-mux-fixture.js';
+import { randomUUID } from 'node:crypto';
+import { StateStore } from '../src/state-store.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -28,7 +32,9 @@ vi.mock('../src/custom-model-hosts.js', async (original) => ({
     models: ['qwen3.8-27b'], defaultModelId: 'qwen3.8-27b', modelContextLengths: { 'qwen3.8-27b': 262144 } }]),
 }));
 
-const makeSession = () => new Session({ id: 'expert-id', name: 'Expert', mode: 'opencode', workingDir: '/workspace',
+let publicationStore: StateStore;
+beforeEach(() => { publicationStore = new StateStore(join(tmpdir(), 'runtime-intent-' + randomUUID() + '.json')); });
+const makeSession = () => new Session({ publicationStore, id: 'expert-id', name: 'Expert', mode: 'opencode', workingDir: '/workspace',
   subscriptionProfile: { id: 'first', label: 'First', provider: 'openai' },
   envOverrides: { CODEX_HOME: '/accounts/first' }, openCodeConfig: { continueSession: 'ses_exact', autoAllowTools: true } });
 
@@ -83,13 +89,17 @@ describe('owner runtime transaction', () => {
 
   it.each(['null', 'throw'] as const)('retains the attempted recipe after uncertain physical dispatch without rollback launch (%s)', async outcome => {
     const {app, session, ctx} = await harness();
-    const respawn = vi.fn(async (options: {onProviderDispatch?: () => void}) => {
-      options.onProviderDispatch?.();
+    const respawn = vi.fn(async (options: RespawnPaneOptions) => {
+      await acknowledgeMuxFixture(options);
       if (outcome === 'throw') throw new Error('synthetic partial provider dispatch');
       return null;
     });
-    Object.assign(session, {_useMux: true, _muxSession: {sessionId: session.id, muxName: 'synthetic-runtime-pane', pid: 999_999_991},
-      _mux: {muxSessionExists: () => true, respawnPane: respawn, clearPaneExit: vi.fn()}});
+    const subject: MuxSession = {sessionId: session.id, owner: session.owner, muxName: 'synthetic-runtime-pane',
+      pid: 999_999_991, createdAt: Date.now(), workingDir: session.workingDir, mode: session.mode, attached: false};
+    const registered = new Map([[subject.sessionId, subject]]);
+    Object.assign(session, {_useMux: true, _muxSession: subject,
+      _mux: {getSession: (id: string) => registered.get(id), muxSessionExists: () => true,
+        respawnPane: respawn, clearPaneExit: vi.fn()}});
     const stop = vi.spyOn(session, 'stop');
     const change = {mode: 'opencode', source: {kind: 'subscription', profileId: 'second'}};
     try {

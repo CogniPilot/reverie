@@ -302,8 +302,12 @@ export function createServer(rooms, { features = { unread: true, dms: true, plac
     if (url.pathname === '/api/system/gpu' && method === 'GET') return ok(structuredClone(state.gpu || { available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null }));
     if (url.pathname === '/api/plans' && method === 'GET') return ok({ accounts: [], gpu: structuredClone(state.gpu || { available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null }) });
     if (url.pathname === '/api/company/settings' && method === 'PUT') {
-      state.company = { ...(state.company || { employees: [] }), settings: { ...opts.body } };
-      return ok({ settings: state.company.settings });
+      // The real settings service merges partial edits and retains readonly identity fields.
+      const { owner: _owner, ownerAvatar: _avatar, ...patch } = opts.body || {};
+      const settings = { ...state.company?.settings, ...patch };
+      if (patch.crashWakeEmployeeId === null) delete settings.crashWakeEmployeeId;
+      state.company = { ...(state.company || { employees: [] }), settings };
+      return ok({ settings: structuredClone(settings) });
     }
     if (url.pathname === '/api/company' && method === 'GET') return ok(structuredClone(state.company || { employees: [], settings: {} }));
     if (url.pathname === '/api/chatrooms/dms' && method === 'POST') {
@@ -327,6 +331,12 @@ export function createServer(rooms, { features = { unread: true, dms: true, plac
   return state;
 }
 
+/**
+ * @param {{rooms?: object[], sessions?: object[], features?: Record<string, boolean>,
+ * stored?: Record<string, unknown>, sessionStored?: Record<string, unknown>, hash?: string,
+ * narrow?: boolean, loadShell?: boolean, approvals?: boolean, company?: object,
+ * viewport?: {width: number, height: number}}} [options]
+ */
 export async function createHarness({
   rooms = [],
   sessions = [],
@@ -457,7 +467,7 @@ export async function createHarness({
     }
     window.ReverieApp = ReverieApp;
   `);
-  for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js']) window.eval(read(f));
+  for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js', 'employee-recovery.js']) window.eval(read(f));
   // Full-state SSE handlers depend on the same sticky input-recovery policy as
   // the page. Load those real methods rather than stubbing away their holds.
   const recoverySource = read('app.js');
@@ -469,6 +479,13 @@ export async function createHarness({
       if (name !== 'constructor') window.ReverieApp.prototype[name] = recovery.prototype[name];
     }
   }`);
+  // Recovery projection can run without a journal in this shell fixture. Use
+  // the real persistence method's explicit no-journal path, not a fake ACK.
+  const deliverySource = read('input-delivery.js');
+  const persistenceStart = deliverySource.indexOf('    async _persistReliableNow() {');
+  const persistenceEnd = deliverySource.lastIndexOf('\n  });');
+  if (persistenceStart < 0 || persistenceEnd <= persistenceStart) throw new Error('Input persistence method missing');
+  window.eval(`Object.assign(window.ReverieApp.prototype, {${deliverySource.slice(persistenceStart, persistenceEnd)}});`);
   window.app = new window.ReverieApp();
   for (const s of sessions) window.app.sessions.set(s.id, s);
   const startShell = async () => {

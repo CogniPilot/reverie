@@ -21,10 +21,14 @@ import {WebServer} from '../src/web/server.js';
 import {CASES_DIR} from '../src/web/route-helpers.js';
 import {CompanyStore} from '../src/company-store.js';
 import {CompanyService} from '../src/company-service.js';
+import {TmuxManager} from '../src/tmux-manager.js';
+import * as workerExecution from '../src/worker-execution.js';
 import {ChatroomStore} from '../src/chatroom-store.js';
 import type {AuthUser} from '../src/types.js';
 import type {SseStreamManager} from '../src/web/sse-stream-manager.js';
 import type {CleanupManager} from '../src/utils/index.js';
+import type {MuxSession, CreateSessionOptions, RespawnPaneOptions} from '../src/mux-interface.js';
+import {acknowledgeMuxFixture} from './helpers/acknowledged-mux-fixture.js';
 
 // Only process transport is fake: actual start owner, filesystem executor,
 // single-use receipt, HTTP routes and wait registry remain real.
@@ -51,6 +55,302 @@ async function start(extra: Partial<ConstructorParameters<typeof Session>[0]> = 
     envOverrides: {REVERIE_HOOK_GENERATION: 'caller-forged'}, ...extra});
   sessions.push(session); await session.startInteractive(); return session;
 }
+
+/** Only the physical create and raw tmux I/O are synthetic. The actual manager
+ * registry, readPaneLiveness decoder and Session settlement owner remain real. */
+function workerLaunchTransport() {
+  const mux = new TmuxManager();
+  vi.spyOn(mux,'isAvailable').mockReturnValue(true);
+  vi.spyOn(mux,'muxSessionExists').mockImplementation(name => name === 'reverie-abcdef');
+  const reader = vi.spyOn(mux as unknown as {listPanesAsync(): Promise<string | null>}, 'listPanesAsync');
+  let record: MuxSession;
+  const create = vi.spyOn(mux,'createSession').mockImplementation(async options => {
+    await acknowledgeMuxFixture(options);
+    record = {sessionId:options.sessionId,muxName:'reverie-abcdef',pid:999_999_991,
+      owner:options.owner,mode:options.mode ?? 'claude',createdAt:0,workingDir:workspace,attached:false};
+    mux.registerSession(record);
+    return record;
+  });
+  reader.mockResolvedValue('0 999999991 reverie-abcdef\n');
+  return {mux,reader,create,get subject() {return record!;}};
+}
+
+it.each(['dead','missing','unreadable','ambiguous','pid-changed','read-failed'] as const)(
+  'ordinary worker launch retains its exact candidate when the original pane is %s at settlement', async state => {
+    vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+    const transport = workerLaunchTransport(), {mux,reader,create} = transport;
+    reader.mockImplementation(async () => {
+      if (state === 'read-failed') throw new Error('synthetic original reader failed');
+      return state === 'unreadable' ? null : state === 'missing' ? '' : state === 'dead'
+        ? '1 999999991 reverie-abcdef\n' : state === 'pid-changed'
+          ? '0 999999992 reverie-abcdef\n'
+          : '0 999999991 reverie-abcdef\n0 999999992 reverie-abcdef\n';
+    });
+    const session = new Session({workingDir:workspace,mode:'claude',useMux:true,mux});sessions.push(session);
+    try {
+      await expect(session.startInteractive()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      expect(session.providerDispatchHeld).toBe(true);
+      expect(mux.getSession(session.id)).toBe(transport.subject);
+      expect((session as unknown as {_muxSession: MuxSession})._muxSession).toBe(transport.subject);
+      expect(session.toState().providerDispatchHeld).toBe(true);
+      await expect(session.startInteractive()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      expect(create).toHaveBeenCalledOnce();
+    } finally {mux.destroy();}
+  }
+);
+
+it.each(['interactive','shell'] as const)('a live original worker %s pane permits launch return without claiming provider readiness', async kind => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const {mux,reader} = workerLaunchTransport();
+  const session = new Session({workingDir:workspace,mode:kind === 'shell'?'shell':'claude',useMux:true,mux});sessions.push(session);
+  try {
+    await (kind === 'shell' ? session.startShell() : session.startInteractive());
+    expect(reader).toHaveBeenCalledOnce();expect(session.providerDispatchHeld).toBe(false);
+    expect(session.pid).toBe(999_999_997);
+  } finally {mux.destroy();}
+});
+
+it.each(['epoch','mode-aba','owner','registry'] as const)('worker launch cannot settle an awaited original observation after %s changes', async change => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const transport = workerLaunchTransport(), {mux,reader} = transport;
+  const entered = deferred<void>(), release = deferred<void>();
+  reader.mockImplementation(async () => {entered.resolve();await release.promise;return '0 999999991 reverie-abcdef\n';});
+  const session = new Session({workingDir:workspace,useMux:true,mux});sessions.push(session);
+  let successor: MuxSession | undefined;
+  const pending = session.startInteractive();void pending.catch(() => {});
+  try {
+    await entered.promise;
+    if (change === 'epoch') (session as unknown as {_invalidateWorkspaceHooks():void})._invalidateWorkspaceHooks();
+    if (change === 'mode-aba') {session.setMode('shell');session.setMode('claude');}
+    if (change === 'owner') transport.subject.owner = 'different-owner';
+    if (change === 'registry') {successor = {...transport.subject};mux.registerSession(successor);}
+    release.resolve();await expect(pending).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+    expect(session.providerDispatchHeld).toBe(true);
+    expect((session as unknown as {_muxSession:MuxSession})._muxSession).toBe(transport.subject);
+    if (successor) expect(mux.getSession(session.id)).toBe(successor);
+  } finally {release.resolve();mux.destroy();}
+});
+
+it.each(['dead','live'] as const)('worker restart uses the same strict post-dispatch %s observation', async state => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const transport = workerLaunchTransport(), {mux,reader} = transport;
+  const record: MuxSession = {sessionId:`synthetic-existing-worker-${state}`,muxName:'reverie-abcdef',pid:999_999_991,
+    mode:'claude',createdAt:0,workingDir:workspace,attached:false};
+  mux.registerSession(record);
+  const session = new Session({id:record.sessionId,workingDir:workspace,useMux:true,mux,muxSession:record});sessions.push(session);
+  try {
+    const respawn = vi.spyOn(mux,'respawnPane').mockImplementation(async options => {
+      await acknowledgeMuxFixture(options);record.pid = 999_999_990;return record.pid;
+    });
+    reader.mockResolvedValue(`${state === 'dead'?'1':'0'} 999999990 reverie-abcdef\n`);
+    if (state === 'live') {expect(await session.restartCli()).toBe(true);expect(session.providerDispatchHeld).toBe(false);}
+    else {
+      await expect(session.restartCli()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      await expect(session.restartCli()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      expect(session.providerDispatchHeld).toBe(true);
+    }
+    expect(respawn).toHaveBeenCalledOnce();expect(record.pid).toBe(999_999_990);
+  } finally {mux.destroy();}
+});
+
+it('viewer-only attachment does not acquire a provider-launch hold from this settlement guard', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const {mux,reader} = workerLaunchTransport();
+  reader.mockResolvedValue(null);
+  const session = new Session({workingDir:workspace,useMux:true,mux,workerAttachOnly:true});sessions.push(session);
+  try {await session.startInteractive();expect(reader).not.toHaveBeenCalled();expect(session.providerDispatchHeld).toBe(false);}
+  finally {mux.destroy();}
+});
+
+it('worker refusal before physical dispatch does not acquire a provider-launch hold', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const {mux,reader,create} = workerLaunchTransport();
+  let allowed = true;
+  create.mockImplementation(async () => {allowed = false;throw new Error('synthetic pre-dispatch refusal');});
+  const session = new Session({workingDir:workspace,useMux:true,mux});sessions.push(session);
+  try {await expect(session.startInteractive(() => allowed)).rejects.toThrow();expect(reader).not.toHaveBeenCalled();expect(session.providerDispatchHeld).toBe(false);expect(spawnPty).not.toHaveBeenCalled();}
+  finally {mux.destroy();}
+});
+
+it.each(['owner','self'] as const)('HTTP quick-start keeps unapproved self requests effect-free and preserves the owner’s unconfirmed candidate (%s)', async actor => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const app = Fastify();await app.register(cookie);
+  const ctx = createMockRouteContext({agentSkillEnabled:false});
+  const store = new CompanyStore(join(workspace,'launch-settlement-company.json'));await store.init();
+  const rooms = new ChatroomStore();
+  const company = new CompanyService(store,{getSession:id=>ctx.sessions.get(id),chatrooms:{
+    rooms:()=>rooms.list(),room:id=>rooms.get(id),addMember:(id,sid,options)=>rooms.addMember(id,sid,options).member},
+    research:{start:vi.fn(),inspect:vi.fn(),stop:vi.fn()}} as never);
+  const employee = await company.hire({name:'Synthetic Launch Owner',icon:'🔬',position:'Engineer',expertise:['testing'],
+    sessionId:'test-session-1',researchEnabled:false} as never);
+  await company.setDesiredRunning('test-session-1',true);
+  const before = structuredClone(store.snapshot().employees.find(row=>row.id===employee.id));
+  const source = ctx.sessions.get('test-session-1');
+  const complete = vi.spyOn(company,'completeSpawn');
+  const transport = workerLaunchTransport(),{mux,reader,create} = transport;
+  reader.mockResolvedValue('1 999999991 reverie-abcdef\n');
+  Object.assign(ctx,{mux});const created:Session[]=[];
+  ctx.setupSessionListeners.mockImplementation(async value=>{const session=value as unknown as Session;created.push(session);sessions.push(session);});
+  registerSessionRoutes(app,ctx as never,{company,verifiedOwner:trustedFixtureOwner});
+  installResponseEnvelope(app);installRouteErrorHandler(app);await app.ready();
+  const caseName='worker-launch-settlement-'+actor;
+  const request=()=>app.inject({method:'POST',url:'/api/quick-start',
+    ...(actor==='self'?{headers:{'x-reverie-parent-session':'test-session-1'}}:{}),
+    payload:{employeeId:employee.id,caseName,mode:'claude'}});
+  try {
+    const originalSessions = [...ctx.sessions];
+    const response=await request();
+    if (actor === 'self') {
+      expect(response.statusCode, response.body).toBe(403);
+      expect(response.json()).toMatchObject({error: expect.any(String)});
+      expect(created).toEqual([]);
+      expect([...ctx.sessions]).toEqual(originalSessions);
+      expect(ctx.sessions.get('test-session-1')).toBe(source);
+      expect(ctx.addSession).not.toHaveBeenCalled();
+      expect(ctx.setupSessionListeners).not.toHaveBeenCalled();
+      expect(ctx.store.incrementSessionsCreated).not.toHaveBeenCalled();
+      expect(ctx.persistSessionState).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+      expect(reader).not.toHaveBeenCalled();
+      expect(complete).not.toHaveBeenCalled();
+      expect(ctx.cleanupSession).not.toHaveBeenCalled();
+      expect(ctx.discardPartiallyBuiltSession).not.toHaveBeenCalled();
+      expect(ctx.broadcast).not.toHaveBeenCalled();
+      expect(store.snapshot().employees.find(row=>row.id===employee.id)).toEqual(before);
+      await expect(readFile(join(CASES_DIR,caseName))).rejects.toMatchObject({code:'ENOENT'});
+      return;
+    }
+    expect(response.statusCode,response.body).toBe(409);
+    const candidate=created[0];expect(candidate).toBeInstanceOf(Session);
+    expect(response.json()).toMatchObject({recoveryRequired:true,sessionId:candidate.id,employeeId:employee.id,
+      replacesSessionId:'test-session-1',replacementClaim:'held'});
+    expect(candidate.providerDispatchHeld).toBe(true);expect(ctx.sessions.get(candidate.id)).toBe(candidate);
+    expect(mux.getSession(candidate.id)).toBe(transport.subject);
+    expect(ctx.sessions.get('test-session-1')).toBe(source);
+    expect(store.snapshot().employees.find(row=>row.id===employee.id)).toEqual(before);
+    expect(complete).not.toHaveBeenCalled();expect(ctx.cleanupSession).not.toHaveBeenCalled();
+    expect(ctx.broadcast.mock.calls.some(([event])=>event==='session:interactive')).toBe(false);
+    const repeated=await request();expect(repeated.statusCode).toBe(409);
+    expect(repeated.json().error).toContain('already being replaced');expect(create).toHaveBeenCalledOnce();
+    expect(store.snapshot().employees.find(row=>row.id===employee.id)).toEqual(before);
+  } finally {await app.close();mux.destroy();await rm(join(CASES_DIR,caseName),{recursive:true,force:true});}
+});
+it.each(['interactive-mux','interactive-direct','shell-mux','shell-direct'] as const)(
+  'an attach-only Session %s cannot fall through to a provider when worker configuration is absent', async kind => {
+    vi.stubEnv('REVERIE_WORKER_SOCKET',''); vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','');
+    const mux = new TmuxManager();
+    const create = vi.spyOn(mux,'createSession');
+    const session = new Session({workingDir:workspace,mode:kind.startsWith('shell')?'shell':'claude',
+      useMux:kind.endsWith('mux'),mux,workerAttachOnly:true});sessions.push(session);
+    const provider = vi.spyOn(workerExecution,'workerPtyCommand');
+    vi.mocked(spawnPty).mockClear();
+    try {
+      await expect(kind.startsWith('shell') ? session.startShell() : session.startInteractive()).rejects.toThrow();
+      expect(spawnPty).not.toHaveBeenCalled(); expect(provider).not.toHaveBeenCalled();
+      if (kind.endsWith('mux')) expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true}));
+      else expect(create).not.toHaveBeenCalled();
+      expect(session.pid).toBeNull(); expect(session.providerDispatchHeld).toBe(false);
+    } finally {mux.destroy();}
+  });
+
+it.each(['interactive','shell'] as const)('ordinary local %s startup still dispatches its provider without worker configuration', async kind => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET',''); vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','');
+  const session = new Session({workingDir:workspace,mode:kind === 'shell'?'shell':'claude',useMux:false});sessions.push(session);
+  vi.mocked(spawnPty).mockClear();
+  await (kind === 'shell' ? session.startShell() : session.startInteractive());
+  expect(spawnPty).toHaveBeenCalledOnce(); expect(session.pid).toBe(999_999_997);
+});
+
+it.each(['interactive','shell'] as const)('a dead attach-only %s pane uses atomic viewer respawn and refuses null-result recreation', async kind => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const id = '33333333-3333-4333-8333-333333333333';
+  const record = {sessionId:id,muxName:'reverie-33333333',pid:999_999_995,workingDir:workspace} as MuxSession;
+  const mux = {isAvailable:()=>true,muxSessionExists:()=>true,isPaneDead:()=>true,getSession:()=>record,
+    respawnPane:vi.fn(async()=>null),createSession:vi.fn(),clearPaneExit:vi.fn()};
+  const session = new Session({id,workingDir:workspace,mode:kind === 'shell'?'shell':'claude',
+    useMux:true,mux:mux as never,muxSession:record,workerAttachOnly:true});sessions.push(session);
+  vi.mocked(spawnPty).mockClear();
+  await expect(kind === 'shell' ? session.startShell() : session.startInteractive()).rejects.toThrow('original viewer endpoint');
+  expect(mux.respawnPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true,onlyIfDead:true}));
+  expect(mux.createSession).not.toHaveBeenCalled(); expect(spawnPty).not.toHaveBeenCalled();
+  expect((session as unknown as {_muxSession:MuxSession})._muxSession).toBe(record);
+});
+
+it('an attach-only Session cannot turn explicit restart, runPrompt or malformed remote attachment into provider control', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const mux = {isAvailable:()=>true,muxSessionExists:()=>true,isPaneDead:()=>true,respawnPane:vi.fn()};
+  const session = new Session({workingDir:workspace,useMux:true,mux:mux as never,workerAttachOnly:true,
+    remote:{host:'synthetic',user:'synthetic'} as never});sessions.push(session);
+  const provider = vi.spyOn(workerExecution,'workerPtyCommand');vi.mocked(spawnPty).mockClear();
+  await expect(session.restartCli()).rejects.toThrow('Attach-only worker sessions');
+  await expect(session.runPrompt('never execute')).rejects.toThrow('Attach-only worker sessions');
+  expect(await session.reattachRemote()).toBe(false);
+  expect(mux.respawnPane).not.toHaveBeenCalled();expect(provider).not.toHaveBeenCalled();expect(spawnPty).not.toHaveBeenCalled();
+});
+
+it.each(['vanished','live-client-dead'] as const)('an attach-only %s mux preserves original metadata and refuses provider fallback', async kind => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const id = '33333333-3333-4333-8333-333333333333';
+  const record = {sessionId:id,muxName:'reverie-33333333',pid:999_999_995,workingDir:workspace} as MuxSession;
+  const mux = {isAvailable:()=>true,muxSessionExists:()=>kind !== 'vanished',isPaneDead:()=>true,getSession:()=>record,
+    respawnPane:vi.fn(),createSession:vi.fn(),clearPaneExit:vi.fn()};
+  const session = new Session({id,workingDir:workspace,useMux:true,mux:mux as never,muxSession:record,workerAttachOnly:true});sessions.push(session);
+  const client = {pid:999_999_997,kill:vi.fn()};
+  if (kind === 'live-client-dead') Object.assign(session,{ptyProcess:client,_pid:client.pid});
+  vi.mocked(spawnPty).mockClear();
+  await expect(session.startInteractive()).rejects.toThrow();
+  expect(mux.respawnPane).not.toHaveBeenCalled();expect(mux.createSession).not.toHaveBeenCalled();expect(spawnPty).not.toHaveBeenCalled();
+  expect((session as unknown as {_muxSession:MuxSession})._muxSession).toBe(record);expect(client.kill).not.toHaveBeenCalled();
+});
+
+it('an attach-only shell may attach its existing provider without automatically typing clear', async () => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','/synthetic/worker.sock');
+  const id = '33333333-3333-4333-8333-333333333333';
+  const record: MuxSession = {sessionId:id,muxName:'reverie-33333333',pid:999_999_995,workingDir:workspace,
+    mode:'shell',createdAt:Date.now(),attached:false};
+  const mux = {isAvailable:()=>true,muxSessionExists:()=>true,isPaneDead:()=>false,getSession:()=>record,setAttached:vi.fn(),
+    createSession:vi.fn(async options=>{await acknowledgeMuxFixture(options);return record;}),clearPaneExit:vi.fn()};
+  const session = new Session({id,workingDir:workspace,mode:'shell',useMux:true,mux:mux as never,workerAttachOnly:true});sessions.push(session);
+  vi.mocked(spawnPty).mockClear();
+  await session.startShell();await new Promise(resolve=>setTimeout(resolve,150));
+  expect(mux.createSession).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true}));
+  expect(spawnPty).toHaveBeenCalledOnce();expect(transport.writes).toEqual([]);
+});
+
+it.each([true,false])('the run HTTP route preflights actual Session attach-only=%s before running/broadcasting', async attachOnly => {
+  vi.stubEnv('REVERIE_WORKER_SOCKET','');vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET','');
+  const session = new Session({workingDir:workspace,useMux:false,workerAttachOnly:attachOnly});sessions.push(session);
+  const {app,ctx} = await hookHarness(session);
+  const run = vi.spyOn(session,'runPrompt'), provider = vi.spyOn(workerExecution,'workerPtyCommand');
+  vi.mocked(spawnPty).mockClear();ctx.broadcast.mockClear();
+  try {
+    const response = await app.inject({method:'POST',url:`/api/sessions/${session.id}/run`,payload:{prompt:'synthetic prompt'}});
+    expect(response.statusCode,response.body).toBe(attachOnly?409:200);
+    if (attachOnly) {
+      expect(response.json()).toMatchObject({success:false,errorCode:'CONFLICT'});
+      expect(response.json().error).toContain('Attach-only worker sessions');
+      expect(run).not.toHaveBeenCalled();expect(provider).not.toHaveBeenCalled();expect(spawnPty).not.toHaveBeenCalled();
+      expect(ctx.broadcast.mock.calls.some(([event])=>event === 'session:running')).toBe(false);
+    } else {
+      expect(run).toHaveBeenCalledOnce();expect(provider).toHaveBeenCalledOnce();expect(spawnPty).toHaveBeenCalledOnce();
+      expect(ctx.broadcast.mock.calls.filter(([event])=>event === 'session:running')).toHaveLength(1);
+    }
+  } finally {await app.close();}
+});
+
+it('an unexpected run preflight error retains no running claim and returns a sanitized failure', async () => {
+  const session = new Session({workingDir:workspace,useMux:false});sessions.push(session);
+  const {app,ctx} = await hookHarness(session), run = vi.spyOn(session,'runPrompt');
+  vi.spyOn(session,'assertProviderLaunchAdmission').mockImplementationOnce(()=>{throw new Error('synthetic-private-preflight-detail');});
+  vi.mocked(spawnPty).mockClear();ctx.broadcast.mockClear();
+  try {
+    const response = await app.inject({method:'POST',url:`/api/sessions/${session.id}/run`,payload:{prompt:'never execute'}});
+    expect(response.statusCode).toBe(500);expect(response.json()).toMatchObject({success:false,errorCode:'OPERATION_FAILED'});
+    expect(response.body).not.toContain('synthetic-private-preflight-detail');
+    expect(run).not.toHaveBeenCalled();expect(spawnPty).not.toHaveBeenCalled();
+    expect(ctx.broadcast.mock.calls.some(([event])=>event === 'session:running')).toBe(false);
+  } finally {await app.close();}
+});
 it('prepares configuration without completing waits or serializing private generation', async () => {
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const session = await start();
@@ -127,7 +427,7 @@ it.each(['{ incomplete', 'null', '[]'])('preserves damaged settings and refuses 
     .rejects.toMatchObject({name: 'WorkspaceHookPreparationError', outcome: {state: 'unconfirmed'}});
   expect(await readFile(path, 'utf8')).toBe(bytes); expect(transport.envs).toHaveLength(0);
 });
-it('releases obsolete parked wait and ignores delayed old events after new start over real HTTP routes', async () => {
+it('releases obsolete parked wait and ignores delayed old events after an original local restart over real HTTP routes', async () => {
   const first = await start({id: 'synthetic-hook-session'}); const oldToken = transport.envs.at(-1)!.REVERIE_HOOK_GENERATION!;
   const app = Fastify(); await app.register(cookie); const ctx = createMockRouteContext();
   ctx.sessions.set(first.id, first as never);
@@ -138,8 +438,9 @@ it('releases obsolete parked wait and ignores delayed old events after new start
     const obsolete = app.inject({method: 'GET', url: waitUrl});
     await new Promise(resolve => setTimeout(resolve, 10)); first.setMode('shell');
     expect((await obsolete).json().data.wait).toMatchObject({ended: true, aborted: false, signal: null});
-    await first.stop(false); const next = await start({id: first.id}); ctx.sessions.set(next.id, next as never);
-    const token = transport.envs.at(-1)!.REVERIE_HOOK_GENERATION!; expect(token).not.toBe(oldToken);
+    first.setMode('claude'); const respawn = restartTransport(first);
+    expect(await first.restartCli()).toBe(true); const next = first;
+    const token = respawn.mock.calls[0][0].envOverrides!.REVERIE_HOOK_GENERATION; expect(token).not.toBe(oldToken);
     const pending = app.inject({method: 'GET', url: waitUrl}); let answered = false;
     void pending.then(() => {answered = true;}); await new Promise(resolve => setTimeout(resolve, 10));
     for (const bad of [undefined, 'wrong', oldToken]) {
@@ -154,10 +455,14 @@ it('releases obsolete parked wait and ignores delayed old events after new start
 });
 
 function restartTransport(session: Session) {
-  const respawn = vi.fn(async (options: {onProviderDispatch?: () => void}) => {options.onProviderDispatch?.(); return 999_999_996;});
-  Object.assign(session, {_useMux: true, _muxSession: {sessionId: session.id, muxName: 'synthetic-pane', pid: 999_999_997},
-    _mux: {muxSessionExists: () => true, respawnPane: respawn, clearPaneExit: vi.fn()}});
-  registerMuxFixture(session);
+  const respawn = vi.fn(async (options: RespawnPaneOptions) => {await acknowledgeMuxFixture(options); return 999_999_996;});
+  const subject: MuxSession = {sessionId: session.id, muxName: 'synthetic-pane', pid: 999_999_997,
+    owner: session.owner, createdAt: Date.now(), workingDir: workspace, mode: session.mode, attached: true};
+  // This fixture owns the original registry record. Never derive a successor
+  // from the live Session during admission or silently mirror owner changes.
+  const registered = new Map([[session.id, subject]]);
+  Object.assign(session, {_useMux: true, _muxSession: subject,
+    _mux: {getSession: (id: string) => registered.get(id), muxSessionExists: () => true, respawnPane: respawn, clearPaneExit: vi.fn()}});
   return respawn;
 }
 it('validates again before an actual restart and exports a fresh generation only after dispatch', async () => {
@@ -220,10 +525,13 @@ function deferred<T>() {
 }
 async function controlledMuxStart(options: {prepared?: boolean; viewer?: boolean} = {}) {
   const dispatched = deferred<{envOverrides: Record<string, string>}>();
-  const settlement = deferred<{muxName: string; sessionId: string; pid: number}>();
+  const settlement = deferred<MuxSession>();
+  const registered = new Map<string,MuxSession>();
   const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, isPaneDead: () => false,
-    setAttached: vi.fn(), createSession: vi.fn(async (options) => {options.onProviderDispatch?.(); dispatched.resolve(options); return settlement.promise;}),
-    respawnPane: vi.fn(async (options) => {options.onProviderDispatch?.(); return 999_999_995;})};
+    getSession: (id:string) => registered.get(id),
+    readPaneLiveness: async () => ({state:'live' as const,pid:999_999_997}),
+    setAttached: vi.fn(), createSession: vi.fn(async (options) => {await acknowledgeMuxFixture(options); dispatched.resolve(options); return settlement.promise;}),
+    respawnPane: vi.fn(async (options) => {await acknowledgeMuxFixture(options); return 999_999_995;})};
   const proof = await prepareWorkspaceHooks(workspace, 'install', {scaffold: false, enabled: async () => true});
   const session = new Session({workingDir: workspace, workspaceHookPreparation: options.prepared === false ? undefined : proof,
     workerAttachOnly: options.viewer === true, useMux: true, mux: mux as never});
@@ -232,7 +540,9 @@ async function controlledMuxStart(options: {prepared?: boolean; viewer?: boolean
   const starting = session.startInteractive(() => allowed);
   const dispatch = await dispatched.promise;
   return {session, mux, starting, token: dispatch.envOverrides.REVERIE_HOOK_GENERATION,
-    succeed: () => settlement.resolve({muxName: 'synthetic-current-pane', sessionId: session.id, pid: 999_999_997}),
+    succeed: () => {const subject:MuxSession = {muxName:'synthetic-current-pane',sessionId:session.id,pid:999_999_997,
+      owner:session.owner,mode:session.mode,createdAt:0,workingDir:workspace,attached:false};
+      registered.set(session.id,subject);settlement.resolve(subject);},
     fail: () => {allowed = false; settlement.reject(new Error('synthetic launch outcome unconfirmed'));}};
 }
 async function hookHarness(session: Session, principal?: () => AuthUser) {
@@ -310,7 +620,7 @@ it.each([true, false])('controlled respawn success=%s cannot admit old or unsett
   const reached = deferred<{envOverrides: Record<string, string>}>();
   const settlement = deferred<number | null>();
   const respawn = restartTransport(session);
-  respawn.mockImplementation(async options => {options.onProviderDispatch?.(); reached.resolve(options as never); return settlement.promise as never;});
+  respawn.mockImplementation(async options => {await acknowledgeMuxFixture(options); reached.resolve(options as never); return settlement.promise as never;});
   const {app, ctx, controller, post} = await hookHarness(session);
   const wait = app.inject({method: 'GET', url: `/api/sessions/${session.id}/wait?until=stop&fresh=1&timeout=2000`});
   await vi.waitFor(() => expect(sessionWaits.signalWaiterCount(session.id)).toBe(1));
@@ -390,18 +700,25 @@ it('revocation while a mux write awaits I/O blocks the physical key and reports 
   const session = await start(); const token = transport.envs.at(-1)!.REVERIE_HOOK_GENERATION;
   restartTransport(session);
   const ready = deferred<void>(), resume = deferred<void>();
-  Object.assign((session as unknown as {_mux: object})._mux, {sendInput: async (_id: string, data: string, options: {admitted: () => boolean}) => {
-    ready.resolve(); await resume.promise; if (!options.admitted()) return false; transport.writes.push(data); return true;
-  }});
+  const admissions: boolean[] = [];
+  const sendInput = vi.fn(async (_id: string, data: string, options: {admitted: () => boolean}) => {
+    admissions.push(options.admitted());
+    ready.resolve(); await resume.promise;
+    const admitted = options.admitted(); admissions.push(admitted);
+    if (!admitted) return false; transport.writes.push(data); return true;
+  });
+  Object.assign((session as unknown as {_mux: object})._mux, {sendInput});
   const {app, post} = await hookHarness(session);
   try {
     await post(token, 'permission_prompt'); const item = approvalInbox.getForSession(session.id)!;
-    const answering = app.inject({method: 'POST', url: `/api/approvals/${encodeURIComponent(item.id)}/answer`, payload: {action: 'approve'}}).then(response => response);
+    const answering = app.inject({method: 'POST', url: `/api/approvals/${encodeURIComponent(item.id)}/answer`, payload: {action: 'approve'}});
+    await expect.poll(() => sendInput.mock.calls.length).toBe(1);
     await ready.promise; session.setMode('shell'); resume.resolve();
     const answer = await answering; expect(answer.statusCode).toBe(409);
     expect(answer.json().error).toContain('unconfirmed'); expect(answer.json().error.toLowerCase()).toContain('do not replay');
+    expect(admissions).toEqual([true, false]);
     expect(transport.writes).toHaveLength(0); expect(approvalInbox.getForSession(session.id)).toBeDefined();
-  } finally {await app.close();}
+  } finally {resume.resolve(); await app.close();}
 });
 it('a physical key followed by invalidation is unconfirmed, held, and never replayed', async () => {
   const session = await start(); const token = transport.envs.at(-1)!.REVERIE_HOOK_GENERATION;
@@ -422,7 +739,7 @@ it('a newly started provider becoming busy does not revoke its settled original 
   const session = await start(); Object.assign(session, {_status: 'idle'}); const respawn = restartTransport(session);
   respawn.mockImplementation(async options => {
     expect((options as {admitted: () => boolean}).admitted()).toBe(true);
-    options.onProviderDispatch?.();
+    await acknowledgeMuxFixture(options);
     Object.assign(session, {_status: 'busy'}); return 999_999_991;
   });
   expect(await session.restartCli(() => true, () => !session.isBusy())).toBe(true);
@@ -555,7 +872,7 @@ it.each(['busy', 'authority'] as const)('known pre-effect %s refusal preserves w
   respawn.mockImplementation(async options => {
     reached.resolve(options as never); await release.promise;
     if (!(options as {admitted(): boolean}).admitted()) return null as never;
-    options.onProviderDispatch?.(); return 999_999_989;
+    await acknowledgeMuxFixture(options); return 999_999_989;
   });
   const {app, post} = await hookHarness(session);
   try {
@@ -577,7 +894,7 @@ it.each(['null', 'throw'] as const)('holds uncertain dispatched provider without
   const session = await start(); const originalPid = session.pid;
   const respawn = restartTransport(session);
   respawn.mockImplementation(async options => {
-    options.onProviderDispatch?.();
+    await acknowledgeMuxFixture(options);
     if (outcome === 'throw') throw new Error('synthetic partial command');
     return null as never;
   });
@@ -625,11 +942,16 @@ it('concurrent duplicate hook cannot recreate consent while the first physical a
 it.each(['create', 'quick-start'] as const)('HTTP %s retains the exact uncertain Session without cleanup or another launch', async route => {
   const app = Fastify(); await app.register(cookie); const ctx = createMockRouteContext({agentSkillEnabled: false});
   const created: Session[] = [];
+  const registered = new Map<string,MuxSession>();
   const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, isPaneDead: () => false,
+    getSession: (id:string)=>registered.get(id),
     setAttached: vi.fn(), clearPaneExit: vi.fn(), setHistoryLimit: vi.fn(),
-    createSession: vi.fn(async (options: {sessionId: string; onProviderDispatch?: () => void}) => {
-      options.onProviderDispatch?.();
-      return {sessionId: options.sessionId, muxName: 'synthetic-retained-pane', pid: 999_999_993};
+    createSession: vi.fn(async (options: CreateSessionOptions) => {
+      await acknowledgeMuxFixture(options);
+      const subject: MuxSession = {sessionId:options.sessionId,owner:options.owner,muxName:'synthetic-retained-pane',
+        pid:999_999_993,mode:options.mode,workingDir:options.workingDir,createdAt:Date.now(),attached:false,
+        remote:options.remote,docker:options.docker};
+      registered.set(subject.sessionId,subject);return subject;
     })};
   Object.assign(ctx, {mux});
   ctx.setupSessionListeners.mockImplementation(async value => {
@@ -701,8 +1023,8 @@ it.each(['create', 'quick-start'] as const)('EID-bound HTTP %s retains the origi
   const reached = deferred<void>(), finish = deferred<void>();
   const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, isPaneDead: () => false,
     setAttached: vi.fn(), clearPaneExit: vi.fn(), setHistoryLimit: vi.fn(),
-    createSession: vi.fn(async (options: {sessionId: string; onProviderDispatch?: () => void}) => {
-      options.onProviderDispatch?.(); reached.resolve(); await finish.promise;
+    createSession: vi.fn(async (options: CreateSessionOptions) => {
+      await acknowledgeMuxFixture(options); reached.resolve(); await finish.promise;
       return {sessionId: options.sessionId, muxName: 'synthetic-employee-pane', pid: 999_999_989};})};
   Object.assign(ctx, {mux});
   const created: Session[] = [];
@@ -748,9 +1070,9 @@ it('positive initial adapter result without physical dispatch proof is held and 
   expect(mux.createSession).toHaveBeenCalledOnce(); expect(mux.respawnPane).not.toHaveBeenCalled();
 });
 
-it('held owned remote recovery never issues a respawn command', async () => {
+it('held owned remote recovery refuses a missing original registry subject', async () => {
   const respawn = vi.fn();
-  const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, respawnPane: respawn};
+  const mux = {isAvailable: () => true, backend: 'tmux', muxSessionExists: () => true, getSession: () => undefined, respawnPane: respawn};
   const session = new Session({workingDir: workspace, providerDispatchHeld: true, useMux: true, mux: mux as never,
     remote: {hostId: 'synthetic-remote', label: 'Synthetic remote', host: '192.0.2.1', owned: true},
     muxSession: {sessionId: 'synthetic-remote-session', muxName: 'synthetic-remote-pane', pid: 999_999_987} as never});
@@ -785,4 +1107,3 @@ it('held attachment preserves the original subject when consecutive mux observat
   expect((session as unknown as {_muxSession: object})._muxSession).toBe(original);
   expect(mux.createSession).not.toHaveBeenCalled(); expect(mux.respawnPane).not.toHaveBeenCalled();
 });
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';

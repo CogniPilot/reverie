@@ -1,3 +1,4 @@
+import type { StateStore } from '../../src/state-store.js';
 import {TerminalInputService} from '../../src/web/terminal-input-service.js';
 /**
  * Mock context for route handler testing.
@@ -101,6 +102,10 @@ export function createMockRouteContext(options?: {
       load: vi.fn(),
       incrementSessionsCreated: vi.fn(),
       setConfig: vi.fn(),
+      // Route-port wiring only; actual disk acknowledgement has isolated API controls.
+      commitConfig: vi.fn(async (config: Parameters<StateStore['commitConfig']>[0]) => ({
+        ralphEnabled: false, maxConcurrentSessions: 5, ...config,
+      })),
       getSessionOrder: vi.fn(() => sessionOrder),
       setSessionOrder: vi.fn((order: string[]) => {
         sessionOrder = order;

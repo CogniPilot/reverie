@@ -1,3 +1,5 @@
+import { ProviderLaunchPublication } from './provider-launch-publication.js';
+import { MuxSessionMetadataStore, type MuxMetadataPublicationStatus, type MuxMetadataReconciliation, type MuxMetadataIncidentSelector } from './mux-session-metadata-store.js';
 import {TerminalInputAttempt} from './terminal-input-outcome.js';
 import { cliConfigContent } from './cli-config-content.js';
 /**
@@ -31,12 +33,11 @@ import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
 import { execSync, exec, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { workerLaunchCommand } from './worker-execution.js';
+import { workerLaunchCommand, WorkerViewerEndpoint, WorkerViewerEndpointCustodyError } from './worker-execution.js';
+import { MuxMutationRefusedError } from './mux-interface.js';
 
 const execAsync = promisify(exec);
-import { existsSync, readFileSync, mkdirSync } from 'node:fs';
-import { writeFile, rename } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
   dataPath,
@@ -213,6 +214,36 @@ const IS_TEST_MODE = !!process.env.VITEST;
 
 /** Path to persisted mux session metadata */
 const MUX_SESSIONS_FILE = dataPath('mux-sessions.json');
+
+/** Copy launch DATA before awaits while retaining the actual private owners/callbacks. */
+function captureLaunchOptions<T extends CreateSessionOptions | RespawnPaneOptions>(options: T): T {
+  const data = { ...options };
+  const continuations = new Map<string, unknown>();
+  for (const key of ['providerLaunch', 'providerSubject', 'onProviderDispatch', 'onViewerDispatch', 'admitted', 'stillCurrent', 'workerResourceLaunch']) {
+    continuations.set(key, Reflect.get(data, key));
+    Reflect.deleteProperty(data, key);
+  }
+  const captured = structuredClone(data);
+  for (const [key, value] of continuations) Reflect.set(captured, key, value);
+  return captured;
+}
+
+function notifyMuxDispatch(options: CreateSessionOptions | RespawnPaneOptions, provider: boolean): void {
+  if (provider) options.onProviderDispatch?.();
+  else options.onViewerDispatch?.();
+}
+
+function isRemoteViewerLaunch(options: CreateSessionOptions | RespawnPaneOptions): boolean {
+  if (options.remote && options.docker) throw new Error('A launch cannot select both remote and container execution');
+  return options.remote?.owned === false;
+}
+
+interface PaneMutation {
+  readonly registration: MuxSession | undefined;
+  current(): boolean;
+  publishCreated(subject: MuxSession): void;
+  release(): void;
+}
 
 /**
  * COD-108 kill-switch: `remoteAutoReconnect` app setting (default ON). Read at
@@ -1731,9 +1762,9 @@ function setTmuxEnvVar(tmuxCmd: string, muxName: string, key: string, value: str
  *
  * Was three near-identical per-CLI functions whose only difference was the key list.
  */
-function setCliSensitiveEnvVars(tmuxCmd: string, muxName: string, keys: readonly string[]): void {
+function setCliSensitiveEnvVars(tmuxCmd: string, muxName: string, keys: readonly string[], environment: Readonly<NodeJS.ProcessEnv>): void {
   for (const key of keys) {
-    const val = process.env[key];
+    const val = environment[key];
     if (val) setTmuxEnvVar(tmuxCmd, muxName, key, val);
   }
 }
@@ -1836,6 +1867,14 @@ function setCliConfigContent(tmuxCmd: string, muxName: string, varName: string, 
 export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   readonly backend = 'tmux' as const;
   private sessions: Map<string, MuxSession> = new Map();
+  /** Exclusion and metadata ownership only; never execution or provider-readiness authority. */
+  readonly #paneMutations = new Map<string, object>();
+  readonly #metadata = new MuxSessionMetadataStore(MUX_SESSIONS_FILE);
+  // Routing continuation belongs to this exact product-created record. A saved
+  // path, restored DTO or manually registered pane cannot recreate its custody.
+  readonly #workerViewerEndpoints = new WeakMap<MuxSession, Readonly<{
+    endpoint: WorkerViewerEndpoint; sessionId: string; owner?: string; muxName: string; workingDir: string;
+  }>>();
   private readonly tmuxSocket = resolveConfiguredTmuxSocket();
   private statsInterval: NodeJS.Timeout | null = null;
   private mouseSyncInterval: NodeJS.Timeout | null = null;
@@ -1988,30 +2027,41 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
   }
 
-  /**
-   * Save sessions to disk asynchronously. (NEVER writes in test mode)
-   * Uses atomic temp+rename to prevent corruption on crash.
-   */
+  /** Queue current observations only; no loaded metadata can grant live custody. */
   private saveSessions(): void {
     if (IS_TEST_MODE) return;
+    this.queueCurrentSessionMetadata();
+  }
 
-    try {
-      const dir = dirname(MUX_SESSIONS_FILE);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
-      const data = Array.from(this.sessions.values());
-      const json = JSON.stringify(data, null, 2);
+  private queueCurrentSessionMetadata(): void {
+    this.#metadata.request(Array.from(this.sessions.values()));
+  }
 
-      const tempPath = MUX_SESSIONS_FILE + '.tmp';
-      writeFile(tempPath, json, 'utf-8')
-        .then(() => rename(tempPath, MUX_SESSIONS_FILE))
-        .catch((err) => {
-          console.error('[TmuxManager] Failed to save sessions:', err);
-        });
-    } catch (err) {
-      console.error('[TmuxManager] Failed to save sessions:', err);
-    }
+  /** Observation-only explicit publication; never accepts bytes, paths or custody DATA. */
+  async publishCurrentSessionMetadata(): Promise<void> {
+    this.queueCurrentSessionMetadata();
+    await this.#metadata.flush();
+  }
+
+  getMuxMetadataPublicationStatus() {
+    return this.#metadata.getStatus();
+  }
+
+  muxMetadataResourceId(): string {
+    return this.#metadata.resourceId();
+  }
+
+  onMuxMetadataPublicationStatus(listener: (status: MuxMetadataPublicationStatus) => void | Promise<void>): () => void {
+    return this.#metadata.onStatus(listener);
+  }
+
+  /** Explicitly join original metadata I/O without launching or probing anything. */
+  async flushSessionMetadata(): Promise<void> {
+    await this.#metadata.flush();
+  }
+
+  reconcileSessionMetadata(selector: MuxMetadataIncidentSelector, admitted: () => boolean): Promise<MuxMetadataReconciliation> {
+    return this.#metadata.reconcile(selector, () => Array.from(this.sessions.values()), admitted);
   }
 
   /**
@@ -2173,13 +2223,14 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     muxName: string,
     sessionId: string,
     mode: SessionMode,
-    rawConfig?: Record<string, unknown>
+    rawConfig: Record<string, unknown> | undefined,
+    environment: Readonly<NodeJS.ProcessEnv>
   ): void {
     const entry = getCli(mode);
     if (!entry) return;
     const tmuxCmd = this.tmux();
 
-    setCliSensitiveEnvVars(tmuxCmd, muxName, entry.env.tmuxSetenvKeys);
+    setCliSensitiveEnvVars(tmuxCmd, muxName, entry.env.tmuxSetenvKeys, environment);
 
     for (const [key, value] of Object.entries(configSetenvValues(entry, rawConfig))) {
       setTmuxEnvVar(tmuxCmd, muxName, key, value);
@@ -2256,11 +2307,43 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
   }
 
-  /**
-   * Creates a new tmux session wrapping Claude CLI or a shell.
-   * In test mode: creates an in-memory session only (no real tmux session).
-   */
+  /** One private owner excludes competing creation/respawn and publishes its own metadata only once. */
+  private _beginPaneMutation(sessionId: string): PaneMutation | undefined {
+    if (this.#paneMutations.has(sessionId)) return undefined;
+    const token = Object.freeze({});
+    const registration = this.sessions.get(sessionId);
+    const fingerprint = (subject: MuxSession | undefined) => subject && JSON.stringify([
+      subject.sessionId, subject.owner, subject.muxName, subject.pid, subject.workingDir, subject.mode, subject.remote, subject.docker,
+    ]);
+    let selection: {state: 'original'; subject: MuxSession | undefined; snapshot: string | undefined}
+      | {state: 'created'; subject: MuxSession; snapshot: string} = {
+        state: 'original', subject: registration, snapshot: fingerprint(registration),
+      };
+    this.#paneMutations.set(sessionId, token);
+    const current = () => this.#paneMutations.get(sessionId) === token
+      && this.sessions.get(sessionId) === selection.subject && fingerprint(selection.subject) === selection.snapshot;
+    return Object.freeze({
+      registration, current,
+      publishCreated: (subject: MuxSession) => {
+        if (selection.state !== 'original' || !current() || subject.sessionId !== sessionId)
+          throw new MuxMutationRefusedError('changed');
+        this.sessions.set(sessionId, subject);
+        selection = {state: 'created', subject, snapshot: fingerprint(subject)!};
+      },
+      release: () => {if (this.#paneMutations.get(sessionId) === token) this.#paneMutations.delete(sessionId);},
+    });
+  }
+
+  /** Creates a new tmux session; test mode substitutes only the physical transport. */
   async createSession(options: CreateSessionOptions): Promise<MuxSession> {
+    options = captureLaunchOptions(options);
+    const mutation = this._beginPaneMutation(options.sessionId);
+    if (!mutation) throw new MuxMutationRefusedError('busy');
+    try {return await this._createSession(options, mutation);}
+    finally {mutation.release();}
+  }
+
+  private async _createSession(options: CreateSessionOptions, mutation: PaneMutation): Promise<MuxSession> {
     const {
       sessionId,
       workingDir,
@@ -2289,6 +2372,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       owner,
     } = options;
     const muxName = `reverie-${sessionId.slice(0, 8)}`;
+    const requireCurrent = () => {
+      if (!mutation.current()) throw new MuxMutationRefusedError('changed');
+      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
+    };
+    if (mutation.registration && (mutation.registration.sessionId !== sessionId || mutation.registration.owner !== owner))
+      throw new MuxMutationRefusedError('changed');
 
     if (!isValidMuxName(muxName)) {
       throw new Error('Invalid session name: contains unsafe characters');
@@ -2296,11 +2385,31 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     if (!isValidPath(workingDir)) {
       throw new Error('Invalid working directory path: contains unsafe characters');
     }
+    // Select once before awaited launch preparation. Later repair must never
+    // select a different endpoint from a changed service environment.
+    const attachOnly = options.workerAttachOnly === true;
+    const remoteViewer = isRemoteViewerLaunch(options);
+    const requiresPublication = !attachOnly && !remoteViewer;
+    const publication = requiresPublication ? options.providerLaunch : undefined;
+    if (requiresPublication && !(publication instanceof ProviderLaunchPublication))
+      throw new Error('Original acknowledged provider launch owner required');
+    const viewerEndpoint = !remote && !docker ? WorkerViewerEndpoint.capture(sessionId) : undefined;
+    if (attachOnly) {
+      if (!viewerEndpoint) throw new WorkerViewerEndpointCustodyError();
+      viewerEndpoint.assertAvailable(sessionId);
+    }
+    if (attachOnly && options.workerResourceLaunch)
+      throw new Error('Resource replacement cannot use an attach-only viewer');
 
     // TEST MODE: Create in-memory session only — no real tmux session
     if (IS_TEST_MODE) {
-      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
-      options.onProviderDispatch?.();
+      requireCurrent();
+      const execution = Object.freeze({kind:'mux' as const,sessionId,owner:owner ?? null,mode,command:'test-mode',cwd:workingDir,environment:envOverrides ?? {}});
+      if (publication) await publication.prepare(options.providerSubject, execution);
+      requireCurrent();
+      notifyMuxDispatch(options, requiresPublication);
+      if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
+      requireCurrent();
       const session: MuxSession = {
         sessionId,
         muxName,
@@ -2314,8 +2423,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         attached: false,
         name,
       };
-      this.sessions.set(sessionId, session);
+      mutation.publishCreated(session);
+      if (viewerEndpoint) this.#workerViewerEndpoints.set(session, Object.freeze({endpoint: viewerEndpoint, sessionId, owner, muxName, workingDir}));
       this.emit('sessionCreated', session);
+      if (!mutation.current()) throw new MuxMutationRefusedError('changed');
       return session;
     }
 
@@ -2336,7 +2447,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // pointing at the real cause. The container's own CLIs are verified by the adoption
     // preflight / image gate before launch instead.
     const cliRunsInContainer = !!docker;
-    if (!cliRunsInContainer && !cliDir) {
+    // An admitted attach-only route never executes the provider command. The
+    // existing worker may have a CLI that is absent from the website image.
+    if (!attachOnly && !cliRunsInContainer && !cliDir) {
       const message = missingCliMessage(mode);
       if (message) throw new Error(message);
     }
@@ -2352,6 +2465,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // settings precedence) — exported below so the shared exporter script
     // can wrap it. Only worth discovering when we're actually injecting.
     const userStatusLineCommand = statusLineCommand ? await findEffectiveUserStatusLineCommand(workingDir) : undefined;
+    requireCurrent();
 
     const baseCmd = buildSpawnCommand({
       codexTrustWorkspace: options.codexTrustWorkspace,
@@ -2387,7 +2501,18 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-          : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly, options.workerResourceLaunch);
+          : attachOnly && viewerEndpoint ? viewerEndpoint.command(localFullCmd, workingDir, sessionId)
+            : workerLaunchCommand(localFullCmd, workingDir, sessionId, attachOnly, options.workerResourceLaunch, publication);
+
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.TMUX;
+      const mergedEnvironment = this.mergedCliEnv(mode, options, envOverrides);
+      const execution = Object.freeze({kind:'mux' as const,sessionId,owner:owner ?? null,mode,command:fullCmd,cwd:workingDir,environment:Object.freeze({...cleanEnv,...mergedEnvironment})});
+      if (publication) {
+        await publication.prepare(options.providerSubject, execution);
+        publication.assertCurrent();
+      }
+      requireCurrent();
 
       // Create tmux session in three steps to handle cold-start (no server running)
       // and avoid the race where the command exits before remain-on-exit is set:
@@ -2395,8 +2520,6 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // 3. Replace shell with actual command via respawn-pane (no terminal echo)
       // Unset $TMUX so nested sessions work when the dev server itself runs inside tmux.
       // (Production uses systemd which has a clean env, but dev/test may be nested.)
-      const cleanEnv = { ...process.env };
-      delete cleanEnv.TMUX;
       // Create the session on the dedicated socket (${this.tmux()} = `tmux -L <socket>`),
       // launched in TMUX_LAUNCH_CWD (/tmp) rather than the real workingDir: a FUSE/rclone
       // mount that isn't ready yet makes `getcwd` fail and breaks the spawn (see #110). The
@@ -2411,7 +2534,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         ? `${this.tmux()} new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`
         : `${this.tmux()} set-option -g history-limit ${safeHistoryLimit} \\; new-session -ds "${muxName}" -c ${TMUX_LAUNCH_CWD} \\; set-option -t "${muxName}" history-limit ${safeHistoryLimit}`;
       // Final admission: from here to the pane launch below nothing awaits, so this is the last moment to refuse.
-      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted; nothing was started');
+      requireCurrent();
       execSync(createSessionCommand, {
         cwd: TMUX_LAUNCH_CWD,
         timeout: EXEC_TIMEOUT_MS,
@@ -2436,29 +2559,34 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         muxName,
         sessionId,
         mode,
-        legacyConfigForMode(mode, options as unknown as Record<string, unknown>)
+        legacyConfigForMode(mode, options as unknown as Record<string, unknown>),
+        cleanEnv
       );
       this._configureStatusLineUserCommand(muxName, userStatusLineCommand);
 
       // Apply user-supplied env overrides (e.g., CLAUDE_CODE_EFFORT_LEVEL) via tmux setenv
       // so secret values stay off the bash command line. Must run before respawn-pane.
-      this.applyEnvOverrides(muxName, this.mergedCliEnv(mode, options, envOverrides));
+      this.applyEnvOverrides(muxName, mergedEnvironment);
 
       // Replace the shell with the actual command (no echo in terminal). Keep
       // pane launch in /tmp, then cd inside bash against the current mount table.
       const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
-      if (options.admitted && !options.admitted()) throw new Error('Session launch is no longer admitted');
-      options.onProviderDispatch?.();
+      requireCurrent();
+      notifyMuxDispatch(options, requiresPublication);
+      if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
+      requireCurrent();
       execSync(
         buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
         {
           timeout: EXEC_TIMEOUT_MS,
           stdio: 'ignore',
+          env: cleanEnv,
         }
       );
 
       // Wait for tmux session to be queryable
       await new Promise((resolve) => setTimeout(resolve, TMUX_CREATION_WAIT_MS));
+      requireCurrent();
 
       // Non-critical tmux config — run in parallel to avoid blocking event loop.
       // These configure UX niceties (no status bar, true color).
@@ -2500,6 +2628,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       let pid = this.getPanePid(muxName);
       for (let i = 0; !pid && i < GET_PID_MAX_RETRIES; i++) {
         await new Promise((resolve) => setTimeout(resolve, GET_PID_RETRY_MS));
+        requireCurrent();
         pid = this.getPanePid(muxName);
       }
       if (!pid) {
@@ -2521,12 +2650,15 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         statusLine,
       };
 
-      this.sessions.set(sessionId, session);
+      mutation.publishCreated(session);
+      if (viewerEndpoint) this.#workerViewerEndpoints.set(session, Object.freeze({endpoint: viewerEndpoint, sessionId, owner, muxName, workingDir}));
       this.saveSessions();
       this.emit('sessionCreated', session);
+      if (!mutation.current()) throw new MuxMutationRefusedError('changed');
 
       return session;
     } catch (err) {
+      if (err instanceof MuxMutationRefusedError) throw err;
       throw new Error(`Failed to create tmux session: ${getErrorMessage(err)}`);
     }
   }
@@ -2623,6 +2755,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * `onlyIfDead` omits -k so tmux atomically refuses a pane that is running again.
    */
   async respawnPane(options: RespawnPaneOptions): Promise<number | null> {
+    options = captureLaunchOptions(options);
+    if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
     const {
       sessionId,
       workingDir,
@@ -2650,104 +2784,160 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     } = options;
     const session = this.sessions.get(sessionId);
     if (!session) return null;
-    const muxName = session.muxName;
-
-    if (!isValidMuxName(muxName) || !isValidPath(workingDir)) return null;
-    if (IS_TEST_MODE) {
-      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
-      options.onProviderDispatch?.();
-      session.mode = mode;
-      session.remote = remote;
-      session.docker = docker;
-      return session.pid || 99999;
-    }
-
-    // Resolve CLI binary directory based on mode
-    const { pathExport } = this.buildPathExport(mode);
-
-    const envExportsStr = this.buildEnvExports(sessionId, muxName, mode).join(' && ');
-
-    const { command: statusLineCommand, state: statusLine } = await this._resolveStatusLine(
-      mode,
-      workingDir,
-      !!(remote || docker)
-    );
-    const userStatusLineCommand = statusLineCommand ? await findEffectiveUserStatusLineCommand(workingDir) : undefined;
-
-    const baseCmd = buildSpawnCommand({
-      codexTrustWorkspace: options.codexTrustWorkspace,
-      codexHookTrust: options.codexHookTrust,
-      mode,
-      sessionId,
-      model,
-      claudeMode,
-      allowedTools,
-      openCodeConfig,
-      codexConfig,
-      geminiConfig,
-      antigravityConfig,
-      piConfig,
-      grokConfig,
-      deepSeekConfig,
-      ompConfig,
-      resumeSessionId,
-      claudeResumeCandidates: options.claudeResumeCandidates,
-      effort,
-      advisorModel,
-      statusLineCommand,
-      sessionName: cliName,
-    });
-    const config = niceConfig || DEFAULT_NICE_CONFIG;
-    const cmd = wrapWithNice(baseCmd, config);
-    const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
-    const fullCmd = docker
-      ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
-      : remote
-        ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
-        : workerLaunchCommand(localFullCmd, workingDir, sessionId, options.workerAttachOnly);
-
-    if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
+    const mutation = this._beginPaneMutation(sessionId);
+    if (!mutation) throw new MuxMutationRefusedError('busy');
     try {
-      // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
-      this._configureCliEnv(
-        muxName,
-        sessionId,
-        mode,
-        legacyConfigForMode(mode, options as unknown as Record<string, unknown>)
-      );
-      this._configureStatusLineUserCommand(muxName, userStatusLineCommand);
-
-      // Re-apply user env overrides before respawn so the new shell inherits them,
-      // dropping the ones the caller retired first (see applyEnvOverrides).
-      this.applyEnvOverrides(muxName, this.mergedCliEnv(mode, options, envOverrides), unsetEnvKeys);
-
-      // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
-      const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
-      if ((options.stillCurrent && !options.stillCurrent()) || (options.admitted && !options.admitted())) return null;
-      options.onProviderDispatch?.();
-      await execAsync(
-        buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
-        {
-          timeout: EXEC_TIMEOUT_MS,
+      const muxName = session.muxName;
+      const attachOnly = options.workerAttachOnly === true;
+      const remoteViewer = isRemoteViewerLaunch(options);
+      const remoteAttachOnly = options.remoteAttachOnly === true;
+      if (remoteAttachOnly && (!remote || docker || attachOnly || ('workerResourceLaunch' in options && options.workerResourceLaunch) || !options.onlyIfDead || !options.admitted))
+        throw new Error('Strict remote attachment requires its original admitted dead client');
+      const requiresPublication = !attachOnly && !remoteAttachOnly && !remoteViewer;
+      const originalClientCurrent = mutation.current;
+      const dispatchCurrent = () => originalClientCurrent()
+        && (!options.stillCurrent || options.stillCurrent()) && (!options.admitted || options.admitted());
+      const publication = requiresPublication ? options.providerLaunch : undefined;
+      if (requiresPublication && !(publication instanceof ProviderLaunchPublication))
+        throw new Error('Original acknowledged provider launch owner required');
+      const viewer = attachOnly ? this.#workerViewerEndpoints.get(session) : undefined;
+      const viewerCurrent = () => !attachOnly || !!viewer && !remote && !docker &&
+        this.sessions.get(sessionId) === session && session.sessionId === viewer.sessionId &&
+        session.owner === viewer.owner && options.owner === viewer.owner && session.muxName === viewer.muxName &&
+        session.workingDir === viewer.workingDir && workingDir === viewer.workingDir;
+      const requireViewer = () => {
+        if (!viewerCurrent()) {
+          this.#workerViewerEndpoints.delete(session);
+          throw new WorkerViewerEndpointCustodyError();
         }
-      );
-      // Wait for the respawned process to start
-      await new Promise((resolve) => setTimeout(resolve, TMUX_CREATION_WAIT_MS));
-      // The pane now runs a fresh command, so whatever the last read observed of
-      // the old one is history. Clearing it here rather than waiting for the next
-      // poll also invalidates any read already in flight, which would otherwise
-      // write the old death back over the pane that just replaced it.
-      this.clearPaneExit(muxName);
-      const pid = this.getPanePid(muxName);
-      if (pid) session.pid = pid;
-      if (session.statusLine !== statusLine) {
-        session.statusLine = statusLine;
-        this.saveSessions();
+        viewer?.endpoint.assertAvailable(sessionId);
+      };
+      // This dedicated refusal precedes all tmux/server effects in this method.
+      requireViewer();
+
+      if (!isValidMuxName(muxName) || !isValidPath(workingDir)) return null;
+      if (IS_TEST_MODE) {
+        if (!dispatchCurrent()) return null;
+        const execution = Object.freeze({kind:'mux' as const,sessionId,owner:options.owner ?? null,mode,command:'test-mode',cwd:workingDir,environment:envOverrides ?? {}});
+        if (publication) await publication.prepare(options.providerSubject, execution);
+        if (!dispatchCurrent()) return null;
+        notifyMuxDispatch(options, requiresPublication);
+        if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
+        if (!dispatchCurrent()) return null;
+        session.mode = mode;
+        session.remote = remote;
+        session.docker = docker;
+        return session.pid || 99999;
       }
-      return pid;
-    } catch (err) {
-      console.error('[TmuxManager] Failed to respawn pane:', err);
-      return null;
+
+      // Resolve CLI binary directory based on mode
+      const { pathExport } = this.buildPathExport(mode);
+
+      const envExportsStr = this.buildEnvExports(sessionId, muxName, mode).join(' && ');
+
+      const { command: statusLineCommand, state: statusLine } = await this._resolveStatusLine(
+        mode,
+        workingDir,
+        !!(remote || docker)
+      );
+      const userStatusLineCommand = statusLineCommand ? await findEffectiveUserStatusLineCommand(workingDir) : undefined;
+      requireViewer();
+
+      const baseCmd = buildSpawnCommand({
+        codexTrustWorkspace: options.codexTrustWorkspace,
+        codexHookTrust: options.codexHookTrust,
+        mode,
+        sessionId,
+        model,
+        claudeMode,
+        allowedTools,
+        openCodeConfig,
+        codexConfig,
+        geminiConfig,
+        antigravityConfig,
+        piConfig,
+        grokConfig,
+        deepSeekConfig,
+        ompConfig,
+        resumeSessionId,
+        claudeResumeCandidates: options.claudeResumeCandidates,
+        effort,
+        advisorModel,
+        statusLineCommand,
+        sessionName: cliName,
+      });
+      const config = niceConfig || DEFAULT_NICE_CONFIG;
+      const cmd = wrapWithNice(baseCmd, config);
+      const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
+      const fullCmd = docker
+        ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
+        : remote
+          ? remoteAttachOnly
+            ? buildRemoteAttachCommand(remote, remote.remoteSessionName || remoteTmuxSessionName(sessionId))
+            : buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
+          : viewer ? viewer.endpoint.command(localFullCmd, workingDir, sessionId)
+            : workerLaunchCommand(localFullCmd, workingDir, sessionId, attachOnly, undefined, publication);
+
+      if (!dispatchCurrent()) return null;
+      const launchEnvironment = { ...process.env };
+      const mergedEnvironment = this.mergedCliEnv(mode, options, envOverrides);
+      const execution = Object.freeze({kind:'mux' as const,sessionId,owner:options.owner ?? null,mode,command:fullCmd,cwd:workingDir,environment:Object.freeze({...launchEnvironment,...mergedEnvironment})});
+      if (publication) {
+        await publication.prepare(options.providerSubject, execution);
+        publication.assertCurrent();
+      }
+      if (!dispatchCurrent()) return null;
+      try {
+        // Same per-CLI env setup as createSession, re-applied so the respawned pane inherits it.
+        this._configureCliEnv(
+          muxName,
+          sessionId,
+          mode,
+          legacyConfigForMode(mode, options as unknown as Record<string, unknown>),
+          launchEnvironment
+        );
+        this._configureStatusLineUserCommand(muxName, userStatusLineCommand);
+
+        // Re-apply user env overrides before respawn so the new shell inherits them,
+        // dropping the ones the caller retired first (see applyEnvOverrides).
+        this.applyEnvOverrides(muxName, mergedEnvironment, unsetEnvKeys);
+
+        // -c /tmp + cd bounce — see createSession() for rationale (stale FUSE state).
+        const launchCmd = remote || docker ? fullCmd : `cd ${shellescape(workingDir)} && ${fullCmd}`;
+        if (!viewerCurrent() || !dispatchCurrent()) return null;
+        notifyMuxDispatch(options, requiresPublication);
+        if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
+        if (!dispatchCurrent()) return null;
+        await execAsync(
+          buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
+          {
+            timeout: EXEC_TIMEOUT_MS,
+            env: launchEnvironment,
+          }
+        );
+        // Wait for the respawned process to start
+        await new Promise((resolve) => setTimeout(resolve, TMUX_CREATION_WAIT_MS));
+        // The original command may have completed while its owner was replaced.
+        // Keep that result unconfirmed instead of clearing or rewriting a successor.
+        if (!originalClientCurrent() || remoteAttachOnly && !dispatchCurrent()) return null;
+        // The pane now runs a fresh command, so whatever the last read observed of
+        // the old one is history. Clearing it here rather than waiting for the next
+        // poll also invalidates any read already in flight, which would otherwise
+        // write the old death back over the pane that just replaced it.
+        this.clearPaneExit(muxName);
+        const pid = this.getPanePid(muxName);
+        if (pid) session.pid = pid;
+        if (session.statusLine !== statusLine) {
+          session.statusLine = statusLine;
+          this.saveSessions();
+        }
+        return pid;
+      } catch (err) {
+        console.error('[TmuxManager] Failed to respawn pane:', err);
+        return null;
+      }
+    } finally {
+      mutation.release();
     }
   }
 
@@ -3173,7 +3363,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const pid = active.get(session.muxName);
       if (pid !== undefined) {
         alive.push(sessionId);
-        if (pid !== session.pid) session.pid = pid;
+        if (pid !== session.pid && !this.#paneMutations.has(sessionId)) session.pid = pid;
       } else {
         dead.push(sessionId);
         this.sessions.delete(sessionId);
@@ -3940,7 +4130,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return attempt.finish(outcome !== 'not-written' || writeGateTypedUnsent(), admitted());
+        return attempt.finish(outcome !== 'not-written', admitted());
       }
 
       if (textPart && hasCarriageReturn) {
@@ -3967,10 +4157,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         };
         const outcome = await typeAndSubmit(io, textPart, this.turnSignals(session.mode), `[TmuxManager] ${session.muxName}`, options.requireEmptyComposer,
           options.admitted ? () => admitted() && (!options.stillIdle || options.stillIdle()) : options.stillIdle);
-        // A positively completed text write with Enter deliberately withheld is
-        // known, not an RPC failure. The enclosing gate records typed-unsent;
-        // changed provider authority still fails closed here.
-        if (outcome === 'not-written') return attempt.finish(writeGateTypedUnsent(), admitted());
+        if (outcome === 'not-written') {
+          if (writeGateTypedUnsent()) return attempt.finishTypedUnsent(admitted());
+          return attempt.finish(false, admitted());
+        }
       } else if (textPart) {
         // Text only, no Enter
         await dispatch(`${this.tmux()} send-keys -t "${session.muxName}" -l ${shellescape(textPart)}`, {

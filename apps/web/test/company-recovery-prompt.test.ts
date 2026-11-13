@@ -1,3 +1,4 @@
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import { deliverRecoveryPrompt, submitRecoveryPrompt } from '../src/company-recovery-prompt.js';
@@ -101,7 +102,8 @@ function realRecoverySession(initial = '') {
   const writes: string[] = [];
   const session = new Session({ mode: 'codex', workingDir: '/owned/recovery-fixture' });
   ownedSessions.push(session);
-  const mux = {
+  const registry = registeredMuxFixture({mode: 'codex', sessionId: session.id, muxName: 'owned-recovery', pid: 42, owner: session.owner});
+  const mux = {...registry,
     capturePaneText: () => pane,
     sendInput: vi.fn(async (_id: string, data: string) => {
       writes.push(data);
@@ -110,13 +112,12 @@ function realRecoverySession(initial = '') {
       return true;
     }),
   };
-  Object.assign(session, { _pid: 42, _mux: mux, _muxSession: { muxName: 'owned-recovery', pid: 42 } });
-  registerMuxFixture(session);
-  vi.spyOn(session as any, '_recheckPaneDialogSoon').mockImplementation(() => {});
+  Object.assign(session, { _pid: 42, _mux: mux, _muxSession: registry.subject });
+  vi.spyOn(session as unknown as {_recheckPaneDialogSoon(): void}, '_recheckPaneDialogSoon').mockImplementation(() => {});
   return { session, writes, mux, pane: () => pane, setPane: (body: string) => { pane = codexPane(body); } };
 }
 afterEach(() => {
-  for (const session of ownedSessions.splice(0)) (session as any)._submitVerifier?.cancel();
+  for (const session of ownedSessions.splice(0)) (session as unknown as {_submitVerifier?: {cancel(): void}})._submitVerifier?.cancel();
   vi.useRealTimers();
 });
 
@@ -144,4 +145,3 @@ describe('actual Session recovery submission ownership', () => {
     expect(f.writes).toHaveLength(1); expect(f.pane()).toBe(codexPane('new owner draft'));
   });
 });
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';

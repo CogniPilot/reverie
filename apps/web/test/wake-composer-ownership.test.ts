@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 /**
  * A write that owns the composer (an agent wake, a capacity retry) presses Enter only while the composer holds exactly its own
  * text, in every harness. Codex already had this; Claude Code did not, so a person typing between the text and its Enter had
@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { typeAndSubmit, withWriteGate, writeGateActive } from '../src/submit-settle.js';
 import { Session } from '../src/session.js';
-import type { MuxSession, TerminalMultiplexer } from '../src/mux-interface.js';
+import type { TerminalMultiplexer } from '../src/mux-interface.js';
 
 const CLAUDE = { glyph: '❯', workingLine: '[Ee]sc to interrupt' };
 const WAKE = 'Check your rooms: you have unread messages.';
@@ -121,18 +121,18 @@ describe('the session runs exactly the writes that own the composer under their 
     const dir = await mkdtemp(join(tmpdir(), 'wake-ownership-'));
     cleanups.push(() => rm(dir, { recursive: true, force: true }));
     const calls: Array<{ options?: Record<string, unknown>; gated: boolean }> = [];
-    const mux = {
+    const registry = registeredMuxFixture({mode: 'claude', sessionId: 'owned', muxName: 'reverie-owned', pid: 41});
+    const mux = {...registry,
       isAvailable: () => true,
       muxSessionExists: () => true,
       isPaneDead: () => false,
       capturePaneText: () => claude(''),
       sendInput: vi.fn(async (_id: string, _text: string, options?: Record<string, unknown>) => { calls.push({ options, gated: writeGateActive() }); return true; }),
     };
-    const session = new Session({ workingDir: dir, mode: 'claude', useMux: true, mux: mux as unknown as TerminalMultiplexer,
-      muxSession: { sessionId: 'owned', muxName: 'reverie-owned', pid: 41 } as MuxSession });
-    registerMuxFixture(session);
+    const session = new Session({ id: registry.subject.sessionId, workingDir: dir, mode: 'claude', useMux: true, mux: mux as unknown as TerminalMultiplexer,
+      muxSession: registry.subject });
     cleanups.push(async () => { Object.assign(session, { ptyProcess: null, _muxSession: null }); await session.stop(false); });
-    return { session, calls };
+    return { session, calls, registry };
   }
 
   it('the capacity retry caller shape (no idle check) types under its gate with an empty-composer requirement', async () => {
@@ -149,4 +149,15 @@ describe('the session runs exactly the writes that own the composer under their 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.gated).toBe(false);
   });
+  it.each(['replaced', 'removed', 'owner-changed'] as const)('refuses a stale original mux witness: %s', async change => {
+    const {session, calls, registry} = await claudeSession();
+    expect(await session.writeViaMux('before change')).toBe(true);
+    expect(calls).toHaveLength(1);
+    if (change === 'replaced') registry.sessions.set(session.id, {...registry.subject});
+    else if (change === 'removed') registry.sessions.delete(session.id);
+    else registry.subject.owner = 'different-owner';
+    expect(await session.writeViaMux('must not be typed')).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
 });

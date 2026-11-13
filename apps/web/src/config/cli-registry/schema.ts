@@ -16,10 +16,13 @@ import { z } from 'zod';
 import { compileVersionRegex, countCaptureGroups, TOKEN_PATTERNS } from './patterns.js';
 import {
   ACCOUNT_REPLACEMENT_PROFILE_NAMES,
+  DOCKER_CASE_SEED_PROFILE_NAMES,
   LAUNCH_EFFORT_INPUT_NAMES,
   STARTUP_ACCOUNT_PROFILE_NAMES,
   THREAD_STATE_PROFILE_NAMES,
   THREAD_STATE_BINDINGS,
+  WORKSPACE_SUMMARY_HOOK_PROFILE_NAMES,
+  RUNTIME_POLICY_FALLBACK_PROFILE_NAMES,
   isKnownLauncherProfile,
   isKnownSetenvProfile,
 } from './profiles.js';
@@ -122,6 +125,7 @@ const launchSchema = z
     resumeSelection: z.literal('claude-transcript').optional(),
     threadStateProfile: z.enum(THREAD_STATE_PROFILE_NAMES).optional(),
     effortInput: z.enum(LAUNCH_EFFORT_INPUT_NAMES).optional(),
+    dockerCaseSeed: z.enum(DOCKER_CASE_SEED_PROFILE_NAMES).optional(),
     variants: z.array(variantSchema).min(1).max(4),
     legacyConfigAliases: z.record(z.string(), z.string()).optional(),
     legacyConfigField: z.string().min(1).max(40).optional(),
@@ -334,12 +338,13 @@ const configProperty = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/)
 
 const capabilitiesSchema = z
   .object({
-    input: z.object({
-      keyBurstMaxChars: z.number().int().positive().max(1000000).optional(),
+    workspaceSummaryHooks: z.enum(WORKSPACE_SUMMARY_HOOK_PROFILE_NAMES).optional(),
+    runtimePolicyFallback: z.enum(RUNTIME_POLICY_FALLBACK_PROFILE_NAMES).optional(),
+    terminalInput: z.object({
       requiresEmptyComposer: z.boolean().optional(),
-      shellKeyGuard: z.boolean().optional(),
+      shellKeyGuard: z.literal('bang-shell').optional(),
+      keyBurstMaxChars: z.number().int().min(1).max(1_048_576).optional(),
     }).strict().optional(),
-    turnSummaryHooks: z.literal('codex-config-v1').optional(),
     rebootRestore: z.enum(['native-required','native-or-new','persistent-record']).optional(),
     startupAccountProfile: z.enum(STARTUP_ACCOUNT_PROFILE_NAMES).optional(),
     fullAccessDefaults: z.object({

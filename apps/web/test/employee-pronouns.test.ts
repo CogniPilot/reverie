@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { registerCompanyRoutes } from '../src/web/routes/company-routes.js';
+import { registerAuthMiddleware } from '../src/web/middleware/auth.js';
 import { CompanyService } from '../src/company-service.js';
 import { CompanyStore } from '../src/company-store.js';
 import { ChatroomStore } from '../src/chatroom-store.js';
@@ -136,6 +137,7 @@ describe('who may set pronouns', () => {
       research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
     });
     app = Fastify();
+    registerAuthMiddleware(app, false);
     registerCompanyRoutes(app, { sessions } as unknown as SessionPort, service, undefined, undefined, undefined, { verifiedOwner: trustedFixtureOwner });
     installRouteErrorHandler(app);
     await app.ready();

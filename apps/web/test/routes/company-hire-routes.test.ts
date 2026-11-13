@@ -224,9 +224,9 @@ describe('fresh permanent expert hire', () => {
       voice,
       sessionId: 'different-model-runtime',
     });
-    await company.update(employee.id, undefined, { voice: { provider: 'piper', id: 'en_US-amy-medium' } });
+    await company.update(employee.id, undefined, { voice: { provider: 'piper', id: 'en_US-amy-medium' } }, () => {});
     expect(store.snapshot().employees[0].voice?.provider).toBe('piper');
-    await company.update(employee.id, undefined, { voice: null });
+    await company.update(employee.id, undefined, { voice: null }, () => {});
     expect(store.snapshot().employees[0]).not.toHaveProperty('voice');
   });
 
@@ -312,14 +312,14 @@ describe('fresh permanent expert hire', () => {
       personality: 'Calm and precise',
       permissions: { recoverEmployees: true },
     });
-    await company.update(employee.id, undefined, { icon: 'X' });
+    await company.update(employee.id, undefined, { icon: 'X' }, () => {});
     const reopened = new CompanyStore(store.file);
     await reopened.init();
     expect(reopened.snapshot().employees[0]).toMatchObject({
       responsibilities: ['Review architecture with evidence'],
       personality: 'Calm and precise',
     });
-    await company.update(employee.id, undefined, { responsibilities: [], personality: '' });
+    await company.update(employee.id, undefined, { responsibilities: [], personality: '' }, () => {});
     expect(company.view().employees[0]).toMatchObject({ responsibilities: [], personality: '' });
   });
   it('rejects a case-insensitive duplicate name before starting another runtime', async () => {

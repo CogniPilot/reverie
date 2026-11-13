@@ -369,6 +369,9 @@ describe('handleInit with the grid open (SSE back after a server restart)', () =
 describe('the header connection state follows the tile sockets', () => {
   it('reads connected only when every live tile socket is open; a stopped tile does not count', () => {
     const app = appWithGrid(true);
+    // Connection status reads the actual delivery mixin's queue accounting.
+    const delivery = readFileSync(resolve(import.meta.dirname, '../src/web/public/input-delivery.js'), 'utf8');
+    new Function('ReverieApp', delivery)({prototype: app});
     // The main socket is parked on purpose; it must not decide the header.
     app._wsState = 'disconnected';
     for (const t of FakeTile.all) t._wsReady = true;

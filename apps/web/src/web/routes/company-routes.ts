@@ -14,12 +14,13 @@ import { findSessionOrFail, ownerFor, parseBody, resolveParentSessionId } from '
 import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarUrl, checkAvatar } from '../../agent-avatars.js';
 import { createHash } from 'node:crypto';
 import { appendAdminAudit } from '../admin-audit.js';
-import { adminGrant } from '../../owner-auth/policy.js';
+import { adminGrant, adminGrantContinuation } from '../../owner-auth/policy.js';
+import { humanTransportContinuation } from '../middleware/auth.js';
 import { ownerAvatarKey, ownerAvatarUrl } from '../../owner-avatar.js';
 import { EmployeeVoiceSchema } from '../../employee-voice.js';
 import type { CompanyWakeReport } from '../../company-wake.js';
 import { effectiveBoardPermissions } from '../../board-permissions.js';
-import { effectiveCoreBeliefs, type CompanyEmployee, type CompanySettings } from '../../company-types.js';
+import { effectiveCoreBeliefs, type CompanyEmployee, type CompanySettingsPatch } from '../../company-types.js';
 
 const HireSchema = EmployeeSchema.omit({
   id: true,
@@ -115,6 +116,62 @@ export function registerCompanyRoutes(
     ownerOnly(req);
     return 'owner';
   };
+  const employeeMutationAuthority = async (req: FastifyRequest, employeeId: string, allowAdmin: boolean) => {
+    const admin = allowAdmin ? adminGrant(req) : undefined;
+    const currentAdmin = admin ? adminGrantContinuation(req) : undefined;
+    const currentHuman = admin ? undefined : humanTransportContinuation(req);
+    const requireHuman = async () => {
+      ownerOnly(req);
+      if (!currentHuman || !(await currentHuman()))
+        throw new CompanyError(
+          'Your sign-in could not be confirmed for this action. Sign in again before retrying.',
+          403
+        );
+      ownerOnly(req);
+    };
+    if (!admin) await requireHuman();
+    else if (!currentAdmin || !(await currentAdmin()))
+      throw new CompanyError('Current administrator authority is unavailable', 403);
+    const owner = ownerFor(req);
+    const binding = (id: string, sessionId?: string) => {
+      const state = service.store.snapshot(),
+        all = [...state.employees, ...state.retired];
+      const matches = all.filter((row) => row.id === id);
+      const selected = matches[0];
+      if (!selected || selected.owner !== owner) throw new CompanyError('Unknown employee', 404);
+      if (
+        matches.length !== 1 ||
+        !selected ||
+        selected.owner !== owner ||
+        (sessionId !== undefined && selected.sessionId !== sessionId) ||
+        all.filter((row) => row.sessionId === selected.sessionId).length !== 1
+      )
+        throw new CompanyError('Original company employee binding is unavailable', 409);
+      return { id, owner: selected.owner, sessionId: selected.sessionId, generation: selected.sessionGeneration };
+    };
+    const target = binding(employeeId);
+    const actor = admin ? service.store.snapshot().employees.filter((row) => row.sessionId === admin) : [];
+    if (admin && actor.length !== 1) throw new CompanyError('Original administrator binding is unavailable', 403);
+    const source = admin ? binding(actor[0].id, admin) : undefined;
+    const unchanged = (before: ReturnType<typeof binding>) => {
+      const now = binding(before.id);
+      if (now.owner !== before.owner || now.sessionId !== before.sessionId || now.generation !== before.generation)
+        throw new CompanyError('Original company employee binding changed', 409);
+    };
+    return {
+      owner,
+      by: admin ? `session ${admin}` : 'owner',
+      require: async () => {
+        if (ownerFor(req) !== owner) throw new CompanyError('Company requester scope changed', 403);
+        if (currentAdmin) {
+          if (!(await currentAdmin())) throw new CompanyError('Administrator authority changed', 403);
+        } else await requireHuman();
+        if (ownerFor(req) !== owner) throw new CompanyError('Company requester scope changed', 403);
+        unchanged(target);
+        if (source) unchanged(source);
+      },
+    };
+  };
   // These routes return their own envelope so they also work through app.inject().
   const run = async <T>(reply: { code(code: number): unknown }, work: () => T | Promise<T>) => {
     try {
@@ -170,7 +227,9 @@ export function registerCompanyRoutes(
       const patch = parseBody(z.record(z.string(), z.unknown()), req.body);
       if (Object.keys(patch).some(key => !Object.hasOwn(CompanySettingsSchema.shape, key)))
         throw new CompanyError('Unknown company setting', 400);
-      return { settings: await service.configure(ownerFor(req), patch as Partial<Omit<CompanySettings, 'owner'>>) };
+      if (Object.entries(patch).some(([key, value]) => value === null && key !== 'crashWakeEmployeeId'))
+        throw new CompanyError('Only the crash recovery expert can be cleared with null', 400);
+      return { settings: await service.configure(ownerFor(req), patch as CompanySettingsPatch) };
     })
   );
   app.post('/api/company/employees/:id/wake', async (req, reply) =>
@@ -233,13 +292,36 @@ export function registerCompanyRoutes(
       return { employee };
     })
   );
-  app.put('/api/company/employees/:id', async (req, reply) =>
+  app.get('/api/company/employees/:id/permissions', async (req, reply) =>
     run(reply, async () => {
       ownerOnly(req);
       const { id } = req.params as { id: string };
+      let employee: CompanyEmployee | undefined;
+      try {
+        employee = await service.store.employeeAfterPublications(id, ownerFor(req));
+      } catch {
+        ownerOnly(req);
+        throw new CompanyError('Current permissions could not be confirmed. Refresh status before changing them.', 503);
+      }
+      ownerOnly(req);
+      if (!employee) throw new CompanyError('Unknown employee', 404);
+      const current = presentEmployee(employee, false);
+      return {
+        employeeId: employee.id,
+        permissions: current.permissions,
+        effectiveBoardPermissions: current.effectiveBoardPermissions,
+        boardPermissionSources: current.boardPermissionSources,
+      };
+    })
+  );
+  app.put('/api/company/employees/:id', async (req, reply) =>
+    run(reply, async () => {
+      const { id } = req.params as { id: string };
+      const mutation = await employeeMutationAuthority(req, id, false);
       const change = parseBody(UpdateSchema, req.body);
-      const employee = await service.update(id, ownerFor(req), change, async (before, after) => {
-        await validatePublicationChange(ownerFor(req), before, after);
+      const employee = await service.update(id, mutation.owner, change, mutation.require, async (before, after) => {
+        await validatePublicationChange(mutation.owner, before, after);
+        await mutation.require();
         await appendAdminAudit({
           admin: 'owner',
           action: 'employee_update',
@@ -268,12 +350,13 @@ export function registerCompanyRoutes(
   );
   app.put<{ Params: { id: string; tokenId: string } }>('/api/company/employees/:id/publication-tokens/:tokenId', async (req, reply) =>
     run(reply, async () => {
-      ownerOnly(req);
       const { id, tokenId } = req.params;
+      const mutation = await employeeMutationAuthority(req, id, false);
       const { enabled } = parseBody(z.object({ enabled: z.boolean() }).strict(), req.body);
       if (!z.string().uuid().safeParse(tokenId).success) throw new CompanyError('Choose a valid PAT identifier', 400);
-      const employee = await service.setPublicationTokenGrant(id, ownerFor(req), tokenId, enabled, async (before, after) => {
-        await validatePublicationChange(ownerFor(req), before, after);
+      const employee = await service.setPublicationTokenGrant(id, mutation.owner, tokenId, enabled, mutation.require, async (before, after) => {
+        await validatePublicationChange(mutation.owner, before, after);
+        await mutation.require();
         await appendAdminAudit({ admin: 'owner', action: 'employee_update', target: after.name, ip: req.ip,
           detail: { id, fields: ['permissions'], permissions: { from: before.permissions, to: after.permissions } } });
       });
@@ -327,9 +410,9 @@ export function registerCompanyRoutes(
   );
   app.post('/api/company/employees/:id/retire', async (req, reply) =>
     run(reply, async () => {
-      ownerOnly(req);
       const { id } = req.params as { id: string };
-      const { employee, rooms, failed } = await service.retire(id, ownerFor(req));
+      const authority = await employeeMutationAuthority(req, id, false);
+      const { employee, rooms, failed } = await service.retire(id, authority.owner, authority.require);
       void appendAdminAudit({
         admin: 'owner',
         action: 'employee_retire',
@@ -342,9 +425,10 @@ export function registerCompanyRoutes(
   );
   app.post('/api/company/employees/:id/restore', async (req, reply) =>
     run(reply, async () => {
-      const by = ownerOrAdmin(req);
       const { id } = req.params as { id: string };
-      const employee = await service.restore(id, ownerFor(req));
+      const authority = await employeeMutationAuthority(req, id, true);
+      const by = authority.by;
+      const employee = await service.restore(id, authority.owner, authority.require);
       void appendAdminAudit({
         admin: by,
         action: 'employee_restore',

@@ -87,6 +87,36 @@ the HTTP status.
 
 Adding a new error code is non-breaking; removing or renaming one is a major change.
 
+## Company recovery settings
+
+`PUT /api/company/settings` requires the verified owner and accepts a partial
+settings object. Omitted fields retain their current saved values. To return to
+Automatic selection, explicitly send `"crashWakeEmployeeId": null`; the stored
+setting becomes absent, never `null`. A nonempty string selects a registered
+employee belonging to that owner. Unknown settings, invalid experts and `null`
+for any other field return `400` without a partial update. Employee recovery
+permissions and service credentials do not authorize this settings route.
+
+Each form sends only the fields it edits. A name-only save sends `ownerName`;
+owner details send `ownerName` and `ownerTitle`. Reading settings immediately
+before saving does not make a full snapshot safe to write: another edit can
+commit between that read and the write. An incomplete successful response is
+unconfirmed, even if the server committed; reopen settings or read the API to
+check the saved values before choosing whether to retry.
+
+For example, disable automatic recovery and clear its explicit expert without
+changing the time zone, owner details or other settings:
+
+```json
+{ "autoWakeEnabled": false, "crashWakeEmployeeId": null }
+```
+
+The response contains the canonical saved `settings`. Saving only changes
+configuration; it does not start an employee. Automatic selection uses the single
+top-level expert when there is exactly one; stopped or vacationing experts stay
+off. If a save reply is lost, read `GET /api/company` before deciding whether to
+submit another edit.
+
 ## Employee laptop memory
 
 These optional routes exist when the server enables resource replacement.
@@ -138,6 +168,102 @@ draft request or Apply may have been sent, unconfirmed failures retain
 `RESOURCE_REPLACEMENT_UNCONFIRMED_INSPECT_BEFORE_RETRY`. Keep the operation ID and
 inspect status; a lost response is not proof that nothing happened. An owner
 authorization failure remains HTTP 403, including logout during host connection.
+
+## Main-state publication warning
+
+Authenticated `GET /api/v1/status` (alias `/api/status`) and SSE `init`
+include `statePublication: { version: 1, kind: "unconfirmed" | "no-hold-observed" }`.
+This fresh projection is independent of the cached session snapshot.
+`no-hold-observed` reports only that this writer has not raised this fence;
+it does not establish disk health, durability, readiness, or permission to retry.
+
+The first observed ambiguous publication installs the writer's fence before
+sending the fixed SSE `state:publicationHeld` payload
+`{ version: 1, kind: "unconfirmed" }`. Private paths, causes and serialized
+state are excluded. The warning does not restart employees, replay writes or
+clear the writer. The page retains an observed warning across partial/stale
+snapshots; supported reconciliation remains unfinished.
+
+Live SSE subscription selectors are page-scoped and bind filter updates to the
+original verified caller. Stateless Basic callers can reauthenticate with the
+same current principal and credential epoch; cookie/QR callers use their original
+login session. Public-to-public view filtering requires the explicit
+`--allow-unauthenticated-network` acknowledgement (or its environment setting)
+and an owner policy that is genuinely off. Without that acknowledgement public
+filter changes are refused; this does not change network reachability or grant
+owner, input, recovery or provider authority.
+The optional `streamNonce` on the GET and subscription POST binds a filter
+update to that exact registered connection. A nonce-bearing connection rejects
+missing or predecessor nonces with the same 404 as an unknown selector. The
+nonce is not authentication. Legacy nonce-less clients retain their verified
+caller checks. Filter mutations recheck the original credential/session and
+current role at the mutation boundary, after request setup waits.
+
+The browser's initial GET establishes its filter. A refused or unconfirmed live
+filter update reconnects read-only once with the latest selected filter and a
+fresh connection nonce; it does not replay input or retry the POST. This also
+keeps explicitly unacknowledged public viewers usable under the existing GET
+policy. A known authentication refusal displays a sign-in message and retains
+drafts. These mutation checks do not establish continuous stream authorization.
+
+## Core configuration publication
+
+`PUT /api/config` preserves its strict allowed fields and existing authorization,
+including partial respawn updates that preserve unrelated fields. It acknowledges
+success only after the canonical main-state writer has completed
+file sync, consuming close, rename and directory sync/close. Its returned config
+is the committed snapshot, separate from later in-memory changes. An already held
+writer refuses before mutating configuration; a newly uncertain publication
+returns a sanitized HTTP 503 rather than a successful save. No retry is automatic.
+
+While that writer is held, `GET /api/config` also returns HTTP 503 rather than
+presenting restored in-memory values as a confirmed readback. `GET /api/status`
+and internal observation getters remain available; reads never clear the hold.
+This endpoint has no maintained browser form. Terminal settings uses the separate
+`/api/settings` writer and is not blocked by this Config-specific refusal. The
+global state-publication warning preserves its editable draft and Close control.
+
+## Terminal metadata publication and reconciliation
+
+`GET /api/status`, SSE `init`, and read-only `GET /api/mux/metadata/status`
+include `muxMetadataPublication`. The fixed `mux:metadataPublication` SSE event
+reports the same observation when an incident or its known repair occurs.
+This is a separate writer from main app state and never establishes provider
+readiness, process custody, input permission or disk health.
+
+The closed version-1 states are `no-hold-observed` with `writerId`, `unconfirmed`
+with that writer's `incidentId` and decimal `incidentOrdinal`, and `reconciled`
+with `repairedIncidentId` and decimal `repairedThrough`. Selectors and ordinals
+are data, never grants. Only a matching original writer's known repair can
+resolve its earlier incident; omission, a different writer or generic no-hold
+status cannot clear an observed page warning.
+
+The current verified human owner may explicitly `POST /api/mux/metadata/reconcile`
+with `{ writerId, expectedIncidentId }`. The original writer first joins all its
+retained I/O, then persists a fresh snapshot of its current manager observations
+using unique temporary files, file/directory sync and consuming close. It never
+replays the old failed payload or any provider/input/configuration operation.
+An exact lost-reply retry returns the retained known receipt without another
+write. Prefer read-only status refresh after an unconfirmed response. HTTP 409
+refuses a changed/busy selection; HTTP 503 retains uncertainty after I/O may have
+been issued. Neither result clears any independent main/native/provider fence.
+
+Delegation additionally requires an actual signed Office source, its configured
+`officeEmployeeId`-associated issuer, the separate configured
+`reverie.ops.mux-metadata.reconcile` action with `employees+resources` purpose,
+and an original canonical grant covering both the target and the writer-derived
+`mux-metadata:<sha256>` resource. Its body adds `employeeId` and the exact
+`grantRef: { grantId, policyGeneration }`. Source, company domain, owner account,
+binding, grant and `recoverEmployees` permission are rechecked across waits.
+All current rows must belong to that owner with the original target present;
+empty, mixed-owner or missing-target global files require the human owner.
+No resource path, structural lease, title or request selector supplies authority.
+The delegated source proof binds the exact unversioned canonical path. The
+server strips its configured public mount prefix before verification; both that
+public ingress and the direct canonical bridge path reach the same registered
+verifier. Query aliases, neighboring paths and alternate methods remain refused.
+The maintained agent OPS/Office dispatcher for this action is not implemented
+yet; this delegated API verifier does not qualify installed agent invocation.
 
 ## Cron jobs
 
@@ -462,6 +588,18 @@ Build the query with `-G --data-urlencode` rather than by hand: a `+` in a
 hand-written query string decodes to a space.
 
 ### `GET /api/v1/input-identity`
+
+Browser terminal input uses protocol `2`: send `X-Reverie-Input-Protocol: 2`
+on input POSTs and `inputProtocol=2` on terminal WebSocket upgrades. Requests
+carrying Origin or Sec-Fetch-Site without that marker are held before
+input admission and told to reload. Their existing terminal output remains
+available. A stale tag may already have been sent by an older server, so this
+refusal never declares the original input unsent or permits automatic replay.
+This is a compatibility fence, not authentication or proof of durable delivery.
+Existing authenticated headless API clients retain their input contract; all
+normal ownership, Origin and permission checks still apply.
+Sec-Fetch-Mode alone is not classified as browser identity because ordinary
+Node fetch also adds it. This heuristic grants no sign-in or session permission.
 
 Read-only browser input journal partition. Returns `data: {version: 1, kind,
 scopeId, epoch}` with `Cache-Control: no-store`. An authenticated account uses
@@ -1212,3 +1350,59 @@ The bundled frontend reads responses through `_apiJson()`
 (`src/web/public/api-client.js`), which unwraps `{success:true,data}` → `data` and
 returns `null` on a non-2xx / `{success:false}` response. External clients should
 do the same: check the HTTP status (or `body.success`), then read `body.data`.
+
+### Read-only memory pressure sample
+
+`GET /api/v1/company/resources/employees/:employeeId/memory-diagnostics` requires
+an actual unrestricted owner login cookie and current native owner registration.
+It rejects bearer/service, parent-session and goal headers. An employee title,
+`recoverEmployees` or other ordinary management permission does not authorize it.
+There is currently no delegated-agent resource-diagnostics grant or dedicated CLI;
+a headless owner can use the same login/second-factor flow and authenticated GET.
+Never lend an owner cookie to an agent.
+
+The application response has `version: 1`, the exact employee/session/generation
+(generation is decimal text), `resources` with the existing strict version-one
+resource-status shape, and one of:
+
+- `source: "native-compound"`, `diagnostics: { kind: "snapshot", value }`:
+  `value` is the separate `employee-memory-diagnostics-v1` native snapshot. The
+  limits and optional pressure/event metrics share one original anchored read.
+- `source: "independent-status-read"`, `diagnostics: { kind: "unavailable",
+reason: "native-observation-unconfirmed" }`: the diagnostic read failed and
+  one fresh, separately authorized status read succeeded. This does not settle
+  the earlier query, identify an unsupported peer, or grant any retry/effect.
+
+Both reads share an original ten-second monotonic client budget. Revoked owner
+access or a changed employee/session/generation prevents fallback. If no current
+status can be verified, the route returns 503; the GUI retains prior limits and
+policy drafts as stale and disables Apply until a fresh check succeeds. Refresh
+uses this same API, with no additional diagnostic button or launch/stop action.
+
+Pressure averages describe recent stall windows; event counts are cumulative
+for the original cgroup. Missing or malformed optional metrics are unavailable,
+never zero or healthy. The UI reports sample time/age and read duration without
+inferring provider death, identifying an OOM victim, or selecting a resource
+policy. Native close uncertainty remains with its original native owner; closing
+the HTTP client's channel does not confirm that settlement.
+
+The application also returns an additive `advisory` with server
+`evaluatedAtEpochMs` and the original `sampledAtEpochMs` (null when unavailable).
+Its diagnostic heuristic is `state: "warning", code: "high-memory-stall"` only
+when an original sample is at most 30 seconds old, not future-dated, and its
+10-second PSI `some` or `full` average is at least 50.00%. This deliberately
+conservative threshold is a diagnostic heuristic, not a guarantee or a kernel
+policy. Low recent averages return `state: "not-observed"`; that does not mean
+healthy, safe to admit more work, or free of ancestor/host pressure. Cumulative
+memory events never trigger this warning or identify a recent cause.
+
+Missing/unsupported metrics, a missing compound sample, stale/future/unusable
+timestamps or an unconfirmed native diagnostic return `state: "unknown"` with
+a closed reason. The GUI displays the sampled and server-evaluation times;
+Refresh requests another observation. There is no proactive watcher. A warning
+advises inspecting current jobs because soft-limit reclaim may stall the model
+and terminal even when the host has free RAM. This read does not restart an
+employee, kill a job, change limits, or grant delegated diagnostic access.
+Older responses without this additive field still provide their existing
+limits/metrics; the GUI marks the advisory unavailable rather than inventing
+severity locally. The strict native version-one DTO remains unchanged.

@@ -600,10 +600,9 @@ const VoiceInput = {
     // that will only answer 404 (and never typing it into some other tab).
     if (app.sessions && !app.sessions.has(target)) {
       app.showToast?.('That session has closed; dictation not sent', 'warning');
-      return Promise.resolve();
+      return Promise.resolve(false);
     }
-    app._sendInputAsync(target, text, { useMux: true });
-    return Promise.resolve();
+    return app._sendInputAsync(target, text, {useMux: true});
   },
 
   _insertText(text) {
@@ -734,10 +733,19 @@ const VoiceInput = {
       </div>
     `;
     const textarea = overlay.querySelector('textarea');
-    const send = () => {
+    let draftRevision = 0;
+    textarea.addEventListener('input', () => {draftRevision++;});
+    const target = this._targetSession();
+    let sending = false;
+    const send = async () => {
       const val = textarea.value.trim();
-      overlay.remove();
-      if (val) this._sendToTarget(this._targetSession(), val + '\r').catch(() => {});
+      const revision = draftRevision;
+      if (!val || sending) return;
+      sending = true;
+      try {
+        if (await this._sendToTarget(target, val + '\r') === false) return;
+        if (draftRevision === revision) overlay.remove();
+      } finally {sending = false;}
     };
     const cancel = () => overlay.remove();
     const newInput = () => {

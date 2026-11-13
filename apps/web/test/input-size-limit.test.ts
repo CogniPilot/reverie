@@ -14,12 +14,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+import { browserInputFixture } from './helpers/browser-input-fixture.js';
 import { MAX_INPUT_LENGTH } from '../src/config/terminal-limits.js';
 import { SessionInputWithLimitSchema } from '../src/web/schemas.js';
 
 const pub = (f: string) => readFileSync(resolve(import.meta.dirname, '../src/web/public', f), 'utf8');
-const appSource = pub('app.js');
 
 type InputLimit = { FRAME_MAX_CHARS: number; PASTE_MAX_CHARS: number; split: (d: string, max?: number) => string[] };
 
@@ -76,39 +76,71 @@ describe('splitInputFrames', () => {
   });
 });
 
-describe('the client never queues or keeps an undeliverable frame', () => {
-  const sendAsync = appSource.slice(
-    appSource.indexOf('_sendInputAsync(sessionId, input, opts) {'),
-    appSource.indexOf('_sendInputEphemeral(sessionId, input) {')
-  );
-
-  it('splits an oversized paste, and refuses an oversized mux write or giant paste with a toast', () => {
-    expect(sendAsync).toContain('limit.split(input)');
-    expect(sendAsync).toMatch(/useMux \|\| input\.length > limit\.PASTE_MAX_CHARS/);
-    expect(sendAsync).toContain('showToast');
+describe('bounded committed frames and retained uncertain input', () => {
+  let fixture: ReturnType<typeof browserInputFixture>;
+  afterEach(async () => {
+    await fixture?.close();
   });
-
-  it('drops a POST the server refused as invalid instead of retrying it forever', () => {
-    const drain = appSource.slice(appSource.indexOf('_drainSession(sessionId) {'));
-    const body = drain.slice(0, drain.indexOf('_dropRejectedInput(sessionId, rec) {'));
-    expect(body).toMatch(
-      /resp\.status === 400 \|\| resp\.status === 413\)\) \{\s*[\s\S]{0,400}this\._dropRejectedInput\(sessionId, rec\);/
-    );
+  it('commits a split paste atomically with bounded frames and preserves Unicode bytes', async () => {
+    fixture = browserInputFixture();
+    const frames: { seq: number; d: string }[] = [];
+    const app = await fixture.page();
+    app._ws = { readyState: 1, send: (data) => frames.push(JSON.parse(data)) };
+    app._wsSessionId = 'session-1';
+    const paste = 'x'.repeat(MAX_INPUT_LENGTH - 1) + '😀' + 'tail';
+    expect(await app._sendInputAsync('session-1', paste)).toBe(true);
+    const rows = (await app._inputJournal.snapshot()).records;
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.data).join('')).toBe(paste);
+    expect(rows.every((row) => row.data.length <= MAX_INPUT_LENGTH && !/[\uD800-\uDBFF]$/.test(row.data))).toBe(true);
+    await expect.poll(() => frames.length).toBe(1);
+    await app._onWsInputAck(1, { t: 'ia', seq: 1, confirmed: true }, 'session-1');
+    await expect.poll(() => frames.length).toBe(2);
+    expect(frames.map((frame) => frame.d).join('')).toBe(paste);
+    await app._onWsInputAck(2, { t: 'ia', seq: 2, confirmed: true }, 'session-1');
   });
-
-  it('drops a frame the WebSocket refused with an error ACK', () => {
-    const handler = appSource.slice(appSource.indexOf('_onWsInputAck(seq, msg, sessionId = this._wsSessionId) {'));
-    const method = handler.slice(0, handler.indexOf('\n  }') + 4);
-    const ack = vm.runInNewContext(`({${method}})._onWsInputAck`);
-    const rejected: unknown[] = [];
-    const record = {seq: 1, data: 'oversized'};
-    ack.call({_pendingDeliveries: new Map([['s', [record]]]), _sessionInputHeld: () => false,
-      _dropRejectedInput: (...args: unknown[]) => rejected.push(args)}, 1, {err: true}, 's');
-    expect(rejected).toEqual([['s', record]]);
+  it.each([true, false])('refuses oversized editable mux=%s before storage/effects without duplicating its draft', async (useMux) => {
+    fixture = browserInputFixture();
+    let effects = 0;
+    const app = await fixture.page(async () => {
+      effects++;
+      return Response.json({ success: true, data: {} });
+    });
+    const text = 'x'.repeat((useMux ? MAX_INPUT_LENGTH : loadLimit().PASTE_MAX_CHARS) + 1);
+    expect(await app._sendInputAsync('session-1', text, { useMux })).toBe(false);
+    expect((await app._inputJournal.snapshot()).records).toEqual([]);
+    expect(effects).toBe(0);
+    expect(app._unsavedInputDrafts).toEqual([]);
+    expect(app.showToast.mock.calls.flat().join(' ')).toMatch(/too large/i);
   });
-
-  it('prunes oversized frames persisted by an older build on load', () => {
-    const load = appSource.slice(appSource.indexOf('_loadReliableState() {'));
-    expect(load.slice(0, 3000)).toMatch(/r\.data\.length <= frameMax/);
+  it('an invalid WS acknowledgment holds the original frame instead of deleting or reissuing it', async () => {
+    fixture = browserInputFixture();
+    const frames: string[] = [],
+      app = await fixture.page();
+    app._ws = { readyState: 1, send: (data) => frames.push(data) };
+    app._wsSessionId = 'session-1';
+    await app._sendInputAsync('session-1', 'retained');
+    await expect.poll(() => frames.length).toBe(1);
+    await app._onWsInputAck(1, { t: 'ia', seq: 1, err: 'too large' }, 'session-1');
+    await app._drainSession('session-1');
+    expect(frames).toHaveLength(1);
+    expect(app._inputRecoveryHolds?.has('session-1')).toBe(true);
+    const state = await app._inputJournal.snapshot();
+    expect([...state.records, ...state.retained].map((row) => row.data)).toEqual(['retained']);
+  });
+  it('quarantines oversized legacy snapshots without modifying their bytes or replaying them', async () => {
+    fixture = browserInputFixture();
+    const text = 'x'.repeat(MAX_INPUT_LENGTH + 1),
+      raw = JSON.stringify({ pending: { 'session-1': [{ seq: 1, data: text }] } });
+    fixture.storage.set('reverie:pendingInput', raw);
+    let effects = 0;
+    const app = await fixture.page(async () => {
+      effects++;
+      return Response.json({ success: true, data: {} });
+    });
+    expect(fixture.storage.get('reverie:pendingInput')).toBe(raw);
+    expect(await app._sendInputAsync('session-1', 'new input')).toBe(false);
+    expect(effects).toBe(0);
+    expect((await app._inputJournal.snapshot()).holds.some((hold) => hold.sid === 'session-1')).toBe(true);
   });
 });

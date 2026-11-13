@@ -11,6 +11,21 @@ const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
 const harness = readFileSync(resolve(import.meta.dirname, 'helpers/chat-app-harness.mjs'), 'utf8');
 const appStub = harness.match(/window\.eval\(`([\s\S]*?)`\);/)![1];
+// Only the chat shell's company/phone identity is synthetic. The owner cookie
+// and all Workspace authentication, file routes and filesystem effects are real.
+const shellOwnerFixture = `
+  window.__server.company = { employees: [], settings: { ownerName: 'Workspace fixture owner' }, canManage: true };
+  window.__server.navigationOwnerAllowed = true;
+  const shellHandle = window.__server.handle;
+  window.__server.handle = (path, opts = {}) => {
+    if (path === '/api/chatrooms/phone-status' && (!opts.method || opts.method === 'GET')) {
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({
+        success: true, data: { self: 'owner', canSetOwn: window.__server.navigationOwnerAllowed }
+      }) });
+    }
+    return shellHandle(path, opts);
+  };
+`;
 let browser: Browser;
 let fixture: Awaited<ReturnType<typeof workspaceServer>>, origin: string;
 beforeAll(async () => {
@@ -64,7 +79,7 @@ for (const viewportWidth of [1905, 390, 320])
       await page.goto(origin);
       for (const name of ['styles.css', 'chat-app.css']) await page.addStyleTag({ content: read(name) });
       await page.addScriptTag({
-        content: `${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}\nwindow.ReverieUrlSession = { sessionIdFromFragment: () => null }; window.__server = createServer([room('r1','General',[],{ messages: [] })]); ${appStub}`,
+        content: `${member.toString()} ${room.toString()} ${message.toString()} ${createServer.toString()}\nwindow.ReverieUrlSession = { sessionIdFromFragment: () => null }; window.__server = createServer([room('r1','General',[],{ messages: [] })]); ${shellOwnerFixture} ${appStub}`,
       });
       for (const name of ['chatroom-ui.js', 'chat-media.js']) await page.addScriptTag({ content: read(name) });
       await page.addScriptTag({ content: 'window.app = new ReverieApp();' });
@@ -72,13 +87,23 @@ for (const viewportWidth of [1905, 390, 320])
       await page.locator('.ca-root').waitFor();
       const composer = page.locator('.chatroom-input');
       await composer.fill('Keep this unsent draft λ');
-      // Exercise the actual sidebar entry on both layouts (the phone uses its drawer).
+      // Exercise the actual footer launcher on both layouts (the phone also uses its drawer).
       if (phone) await page.getByRole('button', { name: 'Open channels', exact: true }).click();
-      const office = page.getByRole('button', { name: 'Office', exact: true });
+      const office = page.getByRole('button', { name: 'Office settings', exact: true });
       if (phone) expect((await office.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      expect(await office.getAttribute('aria-expanded')).toBe('false');
       await office.click();
+      expect(await office.getAttribute('aria-expanded')).toBe('true');
+      await page.getByRole('button', { name: 'Workspace', exact: true }).waitFor();
+      await office.press('Enter');
       expect(await office.getAttribute('aria-expanded')).toBe('false');
       expect(await page.getByRole('button', { name: 'Workspace', exact: true }).isVisible()).toBe(false);
+      await page.evaluate('window.__server.navigationOwnerAllowed = false');
+      await office.press('Enter');
+      await page.getByRole('button', { name: 'Terminal settings', exact: true }).waitFor();
+      expect(await page.getByRole('button', { name: 'Workspace', exact: true }).count()).toBe(0);
+      await office.press('Enter');
+      await page.evaluate('window.__server.navigationOwnerAllowed = true');
       await office.press('Enter');
       expect(await office.getAttribute('aria-expanded')).toBe('true');
       await page.getByRole('button', { name: 'Workspace', exact: true }).click();
@@ -145,7 +170,7 @@ for (const viewportWidth of [1905, 390, 320])
         for (const name of ['handoffs', '2026-10-23', 'brooke'])
           await frame.getByRole('button', { name: `${name} Folder`, exact: true }).click();
         await frame.getByRole('status').filter({ hasText: '48 items' }).waitFor();
-        if (!phone) await page.getByRole('button', { name: 'Office', exact: true }).click();
+        if (!phone) await page.getByRole('button', { name: 'Office settings', exact: true }).click();
         expect(await frame.locator('#preview').isVisible()).toBe(false);
         const deepWidth = await frame.locator('body').evaluate((el) => ({ scroll: el.scrollWidth, inner: innerWidth }));
         expect(deepWidth.scroll).toBeLessThanOrEqual(deepWidth.inner);
@@ -192,8 +217,12 @@ for (const viewportWidth of [1905, 390, 320])
           ),
         });
       }
-      // The embedded page closes through a source/origin-checked message, retaining the composer.
-      await frame.getByRole('link', { name: 'Back to chat', exact: true }).click();
+      // Embedded tools return through the shell's Company/tools adapter, then
+      // its real Back to chat action restores the unsent conversation draft.
+      await frame.getByRole('link', { name: 'Back to Company / tools', exact: true }).click();
+      await page.getByRole('menu', { name: 'Company tools', exact: true }).waitFor();
+      await page.keyboard.press('Escape');
+      await page.locator('.ca-company').getByRole('button', { name: 'Back to chat', exact: true }).click();
       await composer.waitFor({ state: 'visible' });
       expect(await composer.inputValue()).toBe('Keep this unsent draft λ');
       expect(errors).toEqual([]);

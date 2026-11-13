@@ -85,9 +85,21 @@ export type AccountReplacementProfileName = (typeof ACCOUNT_REPLACEMENT_PROFILE_
 export const STARTUP_ACCOUNT_PROFILE_NAMES = ['anthropic-local-account-v1', 'openai-local-account-v1'] as const;
 export type StartupAccountProfileName = (typeof STARTUP_ACCOUNT_PROFILE_NAMES)[number];
 
+/** Project summary-hook writers: executable configuration owned by the shipped runtime. */
+export const WORKSPACE_SUMMARY_HOOK_PROFILE_NAMES = ['codex-project-v1'] as const;
+export type WorkspaceSummaryHookProfileName = (typeof WORKSPACE_SUMMARY_HOOK_PROFILE_NAMES)[number];
+
+/** Runtime-policy report codecs. Selecting one never enables backend switching. */
+export const RUNTIME_POLICY_FALLBACK_PROFILE_NAMES = ['opencode-local-v1'] as const;
+export type RuntimePolicyFallbackProfileName = (typeof RUNTIME_POLICY_FALLBACK_PROFILE_NAMES)[number];
+
 /** Session-level effort wire/engine codec; enum parameters remain declared launch data. */
 export const LAUNCH_EFFORT_INPUT_NAMES = ['session-effort-v1'] as const;
 export type LaunchEffortInputName = (typeof LAUNCH_EFFORT_INPUT_NAMES)[number];
+
+/** Docker case seed storage paired with the fixed session-id/resume pane wrapper. */
+export const DOCKER_CASE_SEED_PROFILE_NAMES = ['session-id-resume-v1'] as const;
+export type DockerCaseSeedProfileName = (typeof DOCKER_CASE_SEED_PROFILE_NAMES)[number];
 
 /** Native thread storage/launch codecs. These do not grant reboot or lifecycle permission. */
 export const THREAD_STATE_PROFILE_NAMES = ['conversation-chain-v1', 'nested-resume-v1', 'forkable-continue-v1'] as const;

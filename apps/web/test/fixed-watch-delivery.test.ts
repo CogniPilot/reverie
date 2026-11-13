@@ -12,12 +12,32 @@ import { readFixedPr } from '../src/cron/fixed-github-watch.js';
 import type { Fetcher } from '../src/cron/github-source.js';
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
-  return { ...actual, writeFile: vi.fn(actual.writeFile) };
+  return { ...actual, open: vi.fn(actual.open) };
 });
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof import('node:fs')>();
-  return { ...actual, fsyncSync: vi.fn(actual.fsyncSync) };
+  return { ...actual, fsyncSync: vi.fn(actual.fsyncSync), renameSync: vi.fn(actual.renameSync) };
 });
+
+/** Pause the real writer's original descriptor, preserving sync/close ownership. */
+async function pauseNextStateWrite() {
+  const original = (await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).open;
+  let release!: () => void;
+  let entered!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const writing = new Promise<void>((resolve) => { entered = resolve; });
+  vi.mocked(asyncFs.open).mockImplementationOnce(async (...args: Parameters<typeof asyncFs.open>) => {
+    const file = await original(...args);
+    const write = file.writeFile.bind(file);
+    vi.spyOn(file, 'writeFile').mockImplementation(async (...data: Parameters<typeof file.writeFile>) => {
+      entered();
+      await gate;
+      return write(...data);
+    });
+    return file;
+  });
+  return { release, writing };
+}
 
 const input = (): CronJobInput => ({
   name: 'public PR notice',
@@ -56,7 +76,10 @@ const fixture: Fetcher = async (url) => ({
 const stores: StateStore[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
-  for (const s of stores.splice(0)) await s.saveNowAsync();
+  for (const s of stores.splice(0)) {
+    if (s.statePublicationHeld) await expect(s.saveNowAsync()).rejects.toMatchObject({ code: 'STATE_PUBLICATION_UNCONFIRMED' });
+    else await s.saveNowAsync();
+  }
 });
 function setup(file = join(mkdtempSync(join(tmpdir(), 'watch-fixture-')), 'state.json')) {
   const store = new StateStore(file);
@@ -220,20 +243,7 @@ describe('fixed watcher actual state/delivery integration', () => {
     const x = setup();
     const job = x.service.createJob(input(), undefined, undefined, true);
     writeFileSync(x.file + '.bak', JSON.stringify(x.store.getState()));
-    const original = (await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).writeFile;
-    let release!: () => void;
-    let entered!: () => void;
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const writing = new Promise<void>((r) => {
-      entered = r;
-    });
-    vi.mocked(asyncFs.writeFile).mockImplementation(async (...args: Parameters<typeof asyncFs.writeFile>) => {
-      entered();
-      await gate;
-      return original(...args);
-    });
+    const { release, writing } = await pauseNextStateWrite();
     const oldSave = x.store.saveNowAsync();
     expect(x.store.recoverFromBackup()).toBe(false); // queued, before its first I/O starts
     await writing;
@@ -241,7 +251,6 @@ describe('fixed watcher actual state/delivery integration', () => {
     expect(x.service.getJob(job.id)?.watchGeneration).toBe(job.watchGeneration);
     release();
     await oldSave;
-    vi.mocked(asyncFs.writeFile).mockImplementation(original);
     expect(x.store.recoverFromBackup()).toBe(true);
     await x.store.saveNowAsync();
     const restart = setup(x.file);
@@ -353,6 +362,27 @@ describe('fixed watcher actual state/delivery integration', () => {
     expect(restart.posts).toEqual([]);
     vi.mocked(syncFs.fsyncSync).mockImplementation(real);
   });
+  it.each([1, 2])('reports an uncertain actual publication %s as held and never repeats its notice', async (at) => {
+    const x = setup();
+    const job = x.service.createJob(input(), undefined, undefined, true);
+    const real = (await vi.importActual<typeof import('node:fs')>('node:fs')).renameSync;
+    let calls = 0;
+    vi.mocked(syncFs.renameSync).mockImplementation((from, to) => {
+      real(from, to);
+      if (++calls === at) throw new Error('synthetic lost publication reply');
+    });
+    try {
+      const failed = await x.service.runNow(job.id);
+      expect(failed?.status).toBe('failed');
+      expect(failed?.errorMessage).toContain('WATCH_DELIVERY_UNCERTAIN');
+      expect(x.posts).toHaveLength(at === 1 ? 0 : 1);
+      const published = readFileSync(x.file, 'utf8');
+      await x.service.runNow(job.id);
+      expect(x.posts).toHaveLength(at === 1 ? 0 : 1);
+      expect(readFileSync(x.file, 'utf8')).toBe(published);
+      expect(x.store.statePublicationHeld).toBe(true);
+    } finally { vi.mocked(syncFs.renameSync).mockImplementation(real); }
+  });
   it('caps pre-effect query retries at three; errors contain no external/private strings', async () => {
     const x = setup();
     const job = x.service.createJob(input(), undefined, undefined, true);
@@ -431,20 +461,7 @@ describe('fixed watcher actual state/delivery integration', () => {
   it('queues durable intent after an actual old asynchronous save, and synchronous save cannot overtake it', async () => {
     const x = setup();
     const job = x.service.createJob(input(), undefined, undefined, true);
-    const original = (await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')).writeFile;
-    let release!: () => void;
-    let entered!: () => void;
-    const gate = new Promise<void>((r) => {
-      release = r;
-    });
-    const writing = new Promise<void>((r) => {
-      entered = r;
-    });
-    vi.mocked(asyncFs.writeFile).mockImplementation(async (...args: Parameters<typeof asyncFs.writeFile>) => {
-      entered();
-      await gate;
-      return original(...args);
-    });
+    const { release, writing } = await pauseNextStateWrite();
     const oldSave = x.store.saveNowAsync();
     await writing;
     const intent = x.store.commitCronWatch(() => {

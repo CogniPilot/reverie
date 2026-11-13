@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { CompanySettingsSchema, EmployeePermissionsSchema } from '../src/company-types.js';
 import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 
 const handles: Awaited<ReturnType<typeof createHarness>>[] = [];
@@ -9,7 +10,11 @@ afterEach(() => {
 });
 
 async function fixture(extraEmployees: object[] = []) {
-  const employee = { id: 'employee-one', sessionId: 'current-session', name: 'Reviewer', position: 'Engineer', available: true, reportsTo: 'owner', icon: 'R' };
+  const employee = { id: 'employee-one', sessionId: 'current-session', name: 'Reviewer', position: 'Engineer', available: true, reportsTo: 'owner', icon: 'R',
+    permissions: EmployeePermissionsSchema.parse({}),
+    effectiveBoardPermissions: { editBoardIssues: true, manageBoard: false, manageDecisions: false },
+    boardPermissionSources: { editBoardIssues: 'legacy', manageBoard: 'legacy', manageDecisions: 'legacy' },
+  };
   const company = { employees: [employee, ...extraEmployees], settings: { ownerName: 'Owner name' }, canManage: false };
   const handle = await createHarness({ rooms: [room('room', 'General', [member(employee.sessionId, employee.name)])], sessions: [{ id: employee.sessionId, name: employee.name }], company });
   handles.push(handle);
@@ -306,7 +311,7 @@ async function recoveryFixture(settings: object = {}, extras: object[] = []) {
   const result = await fixture(extras);
   const { handle, company } = result;
   company.canManage = true;
-  Object.assign(company.settings, settings);
+  company.settings = CompanySettingsSchema.parse({ ...company.settings, ...settings });
   const previous = handle.app._chatApi.bind(handle.app);
   const writes: any[] = [];
   handle.app._chatApi = async (path: string, options: any) => {
@@ -314,7 +319,11 @@ async function recoveryFixture(settings: object = {}, extras: object[] = []) {
     if (path === '/api/chatrooms/phone-status') return { ok: true, data: { self: 'owner', canSetOwn: true } };
     if (path === '/api/company/settings') {
       writes.push(options);
-      return { ok: true, data: { settings: options.body } };
+      // Model the canonical saved response, never return a patch/null as stored settings.
+      const merged = { ...company.settings, ...options.body };
+      if (merged.crashWakeEmployeeId === null) delete merged.crashWakeEmployeeId;
+      company.settings = CompanySettingsSchema.parse(merged);
+      return { ok: true, data: { settings: structuredClone(company.settings) } };
     }
     return previous(path, options);
   };
@@ -332,22 +341,26 @@ async function recoverySettingsFixture(settings: object = {}, extras: object[] =
 
 describe('owner chooses one crash recovery expert', () => {
   it('allows selecting a report and saving the choice without a title privilege', async () => {
-    const { handle, writes } = await recoverySettingsFixture({}, [{ id: 'report', name: '<Reviewer>', reportsTo: 'employee-one', position: 'Expert' }]);
+    const { handle, writes, company } = await recoverySettingsFixture({}, [{ id: 'report', name: '<Reviewer>', reportsTo: 'employee-one', position: 'Expert' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
-    expect(select.options[0].textContent).toBe('Automatic: Reviewer');
+    expect(select.options[0].textContent).toBe('Automatic');
     expect([...select.options].map(option => option.value)).toEqual(['', 'employee-one', 'report']);
+    expect(select.options[2].textContent).toBe('<Reviewer>');
     select.value = 'report';
     handle.document.querySelector<HTMLButtonElement>('.ca-company-recovery button')!.click();
     await handle.flush();
-    expect(writes).toEqual([{ method: 'PUT', body: { ownerName: 'Owner name', autoWakeEnabled: true, crashWakeEmployeeId: 'report' } }]);
+    expect(writes).toEqual([{ method: 'PUT', body: { autoWakeEnabled: true, crashWakeEmployeeId: 'report' } }]);
+    expect(company.settings).toMatchObject({ ownerName: 'Owner name', autoWakeEnabled: true, crashWakeEmployeeId: 'report' });
     expect(handle.document.querySelector('.ca-company-recovery img')).toBeNull();
   });
 
-  it('uses the configured coordinator as the default root for older unspecified reporting lines', async () => {
-    const { handle } = await recoverySettingsFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy-report', name: 'Legacy report' }]);
+  it('leaves Automatic policy to the backend for older unspecified reporting lines', async () => {
+    const { handle, company } = await recoverySettingsFixture({ coordinatorEmployeeId: 'employee-one' }, [{ id: 'legacy-report', name: 'Legacy report' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
-    expect(select.options[0].textContent).toBe('Automatic: Reviewer');
+    expect(select.options[0].textContent).toBe('Automatic');
     expect(select.value).toBe('');
+    expect(handle.document.querySelector('.ca-company-recovery')!.textContent).toContain('single top-level expert when there is exactly one');
+    expect(company.settings).toMatchObject({ coordinatorEmployeeId: 'employee-one' });
   });
 
   it('keeps the selected expert while disabling automatic recovery', async () => {
@@ -364,14 +377,17 @@ describe('owner chooses one crash recovery expert', () => {
     expect(writes[0].body.crashWakeEmployeeId).toBe('employee-one');
   });
 
-  it('requires a choice for multiple roots and omits a cleared selection', async () => {
-    const { handle, writes } = await recoverySettingsFixture({ crashWakeEmployeeId: 'employee-one' }, [{ id: 'second-root', name: 'Another expert', reportsTo: 'owner' }]);
+  it('keeps Automatic conditional for multiple roots and explicitly clears the stored selection', async () => {
+    const { handle, writes, company } = await recoverySettingsFixture({ crashWakeEmployeeId: 'employee-one' }, [{ id: 'second-root', name: 'Another expert', reportsTo: 'owner' }]);
     const select = handle.document.querySelector<HTMLSelectElement>('[aria-label="Wake after a crash"]')!;
-    expect(select.options[0].textContent).toBe('Choose an expert');
+    expect(select.options[0].textContent).toBe('Automatic');
+    expect(handle.document.querySelector('.ca-company-recovery')!.textContent).toContain('single top-level expert when there is exactly one');
     select.value = '';
     handle.document.querySelector<HTMLButtonElement>('.ca-company-recovery button')!.click();
     await handle.flush();
-    expect(writes[0].body).not.toHaveProperty('crashWakeEmployeeId');
+    expect(writes).toEqual([{ method: 'PUT', body: { autoWakeEnabled: true, crashWakeEmployeeId: null } }]);
+    expect(company.settings).not.toHaveProperty('crashWakeEmployeeId');
+    expect(company.settings).toMatchObject({ ownerName: 'Owner name', autoWakeEnabled: true });
   });
 
   it('shows an unavailable stored choice without silently selecting another expert', async () => {

@@ -97,15 +97,29 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
     expect(() => company.prepareRuntimeRestart(created, undefined)?.finish()).not.toThrow();
   });
 
-  it("the employee's own session replacing itself records nothing (agent caller)", async () => {
+  it("refuses the employee's unapproved self replacement without changing running intent", async () => {
     const abe = await hireStopped();
+    const before = structuredClone(store.snapshot());
+    const original = ctx.sessions.get('test-session-1');
+    const originalSessions = [...ctx.sessions];
     const replaced = await agent('test-session-1', { employeeId: abe.id });
-    expect(replaced.statusCode, replaced.body).toBe(200);
-    expect(employee().sessionId).toBe(replaced.json().session.id);
+    expect(replaced.statusCode, replaced.body).toBe(403);
+    expect(store.snapshot()).toEqual(before);
+    expect(employee().sessionId).toBe('test-session-1');
     expect(employee().desiredRunning).toBe(false);
+    expect([...ctx.sessions]).toEqual(originalSessions);
+    expect(ctx.sessions.get('test-session-1')).toBe(original);
+    expect(ctx.addSession).not.toHaveBeenCalled();
+    expect(ctx.setupSessionListeners).not.toHaveBeenCalled();
+    expect(ctx.store.incrementSessionsCreated).not.toHaveBeenCalled();
+    expect(ctx.persistSessionState).not.toHaveBeenCalled();
+    expect(ctx.cleanupSession).not.toHaveBeenCalled();
+    expect(ctx.discardPartiallyBuiltSession).not.toHaveBeenCalled();
+    expect(ctx.broadcast).not.toHaveBeenCalled();
+    expect(() => company.prepareRuntimeRestart('test-session-1', undefined)?.finish()).not.toThrow();
   });
 
-  it('a non-owner request records nothing', async () => {
+  it('refuses an unverified owner replacement without registration or cleanup', async () => {
     const abe = await hireStopped();
     await app.close();
     app = Fastify();
@@ -113,9 +127,24 @@ describe('bug 19: owner replacement spawns record running intent on the new sess
     registerSessionRoutes(app, ctx, { company, verifiedOwner: () => false });
     installRouteErrorHandler(app);
     await app.ready();
+    const before = structuredClone(store.snapshot());
+    const original = ctx.sessions.get('test-session-1');
+    const originalSessions = [...ctx.sessions];
     const replaced = await owner({ employeeId: abe.id });
-    expect(replaced.statusCode, replaced.body).toBe(200);
+    expect(replaced.statusCode, replaced.body).toBe(403);
+    expect(store.snapshot()).toEqual(before);
+    expect(employee().sessionId).toBe('test-session-1');
     expect(employee().desiredRunning).toBe(false);
+    expect([...ctx.sessions]).toEqual(originalSessions);
+    expect(ctx.sessions.get('test-session-1')).toBe(original);
+    expect(ctx.addSession).not.toHaveBeenCalled();
+    expect(ctx.setupSessionListeners).not.toHaveBeenCalled();
+    expect(ctx.store.incrementSessionsCreated).not.toHaveBeenCalled();
+    expect(ctx.persistSessionState).not.toHaveBeenCalled();
+    expect(ctx.cleanupSession).not.toHaveBeenCalled();
+    expect(ctx.discardPartiallyBuiltSession).not.toHaveBeenCalled();
+    expect(ctx.broadcast).not.toHaveBeenCalled();
+    expect(() => company.prepareRuntimeRestart('test-session-1', undefined)?.finish()).not.toThrow();
   });
 
   it('a vacationing employee keeps its stop', async () => {

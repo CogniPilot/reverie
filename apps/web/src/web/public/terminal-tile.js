@@ -234,6 +234,7 @@
     async connect() {
       const savedFontSize = this.fontSize ?? parseInt(localStorage.getItem('reverie-font-size'), 10);
       this.terminal = new Terminal({
+        disableStdin: global.app?._rawInputBlocked?.(this.sessionId) === true,
         theme: { ...global.reverieCurrentXtermTheme() },
         fontFamily: global.ReverieTerminalFont.resolve(this.fontSettings.terminalFontFamily),
         ...global.ReverieTerminalFont.resolveWeights(this.fontSettings),
@@ -441,7 +442,7 @@
       const app = global.app;
       const cid = app?._clientId ? `${app._clientId}:${app._wsTabNonce}:tile` : '';
       const cidQuery = cid ? `?cid=${encodeURIComponent(cid)}` : '';
-      this._socketUrl = `${proto}//${location.host}${window.ReverieBase.base}/ws/sessions/${this.sessionId}/terminal${cidQuery}`;
+      this._socketUrl = `${proto}//${location.host}${window.ReverieBase.base}/ws/sessions/${this.sessionId}/terminal${cidQuery}${cidQuery ? '&' : '?'}inputProtocol=2`;
       this._openSocket();
     }
 
@@ -481,7 +482,8 @@
             // Input ACK. The frame names no session, so it is this pane's.
             global.app?._onWsInputAck?.(msg.seq, msg, this.sessionId);
           } else if (msg.t === 'ie' && (msg.unconfirmed === true || msg.held === true)) {
-            global.app?._holdInputRecovery?.(this.sessionId);
+            if (msg.reloadRequired === true) global.app?._noteInputReloadRequired?.(this.sessionId);
+            else global.app?._holdInputRecovery?.(this.sessionId);
           } else if (msg.t === 'ir') {
             global.app?._onWsInputRefusal?.(msg.seq, msg, this.sessionId);
           } else if (msg.t === 'ip') {
@@ -632,6 +634,7 @@
     // program asked for, but nobody typed it: it goes out once, never
     // persisted. Same predicates as the primary pane (terminal-ui.js onData).
     _onTerminalData(data) {
+      if (global.app?._rawInputBlocked?.(this.sessionId)) return;
       const input = global.ReverieTerminalInput;
       if (input?.shouldSuppressTerminalQueryResponse?.(data, this.terminal)) return;
       const app = global.app;
@@ -639,7 +642,9 @@
         app?._sendInputEphemeral?.(this.sessionId, data);
         return;
       }
-      app?._sendInputAsync?.(this.sessionId, data);
+      const owner = app._createRawInputBuffer(this.sessionId);
+      if (!owner.append(data)) return false;
+      return owner.flush();
     }
 
     // The soft-keyboard controller, the twin of the primary pane's wiring in

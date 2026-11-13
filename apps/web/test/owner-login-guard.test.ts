@@ -39,7 +39,11 @@ function resp(status: number, body: unknown) {
 
 const UNAUTH = { status: 401, body: { success: false, error: 'Sign in as the owner', errorCode: 'UNAUTHORIZED' } };
 
-function boot(url: string, reply: (path: string) => Reply, opts: { base?: string; storage?: Record<string, string> } = {}) {
+function boot(
+  url: string,
+  reply: (path: string) => Reply,
+  opts: { base?: string; storage?: Record<string, string> } = {}
+) {
   const dom = new JSDOM('<!doctype html><body></body>', { url, runScripts: 'outside-only' });
   const win = dom.window as unknown as GuardWin;
   if (opts.base) win.__REVERIE_BASE__ = opts.base;
@@ -88,6 +92,87 @@ describe('owner-login-guard: when it redirects', () => {
 });
 
 describe('owner-login-guard: when it does not', () => {
+  it('keeps only exact metadata status/reconciliation refusals in their draft-preserving warning UI', async () => {
+    for (const base of ['', '/reverie']) {
+      const { dom, win, navigations } = boot(`http://localhost${base}/`, () => UNAUTH, { base });
+      try {
+        await win.fetch(base + '/api/mux/metadata/status');
+        await win.fetch(base + '/api/mux/metadata/reconcile', { method: 'POST' });
+        await settle();
+        expect(navigations).toEqual([]);
+        await win.fetch(base + '/api/mux/metadata/reconcile');
+        await settle();
+        expect(navigations).toEqual([base + '/owner/login?next=' + encodeURIComponent(base + '/')]);
+      } finally {
+        dom.window.close();
+      }
+    }
+  });
+
+  it('leaves only the supported recovery request refusals to their draft-preserving profile UI', async () => {
+    const employee = '11111111-2222-4333-8444-555555555555';
+    for (const base of ['', '/reverie'])
+      for (const [suffix, method] of [
+        ['recovery-selection', 'GET'],
+        ['recovery', 'POST'],
+        ['recovery/observe', 'POST'],
+      ]) {
+        const { dom, win, navigations } = boot(`http://localhost${base}/`, () => UNAUTH, { base });
+        try {
+          const response = await win.fetch(base + `/api/company/employees/${employee}/${suffix}`, { method });
+          expect(response.status).toBe(401);
+          await settle();
+          expect(navigations).toEqual([]);
+        } finally {
+          dom.window.close();
+        }
+      }
+  });
+
+  it('keeps neighboring routes, unsupported recovery methods and malformed employee IDs on the existing sign-in path', async () => {
+    for (const [path, method] of [
+      ['/api/company/employees/11111111-2222-4333-8444-555555555555/recovery/other', 'POST'],
+      ['/api/company/employees/11111111-2222-4333-8444-555555555555/recovery', 'GET'],
+      ['/api/company/employees/11111111-2222-4333-8444-555555555555/recovery-selection', 'PUT'],
+      ['/api/company/employees/not-an-employee/recovery', 'POST'],
+    ]) {
+      const { dom, win, navigations } = boot('http://localhost/', () => UNAUTH);
+      try {
+        await win.fetch(path, { method });
+        await settle();
+        expect(navigations).toEqual(['/owner/login?next=' + encodeURIComponent('/')]);
+      } finally {
+        dom.window.close();
+      }
+    }
+  });
+
+  it('leaves the live subscription POST refusal to its draft-preserving transport UI', async () => {
+    for (const base of ['', '/reverie']) {
+      const { dom, win, navigations } = boot(`http://localhost${base}/`, () => UNAUTH, { base });
+      try {
+        await win.fetch(base + '/api/events/subscribe', { method: 'POST' });
+        await settle();
+        expect(navigations).toEqual([]);
+        await win.fetch(base + '/api/events/subscribe');
+        await settle();
+        expect(navigations).toEqual([base + '/owner/login?next=' + encodeURIComponent(base + '/')]);
+      } finally {
+        dom.window.close();
+      }
+    }
+  });
+
+  it('keeps other POST authentication failures on the existing sign-in path', async () => {
+    const { dom, win, navigations } = boot('http://localhost/', () => UNAUTH);
+    try {
+      await win.fetch('/api/events/subscribe/other', { method: 'POST' });
+      await settle();
+      expect(navigations).toEqual(['/owner/login?next=' + encodeURIComponent('/')]);
+    } finally {
+      dom.window.close();
+    }
+  });
   it('does not redirect on a 403', async () => {
     const { win, navigations } = boot('http://localhost/', () => ({
       status: 403,
@@ -121,7 +206,10 @@ describe('owner-login-guard: when it does not', () => {
 
   it('does not redirect on other statuses', async () => {
     for (const status of [200, 400, 404, 500, 502]) {
-      const { win, navigations } = boot('http://localhost/', () => ({ status, body: { success: false, errorCode: 'UNAUTHORIZED' } }));
+      const { win, navigations } = boot('http://localhost/', () => ({
+        status,
+        body: { success: false, errorCode: 'UNAUTHORIZED' },
+      }));
       await win.fetch('/api/sessions');
       await settle();
       expect(navigations, String(status)).toEqual([]);
@@ -129,7 +217,11 @@ describe('owner-login-guard: when it does not', () => {
   });
 
   it('does not redirect when already on /owner/* (no loops)', async () => {
-    for (const url of ['http://localhost/owner/login?next=%2F', 'http://localhost/owner/account', 'http://localhost/OWNER/login']) {
+    for (const url of [
+      'http://localhost/owner/login?next=%2F',
+      'http://localhost/owner/account',
+      'http://localhost/OWNER/login',
+    ]) {
       const { win, navigations } = boot(url, () => UNAUTH);
       await win.fetch('/api/owner/status');
       await settle();

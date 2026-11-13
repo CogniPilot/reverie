@@ -1,3 +1,14 @@
+import type { Session } from './session.js';
+import type { ProviderLaunchPublication } from './provider-launch-publication.js';
+
+/** A selected terminal mutation was refused; this never permits a fallback process. */
+export class MuxMutationRefusedError extends Error {
+  constructor(reason: 'busy' | 'changed') {
+    super(reason === 'busy' ? 'Another operation owns this terminal. Refresh its status before retrying.'
+      : 'The original terminal changed. Refresh its status before retrying.');
+    this.name = 'MuxMutationRefusedError';
+  }
+}
 /**
  * @fileoverview Terminal multiplexer abstraction layer (tmux).
  *
@@ -107,6 +118,11 @@ export interface CreateSessionOptions {
   admitted?: () => boolean;
   /** Private, at-most-once boundary after final admission, immediately before the actual command. */
   onProviderDispatch?: () => void;
+  /** Actual read-only viewer transport dispatch; never a provider receipt. */
+  onViewerDispatch?: () => void;
+  /** Actual original acknowledged writer owner, never supplied by a request DTO. */
+  providerLaunch?: ProviderLaunchPublication;
+  providerSubject?: Session;
   /** Process-local fixed resource actor join, never a persisted/wire option. */
   workerResourceLaunch?: ResourceWorkerLaunch;
   sessionId: string;
@@ -160,6 +176,13 @@ export interface RespawnPaneOptions {
   admitted?: () => boolean;
   /** Private, at-most-once boundary after final admission, immediately before the actual command. */
   onProviderDispatch?: () => void;
+  /** Actual read-only viewer transport dispatch; never a provider receipt. */
+  onViewerDispatch?: () => void;
+  /** Selects a strict remote attach command, preserving ownership metadata. */
+  remoteAttachOnly?: boolean;
+  /** Actual original acknowledged writer owner, never supplied by a request DTO. */
+  providerLaunch?: ProviderLaunchPublication;
+  providerSubject?: Session;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   /** Internal, launch-only trust for Reverie's own Codex hooks (shell-escaped --config value). */

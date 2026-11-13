@@ -1,4 +1,4 @@
-import { registerMuxFixture } from './helpers/registered-mux-fixture.js';
+import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import Fastify from 'fastify';
 import fastifyCookie from '@fastify/cookie';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -16,20 +16,20 @@ const CODEX_EMPTY = '›\n  gpt-6.1-sol high · /owned/fixture\n? for shortcuts'
 const CLAUDE_EMPTY = '● Done.\n────────────────────────────────\n❯ \n────────────────────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle)';
 const CLAUDE_DRAFT = CLAUDE_EMPTY.replace('❯ ', '❯ a half-typed note to myself');
 
-type Mux = { capturePaneText: () => string; sendInput: ReturnType<typeof vi.fn> };
+type Mux = { getSession: ReturnType<typeof registeredMuxFixture>['getSession']; capturePaneText: () => string; sendInput: ReturnType<typeof vi.fn> };
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!();
 });
 
-async function harness(mode: string, screen: string, remoteWake: Record<string, unknown> = { hasWakeTarget: vi.fn(async () => false) }, sendInput = vi.fn(async () => true)) {
+async function harness(mode: 'claude' | 'codex' | 'opencode', screen: string, remoteWake: Record<string, unknown> = { hasWakeTarget: vi.fn(async () => false) }, sendInput = vi.fn(async () => true)) {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
   const ctx = createMockRouteContext();
-  const mux: Mux = { capturePaneText: () => screen, sendInput };
+  const registry = registeredMuxFixture({ mode, muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 });
+  const mux: Mux = { ...registry, capturePaneText: () => screen, sendInput };
   const session = new Session({ id: 'test-session-1', workingDir: '/tmp', mode: mode as never, useMux: true, mux: mux as never,
-    muxSession: { muxName: 'reverie-owned-review', sessionId: 'test-session-1', pid: 42 } as never });
-  registerMuxFixture(session);
+    muxSession: registry.subject });
   ctx.sessions.set(session.id, session as never);
   registerSessionRoutes(app, ctx as never, { verifiedOwner: trustedFixtureOwner, remoteWake: remoteWake as never });
   installRouteErrorHandler(app);
@@ -48,7 +48,8 @@ describe('idle-only wake at the write boundary', () => {
     const h = await harness('claude', CLAUDE_DRAFT);
     const response = await h.wake();
     expect(h.mux.sendInput).not.toHaveBeenCalled();
-    expect(response.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false } });
+    expect(response.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false}});
+    expect(response.json().recoveryRequired).toBeUndefined();
   });
 
   it('wakes an idle Claude Code session through a gate that is re-checked at the keys', async () => {
@@ -69,11 +70,11 @@ describe('idle-only wake at the write boundary', () => {
     const h = await harness('opencode', '┃ \n┃ some draft');
     const response = await h.wake();
     expect(h.mux.sendInput).not.toHaveBeenCalled();
-    expect(response.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false } });
+    expect(response.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false}});
+    expect(response.json().recoveryRequired).toBeUndefined();
   });
 
   it('never buffers an idle-only wake for a sleeping host, and refuses one that went busy while the host woke', async () => {
-    let session!: Session;
     const remoteWake = {
       hasWakeTarget: vi.fn(async () => true),
       handleInput: vi.fn(async () => 'buffered'),
@@ -83,12 +84,13 @@ describe('idle-only wake at the write boundary', () => {
       }),
     };
     const h = await harness('codex', CODEX_EMPTY, remoteWake);
-    session = h.session;
+    const session = h.session;
     const response = await h.wake();
     expect(remoteWake.handleInput).not.toHaveBeenCalled();
     expect(remoteWake.ensureAwake).toHaveBeenCalledOnce();
     expect(h.mux.sendInput).not.toHaveBeenCalled();
-    expect(response.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false } });
+    expect(response.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false}});
+    expect(response.json().recoveryRequired).toBeUndefined();
   });
 
   it('types one wake when two arrive together', async () => {
@@ -98,7 +100,8 @@ describe('idle-only wake at the write boundary', () => {
     const first = h.wake(1);
     await vi.waitFor(() => expect(sendInput).toHaveBeenCalledOnce());
     const second = await h.wake(2);
-    expect(second.json()).toMatchObject({ success: false, errorCode: 'SESSION_BUSY', data: { delivered: false } });
+    expect(second.json()).toMatchObject({success: false, errorCode: 'SESSION_BUSY', data: {delivered: false}});
+    expect(second.json().recoveryRequired).toBeUndefined();
     release(true);
     expect((await first).json()).toEqual({ delivered: true });
     expect(sendInput).toHaveBeenCalledOnce();

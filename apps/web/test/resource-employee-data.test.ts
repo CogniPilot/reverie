@@ -1,6 +1,12 @@
 /** Wire consistency controls, without fabricated host authority or effects. */
 import { expect, it } from 'vitest';
-import { EmployeePolicyEditApproval, EmployeeResourceStatus } from '../src/resource-employee-data.js';
+import {
+  EmployeePolicyEditApproval,
+  EmployeeResourceStatus,
+  EmployeeMemoryDiagnostics,
+  EmployeeMemoryAdvisory,
+  memoryPressureAdvisory,
+} from '../src/resource-employee-data.js';
 const requested = {
   memoryHighMiB: 8192,
   memoryMaxMiB: 49152,
@@ -89,4 +95,152 @@ it('freezes the exact five approval fields and refuses extra data', () => {
   expect(EmployeePolicyEditApproval.parse(value)).toEqual(value);
   expect(Object.isFrozen(EmployeePolicyEditApproval.parse(value))).toBe(true);
   expect(EmployeePolicyEditApproval.safeParse({ ...value, memoryMaxMiB: 49152 }).success).toBe(false);
+});
+
+it('keeps memory metric unavailability separate from current resource binding and cumulative counters', async () => {
+  const { EmployeeMemoryDiagnostics } = await import('../src/resource-employee-data.js');
+  const resources = status();
+  const value = {
+    version: 1,
+    purpose: 'employee-memory-diagnostics-v1',
+    employeeId: resources.employeeId,
+    sessionId: resources.sessionId,
+    sessionGeneration: '9007199254740992',
+    state: 'observed',
+    readOnly: true,
+    resources,
+    observation: {
+      binding: {
+        containerId: observation.containerId,
+        initPid: observation.pid,
+        initProcessStart: observation.processStart,
+        leafDevice: observation.leafDevice,
+        leafInode: observation.leafInode,
+      },
+      sampledAtEpochMs: 1800000000000,
+      sampleDurationUs: '5',
+      pressure: { state: 'unavailable', reason: 'missing' },
+      events: {
+        state: 'available',
+        low: '0',
+        high: '9007199254740993',
+        max: '0',
+        oom: '0',
+        oomKill: '0',
+        oomGroupKill: null,
+      },
+    },
+  };
+  expect(EmployeeMemoryDiagnostics.parse(value).sessionGeneration).toBe('9007199254740992');
+  value.observation.sampledAtEpochMs = Number.MAX_SAFE_INTEGER;
+  expect(EmployeeMemoryDiagnostics.parse(value).observation?.sampledAtEpochMs).toBe(Number.MAX_SAFE_INTEGER);
+  for (const changed of [
+    { ...value, unexpected: true },
+    { ...value, sessionGeneration: '01' },
+    { ...value, observation: { ...value.observation, binding: { ...value.observation.binding, initPid: 999 } } },
+    {
+      ...value,
+      observation: { ...value.observation, pressure: { state: 'available', some: { avg10Hundredths: 10001 } } },
+    },
+    { ...value, observation: { ...value.observation, events: { ...value.observation.events, high: '-1' } } },
+  ])
+    expect(EmployeeMemoryDiagnostics.safeParse(changed).success).toBe(false);
+});
+
+function advisorySnapshot() {
+  const resources = EmployeeResourceStatus.parse(status());
+  return EmployeeMemoryDiagnostics.parse({
+    version: 1,
+    purpose: 'employee-memory-diagnostics-v1',
+    employeeId: resources.employeeId,
+    sessionId: resources.sessionId,
+    sessionGeneration: '1',
+    state: 'observed',
+    readOnly: true,
+    resources,
+    observation: {
+      binding: {
+        containerId: observation.containerId,
+        initPid: observation.pid,
+        initProcessStart: observation.processStart,
+        leafDevice: observation.leafDevice,
+        leafInode: observation.leafInode,
+      },
+      sampledAtEpochMs: 1_800_000_000_000,
+      sampleDurationUs: '50',
+      pressure: {
+        state: 'available',
+        some: { avg10Hundredths: 5000, avg60Hundredths: 0, avg300Hundredths: 0, totalUs: '0' },
+        full: { avg10Hundredths: 0, avg60Hundredths: 0, avg300Hundredths: 0, totalUs: '0' },
+      },
+      events: {
+        state: 'available',
+        low: '0',
+        high: '18446744073709551615',
+        max: '999',
+        oom: '999',
+        oomKill: '999',
+        oomGroupKill: null,
+      },
+    },
+  });
+}
+it('bounds the high-stall heuristic to fresh recent PSI, including exact thresholds, without treating historical counters as recent cause', () => {
+  const value = advisorySnapshot(),
+    sample = value.observation!;
+  const now = sample.sampledAtEpochMs;
+  expect(memoryPressureAdvisory(value, now + 30_000).state).toBe('warning');
+  if (sample.pressure.state !== 'available') throw Error('Expected available fixture pressure');
+  sample.pressure.some.avg10Hundredths = 4999;
+  expect(memoryPressureAdvisory(value, now).state).toBe('not-observed');
+  sample.pressure.full.avg10Hundredths = 5000;
+  expect(memoryPressureAdvisory(value, now).state).toBe('warning');
+  sample.pressure.some.avg10Hundredths = sample.pressure.full.avg10Hundredths = 0;
+  sample.pressure.some.avg60Hundredths = sample.pressure.some.avg300Hundredths = 10000;
+  expect(memoryPressureAdvisory(value, now)).toEqual({
+    state: 'not-observed',
+    sampledAtEpochMs: now,
+    evaluatedAtEpochMs: now,
+  });
+  expect(value.observation?.events).toMatchObject({ oomKill: '999', high: '18446744073709551615' });
+});
+it('projects missing, stale, future and unusable-clock samples as unknown without throwing or changing native data', () => {
+  const value = advisorySnapshot(),
+    sample = value.observation!,
+    now = sample.sampledAtEpochMs;
+  for (const [at, reason] of [
+    [now + 30001, 'stale-sample'],
+    [now - 1, 'future-sample'],
+    [NaN, 'server-clock-unavailable'],
+    [Infinity, 'server-clock-unavailable'],
+    [-1, 'server-clock-unavailable'],
+    [Number.MAX_SAFE_INTEGER, 'server-clock-unavailable'],
+  ] as const) {
+    const result = memoryPressureAdvisory(value, at);
+    expect(result).toMatchObject({ state: 'unknown', reason });
+    expect(EmployeeMemoryAdvisory.safeParse(result).success).toBe(true);
+  }
+  sample.sampledAtEpochMs = Number.MAX_SAFE_INTEGER;
+  expect(memoryPressureAdvisory(value, now)).toMatchObject({
+    state: 'unknown',
+    reason: 'sample-time-unavailable',
+    sampledAtEpochMs: null,
+  });
+  sample.sampledAtEpochMs = now;
+  sample.pressure = { state: 'unavailable', reason: 'missing' };
+  expect(memoryPressureAdvisory(value, now)).toMatchObject({ state: 'unknown', reason: 'pressure-unavailable' });
+  expect(memoryPressureAdvisory(null, now)).toMatchObject({
+    state: 'unknown',
+    reason: 'native-observation-unconfirmed',
+  });
+  const stopped = EmployeeMemoryDiagnostics.parse({
+    ...value,
+    state: 'stopped',
+    observation: null,
+    resources: { ...value.resources, state: 'stopped', observed: null },
+  });
+  expect(memoryPressureAdvisory(stopped, now)).toMatchObject({ state: 'unknown', reason: 'no-sample' });
+  expect(EmployeeMemoryDiagnostics.safeParse({ ...value, advisory: memoryPressureAdvisory(value, now) }).success).toBe(
+    false
+  );
 });

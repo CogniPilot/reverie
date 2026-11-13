@@ -1025,7 +1025,8 @@ async function emptyRunsWorkbook(runs: number): Promise<Uint8Array> {
   const emptyStoredBlock = Uint8Array.from([0x00, 0x00, 0x00, 0xff, 0xff]);
   const blocks = Math.ceil((strings.length / 50 - deflated.length) / emptyStoredBlock.length);
   const padded = concatBytes([...Array.from({ length: blocks }, () => emptyStoredBlock), deflated]);
-  expect(fflate.inflateSync(padded)).toEqual(strings);
+  // Compare every byte without allocating a deep-equality entry for each one.
+  expect(Buffer.compare(fflate.inflateSync(padded), strings)).toBe(0);
   const parts = Object.keys(entries).map((name) => zipPart(name, entries[name], 8));
   parts.push({
     name: 'xl/sharedStrings.xml',

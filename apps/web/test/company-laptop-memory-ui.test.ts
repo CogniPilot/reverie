@@ -86,7 +86,9 @@ describe('the Laptop memory section of the owner profile', () => {
       if (path === '/api/company/hire-options') return { ok: true, data: { sources: [], harnesses: [] } };
       // The live RAM/CPU observation panel is independent of the replacement
       // workflow under test. Its GET is neither a preview nor an owner mutation.
-      if (path === `/api/company/resources/employees/${employeeId}`) {
+      if (path === `/api/company/resources/employees/${employeeId}/memory-diagnostics`) {
+        expect(opts?.method ?? 'GET').toBe('GET');
+        expect(opts?.body).toBeUndefined();
         nativeReads.push(path); return { ok: false, status: 503, error: 'Synthetic native observation unavailable' };
       }
       if (path.startsWith('/api/company/resources/')) {
@@ -110,7 +112,7 @@ describe('the Laptop memory section of the owner profile', () => {
     const { calls, nativeReads, section } = await setup(false);
     expect(section()).toBeNull();
     expect(calls).toHaveLength(0);
-    expect(nativeReads).toEqual([`/api/company/resources/employees/${employeeId}`]);
+    expect(nativeReads).toEqual([`/api/company/resources/employees/${employeeId}/memory-diagnostics`]);
   });
 
   it('previews, shows what is kept, restarts once with the note, and reads the result on request', async () => {

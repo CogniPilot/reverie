@@ -18,6 +18,29 @@ const DEFAULT_BG = '#0d0d0d';
 const DEFAULT_FG = '#eeeeee';
 const DEFAULT_CURSOR = '#e0e0e0';
 
+/** An editor-owned claim; matching bytes cannot manufacture a valid receipt. */
+export interface PendingDraftReceipt {
+  readonly text: string;
+  readonly revision: number;
+}
+
+type DraftClaim = {
+  kind: 'pending' | 'flushed';
+  text: string;
+  flushedIds: ReadonlySet<number>;
+  producedMarker: ReadonlySet<number>;
+  ids: ReadonlySet<number>;
+  units: readonly { id: number; text: string }[];
+  incarnation: number;
+  dependencies: DraftClaim[];
+  phase: 'claimed' | 'dispatching' | 'accepted' | 'rejected';
+  compositionRevision: number;
+  settled: Promise<void>;
+  resolve(): void;
+  transferErasure?: DraftClaim;
+  transferPending?: DraftClaim;
+};
+
 /**
  * xterm.js addon that provides instant keystroke feedback via a DOM overlay.
  *
@@ -64,6 +87,14 @@ export class ZerolagInputAddon implements XtermAddon {
 
   // Text state
   private _pendingText = '';
+  private _draftRevision = 0;
+  private _draftIncarnation = 0;
+  private _nextDraftUnit = 0;
+  private _draftUnits: { id: number; text: string }[] = [];
+  private _flushedUnits: { id: number; text: string }[] | null = [];
+  private _compositionRevision = 0;
+  #draftReceipts = new WeakMap<PendingDraftReceipt, DraftClaim>();
+  #draftClaims = new Set<DraftClaim>();
   private _flushedOffset = 0;
   private _flushedText = '';
   private _bufferDetectDone = false;
@@ -155,6 +186,7 @@ export class ZerolagInputAddon implements XtermAddon {
    * Remove the overlay, clean up listeners.
    */
   dispose(): void {
+    this._draftRevision++;
     this.clear();
     if (this._scrollTimer) {
       clearTimeout(this._scrollTimer);
@@ -177,8 +209,9 @@ export class ZerolagInputAddon implements XtermAddon {
    * Call this when the user types a character (charCode >= 32, length === 1).
    */
   addChar(char: string): void {
+    this._draftRevision++;
     if (!this._pendingText && !this._flushedOffset) this._detectBufferText();
-    this._pendingText += char;
+    this._appendDraftUnits(char);
     this._render();
   }
 
@@ -186,9 +219,10 @@ export class ZerolagInputAddon implements XtermAddon {
    * Append multiple characters at once (e.g., paste).
    */
   appendText(text: string): void {
+    this._draftRevision++;
     if (!text) return;
     if (!this._pendingText && !this._flushedOffset) this._detectBufferText();
-    this._pendingText += text;
+    this._appendDraftUnits(text);
     this._render();
   }
 
@@ -212,11 +246,14 @@ export class ZerolagInputAddon implements XtermAddon {
    * without it (hidden when nothing else is left).
    */
   removeChar(): 'pending' | 'flushed' | false {
+    this._draftRevision++;
     // A backspace that reaches the overlay means no composition is open.
     const droppedComposition = this._composition.length > 0;
     this._composition = '';
+    this._compositionRevision++;
     if (this._pendingText.length > 0) {
-      this._pendingText = this._pendingText.slice(0, -1);
+      const removed = this._draftUnits.pop()!;
+      this._pendingText = this._pendingText.slice(0, -removed.text.length);
       if (this._pendingText.length > 0 || this._flushedOffset > 0) {
         this._render();
       } else {
@@ -226,8 +263,9 @@ export class ZerolagInputAddon implements XtermAddon {
     }
 
     if (this._flushedOffset > 0) {
-      this._flushedOffset--;
-      this._flushedText = this._flushedText.slice(0, -1);
+      const removed = this._flushedUnits?.pop();
+      this._flushedOffset -= removed?.text.length || 1;
+      this._flushedText = this._flushedText.slice(0, -(removed?.text.length || 1));
       if (this._flushedOffset > 0) {
         this._render();
       } else {
@@ -240,8 +278,9 @@ export class ZerolagInputAddon implements XtermAddon {
     // (handles tab completion, arrow-key edits, etc.)
     this._detectBufferText();
     if (this._flushedOffset > 0) {
-      this._flushedOffset--;
-      this._flushedText = this._flushedText.slice(0, -1);
+      const removed = this._flushedUnits?.pop();
+      this._flushedOffset -= removed?.text.length || 1;
+      this._flushedText = this._flushedText.slice(0, -(removed?.text.length || 1));
       if (this._flushedOffset > 0) {
         this._render();
       } else {
@@ -261,14 +300,182 @@ export class ZerolagInputAddon implements XtermAddon {
    * Call on Enter, Ctrl+C, or any action that submits/cancels input.
    */
   clear(): void {
+    this._draftRevision++;
+    this._draftIncarnation++;
+    this._compositionRevision++;
+    this._draftUnits = [];
+    for (const claim of this.#draftClaims) {
+      if (claim.phase === 'claimed') {
+        claim.phase = 'rejected';
+        claim.resolve();
+        this.#draftClaims.delete(claim);
+      }
+    }
     this._pendingText = '';
     this._composition = '';
-    this._flushedOffset = 0;
-    this._flushedText = '';
+    this._replaceFlushedUnits(0, '');
     this._bufferDetectDone = false;
     this._lastRenderKey = '';
     this._lastPromptPos = null;
     this._hide();
+  }
+
+  /** Reserve original editable units synchronously at the user's gesture. */
+  claimPendingDraft(): PendingDraftReceipt {
+    return this._claimDraftUnits('pending', this._draftUnits);
+  }
+
+  /** Claim only the original already-flushed marker; malformed legacy state is not guessed. */
+  claimFlushedDraft(lastOnly = false): PendingDraftReceipt | null {
+    if (!this._flushedUnits) return null;
+    const reserved = new Set(
+      [...this.#draftClaims].filter((claim) => claim.kind === 'flushed').flatMap((claim) => [...claim.ids])
+    );
+    const units = this._flushedUnits.filter((unit) => !reserved.has(unit.id));
+    return this._claimDraftUnits('flushed', lastOnly ? units.slice(-1) : units);
+  }
+
+  private _claimDraftUnits(kind: 'pending' | 'flushed', source: { id: number; text: string }[]): PendingDraftReceipt {
+    const predecessors = [...this.#draftClaims].filter(
+      (claim) => claim.incarnation === this._draftIncarnation && claim.kind === kind
+    );
+    const reserved = new Set(predecessors.flatMap((claim) => [...claim.ids]));
+    const units = source.filter((unit) => !reserved.has(unit.id));
+    const receipt = Object.freeze({ text: units.map((unit) => unit.text).join(''), revision: this._draftRevision });
+    let resolve!: () => void;
+    const settled = new Promise<void>((done) => {
+      resolve = done;
+    });
+    const claim: DraftClaim = {
+      settled,
+      resolve,
+      kind,
+      text: receipt.text,
+      flushedIds: new Set((this._flushedUnits || []).map((unit) => unit.id)),
+      producedMarker: new Set(),
+      ids: new Set(units.map((unit) => unit.id)),
+      units,
+      incarnation: this._draftIncarnation,
+      dependencies: predecessors.slice(-1),
+      phase: 'claimed',
+      compositionRevision: this._compositionRevision,
+    };
+    this.#draftReceipts.set(receipt, claim);
+    this.#draftClaims.add(claim);
+    return receipt;
+  }
+
+  /** Bind the two parts of one original local transfer inside their actual editor. */
+  bindDraftTransfer(pendingReceipt: PendingDraftReceipt, erasedReceipt: PendingDraftReceipt): boolean {
+    const pending = this.#draftReceipts.get(pendingReceipt),
+      erased = this.#draftReceipts.get(erasedReceipt);
+    if (
+      !pending ||
+      !erased ||
+      pending.kind !== 'pending' ||
+      erased.kind !== 'flushed' ||
+      pending.phase !== 'claimed' ||
+      erased.phase !== 'claimed' ||
+      pending.incarnation !== erased.incarnation ||
+      pending.transferErasure ||
+      erased.transferPending
+    )
+      return false;
+    pending.transferErasure = erased;
+    erased.transferPending = pending;
+    return true;
+  }
+
+  /** Read actual unaccepted original transfer data for explicit recovery presentation only. */
+  recoverDraftText(receipt: PendingDraftReceipt, requireErasure = false): string | null {
+    const claim = this.#draftReceipts.get(receipt);
+    if (!claim || claim.kind !== 'pending' || claim.phase === 'accepted') return null;
+    const erased = claim.transferErasure?.phase === 'accepted' ? claim.transferErasure.text : '';
+    return requireErasure && !erased ? null : erased + claim.text;
+  }
+
+  /** Wait only for original predecessor decisions; this never issues or retries an effect. */
+  async waitDraftReceipt(receipt: PendingDraftReceipt): Promise<boolean> {
+    const claim = this.#draftReceipts.get(receipt);
+    if (!claim || claim.phase !== 'claimed') return false;
+    await Promise.all(claim.dependencies.map((previous) => previous.settled));
+    return claim.phase === 'claimed' && claim.dependencies.every((previous) => previous.phase === 'accepted');
+  }
+
+  /** Spend exactly this private claim before queueing its one storage attempt. */
+  beginDraftReceipt(receipt: PendingDraftReceipt): boolean {
+    const claim = this.#draftReceipts.get(receipt);
+    if (
+      !claim ||
+      claim.phase !== 'claimed' ||
+      claim.incarnation !== this._draftIncarnation ||
+      (claim.kind === 'pending' && this._flushedUnits === null) ||
+      claim.dependencies.some((previous) => previous.phase !== 'accepted')
+    )
+      return false;
+    const current = new Set(
+      (claim.kind === 'pending' ? this._draftUnits : this._flushedUnits || []).map((unit) => unit.id)
+    );
+    if ([...claim.ids].some((id) => !current.has(id))) return false;
+    claim.phase = 'dispatching';
+    return true;
+  }
+
+  /** Acceptance consumes owned units only; edits and equal-byte replacements survive. */
+  settleDraftReceipt(
+    receipt: PendingDraftReceipt,
+    accepted: boolean,
+    mode: 'submitted' | 'flushed' = 'submitted'
+  ): boolean {
+    const claim = this.#draftReceipts.get(receipt);
+    if (
+      typeof accepted !== 'boolean' ||
+      !['submitted', 'flushed'].includes(mode) ||
+      !claim ||
+      (claim.phase !== 'claimed' && claim.phase !== 'dispatching') ||
+      (accepted && claim.phase !== 'dispatching')
+    )
+      return false;
+    claim.phase = accepted ? 'accepted' : 'rejected';
+    this.#draftClaims.delete(claim);
+    claim.resolve();
+    if (!accepted || claim.incarnation !== this._draftIncarnation) return true;
+    if (claim.kind === 'pending') {
+      this._draftUnits = this._draftUnits.filter((unit) => !claim.ids.has(unit.id));
+      this._pendingText = this._draftUnits.map((unit) => unit.text).join('');
+      const causalMarker = new Set([
+        ...claim.flushedIds,
+        ...claim.dependencies.flatMap((previous) => [...previous.producedMarker]),
+      ]);
+      if (this._flushedUnits) {
+        if (mode === 'flushed') {
+          // Append only to original or exact predecessor-produced marker identities.
+          if (this._flushedUnits.every((unit) => causalMarker.has(unit.id))) {
+            for (const unit of claim.units) this._flushedUnits.push(unit);
+            claim.producedMarker = new Set(this._flushedUnits.map((unit) => unit.id));
+          } else
+            claim.producedMarker = new Set(
+              this._flushedUnits.filter((unit) => causalMarker.has(unit.id)).map((unit) => unit.id)
+            );
+        } else this._flushedUnits = this._flushedUnits.filter((unit) => !causalMarker.has(unit.id));
+        this._flushedText = this._flushedUnits.map((unit) => unit.text).join('');
+        this._flushedOffset = this._flushedText.length;
+      }
+      if (claim.compositionRevision === this._compositionRevision) {
+        this._compositionRevision++;
+        this._composition = '';
+      }
+    } else if (this._flushedUnits) {
+      this._flushedUnits = this._flushedUnits.filter((unit) => !claim.ids.has(unit.id));
+      this._flushedText = this._flushedUnits.map((unit) => unit.text).join('');
+      this._flushedOffset = this._flushedText.length;
+    }
+    this._draftRevision++;
+    this._bufferDetectDone = true;
+    this._lastRenderKey = '';
+    if (this._hasContent()) this._render();
+    else this._hide();
+    return true;
   }
 
   // ─── Flushed text tracking ────────────────────────────────────────
@@ -289,8 +496,8 @@ export class ZerolagInputAddon implements XtermAddon {
    *   explicitly after the buffer finishes loading.
    */
   setFlushed(count: number, text: string, render = true): void {
-    this._flushedOffset = count;
-    this._flushedText = text;
+    this._draftRevision++;
+    this._replaceFlushedUnits(count, text);
     if (render) this._render();
   }
 
@@ -306,8 +513,8 @@ export class ZerolagInputAddon implements XtermAddon {
    * buffer now contains the flushed text.
    */
   clearFlushed(): void {
-    this._flushedOffset = 0;
-    this._flushedText = '';
+    this._draftRevision++;
+    this._replaceFlushedUnits(0, '');
     if (this._pendingText || this._composition) {
       this._render();
     } else {
@@ -372,8 +579,8 @@ export class ZerolagInputAddon implements XtermAddon {
    * the detection so it can retry on the next flush cycle.
    */
   undoDetection(): void {
-    this._flushedOffset = 0;
-    this._flushedText = '';
+    this._draftRevision++;
+    this._replaceFlushedUnits(0, '');
     this._bufferDetectDone = false;
   }
 
@@ -418,10 +625,12 @@ export class ZerolagInputAddon implements XtermAddon {
    * composition. `clear()` and `removeChar()` drop it too.
    */
   setComposition(text: string): void {
+    this._draftRevision++;
     // One visual line of provisional text: control characters and line breaks
     // would break the cell grid.
     const next = typeof text === 'string' ? text.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '') : '';
     if (next === this._composition) return;
+    this._compositionRevision++;
     this._composition = next;
     if (this._hasContent()) {
       this._render();
@@ -466,6 +675,11 @@ export class ZerolagInputAddon implements XtermAddon {
     return this._pendingText;
   }
 
+  /** Exact local draft incarnation; equal bytes after an edit are a new intent. */
+  get draftRevision(): number {
+    return this._draftRevision;
+  }
+
   /**
    * Whether there is pending or flushed text. Excludes the IME composition,
    * which is never sent, so an overlay showing only a composition reports
@@ -490,6 +704,25 @@ export class ZerolagInputAddon implements XtermAddon {
 
   // ─── Private methods ──────────────────────────────────────────────
 
+  private _replaceFlushedUnits(count: number, text: string): void {
+    this._flushedOffset = count;
+    this._flushedText = text;
+    const characters = Array.from(text);
+    if (!Number.isSafeInteger(count) || count < 0 || count !== text.length) {
+      this._flushedUnits = null;
+      return;
+    }
+    if (!Number.isSafeInteger(this._nextDraftUnit + characters.length)) throw new Error('Draft identity exhausted');
+    this._flushedUnits = characters.map((character) => ({ id: ++this._nextDraftUnit, text: character }));
+  }
+
+  private _appendDraftUnits(text: string): void {
+    const characters = Array.from(text);
+    if (!Number.isSafeInteger(this._nextDraftUnit + characters.length)) throw new Error('Draft identity exhausted');
+    for (const character of characters) this._draftUnits.push({ id: ++this._nextDraftUnit, text: character });
+    this._pendingText += text;
+  }
+
   private _hasContent(): boolean {
     return this._pendingText.length > 0 || this._flushedOffset > 0 || this._composition.length > 0;
   }
@@ -511,8 +744,8 @@ export class ZerolagInputAddon implements XtermAddon {
       const afterPrompt = readTextAfterPrompt(this._terminal, prompt, offset);
 
       if (afterPrompt.length > 0) {
-        this._flushedOffset = afterPrompt.length;
-        this._flushedText = afterPrompt;
+        this._draftRevision++;
+        this._replaceFlushedUnits(afterPrompt.length, afterPrompt);
         this._lastPromptPos = prompt;
         this._bufferDetectDone = true;
         return afterPrompt;

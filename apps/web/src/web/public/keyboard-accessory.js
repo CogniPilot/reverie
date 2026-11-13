@@ -1122,6 +1122,7 @@ const KeyboardAccessoryBar = {
   },
 
   _setCtrl(on) {
+    this._modifierRevision = (this._modifierRevision || 0) + 1;
     this._ctrlArmed = !!on;
     const btn = this.element?.querySelector('[data-action="ctrl"]') ?? this._overflowEl?.querySelector('[data-action="ctrl"]');
     if (btn) {
@@ -1159,6 +1160,7 @@ const KeyboardAccessoryBar = {
   },
 
   _setAlt(on) {
+    this._modifierRevision = (this._modifierRevision || 0) + 1;
     this._altArmed = !!on;
     const btn = this.element?.querySelector('[data-action="alt"]');
     if (btn) {
@@ -1191,6 +1193,21 @@ const KeyboardAccessoryBar = {
     return single ? '\x1b' + out : out;
   },
 
+  /** Preview a one-shot intent; storage acceptance, not a timer, spends it. */
+  stageModifiers(data) {
+    const revision = this._modifierRevision || 0;
+    const ctrl = this._ctrlArmed === true, alt = this._altArmed === true;
+    const mapped = ctrl ? applyOneShotCtrl(data) : {data, consumed: false};
+    const output = alt && data.length === 1 ? '\x1b' + mapped.data : mapped.data;
+    let committed = false;
+    return {data: output, isCurrent: () => revision === (this._modifierRevision || 0), commit: () => {
+      if (committed || revision !== (this._modifierRevision || 0)) return;
+      committed = true;
+      if (ctrl && mapped.consumed) this.clearCtrl();
+      if (alt && data.length > 0) this.clearAlt();
+    }};
+  },
+
   /** Exposed for tests: pure char to control byte mapping. */
   ctrlByteFor,
 
@@ -1205,11 +1222,14 @@ const KeyboardAccessoryBar = {
     // system keyboard, and are spent by them.
     if (Object.hasOwn(TERMINAL_ROW_KEYS, action)) {
       const char = TERMINAL_ROW_KEYS[action];
-      const out = this.consumeModifiers(char);
+      const staged = this.stageModifiers(char);
+      const out = staged.data;
       // A plain character is text at the prompt (local echo included); a modified one is a raw control or escape
       // sequence, sent after any buffered text like the other control keys.
-      if (out === char) app.insertTerminalText?.(char);
-      else this.flushPendingThen(() => this.sendKey(out));
+      if (out === char) {
+        app.insertTerminalText?.(char);
+        staged.commit(); // Accepted by the editable local draft, no network effect.
+      } else void app._acceptTerminalDraftAction(app.activeSessionId, char, true);
       return;
     }
     // Any key other than Ctrl or Alt spends the modifiers. They are one-shots for
@@ -1253,7 +1273,7 @@ const KeyboardAccessoryBar = {
         // Tab means "complete what I just typed", but with local echo the typed
         // text is still buffered in the overlay and has never reached the PTY —
         // a bare \t would ask the CLI to complete an empty composer.
-        this.flushPendingThen(() => this.sendKey('\t'));
+        void app._acceptTerminalDraftAction(app.activeSessionId, '\t');
         break;
       case 'shift-tab':
         this.sendKey('\x1b[Z');
@@ -1381,10 +1401,7 @@ const KeyboardAccessoryBar = {
    *  Sends text and Enter separately so Ink processes them as distinct events. */
   sendCommand(command) {
     if (!app.activeSessionId) return;
-    // Send command text first (without Enter)
-    app.sendInput(command);
-    // Send Enter separately after a brief delay so Ink has time to process the text.
-    setTimeout(() => app.sendInput('\r'), 120);
+    return app._queueInputFrames(app.activeSessionId, [command, '\r']);
   },
 
   /**
@@ -1396,19 +1413,11 @@ const KeyboardAccessoryBar = {
    * flush the typed path performs in terminal-ui.js's onData; the 120ms is the
    * same settle delay sendCommand uses, so the text lands before the key.
    */
-  flushPendingThen(after) {
-    const overlay = app._localEchoOverlay;
-    const pending = (app._localEchoEnabled && overlay?.pendingText) || '';
-    if (!pending) {
-      after();
-      return;
-    }
-    overlay.clear();
-    overlay.suppressBufferDetection?.();
-    app._flushedOffsets?.delete(app.activeSessionId);
-    app._flushedTexts?.delete(app.activeSessionId);
-    app.sendInput(pending);
-    setTimeout(after, 120);
+  async flushPendingThen(after) {
+    const sessionId = app.activeSessionId, overlay = app._localEchoOverlay;
+    if (await app._flushLocalEchoTo(sessionId) === false) return false;
+    if (app.activeSessionId !== sessionId || app._localEchoOverlay !== overlay) return false;
+    return after();
   },
 
   /**
@@ -1427,24 +1436,20 @@ const KeyboardAccessoryBar = {
    */
   sendNavKey(sequence) {
     if (!app.activeSessionId) return;
-    if (!app._echoPassthroughSessions) app._echoPassthroughSessions = new Set();
-    app._echoPassthroughSessions.add(app.activeSessionId);
-    this.flushPendingThen(() => this.sendKey(sequence));
+    return app._acceptTerminalDraftAction(app.activeSessionId, sequence);
   },
 
   /** Send a special key (arrow, escape, etc.) directly to the PTY.
    *  Bypasses tmux send-keys -l (literal mode) since escape sequences
    *  must be written raw to be interpreted as key presses by Ink. */
   sendKey(escapeSequence) {
-    if (!app.activeSessionId) return;
+    if (!app.activeSessionId) return Promise.resolve(false);
     // Arrows/Esc move the server-side cursor and bypass onData: clear
     // predictions now instead of waiting out the ~150ms off-row grace.
-    app._predictiveEcho?.clearPredictions();
-    fetch(`/api/sessions/${app.activeSessionId}/input`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: escapeSequence })
-    }).catch(() => {});
+    return Promise.resolve(app._sendInputAsync(app.activeSessionId, escapeSequence, {useMux: false})).then(accepted => {
+      if (accepted !== false) app._predictiveEcho?.clearPredictions();
+      return accepted;
+    });
   },
 
   /** Browse the active session's workspace and insert a selected path without Enter. */
@@ -1466,20 +1471,60 @@ const KeyboardAccessoryBar = {
   /** Move the whole editable terminal prompt into the composer. Pending text
    *  exists only in the overlay; flushed text already reached the PTY, so erase
    *  that prefix before making the textarea authoritative. */
-  _takePendingLocalEcho(sessionId) {
-    if (!app._localEchoEnabled || !app._localEchoOverlay) return '';
-    const pending = app._localEchoOverlay.pendingText || '';
-    const overlayFlushed = app._localEchoOverlay.getFlushed?.() || {};
-    const flushedText = overlayFlushed.text || app._flushedTexts?.get(sessionId) || '';
-    const flushedLength = Array.from(flushedText).length;
-    app._localEchoOverlay.clear();
-    app._localEchoOverlay.suppressBufferDetection?.();
-    app._flushedOffsets?.delete(sessionId);
-    app._flushedTexts?.delete(sessionId);
-    if (flushedLength > 0) {
-      app._sendInputAsync(sessionId, '\x7f'.repeat(flushedLength), { useMux: true });
+  async _takePendingLocalEcho(sessionId) {
+    const overlay = app._localEchoEnabled ? app._localEchoOverlay : null;
+    if (!overlay) return Object.freeze({text: '', consume: () => '', cancel() {}});
+    const rawOwner = app._pendingInputOwner;
+    const pending = overlay.claimPendingDraft?.(), flushed = overlay.claimFlushedDraft?.();
+    if (!pending || !flushed || !overlay.bindDraftTransfer(pending, flushed)) {
+      overlay.settleDraftReceipt?.(pending, false); overlay.settleDraftReceipt?.(flushed, false);
+      app.showToast?.('The original prompt is still being queued or its marker is unavailable.', 'warning');
+      return null;
     }
-    return flushedText + pending;
+    const recoverOrphan = () => {
+      const detached = app.activeSessionId !== sessionId || app._localEchoOverlay !== overlay || app._pendingInputOwner !== rawOwner;
+      app._retainEditorDraft?.(sessionId, overlay, pending, !detached);
+    };
+    const revision = overlay.draftRevision;
+    let erased = false, current = false;
+    try {
+      if (!await overlay.waitDraftReceipt(pending) || !await overlay.waitDraftReceipt(flushed)
+        || app.activeSessionId !== sessionId || app._localEchoOverlay !== overlay || app._pendingInputOwner !== rawOwner
+        || overlay.draftRevision !== revision || !overlay.beginDraftReceipt(pending) || !overlay.beginDraftReceipt(flushed)) return null;
+      erased = !flushed.text || await app._sendInputAsync(sessionId, '\x7f'.repeat(Array.from(flushed.text).length), {useMux: true}) !== false;
+      current = app.activeSessionId === sessionId && app._localEchoOverlay === overlay
+        && app._pendingInputOwner === rawOwner && overlay.draftRevision === revision;
+    } catch {
+      app.showToast?.('Prompt transfer could not be queued. Your draft is preserved.', 'error');
+      return null;
+    } finally {
+      // Original erasure is consumed even if a successor draft appeared while awaiting acceptance.
+      overlay.settleDraftReceipt(flushed, erased);
+      if (!erased || !current) {recoverOrphan(); overlay.settleDraftReceipt(pending, false);}
+    }
+    if (!erased || !current) {
+      app.showToast?.('Prompt changed while preparing the composer. Keep or copy the original draft.', 'warning');
+      return null;
+    }
+    const readyRevision = overlay.draftRevision;
+    let spent = false;
+    return Object.freeze({
+      text: flushed.text + pending.text,
+      cancel() {
+        if (!spent) {spent = true; recoverOrphan(); overlay.settleDraftReceipt(pending, false);}
+      },
+      consume() {
+        if (spent) return null;
+        spent = true;
+        const same = app.activeSessionId === sessionId && app._localEchoOverlay === overlay
+          && app._pendingInputOwner === rawOwner && overlay.draftRevision === readyRevision;
+        if (!same) recoverOrphan();
+        overlay.settleDraftReceipt(pending, same);
+        if (!same) return null;
+        app._flushedOffsets?.delete(sessionId); app._flushedTexts?.delete(sessionId);
+        return flushed.text + pending.text;
+      },
+    });
   },
 
   /** Insert text at the textarea selection, adding one separating space when
@@ -1503,19 +1548,20 @@ const KeyboardAccessoryBar = {
    *  so the frame is built directly rather than through terminal.paste().
    *  Enter stays a separate delayed write because Codex drops keys sharing a
    *  PTY read with a bracketed paste. */
-  _sendComposedPrompt(sessionId, text) {
-    if (!this._sendBracketedPaste(sessionId, text, 'Prompt')) return false;
-    setTimeout(() => app._sendInputAsync(sessionId, '\r', { useMux: true }), 120);
-    return true;
+  async _sendComposedPrompt(sessionId, text) {
+    const paste = this._composePasteFrame(sessionId, text, 'Prompt');
+    if (!paste) return false;
+    const accepted = await app._queueInputFrames(sessionId, [paste, '\r']);
+    if (accepted !== false) app._predictiveEcho?.clearPredictions();
+    return accepted;
   },
 
   /** One bracketed-paste write on the durable session-bound path, the same
    *  bytes a terminal paste produces, so the receiving shell or CLI takes a
    *  multi-line block as one edit. Never presses Enter: callers decide.
    *  `label` names the payload in the too-long toast. */
-  _sendBracketedPaste(sessionId, text, label) {
+  _composePasteFrame(sessionId, text, label) {
     if (!sessionId || !text || typeof app._sendInputAsync !== 'function') return false;
-    app._predictiveEcho?.clearPredictions();
     // Match xterm's prepareTextForTerminal(): CR keeps embedded newlines inside
     // the single-line input transport and is what terminal.paste() emitted.
     // Paste markers inside the text are dropped first: a clipboard carrying
@@ -1525,8 +1571,15 @@ const KeyboardAccessoryBar = {
       app.showToast?.(`${label} is too long to send (maximum ${this._composerMaxLength.toLocaleString()} characters)`, 'error');
       return false;
     }
-    app._sendInputAsync(sessionId, `${COMPOSER_PASTE_START}${pasteText}${COMPOSER_PASTE_END}`);
-    return true;
+    return `${COMPOSER_PASTE_START}${pasteText}${COMPOSER_PASTE_END}`;
+  },
+
+  async _sendBracketedPaste(sessionId, text, label) {
+    const frame = this._composePasteFrame(sessionId, text, label);
+    if (!frame) return false;
+    const accepted = await app._sendInputAsync(sessionId, frame);
+    if (accepted !== false) app._predictiveEcho?.clearPredictions();
+    return accepted;
   },
 
   /** Forget a draft when its target session no longer exists. */
@@ -1541,21 +1594,28 @@ const KeyboardAccessoryBar = {
 
   /** Open the manual agent prompt composer. Enter remains a newline; only the
    *  Send button submits. Cancel/backdrop/Escape preserve the per-session draft. */
-  composePrompt() {
+  async composePrompt() {
     if (typeof app === 'undefined' || !app.activeSessionId) return;
     if (this._isShellSession()) {
       this.pasteFromClipboard();
       return;
     }
 
-    const sessionId = app.activeSessionId;
-    const pending = this._takePendingLocalEcho(sessionId);
+    const sessionId = app.activeSessionId, originalOverlay = app._localEchoOverlay, rawOwner = app._pendingInputOwner;
+    const transfer = await this._takePendingLocalEcho(sessionId);
+    if (!transfer) return;
+    if (app.activeSessionId !== sessionId || app._localEchoOverlay !== originalOverlay || app._pendingInputOwner !== rawOwner) {
+      transfer.cancel(); return;
+    }
+    const pending = transfer.consume();
+    if (pending === null) return;
     const saved = this._composerDrafts.get(sessionId) || '';
     // A parked draft and text typed (or attached) on the prompt since are two
     // separate pieces of prose; one space keeps the draft's last word off the
     // prompt's first, unless either side already supplies the gap.
     const needsGap = saved && pending && !/\s$/.test(saved) && !/^\s/.test(pending);
     const initial = needsGap ? `${saved} ${pending}` : saved + pending;
+    this._composerDrafts.set(sessionId, initial);
 
     this._composerOverlay?._closeComposer?.({ restoreFocus: false });
     const overlay = document.createElement('div');
@@ -1607,7 +1667,9 @@ const KeyboardAccessoryBar = {
     terminalButton.disabled = initialUploads > 0;
     if (initialUploads > 0) imageButton.textContent = 'Uploading…';
 
+    let draftRevision = 0;
     const saveDraft = () => {
+      draftRevision++;
       if (textarea.value) this._composerDrafts.set(sessionId, textarea.value);
       else this._composerDrafts.delete(sessionId);
       this._syncComposerDraftIndicator();
@@ -1620,11 +1682,17 @@ const KeyboardAccessoryBar = {
       if (focusTerminal) app.terminal?.focus();
     };
     overlay._closeComposer = close;
-    const send = () => {
+    const send = async () => {
       // Whitespace-only counts as empty (it would submit blank lines), but the
       // text goes out untrimmed so deliberate leading or trailing lines survive.
       const text = textarea.value;
-      if (!text.trim() || !this._sendComposedPrompt(sessionId, text)) return;
+      const revision = draftRevision;
+      if (!text.trim() || sendButton.disabled) return;
+      sendButton.disabled = true;
+      try {
+        if (await this._sendComposedPrompt(sessionId, text) === false) return;
+      } finally {sendButton.disabled = false;}
+      if (draftRevision !== revision) {saveDraft(); return;}
       app._echoPassthroughSessions?.delete(sessionId);
       this._composerDrafts.delete(sessionId);
       this._syncComposerDraftIndicator();
@@ -1696,13 +1764,14 @@ const KeyboardAccessoryBar = {
     });
     imageButton.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', () => void handleImages(fileInput.files));
-    overlay.querySelector('.prompt-composer-terminal').addEventListener('click', () => {
+    overlay.querySelector('.prompt-composer-terminal').addEventListener('click', async () => {
       // Hand the text BACK to the terminal prompt so both surfaces hold the same
       // prompt, the mirror of the adoption composePrompt() does on open. Only a
       // single-line draft can make the trip: the prompt transport is single-line
       // and strips embedded newlines, so a multi-line draft would arrive mangled
       // and instead stays parked as a draft (the dot on the Compose key shows it).
       const text = textarea.value;
+      const revision = draftRevision;
       if (!text || text.includes('\n')) {
         close({ focusTerminal: true });
         return;
@@ -1717,8 +1786,6 @@ const KeyboardAccessoryBar = {
       }
       // Cleared, never kept: the text now lives on the prompt, and a surviving
       // draft would be prepended to it the next time the composer opens.
-      this._composerDrafts.delete(sessionId);
-      close({ focusTerminal: true, preserveDraft: false });
       if (
         app._localEchoEnabled &&
         app._localEchoOverlay &&
@@ -1740,9 +1807,12 @@ const KeyboardAccessoryBar = {
         // doing nothing on codex, so the button looked dead there. That composer
         // may already hold text the open adopted nothing of, so lead with a
         // separator rather than fuse onto its last word (harmless when empty).
+        if (await app._sendInputAsync(sessionId, ` ${text}`) === false) return;
         app._predictiveEcho?.clearPredictions();
-        app._sendInputAsync(sessionId, ` ${text}`);
       }
+      if (draftRevision !== revision) {saveDraft(); return;}
+      this._composerDrafts.delete(sessionId);
+      close({ focusTerminal: true, preserveDraft: false });
       this._syncComposerDraftIndicator();
     });
     overlay.querySelector('.paste-cancel').addEventListener('click', () => close());
@@ -1800,14 +1870,21 @@ const KeyboardAccessoryBar = {
     // arrived. The user reviews the block and presses Enter themselves. A shell
     // that never enabled bracketed paste (dash, bash before 5.1) gets the
     // markers stripped by tmux, so there every line but the last still runs.
-    const sendText = () => {
+    let pasteRevision = 0, acceptingPaste = false;
+    textarea.addEventListener('input', () => {pasteRevision++;});
+    const sendText = async () => {
       const text = textarea.value;
+      const revision = pasteRevision;
+      if (acceptingPaste) return;
       if (!text) {
         close();
         return;
       }
       // A refused (too-long) paste keeps the dialog and its text for trimming.
-      if (this._sendBracketedPaste(sessionId, text, 'Paste')) close();
+      acceptingPaste = true;
+      try {
+        if (await this._sendBracketedPaste(sessionId, text, 'Paste') !== false && pasteRevision === revision) close();
+      } finally {acceptingPaste = false;}
     };
 
     // Filter to images and videos, close the dialog, and hand off to the shared

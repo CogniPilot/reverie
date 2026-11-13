@@ -1,0 +1,125 @@
+{
+  "missing": {
+    "launchOutcome": {
+      "attemptId": "11111111-2222-4333-8444-555555555555",
+      "inspectionOnly": true,
+      "kind": "missing",
+      "providerExecution": "unproved",
+      "purpose": "worker-launch-outcome-v1",
+      "version": 1
+    }
+  },
+  "prepared": {
+    "launchOutcome": {
+      "attemptId": "11111111-2222-4333-8444-555555555555",
+      "configurationDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "disposition": "unselected",
+      "handlerSettlement": "pending",
+      "inspectionOnly": true,
+      "kind": "observed",
+      "lastRecordedPhase": "prepared-not-issued",
+      "phase": "prepared-not-issued",
+      "providerExecution": "unproved",
+      "publicationNonce": null,
+      "purpose": "worker-launch-outcome-v1",
+      "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sessionId": "11111111-2222-4333-8444-555555555555",
+      "source": "original-registry",
+      "storage": {
+        "state": "unselected"
+      },
+      "version": 1,
+      "viewer": "not-started"
+    }
+  },
+  "canonical-storage": {
+    "launchOutcome": {
+      "attemptId": "11111111-2222-4333-8444-555555555555",
+      "configurationDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "disposition": "unselected",
+      "handlerSettlement": "pending",
+      "inspectionOnly": true,
+      "kind": "observed",
+      "lastRecordedPhase": "issued-pending",
+      "phase": "issued-pending",
+      "providerExecution": "unproved",
+      "publicationNonce": null,
+      "purpose": "worker-launch-outcome-v1",
+      "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sessionId": "11111111-2222-4333-8444-555555555555",
+      "source": "original-registry",
+      "storage": {
+        "binding": {
+          "homeDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "identity": "11111111-2222-4333-8444-555555555555",
+          "kind": "employee",
+          "owner": "synthetic-owner",
+          "sessionGeneration": "9007199254740992"
+        },
+        "state": "selected"
+      },
+      "version": 1,
+      "viewer": "not-started"
+    }
+  },
+  "reuse": {
+    "launchOutcome": {
+      "attemptId": "11111111-2222-4333-8444-555555555555",
+      "configurationDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "disposition": "reused-existing",
+      "handlerSettlement": "pending",
+      "inspectionOnly": true,
+      "kind": "observed",
+      "lastRecordedPhase": "issued-pending",
+      "phase": "issued-pending",
+      "providerExecution": "unproved",
+      "publicationNonce": null,
+      "purpose": "worker-launch-outcome-v1",
+      "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sessionId": "11111111-2222-4333-8444-555555555555",
+      "source": "original-registry",
+      "storage": {
+        "binding": {
+          "homeDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "identity": "11111111-2222-4333-8444-555555555555",
+          "kind": "employee",
+          "owner": "synthetic-owner",
+          "sessionGeneration": "9007199254740992"
+        },
+        "state": "selected"
+      },
+      "version": 1,
+      "viewer": "started-unconfirmed"
+    }
+  },
+  "history": {
+    "launchOutcome": {
+      "attemptId": "11111111-2222-4333-8444-555555555555",
+      "configurationDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "disposition": "reused-existing",
+      "handlerSettlement": "unknown",
+      "inspectionOnly": true,
+      "kind": "observed",
+      "lastRecordedPhase": "issued-pending",
+      "phase": "unconfirmed",
+      "providerExecution": "unproved",
+      "publicationNonce": null,
+      "purpose": "worker-launch-outcome-v1",
+      "requestDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "sessionId": "11111111-2222-4333-8444-555555555555",
+      "source": "durable-history",
+      "storage": {
+        "recorded": {
+          "homeDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "identity": "11111111-2222-4333-8444-555555555555",
+          "kind": "employee",
+          "owner": "synthetic-owner",
+          "sessionGeneration": "9007199254740992"
+        },
+        "state": "unavailable"
+      },
+      "version": 1,
+      "viewer": "unknown"
+    }
+  }
+}

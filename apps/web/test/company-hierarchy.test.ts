@@ -41,10 +41,10 @@ describe('transactional employee hierarchy', () => {
     const chief = await hire('chief', undefined, 'owner');
     const lead = await hire('lead');
     const specialist = await hire('specialist');
-    await service.update(lead.id, undefined, { reportsTo: chief.id });
-    await service.update(specialist.id, undefined, { reportsTo: lead.id });
+    await service.update(lead.id, undefined, { reportsTo: chief.id }, () => {});
+    await service.update(specialist.id, undefined, { reportsTo: lead.id }, () => {});
     sessions.delete('chief');
-    await service.update(lead.id, undefined, { reportsTo: chief.id });
+    await service.update(lead.id, undefined, { reportsTo: chief.id }, () => {});
     const reload = new CompanyStore(store.file); await reload.init();
     expect(reload.snapshot().employees.map((e) => e.reportsTo)).toEqual(['owner', chief.id, lead.id]);
     expect(service.view().employees).toHaveLength(3);
@@ -54,11 +54,11 @@ describe('transactional employee hierarchy', () => {
     const lead = await hire('lead');
     const foreign = await hire('foreign', 'other-owner');
     const retired = await hire('retired');
-    sessions.delete('retired'); await service.retire(retired.id, undefined);
+    sessions.delete('retired'); await service.retire(retired.id, undefined, () => {});
     const before = await readFile(store.file, 'utf8');
     for (const reportsTo of ['missing', foreign.id, retired.id, lead.id])
-      await expect(service.update(lead.id, undefined, { reportsTo })).rejects.toThrow();
-    await expect(service.update(lead.id, 'other-owner', { reportsTo: 'owner' })).rejects.toThrow('Unknown employee');
+      await expect(service.update(lead.id, undefined, { reportsTo }, () => {})).rejects.toThrow();
+    await expect(service.update(lead.id, 'other-owner', { reportsTo: 'owner' }, () => {})).rejects.toThrow('Unknown employee');
     await expect(hire('invalid-new', undefined, foreign.id)).rejects.toThrow('same company');
     expect(await readFile(store.file, 'utf8')).toBe(before);
   });
@@ -67,18 +67,18 @@ describe('transactional employee hierarchy', () => {
     const chief = await hire('chief', undefined, 'owner');
     const lead = await hire('lead', undefined, chief.id);
     const specialist = await hire('specialist', undefined, lead.id);
-    await expect(service.update(chief.id, undefined, { reportsTo: specialist.id })).rejects.toThrow('cycle');
+    await expect(service.update(chief.id, undefined, { reportsTo: specialist.id }, () => {})).rejects.toThrow('cycle');
     await service.configure(undefined, { coordinatorEmployeeId: chief.id } as never);
     const implicit = await hire('implicit');
-    await expect(service.update(chief.id, undefined, { reportsTo: implicit.id })).rejects.toThrow('cycle');
+    await expect(service.update(chief.id, undefined, { reportsTo: implicit.id }, () => {})).rejects.toThrow('cycle');
     expect(store.snapshot().employees.find((e) => e.id === chief.id)?.reportsTo).toBe('owner');
   });
 
   it('serializes concurrent opposite edits so only one commits and the reloaded graph stays acyclic', async () => {
     const a = await hire('a'); const b = await hire('b');
     const results = await Promise.allSettled([
-      service.update(a.id, undefined, { reportsTo: b.id }),
-      service.update(b.id, undefined, { reportsTo: a.id }),
+      service.update(a.id, undefined, { reportsTo: b.id }, () => {}),
+      service.update(b.id, undefined, { reportsTo: a.id }, () => {}),
     ]);
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
     const reload = new CompanyStore(store.file); await reload.init();
@@ -89,8 +89,8 @@ describe('transactional employee hierarchy', () => {
     const a = await hire('a'); const b = await hire('b');
     const audit = vi.fn(async (_before: CompanyEmployee, _after: CompanyEmployee) => {});
     await Promise.all([
-      service.update(a.id, undefined, { reportsTo: b.id }, audit),
-      service.update(a.id, undefined, { reportsTo: 'owner' }, audit),
+      service.update(a.id, undefined, { reportsTo: b.id }, () => {}, audit),
+      service.update(a.id, undefined, { reportsTo: 'owner' }, () => {}, audit),
     ]);
     expect(audit.mock.calls).toHaveLength(2);
     expect(audit.mock.calls[0][0]).toMatchObject({ id: a.id });
@@ -103,8 +103,8 @@ describe('transactional employee hierarchy', () => {
     const manager = await hire('manager'); const report = await hire('report');
     sessions.delete('manager');
     const results = await Promise.allSettled([
-      service.update(report.id, undefined, { reportsTo: manager.id }),
-      service.retire(manager.id, undefined),
+      service.update(report.id, undefined, { reportsTo: manager.id }, () => {}),
+      service.retire(manager.id, undefined, () => {}),
     ]);
     expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected']);
     expect(store.snapshot().employees.some((e) => e.id === manager.id)).toBe(true);

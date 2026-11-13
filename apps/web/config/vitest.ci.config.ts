@@ -1,12 +1,19 @@
-import { assertExplicitTestSelection } from './test-selection';
+import { assertExplicitTestSelection, assertTestTempDirectory } from './test-selection';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { defineConfig, configDefaults } from 'vitest/config';
 import { NON_CI_TEST_GLOBS } from './test-suites';
 import { webCoverage } from './coverage-policy';
 
 const root = resolve(import.meta.dirname, '..');
-const selection = { root, suite: 'default CI', include: ['test/**/*.test.ts'], exclude: [...configDefaults.exclude, ...NON_CI_TEST_GLOBS] };
+const selection = {
+  root,
+  suite: 'default CI',
+  include: ['test/**/*.test.ts'],
+  exclude: [...configDefaults.exclude, ...NON_CI_TEST_GLOBS],
+};
 assertExplicitTestSelection(selection);
+assertTestTempDirectory(tmpdir());
 // The Nix check sets this to run test files side by side; unset, files run one at a time as before.
 const fileWorkers = Number.parseInt(process.env.NIX_TEST_FILE_WORKERS ?? '', 10) || 1;
 

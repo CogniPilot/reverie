@@ -244,7 +244,7 @@ describe('owner GPU HTTP and protected Q boundary', () => {
     await company.update(eid, undefined, {
       position: 'CTO',
       permissions: { managePlans: true, recoverEmployees: true },
-    });
+    }, () => {});
     expect((await app.inject({ url: url(eid), headers: { 'x-reverie-parent-session': SID } })).statusCode).toBe(403);
     expect(
       (
