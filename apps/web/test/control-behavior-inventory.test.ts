@@ -175,6 +175,83 @@ it('refuses direct skipped tests and scenarios nested in skipped, todo or condit
   expect(validateManifest(root, manifest, declarations)).toContain('Missing or ambiguous scenario title: owner.save');
 });
 
+it('refuses tests behind control flow or uncalled registration factories', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    `if (false) { ${testBody} }`,
+    `throw Error('disabled'); ${testBody}`,
+    `false && ${testBody}`,
+    `function registerLater() { ${testBody} }`,
+    `const registerLater = () => { ${testBody} };`,
+    `for (const unused of []) { ${testBody} }`,
+    `for (const width of widths) { ${testBody} }`,
+    `for (let width of [320]) { ${testBody} }`,
+    `for (const width of [320]) { break; ${testBody} }`,
+    `for (const width of [320]) { continue; ${testBody} }`,
+    `for (const width of [320]) { if (false) { ${testBody} } }`,
+    `describe('suite', () => { if (false) { ${testBody} } });`,
+    `describe('suite', () => { return; ${testBody} });`,
+    `describe('suite', () => { if (disabled) return; ${testBody} });`,
+    `describe('suite', () => { throw Error('disabled'); ${testBody} });`,
+    `if (false) { describe('suite', () => { ${testBody} }); }`,
+    `registerLater('suite', () => { ${testBody} });`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+});
+
+it('refuses local or foreign replacements for Vitest registration bindings', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    `const it = () => {}; ${testBody}`,
+    `function it() {} ${testBody}`,
+    `import { it } from 'custom-tests'; ${testBody}`,
+    `import type { it } from 'vitest'; ${testBody}`,
+    `import { describe as it } from 'vitest'; ${testBody}`,
+    `it = () => {}; ${testBody}`,
+    `globalThis.it = () => {}; ${testBody}`,
+    `globalThis['it'] = () => {}; ${testBody}`,
+    `([it] = [() => {}]); ${testBody}`,
+    `({ it } = { it: () => {} }); ${testBody}`,
+    `({ other: it } = { other: () => {} }); ${testBody}`,
+    `([...[it]] = [[() => {}]]); ${testBody}`,
+    `for (it of [() => {}]) {} ${testBody}`,
+    `for (it in { replacement: true }) {} ${testBody}`,
+    `const describe = () => {}; describe('suite', () => { ${testBody} });`,
+    `import { describe } from 'custom-tests'; describe('suite', () => { ${testBody} });`,
+    `import { it as describe } from 'vitest'; describe('suite', () => { ${testBody} });`,
+    `describe = () => {}; describe('suite', () => { ${testBody} });`,
+    `describe('suite', (it) => { ${testBody} });`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+});
+
+it('accepts direct tests registered through unconditional ordinary suites', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    testBody,
+    `import { it } from 'vitest'; ${testBody}`,
+    `import { it } from 'vitest'; globalThis.it = () => {}; ${testBody}`,
+    `function helper(it) { it = () => {}; } ${testBody}`,
+    `import { test as it, describe } from 'vitest'; describe('suite', () => { ${testBody} });`,
+    `describe('suite', () => { ${testBody} });`,
+    `describe('suite', function () { describe('nested', () => { ${testBody} }); });`,
+    `describe('suite', () => { function helper() { return 1; } ${testBody} });`,
+    `for (const width of [320, 1280]) { ${testBody} }`,
+    `for (const width of [320, 1280]) ${testBody}`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toEqual([]);
+  }
+});
+
 it('keeps local factories, dynamic markup, roles, and ambiguous declarations visible', () => {
   const found = scanJavaScript(
     'src/view.js',
