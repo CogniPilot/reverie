@@ -24,7 +24,7 @@ import {frontendClassMethods} from './helpers/frontend-declarations.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 import { FixtureLocks } from './helpers/browser-input-fixture.js';
 import { echoClientArgv, ownedEchoArgv } from './helpers/owned-pty-echo.js';
-import type { IPty } from 'node-pty';
+import { spawn as spawnPty, type IPty } from 'node-pty';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks();
@@ -280,16 +280,25 @@ it('reattaches a missing website PTY through the canonical client factory withou
   expect(f.session.runtimeHealth).toBe('unknown');expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
-it('rejects an exited owned echo client rather than accepting its former PID', async () => {
-  const f = await fixture(); Object.assign(f.session, { ptyProcess: null, _pid: null, _viewerClientLost: true });
-  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
-  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
-  const result = ownedEchoArgv(client, () =>
-    (f.session as unknown as { ptyProcess: IPty | null }).ptyProcess === client);
-  client.kill();
-  await expect(result).rejects.toThrow(/exited|incarnation|not live/);
-  expect(f.session.runtimeHealth).toBe('disconnected');
-  expect(f.session.write('must not reach the exited local client')).toBe(false);
+it('rejects a real owned PTY exit before any echo acknowledgement', async () => {
+  const f = await fixture();
+  // This actual child never echoes, so a fast echo cannot beat the exit control.
+  const client = spawnPty(process.execPath, ['-e', 'process.stdin.resume();'], { cwd: f.dir });
+  let exited = false, killRequested = false;
+  const stopped = new Promise<void>(resolve => client.onExit(() => { exited = true; resolve(); }));
+  const waitForExit = () => new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Owned inert exit control did not reap')), 2_000);
+    stopped.then(() => { clearTimeout(timer); resolve(); });
+  });
+  cleanups.push(async () => {
+    if (!killRequested && !exited) { killRequested = true; client.kill(); }
+    await waitForExit();
+  });
+  const refused = expect(ownedEchoArgv(client, () => !exited)).rejects.toThrow(/exited|incarnation|not live/);
+  killRequested = true; client.kill();
+  await refused;
+  await waitForExit();
+  expect(f.mux.respawnPane).not.toHaveBeenCalled();
   expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
