@@ -31,6 +31,8 @@ import { TmuxManager } from '../src/tmux-manager.js';
 import { SINGLE_USER_LAYOUT_OWNER, type TabLayoutWebviewRecord } from '../src/tab-layout-persistence.js';
 import { StateStore } from '../src/state-store.js';
 import { readProcStat } from '../src/signal-target.js';
+import * as signalTarget from '../src/signal-target.js';
+import * as processExitWait from '../src/utils/process-exit-wait.js';
 
 /** Reach the private collections the discard is responsible for emptying. */
 interface ServerInternals {
@@ -370,7 +372,7 @@ describe('discarding a session whose pane never started', () => {
   });
 
   it.skipIf(process.platform !== 'linux')(
-    'confirms an original owned PTY exit without confusing it with replacement',
+    'joins the original owned PTY exit even when the liveness wait finishes before its callback',
     async () => {
       vi.stubEnv('REVERIE_WORKER_SOCKET', '');
       // Node's REPL is the disposable shell: no user shell startup files or model
@@ -384,21 +386,42 @@ describe('discarding a session whose pane never started', () => {
         useMux: false,
         publicationStore,
       });
-      const exited = vi.fn();
+      let callbackObserved = false;
+      const exited = vi.fn(() => { callbackObserved = true; });
       session.on('exit', exited);
+      let restoreWait: (() => void) | undefined;
+      let restoreStat: (() => void) | undefined;
       try {
         await session.startShell();
         const pid = session.pid;
         expect(pid).not.toBeNull();
         const original = readProcStat(pid!);
         expect(original?.ppid).toBe(process.pid);
+        const readKernelStat = signalTarget.readProcStat;
+        let waits = 0;
+        const wait = vi.spyOn(processExitWait, 'waitForProcessesExit').mockImplementation(async () => {
+          // The second wait follows the final signal. Model the zombie interval:
+          // liveness has ended, but the original PID metadata remains until the
+          // actual node-pty exit callback arrives. Signal verification itself
+          // always reads the real kernel metadata for this owned child.
+          if (++waits === 2) {
+            const stat = vi.spyOn(signalTarget, 'readProcStat').mockImplementation((subject) =>
+              subject === pid && !callbackObserved ? original : readKernelStat(subject));
+            restoreStat = () => stat.mockRestore();
+          }
+          return [];
+        });
+        restoreWait = () => wait.mockRestore();
 
         await expect(session.captureCleanupStop(() => true).stop()).resolves.toBeUndefined();
 
         expect(readProcStat(pid!)?.startTime).not.toBe(original!.startTime);
         expect(exited).toHaveBeenCalledOnce();
+        expect(wait).toHaveBeenCalled();
         expect(session.pid).toBeNull();
       } finally {
+        restoreStat?.();
+        restoreWait?.();
         await session.stop(true);
         await publicationStore.saveNowAsync();
         vi.unstubAllEnvs();

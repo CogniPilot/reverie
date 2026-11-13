@@ -65,11 +65,20 @@ const exec = Object.assign(
 const physical = {
   exec,
   execSync: (command: string, options?: { env?: NodeJS.ProcessEnv }) => record(command, options),
-  execFile: (...args: unknown[]) => {
-    const callback = args.at(-1);
-    if (typeof callback === 'function') queueMicrotask(() => callback(null, '', ''));
-    return { pid: 999999997, on() {}, kill() {} };
-  },
+  execFile: Object.assign(
+    (binary: string, args: string[], ...rest: unknown[]) => {
+      const stdout = record([binary, ...args].join(' '));
+      const callback = rest.at(-1);
+      if (typeof callback === 'function') queueMicrotask(() => callback(null, stdout, ''));
+      return { pid: 999999997, on() {}, kill() {} };
+    },
+    {
+      [promisify.custom]: async (binary: string, args: string[], options?: { env?: NodeJS.ProcessEnv }) => ({
+        stdout: record([binary, ...args].join(' '), options),
+        stderr: '',
+      }),
+    }
+  ),
   execFileSync: (_binary: string, args: string[]) => record(args.join(' ')),
   spawnSync: () => {
     throw new Error('Unexpected synchronous process port');

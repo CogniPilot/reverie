@@ -6692,10 +6692,9 @@ export class Session extends EventEmitter {
               throw new Error('Candidate cleanup required: original PTY stop was not verified');
             await waitForProcessesExit([originalPty.pid], { timeoutMs: GRACEFUL_SHUTDOWN_DELAY_MS });
             assertTransport();
-            if (readProcStat(originalPty.pid)?.startTime === expected.ptyStartTime)
-              throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
             // Join the real callback before replacing observers or admitting a
-            // same-ID successor; an old delayed exit must not unwire the new one.
+            // same-ID successor. A Linux zombie ends the liveness wait before
+            // node-pty reaps it, so verify disappearance after that callback.
             let timer: ReturnType<typeof setTimeout> | undefined;
             try {
               await Promise.race([
@@ -6711,6 +6710,8 @@ export class Session extends EventEmitter {
               if (timer) clearTimeout(timer);
             }
             assertTransport();
+            if (readProcStat(originalPty.pid)?.startTime === expected.ptyStartTime)
+              throw new Error('Candidate cleanup required: original PTY exit was not confirmed');
           }
         } else {
           // Server shutdown: just detach — the process lives on inside tmux
