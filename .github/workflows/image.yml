@@ -88,6 +88,12 @@ jobs:
         run: |
           printf 'Nix cache restored: %s\n' "${RESTORED_KEY:-none}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Prevent frontend control coverage regressions
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: nix develop --command node --experimental-strip-types apps/web/scripts/control-behavior-ratchet.mts --base "$BASE_SHA"
+
       - name: Check and build the flake on vanilla Ubuntu
         run: |
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
@@ -247,7 +253,6 @@ jobs:
           test "$(docker inspect --format '{{.State.Running}}' boot)" = false
           test "$(docker inspect --format '{{.RestartCount}}' boot)" = "$stopped_restarts"
           test "${ok:-}" = 1
-
 
   worker-browser:
     needs: image

@@ -77,7 +77,7 @@ it('checks the reviewed real source manifest without claiming its existing gaps 
   const declarations = scanSources(root, INVENTORY_SOURCES);
   expect(validateManifest(root, manifest, declarations)).toEqual([]);
   expect(manifest.mappings.length).toBeGreaterThan(0);
-  expect(manifest.gaps.length).toBeGreaterThan(manifest.mappings.length);
+  expect(manifest.mappings.length + manifest.gaps.length).toBe(declarations.length);
   expect(manifest.gapBudget).toBe(manifest.gaps.length);
   expect(declarations.some((entry) => entry.kind === 'detection-gap')).toBe(true);
 });

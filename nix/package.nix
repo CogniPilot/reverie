@@ -55,6 +55,8 @@ let
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/settings/goldens.json"} test/fixtures/settings/goldens.json
       cp ${consoleFixture "crates/reverie-contracts/src/settings_v1/error-status.json"} test/fixtures/settings-v1/error-status.json
       cp ${consoleFixture "crates/reverie-contracts/src/settings_v1/inherited-error-codes.json"} test/fixtures/settings-v1/inherited-error-codes.json
+      mkdir -p test/fixtures/control-coverage
+      cp ${consoleFixture ".github/workflows/image.yml"} test/fixtures/control-coverage/image.yml
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
@@ -91,7 +93,7 @@ let
         test/employee-recovery-authority.test.ts test/employee-recovery-service.test.ts test/employee-recovery-diagnostics-wire.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
         test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
-        test/control-behavior-inventory.test.ts
+        test/control-behavior-inventory.test.ts test/control-behavior-ratchet.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \
