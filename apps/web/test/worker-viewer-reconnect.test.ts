@@ -23,6 +23,8 @@ import { createHarness, member, room } from './helpers/chat-app-harness.mjs';
 import {frontendClassMethods} from './helpers/frontend-declarations.js';
 import { TmuxManager } from '../src/tmux-manager.js';
 import { FixtureLocks } from './helpers/browser-input-fixture.js';
+import { echoClientArgv, ownedEchoArgv } from './helpers/owned-pty-echo.js';
+import type { IPty } from 'node-pty';
 
 const cleanups: Array<() => Promise<unknown>> = [];
 afterEach(async () => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks();
@@ -270,10 +272,35 @@ it('reattaches a missing website PTY through the canonical client factory withou
   expect(f.session.runtimeHealth).toBe('disconnected');
   expect(await f.controller.reconnect(f.employee.id,f.expected,undefined)).toBe('connected');
   const pid=f.session.pid!;expect(pid).toBeGreaterThan(1);expect(pid).not.toBe(42);
-  const argv=readFileSync(`/proc/${pid}/cmdline`,'utf8').split('\0');
-  expect(argv[1]).toBe('-e');expect(argv[2]).toContain('process.stdin.pipe(process.stdout)');
+  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
+  const argv = await ownedEchoArgv(client, () =>
+    (f.session as unknown as { ptyProcess: IPty }).ptyProcess === client && f.session.pid === pid);
+  expect(argv).toEqual(echoClientArgv);
   expect(f.mux.respawnPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({workerAttachOnly:true}));
   expect(f.session.runtimeHealth).toBe('unknown');expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('rejects an exited owned echo client rather than accepting its former PID', async () => {
+  const f = await fixture(); Object.assign(f.session, { ptyProcess: null, _pid: null, _viewerClientLost: true });
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
+  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
+  const result = ownedEchoArgv(client, () =>
+    (f.session as unknown as { ptyProcess: IPty | null }).ptyProcess === client);
+  client.kill();
+  await expect(result).rejects.toThrow(/exited|incarnation|not live/);
+  expect(f.session.runtimeHealth).toBe('disconnected');
+  expect(f.session.write('must not reach the exited local client')).toBe(false);
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
+});
+
+it('refuses a cancelled echo observation before writing to its owned client', async () => {
+  const f = await fixture(); Object.assign(f.session, { ptyProcess: null, _pid: null, _viewerClientLost: true });
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
+  const client = (f.session as unknown as { ptyProcess: IPty }).ptyProcess;
+  const write = vi.spyOn(client, 'write');
+  await expect(ownedEchoArgv(client, () => false)).rejects.toThrow('incarnation changed');
+  expect(write).not.toHaveBeenCalled();
+  expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
 it.each(['unreadable', 'dead', 'wrong-pid'] as const)('retains disconnection/input hold after %s readback; respawn exit zero is insufficient', async state => {
