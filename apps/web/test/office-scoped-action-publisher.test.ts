@@ -33,6 +33,17 @@ import { registerAuthMiddleware, registerHostGuard } from '../src/web/middleware
 import * as storage from 'node:fs/promises';
 import { dataPath } from '../src/config/instance.js';
 
+const hostRoot = vi.hoisted(() => ({ uid: 0, mode: undefined as number | undefined }));
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  const { hostRootMetadata } = await import('./helpers/host-root-metadata.js');
+  return {
+    ...actual,
+    lstatSync: ((file, options) =>
+      hostRootMetadata(file, actual.lstatSync(file, options as never), hostRoot)) as typeof actual.lstatSync,
+  };
+});
+
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof import('node:fs/promises')>();
   return { ...actual, rename: vi.fn(actual.rename), open: vi.fn(actual.open) };
@@ -48,6 +59,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
   vi.unstubAllEnvs();
+  hostRoot.uid = 0;
+  hostRoot.mode = undefined;
 });
 const targetId = '10000000-0000-4000-8000-000000000001';
 const targetSid = '10000000-0000-4000-8000-000000000002';
@@ -396,6 +409,18 @@ async function fixture(
     sourceNonceState: () => fs.readFileSync(join(directory, 'recovery-nonces.json'), 'utf8'),
   };
 }
+
+it.each(['foreign-owner', 'writable'] as const)(
+  'refuses %s host-root custody before consuming the source nonce',
+  async (kind) => {
+    const f = await fixture();
+    const before = f.sourceNonceState();
+    if (kind === 'foreign-owner') hostRoot.uid = process.getuid!() + 1000;
+    else hostRoot.mode = 0o40777;
+    expect((await f.send()).statusCode).toBe(403);
+    expect(f.sourceNonceState()).toBe(before);
+  }
+);
 
 it('publishes one original private source/config/grant proof and rejects a different canonical domain', async () => {
   const f = await fixture();

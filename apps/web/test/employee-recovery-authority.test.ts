@@ -51,14 +51,11 @@ import { OfficeScopedActionPublisher } from '../src/office-scoped-action-publish
 
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof import('node:fs')>();
+  const { hostRootMetadata } = await import('./helpers/host-root-metadata.js');
   return {
     ...actual,
-    lstatSync: ((file, options) => {
-      const entry = actual.lstatSync(file, options as never);
-      // Same explicit sandbox-root metadata edge as worker-recovery-auth.test.
-      // All private fixture descendants/opened FDs/canonical bytes remain real.
-      return file === '/' ? Object.assign(entry, { uid: typeof entry.uid === 'bigint' ? 0n : 0 }) : entry;
-    }) as typeof actual.lstatSync,
+    lstatSync: ((file, options) =>
+      hostRootMetadata(file, actual.lstatSync(file, options as never), { uid: 0 })) as typeof actual.lstatSync,
   };
 });
 

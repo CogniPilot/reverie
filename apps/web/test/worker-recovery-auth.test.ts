@@ -9,22 +9,11 @@ import type { CompanyEmployee } from '../src/company-types.js';
 const hostRoot = vi.hoisted(() => ({ uid: 0, mode: undefined as number | undefined }));
 vi.mock('node:fs', async (original) => {
   const actual = await original<typeof import('node:fs')>();
+  const { hostRootMetadata } = await import('./helpers/host-root-metadata.js');
   return {
     ...actual,
-    lstatSync: ((file, options) => {
-      const entry = actual.lstatSync(file, options as any);
-      // A Nix sandbox maps / to UID65534 (observed mode0750); production requires
-      // an ordinary trusted host root. Simulate ONLY that host metadata edge.
-      // Every fixture ancestor below /, private file, opened FD and inode stays real.
-      if (file === '/')
-        return Object.assign(entry, {
-          uid: typeof entry.uid === 'bigint' ? BigInt(hostRoot.uid) : hostRoot.uid,
-          ...(hostRoot.mode === undefined
-            ? {}
-            : { mode: typeof entry.mode === 'bigint' ? BigInt(hostRoot.mode) : hostRoot.mode }),
-        });
-      return entry;
-    }) as typeof actual.lstatSync,
+    lstatSync: ((file, options) =>
+      hostRootMetadata(file, actual.lstatSync(file, options as never), hostRoot)) as typeof actual.lstatSync,
   };
 });
 const fixture = JSON.parse(
