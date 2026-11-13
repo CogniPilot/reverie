@@ -358,6 +358,10 @@ jobs:
             TEST_OWNER_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/owner-controls" \
             TEST_APPROVALS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/approvals" \
             TEST_INPUT_RECOVERY_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/input-recovery" \
+            TEST_STATE_PUBLICATION_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/state-publication" \
+            TEST_RESOURCE_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resource-controls" \
+            TEST_RETIREMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/retirement" \
+            TEST_RECOVERY_SETTLEMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/recovery-settlement" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \
@@ -365,6 +369,10 @@ jobs:
               apps/web/test/office-owner-controls.browser.test.ts \
               apps/web/test/approvals-held-layout.browser.test.ts \
               apps/web/test/terminal-input-recovery.browser.test.ts \
+              apps/web/test/state-publication-status.browser.test.ts \
+              apps/web/test/employee-resource-controls.browser.test.ts \
+              apps/web/test/office-retirement.browser.test.ts \
+              apps/web/test/employee-recovery-settlement.browser.test.ts \
               apps/web/test/browser-coverage-attribution.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           # Validate actual execution/context/source evidence after every suite
