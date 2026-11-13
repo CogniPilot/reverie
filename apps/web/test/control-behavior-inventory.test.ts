@@ -214,6 +214,13 @@ it('refuses local or foreign replacements for Vitest registration bindings', () 
     `it = () => {}; ${testBody}`,
     `globalThis.it = () => {}; ${testBody}`,
     `globalThis['it'] = () => {}; ${testBody}`,
+    `(globalThis).it = () => {}; ${testBody}`,
+    `(globalThis as any).it = () => {}; ${testBody}`,
+    `(<any>globalThis).it = () => {}; ${testBody}`,
+    `(globalThis!).it = () => {}; ${testBody}`,
+    `(globalThis satisfies object).it = () => {}; ${testBody}`,
+    `(it as any) = () => {}; ${testBody}`,
+    `(it!) = () => {}; ${testBody}`,
     `([it] = [() => {}]); ${testBody}`,
     `({ it } = { it: () => {} }); ${testBody}`,
     `({ other: it } = { other: () => {} }); ${testBody}`,
@@ -233,6 +240,36 @@ it('refuses local or foreign replacements for Vitest registration bindings', () 
   }
 });
 
+it('refuses a malformed scenario source before crediting its recoverable syntax tree', () => {
+  const { root, manifest, declarations } = fixture();
+  writeFileSync(join(root, 'test/owner.test.ts'), `const broken = ; ${testBody}`);
+  expect(validateManifest(root, manifest, declarations)).toContain('Invalid scenario test syntax: owner.save');
+});
+
+it('refuses writes to the actual supported parameterized registration method', () => {
+  const { root, manifest, declarations } = fixture();
+  const parameterized = testBody.replace('it(', 'it.each([320])(');
+  for (const mutation of [
+    `it.each = () => () => {};`,
+    `(it as any).each = () => () => {};`,
+    `it['each' as const] = () => () => {};`,
+    `(globalThis as any).it.each = () => () => {};`,
+    `([it.each] = [() => () => {}]);`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), mutation + parameterized);
+    expect(validateManifest(root, manifest, declarations), mutation).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+  writeFileSync(join(root, 'test/owner.test.ts'), `it.each = () => () => {}; ${testBody}`);
+  expect(validateManifest(root, manifest, declarations)).toEqual([]);
+  writeFileSync(
+    join(root, 'test/owner.test.ts'),
+    `import { it } from 'vitest'; globalThis.it.each = () => () => {}; ${parameterized}`
+  );
+  expect(validateManifest(root, manifest, declarations)).toEqual([]);
+});
+
 it('accepts direct tests registered through unconditional ordinary suites', () => {
   const { root, manifest, declarations } = fixture();
   for (const wrapped of [
@@ -240,6 +277,9 @@ it('accepts direct tests registered through unconditional ordinary suites', () =
     `import { it } from 'vitest'; ${testBody}`,
     `import { it } from 'vitest'; globalThis.it = () => {}; ${testBody}`,
     `function helper(it) { it = () => {}; } ${testBody}`,
+    `const globalThis = {}; globalThis.it = () => {}; ${testBody}`,
+    `const global = {}; (global as any).it = () => {}; ${testBody}`,
+    `const window = {}; window['it'] = () => {}; ${testBody}`,
     `import { test as it, describe } from 'vitest'; describe('suite', () => { ${testBody} });`,
     `describe('suite', () => { ${testBody} });`,
     `describe('suite', function () { describe('nested', () => { ${testBody} }); });`,

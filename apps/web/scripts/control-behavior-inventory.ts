@@ -300,23 +300,74 @@ function exitsRegistrationScope(node: ts.Node): boolean {
   return ts.forEachChild(node, exitsRegistrationScope) === true;
 }
 
-function registrationChecker(parsed: ts.SourceFile): ts.TypeChecker {
-  const options: ts.CompilerOptions = { noResolve: true, noLib: true, types: [] };
+function registrationSource(source: string) {
+  const filename = '/scenario.ts';
+  const options: ts.CompilerOptions = {
+    noResolve: true,
+    noLib: true,
+    types: [],
+    target: ts.ScriptTarget.Latest,
+    module: ts.ModuleKind.ESNext,
+    moduleDetection: ts.ModuleDetectionKind.Force,
+  };
   const host = ts.createCompilerHost(options, true);
-  host.getSourceFile = (file) => (file === parsed.fileName ? parsed : undefined);
-  host.fileExists = (file) => file === parsed.fileName;
+  host.getSourceFile = (file, languageVersion) =>
+    file === filename ? ts.createSourceFile(file, source, languageVersion, true) : undefined;
+  host.fileExists = (file) => file === filename;
   host.readFile = () => undefined;
   host.directoryExists = () => false;
   host.getDirectories = () => [];
   host.getCurrentDirectory = () => '/';
-  return ts.createProgram([parsed.fileName], options, host).getTypeChecker();
+  const program = ts.createProgram([filename], options, host);
+  const parsed = program.getSourceFile(filename);
+  if (!parsed) throw Error('The original scenario module was not parsed');
+  return {
+    parsed,
+    checker: program.getTypeChecker(),
+    syntaxValid: program.getSyntacticDiagnostics(parsed).length === 0,
+  };
 }
 
-function registrationReassigned(identifier: ts.Identifier, checker: ts.TypeChecker): boolean {
+function transparentRegistrationExpression(node: ts.Node): ts.Node {
+  while (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isSatisfiesExpression(node)
+  )
+    node = node.expression;
+  return node;
+}
+
+function registrationProperty(input: ts.Node) {
+  const node = transparentRegistrationExpression(input);
+  if (ts.isPropertyAccessExpression(node))
+    return { base: transparentRegistrationExpression(node.expression), key: node.name.text };
+  if (ts.isElementAccessExpression(node)) {
+    const key = transparentRegistrationExpression(node.argumentExpression);
+    if (ts.isStringLiteralLike(key)) return { base: transparentRegistrationExpression(node.expression), key: key.text };
+  }
+  return undefined;
+}
+
+function registrationReassigned(identifier: ts.Identifier, checker: ts.TypeChecker, method?: 'each'): boolean {
   const original = checker.getSymbolAtLocation(identifier);
-  const target = (node: ts.Node): boolean => {
-    if (ts.isParenthesizedExpression(node)) return target(node.expression);
+  const binding = (input: ts.Node): boolean => {
+    const node = transparentRegistrationExpression(input);
     if (ts.isIdentifier(node)) return node.text === identifier.text && checker.getSymbolAtLocation(node) === original;
+    if (original) return false;
+    const property = registrationProperty(node);
+    return (
+      !!property &&
+      property.key === identifier.text &&
+      ts.isIdentifier(property.base) &&
+      ['globalThis', 'global', 'window'].includes(property.base.text) &&
+      !checker.getSymbolAtLocation(property.base)?.declarations?.length
+    );
+  };
+  const target = (input: ts.Node): boolean => {
+    const node = transparentRegistrationExpression(input);
     if (ts.isArrayLiteralExpression(node)) return node.elements.some(target);
     if (ts.isObjectLiteralExpression(node)) return node.properties.some(target);
     if (ts.isSpreadElement(node) || ts.isSpreadAssignment(node)) return target(node.expression);
@@ -324,18 +375,9 @@ function registrationReassigned(identifier: ts.Identifier, checker: ts.TypeCheck
     if (ts.isShorthandPropertyAssignment(node))
       return node.name.text === identifier.text && checker.getShorthandAssignmentValueSymbol(node) === original;
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) return target(node.left);
-    if (original) return false;
-    const key = ts.isPropertyAccessExpression(node)
-      ? node.name.text
-      : ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
-        ? node.argumentExpression.text
-        : undefined;
-    return (
-      key === identifier.text &&
-      (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-      ts.isIdentifier(node.expression) &&
-      ['globalThis', 'global', 'window'].includes(node.expression.text)
-    );
+    if (binding(node)) return true;
+    const property = registrationProperty(node);
+    return method !== undefined && property?.key === method && binding(property.base);
   };
   const visit = (node: ts.Node): boolean => {
     if (
@@ -358,8 +400,13 @@ function registrationReassigned(identifier: ts.Identifier, checker: ts.TypeCheck
 /** Free configured Vitest globals and real named Vitest imports may register tests.
  * A local alias, parameter or replacement function supplies no such proof.
  */
-function registrationBinding(identifier: ts.Identifier, checker: ts.TypeChecker, suite = false): boolean {
-  if (registrationReassigned(identifier, checker)) return false;
+function registrationBinding(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+  suite = false,
+  method?: 'each'
+): boolean {
+  if (registrationReassigned(identifier, checker, method)) return false;
   const symbol = checker.getSymbolAtLocation(identifier);
   if (!symbol) return true;
   if (symbol.declarations?.length !== 1) return false;
@@ -442,7 +489,7 @@ function scenarioRegistration(node: ts.CallExpression, checker: ts.TypeChecker):
     factory.name.text !== 'each' ||
     !ts.isIdentifier(factory.expression) ||
     !['it', 'test'].includes(factory.expression.text) ||
-    !registrationBinding(factory.expression, checker)
+    !registrationBinding(factory.expression, checker, false, 'each')
   )
     return false;
   const table = expression.arguments[0];
@@ -478,7 +525,7 @@ export function validateManifest(
   for (const entry of declarations) if (!assigned.has(entry.id)) errors.push(`New unmapped declaration: ${entry.id}`);
   if (manifest.gaps.length > manifest.gapBudget) errors.push('Reviewed gap budget exceeded');
   for (const gap of manifest.gaps) if (!gap.reason.trim()) errors.push(`Gap lacks reason: ${gap.declaration}`);
-  const scenarioSources = new Map<string, { parsed: ts.SourceFile; checker: ts.TypeChecker }>();
+  const scenarioSources = new Map<string, ReturnType<typeof registrationSource>>();
   for (const [id, scenario] of Object.entries(manifest.scenarios)) {
     if (!scenario.outcome.trim() || !scenario.assertions.length)
       errors.push(`Scenario lacks behavioral contract: ${id}`);
@@ -491,11 +538,14 @@ export function validateManifest(
         errors.push(`Missing scenario test: ${id}`);
         continue;
       }
-      const parsed = ts.createSourceFile('/scenario.ts', source, ts.ScriptTarget.Latest, true);
-      original = { parsed, checker: registrationChecker(parsed) };
+      original = registrationSource(source);
       scenarioSources.set(scenario.test, original);
     }
     const { parsed, checker } = original;
+    if (!original.syntaxValid) {
+      errors.push(`Invalid scenario test syntax: ${id}`);
+      continue;
+    }
     const bodies: string[] = [];
     const visit = (node: ts.Node) => {
       if (
