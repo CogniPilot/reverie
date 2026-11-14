@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { isMultiUserMode } from './config/multiuser.js';
 /** Docker callback identity only. Company permissions and native effect custody remain independent. */
 import { createHmac, timingSafeEqual } from 'node:crypto';
@@ -235,15 +235,32 @@ export function dockerWorkerIdentityOf(request: DockerWorkerIdentityRequest): Do
     ? identity
     : undefined;
 }
-/** Initial maintained adapter is boxed single-user only. Multi-user account
+/** The actual boxed runtime opts into mandatory proof for agent hints and callbacks.
+ * Unboxed callers retain their existing human/legacy transport.
+ * Initial maintained adapter is boxed single-user only. Multi-user account
  * disable/current-role proofs require their own supported adapter, never a synthetic admin. */
 export function registerDockerWorkerIdentity(
   app: FastifyInstance,
   authentication: DockerWorkerIdentityAuthentication,
-  basePath = ''
+  basePath = '',
+  options: { requireMachineProof?: boolean } = {}
 ): void {
+  const apiPath = (path: string | undefined): string | undefined => {
+    const pathname = path?.split('?')[0];
+    return basePath && pathname?.startsWith(basePath + '/') ? pathname.slice(basePath.length) : pathname;
+  };
+  const callbackPath = (path: string | undefined): boolean =>
+    /^\/api(?:\/v1)?\/(?:hook-event|status-telemetry)$/.test(apiPath(path) ?? '');
+  const requiresProof = (request: FastifyRequest, path: string | undefined): boolean =>
+    options.requireMachineProof === true &&
+    ((request.headers['x-reverie-parent-session'] !== undefined && apiPath(path)?.startsWith('/api/') === true) ||
+      (request.method === 'POST' && callbackPath(path)));
   app.addHook('onRequest', (request, reply, done) => {
     if (!dockerWorkerIdentityPresented(request)) {
+      if (requiresProof(request, request.url)) {
+        reply.code(403).send('Docker worker identity required');
+        return;
+      }
       done();
       return;
     }
@@ -258,13 +275,15 @@ export function registerDockerWorkerIdentity(
   });
   app.addHook('preHandler', (request, reply, done) => {
     if (!dockerWorkerIdentityPresented(request)) {
+      if (requiresProof(request, request.routeOptions.url)) {
+        reply.code(403).send('Docker worker identity required');
+        return;
+      }
       done();
       return;
     }
     const identity = dockerWorkerIdentityOf(request);
-    const route = request.routeOptions.url;
-    const path = basePath && route?.startsWith(basePath + '/') ? route.slice(basePath.length) : route;
-    const callback = request.method === 'POST' && ['/api/hook-event', '/api/status-telemetry'].includes(path ?? '');
+    const callback = request.method === 'POST' && callbackPath(request.routeOptions.url);
     const body = request.body;
     if (
       !identity ||

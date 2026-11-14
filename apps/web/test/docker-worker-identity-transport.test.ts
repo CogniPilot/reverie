@@ -40,14 +40,23 @@ afterEach(async () => {
   delete process.env.REVERIE_PASSWORD;
   delete process.env.REVERIE_MULTIUSER;
 });
-async function fixture(policy: 'off' | 'log' | 'enforce', password = true, register = true) {
+async function fixture(
+  policy: 'off' | 'log' | 'enforce',
+  password = true,
+  register = true,
+  transport: { requireMachineProof?: boolean; basePath?: string; owner?: boolean } = {}
+) {
   if (password) process.env.REVERIE_PASSWORD = 'synthetic-password';
   else delete process.env.REVERIE_PASSWORD;
   const dir = await mkdtemp(join(tmpdir(), 'docker-identity-'));
   directories.push(dir);
   const store = new OwnerAuthStore(join(dir, 'owner.json'));
-  await writeFile(store.markerFile, policy + '\n', { mode: 0o600 });
-  const service = new OwnerAuthService({ store, auditFile: join(dir, 'audit.jsonl') });
+  if (!transport.owner) await writeFile(store.markerFile, policy + '\n', { mode: 0o600 });
+  const service = new OwnerAuthService({ store, auditFile: join(dir, 'audit.jsonl'), setupEnabled: transport.owner });
+  const ownerCookie = transport.owner
+    ? await service.setup('synthetic-owner', 'Bright-river-factory-742!', 'Bright-river-factory-742!', '127.0.0.1')
+    : undefined;
+  const basePath = transport.basePath ?? '';
   const ctx = {
     sessions: new Map([
       [binding.sessionId, { id: binding.sessionId, owner: undefined }],
@@ -63,8 +72,8 @@ async function fixture(policy: 'off' | 'log' | 'enforce', password = true, regis
   const app = Fastify();
   apps.push(app);
   await app.register(fastifyCookie);
-  if (register) registerDockerWorkerIdentity(app, auth);
-  registerAuthMiddleware(app, false, '', service);
+  if (register) registerDockerWorkerIdentity(app, auth, basePath, transport);
+  registerAuthMiddleware(app, false, basePath, service);
   registerOwnerPolicy(app, {
     service,
     ctx,
@@ -78,19 +87,19 @@ async function fixture(policy: 'off' | 'log' | 'enforce', password = true, regis
       admin: () => false,
     },
   });
-  app.get('/api/sessions', async (req) => ({
+  app.get(basePath + '/api/sessions', async (req) => ({
     caller: callerOf(req, { service, ctx }),
     owner: ownerFor(req),
     human: humanTransportContinuation(req) !== undefined,
     credentialless: credentiallessTransportCurrent(req),
     globalEvents: ownerEventReadAdmission(req)?.current(),
   }));
-  app.post('/api/sessions/:id/input', async () => ({ accepted: true }));
-  app.put('/api/settings', async () => ({ changed: true }));
+  app.post(basePath + '/api/sessions/:id/input', async () => ({ accepted: true }));
+  app.put(basePath + '/api/settings', async () => ({ changed: true }));
   let callbackEffects = 0;
-  for (const path of ['/api/hook-event', '/api/status-telemetry'])
-    app.post(path, async () => ({ effects: ++callbackEffects }));
-  app.get('/api/sessions/:id/terminal', async (req) => {
+  for (const path of ['/api/hook-event', '/api/status-telemetry', '/api/v1/hook-event', '/api/v1/status-telemetry'])
+    app.post(basePath + path, async () => ({ effects: ++callbackEffects }));
+  app.get(basePath + '/api/sessions/:id/terminal', async (req) => {
     const original = dockerWorkerIdentityOf(req)!;
     selected = undefined;
     delete req.headers[DOCKER_WORKER_IDENTITY_HEADER];
@@ -98,9 +107,109 @@ async function fixture(policy: 'off' | 'log' | 'enforce', password = true, regis
   });
   await app.ready();
   const headers = { [DOCKER_WORKER_IDENTITY_HEADER]: token, 'x-reverie-parent-session': binding.sessionId };
-  return { app, auth, headers, callbackEffects: () => callbackEffects };
+  return { app, auth, headers, ownerCookie, callbackEffects: () => callbackEffects };
 }
 describe('actual boxed worker transport', () => {
+  it.each(['off', 'log', 'enforce'] as const)(
+    'requires actual machine proof for boxed parent hints under policy %s',
+    async (policy) => {
+      const f = await fixture(policy, true, true, { requireMachineProof: true });
+      const authorization = 'Basic ' + Buffer.from('admin:synthetic-password').toString('base64');
+      for (const parent of [binding.sessionId, stranger, stranger.slice(0, 8), ''])
+        expect(
+          (
+            await f.app.inject({
+              url: '/api/sessions',
+              headers: { authorization, 'x-reverie-parent-session': parent },
+            })
+          ).statusCode
+        ).toBe(403);
+      expect((await f.app.inject({ url: '/api/sessions', headers: f.headers })).statusCode).toBe(200);
+      expect(
+        (
+          await f.app.inject({
+            url: '/api/sessions',
+            headers: { ...f.headers, 'x-reverie-parent-session': stranger },
+          })
+        ).statusCode
+      ).toBe(403);
+    }
+  );
+  it.each(['', '/office'])(
+    'requires boxed callback proof with base path %s, including aliases and queries',
+    async (basePath) => {
+      const f = await fixture('off', true, true, { requireMachineProof: true, basePath });
+      const authorization = 'Basic ' + Buffer.from('admin:synthetic-password').toString('base64');
+      for (const path of [
+        '/api/hook-event',
+        '/api/status-telemetry',
+        '/api/v1/hook-event',
+        '/api/v1/status-telemetry',
+      ]) {
+        const url = basePath + path + '?synthetic=1';
+        expect(
+          (
+            await f.app.inject({
+              method: 'POST',
+              url,
+              headers: { authorization },
+              payload: { sessionId: stranger },
+            })
+          ).statusCode
+        ).toBe(403);
+        expect(f.callbackEffects()).toBe(0);
+      }
+      expect(
+        (
+          await f.app.inject({
+            method: 'POST',
+            url: basePath + '/api/v1/hook-event',
+            headers: f.headers,
+            payload: { sessionId: stranger },
+          })
+        ).statusCode
+      ).toBe(403);
+    }
+  );
+  it('preserves the actual signed-in owner without a parent hint in boxed mode', async () => {
+    const f = await fixture('enforce', true, true, { requireMachineProof: true, owner: true });
+    expect(f.ownerCookie).toBeTypeOf('string');
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          cookies: { reverie_owner: f.ownerCookie! },
+          headers: { origin: 'http://localhost' },
+          payload: {},
+        })
+      ).statusCode
+    ).toBe(200);
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/settings',
+          cookies: { reverie_owner: f.ownerCookie! },
+          headers: { 'x-reverie-parent-session': stranger },
+          payload: {},
+        })
+      ).statusCode
+    ).toBe(403);
+  });
+  it('preserves the legacy parent-hint transport only when boxed enforcement is not selected', async () => {
+    const f = await fixture('off');
+    const response = await f.app.inject({
+      url: '/api/sessions',
+      headers: {
+        authorization: 'Basic ' + Buffer.from('admin:synthetic-password').toString('base64'),
+        'x-reverie-parent-session': stranger,
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().caller).toEqual({ kind: 'agent', session: stranger });
+  });
+
   it.each(['/api/hook-event', '/api/status-telemetry'])(
     'binds callback body target at %s to the authenticated SID',
     async (path) => {
