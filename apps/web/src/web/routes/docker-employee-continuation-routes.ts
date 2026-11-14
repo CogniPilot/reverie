@@ -1,3 +1,4 @@
+import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -47,7 +48,8 @@ export function registerDockerEmployeeContinuationRoutes(
   store: CompanyDockerContinuationStore,
   service: DockerEmployeeContinuation,
   auth: DockerContinuationRouteAuthentication,
-  proposal?: (employeeId: string) => DockerPolicyProposal | undefined
+  proposal?: (employeeId: string) => DockerPolicyProposal | undefined,
+  pool?: DockerPoolReconciliation
 ): void {
   const human = (req: FastifyRequest) =>
     req.headers['x-reverie-parent-session'] === undefined &&
@@ -95,6 +97,28 @@ export function registerDockerEmployeeContinuationRoutes(
         .send({ success: false, error: { code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: ['observe'] } });
     }
   };
+  if (pool) {
+    app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
+      run(reply, async () => {
+        const id = uuid.parse((req.params as { id: string }).id);
+        return pool.status(id, capture(req, id));
+      })
+    );
+    app.post('/api/company/employees/:id/docker-pool/reconcile', async (req, reply) =>
+      run(reply, async () => {
+        const id = uuid.parse((req.params as { id: string }).id);
+        const input = z
+          .object({
+            sessionId: uuid,
+            sessionGeneration: z.number().int().positive().safe(),
+            expectedScopeDigest: digest,
+          })
+          .strict()
+          .parse(req.body);
+        return pool.reconcile(id, input, capture(req, id));
+      })
+    );
+  }
   app.get('/api/company/employees/:id/docker-policy', async (req, reply) =>
     run(reply, async () => {
       const employeeId = uuid.parse((req.params as { id: string }).id),

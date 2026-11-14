@@ -5,6 +5,9 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanyStateSchema, type CompanyEmployee, type CompanyState } from './company-types.js';
 import { captureDockerSharedPoolLineages, preserveDockerSharedPoolLineages, DockerSharedPoolLineageError } from './docker-shared-pool-lineage.js';
+import {DockerPoolReconciliationReceipt} from './docker-contained-resource-controller.js';
+import {DockerPoolObservationRecord,dockerPoolMetadataDigest} from './docker-pool-observation-data.js';
+import {DockerEmployeeContinuationError} from './docker-employee-continuation.js';
 import { restMetadataId, restMetadataSessionId, type RestEmployeeMetadata } from './rest-canonical-metadata.js';
 import {EmployeeRecoveryAttempt} from './employee-recovery-attempt.js';
 import { recoveryDataDigest, supersedeStoppedRecoveryHistory } from './employee-recovery-operation.js';
@@ -90,6 +93,21 @@ export function serviceAuthorityFits(state: Pick<CompanyState, 'serviceGrants' |
 }
 
 export class CompanyStore {
+  publishDockerPoolObservation(
+    receipt: DockerPoolReconciliationReceipt, beforeDigest:string, authority:()=>void
+  ): Promise<CompanyUpdateOutcome<DockerPoolObservationRecord>> {
+    const record = DockerPoolReconciliationReceipt.prototype.claim.call(receipt, authority);
+    const current = () => {
+      DockerPoolReconciliationReceipt.prototype.require.call(receipt);
+      authority();
+    };
+    return this.#updateOutcome(state => {
+      current();
+      if (dockerPoolMetadataDigest(state)!==beforeDigest)
+        throw new DockerEmployeeContinuationError('DOCKER_POOL_CANONICAL_CHANGED');
+      return structuredClone(record);
+    },current,undefined,undefined,undefined,undefined,{record,beforeDigest});
+  }
   #unconfirmedRecoveryObservation?: {
     owner: EmployeeRecoveryAttempt; before: string; attempted: string; receipt: CompanyPublicationUnconfirmed;
   };
@@ -505,7 +523,8 @@ export class CompanyStore {
     beforeSave?: (result: T) => void | Promise<void>,
     recovery?: { attempt: EmployeeRecoveryAttempt; digest: string },
     observation?: EmployeeRecoveryAttempt,
-    stopped?: { attempt: EmployeeRecoveryAttempt; stage: 'intent' | 'terminal'; digest: string }
+    stopped?: { attempt: EmployeeRecoveryAttempt; stage: 'intent' | 'terminal'; digest: string },
+    pool?: {record:DockerPoolObservationRecord;beforeDigest:string}
   ): Promise<CompanyUpdateOutcome<T>> {
     if (this.queued >= 128)
       return Promise.resolve({ state: 'not-issued', cause: new Error('Canonical company transaction queue is full') });
@@ -542,12 +561,32 @@ export class CompanyStore {
             if (observation || stopped) observationBefore = JSON.stringify(current);
             const validation = validateAuthority();
             if (validation !== undefined) await validation;
+            const companyVersion = current.version;
             const poolLineages = captureDockerSharedPoolLineages(current);
             const poolLineageBytes = JSON.stringify(current.dockerSharedPoolLineages);
+            const poolObservationBytes = JSON.stringify(current.dockerPoolObservations);
             const result = mutate(current);
+            if (companyVersion===2 && current.version!==2)
+              throw new DockerEmployeeContinuationError('DOCKER_COMPANY_FORMAT_DOWNGRADE_REFUSED');
             if (JSON.stringify(current.dockerSharedPoolLineages) !== poolLineageBytes)
               throw new DockerSharedPoolLineageError('DOCKER_SHARED_POOL_LINEAGE_CHANGED');
+            if (JSON.stringify(current.dockerPoolObservations)!==poolObservationBytes)
+              throw new DockerEmployeeContinuationError('DOCKER_POOL_CANONICAL_CHANGED');
             preserveDockerSharedPoolLineages(poolLineages, current);
+            if (pool) {
+              if (dockerPoolMetadataDigest(current)!==pool.beforeDigest)
+                throw new DockerEmployeeContinuationError('DOCKER_POOL_CANONICAL_CHANGED');
+              const records = (current.dockerPoolObservations??=[]);
+              const prior = records.find(value=>value.configuration.containerId===pool.record.configuration.containerId);
+              if (prior && JSON.stringify(prior)!==JSON.stringify(pool.record))
+                throw new DockerEmployeeContinuationError('DOCKER_POOL_CANONICAL_CHANGED');
+              if (!prior) {
+                if (records.length>=128) throw new DockerEmployeeContinuationError('DOCKER_POOL_OBSERVATION_LIMIT');
+                records.push(structuredClone(pool.record));
+              }
+            }
+            if (current.dockerSharedPoolLineages?.length || current.dockerPoolObservations?.length)
+              current.version=2;
             CompanyStateSchema.parse(current);
             const goalBytes = Buffer.byteLength(
               JSON.stringify({ goals: current.goals, grants: current.goalGrants, proofs: current.goalUnblockProofs })

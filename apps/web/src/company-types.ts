@@ -1,4 +1,5 @@
 import {DockerEmployeeBinding,DockerEmployeeResourcePolicy,DockerEmployeeContinuationRecord} from './docker-employee-continuation-data.js';
+import {DockerPoolObservations} from './docker-pool-observation-data.js';
 import { DockerSharedPoolLineages } from './docker-shared-pool-lineage.js';
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
@@ -377,9 +378,11 @@ export const CompanyMemorySchema = z.object({
   cycleId: text.optional(),
 });
 export const CompanyStateSchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1),z.literal(2)]),
   /** Private shared pool task lineage; independent of employee/plan lifetime, never a native grant. */
   dockerSharedPoolLineages: DockerSharedPoolLineages.optional(),
+  /** Re-earned actual global pool ACK correlation, never employee-origin history or a grant. */
+  dockerPoolObservations: DockerPoolObservations.optional(),
   /** Private bounded deny-only Docker operation journal, never a native grant. */
   dockerEmployeeContinuations: z.array(DockerEmployeeContinuationRecord).max(64).refine(rows =>
     new Set(rows.map(row=>row.employeeId)).size===rows.length &&
@@ -419,7 +422,9 @@ export const CompanyStateSchema = z.object({
     .default([]),
   /** Employees the owner retired: off the org chart and out of every room, kept (same id and session) so history still names them. */
   retired: z.array(EmployeeSchema.extend({ retiredAt: z.number() })).default([]),
-});
+}).refine(state=>state.version===2 ||
+  (!(state.dockerSharedPoolLineages?.length) && !(state.dockerPoolObservations?.length)),
+  'Company format 2 is required for retained global pool metadata');
 export type CompanyState = z.infer<typeof CompanyStateSchema>;
 
 /** Eligibility only: the organization scheduler must explicitly schedule a Gantt task. */

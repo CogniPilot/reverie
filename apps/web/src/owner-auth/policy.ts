@@ -118,6 +118,8 @@ const AGENT_ROUTES = new Set([
   'POST /api/company/employees/:id/reconnect', // purpose-authenticated native proof and explicit recovery permission
   'POST /api/company/employees/:id/reconnect/status',
   'GET /api/company/employees/:id/docker-policy',
+  'GET /api/company/employees/:id/docker-pool/status',
+  'POST /api/company/employees/:id/docker-pool/reconcile',
   'GET /api/company/employees/:id/docker-stop/status',
   'POST /api/company/employees/:id/docker-stop/reconcile',
   'POST /api/company/employees/:id/docker-continuation',

@@ -192,8 +192,12 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   }
   /** Resource membership is DATA for fresh Engine/kernel proof, never launch permission.
    * A retained binding remains accounted for when its saved launch is held or changed. */
-  retainedPoolConfigurationTasks(anchorName: string, helperImageId: string): DockerContinuationTask[] {
-    return retainedDockerPoolTasks(this.company.store.snapshot(), anchorName, helperImageId);
+  retainedPoolConfigurationTasks(anchorName: string, helperImageId: string, boxId?:string): DockerContinuationTask[] {
+    const state=this.company.store.snapshot();
+    const tasks=[...retainedDockerPoolTasks(state, anchorName, helperImageId),
+      ...(state.dockerPoolObservations??[]).filter(record=>record.boxId===boxId &&
+        record.anchorTask.name===anchorName).map(record=>record.configuration)];
+    return [...new Map(tasks.map(task=>[dockerContinuationDigest(task),task])).values()];
   }
   resourceInventory(): DockerEmployeeContinuationRecord[] {
     const state = this.company.store.snapshot(),

@@ -2,6 +2,12 @@
  * cursors precede create/start; a failed reply never authorizes a second effect. */
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
+import {
+  DockerResourceObservation as observation,
+  type DockerResourceObservation as Observation,
+  DockerPoolObservationRecord,
+} from './docker-pool-observation-data.js';
+import { DockerEmployeePoolPolicy } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type {
   DockerEmployeeContinuationRecord,
@@ -18,43 +24,38 @@ import {
 import type { DockerEngineCommand } from './docker-engine-command.js';
 
 const cid = z.string().regex(/^[a-f0-9]{64}$/);
-const decimal = z.string().regex(/^(0|[1-9][0-9]{0,19})$/);
-const processIdentity = z
-  .object({
-    id: cid,
-    pid: z.number().int().positive().safe(),
-    startTicks: decimal,
-    path: z.string().max(4096),
-    dev: decimal,
-    ino: decimal,
-  })
-  .strict();
-const observation = z
-  .object({
-    version: z.literal(1),
-    purpose: z.literal('reverie-boxed-resource-observation-v1'),
-    boxId: cid,
-    parent: z.object({ path: z.string().max(4096), dev: decimal, ino: decimal }).strict(),
-    anchor: processIdentity,
-    worker: processIdentity.nullable(),
-    resources: z
-      .object({
-        memoryMax: z.string(),
-        memoryHigh: z.string(),
-        swapMax: z.string(),
-        pidsMax: z.string(),
-        cpuWeight: decimal,
-        cpuMax: z.string().max(128),
-        cpusetCpus: z.string().max(4096),
-        cpusetCpusEffective: z.string().max(4096),
-        cpusetMemsEffective: z.string().max(4096),
-      })
-      .strict(),
-  })
-  .strict();
-type Observation = z.infer<typeof observation>;
 type Config = Readonly<Record<string, unknown>>;
 type Init = { id: string; pid: number; startTicks: string };
+const poolObservationOrigin = Symbol('actual native pool observation');
+export class DockerPoolReconciliationReceipt {
+  readonly #record: DockerPoolObservationRecord;
+  readonly #current: () => void;
+  #claimed = false;
+  constructor(origin: unknown, record: DockerPoolObservationRecord, current: () => void) {
+    if (origin !== poolObservationOrigin) refuse('DOCKER_POOL_OBSERVATION_ORIGIN_REQUIRED');
+    this.#record = DockerPoolObservationRecord.parse(structuredClone(record));
+    this.#current = current;
+  }
+  require(): void {
+    void this.#record;
+    this.#current();
+  }
+  snapshot(current: () => void): DockerPoolObservationRecord {
+    const record = this.#record;
+    this.#current();
+    current();
+    return structuredClone(record);
+  }
+  claim(current: () => void): DockerPoolObservationRecord {
+    const record = this.#record; // Brand before invoking any caller callback.
+    if (this.#claimed) refuse('DOCKER_POOL_OBSERVATION_ALREADY_CONSUMED');
+    this.#current();
+    current();
+    this.#claimed = true;
+    return structuredClone(record);
+  }
+}
+Object.freeze(DockerPoolReconciliationReceipt.prototype);
 export interface DockerContainedResourcesConfiguration {
   readonly boxId: string;
   readonly deployment: string;
@@ -405,7 +406,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
   async #ack(
     task: DockerContinuationTask,
     fresh: Observation,
-    policy: DockerEmployeeResourcePolicy,
+    policy: DockerEmployeeResourcePolicy['pool'],
+    high: number | null,
     worker: boolean
   ): Promise<boolean> {
     if (
@@ -449,7 +451,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       isDeepStrictEqual(result.parent, fresh.parent) &&
       isDeepStrictEqual(result.anchor, fresh.anchor) &&
       isDeepStrictEqual(result.worker, worker ? fresh.worker : null) &&
-      this.#matches(result, worker ? policy : policy.pool, worker ? policy.memoryHighBytes : null)
+      this.#matches(result, policy, high)
     );
   }
   async #poolWriterClosed(task: DockerContinuationTask): Promise<boolean> {
@@ -514,10 +516,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
     // START fence remains unknown until the ORIGINAL fixed container is terminal.
     await this.#poolWritersClosed();
     if (own) {
-      if (!(await this.#ack(own, fresh, row.policy, false))) refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+      if (!(await this.#ack(own, fresh, row.policy.pool, null, false)))
+        refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
       return;
     }
-    for (const task of prior) if (await this.#ack(task, fresh, row.policy, false)) return;
+    for (const task of prior) if (await this.#ack(task, fresh, row.policy.pool, null, false)) return;
     refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
   }
   async validate(_original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void> {
@@ -573,6 +576,180 @@ export class DockerContainedResources implements DockerContainedResourceControll
         current
       );
   }
+  #poolArguments(seen: Observation, policy: DockerEmployeeResourcePolicy['pool']): string[] {
+    return [
+      'configure-pool',
+      '--box-id',
+      this.configuration.boxId,
+      '--anchor-id',
+      seen.anchor.id,
+      '--anchor-pid',
+      String(seen.anchor.pid),
+      '--anchor-start',
+      seen.anchor.startTicks,
+      '--parent-dev',
+      seen.parent.dev,
+      '--parent-ino',
+      seen.parent.ino,
+      '--memory-max',
+      String(policy.memoryMaxBytes),
+      '--swap-max',
+      String(policy.swapMaxBytes),
+      '--pids-max',
+      String(policy.pidsMax),
+      '--cpu-weight',
+      String(policy.cpuWeight),
+      '--cpuset-cpus',
+      canonicalCpus(policy.allowedCpus),
+    ];
+  }
+  async #poolCensus(role: 'anchor' | 'pool-helper'): Promise<string[]> {
+    const raw = await this.command.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'label=org.reverie.purpose=boxed-resource-helper-v1',
+      '--filter',
+      'label=reverie.box.resource.box=' + this.configuration.boxId,
+      '--filter',
+      'label=reverie.box.resource.role=' + role,
+      '--format',
+      '{{.ID}}',
+    ]);
+    if (Buffer.byteLength(raw) > 16384) refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
+    const ids = raw.trim()
+      ? raw
+          .trim()
+          .split(String.fromCharCode(10))
+          .map((value) => cid.parse(value))
+      : [];
+    if (ids.length > 128 || new Set(ids).size !== ids.length) refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
+    return ids.sort();
+  }
+  /** Re-earn an ORIGINAL actual native ACK. No create/start/configure path. */
+  async capturePoolObservation(
+    input: DockerEmployeeResourcePolicy['pool'],
+    current: () => void
+  ): Promise<DockerPoolReconciliationReceipt> {
+    const policy = DockerEmployeePoolPolicy.parse(input);
+    current();
+    const anchors = await this.#poolCensus('anchor');
+    current();
+    if (anchors.length !== 1) refuse('DOCKER_POOL_ANCHOR_UNCONFIRMED');
+    const id = anchors[0]!,
+      name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32),
+      configuration = this.#configuration('anchor', name, ['anchor']);
+    await this.#fixed(id, configuration);
+    current();
+    const init = await this.#init(id);
+    current();
+    if (!init) refuse('DOCKER_POOL_ANCHOR_UNCONFIRMED');
+    const fresh = await this.#probe(init);
+    current();
+    if (!this.#matches(fresh, policy, null)) refuse('DOCKER_POOL_POLICY_CHANGED');
+    await this.#poolWritersClosed();
+    current();
+    const ids = await this.#poolCensus('pool-helper');
+    current();
+    if (!ids.length) refuse('DOCKER_POOL_ORIGINAL_ACK_MISSING');
+    const matches: DockerContinuationTask[] = [];
+    for (const candidate of ids) {
+      const raw = await this.#inspect(candidate);
+      current();
+      const label = z.record(z.string(), z.string()).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Labels);
+      const taskName = z
+        .string()
+        .regex(/^reverie-boxed-pool-helper-[a-f0-9]{64}$/)
+        .parse(label['reverie.box.resource.name']);
+      const expected = this.#configuration('pool-helper', taskName, this.#poolArguments(fresh, policy), {
+        path: this.#parent,
+        target: '/run/reverie-box-pool',
+      });
+      await this.#fixed(candidate, expected);
+      current();
+      const state = z
+        .object({
+          Status: z.string(),
+          Running: z.boolean(),
+          Paused: z.boolean(),
+          Restarting: z.boolean(),
+          Dead: z.boolean(),
+          ExitCode: z.number().int(),
+          OOMKilled: z.boolean().optional(),
+          Error: z.string().optional(),
+        })
+        .parse(raw.State);
+      if (
+        state.Status !== 'exited' ||
+        state.Running ||
+        state.Paused ||
+        state.Restarting ||
+        state.Dead ||
+        state.ExitCode !== 0 ||
+        state.OOMKilled === true ||
+        (state.Error ?? '') !== ''
+      )
+        refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+      const ack = observation.parse(JSON.parse(await this.command.run(['container', 'logs', candidate])));
+      current();
+      const task = DockerContinuationTask.parse({
+        role: 'pool-helper',
+        name: taskName,
+        imageId: this.configuration.helperImageId,
+        configurationDigest: dockerContinuationDigest(expected),
+        phase: 'completed',
+        containerId: candidate,
+        resultDigest: dockerContinuationDigest(ack),
+      });
+      if (!(await this.#ack(task, fresh, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+      current();
+      matches.push(task);
+    }
+    if (matches.length !== 1) refuse('DOCKER_POOL_ACK_AMBIGUOUS');
+    if (
+      !isDeepStrictEqual(await this.#poolCensus('pool-helper'), ids) ||
+      !isDeepStrictEqual(await this.#poolCensus('anchor'), anchors)
+    )
+      refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
+    current();
+    await this.#fixed(id, configuration);
+    current();
+    const confirmed = await this.#probe({ ...init, startTicks: fresh.anchor.startTicks });
+    current();
+    if (
+      !isDeepStrictEqual(
+        { parent: fresh.parent, anchor: fresh.anchor },
+        { parent: confirmed.parent, anchor: confirmed.anchor }
+      ) ||
+      !this.#matches(confirmed, policy, null)
+    )
+      refuse('DOCKER_POOL_EPOCH_CHANGED');
+    if (!(await this.#ack(matches[0]!, confirmed, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+    current();
+    const record = DockerPoolObservationRecord.parse({
+      version: 1,
+      purpose: 'reverie-boxed-pool-observation-v1',
+      boxId: this.configuration.boxId,
+      deployment: this.configuration.deployment,
+      helperImageId: this.configuration.helperImageId,
+      poolPolicy: policy,
+      epoch: { boxId: confirmed.boxId, parent: confirmed.parent, anchor: confirmed.anchor },
+      anchorTask: {
+        role: 'anchor',
+        name,
+        imageId: this.configuration.helperImageId,
+        configurationDigest: dockerContinuationDigest(configuration),
+        phase: 'running',
+        containerId: id,
+        initPid: confirmed.anchor.pid,
+        initStartTicks: confirmed.anchor.startTicks,
+      },
+      configuration: matches[0],
+    });
+    return new DockerPoolReconciliationReceipt(poolObservationOrigin, record, current);
+  }
   async preparePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const anchor = await this.#anchor(row, current);
     current();
@@ -590,31 +767,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     await this.#configureTask(
       row,
       'pool-helper',
-      [
-        'configure-pool',
-        '--box-id',
-        this.configuration.boxId,
-        '--anchor-id',
-        anchor.id,
-        '--anchor-pid',
-        String(anchor.pid),
-        '--anchor-start',
-        anchor.startTicks,
-        '--parent-dev',
-        seen.parent.dev,
-        '--parent-ino',
-        seen.parent.ino,
-        '--memory-max',
-        String(p.memoryMaxBytes),
-        '--swap-max',
-        String(p.swapMaxBytes),
-        '--pids-max',
-        String(p.pidsMax),
-        '--cpu-weight',
-        String(p.cpuWeight),
-        '--cpuset-cpus',
-        canonicalCpus(p.allowedCpus),
-      ],
+      this.#poolArguments(seen, p),
       { path: this.#parent, target: '/run/reverie-box-pool' },
       current
     );
@@ -669,7 +822,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const seen = await this.#probe(anchor, await this.#worker(row));
     const issued = this.journal.read(row, 'leaf-helper');
     if (!issued || issued.phase === 'create-issued' || issued.phase === 'created') return null;
-    if (!(await this.#ack(issued, seen, row.policy, true))) refuse('DOCKER_RESOURCE_WORKER_HELPER_UNACKNOWLEDGED');
+    if (!(await this.#ack(issued, seen, row.policy, row.policy.memoryHighBytes, true)))
+      refuse('DOCKER_RESOURCE_WORKER_HELPER_UNACKNOWLEDGED');
     if (!this.#matches(seen, row.policy, row.policy.memoryHighBytes)) return null;
     return structuredClone(row.policy);
   }

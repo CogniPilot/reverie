@@ -183,3 +183,39 @@ an older backup over them. Do not run competing old and new writers or downgrade
 the data format by editing private files. These source contracts and synthetic
 startup tests do not establish acceptance of a deployed image or grant recovery
 of an uncertain paid launch.
+
+## Reconcile a missing shared Docker pool acknowledgement
+
+A completed pool helper can outlive the employee that originally owned its
+journal row. The supported metadata-only observation path is
+`GET /api/company/employees/:id/docker-pool/status`. A verified owner or an
+agent with a current explicit `recoverEmployees` grant may inspect it. Existing
+approved pool policy is required; this operation cannot approve or edit limits.
+
+When the response offers `reconcile-pool`, submit
+`POST /api/company/employees/:id/docker-pool/reconcile` with the returned
+`sessionId`, `sessionGeneration` and `expectedScopeDigest` copied from
+`scopeDigest`. The server repeats fixed-image/configuration, original successful
+native log ACK, current anchor PID/birth, parent identity and pool-policy checks,
+then records only global observation metadata through the canonical company
+writer. It never creates or starts a helper, changes limits, launches a provider,
+or clears an employee launch fence. No retired employee/session/origin UUID is
+invented from helper labels.
+
+`retained` reports the observation record, not permission to launch. Every
+later resource use still needs its own fresh native proof. Running/unknown
+writers, ambiguous or foreign helpers, changed epochs, missing original logs,
+revoked authority and stale previews remain held. Unknown publication is not
+silently retried; after restart the canonical record and original native proof
+must be observed again. This does not implement a new resource epoch or authorize
+replaying a historical START. Source tests use controlled physical ports and do
+not establish installed Docker/provider acceptance.
+
+Canonical company format 2 is published atomically when either retained pool
+lineage or a re-earned observation becomes nonempty. Empty legacy format 1
+remains readable; format 1 containing new retained pool metadata is rejected.
+Once format 2 is published, this writer refuses downgrades even if the arrays
+later become empty. Older literal-1 readers must refuse the entire store rather
+than strip fields. Do not run old/new writers together or restore an older backup
+over current company data. This envelope upgrade does not change any employee,
+session, binding, approved resource policy, operation or launch fence.

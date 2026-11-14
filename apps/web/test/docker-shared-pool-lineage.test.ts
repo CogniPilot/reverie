@@ -1,12 +1,13 @@
 /** Actual canonical writer and lifecycle; all container descriptors are synthetic
  * DATA. Native acceptance is tested independently by the resource controller. */
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile as writeCompanyFixture } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService, type CompanyServiceDeps } from '../src/company-service.js';
-import { EmployeeSchema } from '../src/company-types.js';
+import { EmployeeSchema, CompanyStateSchema } from '../src/company-types.js';
+import { z } from 'zod';
 import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import { retainedDockerPoolTasks, captureDockerSharedPoolLineages } from '../src/docker-shared-pool-lineage.js';
 import type { DockerContinuationTask } from '../src/docker-continuation-task.js';
@@ -132,6 +133,66 @@ async function fixture() {
   return { store, file, company, row };
 }
 describe('canonical shared pool intent survives its original owner', () => {
+  it('imports empty format1, atomically upgrades retained metadata to2 and refuses an old literal1 reader', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pool-format-'));
+    directories.push(directory);
+    const file = join(directory, 'company.json'),
+      store = new CompanyStore(file);
+    await store.init();
+    await store.update(() => {});
+    const before = store.snapshot();
+    expect(before.version).toBe(1);
+    const staleReader = new CompanyStore(file);
+    await staleReader.init();
+    const original = record();
+    await store.update((state) => {
+      state.dockerEmployeeContinuations = [original];
+    });
+    const current = store.snapshot();
+    expect(current.version).toBe(2);
+    expect(current.dockerEmployeeContinuations).toEqual([original]);
+    const imported = new CompanyStore(file);
+    await imported.init();
+    expect(imported.snapshot()).toEqual(current);
+    // Exact literal-1 envelope gate used by older complete readers, rather
+    // than a second implementation of the current company reader.
+    const oldVersionGate = z.object({ version: z.literal(1) }).passthrough();
+    expect(oldVersionGate.safeParse(before).success).toBe(true);
+    expect(oldVersionGate.safeParse(current).success).toBe(false);
+    expect(CompanyStateSchema.safeParse({ ...current, version: 1 }).success).toBe(false);
+    await staleReader.update((state) => {
+      state.memories = [];
+    });
+    expect(staleReader.snapshot().version).toBe(2);
+    const bytes = await readFile(file, 'utf8');
+    await expect(
+      staleReader.update((state) => {
+        state.version = 1;
+      })
+    ).rejects.toMatchObject({ code: 'DOCKER_COMPANY_FORMAT_DOWNGRADE_REFUSED' });
+    expect(await readFile(file, 'utf8')).toBe(bytes);
+    const invalid = JSON.stringify({ ...current, version: 1 });
+    await writeCompanyFixture(file, invalid, { mode: 0o600 });
+    await expect(new CompanyStore(file).init()).rejects.toThrow('Company format 2');
+    expect(await readFile(file, 'utf8')).toBe(invalid);
+  });
+  it('never silently downgrades format2 even when the global metadata arrays are empty', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pool-format-empty-'));
+    directories.push(directory);
+    const store = new CompanyStore(join(directory, 'company.json'));
+    await store.init();
+    await store.update((state) => {
+      state.version = 2;
+    });
+    const before = store.snapshot();
+    await expect(
+      store.update((state) => {
+        state.version = 1;
+      })
+    ).rejects.toMatchObject({ code: 'DOCKER_COMPANY_FORMAT_DOWNGRADE_REFUSED' });
+    expect(store.snapshot()).toEqual(before);
+  });
+
   it('serializes different employee configure START intents under the real canonical lock', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'pool-writer-race-'));
     directories.push(directory);

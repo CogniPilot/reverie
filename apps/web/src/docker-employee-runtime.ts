@@ -1,3 +1,4 @@
+import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -57,6 +58,7 @@ interface Attached {
   engine: DockerEmployeeEngine;
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
+  pool: DockerPoolReconciliation;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -274,7 +276,8 @@ export class DockerEmployeeRuntime {
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
             'reverie-boxed-anchor-' + boxId.slice(0, 32),
-            configuration.helperImageId
+            configuration.helperImageId,
+            boxId
           ),
       });
     const engine = new DockerEmployeeEngine(
@@ -320,7 +323,10 @@ export class DockerEmployeeRuntime {
       },
       (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure))
     );
-    this.#attached = { company, ctx, store, engine, provider, service };
+    const pool = new DockerPoolReconciliation(company,store,resources,()=>{
+      if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+    });
+    this.#attached = { company, ctx, store, engine, provider, service, pool };
   }
   registerRoutes(
     app: FastifyInstance,
@@ -344,7 +350,8 @@ export class DockerEmployeeRuntime {
       guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, () => {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }),
-      readLegacyDockerPolicyProposal
+      readLegacyDockerPolicyProposal,
+      a.pool
     );
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
