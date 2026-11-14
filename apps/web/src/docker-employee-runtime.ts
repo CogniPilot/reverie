@@ -260,17 +260,7 @@ export class DockerEmployeeRuntime {
     if (this.#attached || !this.current()) throw Error('Boxed runtime composition is not current');
     const configuration = this.selected.value,
       store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id));
-    const eligible = () =>
-      company.store.snapshot().dockerEmployeeContinuations?.filter((row) => {
-        const subject = store.subject(row.employeeId);
-        return (
-          subject &&
-          subject.owner === row.owner &&
-          subject.sessionId === row.request.sessionId &&
-          subject.sessionGeneration === row.request.sessionGeneration &&
-          subject.sourceDigest === row.sourceDigest
-        );
-      }) ?? [];
+    const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
@@ -278,10 +268,10 @@ export class DockerEmployeeRuntime {
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
         selectedWorkerContainerIds: () => [
-          ...new Set(eligible().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
+          ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
         ],
         retainedPoolConfigurationTasks: () =>
-          eligible().flatMap((row) => row.tasks?.filter((task) => task.role === 'pool-helper') ?? []),
+          inventory().flatMap((row) => row.tasks?.filter((task) => task.role === 'pool-helper') ?? []),
       });
     const engine = new DockerEmployeeEngine(
       command,

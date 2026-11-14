@@ -251,6 +251,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
   return {
     app,
     companyStore,
+    saved,
     company,
     store,
     url,
@@ -474,5 +475,108 @@ describe('boxed recovery HTTP and canonical employee permissions', () => {
     }
     expect(f.companyStore.snapshot()).toEqual(before);
     expect(f.effects()).toBe(0);
+  });
+});
+
+describe('canonical resource inventory remains independent of launch permission', () => {
+  async function boundFixture() {
+    const f = await fixture({ storedPolicy: true, office: true });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: { request: f.request },
+    });
+    expect(response.statusCode).toBe(200);
+    await f.companyStore.update((state) => {
+      const row = state.dockerEmployeeContinuations![0]!,
+        employee = state.employees.find((value) => value.id === target)!;
+      row.phase = 'ready';
+      row.destination = { ...row.original, containerId: '8'.repeat(64), imageId: destinationImage };
+      employee.dockerBinding = {
+        version: 1,
+        operationId: row.request.operationId,
+        credentialId: row.credentialId,
+        sessionId: row.request.sessionId,
+        sessionGeneration: row.request.sessionGeneration,
+        containerId: row.destination.containerId,
+        imageId: row.destination.imageId,
+        originalDigest: dockerContinuationDigest(row.destination),
+        policyDigest: dockerContinuationDigest(row.policy),
+      };
+      employee.onVacation = true;
+      employee.desiredRunning = false;
+    });
+    return f;
+  }
+  it.each(['held', 'changed-source', 'remote-saved'] as const)(
+    'retains exact current bound destination when %s prevents launching',
+    async (change) => {
+      const f = await boundFixture();
+      if (change === 'held') f.saved.providerDispatchHeld = true;
+      else if (change === 'changed-source') f.saved.workingDir = '/changed-launch-recipe';
+      else f.saved.remote = true;
+      const row = f.store.record(target)!;
+      expect(f.store.subject(target)?.sourceDigest).not.toBe(row.sourceDigest);
+      expect(f.store.resourceInventory().map((value) => value.destination?.containerId)).toEqual(['8'.repeat(64)]);
+      expect(f.effects()).toBe(1);
+    }
+  );
+  it('retains a current bound row pool task despite held launch, without treating history as an ACK', async () => {
+    const f = await boundFixture();
+    f.saved.providerDispatchHeld = true;
+    const task = {
+      role: 'pool-helper' as const,
+      name: 'reverie-boxed-pool-synthetic',
+      imageId: destinationImage,
+      configurationDigest: '6'.repeat(64),
+      phase: 'completed' as const,
+      containerId: '5'.repeat(64),
+      resultDigest: '4'.repeat(64),
+    };
+    await f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations![0]!.tasks = [task];
+    });
+    expect(f.store.subject(target)).toBeUndefined();
+    expect(
+      f.store.resourceInventory().flatMap((row) => row.tasks?.filter((value) => value.role === 'pool-helper') ?? [])
+    ).toEqual([task]);
+    expect(f.effects()).toBe(1);
+  });
+  it.each([
+    'owner',
+    'session',
+    'generation',
+    'operation',
+    'credential',
+    'container',
+    'image',
+    'destination-digest',
+    'policy-digest',
+    'missing-binding',
+    'duplicate-employee',
+    'early-phase',
+    'eligible-mismatched-binding',
+  ] as const)('does not admit a retained destination after %s changes', async (change) => {
+    const f = await boundFixture();
+    f.saved.providerDispatchHeld = change !== 'eligible-mismatched-binding';
+    await f.companyStore.update((state) => {
+      const employee = state.employees.find((value) => value.id === target)!,
+        binding = employee.dockerBinding!;
+      if (change === 'owner') employee.owner = 'different-owner';
+      else if (change === 'session') employee.sessionId = '77777777-7777-4777-8777-777777777777';
+      else if (change === 'generation') employee.sessionGeneration++;
+      else if (change === 'operation') binding.operationId = '77777777-7777-4777-8777-777777777777';
+      else if (change === 'credential') binding.credentialId = '77777777-7777-4777-8777-777777777777';
+      else if (change === 'container' || change === 'eligible-mismatched-binding') binding.containerId = '7'.repeat(64);
+      else if (change === 'image') binding.imageId = 'sha256:' + '7'.repeat(64);
+      else if (change === 'destination-digest') binding.originalDigest = '7'.repeat(64);
+      else if (change === 'policy-digest') binding.policyDigest = '7'.repeat(64);
+      else if (change === 'missing-binding') delete employee.dockerBinding;
+      else if (change === 'duplicate-employee')
+        state.employees.push({ ...employee, id: '77777777-7777-4777-8777-777777777777' });
+      else state.dockerEmployeeContinuations![0]!.phase = 'pool-issued';
+    });
+    expect(f.store.resourceInventory()).toEqual([]);
   });
 });

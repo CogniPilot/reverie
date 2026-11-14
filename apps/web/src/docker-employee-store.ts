@@ -110,6 +110,57 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
       desiredRunning: employee.desiredRunning,
     };
   }
+  /** Resource membership is DATA for fresh Engine/kernel proof, never launch permission.
+   * A retained binding remains accounted for when its saved launch is held or changed. */
+  resourceInventory(): DockerEmployeeContinuationRecord[] {
+    const state = this.company.store.snapshot(),
+      rows = state.dockerEmployeeContinuations ?? [];
+    return rows.filter((row) => {
+      const employees = state.employees.filter((employee) => employee.id === row.employeeId),
+        employee = employees[0];
+      if (
+        employees.length !== 1 ||
+        !employee ||
+        rows.filter((value) => value.employeeId === row.employeeId).length !== 1 ||
+        state.employees.filter((value) => value.sessionId === employee.sessionId).length !== 1 ||
+        employee.bindingMigration ||
+        employee.owner !== row.owner ||
+        employee.sessionId !== row.request.sessionId ||
+        employee.sessionGeneration !== row.request.sessionGeneration
+      )
+        return false;
+      const binding = employee.dockerBinding,
+        destination = row.destination;
+      const bound = Boolean(
+        binding &&
+        destination &&
+        ['identity-ready', 'provider-issued', 'ready'].includes(row.phase) &&
+        binding.operationId === row.request.operationId &&
+        binding.credentialId === row.credentialId &&
+        binding.sessionId === row.request.sessionId &&
+        binding.sessionGeneration === row.request.sessionGeneration &&
+        binding.containerId === destination.containerId &&
+        binding.imageId === destination.imageId &&
+        binding.originalDigest === dockerContinuationDigest(destination) &&
+        binding.policyDigest === dockerContinuationDigest(row.policy)
+      );
+      if (bound) return true;
+      // Published destinations require their exact current binding, even if a
+      // saved launch recipe still happens to be eligible. Earlier phases may
+      // legitimately precede publication and retain the existing subject check.
+      if (row.phase === 'provider-issued' || row.phase === 'ready') return false;
+      const subject = this.subject(row.employeeId);
+      if (
+        subject &&
+        subject.owner === row.owner &&
+        subject.sessionId === row.request.sessionId &&
+        subject.sessionGeneration === row.request.sessionGeneration &&
+        subject.sourceDigest === row.sourceDigest
+      )
+        return true;
+      return false;
+    });
+  }
   policy(employeeId: string): DockerEmployeeResourcePolicy {
     const rows = this.company.store.snapshot().employees.filter((e) => e.id === employeeId);
     if (rows.length !== 1 || !rows[0]!.dockerResourcePolicy)
