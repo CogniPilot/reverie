@@ -715,14 +715,22 @@
         this.showToast?.('Text was typed but Enter was withheld. Check the terminal before submitting.', 'warning');
       this._inputRetryAt.set(sid, Date.now() + (['pending', 'not-issued'].includes(phase) ? 1000 : 80));
       await this._refreshInputJournal();
-      if (final(phase))
-        setTimeout(() => {
-          // The original dispatch may still be unwinding after its ACK. Join
-          // it before draining the next record, rather than losing this wake
-          // to the in-flight guard and waiting for a recurring sweep.
+      if (final(phase)) {
+        const drainAfterCooldown = () => {
+          // An ACK can precede dispatch completion. Timer and wall clocks can
+          // also disagree at the cooldown boundary; neither may lose the wake.
           const original = this._inputDrainTasks.get(sid) || Promise.resolve();
-          void original.then(() => this._drainSession(sid)).catch(() => this._holdInputRecovery(sid));
-        }, 80);
+          void original
+            .then(() => {
+              if (!this._pendingDeliveries.get(sid)?.length) return;
+              const remaining = (this._inputRetryAt.get(sid) || 0) - Date.now();
+              if (remaining > 0) setTimeout(drainAfterCooldown, Math.min(remaining, 1000));
+              else return this._drainSession(sid);
+            })
+            .catch(() => this._holdInputRecovery(sid));
+        };
+        setTimeout(drainAfterCooldown, 80);
+      }
     },
 
     async _receiveInputResponse(sid, response) {

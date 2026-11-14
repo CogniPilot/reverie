@@ -45,6 +45,46 @@ describe('committed ordering and original transport ownership', () => {
       original.mockRestore();
     }
   });
+  it.each(['websocket', 'http'])(
+    'reschedules an early final-ACK cooldown wake without a sweep (%s)',
+    async (transport) => {
+      fixture = browserInputFixture();
+      const sent: string[] = [];
+      const app = await fixture.page(async (_url, options) => {
+        sent.push(body(options).input);
+        return response();
+      });
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      try {
+        if (transport === 'websocket') {
+          app._ws = { readyState: 1, send: (value) => sent.push(JSON.parse(value).d) };
+          app._wsSessionId = 'session-1';
+        }
+        await Promise.all(['draft', '\x1b[A'].map((text) => app._sendInputAsync('session-1', text)));
+        await app._inputDrainTasks.get('session-1');
+        if (transport === 'websocket') await app._onWsInputAck(1, { t: 'ia', seq: 1, confirmed: true }, 'session-1');
+        await app._inputOutcomes.get('session-1');
+        expect(sent).toEqual(['draft']);
+        const deadline = app._inputRetryAt.get('session-1')!;
+        // Timer clocks can reach their deadline while the wall clock is still1ms
+        // short. An early callback must keep a wake, without sending early.
+        vi.setSystemTime(deadline - 81);
+        await vi.advanceTimersByTimeAsync(80);
+        await app._inputDrainTasks.get('session-1');
+        expect(sent).toEqual(['draft']);
+        await vi.advanceTimersByTimeAsync(1);
+        await app._inputDrainTasks.get('session-1');
+        expect(sent).toEqual(['draft', '\x1b[A']);
+        if (transport === 'websocket') await app._onWsInputAck(2, { t: 'ia', seq: 2, confirmed: true }, 'session-1');
+        await app._inputOutcomes.get('session-1');
+        const stored = await app._inputJournal.snapshot();
+        expect(stored.records).toEqual([]);
+        expect(stored.holds).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
   it('rapid input retains distinct original-issuer frames and advances only on confirmed ACKs', async () => {
     fixture = browserInputFixture();
     const app = await fixture.page(),
