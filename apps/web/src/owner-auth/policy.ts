@@ -151,6 +151,8 @@ const AGENT_ROUTES = new Set([
   'POST /api/experts-hire-requests/:requestId/withdraw',
   // The board: every agent's `reverie board` reads and moves cards.
   'GET /api/board',
+  'GET /api/board/capabilities',
+  'GET /api/board/identity',
   'GET /api/board/issues',
   'GET /api/board/issues/:id',
   'GET /api/publication/credentials',
@@ -478,15 +480,20 @@ export function registerOwnerPolicy(app: FastifyInstance, deps: PolicyDeps): voi
 
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     const originalToken = req.cookies?.[OWNER_COOKIE];
-    eventReadAdmissions.set(req, Object.freeze({
-      current: () => {
-        const originalSession = deps.service.session(originalToken, false);
-        // Neither a limited nor a password-change login admits the global stream.
-        if (originalSession?.role === 'limited' || originalSession?.restricted) return false;
-        return !dockerWorkerIdentityPresented(req) &&
-          (originalSession !== undefined || deps.service.policy() !== 'enforce');
-      },
-    }));
+    eventReadAdmissions.set(
+      req,
+      Object.freeze({
+        current: () => {
+          const originalSession = deps.service.session(originalToken, false);
+          // Neither a limited nor a password-change login admits the global stream.
+          if (originalSession?.role === 'limited' || originalSession?.restricted) return false;
+          return (
+            !dockerWorkerIdentityPresented(req) &&
+            (originalSession !== undefined || deps.service.policy() !== 'enforce')
+          );
+        },
+      })
+    );
     // Limited accounts remain limited even when an operator changes the owner policy to off/log.
     const signedIn = deps.service.session(req.cookies?.[OWNER_COOKIE]);
     if (signedIn?.role === 'limited') {

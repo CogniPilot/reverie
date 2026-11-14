@@ -17,11 +17,18 @@ import {
   humanTransportContinuation,
   credentiallessTransportCurrent,
 } from '../src/web/middleware/auth.js';
-import { callerOf, registerOwnerPolicy, ownerEventReadAdmission } from '../src/owner-auth/policy.js';
+import { callerOf, registerOwnerPolicy, ownerEventReadAdmission, classify } from '../src/owner-auth/policy.js';
 import { OwnerAuthStore } from '../src/owner-auth/store.js';
 import { OwnerAuthService } from '../src/owner-auth/service.js';
 import { ownerFor } from '../src/web/route-helpers.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
+import { registerBoardRoutes } from '../src/web/routes/board-routes.js';
+import { BoardStore } from '../src/board-store.js';
+import { CompanyStore } from '../src/company-store.js';
+import { CompanyService } from '../src/company-service.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { agentCapabilities } from '../src/cli-agent-capabilities.js';
+import { httpRequest } from '../src/cli-agent.js';
 
 const binding: DockerWorkerIdentityBinding = {
   employeeId: '22222222-2222-4222-8222-222222222222',
@@ -44,7 +51,7 @@ async function fixture(
   policy: 'off' | 'log' | 'enforce',
   password = true,
   register = true,
-  transport: { requireMachineProof?: boolean; basePath?: string; owner?: boolean } = {}
+  transport: { requireMachineProof?: boolean; basePath?: string; owner?: boolean; board?: boolean } = {}
 ) {
   if (password) process.env.REVERIE_PASSWORD = 'synthetic-password';
   else delete process.env.REVERIE_PASSWORD;
@@ -105,9 +112,55 @@ async function fixture(
     delete req.headers[DOCKER_WORKER_IDENTITY_HEADER];
     return { current: original.current(), caller: callerOf(req, { service, ctx }) };
   });
+  let board: BoardStore | undefined;
+  if (transport.board) {
+    const companyStore = new CompanyStore(join(dir, 'company.json'));
+    await companyStore.init();
+    await companyStore.update((state) => {
+      state.employees.push(
+        EmployeeSchema.parse({
+          id: binding.employeeId,
+          sessionId: binding.sessionId,
+          sessionGeneration: binding.sessionGeneration,
+          name: 'Synthetic employee',
+          icon: 'S',
+          position: 'Employee',
+          expertise: ['testing'],
+          createdAt: 1,
+          permissions: { manageBoard: false, manageDecisions: false, editBoardIssues: false },
+        })
+      );
+    });
+    const unavailable = () => {
+      throw Error('Read-only capability fixture must not dispatch');
+    };
+    const company = new CompanyService(companyStore, {
+      getSession: (id) => ctx.sessions.get(id),
+      chatrooms: { rooms: () => [], room: () => undefined, addMember: unavailable, setStatus: unavailable },
+      research: { start: async () => unavailable(), inspect: async () => undefined, stop: async () => unavailable() },
+    });
+    board = new BoardStore(join(dir, 'board.json'));
+    await board.init();
+    registerBoardRoutes(app, ctx, {
+      store: board,
+      company: (owner) => company.view(owner),
+      rooms: () => [],
+      audit: async () => unavailable(),
+    });
+  }
   await app.ready();
   const headers = { [DOCKER_WORKER_IDENTITY_HEADER]: token, 'x-reverie-parent-session': binding.sessionId };
-  return { app, auth, headers, ownerCookie, callbackEffects: () => callbackEffects };
+  return {
+    app,
+    auth,
+    headers,
+    ownerCookie,
+    callbackEffects: () => callbackEffects,
+    board,
+    revoke: () => {
+      selected = undefined;
+    },
+  };
 }
 describe('actual boxed worker transport', () => {
   it.each(['off', 'log', 'enforce'] as const)(
@@ -308,5 +361,80 @@ describe('actual boxed worker transport', () => {
     expect(
       (await f.app.inject({ method: 'PUT', url: '/api/settings', headers: { authorization }, payload: {} })).statusCode
     ).toBe(200);
+  });
+});
+
+describe('boxed capability reads through actual owner policy', () => {
+  it('classifies the complete fixed provider probe transport without opening Board writes', () => {
+    const routes = [
+      ['GET', '/api/board/capabilities', 'agent'],
+      ['GET', '/api/board/identity', 'agent'],
+      ['GET', '/api/board', 'agent'],
+      ['GET', '/api/publication/credentials', 'agent'],
+      ['GET', '/api/company/employees/:id/docker-policy', 'agent'],
+      ['POST', '/api/hook-event', 'public'],
+      ['POST', '/api/status-telemetry', 'public'],
+    ];
+    for (const [method, route, expected] of routes) expect(classify(method, route, route)).toBe(expected);
+    for (const route of ['/api/board/capabilities', '/api/board/identity']) {
+      expect(classify('POST', route, route)).toBe('owner');
+      expect(classify('PUT', route, route)).toBe('owner');
+      expect(classify('GET', route + '/private', route + '/private')).toBe('owner');
+    }
+  });
+
+  it('carries the real agent CLI capability request through Fastify, signed proof and current CompanyService', async () => {
+    const f = await fixture('enforce', false, true, { requireMachineProof: true, owner: true, board: true });
+    const before = f.board!.snapshot();
+    await f.app.listen({ host: '127.0.0.1', port: 0 });
+    const address = f.app.server.address();
+    if (!address || typeof address === 'string') throw Error('Owned fixture listener unavailable');
+    const output: string[] = [];
+    const error: string[] = [];
+    const ctx = {
+      apiUrl: 'http://127.0.0.1:' + address.port,
+      selfId: binding.sessionId,
+      workerIdentity: f.headers[DOCKER_WORKER_IDENTITY_HEADER],
+    };
+    const result = await agentCapabilities(
+      {
+        ctx,
+        request: httpRequest,
+        json: true,
+        io: { out: (text) => output.push(text), err: (text) => error.push(text) },
+      },
+      async () => ({ directory: 'synthetic-no-credential-directory', bindings: [], note: 'No personal files read.' })
+    );
+    expect(result).toBe(0);
+    expect(error).toEqual([]);
+    expect(output).toHaveLength(1);
+    expect(JSON.parse(output[0])).toMatchObject({
+      identity: { kind: 'agent', sessionId: binding.sessionId, employeeId: binding.employeeId },
+      board: { manageBoard: false, createDecision: false },
+    });
+    const identity = await httpRequest(ctx, { method: 'GET', path: '/api/board/identity' });
+    expect(identity.status).toBe(200);
+    expect(identity.json?.data).toMatchObject({
+      identity: { kind: 'agent', sessionId: binding.sessionId, employeeId: binding.employeeId },
+    });
+    expect(f.board!.snapshot()).toEqual(before);
+  });
+  it('keeps missing, wrong-session and revoked proof denied, with owner writes still closed', async () => {
+    const f = await fixture('enforce', false, true, { requireMachineProof: true, owner: true, board: true });
+    for (const path of ['/api/board/capabilities', '/api/board/identity']) {
+      expect(
+        (await f.app.inject({ url: path, headers: { 'x-reverie-parent-session': binding.sessionId } })).statusCode
+      ).toBe(403);
+      expect(
+        (await f.app.inject({ url: path, headers: { ...f.headers, 'x-reverie-parent-session': stranger } })).statusCode
+      ).toBe(403);
+      expect((await f.app.inject({ url: path, headers: f.headers })).statusCode).toBe(200);
+    }
+    expect(
+      (await f.app.inject({ method: 'PUT', url: '/api/settings', headers: f.headers, payload: {} })).statusCode
+    ).toBe(403);
+    f.revoke();
+    for (const path of ['/api/board/capabilities', '/api/board/identity'])
+      expect((await f.app.inject({ url: path, headers: f.headers })).statusCode).toBe(403);
   });
 });
