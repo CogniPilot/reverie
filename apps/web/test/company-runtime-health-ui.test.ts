@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { encodeDockerProviderPlacement } from '../src/web/public/docker-provider-health-placement.js';
+import { encodeDockerProviderPlacement } from '../src/docker-provider-health-placement.js';
 /** Real company/member/profile DOM and existing owner restart/WS affordances. */
 import {afterEach,expect,it,vi} from 'vitest';
 import {createHarness,member,room} from './helpers/chat-app-harness.mjs';
@@ -495,8 +495,8 @@ function boxedPlacementFixture() {
 }
 it.each(['containerId','operationId','imageId','credentialId'])('rejects late old Docker %s health with unchanged public9 tuple and clears retained member/session facts',async field=>{
  const {h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal',working:false});
- const binding=boxedPlacementFixture(),encode=h.window.ReverieDockerProviderPlacement.encode;
- Object.assign(employee,{sessionGeneration:1,dockerBinding:binding});
+ const binding=boxedPlacementFixture(),encode=encodeDockerProviderPlacement;
+ Object.assign(employee,{sessionGeneration:1,dockerBinding:binding,dockerProviderPlacement:encode(binding)});
  const old=nativeProof(employee,'healthy',{dockerPlacement:encode(binding)});
  Object.assign(employee,{providerHealth:old});Object.assign(session,{providerHealth:old});
  h.shell.room.members[0].providerHealth=old;
@@ -507,7 +507,7 @@ it.each(['containerId','operationId','imageId','credentialId'])('rejects late ol
  if(field==='operationId')nextBinding.operationId='80000000-0000-4000-8000-000000000008';
  if(field==='imageId')nextBinding.imageId='sha256:'+'8'.repeat(64);
  if(field==='credentialId')nextBinding.credentialId='80000000-0000-4000-8000-000000000008';
- const next={...employee,dockerBinding:nextBinding,providerHealth:undefined};
+ const next={...employee,dockerBinding:nextBinding,dockerProviderPlacement:encode(nextBinding),providerHealth:undefined};
  expect(nativeProof(next).binding).toBe(old.binding);
  const original=h.app._chatApi.bind(h.app);
  h.app._chatApi=async(path:string,options:unknown)=>path==='/api/company'?{ok:true,data:{...h.shell.company,employees:[next]}}:original(path,options);
@@ -521,19 +521,17 @@ it.each(['containerId','operationId','imageId','credentialId'])('rejects late ol
 });
 it('boxed health without current canonical employee/placement cannot become healthy from a connected terminal',async()=>{
  const {h,employee,session}=await fixture({health:'healthy',scope:'provider',working:true});
- const binding=boxedPlacementFixture(),encode=h.window.ReverieDockerProviderPlacement.encode;
- Object.assign(employee,{sessionGeneration:1,dockerBinding:binding,providerHealth:nativeProof(employee)});
+ const binding=boxedPlacementFixture(),encode=encodeDockerProviderPlacement;
+ Object.assign(employee,{sessionGeneration:1,dockerBinding:binding,dockerProviderPlacement:encode(binding),providerHealth:nativeProof(employee)});
  expect(h.shell.employeeHealth(employee).state).toBe('unknown');
  Object.assign(session,{providerHealth:nativeProof(employee,'healthy',{dockerPlacement:encode(binding)})});
  h.shell.company.employees=[];
  expect(h.shell.employeeHealth({sessionId:SID},h.shell.room.members[0]).state).toBe('unknown');
 });
-it('loads the same closed placement codec once before UI bootstrap and refuses non-scalar malformed correlation',async()=>{
- const {h}=await fixture();const encode=h.window.ReverieDockerProviderPlacement.encode,binding=boxedPlacementFixture();
+it('keeps closed server placement without a new browser script dependency',()=>{
+ const encode=encodeDockerProviderPlacement,binding=boxedPlacementFixture();
  const html=readFileSync(new URL('../src/web/public/index.html',import.meta.url),'utf8');
- expect(html.match(/src="docker-provider-health-placement\.js"/g)).toHaveLength(1);
- expect(html.indexOf('src="docker-provider-health-placement.js"')).toBeLessThan(html.indexOf('src="app.js"'));
- expect(encode(binding)).toBe(encodeDockerProviderPlacement(binding));
+ expect(html).not.toContain('docker-provider-health-placement.js');
  expect(encode(binding)).toBe(JSON.stringify([1,binding.operationId,binding.containerId,binding.imageId,binding.credentialId,binding.sessionId,1,binding.originalDigest,binding.policyDigest]));
  for(const invalid of [{...binding,containerId:[binding.containerId]},{...binding,sessionGeneration:'1'},{...binding,imageId:'latest'},null])expect(encode(invalid)).toBeUndefined();
 });

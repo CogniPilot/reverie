@@ -648,7 +648,8 @@ function caProviderFresh(value, now) {
   return true;
 }
 function caProviderPlacement(employee) {
-  return globalThis.ReverieDockerProviderPlacement?.encode(employee?.dockerBinding);
+  const value = employee?.dockerProviderPlacement;
+  return typeof value === 'string' && value.length > 0 && value.length <= 1024 ? value : undefined;
 }
 function caProviderContext(employee) {
   return caProviderBinding(employee) + '\0' + (caProviderPlacement(employee) ?? '');

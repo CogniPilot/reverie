@@ -1,3 +1,4 @@
+import { encodeDockerProviderPlacement } from './docker-provider-health-placement.js';
 import { viewerHealth, type ProviderHealth } from './worker-provider-health.js';
 import { displayTime } from './display-time.js';
 import { RuntimeRecipeSchema, resourceSessionSourceFacts, type RuntimeRecipe } from './expert-runtime-recipe.js';
@@ -642,6 +643,7 @@ export class CompanyService {
         const session = this.deps.getSession(e.sessionId);
         return {
           ...e,
+          dockerProviderPlacement: encodeDockerProviderPlacement(e.dockerBinding),
           available: !!session,
           runtimeHealth: session?.runtimeHealth ?? 'unknown',
           runtimeHealthScope: session?.runtimeHealthScope ?? (this.deps.workerViewers ? 'terminal' : 'provider'),

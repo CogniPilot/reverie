@@ -1,5 +1,5 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
-import { encodeDockerProviderPlacement } from '../src/web/public/docker-provider-health-placement.js';
+import { encodeDockerProviderPlacement } from '../src/docker-provider-health-placement.js';
 import { DockerProviderHealth } from '../src/docker-provider-health.js';
 import { providerHealthBinding } from '../src/worker-provider-health.js';
 import { EmployeeSchema } from '../src/company-types.js';

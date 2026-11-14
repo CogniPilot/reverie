@@ -1,4 +1,4 @@
-import { encodeDockerProviderPlacement } from './web/public/docker-provider-health-placement.js';
+import { encodeDockerProviderPlacement } from './docker-provider-health-placement.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 /** Non-authorizing Docker provider projection. No Session/viewer/activity evidence. */
 import type { CompanyEmployee } from './company-types.js';

@@ -624,6 +624,13 @@ async function startup(scenario: string) {
         'healthy',
         'Actual Session HTTP DTO must expose fresh Docker native health'
       );
+      const company = await app.inject({
+        method: 'GET',
+        url: '/api/company',
+        headers: { host: 'reverie:3000', cookie },
+      });
+      const e = company.json().data.employees.find((e: { id: string }) => e.id === eid);
+      assert.equal(e.dockerProviderPlacement, current.json().data.providerHealth.dockerPlacement);
     }
 
     if (scenario === 'issued-live') {
@@ -634,10 +641,9 @@ async function startup(scenario: string) {
         headers: { host: 'reverie:3000', cookie },
       });
       assert.equal(response.statusCode, 200);
-      assert.equal(
-        response.json().data.employees.find((e: { id: string }) => e.id === eid).providerHealth?.state,
-        'healthy'
-      );
+      const employee = response.json().data.employees.find((e: { id: string }) => e.id === eid);
+      assert.equal(employee.providerHealth?.state, 'healthy');
+      assert.equal(employee.dockerProviderPlacement, employee.providerHealth.dockerPlacement);
       assert.equal(
         JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0].phase,
         'provider-issued'
