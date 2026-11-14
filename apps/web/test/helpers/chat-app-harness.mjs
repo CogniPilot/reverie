@@ -467,6 +467,8 @@ export async function createHarness({
     }
     window.ReverieApp = ReverieApp;
   `);
+  // Execute the shared ESM codec's exact body in this classic-script DOM harness.
+  window.eval(read('docker-provider-health-placement.js').replace(/^export /gm, ''));
   for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js', 'employee-recovery.js', 'docker-employee-recovery.js']) window.eval(read(f));
   // Full-state SSE handlers depend on the same sticky input-recovery policy as
   // the page. Load those real methods rather than stubbing away their holds.

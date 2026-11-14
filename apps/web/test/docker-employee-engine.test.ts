@@ -1,4 +1,10 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
+import { encodeDockerProviderPlacement } from '../src/web/public/docker-provider-health-placement.js';
+import { DockerProviderHealth } from '../src/docker-provider-health.js';
+import { providerHealthBinding } from '../src/worker-provider-health.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import type { CompanyEmployee } from '../src/company-types.js';
+import { DockerEmployeeProviderHealthProof } from '../src/docker-employee-engine.js';
 import { describe, it, expect, vi } from 'vitest';
 import {
   DockerEmployeeEngine,
@@ -601,5 +607,306 @@ describe('Engine-owned first-launch Codex workspace observation', () => {
     });
     await expect(f.engine.observeCodexWorkspace(f.row, '/workspace/case', () => {})).rejects.toThrow();
     expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+async function healthFixture() {
+  const f = await providerViewFixture();
+  f.observed.State.Pid = 42;
+  const binding = {
+    version: 1 as const,
+    operationId: oid,
+    credentialId: f.row.credentialId,
+    sessionId: sid,
+    sessionGeneration: 3,
+    containerId: dest,
+    imageId: target,
+    originalDigest: dockerContinuationDigest(f.row.destination),
+    policyDigest: dockerContinuationDigest(f.row.policy),
+  };
+  const employee = EmployeeSchema.parse({
+    id: eid,
+    sessionId: sid,
+    sessionGeneration: 3,
+    name: 'Health fixture',
+    icon: 'F',
+    position: 'Expert',
+    expertise: ['systems'],
+    createdAt: 1,
+    desiredRunning: true,
+    onVacation: false,
+    dockerBinding: binding,
+  });
+  let mode: 'live' | 'absent' | 'error' | 'mixed' = 'live',
+    calls = 0;
+  const original = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+    if (args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.includes('presence')) {
+      calls++;
+      if (mode === 'error') throw Error('private transport cause');
+      if (mode === 'absent' || (mode === 'mixed' && calls % 2 === 1)) return 'ABSENT\n';
+      return JSON.stringify(f.pane);
+    }
+    return original(args, input);
+  });
+  let rows = [employee],
+    epoch = 10_000,
+    mono = 100,
+    active = true;
+  const changed = vi.fn(),
+    observe = vi.fn((_e: CompanyEmployee, current: () => void) =>
+      f.engine.captureProviderHealth(f.row, binding, current)
+    );
+  const health = new DockerProviderHealth({
+    employees: () => rows,
+    active: () => active,
+    observe,
+    changed,
+    now: () => epoch,
+    monotonic: () => mono,
+  });
+  return {
+    ...f,
+    employee,
+    binding,
+    health,
+    observe,
+    changed,
+    setMode: (m: typeof mode) => {
+      mode = m;
+      calls = 0;
+    },
+    rows: (v: CompanyEmployee[]) => {
+      rows = v;
+    },
+    advance: (n: number) => {
+      epoch += n;
+      mono += n;
+    },
+    epoch: (n: number) => {
+      epoch = n;
+    },
+    mono: (n: number) => {
+      mono = n;
+    },
+    active: (v: boolean) => {
+      active = v;
+    },
+  };
+}
+describe('read-only Docker provider health', () => {
+  it('earns live health from actual Engine/private native-view proof without resources, credentials or viewer input', async () => {
+    const f = await healthFixture();
+    vi.mocked(f.resources.read).mockClear();
+    vi.mocked(f.resources.observePool).mockClear();
+    vi.mocked(f.command.run).mockClear();
+    await f.health.refresh();
+    expect(f.health.read(f.employee)).toEqual({
+      binding: providerHealthBinding(f.employee),
+      employeeId: eid,
+      sessionId: sid,
+      sessionGeneration: 3,
+      state: 'healthy',
+      observedAtEpochMs: 10_000,
+      reason: 'LIVE_NATIVE_COMMAND',
+      dockerPlacement: encodeDockerProviderPlacement(f.employee.dockerBinding),
+    });
+    expect(f.health.read(sid, { owner: 'foreign' })).toBeUndefined();
+    expect(f.resources.read).not.toHaveBeenCalled();
+    expect(f.resources.observePool).not.toHaveBeenCalled();
+    const calls = vi.mocked(f.command.run).mock.calls.map(([a]) => a);
+    expect(calls.filter((a) => a[0] === 'exec')).toHaveLength(2);
+    expect(
+      calls
+        .filter((a) => a[0] === 'exec')
+        .every((a) => a.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && a.includes('presence'))
+    ).toBe(true);
+    expect(f.health.read(f.employee)?.dockerPlacement).toBe(encodeDockerProviderPlacement(f.binding));
+    expect(f.health.read(f.employee)).not.toHaveProperty('panePid');
+    expect(f.health.read(f.employee)).not.toHaveProperty('view');
+    expect(f.command.create).toHaveBeenCalledTimes(1); // only fixture's inert producer setup
+  });
+  it('missing canonical provider is unknown before any live observation, including pending initial dispatch', async () => {
+    const f = await healthFixture();
+    f.setMode('absent');
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+    f.row.phase = 'provider-issued';
+    f.advance(1);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+  });
+  it('classifies fresh double absence as dead only after a genuine live proof of the same private binding', async () => {
+    const f = await healthFixture();
+    await f.health.refresh();
+    f.setMode('absent');
+    f.advance(1);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)).toMatchObject({ state: 'dead', reason: 'COMMAND_EXITED' });
+  });
+  it('uses twice-observed exact stopped PID0 without inventing provider or init PID proof', async () => {
+    const f = await healthFixture();
+    f.observed.State.Running = false;
+    f.observed.State.Pid = 0;
+    await f.health.refresh();
+    expect(f.health.read(f.employee)).toMatchObject({ state: 'dead', reason: 'CONTAINER_STOPPED' });
+    f.observed.State.Pid = 9;
+    f.advance(1);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+  });
+  it.each(['error', 'mixed'] as const)('turns %s into visible unknown rather than retaining healthy', async (mode) => {
+    const f = await healthFixture();
+    await f.health.refresh();
+    f.setMode(mode);
+    f.advance(1);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+    expect(JSON.stringify(f.health.read(f.employee))).not.toContain('private transport cause');
+  });
+  it.each([
+    'owner',
+    'generation',
+    'CID',
+    'operation',
+    'permissions',
+    'recipe',
+    'vacation',
+    'desired',
+    'migration',
+    'removed',
+  ] as const)('refuses late physical proof after %s CAS swap and cannot revive its old cache', async (change) => {
+    const f = await healthFixture();
+    await f.health.refresh();
+    let release!: (value: DockerEmployeeProviderHealthProof) => void;
+    const genuine = await f.engine.captureProviderHealth(f.row, f.binding, () => {});
+    f.observe.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        })
+    );
+    const pending = f.health.refresh(),
+      changed = structuredClone(f.employee);
+    if (change === 'owner') changed.owner = 'foreign';
+    if (change === 'generation') changed.sessionGeneration++;
+    if (change === 'CID') changed.dockerBinding!.containerId = '8'.repeat(64);
+    if (change === 'operation') changed.dockerBinding!.operationId = '80000000-0000-4000-8000-000000000008';
+    if (change === 'permissions') changed.permissions.recoverEmployees = !changed.permissions.recoverEmployees;
+    if (change === 'recipe') changed.runtimeRecipe = { cwd: '/different' } as never;
+    if (change === 'vacation') changed.onVacation = true;
+    if (change === 'desired') changed.desiredRunning = false;
+    if (change === 'migration') changed.bindingMigration = {} as never;
+    f.rows(change === 'removed' ? [] : [changed]);
+    release(genuine);
+    await pending;
+    expect(f.health.read(changed)).toBeUndefined();
+    f.rows([f.employee]);
+    expect(f.health.read(f.employee)).toBeUndefined();
+  });
+  it('does not accept a forged/prototype foreign proof or an old genuine view from another bound employee', async () => {
+    const f = await healthFixture();
+    const foreign = await f.engine.captureProviderHealth(f.row, f.binding, () => {});
+    const callback = vi.fn(() => 'live');
+    f.observe.mockResolvedValueOnce({ require: callback } as never);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+    expect(callback).not.toHaveBeenCalled();
+    f.advance(1);
+    f.observe.mockResolvedValueOnce(Object.create(DockerEmployeeProviderHealthProof.prototype));
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+    const changed = structuredClone(f.employee);
+    changed.dockerBinding!.containerId = '9'.repeat(64);
+    f.rows([changed]);
+    f.advance(1);
+    f.observe.mockResolvedValueOnce(foreign);
+    await f.health.refresh();
+    expect(f.health.read(changed)?.state).toBe('unknown');
+  });
+  it('expires monotonically and invalidates wall-clock rollback, runtime closure, and close without reviving old health', async () => {
+    const f = await healthFixture();
+    await f.health.refresh();
+    f.advance(25_001);
+    expect(f.health.read(f.employee)).toBeUndefined();
+    f.epoch(9999);
+    expect(f.health.read(f.employee)).toBeUndefined();
+    f.epoch(10_000);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)).toBeUndefined();
+    f.epoch(40_000);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('healthy');
+    f.active(false);
+    expect(f.health.read(f.employee)).toBeUndefined();
+    f.active(true);
+    expect(f.health.read(f.employee)).toBeUndefined();
+    f.health.close();
+    await f.health.refresh();
+    expect(f.health.read(f.employee)).toBeUndefined();
+  });
+  it('coalesces callers, limits two workers, refuses over64 and suppresses late publication after close', async () => {
+    const f = await healthFixture();
+    let release!: () => void;
+    const pause = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let active = 0,
+      maximum = 0;
+    f.rows(
+      Array.from({ length: 6 }, (_, i) => ({
+        ...structuredClone(f.employee),
+        id: `${String(i + 1).padStart(8, '0')}-0000-4000-8000-000000000001`,
+        sessionId: `${String(i + 1).padStart(8, '0')}-0000-4000-8000-000000000002`,
+      }))
+    );
+    f.observe.mockImplementation(async () => {
+      active++;
+      maximum = Math.max(maximum, active);
+      await pause;
+      active--;
+      throw Error('read only');
+    });
+    const first = f.health.refresh();
+    expect(f.health.refresh()).toBe(first);
+    expect(f.observe).toHaveBeenCalledTimes(2);
+    f.health.close();
+    release();
+    await first;
+    expect(maximum).toBe(2);
+    expect(f.observe).toHaveBeenCalledTimes(2);
+    expect(f.changed).not.toHaveBeenCalled();
+    const g = await healthFixture();
+    g.rows(Array.from({ length: 65 }, () => structuredClone(g.employee)));
+    await g.health.refresh();
+    expect(g.observe).not.toHaveBeenCalled();
+  });
+  it('publishes a completed native fact without waiting for an unrelated slow worker', async () => {
+    const f = await healthFixture(),
+      other = {
+        ...structuredClone(f.employee),
+        id: '80000000-0000-4000-8000-000000000008',
+        sessionId: '90000000-0000-4000-8000-000000000009',
+      };
+    f.rows([f.employee, other]);
+    let release!: () => void;
+    const pause = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.observe.mockImplementation(async (employee, current) => {
+      if (employee.id === other.id) {
+        await pause;
+        throw Error('unconfirmed');
+      }
+      return f.engine.captureProviderHealth(f.row, f.binding, current);
+    });
+    const pending = f.health.refresh();
+    await vi.waitFor(() => {
+      expect(f.health.read(f.employee)?.state).toBe('healthy');
+      expect(f.changed).toHaveBeenCalled();
+    });
+    f.health.close();
+    release();
+    await pending;
   });
 });

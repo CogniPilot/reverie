@@ -37,7 +37,7 @@ const canonical = (value: unknown) =>
         )
       : item
   );
-const fingerprint = (e: CompanyEmployee) =>
+export const providerHealthBinding = (e: CompanyEmployee) =>
   canonical([
     e.id,
     e.owner,
@@ -111,7 +111,7 @@ export class WorkerProviderHealth {
       employee.desiredRunning !== true ||
       employee.onVacation ||
       employee.bindingMigration ||
-      entry.binding !== fingerprint(employee) ||
+      entry.binding !== providerHealthBinding(employee) ||
       age < 0 ||
       age > PROVIDER_HEALTH_MAX_AGE_MS ||
       this.monotonic() > entry.until
@@ -123,7 +123,7 @@ export class WorkerProviderHealth {
     if (this.flight || this.closed) return;
     this.flight = true;
     this.controller = new AbortController();
-    const before = new Map(this.deps.employees().map((e) => [e.sessionId, fingerprint(e)]));
+    const before = new Map(this.deps.employees().map((e) => [e.sessionId, providerHealthBinding(e)]));
     try {
       const raw = await this.deps.query(this.controller.signal);
       if (this.closed) return;
@@ -146,7 +146,7 @@ export class WorkerProviderHealth {
             if (
               current.length === 1 &&
               employees.filter((e) => e.id === current[0].id).length === 1 &&
-              before.get(sid) === fingerprint(current[0]) &&
+              before.get(sid) === providerHealthBinding(current[0]) &&
               this.read(current[0])
             )
               entries.set(sid, entry);
@@ -163,8 +163,8 @@ export class WorkerProviderHealth {
           );
           if (
             current.length !== 1 ||
-            before.get(row.sessionId) !== fingerprint(current[0]) ||
-            canonical(row.observedBinding) !== fingerprint(current[0])
+            before.get(row.sessionId) !== providerHealthBinding(current[0]) ||
+            canonical(row.observedBinding) !== providerHealthBinding(current[0])
           )
             continue;
           const age = this.now() - row.observedAtEpochMs;
@@ -188,7 +188,7 @@ export class WorkerProviderHealth {
             (row.state === 'unknown' && row.reason !== 'UNCONFIRMED')
           )
             continue;
-          const binding = fingerprint(current[0]);
+          const binding = providerHealthBinding(current[0]);
           const previous = this.receipts.get(row.employeeId);
           const deadline = this.monotonic() + PROVIDER_HEALTH_MAX_AGE_MS - age;
           if (
@@ -202,10 +202,10 @@ export class WorkerProviderHealth {
           this.receipts.set(row.employeeId, { epoch: row.observedAtEpochMs, binding, until });
           if (this.monotonic() > until) continue;
           entries.set(row.sessionId, {
-            binding: fingerprint(current[0]),
+            binding: providerHealthBinding(current[0]),
             until,
             value: {
-              binding: fingerprint(current[0]),
+              binding: providerHealthBinding(current[0]),
               employeeId: row.employeeId,
               sessionId: row.sessionId,
               sessionGeneration: row.sessionGeneration,

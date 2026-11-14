@@ -8,4 +8,6 @@ export interface ProviderHealth {
   state: 'healthy' | 'dead' | 'unknown';
   observedAtEpochMs: number;
   reason: string;
+  /** Optional public Docker placement correlation DATA. Never authorizes an action. */
+  dockerPlacement?: string;
 }

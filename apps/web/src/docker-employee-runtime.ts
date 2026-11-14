@@ -1,3 +1,5 @@
+import { DockerProviderHealth } from './docker-provider-health.js';
+import { providerHealthBinding } from './worker-provider-health.js';
 import { isMultiUserMode } from './config/multiuser.js';
 /** Explicit Docker-only application composition. Config and journal are DATA;
  * only actual Engine/helper observations and current Company actions permit effects. */
@@ -349,6 +351,35 @@ export class DockerEmployeeRuntime {
       }),
       readLegacyDockerPolicyProposal
     );
+  }
+  /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
+  providerHealthObserver(changed: () => void): DockerProviderHealth {
+    const a=this.#attached;
+    if(!a)throw Error('Boxed runtime is not attached');
+    return new DockerProviderHealth({
+      employees:()=>a.company.registeredEmployees(),
+      active:()=>this.current() && !a.company.store.publicationUnconfirmed,
+      changed,
+      observe:async(employee,requireHealthCurrent)=>{
+        const binding=employee.dockerBinding,row=a.store.record(employee.id);
+        if(!binding||!row)throw Error('Original Docker provider binding unavailable');
+        const rowDigest=dockerContinuationDigest(row),publicBinding=providerHealthBinding(employee),bindingDigest=dockerContinuationDigest(binding);
+        let revoked=false;
+        const current=()=>{
+          if(revoked)throw Error('Original Docker provider health changed');
+          try {
+            requireHealthCurrent();
+            const live=a.company.employeeForSession(employee.sessionId,employee.owner),subject=a.store.subject(employee.id);
+            if(!this.current()||!live||providerHealthBinding(live)!==publicBinding||dockerContinuationDigest(live.dockerBinding)!==bindingDigest||
+              live.onVacation||live.desiredRunning!==true||live.bindingMigration||!subject||subject.owner!==employee.owner||
+              subject.sessionId!==binding.sessionId||subject.sessionGeneration!==binding.sessionGeneration||subject.sourceDigest!==row.sourceDigest||
+              dockerContinuationDigest(a.store.record(employee.id))!==rowDigest)
+              throw Error('Original Docker provider health changed');
+          }catch(error){revoked=true;throw error;}
+        };
+        current();const proof=await a.engine.captureProviderHealth(row,binding,current);current();return proof;
+      },
+    });
   }
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */

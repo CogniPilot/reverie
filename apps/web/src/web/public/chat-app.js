@@ -647,15 +647,27 @@ function caProviderFresh(value, now) {
   });
   return true;
 }
+function caProviderPlacement(employee) {
+  return globalThis.ReverieDockerProviderPlacement?.encode(employee?.dockerBinding);
+}
+function caProviderContext(employee) {
+  return caProviderBinding(employee) + '\0' + (caProviderPlacement(employee) ?? '');
+}
+function caBoxedProvider(employee, session, member) {
+  return !!employee?.dockerBinding || !!session?.docker?.continuation ||
+    [employee?.providerHealth, session?.providerHealth, member?.providerHealth].some(value => value?.dockerPlacement !== undefined);
+}
 function caProviderHealth(employee, session, member) {
   if (!employee?.id || !Number.isInteger(employee.sessionGeneration) || employee.bindingMigration) return undefined;
   const sid = employee?.sessionId || session?.id || member?.sessionId;
   const now = Date.now();
+  const boxed = caBoxedProvider(employee, session, member), placement = caProviderPlacement(employee);
   return [session?.providerHealth, employee?.providerHealth, member?.providerHealth]
     .filter(
       (value) =>
         value &&
         value.binding === caProviderBinding(employee) &&
+        (!boxed || (placement !== undefined && value.dockerPlacement === placement)) &&
         value.sessionId === sid &&
         (!employee?.id || value.employeeId === employee.id) &&
         (!Number.isInteger(employee?.sessionGeneration) || value.sessionGeneration === employee.sessionGeneration) &&
@@ -738,7 +750,7 @@ function caEmployeeHealth(employee, session, member, viewerDisconnected = false)
     };
   // A worker viewer can remain connected after its provider command exits.
   // Saved activity and transport presence cannot establish current agent health.
-  if (scope === 'terminal')
+  if (scope === 'terminal' || caBoxedProvider(employee, session, member))
     return {
       state: 'unknown',
       label: 'Agent health unknown',
@@ -2092,13 +2104,13 @@ class ReverieChatApp {
       this.discardBoardFrame();
       return;
     }
-    const prior = new Map((this.company?.employees || []).map((e) => [e.sessionId, caProviderBinding(e)]));
+    const prior = new Map((this.company?.employees || []).map((e) => [e.sessionId, caProviderContext(e)]));
     this.company = res.data;
     // A delayed session/member event cannot keep native proof from an earlier
     // owner, recipe or generation after the canonical company binding changes.
     for (const [sid, binding] of prior) {
       const current = this.company?.employees?.find((e) => e.sessionId === sid);
-      if (current && caProviderBinding(current) === binding) continue;
+      if (current && caProviderContext(current) === binding) continue;
       const session = this.app.sessions?.get?.(sid);
       if (session) delete session.providerHealth;
       for (const room of [this.room, ...(this.viewRooms || [])])

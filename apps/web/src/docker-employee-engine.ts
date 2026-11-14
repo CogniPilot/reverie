@@ -1,4 +1,5 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
+import type { CompanyEmployee } from './company-types.js';
 import { DockerEmployeeCredentialInstaller } from './docker-employee-credential-installer.js';
 /** Fixed adapter for a new boxed destination; the old laptop is read-only.
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
@@ -9,6 +10,7 @@ import type { DockerContinuationTaskJournal } from './docker-continuation-task.j
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
+  DockerEmployeeBinding,
   DockerEmployeeOriginal,
   DockerEmployeeResourcePolicy,
   DockerEmployeeWorkerImage,
@@ -108,6 +110,57 @@ Object.freeze(DockerEmployeeProviderView.prototype);
 export function requireDockerEmployeeProviderView(view: unknown, sessionId: string, docker: SessionDocker): void {
   DockerEmployeeProviderView.prototype.require.call(view as DockerEmployeeProviderView, sessionId, docker);
 }
+const healthOrigin = Symbol('original Engine-observed Docker provider health');
+export type DockerProviderObservation = 'live' | 'absent' | 'stopped';
+/** Read-only proof: no view, launch, attach or input authority is exposed. */
+export class DockerEmployeeProviderHealthProof {
+  readonly #binding: DockerEmployeeBinding;
+  readonly #view?: DockerEmployeeProviderView;
+  constructor(
+    origin: symbol,
+    binding: DockerEmployeeBinding,
+    private readonly employeeId: string,
+    private readonly owner: string | undefined,
+    private readonly observation: DockerProviderObservation,
+    private readonly current: () => void,
+    view?: DockerEmployeeProviderView
+  ) {
+    if (origin !== healthOrigin) throw Error('Original Docker provider health proof required');
+    this.#binding = Object.freeze(structuredClone(binding));
+    this.#view = view;
+    Object.freeze(this);
+  }
+  require(employee: CompanyEmployee): DockerProviderObservation {
+    this.current();
+    const b = this.#binding;
+    if (
+      employee.id !== this.employeeId ||
+      employee.owner !== this.owner ||
+      employee.sessionId !== b.sessionId ||
+      employee.sessionGeneration !== b.sessionGeneration ||
+      dockerContinuationDigest(employee.dockerBinding) !== dockerContinuationDigest(b)
+    )
+      refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    if (this.observation === 'live') {
+      DockerEmployeeProviderView.prototype.require.call(this.#view, b.sessionId, {
+        engine: 'docker',
+        containerName: b.containerId,
+        image: b.imageId,
+        owned: false,
+        daemonHost: 'unix:///run/reverie-engine/docker.sock',
+        continuation: {
+          operationId: b.operationId,
+          employeeId: this.employeeId,
+          sessionGeneration: b.sessionGeneration,
+          clientManifestDigest: this.#view!.descriptor.clientManifestDigest,
+        },
+      } as SessionDocker);
+    }
+    this.current();
+    return this.observation;
+  }
+}
+Object.freeze(DockerEmployeeProviderHealthProof.prototype);
 function rowSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSubject {
   return {
     employeeId: row.employeeId,
@@ -540,6 +593,128 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     await inspect();
     current();
     return Object.freeze(result);
+  }
+  /** Metadata/kernel reads only: no resources, credentials, helpers or provider effects. */
+  async captureProviderHealth(
+    row: DockerEmployeeContinuationRecord,
+    binding: DockerEmployeeBinding,
+    current: () => void
+  ): Promise<DockerEmployeeProviderHealthProof> {
+    const checked = DockerEmployeeContinuationRecord.parse(row),
+      b = DockerEmployeeBinding.parse(binding),
+      digest = dockerContinuationDigest(checked);
+    let revoked = false;
+    const requireCurrent = () => {
+      if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      try {
+        current();
+        if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      } catch (error) {
+        revoked = true;
+        throw error;
+      }
+    };
+    requireCurrent();
+    if (
+      !checked.destination ||
+      b.containerId !== checked.destination.containerId ||
+      b.imageId !== checked.workerImage.imageId ||
+      b.operationId !== checked.request.operationId ||
+      b.sessionId !== checked.request.sessionId ||
+      b.sessionGeneration !== checked.request.sessionGeneration ||
+      b.credentialId !== checked.credentialId ||
+      b.originalDigest !== dockerContinuationDigest(checked.destination) ||
+      b.policyDigest !== dockerContinuationDigest(checked.policy)
+    )
+      refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    const inspect = async () => {
+      requireCurrent();
+      const raw = await this.#destination(checked);
+      requireCurrent();
+      if (
+        !raw ||
+        !isDeepStrictEqual(boxedOriginal(raw, rowSubject(checked), this.deployment, true), checked.destination) ||
+        raw.State.Paused ||
+        raw.State.Restarting ||
+        raw.State.Dead
+      )
+        refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      return raw;
+    };
+    const firstContainer = await inspect();
+    if (!firstContainer.State.Running) {
+      const second = await inspect();
+      if (second.State.Running || firstContainer.State.Pid !== 0 || second.State.Pid !== 0)
+        refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      return new DockerEmployeeProviderHealthProof(
+        healthOrigin,
+        b,
+        checked.employeeId,
+        checked.owner,
+        'stopped',
+        requireCurrent
+      );
+    }
+    if (checked.phase !== 'ready') refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    const pane = async () => {
+      requireCurrent();
+      const text = await this.command.run([
+        'exec',
+        ...DOCKER_PROVIDER_VIEW_ENV,
+        b.containerId,
+        '/opt/reverie-worker-client/bin/node',
+        '--input-type=commonjs',
+        '-e',
+        DOCKER_PROVIDER_VIEW_PROGRAM,
+        '--',
+        'presence',
+        b.sessionId,
+        b.operationId,
+      ]);
+      requireCurrent();
+      if (text === 'ABSENT\n') return null;
+      if (Buffer.byteLength(text) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      return providerPane.parse(JSON.parse(text));
+    };
+    const first = await pane(),
+      middle = await inspect();
+    if (!middle.State.Running) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    const second = await pane(),
+      last = await inspect();
+    if (!last.State.Running || !isDeepStrictEqual(first, second)) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    requireCurrent();
+    if (first === null)
+      return new DockerEmployeeProviderHealthProof(
+        healthOrigin,
+        b,
+        checked.employeeId,
+        checked.owner,
+        'absent',
+        requireCurrent
+      );
+    const view = new DockerEmployeeProviderView(
+      providerViewOrigin,
+      {
+        ...first,
+        employeeId: checked.employeeId,
+        containerId: b.containerId,
+        imageId: b.imageId,
+        operationId: b.operationId,
+        sessionId: b.sessionId,
+        sessionGeneration: b.sessionGeneration,
+        clientManifestDigest: checked.workerImage.clientManifestDigest,
+      },
+      requireCurrent
+    );
+    return new DockerEmployeeProviderHealthProof(
+      healthOrigin,
+      b,
+      checked.employeeId,
+      checked.owner,
+      'live',
+      requireCurrent,
+      view
+    );
   }
   async captureProviderView(
     row: DockerEmployeeContinuationRecord,

@@ -512,7 +512,7 @@ export class WebServer extends EventEmitter {
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
   private workerViewerReconnect?: WorkerViewerReconnect;
-  private workerProviderHealth?: WorkerProviderHealth;
+  private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
   private boardStore?: BoardStore;
   private chatBots?: ChatBotRegistry;
@@ -1794,16 +1794,17 @@ export class WebServer extends EventEmitter {
     });
     dockerRuntime?.attach(this.companyService, ctx);
     dockerRuntime?.registerRoutes(this.app, { verifiedOwner, owner: ownerFor });
-    if (!dockerRuntime) this.workerProviderHealth = new WorkerProviderHealth({
-      employees: () => this.companyService.registeredEmployees(),
-      query: signal => laptopPower('provider-health', undefined, signal),
-      changed: () => {
+    const providerHealthChanged = () => {
         this.cachedSessionsList = null;
         for (const session of this.sessions.values())
           this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
         for (const owner of new Set(this.companyService.registeredEmployees().map(e => e.owner)))
           this.broadcast(SseEvent.ChatroomChanged, { owner: owner ?? '@single', roomId: '', action: 'profile' });
-      },
+    };
+    this.workerProviderHealth = dockerRuntime ? dockerRuntime.providerHealthObserver(providerHealthChanged) : new WorkerProviderHealth({
+      employees: () => this.companyService.registeredEmployees(),
+      query: signal => laptopPower('provider-health', undefined, signal),
+      changed: providerHealthChanged,
     });
     goalBoundary.attach(this.companyService, {
       getSession: (id) => this.sessions.get(id),
@@ -4631,9 +4632,9 @@ export class WebServer extends EventEmitter {
     if (!this.testMode) {
       this.embassyGuestClient.start();
       this.embassyPairing.start();
-      if (process.env.REVERIE_WORKER_SOCKET) {
+      if (this.dockerEmployeeRuntime || process.env.REVERIE_WORKER_SOCKET) {
         void this.workerProviderHealth?.refresh();
-        this.cleanup.setInterval(() => void this.workerProviderHealth?.refresh(), 5_000, { description: 'Read-only native command health' });
+        this.cleanup.setInterval(() => void this.workerProviderHealth?.refresh(), this.dockerEmployeeRuntime ? 10_000 : 5_000, { description: 'Read-only native command health' });
       }
       const tickCompany = () =>
         this.companyService

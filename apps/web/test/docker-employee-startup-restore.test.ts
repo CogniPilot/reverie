@@ -512,7 +512,7 @@ async function seed(scenario: string) {
       sessionGeneration: 1,
       containerId: destinationId,
       imageId: target,
-      originalDigest: row.original.configurationDigest,
+      originalDigest: dockerContinuationDigest(row.destination),
       policyDigest: dockerContinuationDigest(policy),
     },
   });
@@ -574,6 +574,10 @@ async function startup(scenario: string) {
       sessions: Map<string, import('../src/session.js').Session>;
       dockerEmployeeRuntime: { restorationReports: readonly { state: string; sessionId: string }[] };
       store: import('../src/state-store.js').StateStore;
+      workerProviderHealth: {
+        refresh(): Promise<void>;
+        read(id: string): import('../src/types/provider-health.js').ProviderHealth | undefined;
+      };
     };
     assert.equal(JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).settings[0].autoWakeEnabled, false);
     const app = (server as unknown as { app: import('fastify').FastifyInstance }).app;
@@ -597,6 +601,31 @@ async function startup(scenario: string) {
       headers: { host: 'reverie:3000', cookie },
     });
     assert.equal(response.statusCode, scenario === 'attached' ? 200 : 404);
+    assert(internal.workerProviderHealth, 'Docker health must exist without a retired host worker socket');
+    assert.equal(process.env.REVERIE_WORKER_SOCKET, undefined);
+    if (scenario === 'attached')
+      assert.equal(
+        internal.workerProviderHealth.read(sid)?.state,
+        'healthy',
+        'Post-listen Docker polling must run without the retired host-worker socket'
+      );
+    await internal.workerProviderHealth.refresh();
+    if (scenario === 'attached') {
+      assert.equal(internal.workerProviderHealth.read(sid)?.state, 'healthy');
+      const current = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/' + sid,
+        headers: { host: 'reverie:3000', cookie },
+      });
+      assert.equal(current.statusCode, 200);
+      assert.equal(current.json().success, true);
+      assert.equal(
+        current.json().data.providerHealth?.state,
+        'healthy',
+        'Actual Session HTTP DTO must expose fresh Docker native health'
+      );
+    }
+
     const session = internal.sessions.get(sid),
       reports = internal.dockerEmployeeRuntime.restorationReports;
     if (scenario === 'attached') {

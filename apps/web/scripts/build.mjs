@@ -148,6 +148,7 @@ console.log('\n[build] content-hash cache busting');
     'terminal-keycode229-recovery.js',
     'sanitize-html.js',
     'tab-layout-browser.js',
+    'docker-provider-health-placement.js',
     'app.js',
     'tab-rail-resize.js',
     'terminal-ui.js',

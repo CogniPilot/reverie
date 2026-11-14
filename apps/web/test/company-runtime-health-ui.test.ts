@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { encodeDockerProviderPlacement } from '../src/web/public/docker-provider-health-placement.js';
 /** Real company/member/profile DOM and existing owner restart/WS affordances. */
 import {afterEach,expect,it,vi} from 'vitest';
 import {createHarness,member,room} from './helpers/chat-app-harness.mjs';
@@ -485,4 +487,53 @@ it('announces a diagnostic request as unconfirmed without a terminal-reconnected
  expect(calls).toEqual([{path:'/api/company/employees/expert/reconnect',method:'POST',body:{sessionId:SID,sessionGeneration:1}}]);
  expect(h.app.toasts.some((toast:any)=>toast.text==='Diagnostic viewer requested for Alex. Readiness is unconfirmed; automated input remains held.')).toBe(true);
  expect(h.app.toasts.some((toast:any)=>toast.text==='Terminal reconnected for Alex.')).toBe(false);
+});
+
+function boxedPlacementFixture() {
+ return {version:1,operationId:'10000000-0000-4000-8000-000000000001',credentialId:'20000000-0000-4000-8000-000000000002',
+  sessionId:SID,sessionGeneration:1,containerId:'a'.repeat(64),imageId:'sha256:'+'b'.repeat(64),originalDigest:'c'.repeat(64),policyDigest:'d'.repeat(64)};
+}
+it.each(['containerId','operationId','imageId','credentialId'])('rejects late old Docker %s health with unchanged public9 tuple and clears retained member/session facts',async field=>{
+ const {h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal',working:false});
+ const binding=boxedPlacementFixture(),encode=h.window.ReverieDockerProviderPlacement.encode;
+ Object.assign(employee,{sessionGeneration:1,dockerBinding:binding});
+ const old=nativeProof(employee,'healthy',{dockerPlacement:encode(binding)});
+ Object.assign(employee,{providerHealth:old});Object.assign(session,{providerHealth:old});
+ h.shell.room.members[0].providerHealth=old;
+ await h.shell.openCompany();h.shell.renderMembers();
+ expect(h.document.querySelector('.ca-company-state').textContent).toBe('Online');
+ const nextBinding={...binding};
+ if(field==='containerId')nextBinding.containerId='8'.repeat(64);
+ if(field==='operationId')nextBinding.operationId='80000000-0000-4000-8000-000000000008';
+ if(field==='imageId')nextBinding.imageId='sha256:'+'8'.repeat(64);
+ if(field==='credentialId')nextBinding.credentialId='80000000-0000-4000-8000-000000000008';
+ const next={...employee,dockerBinding:nextBinding,providerHealth:undefined};
+ expect(nativeProof(next).binding).toBe(old.binding);
+ const original=h.app._chatApi.bind(h.app);
+ h.app._chatApi=async(path:string,options:unknown)=>path==='/api/company'?{ok:true,data:{...h.shell.company,employees:[next]}}:original(path,options);
+ await h.shell.loadOwner();
+ expect(session).not.toHaveProperty('providerHealth');expect(h.shell.room.members[0]).not.toHaveProperty('providerHealth');
+ Object.assign(session,{providerHealth:old});h.shell.room.members[0].providerHealth=old;
+ expect(h.shell.employeeHealth(next,h.shell.room.members[0]).state).toBe('unknown');
+ const fresh=nativeProof(next,'healthy',{dockerPlacement:encode(nextBinding)});Object.assign(next,{providerHealth:fresh});
+ expect(h.shell.employeeHealth(next,h.shell.room.members[0]).label).toBe('Online');
+ expect(posts).toHaveLength(0);
+});
+it('boxed health without current canonical employee/placement cannot become healthy from a connected terminal',async()=>{
+ const {h,employee,session}=await fixture({health:'healthy',scope:'provider',working:true});
+ const binding=boxedPlacementFixture(),encode=h.window.ReverieDockerProviderPlacement.encode;
+ Object.assign(employee,{sessionGeneration:1,dockerBinding:binding,providerHealth:nativeProof(employee)});
+ expect(h.shell.employeeHealth(employee).state).toBe('unknown');
+ Object.assign(session,{providerHealth:nativeProof(employee,'healthy',{dockerPlacement:encode(binding)})});
+ h.shell.company.employees=[];
+ expect(h.shell.employeeHealth({sessionId:SID},h.shell.room.members[0]).state).toBe('unknown');
+});
+it('loads the same closed placement codec once before UI bootstrap and refuses non-scalar malformed correlation',async()=>{
+ const {h}=await fixture();const encode=h.window.ReverieDockerProviderPlacement.encode,binding=boxedPlacementFixture();
+ const html=readFileSync(new URL('../src/web/public/index.html',import.meta.url),'utf8');
+ expect(html.match(/src="docker-provider-health-placement\.js"/g)).toHaveLength(1);
+ expect(html.indexOf('src="docker-provider-health-placement.js"')).toBeLessThan(html.indexOf('src="app.js"'));
+ expect(encode(binding)).toBe(encodeDockerProviderPlacement(binding));
+ expect(encode(binding)).toBe(JSON.stringify([1,binding.operationId,binding.containerId,binding.imageId,binding.credentialId,binding.sessionId,1,binding.originalDigest,binding.policyDigest]));
+ for(const invalid of [{...binding,containerId:[binding.containerId]},{...binding,sessionGeneration:'1'},{...binding,imageId:'latest'},null])expect(encode(invalid)).toBeUndefined();
 });
