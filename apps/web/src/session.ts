@@ -2978,7 +2978,7 @@ export class Session extends EventEmitter {
       runtimeHealthScope: this.runtimeHealthScope,
       workerViewerReconnect: this.workerViewerReconnect,
       viewerInputHeld: this.viewerInputHeld,
-      ...(this.providerDispatchHeld ? {providerDispatchHeld: true} : {}),
+      providerDispatchHeld: this.providerDispatchHeld,
       providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
       providerInputHeld: this.providerInputHeld,
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
@@ -3009,7 +3009,7 @@ export class Session extends EventEmitter {
     // intent remains the provider-effect fence, rather than an invented failed launch.
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
-    if (this.#providerDenial?.kind === 'loaded-intent') delete snapshot.providerDispatchHeld;
+    if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;
     return snapshot;
   }
 

@@ -75,6 +75,19 @@ describe('boxed original provider publication', () => {
     const f = fixture();
     expect(() => buildDockerLaunchCommand(f.opts)).toThrow('Original boxed provider view required');
   });
+  it('emits a complete unheld API tuple without persisting that observation as authority', () => {
+    const f = fixture();
+    const wire = JSON.parse(JSON.stringify(f.session.toState()));
+    expect(wire).toMatchObject({
+      providerDispatchHeld: false,
+      providerDispatchHoldKind: null,
+      providerInputHeld: false,
+    });
+    const saved = f.session.toPersistedState();
+    expect(Object.hasOwn(saved, 'providerDispatchHeld')).toBe(false);
+    expect(Object.hasOwn(saved, 'providerDispatchHoldKind')).toBe(false);
+    expect(Object.hasOwn(saved, 'providerInputHeld')).toBe(false);
+  });
   it('one actual private Session owner admits canonical provider bytes once', () => {
     const f = fixture(),
       current = vi.fn(),
