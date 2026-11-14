@@ -1,3 +1,5 @@
+import { DockerEphemeralRestoration } from '../src/docker-ephemeral-restoration.js';
+import type { EphemeralJournal } from '../src/docker-ephemeral-data.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
 import { encodeDockerProviderPlacement } from '../src/docker-provider-health-placement.js';
 import { DockerProviderHealth } from '../src/docker-provider-health.js';
@@ -44,7 +46,7 @@ const subject = {
   onVacation: false,
   desiredRunning: true,
 };
-function fixture(boxId = '7'.repeat(64)) {
+function fixture(boxId = '7'.repeat(64), ephemeral = false) {
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: 48 * 1024 ** 3,
     memoryHighBytes: 16 * 1024 ** 3,
@@ -149,12 +151,19 @@ function fixture(boxId = '7'.repeat(64)) {
     read: vi.fn(async () => null),
     configure: vi.fn(async () => {}),
   };
-  const journal: DockerContinuationTaskJournal = {
+  const journal: DockerContinuationTaskJournal & Partial<EphemeralJournal> = {
     read: () => undefined,
     publish: async () => {
       throw Error('Unexpected holder mutation');
     },
   };
+  if (ephemeral)
+    Object.assign(journal, {
+      readEphemeral: () => undefined,
+      publishEphemeral: async () => {
+        throw Error('Unexpected metadata mutation');
+      },
+    });
   const engine = new DockerEmployeeEngine(
     command,
     'fixture',
@@ -166,8 +175,8 @@ function fixture(boxId = '7'.repeat(64)) {
   );
   return { source, row, engine, command, resources, policy, created: () => created };
 }
-async function dockerEncodedDestination() {
-  const f = fixture();
+async function dockerEncodedDestination(ephemeral = false) {
+  const f = fixture('7'.repeat(64), ephemeral);
   f.source.Mounts.push({
     Type: 'bind',
     Source: '/synthetic/workspace',
@@ -215,8 +224,8 @@ async function dockerEncodedDestination() {
   });
   return { ...f, observed };
 }
-async function providerViewFixture() {
-  const f = await dockerEncodedDestination();
+async function providerViewFixture(ephemeral = false) {
+  const f = await dockerEncodedDestination(ephemeral);
   f.observed.State.Running = true;
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
   f.row.phase = 'ready';
@@ -624,8 +633,8 @@ describe('Engine-owned first-launch Codex workspace observation', () => {
   });
 });
 
-async function healthFixture() {
-  const f = await providerViewFixture();
+async function healthFixture(ephemeral = false) {
+  const f = await providerViewFixture(ephemeral);
   f.observed.State.Pid = 42;
   const binding = {
     version: 1 as const,
@@ -951,4 +960,72 @@ describe('read-only Docker provider health', () => {
     expect(g.health.read(g.employee)?.state).toBe('unknown');
     expect(g.command.run).not.toHaveBeenCalled();
   });
+});
+
+describe('ephemeral health boundary integration', () => {
+  // Only denials are injected at the metadata boundary. Every successful proof
+  // still comes from the actual Engine/private Native-view owner above.
+  it('failed ephemeral re-earn cannot mint LIVE health or issue a repair', async () => {
+    const f = await healthFixture(true),
+      before = vi.mocked(f.command.create).mock.calls.length;
+    const verify = vi
+      .spyOn(DockerEphemeralRestoration.prototype, 'verifyDestination')
+      .mockRejectedValueOnce(Error('directory custody unavailable'));
+    try {
+      await f.health.refresh();
+      expect(f.health.read(f.employee)?.state).toBe('unknown');
+      expect(verify).toHaveBeenCalledOnce();
+      expect(f.command.create).toHaveBeenCalledTimes(before);
+    } finally {
+      verify.mockRestore();
+    }
+  });
+  it('an Engine-minted LIVE proof revokes when retained ephemeral custody fails', async () => {
+    const f = await healthFixture(true),
+      proof = await f.engine.captureProviderHealth(f.row, f.binding, () => {});
+    expect(proof.require(f.employee)).toBe('live');
+    const current = vi.spyOn(DockerEphemeralRestoration.prototype, 'assertCurrent').mockImplementation(() => {
+      throw Error('lost retained directory');
+    });
+    try {
+      expect(() => proof.require(f.employee)).toThrow();
+    } finally {
+      current.mockRestore();
+    }
+    expect(() => proof.require(f.employee)).toThrow();
+  });
+  it('a provider disappearing during the metadata await cannot mint stale LIVE health', async () => {
+    const f = await healthFixture(true);
+    const verify = vi
+      .spyOn(DockerEphemeralRestoration.prototype, 'verifyDestination')
+      .mockImplementationOnce(async () => {
+        f.setMode('absent');
+      });
+    try {
+      await f.health.refresh();
+      expect(f.health.read(f.employee)?.state).toBe('unknown');
+    } finally {
+      verify.mockRestore();
+    }
+  });
+  it.each(['stopped', 'absent'] as const)(
+    'preserves read-only %s semantics without ephemeral repairs',
+    async (mode) => {
+      const f = await healthFixture(true);
+      if (mode === 'stopped') {
+        f.observed.State.Running = false;
+        f.observed.State.Pid = 0;
+      } else f.setMode('absent');
+      const verify = vi
+        .spyOn(DockerEphemeralRestoration.prototype, 'verifyDestination')
+        .mockRejectedValue(Error('No directory authority'));
+      try {
+        const proof = await f.engine.captureProviderHealth(f.row, f.binding, () => {});
+        expect(proof.require(f.employee)).toBe(mode);
+        expect(verify).not.toHaveBeenCalled();
+      } finally {
+        verify.mockRestore();
+      }
+    }
+  );
 });

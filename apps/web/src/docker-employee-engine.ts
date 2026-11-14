@@ -642,11 +642,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const checked = DockerEmployeeContinuationRecord.parse(row),
       b = DockerEmployeeBinding.parse(binding),
       digest = dockerContinuationDigest(checked);
-    let revoked = false;
+    let revoked = false,
+      livePreparation = false;
     const requireCurrent = () => {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       try {
         current();
+        if (livePreparation) this.assertPreparationCurrent(checked);
         if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       } catch (error) {
         revoked = true;
@@ -732,6 +734,20 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'absent',
         requireCurrent
       );
+    if (this.#ephemeral) {
+      // LIVE may expose a retained private view. Re-earn actual leaf custody
+      // read-only after restart; no preparation or helper effect is allowed.
+      await this.#ephemeral.verifyDestination(checked);
+      livePreparation = true;
+      requireCurrent();
+      // The added metadata await must not turn an earlier Native observation
+      // into a stale live proof. Bind the same current provider again.
+      const confirmed = await pane(),
+        container = await inspect();
+      requireCurrent();
+      if (!container.State.Running || !isDeepStrictEqual(first, confirmed))
+        refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    }
     const view = new DockerEmployeeProviderView(
       providerViewOrigin,
       {
