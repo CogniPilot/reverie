@@ -1,7 +1,12 @@
 /** Actual HTTP authentication and canonical CompanyStore; engine ports are inert,
  * synthetic observations. No Docker socket, provider, or live data is used. */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
+import { DockerResourceRevisionStore, dockerRevisedPolicy } from '../src/docker-resource-revisions.js';
+import { DockerEmployeeEngine } from '../src/docker-employee-engine.js';
+import { DockerContainedResources } from '../src/docker-contained-resource-controller.js';
+import { DockerResourceRevisionService } from '../src/docker-resource-revision-service.js';
+import { registerDockerResourceRevisionRoutes } from '../src/web/routes/docker-resource-revision-routes.js';
 import cookie from '@fastify/cookie';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -116,7 +121,16 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     workingDir: '/synthetic-workspace',
     runtimeThreads: {},
   } as SessionState;
-  const store = new CompanyDockerContinuationStore(company, (id) => (id === sid ? saved : undefined));
+  const revisions = new DockerResourceRevisionStore(join(directory, 'resource-revisions'));
+  cleanups.push(async () => revisions.close());
+  const store = new CompanyDockerContinuationStore(
+    company,
+    (id) => (id === sid ? saved : undefined),
+    (owner, original) => {
+      const desired = revisions.desired(owner);
+      return desired ? dockerRevisedPolicy(original, desired) : original;
+    }
+  );
   let effects = 0,
     observations = 0,
     beforeObservation: (() => Promise<void>) | undefined;
@@ -224,6 +238,53 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       }
     )
   );
+  let resourceReads = 0,
+    beforeResourceRead: (() => Promise<void>) | undefined;
+  const resourceCommand = {
+    async create() {
+      effects++;
+      throw Error('No physical effects admitted by HTTP fixture');
+    },
+    async run() {
+      resourceReads++;
+      await beforeResourceRead?.();
+      return '';
+    },
+  };
+  const resources = new DockerContainedResources(
+    resourceCommand,
+    store,
+    {
+      boxId: '7'.repeat(64),
+      deployment: 'synthetic-native',
+      helperImageId: 'sha256:' + '8'.repeat(64),
+      selectedWorkerContainerIds: () => [],
+    },
+    revisions
+  );
+  const resourceEngine = new DockerEmployeeEngine(
+    resourceCommand,
+    'synthetic-native',
+    resources,
+    { imageId: destinationImage, clientManifestDigest: '4'.repeat(64), sourceImageIds: [image] },
+    store,
+    'sha256:' + '8'.repeat(64),
+    '7'.repeat(64)
+  );
+  registerDockerResourceRevisionRoutes(
+    app,
+    new DockerResourceRevisionService(company, store, revisions, resources, resourceEngine),
+    guardDockerRuntimeOrigin(
+      {
+        verifiedOwner: ownerVerifier({ service: ownerAuth, ctx }),
+        worker: dockerWorkerIdentityOf,
+        owner: ownerFor,
+      },
+      () => {
+        if (!runtimeCurrent) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      }
+    )
+  );
   await app.ready();
   cleanups.push(async () => {
     await app.close();
@@ -251,6 +312,46 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
   return {
     app,
     companyStore,
+    revisions,
+    resourceReads: () => resourceReads,
+    beforeResourceRead: (fn: () => Promise<void>) => {
+      beforeResourceRead = fn;
+    },
+    bindResourceRow: async () => {
+      const destination = { ...original, containerId: '6'.repeat(64), imageId: destinationImage };
+      const operationId = '55555555-5555-4555-8555-555555555555',
+        credentialId = '66666666-6666-4666-8666-666666666666';
+      await companyStore.update((state) => {
+        const employee = state.employees.find((value) => value.id === target)!;
+        employee.dockerBinding = {
+          version: 1,
+          operationId,
+          credentialId,
+          sessionId: sid,
+          sessionGeneration: 9,
+          containerId: destination.containerId,
+          imageId: destinationImage,
+          originalDigest: dockerContinuationDigest(destination),
+          policyDigest: dockerContinuationDigest(policy),
+        };
+        state.dockerEmployeeContinuations = [
+          {
+            version: 1,
+            purpose: 'docker-employee-continuation-v1',
+            employeeId: target,
+            request: { ...request, operationId },
+            sourceDigest: store.subject(target)!.sourceDigest,
+            original,
+            destination,
+            workerImage: { imageId: destinationImage, sourceImageId: image, clientManifestDigest: '4'.repeat(64) },
+            policy,
+            credentialId,
+            phase: 'ready',
+          },
+        ];
+      });
+    },
+    logout: () => ownerAuth.logout(ownerToken),
     saved,
     company,
     store,
@@ -692,5 +793,261 @@ describe('explicit legacy source-correlation format migration', () => {
       })
     ).rejects.toThrow('custody revoked');
     expect(f.companyStore.snapshot()).toEqual(before);
+  });
+});
+
+describe('owner-only Docker live resource revision HTTP', () => {
+  const revision = '99999999-9999-4999-8999-999999999999';
+  const desired = {
+    revision,
+    expectedRevision: null,
+    scope: 'all-current-and-future',
+    memoryHighBytes: 48 * 1024 ** 3,
+  };
+  it('owner publishes desired48 for existing/offline/future, without rewriting original employees/rows or using Engine', async () => {
+    const f = await fixture({ storedPolicy: true }),
+      before = f.companyStore.snapshot();
+    const response = await f.app.inject({
+      method: 'PUT',
+      url: '/api/company/docker-resources/default',
+      headers: f.ownerHeaders,
+      payload: desired,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data.enforcement).toBe('not-observed');
+    expect(f.companyStore.snapshot()).toEqual(before);
+    expect(f.effects()).toBe(0);
+    const status = await f.app.inject({ method: 'GET', url: '/api/company/docker-resources', headers: f.ownerHeaders });
+    expect(status.statusCode).toBe(200);
+    expect(
+      status.json().data.employees.find((employee: { employeeId: string }) => employee.employeeId === target)
+    ).toMatchObject({
+      desiredMemoryHighBytes: 48 * 1024 ** 3,
+      state: 'offline-or-unbound',
+      enforcement: 'not-observed',
+    });
+    expect(f.store.policy(target)).toEqual({ ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+    const selection = await f.app.inject({ method: 'GET', url: f.url + '/docker-policy', headers: f.ownerHeaders });
+    expect(selection.statusCode).toBe(200);
+    expect(selection.json().data.policy.memoryHighBytes).toBe(48 * 1024 ** 3);
+    expect(selection.json().data.policyDigest).toBe(
+      dockerContinuationDigest({ ...policy, memoryHighBytes: 48 * 1024 ** 3 })
+    );
+    // A new future employee inherits the same approved default, with no implicit row/launch.
+    const future = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      futureSid = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    await f.companyStore.update((state) =>
+      state.employees.push(
+        EmployeeSchema.parse({
+          ...state.employees.find((employee) => employee.id === target)!,
+          id: future,
+          sessionId: futureSid,
+        })
+      )
+    );
+    expect(f.store.policy(future).memoryHighBytes).toBe(48 * 1024 ** 3);
+    expect(f.store.record(future)).toBeUndefined();
+    expect(f.effects()).toBe(0);
+  });
+  it.each(['worker', 'headless-worker'] as const)(
+    'real scoped %s cannot approve/default/apply resource edits',
+    async (caller) => {
+      const f = await fixture({ recover: true, office: true, storedPolicy: true });
+      for (const request of [
+        { method: 'PUT' as const, url: '/api/company/docker-resources/default', payload: desired },
+        { method: 'POST' as const, url: f.url + '/docker-resources/apply', payload: { revision } },
+      ]) {
+        const response = await f.app.inject({ ...request, headers: f.headersFor(caller) });
+        expect(response.statusCode).toBe(403);
+      }
+      expect(f.revisions.desired(undefined)).toBeUndefined();
+      expect(f.effects()).toBe(0);
+    }
+  );
+  it('rejects unauthenticated, ambiguous worker+owner, stale revision, and offline apply without Engine effects', async () => {
+    const f = await fixture({ storedPolicy: true });
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          payload: desired,
+          headers: { origin: 'http://localhost', host: 'localhost' },
+        })
+      ).statusCode
+    ).toBe(401);
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          payload: desired,
+          headers: { ...f.ownerHeaders, ...f.workerHeaders },
+        })
+      ).statusCode
+    ).toBe(403);
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          payload: desired,
+          headers: f.ownerHeaders,
+        })
+      ).statusCode
+    ).toBe(200);
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          payload: { ...desired, revision: '88888888-8888-4888-8888-888888888888' },
+          headers: f.ownerHeaders,
+        })
+      ).statusCode
+    ).toBe(409);
+    expect(
+      (
+        await f.app.inject({
+          method: 'POST',
+          url: f.url + '/docker-resources/apply',
+          payload: { revision },
+          headers: f.ownerHeaders,
+        })
+      ).statusCode
+    ).toBe(409);
+    expect(f.effects()).toBe(0);
+  });
+  it('a real owner logout during the asynchronous publication boundary refuses before desired commit', async () => {
+    const f = await fixture(),
+      original = f.revisions.approve.bind(f.revisions);
+    const spy = vi.spyOn(f.revisions, 'approve').mockImplementation(async (...args) => {
+      await Promise.resolve();
+      f.logout();
+      return original(...args);
+    });
+    try {
+      const response = await f.app.inject({
+        method: 'PUT',
+        url: '/api/company/docker-resources/default',
+        payload: desired,
+        headers: f.ownerHeaders,
+      });
+      expect(response.statusCode).toBe(403);
+      expect(f.revisions.desired(undefined)).toBeUndefined();
+      expect(f.effects()).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('resource revision currentness across real Company/Engine async reads', () => {
+  it.each(['owner', 'generation', 'binding', 'recipe'] as const)(
+    '%s swap during Engine read refuses before helper publication',
+    async (change) => {
+      const f = await fixture({ storedPolicy: true });
+      await f.bindResourceRow();
+      const desired = {
+        revision: '99999999-9999-4999-8999-999999999999',
+        expectedRevision: null,
+        scope: 'all-current-and-future',
+        memoryHighBytes: 48 * 1024 ** 3,
+      };
+      expect(
+        (
+          await f.app.inject({
+            method: 'PUT',
+            url: '/api/company/docker-resources/default',
+            headers: f.ownerHeaders,
+            payload: desired,
+          })
+        ).statusCode
+      ).toBe(200);
+      let changed = false;
+      f.beforeResourceRead(async () => {
+        if (changed) return;
+        changed = true;
+        await f.companyStore.update((state) => {
+          const employee = state.employees.find((value) => value.id === target)!;
+          if (change === 'owner') employee.owner = 'changed-owner';
+          if (change === 'generation') employee.sessionGeneration++;
+          if (change === 'binding') employee.dockerBinding!.containerId = '7'.repeat(64);
+          if (change === 'recipe') employee.runtimeRecipe!.workingDir = '/changed-workspace';
+        });
+      });
+      const row = f.store.record(target)!;
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-resources/apply',
+        headers: f.ownerHeaders,
+        payload: { revision: desired.revision },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(f.effects()).toBe(0);
+      expect(f.resourceReads()).toBe(1);
+      expect(f.revisions.attempt(row, desired.revision)).toBeUndefined();
+    }
+  );
+});
+
+describe('new-operation approved resource default snapshot', () => {
+  const desired = {
+    revision: '99999999-9999-4999-8999-999999999999',
+    expectedRevision: null,
+    scope: 'all-current-and-future',
+    memoryHighBytes: 48 * 1024 ** 3,
+  };
+  it('canonical NEW BEGIN uses48 through its next authority check rather than reverting to the prior16 approval', async () => {
+    const f = await fixture({ storedPolicy: true });
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          headers: f.ownerHeaders,
+          payload: desired,
+        })
+      ).statusCode
+    ).toBe(200);
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: {
+        request: {
+          ...f.request,
+          expectedPolicyDigest: dockerContinuationDigest({ ...policy, memoryHighBytes: 48 * 1024 ** 3 }),
+        },
+      },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(f.store.record(target)?.phase).toBe('pool-issued'); // actual synthetic preparePool port was reached
+    expect(f.store.record(target)?.policy.memoryHighBytes).toBe(48 * 1024 ** 3);
+    expect(
+      f.companyStore.snapshot().employees.find((employee) => employee.id === target)?.dockerResourcePolicy
+        ?.memoryHighBytes
+    ).toBe(48 * 1024 ** 3);
+    expect(f.effects()).toBe(1); // preparePool is intentionally unconfirmed; no provider launch
+  });
+  it('default publication leaves an EXISTING16 request, policy, binding and employee approval unchanged', async () => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const before = f.companyStore.snapshot(),
+      row = f.store.record(target);
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          headers: f.ownerHeaders,
+          payload: desired,
+        })
+      ).statusCode
+    ).toBe(200);
+    expect(f.companyStore.snapshot()).toEqual(before);
+    expect(f.store.record(target)).toEqual(row);
+    expect(f.store.policy(target).memoryHighBytes).toBe(16 * 1024 ** 3);
+    expect(f.effects()).toBe(0);
   });
 });

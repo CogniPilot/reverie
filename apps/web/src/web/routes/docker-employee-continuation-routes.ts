@@ -124,12 +124,18 @@ export function registerDockerEmployeeContinuationRoutes(
       const employeeId = uuid.parse((req.params as { id: string }).id),
         authority = capture(req, employeeId);
       const selection = await service.selection(employeeId, authority);
-      const policy = company.store
+      const approved = company.store
         .snapshot()
         .employees.find(
           (employee) => employee.id === employeeId && employee.owner === authority.owner
         )?.dockerResourcePolicy;
-      const proposed = policy ? undefined : proposal?.(employeeId);
+      const policy = approved ? store.policy(employeeId) : undefined;
+      const rawProposal = policy ? undefined : proposal?.(employeeId);
+      const proposedPolicy = rawProposal ? store.newPolicy(employeeId, rawProposal.policy) : undefined;
+      const proposed =
+        rawProposal && proposedPolicy
+          ? { ...rawProposal, policy: proposedPolicy, policyDigest: dockerContinuationDigest(proposedPolicy) }
+          : undefined;
       authority.require();
       return {
         ...selection,

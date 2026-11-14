@@ -60,7 +60,11 @@ function persistedRecord(row: DockerEmployeeContinuationRecord): DockerEmployeeC
 export class CompanyDockerContinuationStore implements DockerContinuationStore, DockerContinuationTaskJournal {
   constructor(
     readonly company: CompanyService,
-    private readonly saved: (id: string) => SessionState | undefined
+    private readonly saved: (id: string) => SessionState | undefined,
+    private readonly defaultPolicy?: (
+      owner: string | undefined,
+      policy: DockerEmployeeResourcePolicy
+    ) => DockerEmployeeResourcePolicy
   ) {
     if (!(company instanceof CompanyService)) throw Error('Actual company service required');
   }
@@ -238,7 +242,17 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     const rows = this.company.store.snapshot().employees.filter((e) => e.id === employeeId);
     if (rows.length !== 1 || !rows[0]!.dockerResourcePolicy)
       throw new CompanyError('Approve a boxed resource policy before recovery', 409);
-    return DockerEmployeeResourcePolicy.parse(rows[0]!.dockerResourcePolicy);
+    const original = DockerEmployeeResourcePolicy.parse(rows[0]!.dockerResourcePolicy);
+    return this.record(employeeId) ? original : this.newPolicy(employeeId, original);
+  }
+  /** Approved defaults apply to NEW operations only. Existing request/policy/binding stay byte-identical. */
+  newPolicy(employeeId: string, policy: DockerEmployeeResourcePolicy): DockerEmployeeResourcePolicy {
+    const employees = this.company.store.snapshot().employees.filter((employee) => employee.id === employeeId);
+    if (employees.length !== 1) throw new CompanyError('Unknown employee', 404);
+    const original = DockerEmployeeResourcePolicy.parse(policy);
+    return this.record(employeeId) || !this.defaultPolicy
+      ? original
+      : DockerEmployeeResourcePolicy.parse(this.defaultPolicy(employees[0]!.owner, original));
   }
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined {
     return this.company.store.snapshot().dockerEmployeeContinuations?.find((row) => row.employeeId === employeeId);
@@ -261,8 +275,32 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
         rows.some((row) => row.employeeId !== next.employeeId && row.request.operationId === next.request.operationId)
       )
         throw new CompanyError('Boxed operation identifier already belongs to another employee', 409);
-      if (before === undefined) rows.push(structuredClone(next));
-      else rows[index] = structuredClone(next);
+      if (before === undefined) {
+        // Snapshot an already owner-approved default into this NEW operation's
+        // canonical approval. Existing operation/employee bindings are never edited here.
+        if (this.defaultPolicy) {
+          const employees = state.employees.filter((employee) => employee.id === next.employeeId);
+          const employee = employees[0];
+          if (
+            employees.length !== 1 ||
+            !employee ||
+            employee.owner !== next.owner ||
+            employee.sessionId !== next.request.sessionId ||
+            employee.sessionGeneration !== next.request.sessionGeneration ||
+            !employee.dockerResourcePolicy
+          )
+            throw new CompanyError('Original employee policy changed', 409);
+          const original = DockerEmployeeResourcePolicy.parse(employee.dockerResourcePolicy);
+          const effective = DockerEmployeeResourcePolicy.parse(this.defaultPolicy(employee.owner, original));
+          if (!isDeepStrictEqual(next.policy, effective))
+            throw new CompanyError('Approved resource default changed', 409);
+          if (!isDeepStrictEqual(original, effective)) {
+            if (next.phase !== 'staged') throw new CompanyError('New operation policy must be staged', 409);
+            employee.dockerResourcePolicy = effective;
+          }
+        }
+        rows.push(structuredClone(next));
+      } else rows[index] = structuredClone(next);
     }, current);
   }
   async enterOffice(subject: DockerContinuationSubject, current: () => void): Promise<void> {

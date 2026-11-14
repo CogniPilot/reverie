@@ -1,3 +1,4 @@
+import { requireDockerEffectiveResourceProof } from './docker-contained-resource-controller.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
@@ -43,6 +44,7 @@ export interface DockerContainedResourceController {
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null>;
   read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null>;
   configure(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  existingPolicy?(row: DockerEmployeeContinuationRecord, actual: DockerEmployeeResourcePolicy): unknown;
 }
 export interface DockerEmployeeImageConfiguration {
   readonly imageId: string;
@@ -501,6 +503,19 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (row.destination && raw.Id !== row.destination.containerId) refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED');
     return raw;
   }
+  /** Fixed metadata bracket for owner leaf revisions, not provider/paid admission. */
+  async verifyResourceDestination(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
+      refuse('DOCKER_RESOURCE_REVISION_CHANGED');
+    const raw = await this.#destination(row);
+    current();
+    if (
+      !raw?.State.Running ||
+      !isDeepStrictEqual(boxedOriginal(raw, rowSubject(row), this.deployment, true), row.destination)
+    )
+      refuse('DOCKER_RESOURCE_REVISION_DESTINATION_CHANGED');
+  }
   async observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null> {
     const raw = await this.#destination(row);
     if (!raw) return null;
@@ -787,6 +802,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       view
     );
   }
+  /** Existing provider reads only. Never configure, begin, identity or paid launch authority. */
+  existingResourcePolicyCurrent(
+    row: DockerEmployeeContinuationRecord,
+    actual: DockerEmployeeResourcePolicy | null
+  ): boolean {
+    if (!actual) return false;
+    if (isDeepStrictEqual(actual, row.policy)) return true;
+    requireDockerEffectiveResourceProof(this.resources.existingPolicy?.(row, actual), row, actual);
+    return true;
+  }
   /** Canonical mode chooses only the hook requirement; it grants no native/view authority. */
   private providerHooks(row: DockerEmployeeContinuationRecord): {
     mode: string;
@@ -831,7 +856,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         seen.provider.kind !== 'running' ||
         seen.provider.sessionId !== checked.request.sessionId ||
         seen.provider.operationId !== checked.request.operationId ||
-        !isDeepStrictEqual(seen.resources, checked.policy) ||
+        !this.existingResourcePolicyCurrent(checked, seen.resources) ||
         !/^[a-f0-9]{64}$/.test(seen.credentialDigest ?? '')
       )
         refuse('DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED');

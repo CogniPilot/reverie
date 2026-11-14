@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,7 +7,9 @@ import { CompanyStore } from '../src/company-store.js';
 import { retainedDockerPoolTasks } from '../src/docker-shared-pool-lineage.js';
 import { DockerEmployeeContinuationRecord as ContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import type { DockerContinuationTaskRole } from '../src/docker-continuation-task.js';
-import { fixture, helper, policy, deployment } from './helpers/docker-resource-physical.js';
+import { fixture, helper, policy, deployment, writer } from './helpers/docker-resource-physical.js';
+import { DockerResourceRevisionStore, dockerRevisedPolicy, type DockerResourceDesiredRevision } from '../src/docker-resource-revisions.js';
+import { DockerContainedResources, requireDockerEffectiveResourceProof, dockerOtherResourceLimitsMatch } from '../src/docker-contained-resource-controller.js';
 
 describe('fixed Docker resource orchestration', () => {
   it('a real canonical owner-row archival/reload leaves the native pool proof available to another employee', async () => {
@@ -228,5 +231,287 @@ describe('fixed Docker resource orchestration', () => {
     f.foreignMount();
     await expect(f.controller.observePool(f.row())).rejects.toThrow('MOUNTS_CHANGED');
     expect(f.starts).toEqual(before);
+  });
+});
+
+const revisionCleanups: Array<() => void> = [];
+afterEach(() => {
+  for (const cleanup of revisionCleanups.splice(0).reverse()) cleanup();
+});
+async function revisionFixture(capable = true) {
+  const directory = fs.mkdtempSync(join(tmpdir(), 'resource-revision-'));
+  const store = new DockerResourceRevisionStore(join(directory, 'journal'));
+  revisionCleanups.push(() => fs.rmSync(directory, { recursive: true, force: true }));
+  revisionCleanups.push(() => store.close());
+  const f = fixture('b'.repeat(64), store, capable ? writer : undefined);
+  await f.controller.preparePool(f.row(), f.current);
+  await f.setPool();
+  f.makeWorker();
+  await f.controller.configure(f.row(), f.current);
+  f.ready();
+  const desired: DockerResourceDesiredRevision = {
+    revision: '44444444-4444-4444-8444-444444444444',
+    owner: null,
+    scope: 'all-current-and-future',
+    memoryHighBytes: 48 * 1024 ** 3,
+  };
+  await store.approve(desired, null, f.current);
+  return { ...f, store, desired };
+}
+describe('approved leaf-only live memory revisions', () => {
+  it('adopts current48 without writes, retaining original records and historical ACKs', async () => {
+    const f = await revisionFixture(),
+      row = structuredClone(f.row()),
+      tasks = [...f.tasks],
+      effects = { creates: [...f.creates], starts: [...f.starts] };
+    f.setHigh(48 * 1024 ** 3);
+    expect(await f.controller.read(f.row())).toBeNull();
+    const ledgerBefore = fs.readFileSync(join(f.store.directory, 'revisions.json'));
+    expect(await f.controller.observeMemoryHigh(f.row(), f.current)).toMatchObject({
+      actualMemoryHighBytes: 48 * 1024 ** 3,
+      approved: false,
+      approvalSource: null,
+    });
+    expect(fs.readFileSync(join(f.store.directory, 'revisions.json'))).toEqual(ledgerBefore);
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result).toEqual({ state: 'observed', policy: { ...policy, memoryHighBytes: 48 * 1024 ** 3 } });
+    const ledgerAfter = fs.readFileSync(join(f.store.directory, 'revisions.json'));
+    expect(await f.controller.observeMemoryHigh(f.row(), f.current)).toMatchObject({
+      actualMemoryHighBytes: 48 * 1024 ** 3,
+      approved: true,
+      approvalSource: 'owner-revision',
+      approvedRevision: f.desired.revision,
+    });
+    expect(fs.readFileSync(join(f.store.directory, 'revisions.json'))).toEqual(ledgerAfter);
+    expect(f.row()).toEqual(row);
+    expect([...f.tasks]).toEqual(tasks);
+    expect({ creates: f.creates, starts: f.starts }).toEqual(effects);
+    expect(await f.controller.read(f.row())).toEqual(result.policy);
+    const proof = f.controller.existingPolicy(f.row(), result.policy);
+    expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).not.toThrow();
+    expect(() => requireDockerEffectiveResourceProof({ require() {} }, f.row(), result.policy)).toThrow();
+    expect(() =>
+      requireDockerEffectiveResourceProof(proof, { ...f.row(), credentialId: 'changed' }, result.policy)
+    ).toThrow();
+    await f.store.approve(
+      { ...f.desired, revision: '55555555-5555-4555-8555-555555555555', memoryHighBytes: 32 * 1024 ** 3 },
+      f.desired.revision,
+      f.current
+    );
+    expect(await f.controller.read(f.row())).toEqual(result.policy);
+  });
+  it('journals one configure-high separately and returns real48, preserving launch authority', async () => {
+    const f = await revisionFixture(),
+      row = structuredClone(f.row()),
+      tasks = [...f.tasks];
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result.state).toBe('applied');
+    expect(result.policy.memoryHighBytes).toBe(48 * 1024 ** 3);
+    expect(f.creates).toEqual(['anchor', 'pool-helper', 'leaf-helper', 'leaf-helper']);
+    expect(f.starts).toEqual(f.creates);
+    expect([...f.tasks]).toEqual(tasks);
+    expect(f.row()).toEqual(row);
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('applied');
+    await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow('WORKER_READBACK');
+    expect(f.starts).toHaveLength(4);
+  });
+  it('lost START holds matching facts until retained Exit0/ACK observation; never starts again', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('lost start');
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('helper');
+    expect(await f.controller.read(f.row())).toBeNull();
+    await expect(
+      f.store.approve({ ...f.desired, revision: '55555555-5555-4555-8555-555555555555' }, f.desired.revision, f.current)
+    ).rejects.toThrow('ORIGINAL_ATTEMPT_PENDING');
+    expect((await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).state).toBe('applied');
+    expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+  });
+  it('lost CREATE observes the exact retained helper rather than creating another', async () => {
+    const f = await revisionFixture();
+    f.loseCreate();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('lost create');
+    expect(f.creates).toHaveLength(4);
+    expect(f.starts).toHaveLength(3);
+    expect((await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).state).toBe('applied');
+    expect(f.creates).toHaveLength(4);
+    expect(f.starts).toHaveLength(4);
+  });
+  it('changed non-high limits or revoked ownership refuse before any new effect', async () => {
+    const f = await revisionFixture(),
+      before = [...f.starts];
+    f.driftWeight();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('OTHER_LIMIT');
+    expect(f.starts).toEqual(before);
+    expect(f.creates).toHaveLength(3);
+    f.revoke();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('revoked');
+    expect(f.starts).toEqual(before);
+  });
+});
+
+describe('late leaf writer exclusion', () => {
+  it('unknown live helper blocks a new revision/binding until its own actual terminal ACK settles', async () => {
+    const f = await revisionFixture();
+    f.delayNextLeaf();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'lost live start'
+    );
+    expect((await f.controller.observeMemoryHigh(f.row(), f.current)).actualMemoryHighBytes).toBe(
+      policy.memoryHighBytes
+    );
+    const next = { ...f.desired, revision: '55555555-5555-4555-8555-555555555555', memoryHighBytes: 32 * 1024 ** 3 };
+    await expect(f.store.approve(next, f.desired.revision, f.current)).rejects.toThrow('ORIGINAL_ATTEMPT_PENDING');
+    const rebound = {
+      ...f.row(),
+      request: { ...f.row().request, operationId: '66666666-6666-4666-8666-666666666666' },
+    };
+    expect(() => f.store.requireSettled(rebound, f.desired.revision)).toThrow('ORIGINAL_ATTEMPT_PENDING');
+    expect(f.creates).toHaveLength(4);
+    expect(f.starts).toHaveLength(4);
+    f.completeLateLeaf();
+    expect(await f.controller.read(f.row())).toBeNull();
+    await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const oldProof = f.controller.existingPolicy(f.row(), { ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+    await f.store.approve(next, f.desired.revision, f.current);
+    expect((await f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).policy.memoryHighBytes).toBe(
+      32 * 1024 ** 3
+    );
+    expect(f.creates).toHaveLength(5);
+    expect(f.starts).toHaveLength(5);
+    expect(() =>
+      requireDockerEffectiveResourceProof(oldProof, f.row(), { ...policy, memoryHighBytes: 48 * 1024 ** 3 })
+    ).toThrow();
+  });
+});
+
+describe('resource proof publication finalization', () => {
+  it.each(['read', 'profile'] as const)(
+    'failing fresh %s ACK cannot leave a retrievable effective-policy proof',
+    async (path) => {
+      const f = await revisionFixture();
+      const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+      f.corruptLatestLog();
+      if (path === 'read') await expect(f.controller.read(f.row())).rejects.toThrow();
+      else await expect(f.controller.observeMemoryHigh(f.row(), f.current)).rejects.toThrow();
+      expect(() => f.controller.existingPolicy(f.row(), result.policy)).toThrow();
+    }
+  );
+});
+
+describe('nullable original high DATA compatibility', () => {
+  it('excludes high directly, preserving max/null encoding and every other limit without granting an ACK', async () => {
+    const original = { ...policy, memoryHighBytes: null };
+    const actual = {
+      memoryMax: String(policy.memoryMaxBytes),
+      memoryHigh: 'max',
+      swapMax: '0',
+      pidsMax: String(policy.pidsMax),
+      cpuWeight: String(policy.cpuWeight),
+      cpuMax: 'max 100000',
+      cpusetCpus: '0-1',
+      cpusetCpusEffective: '0-1',
+      cpusetMemsEffective: '0',
+    };
+    expect(dockerOtherResourceLimitsMatch(actual, original)).toBe(true);
+    expect(dockerOtherResourceLimitsMatch({ ...actual, memoryHigh: String(48 * 1024 ** 3) }, original)).toBe(true);
+    expect(dockerOtherResourceLimitsMatch({ ...actual, cpuWeight: '99' }, original)).toBe(false);
+    expect(
+      dockerRevisedPolicy(original, {
+        revision: '44444444-4444-4444-8444-444444444444',
+        owner: null,
+        scope: 'all-current-and-future',
+        memoryHighBytes: 48 * 1024 ** 3,
+      })
+    ).toEqual({ ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+    const f = fixture();
+    await expect(f.controller.validate(f.row().original, original)).rejects.toThrow('FINITE_HIGH_REQUIRED');
+    expect(f.creates).toEqual([]);
+    expect(f.starts).toEqual([]);
+  });
+});
+
+describe('independent high-only helper capability and final native freshness', () => {
+  it('old baseline helper remains valid for read/adoption but cannot be reused for a live high writer', async () => {
+    const f = await revisionFixture(false);
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'WRITE_UNSUPPORTED'
+    );
+    expect(f.creates).toHaveLength(3);
+    expect(f.starts).toHaveLength(3);
+    expect(f.store.attempt(f.row(), f.desired.revision)).toBeUndefined();
+    f.setHigh(48 * 1024 ** 3);
+    expect((await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).state).toBe('observed');
+    expect(f.starts).toHaveLength(3);
+  });
+  it.each(['read', 'profile'] as const)(
+    'post-ACK %s reprobes actual limits and revokes previously held proof references',
+    async (path) => {
+      const f = await revisionFixture();
+      const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+      const prior = f.controller.existingPolicy(f.row(), result.policy),
+        paused = f.pauseRevisionAck();
+      const pending = path === 'read' ? f.controller.read(f.row()) : f.controller.observeMemoryHigh(f.row(), f.current);
+      await paused.entered;
+      f.setHigh(32 * 1024 ** 3);
+      paused.release();
+      if (path === 'read') await expect(pending).rejects.toThrow('REVISION');
+      else expect(await pending).toMatchObject({ actualMemoryHighBytes: 32 * 1024 ** 3, approved: false });
+      expect(() => f.controller.existingPolicy(f.row(), result.policy)).toThrow();
+      expect(() => requireDockerEffectiveResourceProof(prior, f.row(), result.policy)).toThrow();
+    }
+  );
+});
+
+describe('legacy namespace and writer pin upgrade isolation', () => {
+  it('selecting an independent new writer leaves exact old anchor/pool/leaf configurations and ACKs intact', async () => {
+    const old = fixture(),
+      next = fixture('b'.repeat(64), undefined, writer);
+    for (const f of [old, next]) {
+      await f.controller.preparePool(f.row(), f.current);
+      await f.setPool();
+      f.makeWorker();
+      await f.controller.configure(f.row(), f.current);
+      expect(await f.controller.read(f.row())).toEqual(policy);
+    }
+    expect(next.configurations).toEqual(old.configurations);
+    expect(next.names).toEqual(old.names);
+    expect(next.tasks).toEqual(old.tasks);
+    expect(next.configurations.every((item) => item.config.Image === helper)).toBe(true);
+  });
+  it('a changed writer pin during capability await refuses before a writer cursor or CREATE', async () => {
+    const f = await revisionFixture();
+    f.beforeNextImage(() => f.changeWritePin('sha256:' + '9'.repeat(64)));
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'REVISION_CHANGED'
+    );
+    expect(f.creates).toHaveLength(3);
+    expect(f.starts).toHaveLength(3);
+    expect(f.store.attempt(f.row(), f.desired.revision)).toBeUndefined();
+  });
+  it('a changed pin revokes an already held proof and restoring the string cannot resurrect it', async () => {
+    const f = await revisionFixture();
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const proof = f.controller.existingPolicy(f.row(), result.policy);
+    f.changeWritePin('sha256:' + '9'.repeat(64));
+    expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
+    f.changeWritePin(writer);
+    expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
+  });
+});
+
+describe('effective policy proof clock denial', () => {
+  it.each([Number.NaN, -1])('a nonfinite/rolled-back clock %s permanently revokes that proof', async (now) => {
+    const f = await revisionFixture(),
+      result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const proof = f.controller.existingPolicy(f.row(), result.policy),
+      clock = vi.spyOn(performance, 'now').mockReturnValue(now);
+    try {
+      expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
+    } finally {
+      clock.mockRestore();
+    }
+    expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
   });
 });

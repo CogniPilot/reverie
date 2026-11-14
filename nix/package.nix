@@ -76,6 +76,7 @@ let
       npm test -- test/docker-contained-resource-controller.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
+        test/docker-resource-revisions.test.ts \
         test/docker-owner-stop-status.test.ts \
         test/docker-ephemeral-restoration.test.ts \
         test/docker-owner-stop-native.test.ts \

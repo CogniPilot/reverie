@@ -31,12 +31,12 @@ describe('legacy resource proposal is desired DATA only', () => {
     expect(proposal).not.toHaveProperty('permission');
     expect(proposal).not.toHaveProperty('nativeAcknowledgment');
   });
-  it('proposes24GiB soft RAM only when the selected employee has no explicit soft override', () => {
+  it('proposes48GiB soft RAM only when the selected employee has no explicit soft override', () => {
     const value = { ...fixture(), employeeMemoryPolicies: {} };
     const proposal = proposeLegacyDockerPolicy(JSON.stringify(value), eid)!;
     expect(proposal.approved).toBe(false);
     expect(proposal.policy).toEqual({
-      memoryHighBytes: 25769803776,
+      memoryHighBytes: 51539607552,
       memoryMaxBytes: 51539607552,
       swapMaxBytes: 0,
       pidsMax: 512,

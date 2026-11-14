@@ -6,6 +6,10 @@ import { isMultiUserMode } from './config/multiuser.js';
 /** Explicit Docker-only application composition. Config and journal are DATA;
  * only actual Engine/helper observations and current Company actions permit effects. */
 import fs from 'node:fs';
+import { dirname, join } from 'node:path';
+import { DockerResourceRevisionStore, dockerRevisedPolicy } from './docker-resource-revisions.js';
+import { DockerResourceRevisionService } from './docker-resource-revision-service.js';
+import { registerDockerResourceRevisionRoutes } from './web/routes/docker-resource-revision-routes.js';
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { CompanyService } from './company-service.js';
@@ -47,6 +51,7 @@ export const DockerRuntimeConfiguration = z
     clientManifestDigest: digest,
     sourceImageIds: z.array(sha).min(1).max(32),
     helperImageId: sha,
+    memoryHighHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
   })
   .strict();
@@ -59,6 +64,7 @@ interface Attached {
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
+  resourceRevisions: DockerResourceRevisionService;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -262,7 +268,11 @@ export class DockerEmployeeRuntime {
   attach(company: CompanyService, ctx: Context): void {
     if (this.#attached || !this.current()) throw Error('Boxed runtime composition is not current');
     const configuration = this.selected.value,
-      store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id));
+      revisions = new DockerResourceRevisionStore(join(dirname(company.store.file), 'docker-resource-revisions')),
+      store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id), (owner, policy) => {
+        const desired = revisions.desired(owner);
+        return desired ? dockerRevisedPolicy(policy, desired) : policy;
+      });
     const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const command = new PackagedDockerEngineCommand(),
@@ -270,16 +280,15 @@ export class DockerEmployeeRuntime {
         boxId,
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
+        memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         selectedWorkerContainerIds: () => [
           ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
         ],
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
-            'reverie-boxed-anchor-' + boxId.slice(0, 32),
-            configuration.helperImageId,
-            boxId
+            'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId, boxId
           ),
-      });
+      }, revisions);
     const engine = new DockerEmployeeEngine(
       command,
       configuration.deployment,
@@ -326,7 +335,8 @@ export class DockerEmployeeRuntime {
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     });
-    this.#attached = { company, ctx, store, engine, provider, service, pool };
+    const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
+    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions };
   }
   registerRoutes(
     app: FastifyInstance,
@@ -337,6 +347,8 @@ export class DockerEmployeeRuntime {
     const requireCurrent = () => {
       if (!this.current()) throw new DockerOwnerStopDiagnosticError('DOCKER_OWNER_STOP_RUNTIME_CHANGED');
     };
+    registerDockerResourceRevisionRoutes(app, a.resourceRevisions,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent));
     registerDockerOwnerStopRoutes(
       app,
       new DockerOwnerStopDiagnostic(a.company, requireCurrent),
@@ -438,7 +450,7 @@ export class DockerEmployeeRuntime {
       seen.provider.kind !== 'running' ||
       seen.provider.operationId !== binding.operationId ||
       seen.provider.sessionId !== binding.sessionId ||
-      dockerContinuationDigest(seen.resources) !== dockerContinuationDigest(row.policy)
+      !a.engine.existingResourcePolicyCurrent(row, seen.resources)
     )
       return false;
     const actual = a.ctx.sessions.get(employee.sessionId);
@@ -549,6 +561,8 @@ export class DockerEmployeeRuntime {
   close(): void {
     this.authentication.close();
     const errors = [];
+    try { this.#attached?.resourceRevisions.revisions.close(); }
+    catch (error) { errors.push(error); }
     try {
       this.#attached?.engine.close();
     } catch (error) {
