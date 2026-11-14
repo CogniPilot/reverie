@@ -156,12 +156,13 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           terminalInputHeld: false,
         });
       original.candidate = candidate;
+      const providerSource =
+        row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved);
       const candidateRecipeCurrent = () =>
         candidate.owner === employee.owner &&
-        (first
-          ? dockerEmployeeSourceDigest(employee, candidate.toPersistedState()) === row.sourceDigest
-          : dockerEmployeeProviderSourceDigest(employee, candidate.toPersistedState()) ===
-            (row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved)));
+        dockerEmployeeProviderSourceDigest(employee, { ...saved, ...candidate.providerRecipeState() }) ===
+          providerSource &&
+        (!first || dockerEmployeeSourceDigest(employee, candidate.toPersistedState()) === row.sourceDigest);
       const currentCandidate = () => {
         current();
         if (!allowed() || !candidateRecipeCurrent() || this.ctx.sessions.get(binding.sessionId) !== candidate)

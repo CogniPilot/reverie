@@ -23,7 +23,7 @@ import {
   dockerContinuationFailureCauses,
 } from './docker-employee-continuation.js';
 import { Session } from './session.js';
-import { CompanyDockerContinuationStore, dockerEmployeeSourceDigest } from './docker-employee-store.js';
+import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } from './docker-employee-store.js';
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
@@ -273,7 +273,8 @@ export class DockerEmployeeRuntime {
         ],
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
-            'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId
+            'reverie-boxed-anchor-' + boxId.slice(0, 32),
+            configuration.helperImageId
           ),
       });
     const engine = new DockerEmployeeEngine(
@@ -446,12 +447,14 @@ export class DockerEmployeeRuntime {
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       const saved = a.ctx.store.getSession(employee.sessionId);
       if (!saved) throw Error('Boxed existing viewer saved recipe missing');
+      const providerSource =
+        row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved);
       const renewalCurrent = () => {
         current();
         if (
           a.ctx.sessions.get(employee.sessionId) !== actual ||
           actual.owner !== employee.owner ||
-          dockerEmployeeSourceDigest(employee, { ...saved, ...actual.providerRecipeState() }) !== row.sourceDigest
+          dockerEmployeeProviderSourceDigest(employee, { ...saved, ...actual.providerRecipeState() }) !== providerSource
         )
           throw Error('Boxed existing viewer recipe changed');
       };

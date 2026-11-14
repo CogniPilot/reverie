@@ -359,8 +359,6 @@ async function savedFixture(
     allowedTools: 'Read',
     workingDir: '/workspace',
     status: 'busy',
-    currentTaskId: null,
-    lastActivityAt: 1,
     pid: 23,
     createdAt: 1,
     lastActivityAt: 1,
@@ -700,7 +698,7 @@ describe('actual saved Docker Session private attachment', () => {
     expect(other.providerDispatchHeld).toBe(true);
     await other.stop(false);
   });
-  it.each(['foreign-owner', 'changed-model', 'native-progress'] as const)(
+  it.each(['foreign-owner', 'changed-model', 'changed-permission', 'changed-tools', 'native-progress'] as const)(
     'actual provider facade checks %s against the same canonical recipe and native process',
     async (mutation) => {
       const f = await savedFixture(),
@@ -731,7 +729,11 @@ describe('actual saved Docker Session private attachment', () => {
           ? { owner: 'foreign-owner' }
           : mutation === 'changed-model'
             ? { model: 'synthetic-different-model' }
-            : { claudeSessionChain: ['70000000-0000-4000-8000-000000000007'] }),
+            : mutation === 'changed-permission'
+              ? { claudeMode: 'normal' as const }
+              : mutation === 'changed-tools'
+                ? { allowedTools: 'Read' }
+                : { claudeSessionChain: ['70000000-0000-4000-8000-000000000007'] }),
       });
       cleanup.push(() => candidate.stop(false));
       const sessions = new Map([[sid, candidate]]);
@@ -859,7 +861,7 @@ describe('in-place Docker existing-view renewal', () => {
         sessionGeneration: 3,
         containerId: dest,
         imageId: target,
-        originalDigest: f.row.original.configurationDigest,
+        originalDigest: dockerContinuationDigest(f.row.destination),
         policyDigest: dockerContinuationDigest(f.row.policy),
       },
     });
@@ -1047,7 +1049,7 @@ describe('in-place Docker existing-view renewal', () => {
       if (field === 'panePid') f.nativeRead.panePid++;
       else if (field === 'paneId') f.nativeRead.paneId = '%2';
       else if (field === 'paneStartTicks') f.nativeRead.paneStartTicks = '12346';
-      else f.nativeRead.hookGeneration += 'changed';
+      else f.nativeRead.hooks.generation += 'changed';
       const fresh = await f.engine.captureProviderView(f.row, () => {});
       expect(() => f.session.renewDockerContinuationView(fresh, () => true)).toThrow();
       expect(f.session.dockerContinuationViewCurrent).toBe(false);

@@ -169,6 +169,14 @@ request, resource approval, operation, credential, binding, phase and launch
 fences. Each employee is migrated inside its own viewer-restoration boundary,
 so a stale record remains held while unrelated viewers can reconnect.
 
+Existing-provider correlation resolves an absent Claude permission mode through
+the unchanged shipped protocol's selected default. Explicit permissions and tool
+selections remain distinct; unknown or overridden protocols retain strict
+comparison. Actual Session facts use a complete projection without view/runtime
+getters, so checking a proof does not recursively invoke its serializer. The
+original launch fingerprint remains unchanged and is still an additional check
+before the first provider launch.
+
 Both formats have explicit strict schemas. An older reader that does not
 understand version 2 must refuse the store; it must not discard records or load
 an older backup over them. Do not run competing old and new writers or downgrade

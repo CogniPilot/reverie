@@ -8,7 +8,6 @@ import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import { THREAD_STATE_BINDINGS } from './config/cli-registry/profiles.js';
 import { nativeThreadProfile, rebootRestoreLaunchConfig, rebootResumeTarget } from './utils/native-thread-profile.js';
 
-
 function sourceValue(employee: CompanyEmployee, saved: SessionState) {
   const target = rebootResumeTarget(saved);
   const normalized = target === undefined ? saved : { ...saved, ...rebootRestoreLaunchConfig(saved, target) };
