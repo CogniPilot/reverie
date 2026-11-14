@@ -1,0 +1,4 @@
+# Maintainer-only immutable configuration layer; runtime uses the shared closed schema.
+ARG REVERIE_CONTROL_BASE
+FROM ${REVERIE_CONTROL_BASE}
+COPY --chown=0:0 boxed-runtime.json /etc/reverie/boxed-runtime.json
