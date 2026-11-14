@@ -707,7 +707,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       current();
       matches.push(task);
     }
-    if (matches.length !== 1) refuse('DOCKER_POOL_ACK_AMBIGUOUS');
+    if (!matches.length) refuse('DOCKER_POOL_ORIGINAL_ACK_MISSING');
     if (
       !isDeepStrictEqual(await this.#poolCensus('pool-helper'), ids) ||
       !isDeepStrictEqual(await this.#poolCensus('anchor'), anchors)
@@ -726,8 +726,33 @@ export class DockerContainedResources implements DockerContainedResourceControll
       !this.#matches(confirmed, policy, null)
     )
       refuse('DOCKER_POOL_EPOCH_CHANGED');
-    if (!(await this.#ack(matches[0]!, confirmed, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+    for (const task of matches) {
+      if (!(await this.#ack(task, confirmed, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+      current();
+    }
+    if (
+      !isDeepStrictEqual(await this.#poolCensus('pool-helper'), ids) ||
+      !isDeepStrictEqual(await this.#poolCensus('anchor'), anchors)
+    )
+      refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
     current();
+    // All actual writers are closed and their original ACKs prove this SAME
+    // epoch/policy. Picking one is new observation correlation, never a claim
+    // about which historical employee or operation caused the pool state.
+    const retained = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    const chosen =
+      matches.find((task) =>
+        retained.some(
+          (prior) =>
+            'containerId' in prior &&
+            'containerId' in task &&
+            prior.containerId === task.containerId &&
+            prior.name === task.name &&
+            prior.imageId === task.imageId &&
+            prior.configurationDigest === task.configurationDigest &&
+            (prior.phase !== 'completed' || task.phase !== 'completed' || prior.resultDigest === task.resultDigest)
+        )
+      ) ?? matches[0]!;
     const record = DockerPoolObservationRecord.parse({
       version: 1,
       purpose: 'reverie-boxed-pool-observation-v1',
@@ -746,7 +771,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         initPid: confirmed.anchor.pid,
         initStartTicks: confirmed.anchor.startTicks,
       },
-      configuration: matches[0],
+      configuration: chosen,
     });
     return new DockerPoolReconciliationReceipt(poolObservationOrigin, record, current);
   }

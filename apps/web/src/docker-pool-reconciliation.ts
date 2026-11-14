@@ -95,6 +95,19 @@ export class DockerPoolReconciliation {
       allowedActions: retained ? [] : ['reconcile-pool'],
     };
   }
+  async #capture(
+    policy: DockerPoolObservationRecord['poolPolicy'],
+    current: () => void
+  ): Promise<DockerPoolReconciliationReceipt> {
+    try {
+      return await this.resources.capturePoolObservation(policy, current);
+    } catch (cause) {
+      // Revoked authority/currency is NOT laundered into a native read failure.
+      current();
+      if (cause instanceof DockerEmployeeContinuationError) throw cause;
+      throw new DockerEmployeeContinuationError('DOCKER_POOL_OBSERVATION_UNCONFIRMED', 409, { cause });
+    }
+  }
   async status(employeeId: string, authority: DockerContinuationAuthority): Promise<DockerPoolStatus> {
     const context = this.#context(employeeId, authority);
     if (this.company.store.publicationUnconfirmed)
@@ -106,7 +119,7 @@ export class DockerPoolReconciliation {
         allowedActions: [],
       };
     try {
-      const receipt = await this.resources.capturePoolObservation(context.original.policy, context.current);
+      const receipt = await this.#capture(context.original.policy, context.current);
       context.current();
       const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, context.current);
       return this.#result(context, record, context.beforePool);
@@ -133,7 +146,7 @@ export class DockerPoolReconciliation {
     )
       refuse('DOCKER_POOL_TARGET_CHANGED');
     if (this.company.store.publicationUnconfirmed) refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
-    const receipt = await this.resources.capturePoolObservation(context.original.policy, context.current);
+    const receipt = await this.#capture(context.original.policy, context.current);
     const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, context.current);
     const expected = this.#result(context, record, context.beforePool).scopeDigest;
     if (input.expectedScopeDigest !== expected) refuse('DOCKER_POOL_SCOPE_CHANGED');

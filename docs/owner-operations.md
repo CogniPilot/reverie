@@ -200,7 +200,11 @@ native log ACK, current anchor PID/birth, parent identity and pool-policy checks
 then records only global observation metadata through the canonical company
 writer. It never creates or starts a helper, changes limits, launches a provider,
 or clears an employee launch fence. No retired employee/session/origin UUID is
-invented from helper labels.
+invented from helper labels. Multiple original successful helpers are accepted
+only when every discovered writer is fixed and terminal and every original ACK
+agrees with the same current pool policy and epoch. One verified task is selected
+as new observation correlation, preferring an already retained proof; this is
+not a claim about which historical operation caused the pool state.
 
 `retained` reports the observation record, not permission to launch. Every
 later resource use still needs its own fresh native proof. Running/unknown

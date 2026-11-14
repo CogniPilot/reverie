@@ -96,7 +96,10 @@ async function fixture(options: { recover?: boolean } = {}) {
   const runtimeCurrent = () => {
     if (!runtime) throw Error('Synthetic runtime revoked');
   };
-  const service = new DockerPoolReconciliation(company, store, physical.controller, runtimeCurrent);
+  const resources = physical.controllerWith(() =>
+    store.retainedPoolConfigurationTasks('reverie-boxed-anchor-' + 'b'.repeat(32), helper, 'b'.repeat(64))
+  );
+  const service = new DockerPoolReconciliation(company, store, resources, runtimeCurrent);
   const ownerAuth = new OwnerAuthService({
     store: new OwnerAuthStore(join(directory, 'owner.json')),
     auditFile: join(directory, 'audit.jsonl'),
@@ -224,6 +227,42 @@ async function fixture(options: { recover?: boolean } = {}) {
   };
 }
 describe('supported metadata-only recovery of an already lost pool ACK', () => {
+  it('accepts a bounded consistent set of original closed ACKs without inventing causality or stranding retained proof', async () => {
+    const f = await fixture(),
+      id = f.completed.containerId;
+    const add = (other: string) => {
+      const raw = structuredClone(f.physical.containers.get(id)!);
+      raw.Id = other;
+      (raw.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] =
+        'reverie-boxed-pool-helper-' + other;
+      f.physical.containers.set(other, raw);
+      f.physical.logs.set(other, f.physical.logs.get(id)!);
+    };
+    add('f'.repeat(64));
+    const status = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(status.json().data.state).toBe('reconciliation-required');
+    const result = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: f.body(status.json().data.scopeDigest),
+    });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    const record = f.companyStore.snapshot().dockerPoolObservations![0]!;
+    expect(record.configuration.containerId).toBe(id);
+    expect(record).not.toHaveProperty('origin');
+    // A later matching closed helper must not cause proof churn just because
+    // its full ID sorts first. Preference is DATA only: every ACK is re-earned.
+    add('0'.repeat(64));
+    const before = await fs.readFile(f.companyFile, 'utf8');
+    const again = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(again.json().data.state).toBe('retained');
+    expect(await fs.readFile(f.companyFile, 'utf8')).toBe(before);
+    expect(f.companyStore.snapshot().dockerPoolObservations).toHaveLength(1);
+    f.effects();
+  });
+
   it.each(['owner', 'worker'] as const)(
     'real %s repairs missing history without inventing origin or dispatching effects',
     async (caller) => {
@@ -336,7 +375,7 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     'wrong-image',
     'changed-epoch',
     'malformed-ack',
-    'ambiguous',
+    'mixed-ack',
     'duplicate-census',
     'unknown-io',
   ] as const)('%s native evidence remains held with no metadata or effects', async (mode) => {
@@ -352,14 +391,16 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     else if (mode === 'wrong-image') container.Image = 'sha256:' + 'f'.repeat(64);
     else if (mode === 'changed-epoch') f.physical.driftEpoch();
     else if (mode === 'malformed-ack') f.physical.logs.set(id, '{}');
-    else if (mode === 'ambiguous') {
+    else if (mode === 'mixed-ack') {
       const other = 'f'.repeat(64),
         raw = structuredClone(container);
       raw.Id = other;
       (raw.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] =
         'reverie-boxed-pool-helper-' + 'f'.repeat(64);
       f.physical.containers.set(other, raw);
-      f.physical.logs.set(other, f.physical.logs.get(id)!);
+      const wrong = JSON.parse(f.physical.logs.get(id)!);
+      wrong.resources.cpuWeight = '200';
+      f.physical.logs.set(other, JSON.stringify(wrong));
     } else if (mode === 'wrong-policy') {
       await f.companyStore.update((state) => {
         state.employees[1]!.dockerResourcePolicy!.pool.cpuWeight = 200;
@@ -391,6 +432,22 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     expect(result).toMatchObject({ state: 'held', allowedActions: [] });
     expect(JSON.stringify(result)).not.toContain('Sensitive private');
     expect(f.companyStore.snapshot().dockerPoolObservations).toBeUndefined();
+    f.effects();
+  });
+  it('a valid POST preview with an unknown native reply is a typed backend hold, not invalid caller input', async () => {
+    const f = await fixture(),
+      status = await f.service.status(f.eid, f.authority());
+    const before = await fs.readFile(f.companyFile, 'utf8');
+    f.physical.logs.set(f.completed.containerId, '{}');
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: f.body(status.scopeDigest!),
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('DOCKER_POOL_OBSERVATION_UNCONFIRMED');
+    expect(await fs.readFile(f.companyFile, 'utf8')).toBe(before);
     f.effects();
   });
   it('strict request schema refuses caller policy, helper ID, foreign SID and stale preview', async () => {
