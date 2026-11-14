@@ -1034,6 +1034,9 @@ export interface SessionState {
   viewerInputHeld?: boolean;
   /** Deny-only saved uncertainty; false/absence never clears an existing in-process hold. */
   providerDispatchHeld?: boolean;
+  /** Read-only live diagnostics; ignored on reload and omitted from disk snapshots. */
+  providerDispatchHoldKind?: 'loaded-intent' | 'intrinsic' | null;
+  providerInputHeld?: boolean;
   /** Deny-only input uncertainty, distinct from provider launch or viewer health. */
   terminalInputHeld?: boolean;
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */

@@ -194,7 +194,7 @@ export class DockerEmployeeRuntime {
       session.owner !== employee.owner ||
       session.docker?.containerName !== binding.containerId ||
       session.docker?.continuation?.operationId !== binding.operationId ||
-      session.providerDispatchHeld ||
+      (session.providerDispatchHeld && !session.dockerContinuationViewCurrent) ||
       session.terminalInputHeld ||
       session.paneExit ||
       (!attached.provider.ownsPreparing(session, row) && !(session.pid !== null && session.status !== 'stopped'))
@@ -337,7 +337,9 @@ export class DockerEmployeeRuntime {
       actual.docker?.containerName === binding.containerId
     )
       return true;
-    await a.provider.attach(row, binding, current);
+    const view = await a.engine.captureProviderView(row, current);
+    current();
+    await a.provider.attach(row, binding, current, view);
     current();
     return true;
   }

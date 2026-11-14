@@ -71,15 +71,9 @@ function fixture() {
   return { place, session, binding, opts };
 }
 describe('boxed original provider publication', () => {
-  it('saved Docker placement can only attach; it cannot create/start or replay a first provider', () => {
-    const f = fixture(),
-      command = buildDockerLaunchCommand(f.opts);
-    expect(command).toContain('attach-session');
-    expect(command).not.toMatch(/new-session|container start|image inspect|--memory|CLAUDE_API_KEY/);
-    expect(command).toContain('reverie-dkr-' + sid);
-    expect(command).toContain('REVERIE_SESSION_ID=' + sid);
-    expect(command).toContain('REVERIE_WORKER_IDENTITY_FILE=');
-    expect(command).not.toContain('reverie-worker-exec');
+  it('saved Docker placement cannot admit an existing provider viewer or a first provider', () => {
+    const f = fixture();
+    expect(() => buildDockerLaunchCommand(f.opts)).toThrow('Original boxed provider view required');
   });
   it('one actual private Session owner admits canonical provider bytes once', () => {
     const f = fixture(),
@@ -246,7 +240,8 @@ describe('boxed provider command contract', () => {
   it('pins the control Engine even when the provider environment selects a private nested daemon', () => {
     vi.stubEnv('DOCKER_HOST', 'unix:///private-worker/docker.sock');
     const f = fixture(),
-      command = buildDockerLaunchCommand(f.opts);
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}),
+      command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
     expect(command.split('unix:///run/reverie-engine/docker.sock').slice(1)).toHaveLength(2);
     expect(command.match(/-H /g)).toHaveLength(2);
     expect(command).not.toContain('/private-worker');

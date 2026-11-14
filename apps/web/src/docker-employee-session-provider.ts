@@ -1,3 +1,4 @@
+import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 /** Existing Session/mux application services own the provider and viewer. No
  * raw docker-exec provider bypass or alternate recipe/account writer.
  */
@@ -66,14 +67,20 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
   launch(row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void): Promise<void> {
     return this.#install(row, binding, current, true);
   }
-  attach(row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void): Promise<void> {
-    return this.#install(row, binding, current, false);
+  attach(
+    row: DockerEmployeeContinuationRecord,
+    binding: DockerEmployeeBinding,
+    current: () => void,
+    view: DockerEmployeeProviderView
+  ): Promise<void> {
+    return this.#install(row, binding, current, false, view);
   }
   async #install(
     row: DockerEmployeeContinuationRecord,
     binding: DockerEmployeeBinding,
     current: () => void,
-    first: boolean
+    first: boolean,
+    view?: DockerEmployeeProviderView
   ): Promise<void> {
     current();
     if (this.#originals.has(row.request.operationId)) throw Error('Original provider attempt is retained');
@@ -98,13 +105,15 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           original.source.pid !== null ||
           original.source.runningTaskCount > 0 ||
           original.source.paneLifecycleInFlight ||
-          original.source.providerDispatchHeld ||
+          (first && original.source.providerDispatchHeld) ||
           original.source.terminalInputHeld
         )
           throw Error('Original application Session requires recovery');
-        await this.ctx.discardPartiallyBuiltSession(binding.sessionId);
-        current();
-        if (this.ctx.sessions.has(binding.sessionId)) throw Error('Original Session cleanup is unconfirmed');
+        if (first) {
+          await this.ctx.discardPartiallyBuiltSession(binding.sessionId);
+          current();
+          if (this.ctx.sessions.has(binding.sessionId)) throw Error('Original Session cleanup is unconfirmed');
+        }
       }
       const allowed = captureLaunchProtocolAdmission(saved.mode ?? 'claude');
       const environment = await clampEnvOverridesForOwner(
@@ -116,18 +125,21 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       if (resume === undefined) throw Error('Original conversation cannot be resumed by this provider');
       const launch = rebootRestoreLaunchConfig(saved, resume),
         docker = this.#docker(row, binding);
-      const candidate = new Session({
-        ...saved,
-        ...launch,
-        useMux: true,
-        mux: this.ctx.mux,
-        docker,
-        remote: undefined,
-        envOverrides: environment,
-        workerAttachOnly: false,
-        providerDispatchHeld: false,
-        terminalInputHeld: false,
-      });
+      const reused = !first ? original.source : undefined;
+      const candidate =
+        reused ??
+        new Session({
+          ...saved,
+          ...launch,
+          useMux: true,
+          mux: this.ctx.mux,
+          docker,
+          remote: undefined,
+          envOverrides: environment,
+          workerAttachOnly: false,
+          providerDispatchHeld: false,
+          terminalInputHeld: false,
+        });
       original.candidate = candidate;
       const currentCandidate = () => {
         current();
@@ -153,11 +165,15 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
             if (!admission()) throw Error('Original Docker launch authorization changed');
           })
         );
-      await this.ctx.addSession(candidate, undefined, admission);
+      if (!first) {
+        if (!view) throw Error('Original Docker provider view required');
+        candidate.bindDockerContinuationView(view, this.ctx.mux);
+      }
+      if (!reused) await this.ctx.addSession(candidate, undefined, admission);
       currentCandidate();
       await this.ctx.reapplyPersistedSessionState(candidate, saved, 'before-spawn');
       currentCandidate();
-      await this.ctx.setupSessionListeners(candidate);
+      if (!reused) await this.ctx.setupSessionListeners(candidate);
       currentCandidate();
       await candidate.startInteractive();
       currentCandidate();

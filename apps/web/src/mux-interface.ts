@@ -1,3 +1,4 @@
+import type { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import type {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import type { Session } from './session.js';
 import type { ProviderLaunchPublication } from './provider-launch-publication.js';
@@ -111,6 +112,7 @@ export interface MuxSessionWithStats extends MuxSession {
 export interface CreateSessionOptions {
   /** Actual private first-provider owner; never persisted or accepted over HTTP. */
   dockerContinuationLaunch?:DockerEmployeeProviderLaunch;
+  dockerContinuationView?:DockerEmployeeProviderView;
   /** Internal, launch-only exact workspace trust for managed Codex. */
   codexTrustWorkspace?: string;
   /** Internal, launch-only trust for Reverie's own Codex hooks (shell-escaped --config value). */
@@ -175,6 +177,7 @@ export interface CreateSessionOptions {
 export interface RespawnPaneOptions {
   /** Actual private first-provider owner; never persisted or accepted over HTTP. */
   dockerContinuationLaunch?:DockerEmployeeProviderLaunch;
+  dockerContinuationView?:DockerEmployeeProviderView;
   /** Reconnect an existing worker viewer only; the broker refuses any cold start. */
   workerAttachOnly?: boolean;
   /** Process-local final admission (an owner stop holds the pane), checked with stillCurrent right before the launch. */

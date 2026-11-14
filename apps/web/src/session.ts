@@ -1,3 +1,4 @@
+import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
@@ -824,7 +825,11 @@ export class Session extends EventEmitter {
   // at spawn, preserved across respawns via persisted state. Not written to .claude/settings.local.json.
   private _envOverrides: Record<string, string> | undefined;
   #workspaceHookPreparation?: WorkspaceHookPreparation;
-  #providerDispatchUncertainty?: ProviderDispatchUnconfirmedError;
+  #providerDenial?: { readonly kind: 'loaded-intent' | 'intrinsic'; readonly error: ProviderDispatchUnconfirmedError };
+  get #providerDispatchUncertainty(): ProviderDispatchUnconfirmedError | undefined { return this.#providerDenial?.error; }
+  set #providerDispatchUncertainty(error: ProviderDispatchUnconfirmedError | undefined) {
+    this.#providerDenial = error ? {kind:'intrinsic',error} : undefined;
+  }
   #employeeRecoveryHold:EmployeeRecoveryAttempt|undefined;
   retainEmployeeRecovery(attempt:EmployeeRecoveryAttempt):void {
     EmployeeRecoveryAttempt.prototype.assertSession.call(attempt,this);
@@ -963,6 +968,8 @@ export class Session extends EventEmitter {
   #lastProviderLaunch?: ProviderLaunchPublication;
   // Prepared but unused is distinct from the provider that may still be running.
   #pendingProviderLaunch?: ProviderLaunchPublication;
+  #dockerContinuationView?: DockerEmployeeProviderView;
+
   static retainProviderLaunchPublication(subject: Session, store: StateStore, publication: ProviderLaunchPublication): void {
     if (!Session.usesProviderLaunchStore(subject, store) || !store.ownsProviderLaunchStaging(subject, publication) || !publication.owns(subject))
       throw new Error('Original Session publication custody required');
@@ -1079,13 +1086,16 @@ export class Session extends EventEmitter {
     return this.#terminalInputUncertainty;
   }
   get providerDispatchHeld(): boolean {return this.#providerDispatchUncertainty !== undefined;}
+  /** Input to a freshly verified existing provider is separate from a new-provider dispatch. */
+  get providerInputHeld(): boolean { return !this._existingProviderObservationAdmitted(); }
   private _holdUnconfirmedProvider(
     cause?: unknown,
     publication?: ProviderLaunchPublication
   ): ProviderDispatchUnconfirmedError {
     if (publication?.retiredStoppedFor(this)) return new ProviderDispatchUnconfirmedError(cause);
-    return (this.#providerDispatchUncertainty ??=
-      cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause));
+    const error = this.#providerDispatchUncertainty ?? (cause instanceof ProviderDispatchUnconfirmedError ? cause : new ProviderDispatchUnconfirmedError(cause));
+    this.#providerDenial = {kind:'intrinsic',error};
+    return error;
   }
   /** Canonical deny-only provider-effect admission; viewer attachment is separate. */
   private _providerEffectsAdmitted(): boolean {return this.#employeeRecoveryHold===undefined && this.#providerDispatchUncertainty === undefined && this.#terminalInputUncertainty === undefined && initialLaunchAdmitted(this);}
@@ -1115,7 +1125,7 @@ export class Session extends EventEmitter {
 
   /** Admission precedes every report effect; an unknown owned start is never a legacy attachment. */
   admitHookReport(value: unknown): 'refused' | 'legacy-attachment' | 'preparing' | 'current' | 'supervised' {
-    if (this._isStopped || this._closing || this.#providerDispatchUncertainty) return 'refused';
+    if (this._isStopped || this._closing || !this._existingProviderObservationAdmitted()) return 'refused';
     const capability = getCli(this.mode)?.capabilities.hooks;
     if (capability === 'supervised') return 'supervised';
     if (capability !== 'always') return 'refused';
@@ -1132,13 +1142,13 @@ export class Session extends EventEmitter {
   /** A prompt may authorize input only to the same provider epoch and Session object. */
   captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease | undefined {
     const evidence = this.#workspaceHookEvidence;
-    if (this._isStopped || this._closing || this.#providerDispatchUncertainty || (evidence.configuration !== 'prepared'
+    if (this._isStopped || this._closing || !this._existingProviderObservationAdmitted() || (evidence.configuration !== 'prepared'
       && evidence.configuration !== 'legacy-attachment' && getCli(this.mode)?.capabilities.hooks !== 'supervised')) return;
     const epoch = this.#workspaceHookEpoch;
     const mode = this.mode;
     const originalOwner = this.owner;
     return issueSessionProviderLease(this, () => !this._isStopped && !this._closing
-      && this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === originalOwner && currentOwner(), originalOwner, epoch);
+      && this._existingProviderObservationAdmitted() && this.#workspaceHookEpoch === epoch && this.mode === mode && this.owner === originalOwner && currentOwner(), originalOwner, epoch);
   }
 
   private _invalidateWorkspaceHooks(): void {
@@ -1253,11 +1263,12 @@ export class Session extends EventEmitter {
 
   private _stageStartHookDispatch(): HookProviderDispatch {
     const attempt = this.#hookStartAttempt;
-    this._assertProviderEffectAdmission();
+    if (this.#dockerContinuationView) this._requireDockerContinuationView();
+    else this._assertProviderEffectAdmission();
     if (!attempt || !this._hookStartCurrent()) throw new Error('Session launch generation changed');
     if (attempt.operation?.attempted()) throw new Error('A provider dispatch is already unsettled');
     const operation = this._stageProviderHookDispatch(attempt.configuration,
-      () => this.#hookStartAttempt === attempt && this.mode === attempt.mode,
+      () => this.#hookStartAttempt === attempt && this.mode === attempt.mode && (!this.#dockerContinuationView || this.dockerContinuationViewCurrent),
       undefined, this._workerAttachOnly || this._remote?.owned === false || (!!this._docker?.continuation&&!this._dockerContinuationLaunch));
     attempt.operation = operation;
     return operation;
@@ -1265,7 +1276,7 @@ export class Session extends EventEmitter {
   private _muxDispatchOptions(dispatch: HookProviderDispatch) {
     const notify = () => {
       dispatch.onDispatch();
-      this._beginClaudeConversationSelection();
+      if (!this.#dockerContinuationView) this._beginClaudeConversationSelection();
     };
     return {
       providerLaunch: dispatch.publication,
@@ -1281,7 +1292,7 @@ export class Session extends EventEmitter {
     const preparation = this.#workspaceHookPreparation;
     this.#workspaceHookPreparation = undefined;
     const attempt: HookStartAttempt = {
-      configuration: this._dockerContinuationLaunch && this.mode==='claude'
+      configuration: this.#dockerContinuationView ? (this._requireDockerContinuationView(),'prepared') : this._dockerContinuationLaunch && this.mode==='claude'
         ? (this._dockerContinuationLaunch.requireFor(this),'prepared')
         : consumeWorkspaceHookPreparation(preparation,this.workingDir),
       mode: this.mode,
@@ -1305,7 +1316,7 @@ export class Session extends EventEmitter {
       const attempted = attempt.operation?.providerAttempted();
       attempt.operation?.settle(false);
       if (attempted) throw this._holdUnconfirmedProvider(error, attempt.operation?.publication);
-      this._assertProviderEffectAdmission();
+      if (!this.#dockerContinuationView) this._assertProviderEffectAdmission();
       throw error;
     } finally {
       if (this.#hookStartAttempt === attempt) this.#hookStartAttempt = undefined;
@@ -1775,7 +1786,9 @@ export class Session extends EventEmitter {
       });
     }
     this.#providerLaunchStore = config.publicationStore ?? getStore();
-    if (this.#providerLaunchStore.providerLaunchHeldFor(this)) this._holdUnconfirmedProvider();
+    if (this.#providerLaunchStore.providerLaunchHeldFor(this)) {
+      if (!this.#providerDenial) this.#providerDenial = {kind:'loaded-intent',error:new ProviderDispatchUnconfirmedError()};
+    }
   }
 
   get status(): SessionStatus {
@@ -1862,6 +1875,27 @@ export class Session extends EventEmitter {
     if(!(owner instanceof DockerEmployeeProviderLaunch)||this._dockerContinuationLaunch||!this._docker?.continuation)
       throw Error('Original unopened Docker continuation required');
     owner.requireFor(this);this._dockerContinuationLaunch=owner;
+  }
+  /** Only an actual Engine-owned view may attach an existing boxed provider. */
+  bindDockerContinuationView(view: DockerEmployeeProviderView, mux: TerminalMultiplexer | null = this._mux): void {
+    if (!(view instanceof DockerEmployeeProviderView) || this.#dockerContinuationView || this._dockerContinuationLaunch || !this._docker?.continuation || !mux || this._isStopped || this._closing || (this.providerDispatchHeld && !(this.#providerDenial?.kind === 'loaded-intent')) || this.ptyProcess || this.paneLifecycleInFlight || this._muxSession || (this._mux && this._mux !== mux))
+      throw Error('Original unopened Docker provider view required');
+    this.#dockerContinuationView = view;
+    DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker);
+    this._mux = mux;
+    this._useMux = true;
+    this.#workspaceHookEvidence = { configuration: 'prepared', generation: view.descriptor.hookGeneration };
+  }
+  get dockerContinuationViewCurrent(): boolean {
+    const view = this.#dockerContinuationView;
+    if (!view || !this._docker) return false;
+    try { DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker); return true; } catch { return false; }
+  }
+  private _requireDockerContinuationView(): void {
+    if (!this.dockerContinuationViewCurrent) throw Error('Original Docker provider view changed');
+  }
+  private _existingProviderObservationAdmitted(): boolean {
+    return !this.#providerDispatchUncertainty || ((this.#providerDenial?.kind === 'loaded-intent') && this.dockerContinuationViewCurrent);
   }
   get docker(): SessionDocker | undefined {
     return this._docker;
@@ -2945,6 +2979,8 @@ export class Session extends EventEmitter {
       workerViewerReconnect: this.workerViewerReconnect,
       viewerInputHeld: this.viewerInputHeld,
       ...(this.providerDispatchHeld ? {providerDispatchHeld: true} : {}),
+      providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
+      providerInputHeld: this.providerInputHeld,
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
       viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
@@ -2965,10 +3001,16 @@ export class Session extends EventEmitter {
 
   /** Complete Session-owned disk snapshot; this must never be used by API/SSE serializers. */
   toPersistedState(): SessionState {
-    return { ...this.toState(),
+    const snapshot = { ...this.toState(),
       __envOverrides: this.getEnvOverridesForPersist(),
       __attachmentHistory: this.getAttachmentHistoryForPersist(),
       __customModel: this.getCustomModelForPersist() } as SessionState;
+    // These observations never become authority on reload. The original disk
+    // intent remains the provider-effect fence, rather than an invented failed launch.
+    delete snapshot.providerDispatchHoldKind;
+    delete snapshot.providerInputHeld;
+    if (this.#providerDenial?.kind === 'loaded-intent') delete snapshot.providerDispatchHeld;
+    return snapshot;
   }
 
   private _providerLaunchConfiguration(): string {
@@ -3111,7 +3153,7 @@ export class Session extends EventEmitter {
     // A held outcome may attach an unchanged live viewer, but must preserve the
     // original subject when observation would otherwise discard or replace it.
     if (!this._providerEffectsAdmitted() && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName)
-      || mux.isPaneDead(this._muxSession.muxName))) this._assertProviderEffectAdmission();
+      || mux.isPaneDead(this._muxSession.muxName))) { if (this.#dockerContinuationView) this._requireDockerContinuationView(); else this._assertProviderEffectAdmission(); }
     // An unsettled owner stop (owner-stop-journal) could still signal whatever holds this agent's pane, so until the
     // laptop settles it no new process goes there: only an existing live pane may be attached to.
     if (ownerStopPending(this.id) && (!this._muxSession || !mux.muxSessionExists(this._muxSession.muxName) || mux.isPaneDead(this._muxSession.muxName)))
@@ -3137,7 +3179,7 @@ export class Session extends EventEmitter {
     let respawnedDeadPane = false;
     let respawnedResumeId: string | undefined;
     if (this._muxSession && mux.isPaneDead(this._muxSession.muxName)) {
-      this._refuseNewProviderWhileRecoveryHeld();
+      if (this.#dockerContinuationView) this._requireDockerContinuationView(); else this._refuseNewProviderWhileRecoveryHeld();
       console.log('[Session] Dead pane detected, respawning:', this._muxSession.muxName);
       // Confirmed dead — safe to resolve/pin now (see `_pinOmpRespawnId()`).
       // `options.respawnPaneOptions` was built eagerly before this dead-pane
@@ -3146,7 +3188,7 @@ export class Session extends EventEmitter {
       const respawnOptions = await this._buildRespawnPaneOptionsWithResumePin();
       assertAdmission();
       // The pane may have read live at the guard above and dead here: check again, now and at the tmux command.
-      this._refuseNewProviderWhileRecoveryHeld();
+      if (this.#dockerContinuationView) this._requireDockerContinuationView(); else this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
       const dispatch = this._stageStartHookDispatch();
       Object.assign(respawnOptions, this._muxDispatchOptions(dispatch));
@@ -3208,7 +3250,7 @@ export class Session extends EventEmitter {
           this._resumeSessionId = pinned;
         }
       }
-      this._refuseNewProviderWhileRecoveryHeld();
+      if (this.#dockerContinuationView) this._requireDockerContinuationView(); else this._refuseNewProviderWhileRecoveryHeld();
       assertAdmission();
       const dispatch = this._stageStartHookDispatch();
       Object.assign(options.createSessionOptions, this._muxDispatchOptions(dispatch));
@@ -3223,7 +3265,7 @@ export class Session extends EventEmitter {
     assertAdmission();
     this._attachExistingMuxClient(options.spawnErrLabel);
 
-    return { isRestored, respawnedResumeId, respawnedDeadPane };
+    return { isRestored: isRestored || this.#dockerContinuationView !== undefined, respawnedResumeId, respawnedDeadPane };
   }
 
   /** Attach only to the already selected local mux; never creates or respawns its command. */
@@ -3650,6 +3692,7 @@ export class Session extends EventEmitter {
       remote: this._remote,
       docker: this._docker,
       dockerContinuationLaunch:this._dockerContinuationLaunch,
+      dockerContinuationView:this.#dockerContinuationView,
       owner: this._owner,
     };
     return this._withCustomModelLaunchModel(options);
@@ -4155,6 +4198,7 @@ export class Session extends EventEmitter {
             remote: this._remote,
             docker: this._docker,
             dockerContinuationLaunch:this._dockerContinuationLaunch,
+            dockerContinuationView:this.#dockerContinuationView,
             owner: this._owner,
           },
           spawnErrLabel: 'mux attachment',
@@ -4250,7 +4294,7 @@ export class Session extends EventEmitter {
         }
       } catch (err) {
         assertAdmission();
-        this._assertProviderEffectAdmission();
+        if (!this.#dockerContinuationView) this._assertProviderEffectAdmission();
         if (err instanceof MuxMutationRefusedError) throw err;
         if (this._workerAttachOnly || this._docker?.continuation) throw err;
         if (this._workerResourceLaunch) throw err;
@@ -6087,7 +6131,7 @@ export class Session extends EventEmitter {
 
   /** Also while a durably recorded owner stop of this session is unsettled, whichever Session object (or process) took it. */
   private _inputHeldForRecovery(): boolean {
-    return this.#employeeRecoveryHold !== undefined || this._recoveryHold || this.providerDispatchHeld || this.terminalInputHeld || ownerStopPending(this.id);
+    return this.#employeeRecoveryHold !== undefined || this._recoveryHold || !this._existingProviderObservationAdmitted() || this.terminalInputHeld || ownerStopPending(this.id);
   }
 
   /**
