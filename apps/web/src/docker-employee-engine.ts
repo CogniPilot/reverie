@@ -735,7 +735,24 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       }
     };
     requireCurrent();
-    if (checked.phase !== 'ready' || !checked.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    if (!['ready', 'provider-issued'].includes(checked.phase) || !checked.destination)
+      refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    if (checked.phase === 'provider-issued') {
+      // A retained dispatch fence grants no attachment. Earn every original
+      // storage/credential/resource observation before the private native view.
+      const seen = await DockerEmployeeEngine.prototype.observeDestination.call(this, checked);
+      requireCurrent();
+      if (
+        !seen ||
+        seen.state !== 'running' ||
+        seen.provider.kind !== 'running' ||
+        seen.provider.sessionId !== checked.request.sessionId ||
+        seen.provider.operationId !== checked.request.operationId ||
+        !isDeepStrictEqual(seen.resources, checked.policy) ||
+        !/^[a-f0-9]{64}$/.test(seen.credentialDigest ?? '')
+      )
+        refuse('DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED');
+    }
     const inspect = async () => {
       requireCurrent();
       const raw = await this.#destination(checked);

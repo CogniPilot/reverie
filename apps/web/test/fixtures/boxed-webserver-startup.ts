@@ -53,7 +53,10 @@ async function startup(): Promise<void> {
 
 export function runBoxedStartupNamespace(entry = 'test/fixtures/boxed-webserver-startup.ts', scenario?: string): void {
   assert(['test/fixtures/boxed-webserver-startup.ts', 'test/docker-employee-startup-restore.test.ts'].includes(entry));
-  assert(scenario === undefined || ['attached', 'absent', 'desired-off', 'unknown', 'issued-live'].includes(scenario));
+  assert(
+    scenario === undefined ||
+      ['attached', 'absent', 'desired-off', 'unknown', 'issued-live', 'issued-absent', 'issued-held'].includes(scenario)
+  );
   assert.equal(process.platform, 'linux', 'This mandatory native check requires Linux user namespaces');
   const source = resolve(import.meta.dirname, '../..');
   const modules = join(source, 'node_modules');

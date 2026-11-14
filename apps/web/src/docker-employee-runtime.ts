@@ -388,7 +388,7 @@ export class DockerEmployeeRuntime {
     if (!a) throw Error('Boxed runtime is not attached');
     const row = a.store.record(employee.id),
       binding = employee.dockerBinding;
-    if (!row || !binding || row.phase !== 'ready') return false;
+    if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
     const current = () => {
       const subject = a.store.subject(employee.id);
       const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
@@ -437,7 +437,7 @@ export class DockerEmployeeRuntime {
     return true;
   }
   /** Restore a viewer of a current running provider, independently of auto-wake.
-   * A ready record is only correlation: wake still earns fresh physical proof.
+   * Ready or retained-issued records are only correlation: fresh physical proof is required.
    * No branch creates a container, launches a provider, or releases a disk fence.
    */
   async restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
@@ -468,7 +468,7 @@ export class DockerEmployeeRuntime {
       };
       try {
         const row = a.store.record(employee.id);
-        if (row?.phase !== 'ready') {
+        if (!row || !['ready', 'provider-issued'].includes(row.phase)) {
           reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' }));
           continue;
         }
