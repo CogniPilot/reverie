@@ -80,6 +80,7 @@ let
         test/docker-owner-stop-native.test.ts \
         test/docker-employee-continuation-http.test.ts \
         test/docker-employee-continuation.test.ts \
+        test/docker-employee-source-correlation.test.ts \
         test/docker-employee-credential-installer.test.ts \
         test/docker-employee-engine.test.ts \
         test/docker-engine-command.test.ts \
