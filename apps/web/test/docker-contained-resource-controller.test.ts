@@ -9,11 +9,9 @@ import {
 import type { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 
-const boxId = 'b'.repeat(64),
-  helper = 'sha256:' + 'a'.repeat(64),
+const helper = 'sha256:' + 'a'.repeat(64),
   workerId = 'd'.repeat(64);
 const deployment = 'synthetic-box';
-const parent = `/reverie.slice/reverie-box.slice/reverie-box-${boxId}.slice`;
 const policy = {
   memoryMaxBytes: 48 * 1024 ** 3,
   memoryHighBytes: 16 * 1024 ** 3,
@@ -23,7 +21,8 @@ const policy = {
   allowedCpus: [0, 1],
   pool: { memoryMaxBytes: 48 * 1024 ** 3, swapMaxBytes: 0, pidsMax: 8192, cpuWeight: 100, allowedCpus: [0, 1] },
 };
-function fixture() {
+function fixture(boxId = 'b'.repeat(64)) {
+  const parent = `/reverie.slice/reverie-box.slice/reverie-box-${boxId}.slice`;
   let row = {
     employeeId: '11111111-1111-4111-8111-111111111111',
     request: {
@@ -39,6 +38,7 @@ function fixture() {
   const containers = new Map<string, Record<string, unknown>>();
   const logs = new Map<string, string>();
   const creates: string[] = [],
+    names: string[] = [],
     starts: string[] = [],
     phases: string[] = [];
   let configured = false,
@@ -119,11 +119,12 @@ function fixture() {
     },
   };
   const command: DockerEngineCommand = {
-    async create(_name, config, guard) {
+    async create(name, config, guard) {
       guard();
       const role = (config.Labels as Record<string, string>)['reverie.box.resource.role']!;
       expect(tasks.get(role as DockerContinuationTaskRole)?.phase).toBe('create-issued');
       creates.push(role);
+      names.push(name);
       const id = String(creates.length).repeat(64);
       const binds = (config.HostConfig as { Binds: string[] }).Binds;
       containers.set(id, {
@@ -228,6 +229,7 @@ function fixture() {
     },
     makeWorker,
     creates,
+    names,
     starts,
     phases,
     tasks,
@@ -258,6 +260,14 @@ function fixture() {
   };
 }
 describe('fixed Docker resource orchestration', () => {
+  it('isolates helper names when two instances receive the same public operation ID', async () => {
+    const first = fixture('b'.repeat(64)),
+      second = fixture('c'.repeat(64));
+    await first.controller.preparePool(first.row(), first.current);
+    await second.controller.preparePool(second.row(), second.current);
+    expect(first.row().request.operationId).toBe(second.row().request.operationId);
+    expect(first.names[1]).not.toBe(second.names[1]);
+  });
   it.each(['restart', 'parent'] as const)(
     'a changed helper %s cannot acknowledge successful resource enforcement',
     async (field) => {

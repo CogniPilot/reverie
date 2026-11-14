@@ -1,7 +1,7 @@
 /** Explicit real-Engine fixture. Requires qualified image IDs and an owned
  * evidence directory. All created containers use a fresh random Box; no company
  * mounts, credentials, providers, or existing containers are selected. */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { request } from 'node:http';
 import { execFile } from 'node:child_process';
@@ -90,7 +90,7 @@ const tasks = new Map<DockerContinuationTaskRole, DockerContinuationTask>();
 let row = {
   employeeId: '11111111-1111-4111-8111-111111111111',
   request: {
-    operationId: '22222222-2222-4222-8222-222222222222',
+    operationId: randomUUID(),
     sessionId: '33333333-3333-4333-8333-333333333333',
     sessionGeneration: 1,
   },

@@ -467,7 +467,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     writable: { path: string; target: string },
     current: () => void
   ): Promise<void> {
-    const name = `reverie-boxed-${role}-${row.request.operationId}`;
+    const name = `reverie-boxed-${role}-${dockerContinuationDigest([this.configuration.boxId, role, row.request.operationId])}`;
     const config = this.#configuration(role, name, args, writable);
     let task = await this.#created(row, role, name, config, current);
     if (!('containerId' in task)) refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');
