@@ -23,6 +23,8 @@ import { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
+import { DockerOwnerStopDiagnostic, DockerOwnerStopDiagnosticError } from './docker-owner-stop-status.js';
+import { registerDockerOwnerStopRoutes } from './web/routes/docker-owner-stop-routes.js';
 import { DockerEmployeeSessionProvider } from './docker-employee-session-provider.js';
 import { readLegacyDockerPolicyProposal, parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
 import {
@@ -327,6 +329,14 @@ export class DockerEmployeeRuntime {
   ): void {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
+    const requireCurrent = () => {
+      if (!this.current()) throw new DockerOwnerStopDiagnosticError('DOCKER_OWNER_STOP_RUNTIME_CHANGED');
+    };
+    registerDockerOwnerStopRoutes(
+      app,
+      new DockerOwnerStopDiagnostic(a.company, requireCurrent),
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
     registerDockerEmployeeContinuationRoutes(
       app,
       a.company,
