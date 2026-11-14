@@ -54,6 +54,7 @@ const selection = () => ({
 async function fixture(
   options: {
     selection?: ReturnType<typeof selection>;
+    selectionFailure?: { status: number; error: string | { code: string; message?: string } };
     start?: (body: Body) => Reply | Promise<Reply>;
     observe?: (body: { operationId: string }) => Reply | Promise<Reply>;
   } = {}
@@ -74,12 +75,22 @@ async function fixture(
   const h = await createHarness({ company });
   handles.push(h);
   const original = h.app._chatApi.bind(h.app);
+  const originalTransport = h.app._api.bind(h.app);
+  h.app._api = async (url: string, request?: object) => {
+    if (url === base + '/docker-policy' && options.selectionFailure)
+      return Response.json(
+        { success: false, error: options.selectionFailure.error },
+        { status: options.selectionFailure.status }
+      );
+    return originalTransport(url, request);
+  };
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
   const selected = options.selection ?? selection();
   h.app._chatApi = async (url: string, request?: { method?: string; body?: unknown }) => {
     if (url.startsWith(base + '/docker-')) {
       calls.push({ url, method: request?.method ?? 'GET', body: structuredClone(request?.body) });
-      if (url === base + '/docker-policy') return { ok: true, data: structuredClone(selected) };
+      if (url === base + '/docker-policy')
+        return options.selectionFailure ? original(url, request) : { ok: true, data: structuredClone(selected) };
       if (url === base + '/docker-continuation')
         return options.start?.(request?.body as Body) ?? { ok: false, status: 503 };
       if (url === base + '/docker-continuation/observe')
@@ -104,6 +115,31 @@ async function fixture(
   const starts = () => calls.filter((c) => c.url === base + '/docker-continuation');
   return { h, employee, selected, dialog, open, panel, button, calls, starts };
 }
+
+it.each([
+  {
+    status: 409,
+    error: { code: 'DOCKER_CONTINUATION_TARGET_CHANGED' },
+    expected: 'DOCKER_CONTINUATION_TARGET_CHANGED',
+  },
+  { status: 401, error: 'Sign in as the owner', expected: 'Sign in as the owner' },
+  {
+    status: 409,
+    error: { code: 'DOCKER_CONTINUATION_OWNER_STOP_PENDING', message: 'The previous stop requires reconciliation.' },
+    expected: 'The previous stop requires reconciliation.',
+  },
+])(
+  'shows the actual shared transport error for HTTP$status without starting recovery',
+  async ({ status, error, expected }) => {
+    const f = await fixture({ selectionFailure: { status, error } });
+    expect(f.panel().querySelector('[role="alert"]')!.textContent).toContain(expected);
+    expect(f.panel().textContent).toContain('Docker recovery status is unavailable.');
+    expect(f.button('Recover and enter office')).toBeUndefined();
+    expect(f.button('Approve displayed limits and recover')).toBeUndefined();
+    expect(f.calls.map((call) => call.method)).toEqual(['GET']);
+    expect(f.starts()).toHaveLength(0);
+  }
+);
 
 it('shows the exact reviewed policy and only reads status until the human acts', async () => {
   const f = await fixture();

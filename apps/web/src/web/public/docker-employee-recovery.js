@@ -53,8 +53,13 @@
       );
       if (!this.live()) throw Error('Employee profile changed. Reopen it to check the current session.');
       if (!response?.ok || !response.data || response.data.success === false) {
-        const error = response?.data?.error;
-        throw Error(typeof error === 'string' ? error : error?.code || 'Docker recovery request was not confirmed');
+        const error = response?.error ?? response?.data?.error;
+        const message = typeof error === 'string' ? error : error?.message;
+        const code = typeof error?.code === 'string' ? error.code : response?.errorCode;
+        throw Error(
+          [typeof message === 'string' ? message : '', code !== message ? code : ''].filter(Boolean).join(' — ') ||
+            'Docker recovery request was not confirmed'
+        );
       }
       return response.data.data ?? response.data;
     }
