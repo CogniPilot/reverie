@@ -16,7 +16,7 @@ const oid = '10000000-0000-4000-8000-000000000001',
   token = 'synthetic.bound.credential',
   hash = createHash('sha256').update(token).digest('hex');
 const imageEnvironment = ['PATH=/opt/reverie-worker-client/bin:/bin', 'HOME=/base', 'REVERIE_CONTAINER=1'];
-function fixture() {
+function fixture(boxId = '7'.repeat(64)) {
   let task: DockerContinuationTask | undefined, raw: Record<string, unknown> | undefined;
   const home = { source: '/synthetic/home', user: '1000:100', dev: '11', ino: '12' },
     row = {
@@ -89,7 +89,7 @@ function fixture() {
       throw Error('Unexpected command');
     }),
   };
-  const installer = new DockerEmployeeCredentialInstaller(command, journal, async () => ({ ...home }));
+  const installer = new DockerEmployeeCredentialInstaller(command, journal, async () => ({ ...home }), boxId);
   return {
     installer,
     row,
@@ -175,4 +175,12 @@ describe('original contained credential installer', () => {
     await expect(f.installer.provision(f.row, token, () => {})).rejects.toThrow();
     expect(f.command.create).toHaveBeenCalledOnce();
   });
+});
+
+it('private Box identity scopes installer names and prevents cross-instance client UUID collision', async () => {
+  const a = fixture('7'.repeat(64)),
+    b = fixture('8'.repeat(64));
+  await a.installer.provision(a.row, token, () => {});
+  await b.installer.provision(b.row, token, () => {});
+  expect(vi.mocked(a.command.create).mock.calls[0]![0]).not.toBe(vi.mocked(b.command.create).mock.calls[0]![0]);
 });

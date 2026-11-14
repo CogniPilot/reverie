@@ -37,8 +37,10 @@ export class DockerEmployeeStorage {
     private readonly command: DockerEngineCommand,
     private readonly journal: DockerContinuationTaskJournal,
     private readonly helperImageId: string,
-    private readonly source: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect>
+    private readonly source: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect>,
+    private readonly boxId: string
   ) {
+    if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^sha256:[a-f0-9]{64}$/.test(helperImageId)) throw Error('Fixed qualified storage helper required');
   }
   #configuration(row: DockerEmployeeContinuationRecord, source: DockerEmployeeInspect): Record<string, unknown> {
@@ -61,6 +63,7 @@ export class DockerEmployeeStorage {
       Cmd: ['hold-storage'],
       Labels: {
         'reverie.box.storage.operation': row.request.operationId,
+        'reverie.box.storage.box': this.boxId,
         'reverie.box.storage.employee': row.employeeId,
       },
       HostConfig: {
@@ -129,7 +132,8 @@ export class DockerEmployeeStorage {
     const source = await this.source(row);
     current();
     const config = this.#configuration(row, source),
-      name = 'reverie-boxed-storage-' + row.request.operationId;
+      name =
+        'reverie-boxed-storage-' + dockerContinuationDigest([this.boxId, 'storage-holder', row.request.operationId]);
     const base = {
       role: 'storage-holder' as const,
       name,
@@ -157,6 +161,8 @@ export class DockerEmployeeStorage {
           '--no-trunc',
           '--filter',
           'label=reverie.box.storage.operation=' + row.request.operationId,
+          '--filter',
+          'label=reverie.box.storage.box=' + this.boxId,
           '--format',
           '{{.ID}}',
         ])
@@ -247,6 +253,8 @@ export class DockerEmployeeStorage {
                 '--no-trunc',
                 '--filter',
                 'label=reverie.box.storage.operation=' + row.request.operationId,
+                '--filter',
+                'label=reverie.box.storage.box=' + this.boxId,
                 '--format',
                 '{{.ID}}',
               ])

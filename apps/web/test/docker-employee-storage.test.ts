@@ -12,7 +12,7 @@ const cid = 'a'.repeat(64),
   dest = 'b'.repeat(64),
   image = 'sha256:' + 'f'.repeat(64),
   oid = '10000000-0000-4000-8000-000000000001';
-function fixture() {
+function fixture(boxId = '7'.repeat(64)) {
   let task: DockerContinuationTask | undefined, raw: Record<string, unknown> | undefined;
   const row = {
     employeeId: oid,
@@ -78,7 +78,7 @@ function fixture() {
       throw Error('Unexpected command');
     }),
   };
-  const service = new DockerEmployeeStorage(command, journal, image, async () => source);
+  const service = new DockerEmployeeStorage(command, journal, image, async () => source, boxId);
   return {
     service,
     row,
@@ -189,4 +189,12 @@ describe('read-only recovery of a fragmented CREATE reply', () => {
     expect(f.command.create).toHaveBeenCalledOnce();
     expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
   });
+});
+
+it('private Box identity scopes the held storage name independently of client operation UUID', async () => {
+  const a = fixture('7'.repeat(64)),
+    b = fixture('8'.repeat(64));
+  await a.service.prepare(a.row, () => {});
+  await b.service.prepare(b.row, () => {});
+  expect(vi.mocked(a.command.create).mock.calls[0]![0]).not.toBe(vi.mocked(b.command.create).mock.calls[0]![0]);
 });

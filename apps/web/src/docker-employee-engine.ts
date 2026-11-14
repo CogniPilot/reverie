@@ -63,12 +63,17 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     private readonly resources: DockerContainedResourceController,
     private readonly workerImage: DockerEmployeeImageConfiguration,
     journal: DockerContinuationTaskJournal,
-    helperImageId: string
+    helperImageId: string,
+    private readonly boxId: string
   ) {
-    this.#storage = new DockerEmployeeStorage(command, journal, helperImageId, (row) => this.#source(row));
-    this.#credentials = new DockerEmployeeCredentialInstaller(command, journal, (row) =>
-      this.#storage.credentialHome(row)
+    this.#storage = new DockerEmployeeStorage(command, journal, helperImageId, (row) => this.#source(row), boxId);
+    this.#credentials = new DockerEmployeeCredentialInstaller(
+      command,
+      journal,
+      (row) => this.#storage.credentialHome(row),
+      boxId
     );
+    if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(deployment)) throw Error('Registered deployment required');
     if (!/^sha256:[a-f0-9]{64}$/.test(workerImage.imageId) || !/^[a-f0-9]{64}$/.test(workerImage.clientManifestDigest))
       throw Error('Fixed qualified worker image required');
@@ -237,6 +242,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       Hostname: source.Config.Hostname,
       Labels: {
         'reverie.boxed.instance': this.deployment,
+        'reverie.boxed.box': this.boxId,
         'reverie.boxed.employee': row.employeeId,
         'reverie.boxed.session': row.request.sessionId,
         'reverie.boxed.generation': String(row.request.sessionGeneration),
@@ -256,7 +262,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!pool || !isDeepStrictEqual(pool, row.pool)) refuse('DOCKER_CONTINUATION_POOL_CHANGED');
     const config = this.#configuration(row, source);
     current();
-    await this.command.create('reverie-boxed-' + row.request.operationId, config, current);
+    await this.command.create(
+      'reverie-boxed-' + dockerContinuationDigest([this.boxId, 'destination', row.request.operationId]),
+      config,
+      current
+    );
   }
   async #destination(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect | null> {
     const selected = await this.command.run([
@@ -268,6 +278,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       'label=reverie.boxed.instance=' + this.deployment,
       '--filter',
       'label=reverie.boxed.operation=' + row.request.operationId,
+      '--filter',
+      'label=reverie.boxed.box=' + this.boxId,
       '--format',
       '{{.ID}}',
     ]);
@@ -279,6 +291,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const labels = raw.Config.Labels;
     if (
       raw.Image !== row.workerImage.imageId ||
+      labels?.['reverie.boxed.box'] !== this.boxId ||
       raw.Config.User !== source.Config.User ||
       !isDeepStrictEqual(raw.Config.Env, desired.Env) ||
       labels?.['reverie.boxed.source'] !== row.original.containerId ||

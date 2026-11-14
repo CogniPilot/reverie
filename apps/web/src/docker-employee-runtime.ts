@@ -197,9 +197,10 @@ export class DockerEmployeeRuntime {
           subject.sourceDigest === row.sourceDigest
         );
       }) ?? [];
+    const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
-        boxId: dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment }),
+        boxId,
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
         selectedWorkerContainerIds: () => [
@@ -218,7 +219,8 @@ export class DockerEmployeeRuntime {
         sourceImageIds: configuration.sourceImageIds,
       },
       store,
-      configuration.helperImageId
+      configuration.helperImageId,
+      boxId
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl);
     const service = new DockerEmployeeContinuation(store, engine, provider, {

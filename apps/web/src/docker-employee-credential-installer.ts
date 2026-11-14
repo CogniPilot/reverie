@@ -23,8 +23,11 @@ export class DockerEmployeeCredentialInstaller {
   constructor(
     private readonly command: DockerEngineCommand,
     private readonly journal: DockerContinuationTaskJournal,
-    private readonly home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>
-  ) {}
+    private readonly home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>,
+    private readonly boxId: string
+  ) {
+    if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
+  }
   async #config(row: DockerEmployeeContinuationRecord, home: DockerCredentialHome): Promise<Record<string, unknown>> {
     const image = z
       .array(
@@ -77,6 +80,7 @@ export class DockerEmployeeCredentialInstaller {
       Tty: false,
       Labels: {
         'reverie.box.identity.operation': row.request.operationId,
+        'reverie.box.identity.box': this.boxId,
         'reverie.box.identity.employee': row.employeeId,
       },
       HostConfig: {
@@ -159,7 +163,9 @@ export class DockerEmployeeCredentialInstaller {
       task &&
       (task.imageId !== row.workerImage.imageId ||
         task.configurationDigest !== dockerContinuationDigest(config) ||
-        task.name !== 'reverie-boxed-identity-' + row.request.operationId)
+        task.name !==
+          'reverie-boxed-identity-' +
+            dockerContinuationDigest([this.boxId, 'identity-helper', row.request.operationId]))
     )
       refuse('DOCKER_IDENTITY_ORIGINAL_CHANGED');
     return task;
@@ -171,7 +177,9 @@ export class DockerEmployeeCredentialInstaller {
     const config = await this.#config(row, home),
       base = {
         role: 'identity-helper' as const,
-        name: 'reverie-boxed-identity-' + row.request.operationId,
+        name:
+          'reverie-boxed-identity-' +
+          dockerContinuationDigest([this.boxId, 'identity-helper', row.request.operationId]),
         imageId: row.workerImage.imageId,
         configurationDigest: dockerContinuationDigest(config),
       };
@@ -190,6 +198,8 @@ export class DockerEmployeeCredentialInstaller {
           '--no-trunc',
           '--filter',
           'label=reverie.box.identity.operation=' + row.request.operationId,
+          '--filter',
+          'label=reverie.box.identity.box=' + this.boxId,
           '--format',
           '{{.ID}}',
         ])

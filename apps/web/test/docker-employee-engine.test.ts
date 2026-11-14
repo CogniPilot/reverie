@@ -30,7 +30,7 @@ const subject = {
   onVacation: false,
   desiredRunning: true,
 };
-function fixture() {
+function fixture(boxId = '7'.repeat(64)) {
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: 48 * 1024 ** 3,
     memoryHighBytes: 16 * 1024 ** 3,
@@ -146,7 +146,8 @@ function fixture() {
     resources,
     { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [image] },
     journal,
-    helper
+    helper,
+    boxId
   );
   return { source, row, engine, command, resources, policy, created: () => created };
 }
@@ -237,4 +238,12 @@ describe('new boxed Docker destination', () => {
     expect(DockerEmployeeResourcePolicy.safeParse({ ...f.policy, memoryHighBytes: 0 }).success).toBe(false);
     expect(DockerEmployeeResourcePolicy.parse({ ...f.policy, memoryHighBytes: null }).memoryHighBytes).toBeNull();
   });
+});
+
+it('the same client operation in two private Boxes cannot share a destination name', async () => {
+  const a = fixture('7'.repeat(64)),
+    b = fixture('8'.repeat(64));
+  await a.engine.createDestination(a.row, () => {});
+  await b.engine.createDestination(b.row, () => {});
+  expect(vi.mocked(a.command.create).mock.calls[0]![0]).not.toBe(vi.mocked(b.command.create).mock.calls[0]![0]);
 });
