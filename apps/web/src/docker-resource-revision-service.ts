@@ -1,9 +1,11 @@
 /** Owner-approved Docker leaf-only revisions. No employee/launch-row mutation, paid admission or host broker. */
+import { boundedDockerResourceVisits } from './docker-resource-convergence.js';
+import { dockerResourceScope } from './docker-resource-revisions.js';
 import { isDeepStrictEqual } from 'node:util';
 import { CompanyService, CompanyError } from './company-service.js';
 import type { CompanyEmployee } from './company-types.js';
 import { CompanyDockerContinuationStore } from './docker-employee-store.js';
-import { DockerEmployeeEngine } from './docker-employee-engine.js';
+import { DockerEmployeeProviderHealthProof, DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import {
@@ -11,7 +13,20 @@ import {
   DockerResourceDesiredRevision,
   dockerRevisedPolicy,
 } from './docker-resource-revisions.js';
+export type DockerResourceConvergence = {
+  readonly employeeId: string;
+  readonly state:
+    | 'no-desired-policy'
+    | 'offline-or-unbound'
+    | 'pending-provider'
+    | 'settled-history'
+    | 'observed'
+    | 'applied';
+};
 export class DockerResourceRevisionService {
+  readonly #converging = new Map<string, Promise<DockerResourceConvergence>>();
+  readonly #failures = new Map<string, { scope: string; revision: string; code: string }>();
+
   constructor(
     readonly company: CompanyService,
     readonly store: CompanyDockerContinuationStore,
@@ -45,8 +60,14 @@ export class DockerResourceRevisionService {
     const results = employees.map((employee) => {
       const row = inventory.find((value) => value.employeeId === employee.id);
       const attempt = row && desired ? this.revisions.attempt(row, desired.revision) : undefined;
+      const failure = this.#failures.get(employee.id);
+      const code =
+        failure && row && desired && failure.scope === dockerResourceScope(row) && failure.revision === desired.revision
+          ? failure.code
+          : undefined;
       return {
         employeeId: employee.id,
+        ...(code ? { code } : {}),
         sessionId: employee.sessionId,
         sessionGeneration: employee.sessionGeneration,
         desiredMemoryHighBytes: desired?.memoryHighBytes ?? null,
@@ -57,6 +78,83 @@ export class DockerResourceRevisionService {
     });
     current();
     return { desired: desired ?? null, employees: results };
+  }
+  /** Durable owner approval, not a caller/title permission. No HTTP endpoint invokes this with worker authority. */
+  converge(employeeId: string, runtimeCurrent: () => void): Promise<DockerResourceConvergence> {
+    const pending = this.#converging.get(employeeId);
+    if (pending) return pending;
+    const work = this.#converge(employeeId, runtimeCurrent).finally(() => this.#converging.delete(employeeId));
+    this.#converging.set(employeeId, work);
+    return work;
+  }
+  async #converge(employeeId: string, runtimeCurrent: () => void): Promise<DockerResourceConvergence> {
+    runtimeCurrent();
+    const initial = this.company.registeredEmployees().find((employee) => employee.id === employeeId);
+    if (
+      !initial ||
+      initial.onVacation ||
+      initial.desiredRunning !== true ||
+      initial.bindingMigration ||
+      !initial.dockerBinding
+    )
+      return { employeeId, state: 'offline-or-unbound' };
+    const desired = this.revisions.desired(initial.owner);
+    if (!desired) return { employeeId, state: 'no-desired-policy' };
+    const row = this.store.resourceInventory().find((record) => record.employeeId === employeeId);
+    if (!row || !['provider-issued', 'ready'].includes(row.phase)) return { employeeId, state: 'pending-provider' };
+    const scope = dockerResourceScope(row);
+    try {
+      const attempt = this.revisions.attempt(row, desired.revision);
+      if (row.policy.memoryHighBytes === desired.memoryHighBytes || (attempt && attempt.state !== 'helper')) {
+        this.#failures.delete(employeeId);
+        // History is not a new kernel observation; wake/profile reads independently earn current facts.
+        return { employeeId, state: 'settled-history' };
+      }
+      const captured = this.#capture(employeeId, initial.owner, runtimeCurrent);
+      // provider-issued precedes paid dispatch. Double ABSENT never authorizes a resource writer while it is in flight.
+      const proof = await this.engine.captureProviderHealth(
+        captured.row,
+        captured.employee.dockerBinding!,
+        captured.current
+      );
+      captured.current();
+      if (DockerEmployeeProviderHealthProof.prototype.require.call(proof, captured.employee) !== 'live')
+        return { employeeId, state: 'pending-provider' };
+      const current = () => {
+        captured.current();
+        const now = this.revisions.desired(initial.owner);
+        if (!isDeepStrictEqual(now, desired))
+          throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REVISION_CHANGED');
+        DockerEmployeeProviderHealthProof.prototype.require.call(proof, captured.employee);
+      };
+      current();
+      const result = await this.apply(employeeId, initial.owner, desired.revision, current);
+      current();
+      this.#failures.delete(employeeId);
+      return { employeeId, state: result.state };
+    } catch (error) {
+      const code =
+        error instanceof DockerEmployeeContinuationError ? error.code : 'DOCKER_RESOURCE_REVISION_UNCONFIRMED';
+      this.#failures.set(employeeId, { scope, revision: desired.revision, code });
+      throw error;
+    }
+  }
+  async convergeAll(runtimeCurrent: () => void): Promise<PromiseSettledResult<DockerResourceConvergence>[]> {
+    runtimeCurrent();
+    const ids = this.company
+      .registeredEmployees()
+      .filter(
+        (employee) =>
+          !employee.onVacation &&
+          employee.desiredRunning === true &&
+          !employee.bindingMigration &&
+          employee.dockerBinding &&
+          this.revisions.desired(employee.owner)
+      )
+      .map((employee) => employee.id);
+    const result = await boundedDockerResourceVisits(ids, (id) => this.converge(id, runtimeCurrent));
+    runtimeCurrent();
+    return result;
   }
   #capture(employeeId: string, owner: string | undefined, authority: () => void) {
     authority();

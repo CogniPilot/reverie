@@ -17,9 +17,15 @@ Success distinguishes observed adoption from applied helper ACK and reports actu
 
 Any unknown helper for the same physical CID prevents another revision/scope writer. Retained CREATE can be located and fully qualified; START-issued can only be waited/observed, never started again. Actual qualified Exit0/log ACK and same kernel identities must finish it. Matching current values cannot settle an unknown cursor. No blind retry, global prune or host resource socket exists.
 
-## Current scope
+## Automatic convergence and view lifecycle
 
-This backend exposes explicit per-employee apply/adoption. The initial packet does not yet automatically converge a retained old operation when a future seat comes online; that bounded convergence phase is required before claiming unattended all-employee persistence. A profile GUI should use these APIs rather than the retired host-socket resource API.
+A separate resource phase runs after API-origin setup and before existing-view restoration. It also runs when returning a seat to office and through a coalesced 10-second controller, at most two visits and 64 eligible active bindings. Settled history skips full resource scans. Future operations snapshot the owner-approved default in their new canonical original policy; an already-original48 operation needs no extra resource writer. Older16/8 operations retain their exact row and converge through separately journaled high-only work or read-only actual48 adoption.
+
+Automatic convergence first requires genuine double protected native LIVE provider proof. A provider-issued row whose launch is pending/absent cannot cause a writer or adoption. Owner approval after server startup triggers convergence and existing-view restoration without another Apply or BEGIN. Offline seats retain desired policy; normal authorized office return performs convergence. Unsupported writer capability remains a visible resource refusal and cannot disconnect a genuinely valid original16 view.
+
+Existing provider/view publication has a private preparing/published/failed phase. The real request actor/wake lease remains required through final attachment publication. Finishing that one-shot lease afterward does not disconnect a valid canonical view. Any publication failure permanently poisons the minted view, even while canonical attendance remains active. Paid launch denial, intrinsic unknown input and every original journal stay intact.
+
+The profile GUI is separately composed using these permissionchecked APIs. Known terminal writer closure with missing/failed ACK still needs its separately qualified recovery packet before enabling the new WRITE feature. No image or production effects are performed by these source changes.
 
 ## Independent writer capability
 

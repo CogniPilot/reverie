@@ -66,6 +66,12 @@ export function runBoxedStartupNamespace(entry = 'test/fixtures/boxed-webserver-
         'codex-input',
         'codex-stale',
         'codex-identity',
+        'ram-startup',
+        'ram-later',
+        'ram-offline',
+        'ram-absent',
+        'ram-unsupported',
+        'ram-attach-failed',
       ].includes(scenario)
   );
   assert.equal(process.platform, 'linux', 'This mandatory native check requires Linux user namespaces');

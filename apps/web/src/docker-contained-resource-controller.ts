@@ -288,6 +288,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         'reverie.box.resource.box': this.configuration.boxId,
         'reverie.box.resource.role': role,
         'reverie.box.resource.name': name,
+        ...(args[0] === 'configure-memory-high' ? { 'org.reverie.resource.memory-high-only': 'v1' } : {}),
       },
       HostConfig: {
         Privileged: false,
@@ -1283,6 +1284,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
           String(policy.memoryHighBytes),
           '--cpu-weight',
           String(policy.cpuWeight),
+          '--cpuset-cpus',
+          canonicalCpus(policy.allowedCpus),
         ],
         { path: seen.worker.path, target: '/run/reverie-worker-cgroup' },
         requireCurrent,

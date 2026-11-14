@@ -192,6 +192,11 @@ export class DockerEmployeeRuntime {
   #attached?: Attached;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
+  #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
+  #resourceConvergence?: ReturnType<DockerResourceRevisionService['convergeAll']>;
+  #resourceTimer?: ReturnType<typeof setInterval>;
+  #resourceTick?: Promise<void>;
+
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
     if (!attached || !this.current()) return [];
@@ -423,12 +428,13 @@ export class DockerEmployeeRuntime {
     const row = a.store.record(employee.id),
       binding = employee.dockerBinding;
     if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
+    let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
       const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
-        !allowed() ||
+        publication === 'failed' || (publication === 'preparing' && !allowed()) ||
         !live ||
         live.owner !== employee.owner ||
         dockerContinuationDigest(live.dockerBinding) !== dockerContinuationDigest(binding) ||
@@ -441,6 +447,10 @@ export class DockerEmployeeRuntime {
       )
         throw Error('Boxed wake binding changed');
     };
+    try {
+    current();
+    try { await a.resourceRevisions.converge(employee.id, current); }
+    catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const seen = await a.engine.observeDestination(row);
     current();
@@ -451,8 +461,7 @@ export class DockerEmployeeRuntime {
       seen.provider.operationId !== binding.operationId ||
       seen.provider.sessionId !== binding.sessionId ||
       !a.engine.existingResourcePolicyCurrent(row, seen.resources)
-    )
-      return false;
+    ) { publication = 'failed'; return false; }
     const actual = a.ctx.sessions.get(employee.sessionId);
     if (
       actual?.pid !== null &&
@@ -461,8 +470,7 @@ export class DockerEmployeeRuntime {
       !actual.providerInputHeld &&
       !actual.terminalInputHeld &&
       actual.docker?.containerName === binding.containerId
-    )
-      return true;
+    ) { publication = 'published'; return true; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       const saved = a.ctx.store.getSession(employee.sessionId);
       if (!saved) throw Error('Boxed existing viewer saved recipe missing');
@@ -485,21 +493,58 @@ export class DockerEmployeeRuntime {
         return true;
       });
       renewalCurrent();
+      publication = 'published';
       return true;
     }
     const view = await a.engine.captureProviderView(row, current);
     current();
     await a.provider.attach(row, binding, current, view);
     current();
+    publication = 'published';
     return true;
+    } catch (cause) {
+      publication = 'failed';
+      throw cause;
+    }
   }
   /** Restore a viewer of a current running provider, independently of auto-wake.
    * Ready or retained-issued records are only correlation: fresh physical proof is required.
-   * No branch creates a container, launches a provider, or releases a disk fence.
+   * Only a separately approved resource-helper phase may create its leaf writer.
+   * No branch creates a destination, launches a provider, or releases a paid disk fence.
    */
-  async restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+  /** Separate resource-default convergence precedes read-only provider attachment. */
+  #convergeResources(): ReturnType<DockerResourceRevisionService['convergeAll']> {
+    if (this.#resourceConvergence) return this.#resourceConvergence;
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
+    const current = () => { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); };
+    const work = a.resourceRevisions.convergeAll(current).finally(() => { this.#resourceConvergence = undefined; });
+    this.#resourceConvergence = work; return work;
+  }
+  #startResourceConvergence(): void {
+    if (this.#resourceTimer || !this.current()) return;
+    this.#resourceTimer = setInterval(() => {
+      if (this.#resourceTick || this.#restoring || !this.current()) return;
+      this.#resourceTick = this.#convergeResources().then(async (results) => {
+        if (results.some((result) => result.status === 'fulfilled' &&
+            (result.value.state === 'observed' || result.value.state === 'applied')))
+          await this.restoreExistingViews();
+      }).then(() => {}, () => {}).finally(() => { this.#resourceTick = undefined; });
+    }, 10_000);
+    this.#resourceTimer.unref();
+  }
+  restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    if (this.#restoring) return this.#restoring;
+    const work = this.#restoreExistingViews().then((reports) => {
+      this.#restoring = undefined; this.#startResourceConvergence(); return reports;
+    }, (cause: unknown) => { this.#restoring = undefined; throw cause; });
+    this.#restoring = work; return work;
+  }
+  async #restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    const a = this.#attached;
+    if (!a) throw Error('Boxed runtime is not attached');
+    try { await this.#convergeResources(); }
+    catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
     for (const employee of a.company.store.snapshot().employees) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
@@ -559,6 +604,8 @@ export class DockerEmployeeRuntime {
     return this.#restorationReports;
   }
   close(): void {
+    if (this.#resourceTimer) clearInterval(this.#resourceTimer);
+    this.#resourceTimer = undefined;
     this.authentication.close();
     const errors = [];
     try { this.#attached?.resourceRevisions.revisions.close(); }

@@ -312,6 +312,12 @@ describe('approved leaf-only live memory revisions', () => {
     expect([...f.tasks]).toEqual(tasks);
     expect(f.row()).toEqual(row);
     expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('applied');
+    const createdWriter = f.configurations.at(-1)!;
+    expect(createdWriter.config.Image).toBe(writer);
+    expect((createdWriter.config.Labels as Record<string, string>)['org.reverie.resource.memory-high-only']).toBe('v1');
+    const args = createdWriter.config.Cmd as string[];
+    expect(args[0]).toBe('configure-memory-high');
+    expect(args[args.indexOf('--cpuset-cpus') + 1]).toBe('0-1');
     await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow('WORKER_READBACK');
     expect(f.starts).toHaveLength(4);
   });

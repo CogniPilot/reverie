@@ -154,7 +154,14 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       containers.set(id, {
         Id: id,
         Image: config.Image,
-        Config: structuredClone(config),
+        Config: {
+          ...structuredClone(config),
+          Labels: {
+            'org.reverie.purpose': 'boxed-resource-helper-v1',
+            ...(config.Image === writer ? { 'org.reverie.resource.memory-high-only': 'v1' } : {}),
+            ...(config.Labels as Record<string, string>),
+          },
+        },
         HostConfig: structuredClone(config.HostConfig),
         Mounts: binds.map((value) => {
           const [Source, Destination, mode] = value.split(':');
