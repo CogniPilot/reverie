@@ -549,7 +549,7 @@ it('returns a distinct requested response without claiming diagnostic readiness 
 
 async function installSessionUpdateCapabilities(h: Awaited<ReturnType<typeof createHarness>>) {
   const source = readFileSync(resolve(import.meta.dirname, '../src/web/public/app.js'), 'utf8');
-  const methods = frontendClassMethods(source,'ReverieApp',['_onSessionUpdated','_observeInputRecovery',
+  const methods = frontendClassMethods(source,'ReverieApp',['_onSessionUpdated','_providerInputRecovery','_observeInputRecovery',
     '_rememberInputRecovery','_renderInputRecoveryBanner','_sessionInputHeld']);
   h.window.eval(`Object.assign(window.ReverieApp.prototype,{${methods}});`);
   const context = {indexedDB:new IDBFactory(),navigator:{locks:new FixtureLocks()},crypto:webcrypto};

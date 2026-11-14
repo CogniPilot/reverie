@@ -471,7 +471,7 @@ export async function createHarness({
   // Full-state SSE handlers depend on the same sticky input-recovery policy as
   // the page. Load those real methods rather than stubbing away their holds.
   const recoverySource = read('app.js');
-  const recoveryMethods = recoverySource.slice(recoverySource.indexOf('  _sessionInputHeld(sessionId) {'),
+  const recoveryMethods = recoverySource.slice(recoverySource.indexOf('  _providerInputRecovery(session) {'),
     recoverySource.indexOf('  async _refreshInputRecovery(id, button, status) {'));
   window.eval(`{
     const recovery = class Recovery {${recoveryMethods}};
