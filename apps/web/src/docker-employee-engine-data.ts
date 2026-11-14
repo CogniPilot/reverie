@@ -120,7 +120,7 @@ export function boxedMountConfiguration(row: DockerEmployeeInspect): Record<stri
       Type: m.type,
       Source: m.type === 'volume' ? m.name : m.source,
       Target: m.destination,
-      ReadOnly: !m.readWrite,
+      ...(m.readWrite ? {} : { ReadOnly: true }),
     };
     if (m.type === 'bind' && m.propagation) mount.BindOptions = { Propagation: m.propagation };
     return mount;

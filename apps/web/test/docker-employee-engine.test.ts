@@ -151,7 +151,78 @@ function fixture(boxId = '7'.repeat(64)) {
   );
   return { source, row, engine, command, resources, policy, created: () => created };
 }
+async function dockerEncodedDestination() {
+  const f = fixture();
+  f.source.Mounts.push({
+    Type: 'bind',
+    Source: '/synthetic/workspace',
+    Destination: '/workspace',
+    RW: false,
+    Propagation: 'rprivate',
+  });
+  f.row.original = boxedOriginal(f.source, subject, 'fixture');
+  await f.engine.createDestination(f.row, () => {});
+  const desired = f.created()!;
+  const observed = DockerEmployeeInspect.parse({
+    ...structuredClone(f.source),
+    Id: dest,
+    Image: target,
+    Config: {
+      ...structuredClone(f.source.Config),
+      User: desired.User,
+      Env: desired.Env,
+      Labels: desired.Labels,
+      Entrypoint: desired.Entrypoint,
+      Cmd: desired.Cmd,
+    },
+    Mounts: f.source.Mounts.filter((m) => m.Destination !== '/instances/default/console/statusline-exporter.sh'),
+    HostConfig: {
+      ...(desired.HostConfig as Record<string, unknown>),
+      Mounts: [
+        { Type: 'bind', Source: '/synthetic/home', Target: '/home/agent', BindOptions: { Propagation: 'rprivate' } },
+        { Type: 'bind', Source: '/synthetic/nix', Target: '/nix', BindOptions: { Propagation: 'rprivate' } },
+        {
+          Type: 'bind',
+          Source: '/synthetic/workspace',
+          Target: '/workspace',
+          ReadOnly: true,
+          BindOptions: { Propagation: 'rprivate' },
+        },
+      ],
+    },
+  });
+  const originalRun = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.run).mockImplementation(async (args, options) => {
+    if (args[0] === 'container' && args[1] === 'ls') return dest;
+    if (args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) return JSON.stringify([observed]);
+    return originalRun(args, options);
+  });
+  return { ...f, observed };
+}
 describe('new boxed Docker destination', () => {
+  it('accepts the actual Docker wire omission of ReadOnly false while preserving true RO', async () => {
+    const f = await dockerEncodedDestination();
+    const seen = await f.engine.observeDestination(f.row);
+    expect(seen?.state).toBe('stopped');
+    expect(seen?.provider.kind).toBe('absent');
+    expect(f.command.create).toHaveBeenCalledOnce();
+  });
+  it.each(['lostRO', 'changedRW', 'source', 'propagation'] as const)(
+    'refuses Docker wire %s drift instead of relaxing readback',
+    async (fault) => {
+      const f = await dockerEncodedDestination(),
+        mounts = f.observed.HostConfig.Mounts as Record<string, unknown>[];
+      if (fault === 'lostRO') delete mounts[2]!.ReadOnly;
+      if (fault === 'changedRW') mounts[0]!.ReadOnly = true;
+      if (fault === 'source') mounts[0]!.Source = '/synthetic/replacement';
+      if (fault === 'propagation') mounts[0]!.BindOptions = { Propagation: 'shared' };
+      await expect(f.engine.observeDestination(f.row)).rejects.toMatchObject({
+        code: 'DOCKER_CONTINUATION_DESTINATION_CHANGED',
+      });
+      expect(f.command.create).toHaveBeenCalledOnce();
+    }
+  );
+
   it.each([
     [0, 1, 2],
     [0, 2, 1],
