@@ -150,6 +150,79 @@ if (failed) {
   process.stderr.write('Synthetic boxed provider probe failed; no retry.\n');
   process.exit(1);
 }
+function inputWitness(challenge) {
+  const receiptPath = path.join(process.env.HOME, 'boxed-canary-provider-input.json');
+  const receipt = {
+    version: 1,
+    purpose: 'synthetic-boxed-provider-input-v1',
+    sessionId: sid,
+    providerThread: thread,
+    pid: process.pid,
+    challenge,
+    receivedAt: new Date().toISOString(),
+    limitation: 'Actual synthetic provider stdin witness only; no shell, model or HTTP action.',
+  };
+  const file = fs.openSync(
+    receiptPath,
+    fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+    0o600
+  );
+  try {
+    fs.writeFileSync(file, JSON.stringify(receipt) + '\n');
+    fs.fsyncSync(file);
+  } finally {
+    fs.closeSync(file);
+  }
+  const home = fs.openSync(
+    process.env.HOME,
+    fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
+  );
+  try {
+    fs.fsyncSync(home);
+  } finally {
+    fs.closeSync(home);
+  }
+  process.stdout.write('BOXED_CANARY_ACK_' + challenge.slice('BOXED_CANARY_INPUT_'.length) + '\n');
+}
+function listenForInputWitness() {
+  let line = '',
+    dropping = false,
+    attempted = false;
+  const accepted = /^BOXED_CANARY_INPUT_[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (chunk) => {
+    if (attempted) return;
+    if (chunk.length > 4096) {
+      line = '';
+      dropping = true;
+      return;
+    }
+    for (const character of chunk) {
+      if (character === '\r' || character === '\n') {
+        const candidate = line;
+        line = '';
+        if (dropping) {
+          dropping = false;
+          continue;
+        }
+        if (!accepted.test(candidate)) continue;
+        attempted = true;
+        try {
+          inputWitness(candidate);
+        } catch {
+          process.stderr.write('Synthetic input witness unconfirmed; no retry.\n');
+        }
+        return;
+      }
+      if (dropping) continue;
+      if (character.charCodeAt(0) < 32 || character.charCodeAt(0) > 126 || line.length >= 128) {
+        line = '';
+        dropping = true;
+      } else line += character;
+    }
+  });
+}
+listenForInputWitness();
 process.stdout.write('Synthetic boxed provider; no model request.\n> ');
 process.stdin.resume();
 process.on('SIGTERM', () => process.exit(0));
