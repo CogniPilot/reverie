@@ -1,4 +1,5 @@
-import { JSDOM } from 'jsdom';
+import { runInNewContext } from 'node:vm';
+import type { GoalNonceCustodyScope } from '../src/goal-nonce-store.js';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import * as fs from 'node:fs';
@@ -87,7 +88,7 @@ const nonceOptions = (authority = join(dir, 'nonces/authority')) => ({
   capacity: 64,
   flockExecutable: FLOCK,
   authorityNamespace: authority,
-  assertPrivateCustody: (scope: Record<string, string>) => {
+  assertPrivateCustody: (scope: GoalNonceCustodyScope) => {
     nonceChecks++;
     const expected = {
       root: join(dir, 'nonces'),
@@ -357,27 +358,53 @@ it('r2c: owner setup page shows one button per configured grant with current ids
     resources: ['website'],
   });
   expect(html.body).toContain('does not resolve to exactly one active employee');
-  const dom = new JSDOM(html.body, { url: 'http://localhost/api/service-grants/setup', runScripts: 'outside-only' });
-  try {
-    const requests: Array<{ url: string; init?: RequestInit }> = [];
-    dom.window.fetch = async (url, init) => {
-      requests.push({ url: String(url), init });
+  const rows = [...html.body.matchAll(/<button data-row="([0-9]+)" data-body="([^"]*)">/g)];
+  expect(rows).toHaveLength(1);
+  const row = rows[0]![1]!,
+    body = rows[0]![2]!.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  class RenderedButton extends EventTarget {
+    readonly dataset = { row, body };
+    disabled = false;
+  }
+  const button = new RenderedButton(),
+    output = { textContent: '' };
+  const scripts = [...html.body.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  expect(scripts).toHaveLength(1);
+  expect(html.body).toContain('id="r' + row + '"');
+  const requests: Array<{ url: string; init: RequestInit }> = [];
+  // Execute the exact emitted JavaScript with a real EventTarget click and
+  // finite document/fetch ports. This is a script/wire control, not browser or
+  // grant-authority acceptance; the canonical store below must remain empty.
+  runInNewContext(scripts[0]![1]!, {
+    location: new URL('http://localhost/api/service-grants/setup'),
+    document: {
+      querySelectorAll(selector: string) {
+        expect(selector).toBe('button[data-body]');
+        return [button];
+      },
+      getElementById(id: string) {
+        expect(id).toBe('r' + row);
+        return output;
+      },
+    },
+    fetch: async (url: string, init: RequestInit) => {
+      requests.push({ url, init });
       return new Response(JSON.stringify({ success: false, error: 'Synthetic refusal' }), {
         headers: { 'Content-Type': 'application/json' },
       });
-    };
-    dom.window.eval(dom.window.document.querySelector('script')!.textContent!);
-    expect(requests).toEqual([]);
-    dom.window.document.querySelector<HTMLButtonElement>('button[data-body]')!.click();
-    expect(requests).toHaveLength(1);
-    expect(requests[0]!.url).toBe('/api/service-grants');
-    expect(requests[0]!.init?.method).toBe('POST');
-    expect(requests[0]!.init?.credentials).toBe('same-origin');
-    expect(JSON.parse(String(requests[0]!.init?.body))).toEqual(buttons[0]);
-    await new Promise(resolve => setImmediate(resolve));
-  } finally {
-    dom.window.close();
-  }
+    },
+  });
+  expect(requests).toEqual([]);
+  button.dispatchEvent(new Event('click'));
+  expect(button.disabled).toBe(true);
+  expect(requests).toHaveLength(1);
+  expect(requests[0]!.url).toBe('/api/service-grants');
+  expect(requests[0]!.init.method).toBe('POST');
+  expect(requests[0]!.init.credentials).toBe('same-origin');
+  expect(JSON.parse(String(requests[0]!.init.body))).toEqual(buttons[0]);
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(output.textContent).toBe('refused: Synthetic refusal');
+  expect(button.disabled).toBe(false);
 
   expect(f.store.snapshot().serviceGrants).toEqual([]);
   await app.close();
