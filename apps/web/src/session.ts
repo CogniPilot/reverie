@@ -1,3 +1,4 @@
+import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
@@ -1292,7 +1293,7 @@ export class Session extends EventEmitter {
     const preparation = this.#workspaceHookPreparation;
     this.#workspaceHookPreparation = undefined;
     const attempt: HookStartAttempt = {
-      configuration: this.#dockerContinuationView ? (this._requireDockerContinuationView(),'prepared') : this._dockerContinuationLaunch && getCli(this.mode)?.capabilities.hooks==='always'
+      configuration: this.#dockerContinuationView ? (this._requireDockerContinuationView(),this.#workspaceHookEvidence.configuration === 'opted-out' ? 'opted-out' : 'prepared') : this._dockerContinuationLaunch && getCli(this.mode)?.capabilities.hooks==='always'
         ? (this._dockerContinuationLaunch.requireFor(this),'prepared')
         : consumeWorkspaceHookPreparation(preparation,this.workingDir),
       mode: this.mode,
@@ -1880,15 +1881,20 @@ export class Session extends EventEmitter {
   bindDockerContinuationView(view: DockerEmployeeProviderView, mux: TerminalMultiplexer | null = this._mux): void {
     if (!(view instanceof DockerEmployeeProviderView) || this.#dockerContinuationView || this._dockerContinuationLaunch || !this._docker?.continuation || !mux || this._isStopped || this._closing || (this.providerDispatchHeld && !(this.#providerDenial?.kind === 'loaded-intent')) || this.ptyProcess || this.paneLifecycleInFlight || this._muxSession || (this._mux && this._mux !== mux))
       throw Error('Original unopened Docker provider view required');
+    const hooks = view.descriptor.hooks;
+    if (view.descriptor.mode !== this.mode || (hooks.kind === 'none' && (hooks.mode !== this.mode || dockerProviderHookPolicy(this.mode)?.kind !== 'none')))
+      throw Error('Original Docker provider hook mode changed');
     this.#dockerContinuationView = view;
     DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker);
     this._mux = mux;
     this._useMux = true;
-    this.#workspaceHookEvidence = { configuration: 'prepared', generation: view.descriptor.hookGeneration };
+    this.#workspaceHookEvidence = hooks.kind === 'none' || getCli(this.mode)?.capabilities.hooks === 'none'
+      ? { configuration: 'opted-out' }
+      : { configuration: 'prepared', generation: hooks.generation };
   }
   get dockerContinuationViewCurrent(): boolean {
     const view = this.#dockerContinuationView;
-    if (!view || !this._docker) return false;
+    if (!view || !this._docker || view.descriptor.mode !== this.mode || (view.descriptor.hooks.kind === 'none' && dockerProviderHookPolicy(this.mode)?.kind !== 'none')) return false;
     try { DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker); return true; } catch { return false; }
   }
   private _requireDockerContinuationView(): void {

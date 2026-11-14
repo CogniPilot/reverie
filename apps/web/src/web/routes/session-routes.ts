@@ -2332,7 +2332,7 @@ export function registerSessionRoutes(
         reloadRequired: true,
         recoveryRequired: true,
       });
-    if (session.providerDispatchHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
+    if (session.providerInputHeld !== false) return {...createErrorResponse(ApiErrorCode.CONFLICT, new ProviderDispatchUnconfirmedError().message), recoveryRequired: true};
     if (session.terminalInputHeld) return {...createErrorResponse(ApiErrorCode.CONFLICT, new TerminalInputUnconfirmedError().message), recoveryRequired: true};
     const agentCaller =
       typeof req.headers['x-reverie-parent-session'] === 'string' && req.headers['x-reverie-parent-session'] !== '';

@@ -1,3 +1,4 @@
+import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
 import { isMultiUserMode } from './config/multiuser.js';
@@ -284,7 +285,8 @@ export class DockerEmployeeRuntime {
       },
       store,
       configuration.helperImageId,
-      boxId
+      boxId,
+      dockerProviderModeReader(company, ctx.store)
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl, (row, workingDir, current) =>
       engine.observeCodexWorkspace(row, workingDir, current)

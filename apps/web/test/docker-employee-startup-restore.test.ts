@@ -21,7 +21,12 @@ const target = 'sha256:' + 'a'.repeat(64),
 const helper = 'sha256:' + 'd'.repeat(64),
   manifest = 'b'.repeat(64);
 const deployment = 'synthetic-startup';
-const pane = { paneId: '%1', panePid: 41, paneStartTicks: '12345', hookGeneration: 'synthetic-startup-hook' };
+const pane = {
+  paneId: '%1',
+  panePid: 41,
+  paneStartTicks: '12345',
+  hooks: { kind: 'generation', generation: 'synthetic-startup-hook' },
+};
 interface PhysicalMount {
   Type: string;
   Source: string;
@@ -249,7 +254,8 @@ class PhysicalDocker implements DockerEngineCommand {
           tokenDigest: this.tokenDigest,
         });
       if (args.includes('status')) return '{}';
-      if (args.includes('presence') || args.includes('observe')) return JSON.stringify(pane);
+      if (args.includes('presence') || args.includes('observe'))
+        return JSON.stringify({ ...pane, hooks: args.at(-1) === 'none' ? { kind: 'none' } : pane.hooks });
     }
     throw Error('Unexpected Docker physical request: ' + JSON.stringify(args));
   }
@@ -427,7 +433,7 @@ async function seed(scenario: string) {
   await resources.configure(row, noop);
   row.phase = 'identity-issued';
   await engine.provisionIdentity(row, 'synthetic-test-token-not-server-authority', noop);
-  row.phase = scenario.startsWith('issued-') ? 'provider-issued' : 'ready';
+  row.phase = scenario.startsWith('issued-') || scenario.startsWith('codex-') ? 'provider-issued' : 'ready';
   row.tasks = [...tasks.values()];
   const docker = {
     hostId: 'boxed-runtime',
@@ -455,7 +461,10 @@ async function seed(scenario: string) {
   const data = {
     id: sid,
     name: 'Synthetic',
-    mode: 'claude',
+    mode: scenario.startsWith('codex-') ? 'codex' : 'claude',
+    ...(scenario.startsWith('codex-')
+      ? { codexConfig: { dangerouslyBypassApprovals: true, resumeSessionId: thread } }
+      : {}),
     workingDir: '/fixture/work',
     status: 'busy',
     pid: 23,
@@ -479,7 +488,7 @@ async function seed(scenario: string) {
     kind: 'mux',
     sessionId: sid,
     owner: null,
-    mode: 'claude',
+    mode: data.mode ?? 'claude',
     command: 'controlled-known-returned-docker',
     cwd: '/fixture/work',
     environment: {},
@@ -539,6 +548,8 @@ async function startup(scenario: string) {
     pty = require('node-pty');
   const oldSpawn = pty.spawn;
   let ptys = 0;
+  const writes: string[] = [];
+  let failWrite = false;
   pty.spawn = (program: string, args: string[]) => {
     assert.equal(program, process.execPath);
     assert.deepEqual(args, [
@@ -552,7 +563,10 @@ async function startup(scenario: string) {
       cols: 80,
       rows: 24,
       process: 'tmux',
-      write: noop,
+      write: (data: string) => {
+        writes.push(data);
+        if (failWrite) throw Error('Controlled physical write reply lost');
+      },
       resize: noop,
       pause: noop,
       resume: noop,
@@ -574,6 +588,8 @@ async function startup(scenario: string) {
       sessions: Map<string, import('../src/session.js').Session>;
       dockerEmployeeRuntime: { restorationReports: readonly { state: string; sessionId: string }[] };
       store: import('../src/state-store.js').StateStore;
+      companyService: import('../src/company-service.js').CompanyService;
+      terminalInput: import('../src/web/terminal-input-service.js').TerminalInputService;
       workerProviderHealth: {
         refresh(): Promise<void>;
         read(id: string): import('../src/types/provider-health.js').ProviderHealth | undefined;
@@ -600,17 +616,20 @@ async function startup(scenario: string) {
       url: '/api/sessions/' + sid,
       headers: { host: 'reverie:3000', cookie },
     });
-    assert.equal(response.statusCode, ['attached', 'issued-live'].includes(scenario) ? 200 : 404);
+    assert.equal(
+      response.statusCode,
+      ['attached', 'issued-live'].includes(scenario) || scenario.startsWith('codex-') ? 200 : 404
+    );
     assert(internal.workerProviderHealth, 'Docker health must exist without a retired host worker socket');
     assert.equal(process.env.REVERIE_WORKER_SOCKET, undefined);
-    if (scenario === 'attached' || scenario === 'issued-live')
+    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-'))
       assert.equal(
         internal.workerProviderHealth.read(sid)?.state,
         'healthy',
         'Post-listen Docker polling must run without the retired host-worker socket'
       );
     await internal.workerProviderHealth.refresh();
-    if (scenario === 'attached' || scenario === 'issued-live') {
+    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-')) {
       assert.equal(internal.workerProviderHealth.read(sid)?.state, 'healthy');
       const current = await app.inject({
         method: 'GET',
@@ -651,7 +670,7 @@ async function startup(scenario: string) {
     }
     const session = internal.sessions.get(sid),
       reports = internal.dockerEmployeeRuntime.restorationReports;
-    if (scenario === 'attached' || scenario === 'issued-live') {
+    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-')) {
       assert(session, 'A genuine existing provider must restore a Session with empty control-local mux');
       assert.equal(session.dockerContinuationViewCurrent, true);
       assert.equal(session.providerDispatchHeld, true);
@@ -664,6 +683,158 @@ async function startup(scenario: string) {
       assert.equal(session, undefined);
       assert.equal(ptys, 0);
       if (scenario !== 'desired-off') assert(reports.some((r) => r.sessionId === sid && r.state === 'held'));
+    }
+    if (scenario.startsWith('codex-')) {
+      assert(session);
+      assert.equal(session.workspaceHookConfiguration, 'opted-out');
+      assert.equal(session.admitHookReport('forged-generation'), 'refused');
+      const headers = { host: 'reverie:3000', origin: 'http://reverie:3000', cookie, 'x-reverie-input-protocol': '2' };
+      const post = (input: string, seq: number) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/sessions/' + sid + '/input',
+          headers,
+          payload: { input, useMux: false, clientId: 'namespace-http', seq },
+        });
+      const denied = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/' + sid + '/input',
+        headers: { host: 'reverie:3000', origin: 'http://reverie:3000', 'x-reverie-input-protocol': '2' },
+        payload: { input: 'forbidden', useMux: false },
+      });
+      assert.equal(denied.statusCode, 401);
+      assert.equal(writes.length, 0);
+      const http = await post('http-original', 1);
+      assert.equal(http.json().success, true);
+      assert.deepEqual(writes, ['http-original']);
+      assert.equal((await post('http-original', 1)).json().success, true);
+      assert.deepEqual(writes, ['http-original']);
+      const { default: WebSocket } = await import('ws');
+      const ws = new WebSocket(
+        'ws://127.0.0.1:' + server.boundPort + '/ws/sessions/' + sid + '/terminal?inputProtocol=2',
+        { headers: { Host: 'reverie:3000', Origin: 'http://reverie:3000', Cookie: cookie } }
+      );
+      await new Promise<void>((resolve, reject) => {
+        ws.once('open', resolve);
+        ws.once('error', reject);
+      });
+      const send = (text: string, seq: number) =>
+        new Promise<Record<string, unknown>>((resolve, reject) => {
+          const timer = setTimeout(() => reject(Error('Actual WS input ACK missing')), 5000);
+          const listener = (data: unknown) => {
+            const x = JSON.parse(String(data));
+            if (x.t === 'ia' && x.seq === seq) {
+              clearTimeout(timer);
+              ws.off('message', listener);
+              resolve(x);
+            }
+          };
+          ws.on('message', listener);
+          ws.send(JSON.stringify({ t: 'i', d: text, cid: 'namespace-ws', seq, useMux: false }));
+        });
+      try {
+        assert.equal((await send('ws-original', 1)).confirmed, true);
+        assert.deepEqual(writes, ['http-original', 'ws-original']);
+        assert.equal((await send('ws-original', 1)).confirmed, true);
+        assert.equal(writes.length, 2);
+        // Trusted input leases recheck actual canonical scoped permissions and
+        // actual Session identity immediately before bytes, not only at capture.
+        const { CompanyStore } = await import('../src/company-store.js');
+        const { EmployeeSchema } = await import('../src/company-types.js');
+        const { Session } = await import('../src/session.js');
+        const actorSid = '66666666-6666-4666-8666-666666666666',
+          actorId = '77777777-7777-4777-8777-777777777777';
+        const actor = new Session({ id: actorSid, mode: 'shell', workingDir: '/fixture/work' });
+        internal.sessions.set(actorSid, actor);
+        const canonical = new CompanyStore('/fixture/data/company.json');
+        await canonical.init();
+        await canonical.update((state) => {
+          state.employees.push(
+            EmployeeSchema.parse({
+              id: actorId,
+              name: 'Scoped synthetic actor',
+              icon: 'A',
+              sessionId: actorSid,
+              sessionGeneration: 1,
+              position: 'Tester',
+              expertise: ['testing'],
+              desiredRunning: true,
+              onVacation: false,
+              createdAt: 1,
+              permissions: { recoverEmployees: true },
+            })
+          );
+        });
+        const grant = internal.companyService.recoveryAction(eid, undefined, actorSid);
+        const permissionCurrent = () => {
+          try {
+            grant.require();
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        const permissionLease = internal.terminalInput.begin(
+          session,
+          { input: 'revoked-grant', useMux: false },
+          permissionCurrent
+        );
+        assert.equal(permissionLease.state, 'admitted');
+        await canonical.update((state) => {
+          state.employees.find((e) => e.id === actorId)!.permissions.recoverEmployees = false;
+        });
+        assert.equal(permissionCurrent(), false);
+        assert(permissionLease.state === 'admitted');
+        assert.equal(permissionLease.operation.writeRaw(), false);
+        permissionLease.operation.refuse();
+        assert.equal(writes.length, 2);
+        internal.sessions.delete(actorSid);
+        await actor.stop(false);
+        await canonical.update((state) => {
+          state.employees = state.employees.filter((e) => e.id !== actorId);
+        });
+        assert.equal(session.providerDispatchHeld, true, 'Input must not clear original paid-effect fence');
+        assert.throws(() => session.assertProviderLaunchAdmission());
+        if (scenario === 'codex-identity') {
+          const ownerLease = internal.terminalInput.begin(
+            session,
+            { input: 'old-owner', useMux: false },
+            () => internal.sessions.get(sid) === session
+          );
+          assert(ownerLease.state === 'admitted');
+          session.owner = 'replacement-owner';
+          assert.equal(ownerLease.operation.writeRaw(), false);
+          ownerLease.operation.refuse();
+          assert.equal((await send('foreign-owner-ws', 2)).held, true);
+          assert.equal(writes.length, 2);
+        } else if (scenario === 'codex-stale') {
+          const { CompanyStore } = await import('../src/company-store.js');
+          const canonical = new CompanyStore('/fixture/data/company.json');
+          await canonical.init();
+          await canonical.update((state) => {
+            state.employees[0]!.owner = 'replacement-owner';
+          });
+          assert.equal(session.dockerContinuationViewCurrent, false);
+          assert.equal((await post('stale-http', 2)).json().success, false);
+          assert.equal((await send('stale-ws', 2)).held, true);
+          assert.equal(writes.length, 2);
+        } else {
+          failWrite = true;
+          assert.equal((await post('uncertain-original', 2)).json().success, false);
+          assert.equal(session.terminalInputHeld, true);
+          assert.equal(writes.length, 3);
+          failWrite = false;
+          assert.equal((await post('uncertain-original', 2)).json().success, false);
+          assert.equal((await send('unknown-must-not-replay', 2)).held, true);
+          assert.equal(writes.length, 3);
+        }
+      } finally {
+        ws.close();
+        await new Promise<void>((resolve) => {
+          if (ws.readyState === WebSocket.CLOSED) resolve();
+          else ws.once('close', () => resolve());
+        });
+      }
     }
     assert.equal(physical.mutations, 0, 'Startup must not create/start/dispatch any provider');
     internal.store.flush();
@@ -703,6 +874,9 @@ if (process.argv.includes('--namespace')) {
       'issued-live',
       'issued-absent',
       'issued-held',
+      'codex-input',
+      'codex-stale',
+      'codex-identity',
     ])
       it(scenario, () => runBoxedStartupNamespace('test/docker-employee-startup-restore.test.ts', scenario), 60_000);
   });

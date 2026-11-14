@@ -298,7 +298,7 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
     paneId: '%1',
     panePid: 41,
     paneStartTicks: '12345',
-    hookGeneration: 'synthetic-hook-generation',
+    hooks: { kind: 'generation', generation: 'synthetic-hook-generation' },
   };
   const run = vi.mocked(f.command.run).getMockImplementation()!;
   vi.mocked(f.command.run).mockImplementation(async (args, input) => {
@@ -338,6 +338,8 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
     status: 'busy',
     pid: 23,
     createdAt: 1,
+    lastActivityAt: 1,
+    currentTaskId: null,
     pinned: true,
     desiredRunning: true,
     docker,
@@ -734,8 +736,8 @@ describe('actual saved Docker Session private attachment', () => {
         sessionGeneration: 3,
         containerId: dest,
         imageId: target,
-        originalDigest: f.row.original.configurationDigest,
-        policyDigest: f.row.policyDigest,
+        originalDigest: dockerContinuationDigest(f.row.destination),
+        policyDigest: dockerContinuationDigest(f.row.policy),
       };
       await expect(provider.attach(f.row, binding, f.requireCurrent, view)).rejects.toThrow(
         'Initial launch protocol changed before publication'

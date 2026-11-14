@@ -164,19 +164,19 @@ setInterval(() => {}, 1000);
         timeout: 5000,
         maxBuffer: 65536,
       });
-    const inspected = probe('observe', sid, operation);
+    const inspected = probe('observe', sid, operation, 'generation');
     success(inspected);
     const observed = JSON.parse(inspected.stdout) as {
       paneId: string;
       panePid: number;
       paneStartTicks: string;
-      hookGeneration: string;
+      hooks: { kind: 'generation'; generation: string };
     };
-    assert.equal(observed.hookGeneration, generation);
-    const present = probe('presence', sid, operation);
+    assert.deepEqual(observed.hooks, { kind: 'generation', generation });
+    const present = probe('presence', sid, operation, 'generation');
     success(present);
     assert.deepEqual(JSON.parse(present.stdout), observed);
-    const absent = probe('presence', 'a0000000-0000-4000-8000-000000000004', operation);
+    const absent = probe('presence', 'a0000000-0000-4000-8000-000000000004', operation, 'generation');
     success(absent);
     assert.equal(absent.stdout, 'ABSENT\n');
     assert.equal(
@@ -188,7 +188,7 @@ setInterval(() => {}, 1000);
         .split(/\s+/)[19]
     );
     assert.equal(
-      probe('observe', sid, 'f0000000-0000-4000-8000-000000000003').status,
+      probe('observe', sid, 'f0000000-0000-4000-8000-000000000003', 'generation').status,
       1,
       'Wrong operation must be refused'
     );
@@ -197,6 +197,7 @@ setInterval(() => {}, 1000);
         'attach',
         sid,
         operation,
+        'generation',
         observed.paneId,
         String(observed.panePid + 1),
         observed.paneStartTicks,
@@ -205,10 +206,99 @@ setInterval(() => {}, 1000);
       1,
       'A changed PID must not attach'
     );
+    // A stock NONE provider has no hook generation. Its existing channel still
+    // requires SID/op/pane/PID birth, while always-hook modes remain refused.
+    success(run(providerSocket, ['set-environment', '-gu', 'REVERIE_HOOK_GENERATION']));
+    assert.equal(
+      probe('observe', sid, operation, 'generation').status,
+      1,
+      'Generation mode must refuse absent hook evidence'
+    );
+    const noHooks = probe('observe', sid, operation, 'none');
+    success(noHooks);
+    const none = JSON.parse(noHooks.stdout) as {
+      paneId: string;
+      panePid: number;
+      paneStartTicks: string;
+      hooks: { kind: string };
+    };
+    assert.deepEqual(none.hooks, { kind: 'none' });
+    assert.equal(none.panePid, observed.panePid);
+    assert.equal(none.paneStartTicks, observed.paneStartTicks);
+    assert.equal(probe('observe', sid, 'f0000000-0000-4000-8000-000000000003', 'none').status, 1);
+    assert.equal(
+      probe('attach', sid, operation, 'none', none.paneId, String(none.panePid + 1), none.paneStartTicks, '').status,
+      1
+    );
+    const { spawn: spawnPty } = await import('node-pty');
+    const viewer = spawnPty(
+      process.execPath,
+      [
+        '--input-type=commonjs',
+        '-e',
+        DOCKER_PROVIDER_VIEW_PROGRAM,
+        '--',
+        'attach',
+        sid,
+        operation,
+        'none',
+        none.paneId,
+        String(none.panePid),
+        none.paneStartTicks,
+        '',
+      ],
+      { env: nativeEnvironment, cwd: root, cols: 80, rows: 24 }
+    );
+    let viewerExited = false;
+    const viewerExit = new Promise<{ exitCode: number }>((resolve) =>
+      viewer.onExit((event) => {
+        viewerExited = true;
+        resolve(event);
+      })
+    );
+    try {
+      let client: string | undefined;
+      const deadline = Date.now() + 5000;
+      while (!client && Date.now() < deadline) {
+        const clients = run(providerSocket, ['list-clients', '-F', '#{client_pid} #{client_name}']);
+        assert.ifError(clients.error);
+        client = clients.stdout
+          .split('\n')
+          .find((line) => {
+            const pid = Number(line.split(' ')[0]);
+            if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+            try {
+              const stat = readFileSync('/proc/' + pid + '/stat', 'utf8');
+              return Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]) === viewer.pid;
+            } catch {
+              return false;
+            }
+          })
+          ?.split(' ')[1];
+        if (!client) await pause(10);
+      }
+      assert(client, 'The actual NONE viewer must attach before timeout');
+      success(run(providerSocket, ['detach-client', '-t', client]));
+      const result = await Promise.race([
+        viewerExit,
+        pause(5000).then(() => {
+          throw Error('Owned native viewer did not exit');
+        }),
+      ]);
+      assert.equal(result.exitCode, 0);
+      const after = probe('observe', sid, operation, 'none');
+      success(after);
+      assert.deepEqual(JSON.parse(after.stdout), none, 'Attaching/detaching must keep the original provider PID birth');
+    } finally {
+      if (!viewerExited) {
+        viewer.kill('SIGKILL');
+        await viewerExit;
+      }
+    }
     await receipt(providerReceipt, ['provider']);
     success(run(providerSocket, ['kill-server']));
     closed.add(providerSocket);
-    assert.equal(probe('observe', sid, operation).status, 1, 'Missing provider must not create a server');
+    assert.equal(probe('observe', sid, operation, 'generation').status, 1, 'Missing provider must not create a server');
     console.log(
       JSON.stringify({
         nativeTmux: true,

@@ -1,3 +1,4 @@
+import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
 import { DockerEphemeralRestoration } from './docker-ephemeral-restoration.js';
@@ -55,7 +56,10 @@ const providerPane = z
     paneId: z.string().regex(/^%[0-9]{1,10}$/),
     panePid: z.number().int().positive().max(2147483647),
     paneStartTicks: z.string().regex(/^[1-9][0-9]{0,19}$/),
-    hookGeneration: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/),
+    hooks: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('none') }).strict(),
+      z.object({ kind: z.literal('generation'), generation: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/) }).strict(),
+    ]),
   })
   .strict();
 export interface DockerEmployeeProviderViewDescriptor {
@@ -68,7 +72,10 @@ export interface DockerEmployeeProviderViewDescriptor {
   readonly paneId: string;
   readonly panePid: number;
   readonly paneStartTicks: string;
-  readonly hookGeneration: string;
+  readonly mode: string;
+  readonly hooks:
+    | { readonly kind: 'none'; readonly mode: string }
+    | { readonly kind: 'generation'; readonly generation: string };
   readonly clientManifestDigest: string;
 }
 /** A private observer admission. It grants no provider creation or relaunch. */
@@ -77,7 +84,7 @@ export class DockerEmployeeProviderView {
   readonly #current: () => void;
   constructor(origin: symbol, descriptor: DockerEmployeeProviderViewDescriptor, current: () => void) {
     if (origin !== providerViewOrigin) throw Error('Original Engine provider view required');
-    this.#descriptor = Object.freeze({ ...descriptor });
+    this.#descriptor = Object.freeze({ ...descriptor, hooks: Object.freeze({ ...descriptor.hooks }) });
     this.#current = current;
     Object.freeze(this);
   }
@@ -185,7 +192,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     private readonly workerImage: DockerEmployeeImageConfiguration,
     journal: DockerContinuationTaskJournal,
     helperImageId: string,
-    private readonly boxId: string
+    private readonly boxId: string,
+    private readonly providerMode: (row: DockerEmployeeContinuationRecord) => string = () => 'claude'
   ) {
     this.#storage = new DockerEmployeeStorage(command, journal, helperImageId, (row) => this.#source(row), boxId);
     this.#credentials = new DockerEmployeeCredentialInstaller(
@@ -641,15 +649,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeProviderHealthProof> {
     const checked = DockerEmployeeContinuationRecord.parse(row),
       b = DockerEmployeeBinding.parse(binding),
-      digest = dockerContinuationDigest(checked);
-    let revoked = false,
-      livePreparation = false;
+      digest = dockerContinuationDigest(checked),
+      hooks = this.providerHooks(checked);
+    let revoked = false, livePreparation = false;
     const requireCurrent = () => {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       try {
         current();
         if (livePreparation) this.assertPreparationCurrent(checked);
-        if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+        if (dockerContinuationDigest(row) !== digest || !isDeepStrictEqual(this.providerHooks(checked), hooks))
+          refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       } catch (error) {
         revoked = true;
         throw error;
@@ -712,11 +721,14 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'presence',
         b.sessionId,
         b.operationId,
+        hooks.kind,
       ]);
       requireCurrent();
       if (text === 'ABSENT\n') return null;
       if (Buffer.byteLength(text) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
-      return providerPane.parse(JSON.parse(text));
+      const value = providerPane.parse(JSON.parse(text));
+      if (value.hooks.kind !== hooks.kind) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+      return value;
     };
     const first = await pane(),
       middle = await inspect();
@@ -752,6 +764,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       providerViewOrigin,
       {
         ...first,
+        mode: hooks.mode,
+        hooks: first.hooks.kind === 'none' ? { kind: 'none', mode: hooks.mode } : first.hooks,
         employeeId: checked.employeeId,
         containerId: b.containerId,
         imageId: b.imageId,
@@ -772,19 +786,31 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       view
     );
   }
+  /** Canonical mode chooses only the hook requirement; it grants no native/view authority. */
+  private providerHooks(row: DockerEmployeeContinuationRecord): {
+    mode: string;
+    kind: 'none' | 'generation';
+    capability: 'none' | 'always' | 'supervised';
+  } {
+    const policy = dockerProviderHookPolicy(this.providerMode(row));
+    if (!policy) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    return policy;
+  }
   async captureProviderView(
     row: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<DockerEmployeeProviderView> {
     const checked = DockerEmployeeContinuationRecord.parse(row);
-    const digest = dockerContinuationDigest(checked);
+    const digest = dockerContinuationDigest(checked),
+      hooks = this.providerHooks(checked);
     let revoked = false;
     const requireCurrent = () => {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       try {
         current();
         this.assertPreparationCurrent(checked);
-        if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+        if (dockerContinuationDigest(row) !== digest || !isDeepStrictEqual(this.providerHooks(checked), hooks))
+          refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       } catch (cause) {
         revoked = true;
         throw cause;
@@ -834,10 +860,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'observe',
         checked.request.sessionId,
         checked.request.operationId,
+        hooks.kind,
       ]);
       requireCurrent();
       if (Buffer.byteLength(raw) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
-      return providerPane.parse(JSON.parse(raw));
+      const value = providerPane.parse(JSON.parse(raw));
+      if (value.hooks.kind !== hooks.kind) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+      return value;
     };
     await this.#ephemeral?.verifyDestination(checked);
     requireCurrent();
@@ -852,6 +881,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       providerViewOrigin,
       {
         ...first,
+        mode: hooks.mode,
+        hooks: first.hooks.kind === 'none' ? { kind: 'none', mode: hooks.mode } : first.hooks,
         employeeId: checked.employeeId,
         containerId: checked.destination.containerId,
         imageId: checked.workerImage.imageId,
@@ -881,6 +912,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     original: DockerEmployeeOriginal,
     row: DockerEmployeeContinuationRecord
   ): Promise<DockerContainerObservation['provider']> {
+    const hooks = this.providerHooks(row);
     const output = await this.command.run([
       'exec',
       ...DOCKER_PROVIDER_VIEW_ENV,
@@ -893,10 +925,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       'presence',
       original.sessionId,
       row.request.operationId,
+      hooks.kind,
     ]);
+    if (!isDeepStrictEqual(this.providerHooks(row), hooks)) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (output === 'ABSENT\n') return { kind: 'absent' };
     if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
-    providerPane.parse(JSON.parse(output));
+    if (providerPane.parse(JSON.parse(output)).hooks.kind !== hooks.kind)
+      refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     return { kind: 'running', operationId: row.request.operationId, sessionId: original.sessionId };
   }
 }

@@ -40,13 +40,14 @@ export const DOCKER_PROVIDER_VIEW_TMUX = '/opt/reverie-worker-tools/bin/tmux';
 export const DOCKER_PROVIDER_VIEW_PROGRAM = String.raw`
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
-const [mode, sid, operation, pane, pidText, ticks, expectedGeneration] = process.argv.slice(1);
+const [mode, sid, operation, hookKind, pane, pidText, ticks, expectedGeneration] = process.argv.slice(1);
 const tmuxProgram = ${JSON.stringify(DOCKER_PROVIDER_VIEW_TMUX)};
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 function refuse() { throw Error('Existing Docker provider view unavailable'); }
 if (!uuid.test(sid || '') || !uuid.test(operation || '') ||
     !['presence', 'observe', 'attach'].includes(mode) ||
-    process.argv.length !== (mode === 'attach' ? 8 : 4)) refuse();
+    !['none', 'generation'].includes(hookKind) ||
+    process.argv.length !== (mode === 'attach' ? 9 : 5)) refuse();
 for (const path of ['/', '/opt', '/opt/reverie-worker-tools', '/opt/reverie-worker-tools/bin']) {
   const stat = fs.lstatSync(path);
   if (!stat.isDirectory() || stat.uid !== 0 || (stat.mode & 0o022) !== 0) refuse();
@@ -83,11 +84,12 @@ function selected() {
       'REVERIE_DOCKER_OPERATION_ID=' + operation + '\n' ||
       tmux(['show-environment', '-t', target, 'REVERIE_SESSION_ID']) !==
       'REVERIE_SESSION_ID=' + sid + '\n') refuse();
+  if (hookKind === 'none') return { paneId: match[1], panePid: Number(match[2]), hooks: { kind: 'none' } };
   const generation = tmux(['show-environment', '-t', target, 'REVERIE_HOOK_GENERATION'], true) ??
     tmux(['show-environment', '-g', 'REVERIE_HOOK_GENERATION']);
   const hook = /^REVERIE_HOOK_GENERATION=([A-Za-z0-9_.:-]{1,256})\n$/.exec(generation || '');
   if (!hook) refuse();
-  return { paneId: match[1], panePid: Number(match[2]), hookGeneration: hook[1] };
+  return { paneId: match[1], panePid: Number(match[2]), hooks: { kind: 'generation', generation: hook[1] } };
 }
 if (mode === 'presence') {
   try {
@@ -126,7 +128,7 @@ if (JSON.stringify(first) !== JSON.stringify(second) || start !== birth(second.p
 const result = { ...first, paneStartTicks: start };
 if (mode !== 'attach') process.stdout.write(JSON.stringify(result) + '\n');
 else {
-  if (pane !== result.paneId || pidText !== String(result.panePid) || ticks !== start || expectedGeneration !== result.hookGeneration) refuse();
+  if (pane !== result.paneId || pidText !== String(result.panePid) || ticks !== start || expectedGeneration !== (result.hooks.kind === 'generation' ? result.hooks.generation : '')) refuse();
   const attached = spawnSync(tmuxProgram, ['-u', '-N', '-f', '/dev/null', '-L', 'reverie-docker', 'attach-session', '-t', target],
     { stdio: 'inherit', env: childEnvironment });
   if (attached.error || attached.signal || attached.status === null) refuse();

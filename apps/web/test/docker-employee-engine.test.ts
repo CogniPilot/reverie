@@ -1,5 +1,6 @@
 import { DockerEphemeralRestoration } from '../src/docker-ephemeral-restoration.js';
 import type { EphemeralJournal } from '../src/docker-ephemeral-data.js';
+import * as cliRegistry from '../src/config/cli-registry/registry.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
 import { encodeDockerProviderPlacement } from '../src/docker-provider-health-placement.js';
 import { DockerProviderHealth } from '../src/docker-provider-health.js';
@@ -46,7 +47,7 @@ const subject = {
   onVacation: false,
   desiredRunning: true,
 };
-function fixture(boxId = '7'.repeat(64), ephemeral = false) {
+function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: 48 * 1024 ** 3,
     memoryHighBytes: 16 * 1024 ** 3,
@@ -171,12 +172,13 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false) {
     { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [image] },
     journal,
     helper,
-    boxId
+    boxId,
+    () => mode
   );
   return { source, row, engine, command, resources, policy, created: () => created };
 }
-async function dockerEncodedDestination(ephemeral = false) {
-  const f = fixture('7'.repeat(64), ephemeral);
+async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
+  const f = fixture('7'.repeat(64), ephemeral, mode);
   f.source.Mounts.push({
     Type: 'bind',
     Source: '/synthetic/workspace',
@@ -224,12 +226,17 @@ async function dockerEncodedDestination(ephemeral = false) {
   });
   return { ...f, observed };
 }
-async function providerViewFixture(ephemeral = false) {
-  const f = await dockerEncodedDestination(ephemeral);
+async function providerViewFixture(ephemeral = false, mode = 'claude') {
+  const f = await dockerEncodedDestination(ephemeral, mode);
   f.observed.State.Running = true;
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
   f.row.phase = 'ready';
-  const pane = { paneId: '%1', panePid: 42, paneStartTicks: '987654', hookGeneration: 'synthetic.current:1' };
+  const pane = {
+    paneId: '%1',
+    panePid: 42,
+    paneStartTicks: '987654',
+    hooks: mode === 'codex' ? { kind: 'none' } : { kind: 'generation', generation: 'synthetic.current:1' },
+  };
   const original = vi.mocked(f.command.run).getMockImplementation()!;
   vi.mocked(f.command.run).mockImplementation(async (args, input) => {
     if (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) return JSON.stringify(pane) + '\n';
@@ -281,9 +288,69 @@ describe('Engine-owned existing Docker provider view', () => {
       calls.every(
         (args) =>
           (args[0] === 'container' && ['ls', 'inspect'].includes(args[1]!)) ||
-          (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.at(-3) === 'observe')
+          (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.at(-4) === 'observe')
       )
     ).toBe(true);
+  });
+  it('captures declared NONE without a historical hook generation and keeps the mode in private evidence', async () => {
+    const f = await providerViewFixture(false, 'codex');
+    const view = await f.engine.captureProviderView(f.row, () => {});
+    requireDockerEmployeeProviderView(view, sid, f.docker);
+    expect(view.descriptor.hooks).toEqual({ kind: 'none', mode: 'codex' });
+    expect(Object.isFrozen(view.descriptor.hooks)).toBe(true);
+    expect(Reflect.set(view.descriptor.hooks, 'kind', 'generation')).toBe(false);
+    expect(
+      vi
+        .mocked(f.command.run)
+        .mock.calls.filter(([a]) => a.includes(DOCKER_PROVIDER_VIEW_PROGRAM))
+        .every(([a]) => a.at(-1) === 'none')
+    ).toBe(true);
+    expect(f.command.create).toHaveBeenCalledTimes(1); // Fixture destination construction only.
+  });
+  it('refuses a native NONE response when the canonical mode requires generation evidence', async () => {
+    const f = await providerViewFixture();
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) =>
+      args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)
+        ? JSON.stringify({ ...f.pane, hooks: { kind: 'none' } })
+        : original(args, input)
+    );
+    await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow(
+      'DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED'
+    );
+  });
+  it('permanently revokes NONE evidence after the canonical provider mode changes', async () => {
+    const f = await providerViewFixture(false, 'codex');
+    const mode = vi.spyOn(f.engine as unknown as { providerMode(row: unknown): string }, 'providerMode');
+    const view = await f.engine.captureProviderView(f.row, () => {});
+    mode.mockReturnValue('claude');
+    expect(() => requireDockerEmployeeProviderView(view, sid, f.docker)).toThrow();
+    mode.mockReturnValue('codex');
+    expect(() => requireDockerEmployeeProviderView(view, sid, f.docker)).toThrow();
+  });
+  it('refuses unknown canonical modes instead of inferring NONE', async () => {
+    const f = await providerViewFixture(false, 'unregistered-mode');
+    await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow(
+      'DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED'
+    );
+  });
+  it('keeps custom NONE declarations on the prior generation-required path', async () => {
+    const custom = { ...cliRegistry.getCli('codex')!, id: cliRegistry.asCliId('custom-none'), stock: false };
+    const registry = vi.spyOn(cliRegistry, 'getCli').mockReturnValue(custom);
+    try {
+      const f = await providerViewFixture(false, 'custom-none');
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) =>
+        args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)
+          ? JSON.stringify({ ...f.pane, hooks: { kind: 'none' } })
+          : original(args, input)
+      );
+      await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow(
+        'DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED'
+      );
+    } finally {
+      registry.mockRestore();
+    }
   });
   it('cannot mint or impersonate an original view, even through its public prototype', async () => {
     const f = await providerViewFixture();
@@ -314,7 +381,7 @@ describe('Engine-owned existing Docker provider view', () => {
                 ? { panePid: 43 }
                 : kind === 'birth'
                   ? { paneStartTicks: '987655' }
-                  : { hookGeneration: 'changed' }),
+                  : { hooks: { kind: 'generation', generation: 'changed' } }),
             });
           return original(args, input);
         });
