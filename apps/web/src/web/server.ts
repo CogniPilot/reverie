@@ -1172,7 +1172,7 @@ export class WebServer extends EventEmitter {
     const dockerRuntime = openDockerEmployeeRuntime(dataPath('docker-runtime'));
     this.dockerEmployeeRuntime = dockerRuntime;
     if (dockerRuntime) {
-      registerDockerWorkerIdentity(this.app, dockerRuntime.authentication, this.basePath);
+      registerDockerWorkerIdentity(this.app, dockerRuntime.authentication, this.basePath, {requireMachineProof:true});
       this.app.addHook('onClose', async () => { dockerRuntime.close(); });
     }
     const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth, this.allowUnauthenticatedNetwork);
