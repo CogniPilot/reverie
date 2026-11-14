@@ -172,13 +172,15 @@ describe('boxed original provider publication', () => {
       continuationLaunch: owner,
       execEnv: {
         GCONV_PATH: '/synthetic/injected',
+        OPENSSL_CONF: '/synthetic/private-openssl',
         LOCALE_ARCHIVE: '/synthetic/private-locale',
         CLAUDE_CONFIG_DIR: '/synthetic/account',
       },
-      execEnvNames: ['GCONV_PATH', 'LOCALE_ARCHIVE', 'CLAUDE_CONFIG_DIR'],
+      execEnvNames: ['GCONV_PATH', 'LOCALE_ARCHIVE', 'OPENSSL_CONF', 'CLAUDE_CONFIG_DIR'],
     });
     expect(command).not.toContain('/synthetic/injected');
     expect(command).not.toContain('/synthetic/private-locale');
+    expect(command).not.toContain('/synthetic/private-openssl');
     expect(command).toContain('/synthetic/account');
     expect(command).toContain('/opt/reverie-worker-tools/share/locale/locale-archive');
     expect(command.match(/GCONV_PATH=/g)).toHaveLength(1);
