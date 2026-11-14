@@ -3781,23 +3781,23 @@ export class Session extends EventEmitter {
   private async _prepareManagedCodexTrust(): Promise<void> {
     this._codexTrustWorkspace = undefined;
     this._codexHookTrust = undefined;
+    const options = {
+      mode: this.mode,
+      fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
+      workingDir: this.workingDir,
+      owner: this._owner,
+      remote: this._remote,
+      docker: this._docker,
+      customModel: this._customModel,
+      discovered: this._muxSession?.discovered,
+    };
     if (this._docker) {
-      if (
-        !this._dockerContinuationLaunch ||
-        !(await managedCodexTrustEligible({
-          mode: this.mode,
-          fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
-          workingDir: this.workingDir,
-          owner: this._owner,
-          remote: this._remote,
-          discovered: this._muxSession?.discovered,
-        }))
-      )
-        return;
-      const workspace = await DockerEmployeeProviderLaunch.prototype.prepareCodexWorkspace.call(
-        this._dockerContinuationLaunch,
-        this
-      );
+      const launch = this._dockerContinuationLaunch;
+      if (!launch || !(await managedCodexTrustEligible(options))) return;
+      const workspace = await DockerEmployeeProviderLaunch.prototype.prepareCodexWorkspace.call(launch, this);
+      // Native filesystem observations do not preserve a privilege revoked while awaiting them.
+      if (!(await managedCodexTrustEligible(options))) return;
+      DockerEmployeeProviderLaunch.prototype.requireFor.call(launch, this);
       this._codexTrustWorkspace = workspace.realPath;
       this._codexHookTrust =
         workspace.hooksText === null
@@ -3807,16 +3807,7 @@ export class Session extends EventEmitter {
             );
       return;
     }
-    this._codexTrustWorkspace = await managedCodexTrust({
-      mode: this.mode,
-      fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
-      workingDir: this.workingDir,
-      owner: this._owner,
-      remote: this._remote,
-      docker: this._docker,
-      customModel: this._customModel,
-      discovered: this._muxSession?.discovered,
-    });
+    this._codexTrustWorkspace = await managedCodexTrust(options);
   }
 
   /**

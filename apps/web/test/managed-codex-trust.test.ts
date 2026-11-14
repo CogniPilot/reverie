@@ -231,7 +231,7 @@ describe('private Docker employee Codex trust', () => {
       })
     ).toThrow();
   });
-  it.each(['restricted', 'ungranted', 'revoked', 'plain-docker'])(
+  it.each(['restricted', 'ungranted', 'revoked', 'eligibility-revoked', 'plain-docker'])(
     'never earns Docker workspace trust for %s',
     async (kind) => {
       const mux = new TmuxManager(),
@@ -244,13 +244,19 @@ describe('private Docker employee Codex trust', () => {
         useMux: true,
         mux,
         docker,
-        owner: kind === 'ungranted' ? 'ungranted' : undefined,
+        owner: kind === 'ungranted' ? 'ungranted' : kind === 'eligibility-revoked' ? 'eligible-target' : undefined,
         codexConfig: { dangerouslyBypassApprovals: kind !== 'restricted' },
         publicationStore: new StateStore(join(dir, 'state.json')),
       });
       sessions.push(session);
       bindInitialLaunchAdmission(session, () => true);
-      const reader = vi.fn(async () => ({ realPath: dir, dev: '1', ino: '2', hooksText: null }));
+      const reader = vi.fn(async () => {
+        if (kind === 'eligibility-revoked')
+          vi.mocked(users.canUsernameRunPrivilegedCommands).mockImplementation(
+            async (owner) => owner !== 'eligible-target'
+          );
+        return { realPath: dir, dev: '1', ino: '2', hooksText: null };
+      });
       if (kind !== 'plain-docker')
         session.bindDockerContinuationLaunch(
           captureDockerEmployeeProviderLaunch(
@@ -272,7 +278,8 @@ describe('private Docker employee Codex trust', () => {
         await session.startInteractive();
         expect(create.mock.calls[0]![0].codexTrustWorkspace).toBeUndefined();
       }
-      if (kind !== 'revoked') expect(reader).not.toHaveBeenCalled();
+      if (kind === 'eligibility-revoked') expect(reader).toHaveBeenCalledOnce();
+      else if (kind !== 'revoked') expect(reader).not.toHaveBeenCalled();
     }
   );
 });
