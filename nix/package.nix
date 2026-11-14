@@ -61,7 +61,7 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ];
+    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
@@ -80,11 +80,34 @@ let
         test/docker-employee-recovery-ui.test.ts \
         test/docker-employee-storage.test.ts \
         test/docker-runtime-key.test.ts \
-        test/docker-worker-identity-client.test.ts \
         test/docker-worker-identity-transport.test.ts \
         test/docker-worker-identity.test.ts \
-        test/worker-client-continuation-cli.test.ts \
-        test/worker-client.test.ts
+        test/worker-client-continuation-cli.test.ts
+      # Preserve real credential FD checks while mapping Nix's unmapped root
+      # into a disposable real root-owned namespace. Production is unchanged.
+      boxedCredentialCheck() {
+        npm test -- test/docker-worker-identity-client.test.ts \
+          test/worker-client.test.ts \
+          test/worker-status-wire.test.ts
+      }
+      ${if pkgs.stdenv.isLinux then ''
+        mkdir -p "$TMPDIR/boxed-check-root"/{nix,source,fixture,proc,dev,bin}
+        mkdir -p "$TMPDIR/boxed-check-fixture"/{home,tmp}
+        chmod 700 "$TMPDIR/boxed-check-root" "$TMPDIR/boxed-check-fixture" "$TMPDIR/boxed-check-fixture"/{home,tmp}
+        export -f boxedCredentialCheck
+        ${pkgs.bubblewrap}/bin/bwrap --unshare-user --uid 0 --gid 0 --cap-drop ALL \
+          --ro-bind "$TMPDIR/boxed-check-root" / --ro-bind /nix /nix \
+          --ro-bind ${pkgs.bash}/bin /bin --bind "$PWD" /source \
+          --bind "$TMPDIR/boxed-check-fixture" /fixture --proc /proc --dev /dev \
+          --chdir /source --setenv HOME /fixture/home --setenv TMPDIR /fixture/tmp \
+          ${pkgs.bash}/bin/bash -euc '
+            test "$(id -u)" = 0
+            test "$(stat -c %u /)" = 0
+            boxedCredentialCheck
+          '
+      '' else ''
+        boxedCredentialCheck
+      ''}
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts
       npm test -- test/native-thread-profile.test.ts
