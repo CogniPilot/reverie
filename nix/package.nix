@@ -69,6 +69,22 @@ let
       export NIX_TEST_FILE_WORKERS=2
       # Refuse missing or duplicate registrations before the longer test batches.
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
+      # Boxed recovery and bound worker transport use the same default CI gate.
+      npm test -- test/docker-contained-resource-controller.test.ts \
+        test/docker-employee-continuation-http.test.ts \
+        test/docker-employee-continuation.test.ts \
+        test/docker-employee-credential-installer.test.ts \
+        test/docker-employee-engine.test.ts \
+        test/docker-employee-policy-import.test.ts \
+        test/docker-employee-provider-launch.test.ts \
+        test/docker-employee-recovery-ui.test.ts \
+        test/docker-employee-storage.test.ts \
+        test/docker-runtime-key.test.ts \
+        test/docker-worker-identity-client.test.ts \
+        test/docker-worker-identity-transport.test.ts \
+        test/docker-worker-identity.test.ts \
+        test/worker-client-continuation-cli.test.ts \
+        test/worker-client.test.ts
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts
       npm test -- test/native-thread-profile.test.ts
