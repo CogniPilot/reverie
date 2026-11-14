@@ -22,7 +22,7 @@
       this.error = shell.el('p', 'ca-error');
       this.error.setAttribute('role', 'alert');
       this.policy = shell.el('div');
-      this.controls = shell.el('div', 'ca-actions');
+      this.controls = shell.el('div', 'ca-company-actions ca-fleet-actions');
       this.root.append(
         shell.el('h3', '', 'Docker session recovery'),
         this.status,
@@ -92,7 +92,7 @@
       this.policy.replaceChildren();
       const policy = s.policy ?? s.proposedPolicy;
       if (!policy) return;
-      const table = this.shell.el('table', 'ca-resource-table');
+      const table = this.shell.el('table', 'ca-fleet-table');
       const caption = this.shell.el(
         'caption',
         '',

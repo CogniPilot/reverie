@@ -5029,7 +5029,14 @@ class ReverieChatApp {
       status.textContent = '';
       if (manage) {
         this.companyRecoveryFields(runtime, data, status);
-        this.doc.defaultView.ReverieFleetResources?.mount(this, runtime, dialog);
+        if (data.boxedRuntime === true) {
+          runtime.append(
+            this.el('h3', '', 'Employee resources'),
+            this.el('p', 'ca-hint', 'Review resource limits and recover sessions in each employee’s Permissions tab.')
+          );
+        } else {
+          this.doc.defaultView.ReverieFleetResources?.mount(this, runtime, dialog);
+        }
         selectTab('runtime');
         const plugins = this.doc.defaultView?.ReverieChatPlugins;
         if (plugins)
