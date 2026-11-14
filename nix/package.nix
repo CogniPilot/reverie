@@ -64,7 +64,7 @@ let
     nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
-      ${lib.optionalString pkgs.stdenv.isLinux "export REVERIE_TEST_LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
+      ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
       # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
       export NIX_TEST_FILE_WORKERS=2
