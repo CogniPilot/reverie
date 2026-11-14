@@ -1292,7 +1292,7 @@ export class Session extends EventEmitter {
     const preparation = this.#workspaceHookPreparation;
     this.#workspaceHookPreparation = undefined;
     const attempt: HookStartAttempt = {
-      configuration: this.#dockerContinuationView ? (this._requireDockerContinuationView(),'prepared') : this._dockerContinuationLaunch && this.mode==='claude'
+      configuration: this.#dockerContinuationView ? (this._requireDockerContinuationView(),'prepared') : this._dockerContinuationLaunch && getCli(this.mode)?.capabilities.hooks==='always'
         ? (this._dockerContinuationLaunch.requireFor(this),'prepared')
         : consumeWorkspaceHookPreparation(preparation,this.workingDir),
       mode: this.mode,

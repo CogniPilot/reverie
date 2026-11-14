@@ -41,6 +41,7 @@ import { workerLaunchCommand, WorkerViewerEndpoint, WorkerViewerEndpointCustodyE
 import { MuxMutationRefusedError } from './mux-interface.js';
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import {
@@ -2772,7 +2773,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    */
   private async listPanesAsync(): Promise<string | null> {
     try {
-      const { stdout } = await execAsync(`${this.tmux()} list-panes -a -F '${PANE_LIVENESS_FORMAT}'`, {
+      const { stdout } = await execFileAsync('tmux', ['-L', this.tmuxSocket, 'list-panes', '-a', '-F', PANE_LIVENESS_FORMAT], {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });
@@ -2785,7 +2786,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   /** Pid of the tmux server on our socket, or null when it does not answer. */
   private async getServerPidAsync(): Promise<number | null> {
     try {
-      const { stdout } = await execAsync(`${this.tmux()} display-message -p '#{pid}'`, {
+      const { stdout } = await execFileAsync('tmux', ['-L', this.tmuxSocket, 'display-message', '-p', '#{pid}'], {
         encoding: 'utf-8',
         timeout: EXEC_TIMEOUT_MS,
       });
