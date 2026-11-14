@@ -627,6 +627,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       b.policyDigest !== dockerContinuationDigest(checked.policy)
     )
       refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
+    if (checked.phase !== 'provider-issued' && checked.phase !== 'ready')
+      refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
     const inspect = async () => {
       requireCurrent();
       const raw = await this.#destination(checked);
@@ -655,7 +657,6 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         requireCurrent
       );
     }
-    if (checked.phase !== 'ready') refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
     const pane = async () => {
       requireCurrent();
       const text = await this.command.run([

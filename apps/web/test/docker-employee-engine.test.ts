@@ -728,6 +728,7 @@ describe('read-only Docker provider health', () => {
   });
   it('missing canonical provider is unknown before any live observation, including pending initial dispatch', async () => {
     const f = await healthFixture();
+    f.row.phase = 'provider-issued';
     f.setMode('absent');
     await f.health.refresh();
     expect(f.health.read(f.employee)?.state).toBe('unknown');
@@ -908,5 +909,32 @@ describe('read-only Docker provider health', () => {
     f.health.close();
     release();
     await pending;
+  });
+  it('observes provider-issued live command without settling its lost completion acknowledgement', async () => {
+    const f = await healthFixture();
+    f.row.phase = 'provider-issued';
+    const before = structuredClone(f.row);
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('healthy');
+    expect(f.row).toEqual(before);
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
+  it('refuses a changed record digest during provider-issued native observation and all earlier phases', async () => {
+    const f = await healthFixture();
+    f.row.phase = 'provider-issued';
+    const run = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (a, i) => {
+      const value = await run(a, i);
+      if (a.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) f.row.sourceDigest = '8'.repeat(64);
+      return value;
+    });
+    await f.health.refresh();
+    expect(f.health.read(f.employee)?.state).toBe('unknown');
+    const g = await healthFixture();
+    g.row.phase = 'identity-ready';
+    vi.mocked(g.command.run).mockClear();
+    await g.health.refresh();
+    expect(g.health.read(g.employee)?.state).toBe('unknown');
+    expect(g.command.run).not.toHaveBeenCalled();
   });
 });

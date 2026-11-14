@@ -427,7 +427,7 @@ async function seed(scenario: string) {
   await resources.configure(row, noop);
   row.phase = 'identity-issued';
   await engine.provisionIdentity(row, 'synthetic-test-token-not-server-authority', noop);
-  row.phase = 'ready';
+  row.phase = scenario === 'issued-live' ? 'provider-issued' : 'ready';
   row.tasks = [...tasks.values()];
   const docker = {
     hostId: 'boxed-runtime',
@@ -603,7 +603,7 @@ async function startup(scenario: string) {
     assert.equal(response.statusCode, scenario === 'attached' ? 200 : 404);
     assert(internal.workerProviderHealth, 'Docker health must exist without a retired host worker socket');
     assert.equal(process.env.REVERIE_WORKER_SOCKET, undefined);
-    if (scenario === 'attached')
+    if (scenario === 'attached' || scenario === 'issued-live')
       assert.equal(
         internal.workerProviderHealth.read(sid)?.state,
         'healthy',
@@ -626,6 +626,23 @@ async function startup(scenario: string) {
       );
     }
 
+    if (scenario === 'issued-live') {
+      assert.equal(internal.workerProviderHealth.read(sid)?.state, 'healthy');
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/company',
+        headers: { host: 'reverie:3000', cookie },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(
+        response.json().data.employees.find((e: { id: string }) => e.id === eid).providerHealth?.state,
+        'healthy'
+      );
+      assert.equal(
+        JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0].phase,
+        'provider-issued'
+      );
+    }
     const session = internal.sessions.get(sid),
       reports = internal.dockerEmployeeRuntime.restorationReports;
     if (scenario === 'attached') {
@@ -672,7 +689,7 @@ if (process.argv.includes('--namespace')) {
 } else {
   const { describe, it } = await import('vitest');
   describe('actual boxed WebServer startup restores only existing provider viewers', () => {
-    for (const scenario of ['attached', 'absent', 'desired-off', 'unknown'])
+    for (const scenario of ['attached', 'absent', 'desired-off', 'unknown', 'issued-live'])
       it(scenario, () => runBoxedStartupNamespace('test/docker-employee-startup-restore.test.ts', scenario), 60_000);
   });
 }
