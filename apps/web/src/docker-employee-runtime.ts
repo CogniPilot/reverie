@@ -334,6 +334,8 @@ export class DockerEmployeeRuntime {
       actual?.pid !== null &&
       actual?.pid !== undefined &&
       !actual.paneExit &&
+      !actual.providerInputHeld &&
+      !actual.terminalInputHeld &&
       actual.docker?.containerName === binding.containerId
     )
       return true;

@@ -141,9 +141,12 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           terminalInputHeld: false,
         });
       original.candidate = candidate;
+      const candidateRecipeCurrent = () =>
+        candidate.owner === employee.owner &&
+        dockerEmployeeSourceDigest(employee, candidate.toPersistedState()) === row.sourceDigest;
       const currentCandidate = () => {
         current();
-        if (!allowed() || this.ctx.sessions.get(binding.sessionId) !== candidate)
+        if (!allowed() || !candidateRecipeCurrent() || this.ctx.sessions.get(binding.sessionId) !== candidate)
           throw Error('Original provider Session changed');
       };
       const admission = () => {
@@ -151,6 +154,7 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           current();
           return (
             allowed() &&
+            candidateRecipeCurrent() &&
             (!this.ctx.sessions.has(binding.sessionId) || this.ctx.sessions.get(binding.sessionId) === candidate)
           );
         } catch {

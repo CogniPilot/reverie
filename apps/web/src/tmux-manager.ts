@@ -1580,7 +1580,7 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  }else {
    const descriptor=opts.continuationView!.descriptor;
    flags.push(...DOCKER_PROVIDER_VIEW_ENV.map(shellescape), '--env', 'ENV=', '--env', 'BASH_ENV=');
-   inner=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'attach',sessionId,placement.operationId,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hookGeneration].map(shellescape).join(' ');
+   inner=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'--','attach',sessionId,placement.operationId,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hookGeneration].map(shellescape).join(' ');
  }
  if(opts.continuationLaunch) inner='export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner;
  const expected=shellescape(docker.image+' true '+docker.containerName);
