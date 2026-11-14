@@ -1,3 +1,4 @@
+import {registerDockerEmployeeContinuationCommands} from './docker-employee-continuation-cli.js';
 import { legacyThreadBinding } from './legacy-thread-binding.js';
 import { matchesPattern } from './config/cli-registry/patterns.js';
 import { isChatRaster, localImageFiles } from './chat-image-paths.js';
@@ -2790,6 +2791,7 @@ export function registerAgentCommands(program: Command): Command {
     .description('Talk to other sessions from inside one (any CLI mode): list, spawn, send, wait, read, interrupt, rm');
 
   const run = runAgentVerb;
+  registerDockerEmployeeContinuationCommands(agent,run);
   const context = agent.command('context').description('Read current self profile/core context; old startup is unknown without a harness receipt');
   context.option('--json', 'Machine-readable current context and capture availability')
     .action((options: { json?: boolean }) => run(Boolean(options.json), agentContext));

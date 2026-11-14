@@ -31,6 +31,8 @@ const HireSchema = EmployeeSchema.omit({
   wakeAttempts: true,
   onVacation: true,
   runtimeRecipe: true,
+  dockerResourcePolicy: true,
+  dockerBinding: true,
 });
 const InviteSchema = z.object({ roomId: z.string().min(1).max(100) });
 // Pronouns: a value sets them, null clears them (owner only, like every field here; an agent only proposes, in chat).
@@ -70,6 +72,8 @@ export function registerCompanyRoutes(
     publicationTokens?: { assertGrantIds(owner: string | undefined, ids: string[]): Promise<void> };
     /** The protected laptop-memory replacement routes are registered (server started with --resource-replacement). */
     resourceReplacement?: boolean;
+    /** Explicit configured backend capability, never readiness proof. */
+    boxedRuntime?: boolean;
     refreshHealth?: () => Promise<void>;
     startEmployee?: (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, current: () => boolean) => Promise<unknown>;
   } = {}
@@ -206,7 +210,7 @@ export function registerCompanyRoutes(
     const view = service.view(ownerFor(req));
     return {
       success: true,
-      data: { ...view, employees: view.employees.map(employee =>
+      data: { ...view, boxedRuntime:authority.boxedRuntime===true, employees: view.employees.map(employee =>
         presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
         canManageAttendance: verifiedOwner(req) || view.employees.some(e=>e.sessionId===caller(req) && e.permissions.manageOffice===true),
         // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.

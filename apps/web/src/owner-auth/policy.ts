@@ -117,6 +117,9 @@ const AGENT_ROUTES = new Set([
   'POST /api/company/employees/:id/wake', // route checks the explicit owner-granted recovery capability
   'POST /api/company/employees/:id/reconnect', // purpose-authenticated native proof and explicit recovery permission
   'POST /api/company/employees/:id/reconnect/status',
+  'GET /api/company/employees/:id/docker-policy',
+  'POST /api/company/employees/:id/docker-continuation',
+  'POST /api/company/employees/:id/docker-continuation/observe',
   'POST /api/plans/moves/force', // route requires a purpose proof; raw parent headers grant nothing
   'POST /api/plans/moves/:id/status',
   'POST /api/plans/moves/:id/resolve',

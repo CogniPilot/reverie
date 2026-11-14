@@ -1,0 +1,193 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Session } from '../src/session.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { dockerEmployeeSourceDigest } from '../src/docker-employee-store.js';
+import {
+  captureDockerEmployeeProviderLaunch,
+  DockerEmployeeProviderLaunch,
+} from '../src/docker-employee-provider-launch.js';
+import { buildDockerLaunchCommand, buildSpawnCommand } from '../src/tmux-manager.js';
+import { rebootRestoreLaunchConfig, rebootResumeTarget } from '../src/utils/native-thread-profile.js';
+import type { SessionDocker, SessionState } from '../src/types.js';
+const eid = '10000000-0000-4000-8000-000000000001',
+  sid = '20000000-0000-4000-8000-000000000002',
+  oid = '30000000-0000-4000-8000-000000000003';
+const cid = 'a'.repeat(64),
+  image = 'sha256:' + 'b'.repeat(64),
+  digest = 'c'.repeat(64);
+const sessions: Session[] = [];
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  for (const session of sessions.splice(0)) await session.stop(false);
+});
+function docker(): SessionDocker {
+  return {
+    hostId: 'boxed',
+    label: 'Boxed',
+    engine: 'docker',
+    image,
+    containerName: cid,
+    hostWorkspacePath: '/',
+    containerWorkdir: '/synthetic/work',
+    network: 'bridge',
+    mountCredentials: false,
+    hooksEnabled: false,
+    resumeOnStart: true,
+    owned: false,
+    daemonHost: 'unix:///run/reverie-engine/docker.sock',
+    continuation: {
+      operationId: oid,
+      employeeId: eid,
+      sessionGeneration: 7,
+      clientManifestDigest: digest,
+      apiUrl: 'http://boxed-office:3000',
+    },
+  };
+}
+function fixture() {
+  const place = docker(),
+    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode: 'claude', docker: place });
+  sessions.push(session);
+  const binding = {
+    version: 1 as const,
+    operationId: oid,
+    credentialId: '40000000-0000-4000-8000-000000000004',
+    sessionId: sid,
+    sessionGeneration: 7,
+    containerId: cid,
+    imageId: image,
+    originalDigest: digest,
+    policyDigest: digest,
+  };
+  const opts = {
+    mode: 'claude' as const,
+    docker: place,
+    sessionId: sid,
+    createContext: {} as never,
+    execEnv: {},
+    execEnvNames: [],
+    canonicalCommand: 'claude --model preserved --resume 55555555-5555-4555-8555-555555555555',
+  };
+  return { place, session, binding, opts };
+}
+describe('boxed original provider publication', () => {
+  it('saved Docker placement can only attach; it cannot create/start or replay a first provider', () => {
+    const f = fixture(),
+      command = buildDockerLaunchCommand(f.opts);
+    expect(command).toContain('attach-session');
+    expect(command).not.toMatch(/new-session|container start|image inspect|--memory|CLAUDE_API_KEY/);
+    expect(command).toContain('reverie-dkr-' + sid);
+    expect(command).toContain('REVERIE_SESSION_ID=' + sid);
+    expect(command).toContain('REVERIE_WORKER_IDENTITY_FILE=');
+    expect(command).not.toContain('reverie-worker-exec');
+  });
+  it('one actual private Session owner admits canonical provider bytes once', () => {
+    const f = fixture(),
+      current = vi.fn(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, current);
+    f.session.bindDockerContinuationLaunch(owner);
+    const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
+    expect(command).toContain('new-session');
+    expect(command).toContain('preserved');
+    expect(command).toContain('REVERIE_DOCKER_OPERATION_ID');
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    expect(current).toHaveBeenCalled();
+  });
+  it('revoked currentness and destination substitution cannot consume another provider slot', () => {
+    const f = fixture();
+    let active = true;
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {
+      if (!active) throw Error('revoked');
+    });
+    expect(() =>
+      buildDockerLaunchCommand({
+        ...f.opts,
+        docker: { ...f.place, containerName: 'd'.repeat(64) },
+        continuationLaunch: owner,
+      })
+    ).toThrow();
+    active = false;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('revoked');
+    expect(() => Object.create(DockerEmployeeProviderLaunch.prototype).claim(sid, f.place)).toThrow();
+  });
+  it('explicit Docker binding does not inherit a globally configured native viewer hold', () => {
+    vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic/native.sock');
+    const session = new Session({
+      id: sid,
+      workingDir: '/synthetic/work',
+      mode: 'claude',
+      docker: docker(),
+      viewerInputHeld: true,
+    });
+    sessions.push(session);
+    expect(session.toState().viewerInputHeld).not.toBe(true);
+  });
+  it('normal same-thread Session construction keeps the source recipe correlation stable', () => {
+    const employee = EmployeeSchema.parse({
+      id: eid,
+      name: 'Synthetic',
+      icon: 'S',
+      position: 'Employee',
+      expertise: ['testing'],
+      sessionId: sid,
+      sessionGeneration: 7,
+      createdAt: 1,
+    });
+    const saved = {
+      id: sid,
+      workingDir: '/synthetic/work',
+      mode: 'claude',
+      status: 'stopped',
+      pid: null,
+      createdAt: 1,
+      claudeSessionChain: ['55555555-5555-4555-8555-555555555555'],
+      __envOverrides: { CLAUDE_CONFIG_DIR: '/synthetic/account' },
+    } as unknown as SessionState;
+    const target = rebootResumeTarget(saved)!;
+    const session = new Session({
+      ...saved,
+      ...rebootRestoreLaunchConfig(saved, target),
+      docker: docker(),
+      envOverrides: (saved as never as { __envOverrides: Record<string, string> }).__envOverrides,
+    });
+    sessions.push(session);
+    const source = dockerEmployeeSourceDigest(employee, saved);
+    expect(dockerEmployeeSourceDigest(employee, session.toPersistedState())).toBe(source);
+    expect(
+      dockerEmployeeSourceDigest(employee, { ...saved, claudeSessionChain: ['66666666-6666-4666-8666-666666666666'] })
+    ).not.toBe(source);
+    expect(
+      dockerEmployeeSourceDigest(employee, {
+        ...saved,
+        __envOverrides: { CLAUDE_CONFIG_DIR: '/foreign/account' },
+      } as unknown as SessionState)
+    ).not.toBe(source);
+  });
+});
+
+describe('boxed provider command contract', () => {
+  it('pins the control Engine even when the provider environment selects a private nested daemon', () => {
+    vi.stubEnv('DOCKER_HOST', 'unix:///private-worker/docker.sock');
+    const f = fixture(),
+      command = buildDockerLaunchCommand(f.opts);
+    expect(command.split('unix:///run/reverie-engine/docker.sock').slice(1)).toHaveLength(2);
+    expect(command.match(/-H /g)).toHaveLength(2);
+    expect(command).not.toContain('/private-worker');
+  });
+  it('folds fixed capsule hooks into the same Claude settings value as advisor/effort without a HOME writer', () => {
+    const command = buildSpawnCommand({
+      mode: 'claude',
+      sessionId: sid,
+      resumeSessionId: '55555555-5555-4555-8555-555555555555',
+      boxedWorkerHooks: true,
+      advisorModel: 'claude-opus-4-6',
+    });
+    expect(command).toContain('/opt/reverie-worker-client/bin/reverie worker-callback hook-event');
+    expect(command).toContain('worker-callback status-telemetry');
+    expect(command).not.toMatch(/statusline-exporter.sh|REVERIE_HOOK_SECRET|curl|settings.json/);
+    // Two bounded resume candidates plus the fresh branch each render one
+    // settings value; the selector executes exactly one candidate.
+    expect(command.match(/--settings/g)).toHaveLength(3);
+    expect(command.match(/advisorModel/g)).toHaveLength(3);
+  });
+});

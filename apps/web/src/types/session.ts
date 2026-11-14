@@ -370,6 +370,8 @@ export interface DockerCase {
  * SessionRemote). Round-trips through MuxSession/SessionState/mux-sessions.json.
  */
 export interface SessionDocker {
+  /** Explicit boxed placement DATA; first launch needs a private process-local owner. */
+  continuation?: {operationId:string;employeeId:string;sessionGeneration:number;clientManifestDigest:string;apiUrl:string};
   hostId: string;
   label: string;
   engine: DockerEngine;

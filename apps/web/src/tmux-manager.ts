@@ -1,3 +1,4 @@
+import type {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
 import { MuxSessionMetadataStore, type MuxMetadataPublicationStatus, type MuxMetadataReconciliation, type MuxMetadataIncidentSelector } from './mux-session-metadata-store.js';
 import {TerminalInputAttempt} from './terminal-input-outcome.js';
@@ -1064,6 +1065,7 @@ export function buildCodexCommand(config?: CodexConfig): string {
 }
 
 export function buildSpawnCommand(options: {
+  boxedWorkerHooks?:boolean;
   codexTrustWorkspace?: string;
   codexHookTrust?: string;
   mode: SessionMode;
@@ -1416,6 +1418,8 @@ export interface DockerLaunchOptions {
    * writes its runtime state back into the host `~/.claude`.
    */
   seedCopies?: DockerSeedCopy[];
+  canonicalCommand?: string;
+  continuationLaunch?: DockerEmployeeProviderLaunch;
 }
 
 /**
@@ -1426,6 +1430,7 @@ export interface DockerLaunchOptions {
  * command -> `docker exec … sh -lc '<tmux>'` -> tmux `'<paneCommand>'`.
  */
 export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
+  if(opts.docker.continuation)return buildDockerEmployeeContinuationCommand(opts);
   const { mode, docker, sessionId, resumeSessionId, createContext, execEnv, execEnvNames, seedCopies } = opts;
   const base = buildDockerBaseArgs(docker).join(' ');
   // ADOPTED container (docker.owned === false): the user built it and runs it, so
@@ -1535,6 +1540,31 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   return [imageCheck, ensure, memoryCheck, start, execCmd].filter(Boolean).join(' ; ');
 }
 
+/** First provider is private one-attempt authority; normal restores only attach. */
+function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string {
+ const {docker,sessionId}=opts,placement=docker.continuation!;
+ if(!/^[a-f0-9]{64}$/.test(docker.containerName)||!/^sha256:[a-f0-9]{64}$/.test(docker.image)||
+   !/^[0-9a-f-]{36}$/.test(sessionId)||docker.owned!==false)throw Error('Exact boxed Docker placement required');
+ const base=buildDockerBaseArgs(docker).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
+ const env={...opts.execEnv,REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
+   REVERIE_WORKER_IDENTITY_FILE:'/home/agent/.reverie/docker-worker-identity',REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
+ const flags=Object.entries(env).flatMap(([key,value])=>['--env',shellescape(key+'='+value)]);
+ flags.push(...opts.execEnvNames.filter(key=>!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION').flatMap(key=>['--env',key]));
+ let inner:string;
+ if(opts.continuationLaunch){
+   if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');
+   opts.continuationLaunch.claim(sessionId,docker);
+   inner='tmux -u -L reverie-docker new-session -d -s '+shellescape(target)+' -c '+shellescape(docker.containerWorkdir)+' '+shellescape(opts.canonicalCommand)+
+    ' '+shellescape(';')+' setenv -t '+shellescape(target)+' REVERIE_SESSION_ID '+shellescape(sessionId)+
+    ' '+shellescape(';')+' setenv -t '+shellescape(target)+' REVERIE_DOCKER_OPERATION_ID '+shellescape(placement.operationId)+
+    ' '+shellescape(';')+' set -t '+shellescape(target)+' status off '+shellescape(';')+' attach-session -t '+shellescape(target);
+ }else inner='tmux -u -L reverie-docker attach-session -t '+shellescape(target);
+ inner='export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner;
+ const expected=shellescape(docker.image+' true '+docker.containerName);
+ const checked=base+' inspect -f '+shellescape('{{.Image}} {{.State.Running}} {{.Id}}')+' '+name+' | grep -Fx '+expected;
+ return checked+' && exec '+base+' exec -it --workdir '+shellescape(docker.containerWorkdir)+' '+flags.join(' ')+' '+name+' sh -lc '+shellescape(inner);
+}
+
 /**
  * Kill ONLY this session's in-container tmux session. The container is shared by
  * the case's other sessions, so this NEVER `docker stop`s it — stopping/removing
@@ -1544,7 +1574,7 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
 export function buildDockerKillCommand(options: { docker: SessionDocker; sessionId: string }): string {
   const { docker, sessionId } = options;
   const base = buildDockerBaseArgs(docker).join(' ');
-  const dkrName = dockerTmuxSessionName(sessionId);
+  const dkrName = docker.continuation?'reverie-dkr-'+sessionId:dockerTmuxSessionName(sessionId);
   return `${base} exec ${shellescape(docker.containerName)} tmux -L ${DOCKER_TMUX_SOCKET} kill-session -t ${shellescape(dkrName)}`;
 }
 
@@ -2468,6 +2498,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     requireCurrent();
 
     const baseCmd = buildSpawnCommand({
+      boxedWorkerHooks:!!docker?.continuation,
       codexTrustWorkspace: options.codexTrustWorkspace,
       codexHookTrust: options.codexHookTrust,
       mode,
@@ -2498,7 +2529,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // Build the full command to run inside tmux
       const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
       const fullCmd = docker
-        ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
+        ? buildDockerLaunchCommand({...resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates), canonicalCommand:buildNofileLimitCommand()+' && '+cmd,continuationLaunch:options.dockerContinuationLaunch,execEnvNames:[...new Set([...(getCli(mode)?.env.dockerExecEnvNames??[]),...Object.keys(envOverrides??{})])]})
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
           : attachOnly && viewerEndpoint ? viewerEndpoint.command(localFullCmd, workingDir, sessionId)
@@ -2844,6 +2875,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       requireViewer();
 
       const baseCmd = buildSpawnCommand({
+      boxedWorkerHooks:!!docker?.continuation,
         codexTrustWorkspace: options.codexTrustWorkspace,
         codexHookTrust: options.codexHookTrust,
         mode,
@@ -2870,7 +2902,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const cmd = wrapWithNice(baseCmd, config);
       const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
       const fullCmd = docker
-        ? buildDockerLaunchCommand(resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates))
+        ? buildDockerLaunchCommand({...resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates),canonicalCommand:buildNofileLimitCommand()+' && '+cmd,continuationLaunch:options.dockerContinuationLaunch,execEnvNames:[...new Set([...(getCli(mode)?.env.dockerExecEnvNames??[]),...Object.keys(envOverrides??{})])]})
         : remote
           ? remoteAttachOnly
             ? buildRemoteAttachCommand(remote, remote.remoteSessionName || remoteTmuxSessionName(sessionId))

@@ -1,3 +1,4 @@
+import {DockerEmployeeBinding,DockerEmployeeResourcePolicy,DockerEmployeeContinuationRecord} from './docker-employee-continuation-data.js';
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
 import { EmployeeRecoveryOperation } from './employee-recovery-operation.js';
@@ -78,6 +79,10 @@ export const EmployeeSchema = z
     /** In-flight room migration fences Goal authority until a matching commit/reconciliation. */
     bindingMigration: z.object({ id: text, from: text, to: text }).strict().optional(),
     runtimeRecipe: RuntimeRecipeSchema.optional(),
+    /** Owner-managed desired Docker policy; recovery agents cannot edit it. */
+    dockerResourcePolicy: DockerEmployeeResourcePolicy.optional(),
+    /** Explicit boxed placement, independent from provider/account/thread recipe. */
+    dockerBinding: DockerEmployeeBinding.optional(),
     /** The CLI conversation thread this person resumes whenever its session is replaced (an OpenCode `ses_...` id). It belongs to the employee, not to any one session. */
     threadId: z.string().trim().min(1).max(200).optional(),
     researchEnabled: z.boolean().default(true),
@@ -372,6 +377,10 @@ export const CompanyMemorySchema = z.object({
 });
 export const CompanyStateSchema = z.object({
   version: z.literal(1),
+  /** Private bounded deny-only Docker operation journal, never a native grant. */
+  dockerEmployeeContinuations: z.array(DockerEmployeeContinuationRecord).max(64).refine(rows =>
+    new Set(rows.map(row=>row.employeeId)).size===rows.length &&
+    new Set(rows.map(row=>row.request.operationId)).size===rows.length).optional(),
   /** Private deny-only native recovery correlation; CompanyService.view never projects it. */
   employeeRecoveryOperations: z.array(EmployeeRecoveryOperation).max(256).refine(
     rows => new Set(rows.map(row => row.approval.operationId)).size === rows.length,

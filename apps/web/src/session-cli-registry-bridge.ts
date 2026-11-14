@@ -39,7 +39,10 @@ import type {
   PiConfig,
 } from './types/session.js';
 
+import {workerHookSettings} from './worker-client-callback.js';
 export interface SpawnBridgeOptions {
+  /** Internal fixed capsule settings; never part of persisted provider recipes. */
+  boxedWorkerHooks?:boolean;
   mode: string;
   /** Internal, launch-only workspace trust resolved by Session for an authorized container Codex runtime. */
   codexTrustWorkspace?: string;
@@ -216,7 +219,7 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
   // Key order (ultracode, advisorModel, statusLine) keeps a launch without an advisor
   // byte-identical to one from before the advisor existed.
   const advisorSettings = buildAdvisorSettings(options.advisorModel);
-  if ((effortFlag === '--settings' && effortValue) || advisorSettings.advisorModel || options.statusLineCommand) {
+  if ((effortFlag === '--settings' && effortValue) || advisorSettings.advisorModel || options.statusLineCommand || options.boxedWorkerHooks) {
     const settingsObj: Record<string, unknown> = {
       ...(effortFlag === '--settings' && effortValue ? JSON.parse(effortValue) : {}),
       ...advisorSettings,
@@ -224,6 +227,7 @@ export function buildSpawnCommandFromRegistry(entry: CliEntry, options: SpawnBri
     if (options.statusLineCommand) {
       settingsObj.statusLine = { type: 'command', command: options.statusLineCommand };
     }
+    if(options.boxedWorkerHooks)Object.assign(settingsObj,workerHookSettings());
     engineValues.effortSettingsJson = JSON.stringify(settingsObj);
   }
 

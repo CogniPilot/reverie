@@ -1,3 +1,4 @@
+import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
 import { captureLaunchProtocolAdmission, completeInitialLaunchAdmission, initialLaunchAdmitted } from './initial-launch-admission.js';
@@ -751,7 +752,7 @@ export class Session extends EventEmitter {
    *  keys for its own. */
   private _muxWriteIds = new Set<number>();
   private _nextMuxWriteId = 0;
-  private readonly _workerBacked = Boolean(process.env.REVERIE_WORKER_SOCKET);
+  private readonly _workerBacked: boolean;
   /**
    * How many starts, attaches or relaunches are running for this session's
    * pane. While one is, a dead-pane reading may describe a pane that is being
@@ -1171,7 +1172,7 @@ export class Session extends EventEmitter {
     authority: () => boolean, eligible: () => boolean = authority, viewerOnly = false): HookProviderDispatch {
     const initialEpoch = this.#workspaceHookEpoch;
     const mode = this.mode;
-    const generation = configuration === 'prepared' && !viewerOnly && !this._remote && !this._docker
+    const generation = configuration === 'prepared' && !viewerOnly && !this._remote && (!this._docker || !!this._dockerContinuationLaunch)
       ? uuidv4() : undefined;
     let phase: {state: 'staged'} | {state: 'dispatched'; epoch: number; handoff: 'pending' | 'adopted'}
       | {state: 'refused' | 'failed' | 'succeeded'; epoch: number} = {state: 'staged'};
@@ -1257,7 +1258,7 @@ export class Session extends EventEmitter {
     if (attempt.operation?.attempted()) throw new Error('A provider dispatch is already unsettled');
     const operation = this._stageProviderHookDispatch(attempt.configuration,
       () => this.#hookStartAttempt === attempt && this.mode === attempt.mode,
-      undefined, this._workerAttachOnly || this._remote?.owned === false);
+      undefined, this._workerAttachOnly || this._remote?.owned === false || (!!this._docker?.continuation&&!this._dockerContinuationLaunch));
     attempt.operation = operation;
     return operation;
   }
@@ -1280,7 +1281,9 @@ export class Session extends EventEmitter {
     const preparation = this.#workspaceHookPreparation;
     this.#workspaceHookPreparation = undefined;
     const attempt: HookStartAttempt = {
-      configuration: consumeWorkspaceHookPreparation(preparation, this.workingDir),
+      configuration: this._dockerContinuationLaunch && this.mode==='claude'
+        ? (this._dockerContinuationLaunch.requireFor(this),'prepared')
+        : consumeWorkspaceHookPreparation(preparation,this.workingDir),
       mode: this.mode,
       initialEpoch: this.#workspaceHookEpoch,
     };
@@ -1345,6 +1348,7 @@ export class Session extends EventEmitter {
   // Docker execution metadata, present when this session runs inside a container via
   // local tmux + `docker exec`. The container is per-CASE (shared by sibling sessions).
   private readonly _docker?: SessionDocker;
+  private _dockerContinuationLaunch?: DockerEmployeeProviderLaunch;
 
   // Owning username in multi-user mode (undefined in single-user). Stamped at create
   // from req.authUser and round-tripped through recovery like _remote/_docker.
@@ -1486,6 +1490,9 @@ export class Session extends EventEmitter {
   ) {
     super();
     this.setMaxListeners(25);
+    // Backend placement is exclusive: an explicit Docker binding never becomes
+    // a host-native viewer because another deployment endpoint is configured.
+    this._workerBacked = !config.docker && !config.remote && Boolean(process.env.REVERIE_WORKER_SOCKET);
 
     // Default error handler prevents unhandled 'error' events from crashing the process.
     // Server attaches its own handler after construction — this is a safety net for the gap.
@@ -1851,6 +1858,11 @@ export class Session extends EventEmitter {
   }
 
   /** Docker execution metadata when this session runs inside a container, else undefined. */
+  bindDockerContinuationLaunch(owner:DockerEmployeeProviderLaunch):void {
+    if(!(owner instanceof DockerEmployeeProviderLaunch)||this._dockerContinuationLaunch||!this._docker?.continuation)
+      throw Error('Original unopened Docker continuation required');
+    owner.requireFor(this);this._dockerContinuationLaunch=owner;
+  }
   get docker(): SessionDocker | undefined {
     return this._docker;
   }
@@ -3637,6 +3649,7 @@ export class Session extends EventEmitter {
       historyLimit: this._tmuxHistoryLimit,
       remote: this._remote,
       docker: this._docker,
+      dockerContinuationLaunch:this._dockerContinuationLaunch,
       owner: this._owner,
     };
     return this._withCustomModelLaunchModel(options);
@@ -4139,6 +4152,7 @@ export class Session extends EventEmitter {
             historyLimit: this._tmuxHistoryLimit,
             remote: this._remote,
             docker: this._docker,
+            dockerContinuationLaunch:this._dockerContinuationLaunch,
             owner: this._owner,
           },
           spawnErrLabel: 'mux attachment',

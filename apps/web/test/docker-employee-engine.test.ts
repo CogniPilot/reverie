@@ -1,0 +1,240 @@
+import { describe, it, expect, vi } from 'vitest';
+import { DockerEmployeeEngine, type DockerContainedResourceController } from '../src/docker-employee-engine.js';
+import {
+  DockerEmployeeResourcePolicy,
+  type DockerEmployeeContinuationRecord,
+} from '../src/docker-employee-continuation-data.js';
+import {
+  DockerEmployeeInspect,
+  boxedOriginal,
+  boxedMountConfiguration,
+  boxedStorageMounts,
+} from '../src/docker-employee-engine-data.js';
+import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
+import type { DockerEngineCommand } from '../src/docker-engine-command.js';
+import type { DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
+const cid = 'a'.repeat(64),
+  dest = 'd'.repeat(64),
+  image = 'sha256:' + 'b'.repeat(64),
+  target = 'sha256:' + 'c'.repeat(64),
+  helper = 'sha256:' + 'f'.repeat(64);
+const eid = '10000000-0000-4000-8000-000000000001',
+  sid = '20000000-0000-4000-8000-000000000002',
+  oid = '30000000-0000-4000-8000-000000000003';
+const subject = {
+  employeeId: eid,
+  sessionId: sid,
+  sessionGeneration: 3,
+  owner: undefined,
+  sourceDigest: 'e'.repeat(64),
+  onVacation: false,
+  desiredRunning: true,
+};
+function fixture() {
+  const policy = DockerEmployeeResourcePolicy.parse({
+    memoryMaxBytes: 48 * 1024 ** 3,
+    memoryHighBytes: 16 * 1024 ** 3,
+    swapMaxBytes: 0,
+    pidsMax: 512,
+    cpuWeight: 100,
+    allowedCpus: [0, 1],
+    pool: { memoryMaxBytes: 48 * 1024 ** 3, swapMaxBytes: 0, pidsMax: 8192, cpuWeight: 100, allowedCpus: [0, 1] },
+  });
+  const source = DockerEmployeeInspect.parse({
+    Id: cid,
+    Image: image,
+    State: { Running: false, Paused: false, Restarting: false, Dead: false },
+    Config: {
+      User: '1000:100',
+      Entrypoint: ['/opt/reverie/perf/bin/reverie-worker-init'],
+      Cmd: null,
+      Env: ['HOME=/home/agent', 'PATH=/bin'],
+      WorkingDir: '/workspace',
+      Labels: { 'reverie.worker': 'fixture', 'reverie.employee': eid, 'reverie.session': sid },
+    },
+    Mounts: [
+      { Type: 'bind', Source: '/synthetic/home', Destination: '/home/agent', RW: true, Propagation: 'rprivate' },
+      { Type: 'bind', Source: '/synthetic/nix', Destination: '/nix', RW: true, Propagation: 'rprivate' },
+      {
+        Type: 'bind',
+        Source: '/synthetic/host-script',
+        Destination: '/instances/default/console/statusline-exporter.sh',
+        RW: false,
+      },
+    ],
+    HostConfig: {
+      Privileged: false,
+      Memory: 16 * 1024 ** 3,
+      MemorySwap: 16 * 1024 ** 3,
+      PidsLimit: 512,
+      CgroupParent: 'legacy.slice',
+      CapDrop: ['ALL'],
+      SecurityOpt: ['no-new-privileges'],
+      Mounts: [],
+    },
+  });
+  const pool = {
+    containerId: '1'.repeat(64),
+    cgroupParent: 'reverie-box-fixture.slice',
+    policyDigest: dockerContinuationDigest(policy.pool),
+    physicalDigest: '2'.repeat(64),
+  };
+  const original = boxedOriginal(source, subject, 'fixture');
+  const row: DockerEmployeeContinuationRecord = {
+    version: 1,
+    purpose: 'docker-employee-continuation-v1',
+    employeeId: eid,
+    request: {
+      operationId: oid,
+      sessionId: sid,
+      sessionGeneration: 3,
+      containerId: cid,
+      imageId: image,
+      expectedPolicyDigest: dockerContinuationDigest(policy),
+      expectedDestinationImageId: target,
+      enterOffice: false,
+    },
+    sourceDigest: subject.sourceDigest,
+    original,
+    workerImage: { imageId: target, sourceImageId: image, clientManifestDigest: '4'.repeat(64) },
+    policy,
+    credentialId: '50000000-0000-4000-8000-000000000005',
+    phase: 'pool-ready',
+    pool,
+  };
+  let created: Record<string, unknown> | undefined;
+  const command: DockerEngineCommand = {
+    run: vi.fn(async (args) => {
+      if (args[0] === 'container' && args[1] === 'inspect') return JSON.stringify([source]);
+      if (args[0] === 'container' && args[1] === 'ls') return cid;
+      if (args[0] === 'image')
+        return JSON.stringify([
+          {
+            Id: args[2],
+            RootFS: { Layers: args[2] === image ? ['old'] : ['old', 'new'] },
+            Config: {
+              Entrypoint: source.Config.Entrypoint,
+              Cmd: null,
+              Labels: { 'org.reverie.worker-client.manifest': '4'.repeat(64) },
+            },
+          },
+        ]);
+      throw Error('Unexpected command');
+    }),
+    create: vi.fn(async (_name, config, current) => {
+      current();
+      created = structuredClone(config);
+      return dest;
+    }),
+  };
+  const resources: DockerContainedResourceController = {
+    validate: vi.fn(async () => {}),
+    preparePool: vi.fn(async () => {}),
+    observePool: vi.fn(async () => pool),
+    read: vi.fn(async () => null),
+    configure: vi.fn(async () => {}),
+  };
+  const journal: DockerContinuationTaskJournal = {
+    read: () => undefined,
+    publish: async () => {
+      throw Error('Unexpected holder mutation');
+    },
+  };
+  const engine = new DockerEmployeeEngine(
+    command,
+    'fixture',
+    resources,
+    { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [image] },
+    journal,
+    helper
+  );
+  return { source, row, engine, command, resources, policy, created: () => created };
+}
+describe('new boxed Docker destination', () => {
+  it('captures original observed home while preserving desired48/high16 separately from old16 drift', async () => {
+    const f = fixture(),
+      seen = await f.engine.observeSource(subject, cid);
+    expect(seen.original.home.source).toBe('/synthetic/home');
+    await f.engine.validateCapabilities(seen.original, f.policy);
+    expect(f.resources.validate).toHaveBeenCalledWith(seen.original, f.policy);
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it('creates only a NEW inert destination with exact hard/noSwap/PIDs and retained storage, without host executor mount', async () => {
+    const f = fixture();
+    await f.engine.createDestination(f.row, () => {});
+    const config = f.created()!;
+    expect(config).toMatchObject({
+      Image: target,
+      User: '1000:100',
+      Cmd: [],
+      HostConfig: {
+        Memory: 48 * 1024 ** 3,
+        MemorySwap: 48 * 1024 ** 3,
+        PidsLimit: 512,
+        CpuShares: 0,
+        CgroupParent: 'reverie-box-fixture.slice',
+      },
+    });
+    expect(config).not.toHaveProperty('MemoryReservation');
+    expect((config.HostConfig as Record<string, unknown>).Mounts).toEqual(boxedMountConfiguration(f.source));
+    expect(config.Env).toEqual([
+      'HOME=/home/agent',
+      'PATH=/opt/reverie-worker-client/bin:/bin',
+      'REVERIE_CLI=/opt/reverie-worker-client/bin/reverie',
+    ]);
+    expect(JSON.stringify(config)).not.toContain('host-script');
+    expect(f.source.State.Running).toBe(false);
+  });
+  it.each(['running', 'mount', 'identity', 'security'] as const)(
+    'refuses original %s drift before create',
+    async (fault) => {
+      const f = fixture();
+      if (fault === 'running') f.source.State.Running = true;
+      if (fault === 'mount') f.source.Mounts[0]!.Source = '/replacement';
+      if (fault === 'identity') f.source.Config.Labels!['reverie.employee'] = 'foreign';
+      if (fault === 'security') f.source.HostConfig.Privileged = true;
+      await expect(f.engine.createDestination(f.row, () => {})).rejects.toThrow();
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+  it('refuses revoked actual authority after asynchronous image inspection', async () => {
+    const f = fixture();
+    await expect(
+      f.engine.createDestination(f.row, () => {
+        throw Error('revoked');
+      })
+    ).rejects.toThrow('revoked');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it('refuses changed actual pool before create', async () => {
+    const f = fixture();
+    vi.mocked(f.resources.observePool).mockResolvedValue({ ...f.row.pool!, physicalDigest: '9'.repeat(64) });
+    await expect(f.engine.createDestination(f.row, () => {})).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_POOL_CHANGED',
+    });
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it('requires immutable source prefix and actual capsule label', async () => {
+    const f = fixture(),
+      base = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+      if (a[0] === 'image' && a[2] === target)
+        return JSON.stringify([
+          { Id: target, RootFS: { Layers: ['foreign'] }, Config: { Entrypoint: null, Cmd: null, Labels: {} } },
+        ]);
+      return base(a, b);
+    });
+    await expect(f.engine.image(f.row.original)).rejects.toThrow();
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it('retained mount projection excludes only obsolete host executors, not private storage', () => {
+    const f = fixture(),
+      mounts = boxedStorageMounts(f.source);
+    expect(mounts.map((m) => m.destination)).toEqual(['/home/agent', '/nix']);
+  });
+  it('rejects zero high at the shared policy boundary and preserves null as unbounded DATA', () => {
+    const f = fixture();
+    expect(DockerEmployeeResourcePolicy.safeParse({ ...f.policy, memoryHighBytes: 0 }).success).toBe(false);
+    expect(DockerEmployeeResourcePolicy.parse({ ...f.policy, memoryHighBytes: null }).memoryHighBytes).toBeNull();
+  });
+});

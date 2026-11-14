@@ -14,6 +14,8 @@ export interface CompanyWakeDeps {
   begin(employeeId: string, sessionId: string): { current(): boolean; finish(): void } | undefined;
   claim(employeeId: string, sessionId: string, now: number, automatic: boolean, stillCurrent?: () => boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
+  /** Exclusive explicit backend. Its refusal never invokes local/native restore. */
+  dockerWake?(employee:CompanyEmployee,allowed:()=>boolean):Promise<boolean>;
   now?(): number;
   kickoff?(employee: CompanyEmployee, allowed: () => boolean): Promise<void>;
 }
@@ -153,9 +155,9 @@ export class CompanyWake {
         continue;
       }
       if (!stillCurrent()) { skip('changed-or-stopping'); continue; }
-      const isLive = () => this.deps.nativeHealth
+      const isLive = () => this.deps.dockerWake ? false : this.deps.nativeHealth
         ? this.deps.nativeHealth(employee.sessionId)==='healthy' : this.deps.live(employee.sessionId);
-      if (this.deps.nativeHealth?.(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
+      if (!this.deps.dockerWake && this.deps.nativeHealth?.(employee.sessionId)==='unknown') { skip('native-health-unconfirmed'); continue; }
       if (isLive()) {
         await this.deps.noteRunning(employee.sessionId);
         continue;
@@ -183,7 +185,7 @@ export class CompanyWake {
         allowMissingPid: employee.desiredRunning === true,
       });
       const entry = plan.restore[0];
-      if (!entry) {
+      if (!entry && !this.deps.dockerWake) {
         skip(plan.skipped[0]?.reason ?? 'ineligible');
         continue;
       }
@@ -208,12 +210,14 @@ export class CompanyWake {
         }
         // A claim can await disk I/O. Unknown native facts after that wait are
         // still a pre-effect refusal; an alive viewer cannot supply the proof.
-        if (this.deps.nativeHealth?.(employee.sessionId)==='unknown') {
+        if (!this.deps.dockerWake && this.deps.nativeHealth?.(employee.sessionId)==='unknown') {
           skip('native-health-unconfirmed');
           continue;
         }
         attempted = true;
-        const woke = await this.deps.wake(entry, allowed);
+        const woke = this.deps.dockerWake
+          ? await this.deps.dockerWake(employee,allowed)
+          : await this.deps.wake(entry!,allowed);
         if (!allowed()) {
           skip('start-unconfirmed');
           continue;
