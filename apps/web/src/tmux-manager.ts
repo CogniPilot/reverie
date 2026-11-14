@@ -1563,10 +1563,10 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  if(!opts.continuationLaunch && !opts.continuationView) throw Error('Original boxed provider view required');
  if(opts.continuationView) DockerEmployeeProviderView.prototype.require.call(opts.continuationView,sessionId,docker);
  const base=buildDockerBaseArgs(docker).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
- const env={...opts.execEnv,TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
+ const env={...opts.execEnv,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:'/home/agent/.reverie/docker-worker-identity',REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',shellescape(key+'='+value)]);
- flags.push(...opts.execEnvNames.filter(key=>!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION').flatMap(key=>['--env',key]));
+ flags.push(...opts.execEnvNames.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',key]));
  let inner:string;
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');

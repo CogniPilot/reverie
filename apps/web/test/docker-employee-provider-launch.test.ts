@@ -164,6 +164,26 @@ describe('boxed original provider publication', () => {
     expect(buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toContain('source-file -');
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
   });
+  it('keeps the selected account while refusing loader and locale overrides for the managed tmux', () => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    const command = buildDockerLaunchCommand({
+      ...f.opts,
+      continuationLaunch: owner,
+      execEnv: {
+        GCONV_PATH: '/synthetic/injected',
+        LOCALE_ARCHIVE: '/synthetic/private-locale',
+        CLAUDE_CONFIG_DIR: '/synthetic/account',
+      },
+      execEnvNames: ['GCONV_PATH', 'LOCALE_ARCHIVE', 'CLAUDE_CONFIG_DIR'],
+    });
+    expect(command).not.toContain('/synthetic/injected');
+    expect(command).not.toContain('/synthetic/private-locale');
+    expect(command).toContain('/synthetic/account');
+    expect(command).toContain('/opt/reverie-worker-tools/share/locale/locale-archive');
+    expect(command.match(/GCONV_PATH=/g)).toHaveLength(1);
+    expect(command.match(/LOCALE_ARCHIVE=/g)).toHaveLength(1);
+  });
   it('revoked currentness and destination substitution cannot consume another provider slot', () => {
     const f = fixture();
     let active = true;
