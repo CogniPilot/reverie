@@ -220,7 +220,16 @@ const MUX_SESSIONS_FILE = dataPath('mux-sessions.json');
 function captureLaunchOptions<T extends CreateSessionOptions | RespawnPaneOptions>(options: T): T {
   const data = { ...options };
   const continuations = new Map<string, unknown>();
-  for (const key of ['providerLaunch', 'providerSubject', 'onProviderDispatch', 'onViewerDispatch', 'admitted', 'stillCurrent', 'workerResourceLaunch']) {
+  for (const key of [
+    'providerLaunch',
+    'providerSubject',
+    'onProviderDispatch',
+    'onViewerDispatch',
+    'admitted',
+    'stillCurrent',
+    'workerResourceLaunch',
+    'dockerContinuationLaunch',
+  ]) {
     continuations.set(key, Reflect.get(data, key));
     Reflect.deleteProperty(data, key);
   }

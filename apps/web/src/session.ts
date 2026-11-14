@@ -3968,6 +3968,8 @@ export class Session extends EventEmitter {
   }
 
   private async _startInteractive(admitted?: () => boolean): Promise<void> {
+    if (this._docker?.continuation && (!this._useMux || !this._mux))
+      throw new Error('Boxed Docker provider requires its original multiplexer');
     const assertAdmission = () => { if (!this._hookStartCurrent() || (admitted && !admitted())) throw new Error('Session launch authorization changed'); };
     assertAdmission();
     if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
@@ -4250,7 +4252,7 @@ export class Session extends EventEmitter {
         assertAdmission();
         this._assertProviderEffectAdmission();
         if (err instanceof MuxMutationRefusedError) throw err;
-        if (this._workerAttachOnly) throw err;
+        if (this._workerAttachOnly || this._docker?.continuation) throw err;
         if (this._workerResourceLaunch) throw err;
         if (this.#hookStartAttempt?.operation?.attempted()) throw err;
         if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)
@@ -5143,6 +5145,8 @@ export class Session extends EventEmitter {
   }
 
   private async _startShell(): Promise<void> {
+    if (this._docker?.continuation && (!this._useMux || !this._mux))
+      throw new Error('Boxed Docker provider requires its original multiplexer');
     if (this._workerResourceLaunch && (!this._useMux || !this._mux || this._remote || this._docker))
       throw new Error('Resource replacement requires the normal local native worker multiplexer');
     if (this.ptyProcess) {
@@ -5207,7 +5211,7 @@ export class Session extends EventEmitter {
       } catch (err) {
         this._assertProviderEffectAdmission();
         if (err instanceof MuxMutationRefusedError) throw err;
-        if (this._workerAttachOnly) throw err;
+        if (this._workerAttachOnly || this._docker?.continuation) throw err;
         if (ownerStopPending(this.id)) throw err;  // held by an unsettled owner stop: no fallback process
         if (this.#hookStartAttempt?.operation?.attempted()) throw err;
         if (this._muxSession && this._mux?.muxSessionExists(this._muxSession.muxName)

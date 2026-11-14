@@ -6,7 +6,7 @@ import {
   captureDockerEmployeeProviderLaunch,
   DockerEmployeeProviderLaunch,
 } from '../src/docker-employee-provider-launch.js';
-import { buildDockerLaunchCommand, buildSpawnCommand } from '../src/tmux-manager.js';
+import { TmuxManager, buildDockerLaunchCommand, buildSpawnCommand } from '../src/tmux-manager.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from '../src/utils/native-thread-profile.js';
 import type { SessionDocker, SessionState } from '../src/types.js';
 const eid = '10000000-0000-4000-8000-000000000001',
@@ -93,6 +93,74 @@ describe('boxed original provider publication', () => {
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
     expect(current).toHaveBeenCalled();
   });
+  it('retains the actual private first-provider owner across public mux option capture', async () => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    const manager = new TmuxManager();
+    const physical = vi
+      .spyOn(
+        manager as unknown as {
+          _createSession(options: import('../src/mux-interface.js').CreateSessionOptions): Promise<never>;
+        },
+        '_createSession'
+      )
+      .mockImplementation(async (options) => {
+        expect(options.dockerContinuationLaunch).toBe(owner);
+        const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: options.dockerContinuationLaunch });
+        expect(command).toContain('new-session');
+        throw Error('physical transport withheld');
+      });
+    try {
+      await expect(
+        manager.createSession({
+          sessionId: sid,
+          workingDir: f.place.containerWorkdir,
+          mode: 'claude',
+          docker: f.place,
+          dockerContinuationLaunch: owner,
+        })
+      ).rejects.toThrow('physical transport withheld');
+      expect(physical).toHaveBeenCalledOnce();
+      expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    } finally {
+      physical.mockRestore();
+    }
+  });
+  it.each([
+    { method: 'startInteractive' as const, useMux: true },
+    { method: 'startInteractive' as const, useMux: false },
+    { method: 'startShell' as const, useMux: true },
+    { method: 'startShell' as const, useMux: false },
+  ])(
+    'never falls back to a control-local PTY when a boxed mux is unavailable ($method, mux=$useMux)',
+    async ({ method, useMux }) => {
+      const f = fixture(),
+        owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+      f.session.bindDockerContinuationLaunch(owner);
+      Reflect.set(f.session, '_useMux', useMux);
+      Reflect.set(f.session, '_mux', new TmuxManager());
+      const subject = f.session as unknown as {
+        _setupOrAttachMuxSession(): Promise<never>;
+        _assertProviderLaunchAdmission(): void;
+      };
+      const mux = vi
+        .spyOn(subject, '_setupOrAttachMuxSession')
+        .mockRejectedValue(Error('original boxed mux unavailable'));
+      const local = vi.spyOn(subject, '_assertProviderLaunchAdmission').mockImplementation(() => {
+        throw Error('control-local PTY reached');
+      });
+      try {
+        await expect(f.session[method]()).rejects.toThrow(
+          useMux ? 'original boxed mux unavailable' : 'Boxed Docker provider requires its original multiplexer'
+        );
+        expect(local).not.toHaveBeenCalled();
+        expect(f.session.pid).toBeNull();
+      } finally {
+        mux.mockRestore();
+        local.mockRestore();
+      }
+    }
+  );
   it('revoked currentness and destination substitution cannot consume another provider slot', () => {
     const f = fixture();
     let active = true;
