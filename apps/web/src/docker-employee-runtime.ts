@@ -250,26 +250,32 @@ export class DockerEmployeeRuntime {
       boxId
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl);
-    const service = new DockerEmployeeContinuation(store, engine, provider, {
-      issue: (row, current) => {
-        current();
-        if (!this.current() || !row.destination) throw Error('Boxed identity custody changed');
-        return this.authentication.issue(
-          {
-            employeeId: row.employeeId,
-            owner: row.owner,
-            sessionId: row.request.sessionId,
-            sessionGeneration: row.request.sessionGeneration,
-            containerId: row.destination.containerId,
-            credentialId: row.credentialId,
-          },
-          () => {
-            current();
-            return this.current();
-          }
-        );
+    const service = new DockerEmployeeContinuation(
+      store,
+      engine,
+      provider,
+      {
+        issue: (row, current) => {
+          current();
+          if (!this.current() || !row.destination) throw Error('Boxed identity custody changed');
+          return this.authentication.issue(
+            {
+              employeeId: row.employeeId,
+              owner: row.owner,
+              sessionId: row.request.sessionId,
+              sessionGeneration: row.request.sessionGeneration,
+              containerId: row.destination.containerId,
+              credentialId: row.credentialId,
+            },
+            () => {
+              current();
+              return this.current();
+            }
+          );
+        },
       },
-    });
+      (failure) => console.error('[docker-employee-continuation] recovery held', JSON.stringify(failure))
+    );
     this.#attached = { company, ctx, store, engine, provider, service };
   }
   registerRoutes(

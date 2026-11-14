@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DockerEmployeeContinuation,
+  dockerContinuationFailureCauses,
   dockerContinuationDigest,
   type DockerContinuationAuthority,
   type DockerContinuationStore,
@@ -204,6 +205,48 @@ function fixture() {
   };
 }
 describe('owned boxed Docker employee continuation', () => {
+  it('reports one bounded failure without secrets, including frames after a large command message', () => {
+    const error = Object.assign(new Error('PRIVATE-TOKEN'), { code: 'EACCES' });
+    error.stack = 'PRIVATE-TOKEN\n'.repeat(3000) + '    at launch (/private/path/tmux-manager.js:2703:11)';
+    expect(dockerContinuationFailureCauses(error)).toEqual([
+      { errorType: 'Error', errno: 'EACCES', locations: [{ module: 'tmux-manager', line: 2703, column: 11 }] },
+    ]);
+    expect(JSON.stringify(dockerContinuationFailureCauses(error))).not.toMatch(/PRIVATE-TOKEN|private\/path/);
+  });
+  it('bounds cyclic causes and refuses arbitrary names, codes and stack filenames', () => {
+    const error = Object.assign(new Error('SECRET'), {
+      name: 'SECRET-NAME',
+      code: 'SECRET-CODE',
+      stack: 'Error\n at f (/SECRET-FILE.js:1:1)',
+      cause: undefined as unknown,
+    });
+    error.cause = error;
+    expect(dockerContinuationFailureCauses(error)).toEqual([{ errorType: 'OtherError', locations: [] }]);
+    const hostile = Object.defineProperty({}, 'stack', {
+      get() {
+        throw Error('SECRET');
+      },
+    });
+    expect(dockerContinuationFailureCauses(hostile)).toEqual([{ errorType: 'UninspectableError', locations: [] }]);
+  });
+  it('a failing reporter cannot release a failed provider attempt or dispatch it again', async () => {
+    const f = fixture();
+    f.provider.launch.mockRejectedValue(new Error('PRIVATE-TOKEN'));
+    const reporter = vi.fn(
+      (_failure: Parameters<NonNullable<ConstructorParameters<typeof DockerEmployeeContinuation>[4]>>[0]) => {
+        throw Error('report sink unavailable');
+      }
+    );
+    const service = new DockerEmployeeContinuation(f.store, f.engine, f.provider, f.identity, reporter);
+    const failed = await service.begin(eid, f.request, f.authority);
+    expect(failed).toMatchObject({ state: 'held', phase: 'provider-issued', allowedActions: ['observe'] });
+    expect(reporter).toHaveBeenCalledOnce();
+    expect(reporter.mock.calls[0]?.[0]).toMatchObject({ employeeId: eid, operationId: oid, phase: 'provider-issued' });
+    expect(JSON.stringify(reporter.mock.calls)).not.toContain('PRIVATE-TOKEN');
+    await service.observe(eid, oid, f.authority);
+    expect(reporter).toHaveBeenCalledOnce();
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+  });
   it('retains original stopped and journals NEW destination/pool and every effect before dispatch', async () => {
     const f = fixture();
     expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });

@@ -129,6 +129,85 @@ const issued = new Set<DockerEmployeeContinuationPhase>([
   'identity-issued',
   'provider-issued',
 ]);
+export interface DockerContinuationFailure {
+  readonly employeeId: string;
+  readonly operationId: string;
+  readonly phase: DockerEmployeeContinuationPhase;
+  readonly causes: readonly {
+    readonly errorType: string;
+    readonly errno?: string;
+    readonly locations: readonly { readonly module: string; readonly line: number; readonly column: number }[];
+  }[];
+}
+/** Diagnostic DATA only: never include messages, commands, environment, paths or
+ * credentials. Parse the stack tail because command failures can have huge messages. */
+export function dockerContinuationFailureCauses(cause: unknown): DockerContinuationFailure['causes'] {
+  const names = new Set([
+    'Error',
+    'TypeError',
+    'RangeError',
+    'SyntaxError',
+    'ReferenceError',
+    'AggregateError',
+    'ProviderDispatchUnconfirmedError',
+    'MuxMutationRefusedError',
+  ]);
+  const codes = new Set([
+    'E2BIG',
+    'ETIMEDOUT',
+    'ENOENT',
+    'EACCES',
+    'EPERM',
+    'ENOTDIR',
+    'EISDIR',
+    'EIO',
+    'ENOSPC',
+    'ENOMEM',
+    'EPIPE',
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ERR_DLOPEN_FAILED',
+  ]);
+  const modules = new Set([
+    'docker-employee-continuation',
+    'docker-employee-engine',
+    'docker-employee-runtime',
+    'docker-employee-session-provider',
+    'docker-employee-store',
+    'tmux-manager',
+    'session',
+    'server',
+    'provider-launch-publication',
+    'initial-launch-admission',
+    'workspace-hooks',
+    'workspace-hook-generation',
+  ]);
+  const seen = new Set<object>();
+  const result: Array<DockerContinuationFailure['causes'][number]> = [];
+  let next = cause;
+  for (let depth = 0; depth < 3; depth++) {
+    if (!next || typeof next !== 'object' || seen.has(next)) break;
+    seen.add(next);
+    try {
+      const value = next as Record<string, unknown>;
+      const errorType = typeof value.name === 'string' && names.has(value.name) ? value.name : 'OtherError';
+      const errno = typeof value.code === 'string' && codes.has(value.code) ? value.code : undefined;
+      const stack = typeof value.stack === 'string' ? value.stack.slice(-16384) : '';
+      const locations: Array<{ module: string; line: number; column: number }> = [];
+      for (const line of stack.split('\n').slice(-32)) {
+        const match = /(?:^|\/)([A-Za-z0-9-]+)\.(?:js|ts):(\d{1,7}):(\d{1,7})\)?$/.exec(line);
+        if (match && modules.has(match[1]!) && locations.length < 6)
+          locations.push(Object.freeze({ module: match[1]!, line: Number(match[2]), column: Number(match[3]) }));
+      }
+      result.push(Object.freeze({ errorType, ...(errno ? { errno } : {}), locations: Object.freeze(locations) }));
+      next = value.cause;
+    } catch {
+      result.push(Object.freeze({ errorType: 'UninspectableError', locations: Object.freeze([]) }));
+      break;
+    }
+  }
+  return Object.freeze(result);
+}
 export class DockerEmployeeContinuation {
   readonly #flights = new Map<string, string>();
   readonly #causes = new Map<string, unknown>();
@@ -136,7 +215,8 @@ export class DockerEmployeeContinuation {
     private readonly store: DockerContinuationStore,
     private readonly engine: DockerContinuationEngine,
     private readonly provider: DockerContinuationProvider,
-    private readonly identity: DockerContinuationIdentity
+    private readonly identity: DockerContinuationIdentity,
+    private readonly onFailure?: (failure: DockerContinuationFailure) => void
   ) {}
   #require(
     subject: DockerContinuationSubject,
@@ -565,8 +645,21 @@ export class DockerEmployeeContinuation {
       }
       return this.#result(row);
     } catch (cause) {
-      if (!this.#causes.has(row.request.operationId) && this.#causes.size < 64)
+      if (!this.#causes.has(row.request.operationId) && this.#causes.size < 64) {
         this.#causes.set(row.request.operationId, cause);
+        try {
+          this.onFailure?.(
+            Object.freeze({
+              employeeId: row.employeeId,
+              operationId: row.request.operationId,
+              phase: row.phase,
+              causes: dockerContinuationFailureCauses(cause),
+            })
+          );
+        } catch {
+          /* Reporting cannot change the retained failure or authorize a retry. */
+        }
+      }
       try {
         row = this.#refresh(row, current);
       } catch {
