@@ -121,8 +121,9 @@ export function verifyPtySpawn(ptyDir) {
     let child;
     try {
         const pty = require(ptyDir); // directory require → node-pty's "main" (lib/index.js)
-        const file = process.platform === 'win32' ? process.env.COMSPEC || 'cmd.exe' : '/bin/echo';
-        const args = process.platform === 'win32' ? ['/c', 'exit'] : ['reverie-node-pty-check'];
+        // Node is already running here; /bin/echo and COMSPEC are not portable prerequisites.
+        const file = process.execPath;
+        const args = ['-e', 'process.stdout.write("reverie-node-pty-check")'];
         child = pty.spawn(file, args, {
             name: 'xterm-color',
             cols: 80,

@@ -77,7 +77,7 @@ it('checks the reviewed real source manifest without claiming its existing gaps 
   const declarations = scanSources(root, INVENTORY_SOURCES);
   expect(validateManifest(root, manifest, declarations)).toEqual([]);
   expect(manifest.mappings.length).toBeGreaterThan(0);
-  expect(manifest.gaps.length).toBeGreaterThan(manifest.mappings.length);
+  expect(manifest.mappings.length + manifest.gaps.length).toBe(declarations.length);
   expect(manifest.gapBudget).toBe(manifest.gaps.length);
   expect(declarations.some((entry) => entry.kind === 'detection-gap')).toBe(true);
 });
@@ -173,6 +173,123 @@ it('refuses direct skipped tests and scenarios nested in skipped, todo or condit
   }
   writeFileSync(join(root, 'test/owner.test.ts'), testBody.replace('it(', 'it.skip('));
   expect(validateManifest(root, manifest, declarations)).toContain('Missing or ambiguous scenario title: owner.save');
+});
+
+it('refuses tests behind control flow or uncalled registration factories', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    `if (false) { ${testBody} }`,
+    `throw Error('disabled'); ${testBody}`,
+    `false && ${testBody}`,
+    `function registerLater() { ${testBody} }`,
+    `const registerLater = () => { ${testBody} };`,
+    `for (const unused of []) { ${testBody} }`,
+    `for (const width of widths) { ${testBody} }`,
+    `for (let width of [320]) { ${testBody} }`,
+    `for (const width of [320]) { break; ${testBody} }`,
+    `for (const width of [320]) { continue; ${testBody} }`,
+    `for (const width of [320]) { if (false) { ${testBody} } }`,
+    `describe('suite', () => { if (false) { ${testBody} } });`,
+    `describe('suite', () => { return; ${testBody} });`,
+    `describe('suite', () => { if (disabled) return; ${testBody} });`,
+    `describe('suite', () => { throw Error('disabled'); ${testBody} });`,
+    `if (false) { describe('suite', () => { ${testBody} }); }`,
+    `registerLater('suite', () => { ${testBody} });`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+});
+
+it('refuses local or foreign replacements for Vitest registration bindings', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    `const it = () => {}; ${testBody}`,
+    `function it() {} ${testBody}`,
+    `import { it } from 'custom-tests'; ${testBody}`,
+    `import type { it } from 'vitest'; ${testBody}`,
+    `import { describe as it } from 'vitest'; ${testBody}`,
+    `it = () => {}; ${testBody}`,
+    `globalThis.it = () => {}; ${testBody}`,
+    `globalThis['it'] = () => {}; ${testBody}`,
+    `(globalThis).it = () => {}; ${testBody}`,
+    `(globalThis as any).it = () => {}; ${testBody}`,
+    `(<any>globalThis).it = () => {}; ${testBody}`,
+    `(globalThis!).it = () => {}; ${testBody}`,
+    `(globalThis satisfies object).it = () => {}; ${testBody}`,
+    `(it as any) = () => {}; ${testBody}`,
+    `(it!) = () => {}; ${testBody}`,
+    `([it] = [() => {}]); ${testBody}`,
+    `({ it } = { it: () => {} }); ${testBody}`,
+    `({ other: it } = { other: () => {} }); ${testBody}`,
+    `([...[it]] = [[() => {}]]); ${testBody}`,
+    `for (it of [() => {}]) {} ${testBody}`,
+    `for (it in { replacement: true }) {} ${testBody}`,
+    `const describe = () => {}; describe('suite', () => { ${testBody} });`,
+    `import { describe } from 'custom-tests'; describe('suite', () => { ${testBody} });`,
+    `import { it as describe } from 'vitest'; describe('suite', () => { ${testBody} });`,
+    `describe = () => {}; describe('suite', () => { ${testBody} });`,
+    `describe('suite', (it) => { ${testBody} });`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+});
+
+it('refuses a malformed scenario source before crediting its recoverable syntax tree', () => {
+  const { root, manifest, declarations } = fixture();
+  writeFileSync(join(root, 'test/owner.test.ts'), `const broken = ; ${testBody}`);
+  expect(validateManifest(root, manifest, declarations)).toContain('Invalid scenario test syntax: owner.save');
+});
+
+it('refuses writes to the actual supported parameterized registration method', () => {
+  const { root, manifest, declarations } = fixture();
+  const parameterized = testBody.replace('it(', 'it.each([320])(');
+  for (const mutation of [
+    `it.each = () => () => {};`,
+    `(it as any).each = () => () => {};`,
+    `it['each' as const] = () => () => {};`,
+    `(globalThis as any).it.each = () => () => {};`,
+    `([it.each] = [() => () => {}]);`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), mutation + parameterized);
+    expect(validateManifest(root, manifest, declarations), mutation).toContain(
+      'Missing or ambiguous scenario title: owner.save'
+    );
+  }
+  writeFileSync(join(root, 'test/owner.test.ts'), `it.each = () => () => {}; ${testBody}`);
+  expect(validateManifest(root, manifest, declarations)).toEqual([]);
+  writeFileSync(
+    join(root, 'test/owner.test.ts'),
+    `import { it } from 'vitest'; globalThis.it.each = () => () => {}; ${parameterized}`
+  );
+  expect(validateManifest(root, manifest, declarations)).toEqual([]);
+});
+
+it('accepts direct tests registered through unconditional ordinary suites', () => {
+  const { root, manifest, declarations } = fixture();
+  for (const wrapped of [
+    testBody,
+    `import { it } from 'vitest'; ${testBody}`,
+    `import { it } from 'vitest'; globalThis.it = () => {}; ${testBody}`,
+    `function helper(it) { it = () => {}; } ${testBody}`,
+    `const globalThis = {}; globalThis.it = () => {}; ${testBody}`,
+    `const global = {}; (global as any).it = () => {}; ${testBody}`,
+    `const window = {}; window['it'] = () => {}; ${testBody}`,
+    `import { test as it, describe } from 'vitest'; describe('suite', () => { ${testBody} });`,
+    `describe('suite', () => { ${testBody} });`,
+    `describe('suite', function () { describe('nested', () => { ${testBody} }); });`,
+    `describe('suite', () => { function helper() { return 1; } ${testBody} });`,
+    `for (const width of [320, 1280]) { ${testBody} }`,
+    `for (const width of [320, 1280]) ${testBody}`,
+  ]) {
+    writeFileSync(join(root, 'test/owner.test.ts'), wrapped);
+    expect(validateManifest(root, manifest, declarations), wrapped).toEqual([]);
+  }
 });
 
 it('keeps local factories, dynamic markup, roles, and ambiguous declarations visible', () => {

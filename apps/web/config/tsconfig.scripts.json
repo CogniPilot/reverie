@@ -11,6 +11,7 @@
     "../scripts/test-local-llm-harnesses.ts",
     "../scripts/operator-viewer-bridge.ts",
     "../scripts/control-behavior-inventory.ts",
+    "../scripts/control-behavior-ratchet.mts",
     "../scripts/test-native-worker-hooks.ts",
     "../scripts/select-native-hook-host-test.ts",
     "../test/fixtures/native-hook-provider.ts",
