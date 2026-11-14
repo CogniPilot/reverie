@@ -215,8 +215,23 @@ describe('TerminalTile input through committed journal custody', () => {
     await app._drainSession('s-http'); // Settle the acceptance-triggered backoff task first.
     expect(posts.map(row => row.seq)).toEqual([1]);
     app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http'); expect(reads).toHaveLength(1); expect(posts).toHaveLength(1);
-    confirmed = true; app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http');
-    await expect.poll(() => posts.map(row => [row.seq, row.input])).toEqual([[1, 'original'], [2, 'later']]);
+    // This prototype fixture does not run the constructor's 2s sweep. Force
+    // the real one-shot callback to arrive before its unchanged backoff deadline.
+    const nativeTimeout = globalThis.setTimeout, callbacks: (() => void)[] = [];
+    const timer = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: (...values: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      if (ms === 80) { callbacks.push(() => fn(...args)); return nativeTimeout(() => {}, 0); }
+      return nativeTimeout(fn, ms, ...args);
+    }) as typeof globalThis.setTimeout);
+    try { confirmed = true; app._inputRetryAt.set('s-http', 0); await app._drainSession('s-http'); }
+    finally { timer.mockRestore(); }
+    expect(callbacks).toHaveLength(1);
+    const deadline = app._inputRetryAt.get('s-http')!;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(deadline - 1);
+    try { callbacks[0]!(); await app._inputDrainTasks.get('s-http'); }
+    finally { clock.mockRestore(); }
+    expect(posts.map(row => row.seq)).toEqual([1]);
+    expect(app._inputRetryAt.get('s-http')).toBe(deadline);
+    await expect.poll(() => {app._redeliverSweep(); return posts.map(row => [row.seq, row.input]);}).toEqual([[1, 'original'], [2, 'later']]);
     expect(reads).toHaveLength(2);
   });
   it('a typed-unsent original response warns but never spends an idle alert or sends Enter automatically', async () => {
