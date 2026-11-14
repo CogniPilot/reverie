@@ -1,5 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DockerEmployeeEngine, type DockerContainedResourceController } from '../src/docker-employee-engine.js';
+import {
+  DockerEmployeeEngine,
+  DockerEmployeeProviderView,
+  requireDockerEmployeeProviderView,
+  type DockerContainedResourceController,
+} from '../src/docker-employee-engine.js';
+import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
+import type { SessionDocker } from '../src/types.js';
 import {
   DockerEmployeeResourcePolicy,
   type DockerEmployeeContinuationRecord,
@@ -201,6 +208,135 @@ async function dockerEncodedDestination() {
   });
   return { ...f, observed };
 }
+async function providerViewFixture() {
+  const f = await dockerEncodedDestination();
+  f.observed.State.Running = true;
+  f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+  f.row.phase = 'ready';
+  const pane = { paneId: '%1', panePid: 42, paneStartTicks: '987654', hookGeneration: 'synthetic.current:1' };
+  const original = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+    if (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) return JSON.stringify(pane) + '\n';
+    return original(args, input);
+  });
+  const docker: SessionDocker = {
+    hostId: 'boxed-runtime',
+    label: 'Docker-contained employee',
+    engine: 'docker',
+    image: target,
+    containerName: dest,
+    hostWorkspacePath: '/',
+    containerWorkdir: '/workspace',
+    network: 'bridge',
+    mountCredentials: false,
+    hooksEnabled: false,
+    resumeOnStart: true,
+    owned: false,
+    daemonHost: 'unix:///run/reverie-engine/docker.sock',
+    continuation: {
+      operationId: oid,
+      employeeId: eid,
+      sessionGeneration: 3,
+      clientManifestDigest: '4'.repeat(64),
+      apiUrl: 'http://reverie:3000',
+    },
+  };
+  return { ...f, pane, docker };
+}
+describe('Engine-owned existing Docker provider view', () => {
+  it('captures full native placement and two matching PID births without any provider effect', async () => {
+    const f = await providerViewFixture();
+    vi.mocked(f.command.run).mockClear();
+    const view = await f.engine.captureProviderView(f.row, () => {});
+    requireDockerEmployeeProviderView(view, sid, f.docker);
+    expect(view.descriptor).toMatchObject({
+      ...f.pane,
+      containerId: dest,
+      imageId: target,
+      operationId: oid,
+      sessionId: sid,
+      sessionGeneration: 3,
+    });
+    expect(Object.isFrozen(view)).toBe(true);
+    expect(Object.isFrozen(view.descriptor)).toBe(true);
+    const calls = vi.mocked(f.command.run).mock.calls.map(([args]) => args);
+    expect(calls.filter((args) => args[0] === 'exec')).toHaveLength(2);
+    expect(
+      calls.every(
+        (args) =>
+          (args[0] === 'container' && ['ls', 'inspect'].includes(args[1]!)) ||
+          (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.at(-3) === 'inspect')
+      )
+    ).toBe(true);
+  });
+  it('cannot mint or impersonate an original view, even through its public prototype', async () => {
+    const f = await providerViewFixture();
+    const current = vi.fn();
+    expect(() => new DockerEmployeeProviderView(Symbol('forged'), {} as never, current)).toThrow('Original Engine');
+    const forged = Object.create(DockerEmployeeProviderView.prototype, {
+      require: { value: current },
+      current: { value: current },
+    });
+    expect(() => requireDockerEmployeeProviderView(forged, sid, f.docker)).toThrow();
+    expect(() => requireDockerEmployeeProviderView({}, sid, f.docker)).toThrow();
+    expect(current).not.toHaveBeenCalled();
+  });
+  it.each(['stopped', 'phase', 'pid', 'birth', 'generation'] as const)(
+    'refuses changed %s observations before granting a view',
+    async (kind) => {
+      const f = await providerViewFixture();
+      if (kind === 'stopped') f.observed.State.Running = false;
+      if (kind === 'phase') f.row.phase = 'provider-issued';
+      if (['pid', 'birth', 'generation'].includes(kind)) {
+        const original = vi.mocked(f.command.run).getMockImplementation()!;
+        let reads = 0;
+        vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+          if (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && ++reads === 2)
+            return JSON.stringify({
+              ...f.pane,
+              ...(kind === 'pid'
+                ? { panePid: 43 }
+                : kind === 'birth'
+                  ? { paneStartTicks: '987655' }
+                  : { hookGeneration: 'changed' }),
+            });
+          return original(args, input);
+        });
+      }
+      await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow();
+    }
+  );
+  it('refuses foreign placement and permanently revokes a captured view on currency loss', async () => {
+    const f = await providerViewFixture();
+    let current = true;
+    const view = await f.engine.captureProviderView(f.row, () => {
+      if (!current) throw Error('revoked');
+    });
+    expect(() => requireDockerEmployeeProviderView(view, sid, { ...f.docker, image })).toThrow();
+    expect(() =>
+      requireDockerEmployeeProviderView(view, sid, {
+        ...f.docker,
+        continuation: { ...f.docker.continuation!, sessionGeneration: 4 },
+      })
+    ).toThrow();
+    current = false;
+    expect(() => requireDockerEmployeeProviderView(view, sid, f.docker)).toThrow();
+    current = true;
+    expect(() => requireDockerEmployeeProviderView(view, sid, f.docker)).toThrow();
+  });
+  it.each(['/opt', '/opt/reverie-worker-tools', '/opt/reverie-worker-tools/bin/tmux', '/opt/reverie-worker-client'])(
+    'refuses readonly capsule shadow %s before creating a worker',
+    async (path) => {
+      const f = fixture();
+      f.source.Mounts.push({ Type: 'bind', Source: '/synthetic/shadow', Destination: path, RW: false });
+      f.row.original = boxedOriginal(f.source, subject, 'fixture');
+      await expect(f.engine.createDestination(f.row, () => {})).rejects.toMatchObject({
+        code: 'DOCKER_CONTINUATION_CAPSULE_MOUNT_SHADOW',
+      });
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+});
 describe('new boxed Docker destination', () => {
   it.each([false, null])('known effective OOM-enabled form %j preserves the original complete descriptor', (value) => {
     const f = fixture();

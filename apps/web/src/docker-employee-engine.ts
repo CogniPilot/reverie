@@ -11,7 +11,7 @@ import {
   DockerEmployeeOriginal,
   DockerEmployeeResourcePolicy,
   DockerEmployeeWorkerImage,
-  type DockerEmployeeContinuationRecord,
+  DockerEmployeeContinuationRecord,
   type DockerEmployeePool,
 } from './docker-employee-continuation-data.js';
 import {
@@ -28,6 +28,8 @@ import {
   dockerEngineRefuse as refuse,
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
+import type { SessionDocker } from './types.js';
+import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM } from './docker-employee-provider-view-native.js';
 export { PackagedDockerEngineCommand, type DockerEngineCommand } from './docker-engine-command.js';
 export interface DockerContainedResourceController {
   validate(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void>;
@@ -43,6 +45,69 @@ export interface DockerEmployeeImageConfiguration {
   readonly sourceImageIds: readonly string[];
 }
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const providerViewOrigin = Symbol('original Engine-observed Docker provider view');
+const providerPane = z
+  .object({
+    paneId: z.string().regex(/^%[0-9]{1,10}$/),
+    panePid: z.number().int().positive().max(2147483647),
+    paneStartTicks: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    hookGeneration: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/),
+  })
+  .strict();
+export interface DockerEmployeeProviderViewDescriptor {
+  readonly employeeId: string;
+  readonly containerId: string;
+  readonly imageId: string;
+  readonly operationId: string;
+  readonly sessionId: string;
+  readonly sessionGeneration: number;
+  readonly paneId: string;
+  readonly panePid: number;
+  readonly paneStartTicks: string;
+  readonly hookGeneration: string;
+  readonly clientManifestDigest: string;
+}
+/** A private observer admission. It grants no provider creation or relaunch. */
+export class DockerEmployeeProviderView {
+  readonly #descriptor: Readonly<DockerEmployeeProviderViewDescriptor>;
+  readonly #current: () => void;
+  constructor(origin: symbol, descriptor: DockerEmployeeProviderViewDescriptor, current: () => void) {
+    if (origin !== providerViewOrigin) throw Error('Original Engine provider view required');
+    this.#descriptor = Object.freeze({ ...descriptor });
+    this.#current = current;
+    Object.freeze(this);
+  }
+  get descriptor(): Readonly<DockerEmployeeProviderViewDescriptor> {
+    return this.#descriptor;
+  }
+  require(sessionId: string, docker: SessionDocker): void {
+    const value = this.#descriptor;
+    this.#current();
+    if (
+      sessionId !== value.sessionId ||
+      docker.containerName !== value.containerId ||
+      docker.image !== value.imageId ||
+      docker.owned !== false ||
+      docker.engine !== 'docker' ||
+      docker.context !== undefined ||
+      docker.daemonHost !== 'unix:///run/reverie-engine/docker.sock' ||
+      docker.continuation?.operationId !== value.operationId ||
+      docker.continuation.sessionGeneration !== value.sessionGeneration ||
+      docker.continuation.employeeId !== value.employeeId ||
+      docker.continuation.clientManifestDigest !== value.clientManifestDigest ||
+      docker.extraExecArgs !== undefined ||
+      docker.extraCreateArgs !== undefined ||
+      docker.commands !== undefined
+    )
+      refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    this.#current();
+  }
+}
+Object.freeze(DockerEmployeeProviderView.prototype);
+/** Use the original branded method, never a caller-supplied lookalike method. */
+export function requireDockerEmployeeProviderView(view: unknown, sessionId: string, docker: SessionDocker): void {
+  DockerEmployeeProviderView.prototype.require.call(view as DockerEmployeeProviderView, sessionId, docker);
+}
 function rowSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSubject {
   return {
     employeeId: row.employeeId,
@@ -94,6 +159,19 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (raw.State.Running || !isDeepStrictEqual(boxedOriginal(raw, rowSubject(row), this.deployment), row.original))
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
     return raw;
+  }
+  #requireCapsuleMounts(raw: DockerEmployeeInspect): void {
+    for (const mount of raw.Mounts) {
+      for (const prefix of ['/opt/reverie-worker-tools', '/opt/reverie-worker-client']) {
+        if (
+          mount.Destination === '/' ||
+          mount.Destination === prefix ||
+          prefix.startsWith(mount.Destination + '/') ||
+          mount.Destination.startsWith(prefix + '/')
+        )
+          refuse('DOCKER_CONTINUATION_CAPSULE_MOUNT_SHADOW');
+      }
+    }
   }
   async image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage> {
     if (!this.workerImage.sourceImageIds.includes(original.imageId) && original.imageId !== this.workerImage.imageId)
@@ -150,6 +228,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   async validateCapabilities(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void> {
     const raw = await this.#inspect(original.containerId);
+    this.#requireCapsuleMounts(raw);
     if (
       raw.State.Running ||
       raw.Config.Entrypoint?.length !== 1 ||
@@ -181,6 +260,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     return this.resources.observePool(row);
   }
   #configuration(row: DockerEmployeeContinuationRecord, source: DockerEmployeeInspect): Record<string, unknown> {
+    this.#requireCapsuleMounts(source);
     if (!row.pool) refuse('DOCKER_CONTINUATION_POOL_UNCONFIRMED');
     const sourceHost = source.HostConfig;
     const host: Record<string, unknown> = {};
@@ -289,6 +369,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       source = await this.#source(row),
       desired = this.#configuration(row, source);
     const labels = raw.Config.Labels;
+    this.#requireCapsuleMounts(raw);
     if (
       raw.Image !== row.workerImage.imageId ||
       labels?.['reverie.boxed.box'] !== this.boxId ||
@@ -366,6 +447,76 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (!raw || !row.destination || raw.State.Running) refuse('DOCKER_CONTINUATION_STOPPED_DESTINATION_REQUIRED');
     await this.command.run(['container', 'start', raw.Id]);
+  }
+  async captureProviderView(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerEmployeeProviderView> {
+    const checked = DockerEmployeeContinuationRecord.parse(row);
+    const digest = dockerContinuationDigest(checked);
+    let revoked = false;
+    const requireCurrent = () => {
+      if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+      try {
+        current();
+        if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+      } catch (cause) {
+        revoked = true;
+        throw cause;
+      }
+    };
+    requireCurrent();
+    if (checked.phase !== 'ready' || !checked.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    const inspect = async () => {
+      requireCurrent();
+      const raw = await this.#destination(checked);
+      requireCurrent();
+      if (
+        !raw?.State.Running ||
+        !isDeepStrictEqual(boxedOriginal(raw, rowSubject(checked), this.deployment, true), checked.destination)
+      )
+        refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+      return raw;
+    };
+    const pane = async () => {
+      requireCurrent();
+      const raw = await this.command.run([
+        'exec',
+        ...DOCKER_PROVIDER_VIEW_ENV,
+        checked.destination!.containerId,
+        '/opt/reverie-worker-client/bin/node',
+        '--input-type=commonjs',
+        '-e',
+        DOCKER_PROVIDER_VIEW_PROGRAM,
+        'inspect',
+        checked.request.sessionId,
+        checked.request.operationId,
+      ]);
+      requireCurrent();
+      if (Buffer.byteLength(raw) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+      return providerPane.parse(JSON.parse(raw));
+    };
+    await inspect();
+    const first = await pane();
+    await inspect();
+    const second = await pane();
+    await inspect();
+    requireCurrent();
+    if (!isDeepStrictEqual(first, second)) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    return new DockerEmployeeProviderView(
+      providerViewOrigin,
+      {
+        ...first,
+        employeeId: checked.employeeId,
+        containerId: checked.destination.containerId,
+        imageId: checked.workerImage.imageId,
+        operationId: checked.request.operationId,
+        sessionId: checked.request.sessionId,
+        sessionGeneration: checked.request.sessionGeneration,
+        clientManifestDigest: checked.workerImage.clientManifestDigest,
+      },
+      requireCurrent
+    );
   }
   async configureResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const raw = await this.#destination(row);
