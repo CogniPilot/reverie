@@ -5337,6 +5337,10 @@ button.ca-company-profile-trigger:focus-visible {
 .ca-expert-profile .ca-profile-management > p {
   margin: 0 0 7px;
 }
+.ca-profile-docker-recovery [role='alert'] {
+  color: var(--error, #f38b8b);
+  overflow-wrap: anywhere;
+}
 .ca-expert-profile .ca-profile-management fieldset,
 .ca-expert-profile .ca-profile-preferences {
   border: 1px solid var(--ca-line);

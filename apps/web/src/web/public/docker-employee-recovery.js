@@ -56,10 +56,12 @@
         const error = response?.error ?? response?.data?.error;
         const message = typeof error === 'string' ? error : error?.message;
         const code = typeof error?.code === 'string' ? error.code : response?.errorCode;
-        throw Error(
+        const failure = Error(
           [typeof message === 'string' ? message : '', code !== message ? code : ''].filter(Boolean).join(' — ') ||
             'Docker recovery request was not confirmed'
         );
+        if (typeof code === 'string') failure.code = code;
+        throw failure;
       }
       return response.data.data ?? response.data;
     }
@@ -182,10 +184,33 @@
           this.selection = null;
           this.status.textContent = 'Docker recovery status is unavailable.';
           this.error.textContent = error.message;
+          await this.describePendingStop(error);
         }
       } finally {
         this.busy = false;
         this.paint();
+      }
+    }
+    async describePendingStop(error) {
+      if (!['DOCKER_CONTINUATION_TARGET_CHANGED', 'DOCKER_CONTINUATION_OWNER_STOP_PENDING'].includes(error.code))
+        return;
+      try {
+        const stop = await this.api('docker-stop/status');
+        if (
+          stop.sessionId !== this.binding.sessionId ||
+          stop.sessionGeneration !== this.binding.generation ||
+          stop.state !== 'pending' ||
+          stop.code !== 'DOCKER_OWNER_STOP_LEGACY_SCOPE_UNCONFIRMED' ||
+          !Array.isArray(stop.allowedActions) ||
+          stop.allowedActions.length !== 0
+        )
+          return;
+        this.status.textContent = 'An earlier stop is blocking this session.';
+        this.error.textContent =
+          'The original worker for that stop could not be verified. Operator recovery is required; the stop cannot be cleared automatically. ' +
+          stop.code;
+      } catch {
+        // Older servers or missing office permission retain the original error.
       }
     }
     create(approve) {

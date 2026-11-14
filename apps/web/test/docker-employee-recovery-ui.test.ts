@@ -55,6 +55,7 @@ async function fixture(
   options: {
     selection?: ReturnType<typeof selection>;
     selectionFailure?: { status: number; error: string | { code: string; message?: string } };
+    stopStatus?: Record<string, unknown>;
     start?: (body: Body) => Reply | Promise<Reply>;
     observe?: (body: { operationId: string }) => Reply | Promise<Reply>;
   } = {}
@@ -82,6 +83,10 @@ async function fixture(
         { success: false, error: options.selectionFailure.error },
         { status: options.selectionFailure.status }
       );
+    if (url === base + '/docker-stop/status')
+      return options.stopStatus
+        ? Response.json({ success: true, data: options.stopStatus })
+        : Response.json({ success: false, error: 'Unavailable' }, { status: 404 });
     return originalTransport(url, request);
   };
   const calls: Array<{ url: string; method: string; body?: unknown }> = [];
@@ -136,8 +141,38 @@ it.each([
     expect(f.panel().textContent).toContain('Docker recovery status is unavailable.');
     expect(f.button('Recover and enter office')).toBeUndefined();
     expect(f.button('Approve displayed limits and recover')).toBeUndefined();
-    expect(f.calls.map((call) => call.method)).toEqual(['GET']);
+    expect(f.calls.every((call) => call.method === 'GET')).toBe(true);
     expect(f.starts()).toHaveLength(0);
+  }
+);
+
+it.each(['current', 'wrong-session', 'wrong-generation', 'unknown-code', 'unexpected-action'])(
+  'only displays a matching, read-only pending stop diagnosis (%s)',
+  async (mode) => {
+    const stopStatus = {
+      sessionId: mode === 'wrong-session' ? '11111111-1111-4111-8111-111111111111' : sid,
+      sessionGeneration: mode === 'wrong-generation' ? 10 : 9,
+      state: 'pending',
+      code: mode === 'unknown-code' ? '<img src=x onerror=alert(1)>' : 'DOCKER_OWNER_STOP_LEGACY_SCOPE_UNCONFIRMED',
+      allowedActions: mode === 'unexpected-action' ? ['clear-stop'] : [],
+    };
+    const f = await fixture({
+      selectionFailure: { status: 409, error: { code: 'DOCKER_CONTINUATION_TARGET_CHANGED' } },
+      stopStatus,
+    });
+    const message = f.panel().querySelector('[role="alert"]')!.textContent;
+    if (mode === 'current') {
+      expect(message).toContain('Operator recovery is required');
+      expect(message).toContain('DOCKER_OWNER_STOP_LEGACY_SCOPE_UNCONFIRMED');
+      expect(f.panel().textContent).toContain('An earlier stop is blocking this session.');
+    } else {
+      expect(message).toBe('DOCKER_CONTINUATION_TARGET_CHANGED');
+    }
+    expect(f.calls.map((call) => call.url)).toEqual([base + '/docker-policy', base + '/docker-stop/status']);
+    expect(f.calls.every((call) => call.method === 'GET')).toBe(true);
+    expect(f.starts()).toHaveLength(0);
+    expect([...f.panel().querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Refresh recovery status']);
+    expect(f.panel().querySelector('img')).toBeNull();
   }
 );
 
