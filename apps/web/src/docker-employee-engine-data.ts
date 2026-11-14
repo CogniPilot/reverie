@@ -100,6 +100,12 @@ export function boxedOriginal(
   const mounts = [...row.Mounts].sort((a, b) => a.Destination.localeCompare(b.Destination));
   if (new Set(mounts.map((mount) => mount.Destination)).size !== mounts.length)
     dockerEngineRefuse('DOCKER_CONTINUATION_DUPLICATE_MOUNT_DESTINATION');
+  // Docker cgroup-v2 start normalizes the known enabled flag false to null.
+  // Missing/opaque values and explicit disabling never acquire this equivalence.
+  const oomKillDisable = row.HostConfig.OomKillDisable;
+  if (oomKillDisable === true) dockerEngineRefuse('DOCKER_CONTINUATION_OOM_DISABLED');
+  if (oomKillDisable !== false && oomKillDisable !== null) dockerEngineRefuse('DOCKER_CONTINUATION_OOM_POLICY_UNKNOWN');
+  const host = { ...row.HostConfig, OomKillDisable: false };
   const original = {
     containerId: row.Id,
     imageId: row.Image,
@@ -109,7 +115,7 @@ export function boxedOriginal(
     home: { type: homes[0]!.Type, source: homes[0]!.Source, destination: '/home/agent', readWrite: true },
     mountDigest: dockerContinuationDigest(mounts),
     storageDigest: dockerContinuationDigest(boxedStorageMounts(row)),
-    configurationDigest: dockerContinuationDigest({ config: row.Config, host: row.HostConfig, mounts }),
+    configurationDigest: dockerContinuationDigest({ config: row.Config, host, mounts }),
   };
   return DockerEmployeeOriginal.parse(original);
 }

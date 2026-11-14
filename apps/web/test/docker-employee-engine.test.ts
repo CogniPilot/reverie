@@ -64,6 +64,7 @@ function fixture(boxId = '7'.repeat(64)) {
     ],
     HostConfig: {
       Privileged: false,
+      OomKillDisable: false,
       Memory: 16 * 1024 ** 3,
       MemorySwap: 16 * 1024 ** 3,
       PidsLimit: 512,
@@ -178,6 +179,7 @@ async function dockerEncodedDestination() {
     Mounts: f.source.Mounts.filter((m) => m.Destination !== '/instances/default/console/statusline-exporter.sh'),
     HostConfig: {
       ...(desired.HostConfig as Record<string, unknown>),
+      OomKillDisable: false,
       Mounts: [
         { Type: 'bind', Source: '/synthetic/home', Target: '/home/agent', BindOptions: { Propagation: 'rprivate' } },
         { Type: 'bind', Source: '/synthetic/nix', Target: '/nix', BindOptions: { Propagation: 'rprivate' } },
@@ -200,6 +202,35 @@ async function dockerEncodedDestination() {
   return { ...f, observed };
 }
 describe('new boxed Docker destination', () => {
+  it.each([false, null])('known effective OOM-enabled form %j preserves the original complete descriptor', (value) => {
+    const f = fixture();
+    f.source.HostConfig.OomKillDisable = value;
+    expect(boxedOriginal(f.source, subject, 'fixture')).toEqual(f.row.original);
+  });
+  it('preserves the created destination when Docker start normalizes false OOM flag to null', async () => {
+    const f = await dockerEncodedDestination(),
+      before = boxedOriginal(f.observed, subject, 'fixture', true);
+    f.observed.State.Running = true;
+    f.observed.HostConfig.OomKillDisable = null;
+    expect(boxedOriginal(f.observed, subject, 'fixture', true)).toEqual(before);
+  });
+  it.each([true, undefined, 'false', 0])(
+    'refuses missing or unsupported OOM value %j instead of treating it as enabled',
+    (value) => {
+      const f = fixture();
+      if (value === undefined) delete f.source.HostConfig.OomKillDisable;
+      else f.source.HostConfig.OomKillDisable = value;
+      expect(() => boxedOriginal(f.source, subject, 'fixture')).toThrow();
+    }
+  );
+  it('detects a PID limit change alongside normalized OOM flag', async () => {
+    const f = fixture();
+    f.source.HostConfig.OomKillDisable = null;
+    f.source.HostConfig.PidsLimit = 513;
+    await expect(f.engine.createDestination(f.row, () => {})).rejects.toThrow();
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+
   it('accepts the actual Docker wire omission of ReadOnly false while preserving true RO', async () => {
     const f = await dockerEncodedDestination();
     const seen = await f.engine.observeDestination(f.row);
