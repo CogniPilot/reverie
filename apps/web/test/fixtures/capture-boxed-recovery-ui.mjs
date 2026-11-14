@@ -7,9 +7,9 @@ import process from 'node:process';
 import { chromium } from 'playwright';
 import { loadVerifiedCanaryOwner, applyVerifiedOwnerCookie } from './boxed-canary-browser-proof.mjs';
 
-const [proofFile, output, sessionName = 'owner-session.json'] = process.argv.slice(2);
+const [proofFile, output, sessionName = 'owner-session.json', contractFile] = process.argv.slice(2);
 assert(proofFile && output && resolve(output) === output);
-const canary = await loadVerifiedCanaryOwner(proofFile, sessionName);
+const canary = await loadVerifiedCanaryOwner(proofFile, sessionName, contractFile);
 const { proof, endpoint } = canary;
 await fs.mkdir(output, { mode: 0o700 });
 const browser = await chromium.launch({

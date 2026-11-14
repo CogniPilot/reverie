@@ -11,13 +11,13 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
-function fixture() {
+function fixture(sid = '22222222-2222-4222-8222-222222222222', thread = '44444444-4444-4444-8444-444444444444') {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'provider-input-'));
   fs.chmodSync(root, 0o700);
   roots.push(root);
   const source = ts.createSourceFile(
     'fixture.cjs',
-    fs.readFileSync(new URL('./fixtures/boxed-fake-provider.cjs', import.meta.url), 'utf8'),
+    fs.readFileSync(new URL('./fixtures/boxed-fake-provider.mjs', import.meta.url), 'utf8'),
     ts.ScriptTarget.Latest,
     true,
     ts.ScriptKind.JS
@@ -33,8 +33,8 @@ function fixture() {
   vm.runInNewContext(declarations.map((node) => node.getText(source)).join('\n') + '\nlistenForInputWitness();', {
     fs,
     path,
-    sid: '22222222-2222-4222-8222-222222222222',
-    thread: '44444444-4444-4444-8444-444444444444',
+    sid,
+    thread,
     process: {
       env: { HOME: root },
       pid: process.pid,
@@ -63,6 +63,15 @@ const first = '11111111-1111-4111-8111-111111111111';
 const second = '55555555-5555-4555-8555-555555555555';
 const challenge = (uuid: string) => 'BOXED_CANARY_INPUT_' + uuid;
 describe('maintained fake provider input witness', () => {
+  it('keeps the fresh office SID and thread in the actual one-shot receipt', () => {
+    const sid = '66666666-6666-4666-8666-666666666666';
+    const thread = '77777777-7777-4777-8777-777777777777';
+    const f = fixture(sid, thread);
+    f.stdin.write(challenge(first) + '\n');
+    expect(JSON.parse(fs.readFileSync(f.file, 'utf8'))).toMatchObject({ sessionId: sid, providerThread: thread });
+    expect(f.stdout()).toBe('BOXED_CANARY_ACK_' + first + '\n');
+  });
+
   it('writes a real exclusive private receipt and acknowledges exactly one split ASCII input', () => {
     const f = fixture();
     const user = path.join(f.root, 'memory.txt');

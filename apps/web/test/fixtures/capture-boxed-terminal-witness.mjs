@@ -15,19 +15,22 @@ import {
   inspectCanaryContainer,
   readPrivateCanaryJson,
   canaryGet,
-  CANARY_SID,
-  CANARY_EID,
-  CANARY_OPERATION,
-  CANARY_THREAD,
 } from './boxed-canary-browser-proof.mjs';
 
-const [proofFile, sourceProofFile, output, sessionName = 'owner-session-after-control1.json'] = process.argv.slice(2);
+const [proofFile, sourceProofFile, output, sessionName = 'owner-session-after-control1.json', contractFile] =
+  process.argv.slice(2);
 assert(
   proofFile && sourceProofFile && output && resolve(sourceProofFile) === sourceProofFile && resolve(output) === output
 );
-const canary = await loadVerifiedCanaryOwner(proofFile, sessionName);
+const canary = await loadVerifiedCanaryOwner(proofFile, sessionName, contractFile);
+const fixture = canary.fixture;
 const sourceProof = JSON.parse(await fs.readFile(sourceProofFile, 'utf8'));
-assert(sourceProof.sourceCid === '4bb91b4a27c8f9a58f4ce03c342ce0c3d3fc79419b2aeaefa4b60437c41e9865');
+assert(sourceProof.sourceCid === fixture.sourceCid && sourceProof.sourceImage === fixture.imageId);
+assert(
+  sourceProof.home.path === fixture.home.path &&
+    sourceProof.home.dev === fixture.home.dev &&
+    sourceProof.home.ino === fixture.home.ino
+);
 const home = sourceProof.home.path,
   receiptFile = join(home, 'boxed-canary-provider-input.json');
 const report = {
@@ -35,8 +38,8 @@ const report = {
   purpose: 'real-browser-synthetic-terminal-witness-v1',
   control: canary.proof.cid,
   endpoint: canary.endpoint.origin,
-  operationId: CANARY_OPERATION,
-  sessionId: CANARY_SID,
+  operationId: fixture.operationId,
+  sessionId: fixture.sessionId,
   keyboardIssued: false,
   passed: false,
   network: [],
@@ -52,11 +55,19 @@ async function readiness() {
   verifyCanaryControl(canary);
   const source = inspectCanaryContainer(sourceProof.sourceCid);
   assert(source.State.Running === false && source.Image === sourceProof.sourceImage);
-  const selection = await canaryGet(canary, '/api/company/employees/' + CANARY_EID + '/docker-policy');
   assert(
-    selection.sessionId === CANARY_SID &&
-      selection.sessionGeneration === 1 &&
-      selection.operationId === CANARY_OPERATION
+    source.Config.Labels['reverie.task'] === fixture.sourceTask &&
+      source.Config.Labels['reverie.disposable'] === fixture.sourceFixtureId &&
+      source.Config.Labels['reverie.employee'] === fixture.employeeId &&
+      source.Config.Labels['reverie.session'] === fixture.sessionId
+  );
+  const sourceHome = source.Mounts.filter((m) => m.Destination === '/home/agent');
+  assert(sourceHome.length === 1 && sourceHome[0].Source === home && sourceHome[0].RW === true);
+  const selection = await canaryGet(canary, '/api/company/employees/' + fixture.employeeId + '/docker-policy');
+  assert(
+    selection.sessionId === fixture.sessionId &&
+      selection.sessionGeneration === fixture.generation &&
+      selection.operationId === fixture.operationId
   );
   assert(
     selection.operation?.state === 'ready' && selection.operation?.phase === 'ready',
@@ -70,11 +81,11 @@ async function readiness() {
       '--all',
       '--no-trunc',
       '--filter',
-      'label=reverie.boxed.operation=' + CANARY_OPERATION,
+      'label=reverie.boxed.operation=' + fixture.operationId,
       '--filter',
-      'label=reverie.boxed.employee=' + CANARY_EID,
+      'label=reverie.boxed.employee=' + fixture.employeeId,
       '--filter',
-      'label=reverie.boxed.session=' + CANARY_SID,
+      'label=reverie.boxed.session=' + fixture.sessionId,
       '--filter',
       'label=reverie.boxed.source=' + sourceProof.sourceCid,
       '--format',
@@ -91,22 +102,27 @@ async function readiness() {
       !destination.State.Dead
   );
   assert(
-    destination.Image === selection.destinationImageId && destination.Config.Labels['reverie.boxed.generation'] === '1'
+    destination.Image === selection.destinationImageId &&
+      destination.Config.Labels['reverie.boxed.generation'] === String(fixture.generation)
   );
   const mounts = destination.Mounts.filter((m) => m.Destination === '/home/agent');
   assert(mounts.length === 1 && mounts[0].RW === true && mounts[0].Source === home);
   const current = await fs.stat(home, { bigint: true });
   assert(String(current.dev) === sourceProof.home.dev && String(current.ino) === sourceProof.home.ino);
-  assert(current.uid === 1000n && current.gid === 100n && (current.mode & 0o777n) === 0o700n);
-  const marker = await readPrivateCanaryJson(join(home, 'boxed-canary-provider-start.json'), 1000);
+  assert(
+    current.uid === BigInt(fixture.home.uid) &&
+      current.gid === BigInt(fixture.home.gid) &&
+      (current.mode & 0o777n) === 0o700n
+  );
+  const marker = await readPrivateCanaryJson(join(home, 'boxed-canary-provider-start.json'), fixture.home.uid);
   assert(
     marker.version === 2 &&
       marker.completed === true &&
-      marker.sessionId === CANARY_SID &&
-      marker.resumeThread === CANARY_THREAD
+      marker.sessionId === fixture.sessionId &&
+      marker.resumeThread === fixture.providerThread
   );
   assert(
-    marker.capabilityIdentity?.sessionId === CANARY_SID &&
+    marker.capabilityIdentity?.sessionId === fixture.sessionId &&
       marker.hookTransportAcknowledged === true &&
       marker.statusTransportAcknowledged === true
   );
@@ -115,10 +131,10 @@ async function readiness() {
   report.providerPid = marker.pid;
   return marker;
 }
-function terminalText(needle) {
+function terminalText({ needle, sid }) {
   const terminal = globalThis.app?.terminal,
     buffer = terminal?.buffer?.active;
-  if (!buffer || globalThis.app.activeSessionId !== '22222222-2222-4222-8222-222222222222') return '';
+  if (!buffer || globalThis.app.activeSessionId !== sid) return '';
   const lines = [];
   for (let i = Math.max(0, buffer.length - 200); i < buffer.length; i++)
     lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
@@ -159,7 +175,7 @@ try {
     await onboarding.getByRole('button', { name: 'Cancel', exact: true }).click();
     await onboarding.waitFor({ state: 'hidden' });
   }
-  const member = page.locator('[data-key="member:' + CANARY_SID + '"]');
+  const member = page.locator('[data-key="member:' + fixture.sessionId + '"]');
   if (!(await member.isVisible())) {
     const toggle = page.locator('[aria-controls="ca-members-list"]');
     if (await toggle.isVisible()) await toggle.click();
@@ -169,7 +185,7 @@ try {
   await page.waitForFunction(
     (sid) =>
       globalThis.app?.activeSessionId === sid && globalThis.document.documentElement.dataset.reverieView === 'debug',
-    CANARY_SID
+    fixture.sessionId
   );
   const input = page.locator('#terminalContainer .xterm-helper-textarea');
   await input.focus();
@@ -188,7 +204,7 @@ try {
       JSON.stringify({
         challenge,
         ack,
-        operationId: CANARY_OPERATION,
+        operationId: fixture.operationId,
         destination: report.destination,
         at: new Date().toISOString(),
       }) + '\n'
@@ -207,13 +223,13 @@ try {
   report.keyboardIssued = true;
   await page.keyboard.type(challenge);
   await page.keyboard.press('Enter');
-  await page.waitForFunction(terminalText, ack, { timeout: 20000 });
-  const receipt = await readPrivateCanaryJson(receiptFile, 1000);
+  await page.waitForFunction(terminalText, { needle: ack, sid: fixture.sessionId }, { timeout: 20000 });
+  const receipt = await readPrivateCanaryJson(receiptFile, fixture.home.uid);
   assert(receipt.version === 1 && receipt.purpose === 'synthetic-boxed-provider-input-v1');
   assert(
     receipt.challenge === challenge &&
-      receipt.sessionId === CANARY_SID &&
-      receipt.providerThread === CANARY_THREAD &&
+      receipt.sessionId === fixture.sessionId &&
+      receipt.providerThread === fixture.providerThread &&
       receipt.pid === marker.pid
   );
   report.receipt = receipt;
@@ -236,7 +252,10 @@ try {
       .catch(() => {});
     await page.screenshot({ path: join(output, 'failure.png'), fullPage: true }).catch(() => {});
     await fs
-      .writeFile(join(output, 'terminal-buffer.txt'), await page.evaluate(terminalText), { mode: 0o600, flag: 'wx' })
+      .writeFile(join(output, 'terminal-buffer.txt'), await page.evaluate(terminalText, { sid: fixture.sessionId }), {
+        mode: 0o600,
+        flag: 'wx',
+      })
       .catch(() => {});
   }
   throw error;

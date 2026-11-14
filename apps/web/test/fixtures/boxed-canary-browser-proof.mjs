@@ -8,6 +8,7 @@ import { constants, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
+import { loadCanaryFixtureContract } from './boxed-canary-fixture-contract.mjs';
 
 export const CANARY_SID = '22222222-2222-4222-8222-222222222222';
 export const CANARY_EID = '11111111-1111-4111-8111-111111111111';
@@ -124,7 +125,8 @@ export function validCanaryCookieName(name) {
     /^owner-session-control-[a-f0-9]{64}\.json$/.test(name)
   );
 }
-export async function loadVerifiedCanaryOwner(proofFile, sessionName = 'owner-session.json') {
+export async function loadVerifiedCanaryOwner(proofFile, sessionName = 'owner-session.json', contractFile) {
+  const fixture = loadCanaryFixtureContract(contractFile);
   assert(resolve(proofFile) === proofFile);
   assert(validCanaryCookieName(sessionName));
   assert((await fs.stat(proofFile)).size <= 65536);
@@ -144,7 +146,7 @@ export async function loadVerifiedCanaryOwner(proofFile, sessionName = 'owner-se
   const directory = await fs.lstat(proof.authDirectory);
   assert(directory.isDirectory() && directory.uid === process.getuid() && (directory.mode & 0o777) === 0o700);
   assert((await fs.realpath(proof.authDirectory)) === proof.authDirectory);
-  const canary = { proof, endpoint };
+  const canary = { proof, endpoint, fixture };
   verifyCanaryControl(canary);
   const { cookie } = await readPrivateCanaryJson(join(proof.authDirectory, sessionName));
   assert(typeof cookie === 'string' && /^reverie_owner=[^;\r\n]+$/.test(cookie));

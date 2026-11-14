@@ -2,6 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import { constants, promises as fs, type Stats } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { loadCanaryFixtureContract, type CanaryFixture } from '../fixtures/boxed-canary-fixture-contract.mjs';
 
 export const CANARY_EMPLOYEE = '11111111-1111-4111-8111-111111111111';
 export const CANARY_SESSION = '22222222-2222-4222-8222-222222222222';
@@ -129,25 +130,33 @@ async function signIn(
     throw Error('Actual owner session currentness refused');
   return { cookie, sessionFile };
 }
-async function verifyFixture(request: ReturnType<typeof client>, cookie: string): Promise<void> {
+async function verifyFixture(
+  request: ReturnType<typeof client>,
+  cookie: string,
+  fixture: CanaryFixture
+): Promise<void> {
   const company = await success(await request('/api/company', 'GET', undefined, { cookie }));
   if (!Array.isArray(company.employees) || company.employees.length !== 1)
     throw Error('Expected exactly one synthetic canary employee');
   const employee = record(company.employees[0]);
   if (
-    employee.id !== CANARY_EMPLOYEE ||
-    employee.sessionId !== CANARY_SESSION ||
-    employee.sessionGeneration !== CANARY_GENERATION
+    employee.id !== fixture.employeeId ||
+    employee.sessionId !== fixture.sessionId ||
+    employee.sessionGeneration !== fixture.generation
   )
     throw Error('Synthetic canary employee binding differs');
 }
-async function refusalControls(request: ReturnType<typeof client>, cookie: string): Promise<void> {
+async function refusalControls(
+  request: ReturnType<typeof client>,
+  cookie: string,
+  fixture: CanaryFixture
+): Promise<void> {
   const requests: Array<Parameters<typeof request>> = [
-    ['/api/company', 'GET', undefined, { 'x-reverie-parent-session': CANARY_SESSION }],
-    ['/api/company', 'GET', undefined, { cookie, 'x-reverie-parent-session': CANARY_SESSION }],
+    ['/api/company', 'GET', undefined, { 'x-reverie-parent-session': fixture.sessionId }],
+    ['/api/company', 'GET', undefined, { cookie, 'x-reverie-parent-session': fixture.sessionId }],
     ['/api/company', 'GET', undefined, { cookie, 'x-reverie-worker-identity': 'malformed' }],
-    ['/api/hook-event', 'POST', { sessionId: CANARY_SESSION, event: 'stop', data: {} }, { cookie }],
-    ['/api/status-telemetry', 'POST', { sessionId: CANARY_SESSION, data: {} }, { cookie }],
+    ['/api/hook-event', 'POST', { sessionId: fixture.sessionId, event: 'stop', data: {} }, { cookie }],
+    ['/api/status-telemetry', 'POST', { sessionId: fixture.sessionId, data: {} }, { cookie }],
   ];
   for (const args of requests) {
     const response = await request(...args);
@@ -158,16 +167,17 @@ async function refusalControls(request: ReturnType<typeof client>, cookie: strin
 /** Caller must freshly verify the actual disposable Docker control CID, mapped
  * loopback port and owned fixture labels before calling. These HTTP checks do
  * not establish that native identity or authorize any production request. */
-export async function enrollDockerCanaryOwner(endpoint: string, directory: string) {
+export async function enrollDockerCanaryOwner(endpoint: string, directory: string, contractFile?: string) {
+  const fixture = loadCanaryFixtureContract(contractFile);
   const url = target(endpoint);
   await privateDirectory(directory);
   const requests: RecordedRequest[] = [];
   const request = client(url, requests);
   const owner = await authenticate(request, directory);
-  await verifyFixture(request, owner.cookie);
-  await refusalControls(request, owner.cookie);
+  await verifyFixture(request, owner.cookie, fixture);
+  await refusalControls(request, owner.cookie, fixture);
   const policy = await success(
-    await request('/api/company/employees/' + CANARY_EMPLOYEE + '/docker-policy', 'GET', undefined, {
+    await request('/api/company/employees/' + fixture.employeeId + '/docker-policy', 'GET', undefined, {
       cookie: owner.cookie,
     })
   );
@@ -175,9 +185,9 @@ export async function enrollDockerCanaryOwner(endpoint: string, directory: strin
     version: 1,
     purpose: 'reverie-disposable-owner-http-canary-v1',
     endpoint: url.origin,
-    employeeId: CANARY_EMPLOYEE,
-    sessionId: CANARY_SESSION,
-    sessionGeneration: CANARY_GENERATION,
+    employeeId: fixture.employeeId,
+    sessionId: fixture.sessionId,
+    sessionGeneration: fixture.generation,
     ownerAuthenticated: true,
     ownerNoParentPolicyRead: true,
     canApprovePolicy: policy.canApprovePolicy,
@@ -275,8 +285,10 @@ export async function loginDockerCanaryOwner(
   endpoint: string,
   directory: string,
   controlId: string,
-  previousSessionName: string
+  previousSessionName: string,
+  contractFile?: string
 ) {
+  const fixture = loadCanaryFixtureContract(contractFile);
   if (!/^[a-f0-9]{64}$/.test(controlId) || !validCanaryCookieName(previousSessionName))
     throw Error('Exact control CID and closed prior cookie filename required');
   const url = target(endpoint);
@@ -326,16 +338,16 @@ export async function loginDockerCanaryOwner(
       'owner-session-control-' + controlId + '.json'
     );
   }
-  await verifyFixture(request, owner.cookie);
-  await refusalControls(request, owner.cookie);
+  await verifyFixture(request, owner.cookie, fixture);
+  await refusalControls(request, owner.cookie, fixture);
   const report = {
     version: 2,
     purpose: 'reverie-disposable-owner-current-or-login-v2',
     controlId,
     endpoint: url.origin,
-    employeeId: CANARY_EMPLOYEE,
-    sessionId: CANARY_SESSION,
-    sessionGeneration: CANARY_GENERATION,
+    employeeId: fixture.employeeId,
+    sessionId: fixture.sessionId,
+    sessionGeneration: fixture.generation,
     ownerAuthenticated: true,
     loginIssued,
     previousCookieReused: !loginIssued,
