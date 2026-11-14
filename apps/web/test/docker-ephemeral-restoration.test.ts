@@ -912,11 +912,13 @@ describe('canonical store and paid-phase separation', () => {
         sessionGeneration: 7,
         owner: undefined,
         sourceDigest: actual.sourceDigest,
+        providerSourceDigest: actual.sourceDigest,
         onVacation: false,
         desiredRunning: true,
       };
       const store: DockerContinuationStore = {
         subject: () => subject,
+        existingSubject: (_employeeId, original) => (original === actual ? subject : undefined),
         policy: () => actual.policy,
         record: () => actual,
         replace: async (_before, next, current) => {

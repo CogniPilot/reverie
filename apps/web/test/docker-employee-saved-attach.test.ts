@@ -46,6 +46,7 @@ const subject = {
   sessionGeneration: 3,
   owner: undefined,
   sourceDigest: 'e'.repeat(64),
+  providerSourceDigest: 'e'.repeat(64),
   onVacation: false,
   desiredRunning: true,
 };
@@ -667,8 +668,8 @@ describe('actual saved Docker Session private attachment', () => {
     expect(other.providerDispatchHeld).toBe(true);
     await other.stop(false);
   });
-  it.each(['foreign-owner', 'changed-thread'] as const)(
-    'actual provider facade refuses a %s live candidate while canonical saved recipe remains unchanged',
+  it.each(['foreign-owner', 'changed-model', 'native-progress'] as const)(
+    'actual provider facade checks %s against the same canonical recipe and native process',
     async (mutation) => {
       const f = await savedFixture(),
         saved = f.loaded.getSession(sid)!;
@@ -696,9 +697,9 @@ describe('actual saved Docker Session private attachment', () => {
         mux: f.mux,
         ...(mutation === 'foreign-owner'
           ? { owner: 'foreign-owner' }
-          : {
-              claudeSessionChain: ['70000000-0000-4000-8000-000000000007'],
-            }),
+          : mutation === 'changed-model'
+            ? { model: 'synthetic-different-model' }
+            : { claudeSessionChain: ['70000000-0000-4000-8000-000000000007'] }),
       });
       cleanup.push(() => candidate.stop(false));
       const sessions = new Map([[sid, candidate]]);
@@ -739,13 +740,21 @@ describe('actual saved Docker Session private attachment', () => {
         originalDigest: dockerContinuationDigest(f.row.destination),
         policyDigest: dockerContinuationDigest(f.row.policy),
       };
-      await expect(provider.attach(f.row, binding, f.requireCurrent, view)).rejects.toThrow(
-        'Initial launch protocol changed before publication'
-      );
+      if (mutation === 'native-progress') {
+        await provider.attach(f.row, binding, f.requireCurrent, view);
+        expect(candidate.dockerContinuationViewCurrent).toBe(true);
+        expect(candidate.providerInputHeld).toBe(false);
+        expect(native.ptys).toHaveLength(1);
+        expect(publish).toHaveBeenCalledOnce();
+      } else {
+        await expect(provider.attach(f.row, binding, f.requireCurrent, view)).rejects.toThrow(
+          'Initial launch protocol changed before publication'
+        );
+        expect(publish).not.toHaveBeenCalled();
+        expect(native.ptys).toEqual([]);
+      }
       expect(add).not.toHaveBeenCalled();
       expect(discard).not.toHaveBeenCalled();
-      expect(publish).not.toHaveBeenCalled();
-      expect(native.ptys).toEqual([]);
       expect(candidate.providerDispatchHeld).toBe(true);
       expect(f.loaded.getSession(sid)).toEqual(canonical);
       f.loaded.flush();
