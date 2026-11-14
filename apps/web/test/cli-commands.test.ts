@@ -56,7 +56,6 @@ const SUBCOMMANDS: Record<string, Record<string, string[]>> = {
   ralph: { start: [], stop: [], status: [] },
   skill: { install: [], uninstall: [] },
   agent: { ls: ['list'], spawn: [], send: [], wait: [], read: [], interrupt: [], rm: [] },
-  service: { install: [], uninstall: [], status: [] },
   users: { add: [], passwd: [], list: ['ls'], rm: [] },
 };
 
@@ -132,9 +131,13 @@ describe('registered options', () => {
     );
   });
 
-  it('gives `service install` the same launch flags as `web`', () => {
-    const install = flagsOf(find(find(program, 'service')!, 'install')!);
-    expect(install).toEqual(expect.arrayContaining(['-H', '--host', '-p', '--port', '--https', '--multiuser']));
+  it('keeps only a hidden refusal for the retired host service family', () => {
+    const service = find(program, 'service')!;
+    expect(service.commands).toEqual([]);
+    expect(service.options).toEqual([]);
+    expect(service.description()).toContain('Retired host service');
+    expect(program.helpInformation()).not.toMatch(/\n\s+service\b/);
+    expect(service.helpInformation()).not.toContain('Install and start');
   });
 
   it('keeps `doctor --json` and `--category`', () => {

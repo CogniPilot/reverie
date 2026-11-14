@@ -1,5 +1,10 @@
 # Reverie setup and operations
 
+> Historical native-runtime notes below are retained for migration reference.
+> Install the office with [Docker](../README.md#install-with-docker). The former
+> host brokers, GPU publishers and application service units are retired; do not
+> recreate them from these notes. See [runtime boundaries](host-runtime-retirement.md).
+
 Detailed setup, runtime and operations notes. The [README](../README.md) has the overview.
 For everyday website workflows, open Handbook in the sidebar or start with
 [Getting started](../apps/web/src/web/public/handbook/getting-started.md).

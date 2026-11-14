@@ -6,6 +6,12 @@ publisher, standalone terminal viewer or the former host engine/website bridge
 units. Host Docker, NVIDIA drivers and NVIDIA Container Toolkit/CDI remain
 ordinary platform prerequisites.
 
+The old `reverie service` CLI is a hidden compatibility refusal. Install, start,
+stop, status, logs and uninstall arguments return exit status 2 with Docker
+guidance; they do not load the native service installer or control a supervisor.
+Its action tests run the real Commander parser with writes, network and process
+effects blocked. Pure legacy unit-builder tests remain until their library retires.
+
 The public flake no longer selects the legacy broker/service installers, host
 model launcher, host GPU publisher, isolation installer, standalone viewer or
 H/resource service installers. Their former nix run instructions in older

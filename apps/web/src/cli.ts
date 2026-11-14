@@ -39,7 +39,6 @@ import { getStore } from './state-store.js';
 import { getErrorMessage } from './types.js';
 import { DOCUMENT_ATTACHMENT_EXTENSIONS, isSupportedAttachmentExtension } from './attachment-registry.js';
 import { daemonStatus, startDaemon, stopDaemon, type WebLaunchOptions } from './daemon-control.js';
-import { installService, serviceStatus, uninstallService, controlService, serviceLogs } from './service-installer.js';
 import { FRONT_UNAVAILABLE_EXIT, execFront, frontLaunch } from './rust-front/launch.js';
 import { isLoopbackBindHost, isUnauthenticatedNetworkAcknowledged } from './web/network-auth-policy.js';
 import { confirm, heading, isInteractive, kv, palette, rule, tint, withSpinner, type Tone } from './cli-style.js';
@@ -998,7 +997,7 @@ function addWebLaunchOptions(cmd: Command): Command {
     );
 }
 
-/** Normalize commander's strings into the shape daemon-control/service-installer take. */
+/** Normalize commander's strings for the development web launcher. */
 function toWebLaunchOptions(options: {
   host: string;
   port: string;
@@ -1107,7 +1106,7 @@ webCmd.action(async (options) => {
       console.log(palette.ok(`\n✓ Reverie is running at ${result.url} (pid ${result.pid})`));
       console.log(palette.muted(`  Logs: ${result.logPath}`));
       console.log(palette.muted('  Stop it with: reverie web --stop'));
-      console.log(palette.muted('  Want it back after a reboot? reverie service install'));
+      console.log(palette.muted('  Production restart policy belongs to the Docker deployment.'));
       return;
     }
     console.error(palette.err(`\n✗ ${result.message ?? 'Failed to start'}`));
@@ -1229,82 +1228,15 @@ export async function stopWebAndExit(
   return exit(0);
 }
 
-// Supervised service: the "still there after a reboot" answer, where `web -d` is
-// the "still there after I close this shell" one (issue #231).
-const serviceCmd = program
-  .command('service')
-  .description('Manage the background service (systemd user unit on Linux, LaunchAgent on macOS)');
-
-for (const action of ['start', 'stop'] as const) {
-  serviceCmd.command(action).description(`${action} the installed native website service; preserve employee intent`).action(() => {
-    const result = controlService(action);
-    console.log(result.message);
-    if (!result.ok) process.exitCode = 1;
-  });
-}
-serviceCmd.command('logs').description('Read bounded native website service logs')
-  .option('--lines <count>', 'Log lines, 1..1000', '100').action((options) => {
-    const result = serviceLogs(Number(options.lines));
-    console.log(result.message);
-    if (!result.ok) process.exitCode = 1;
-  });
-
-addWebLaunchOptions(
-  serviceCmd.command('install').description('Install and start the service, then verify it answers')
-).action(async (options) => {
-  const launch = toWebLaunchOptions(options);
-  warnIfUnauthenticatedNetwork(launch);
-
-  // Install polls the new unit's /api/status for up to 30s before it can honestly
-  // report success, so the wait needs a visible heartbeat.
-  const result = await withSpinner('Installing the Reverie service, waiting for it to answer...', () =>
-    installService(launch)
-  );
-  for (const warning of result.warnings ?? []) console.log(palette.warn(`⚠ ${warning}`));
-
-  if (!result.ok) {
-    console.error(palette.err(`✗ ${result.message}`));
-    process.exit(1);
-  }
-  console.log(palette.ok(`✓ ${result.message}`));
-  console.log(palette.muted(`  Unit: ${result.unitPath}`));
-  if (process.env.REVERIE_PASSWORD) {
-    console.log(
-      palette.warn(
-        '  Note: REVERIE_PASSWORD was NOT copied into the unit file. Add it there yourself if the service needs auth.'
-      )
-    );
-  }
-});
-
-serviceCmd
-  .command('uninstall')
-  .description('Stop the service and remove its unit file')
+// A compatibility refusal only. No host service installer/control module is loaded.
+program
+  .command('service [retired-arguments...]', { hidden: true })
+  .description('Retired host service command. Use the reviewed Docker deployment and its container restart policy.')
+  .allowUnknownOption()
   .action(() => {
-    const result = uninstallService();
-    if (!result.ok) {
-      console.error(palette.err(`✗ ${result.message}`));
-      process.exit(1);
-    }
-    console.log(palette.ok(`✓ ${result.message}`));
+    console.error('The host service command is retired. Use the reviewed Docker deployment; no host service was changed.');
+    process.exitCode = 2;
   });
-
-addWebLaunchOptions(
-  serviceCmd.command('status').description('Show whether the service is installed and running')
-).action(async (options) => {
-  const status = await serviceStatus(toWebLaunchOptions(options));
-  if (!status.kind) {
-    console.log(palette.warn(`No supported supervisor on ${process.platform}. Use \`reverie web -d\` instead.`));
-    return;
-  }
-  console.log(`  Supervisor: ${status.kind} (${status.name})`);
-  console.log(`  Unit file:  ${status.installed ? palette.ok(status.unitPath) : palette.muted('not installed')}`);
-  console.log(`  Loaded:     ${status.loaded ? palette.ok('yes') : palette.muted('no')}`);
-  const version = status.version ? ` (v${status.version})` : '';
-  console.log(
-    `  Responding: ${status.responding ? palette.ok(`yes at ${status.url}${version}`) : palette.muted(`no at ${status.url}`)}`
-  );
-});
 
 // ============ Multi-user Commands ============
 //
