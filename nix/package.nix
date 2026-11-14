@@ -75,6 +75,7 @@ let
       # Boxed recovery and bound worker transport use the same default CI gate.
       npm test -- test/docker-contained-resource-controller.test.ts \
         test/docker-owner-stop-status.test.ts \
+        test/docker-ephemeral-restoration.test.ts \
         test/docker-owner-stop-native.test.ts \
         test/docker-employee-continuation-http.test.ts \
         test/docker-employee-continuation.test.ts \

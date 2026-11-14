@@ -492,6 +492,11 @@ export class DockerEmployeeRuntime {
     this.authentication.close();
     const errors = [];
     try {
+      this.#attached?.engine.close();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
       this.#key.close();
     } catch (error) {
       errors.push(error);

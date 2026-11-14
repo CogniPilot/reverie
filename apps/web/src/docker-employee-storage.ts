@@ -280,6 +280,12 @@ export class DockerEmployeeStorage {
       ino: held.value.home.ino,
     };
   }
+  async protectedDirectories(row: DockerEmployeeContinuationRecord) {
+    const source = await this.source(row),
+      held = await this.#held(row, this.#configuration(row, source));
+    if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
+    return [held.value.home, held.value.nix].map(({ dev, ino }) => ({ dev, ino }));
+  }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
     if (!row.destination) refuse('DOCKER_STORAGE_DESTINATION_UNKNOWN');
     const source = await this.source(row),

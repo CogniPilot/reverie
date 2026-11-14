@@ -1,3 +1,4 @@
+import { EphemeralRestoration } from './docker-ephemeral-data.js';
 import { DockerContinuationTask } from './docker-continuation-task.js';
 /** Private Docker continuation metadata. Correlation never grants engine or native authority. */
 import { z } from 'zod';
@@ -142,6 +143,7 @@ export const DockerEmployeeContinuationRecord = z
       .max(5)
       .refine((tasks) => new Set(tasks.map((task) => task.role)).size === tasks.length)
       .optional(),
+    ephemeralRestoration: z.lazy(() => EphemeralRestoration).optional(),
     phase: DockerEmployeeContinuationPhase,
     pool: DockerEmployeePool.optional(),
     destination: DockerEmployeeOriginal.optional(),
@@ -149,6 +151,16 @@ export const DockerEmployeeContinuationRecord = z
   .strict()
   .refine(
     (row) =>
+      (!row.ephemeralRestoration ||
+        row.ephemeralRestoration.attempts.every(
+          (attempt, index) =>
+            attempt.ordinal === index + 1 &&
+            attempt.request.operationId === row.request.operationId &&
+            attempt.request.employeeId === row.employeeId &&
+            attempt.request.sessionId === row.request.sessionId &&
+            attempt.request.sessionGeneration === row.request.sessionGeneration &&
+            attempt.imageId === row.workerImage.imageId
+        )) &&
       row.employeeId === row.original.employeeId &&
       row.request.sessionId === row.original.sessionId &&
       row.request.containerId === row.original.containerId &&

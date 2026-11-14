@@ -1,3 +1,4 @@
+import { EphemeralRestoration, allowedEphemeralTransition } from './docker-ephemeral-data.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from './utils/native-thread-profile.js';
 import {
   DockerContinuationTask,
@@ -248,6 +249,33 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
       if (index === -1) tasks.push(checked);
       else tasks[index] = checked;
       return structuredClone(actual);
+    }, current);
+  }
+  readEphemeral(row: DockerEmployeeContinuationRecord): EphemeralRestoration | undefined {
+    const actual = this.record(row.employeeId);
+    if (!actual || actual.request.operationId !== row.request.operationId)
+      throw new CompanyError('Original ephemeral operation changed', 409);
+    return actual.ephemeralRestoration;
+  }
+  async publishEphemeral(
+    row: DockerEmployeeContinuationRecord,
+    before: EphemeralRestoration | undefined,
+    next: EphemeralRestoration,
+    current: () => void
+  ): Promise<void> {
+    const checked = EphemeralRestoration.parse(next);
+    if (!allowedEphemeralTransition(before, checked)) throw new CompanyError('Invalid ephemeral transition', 409);
+    await this.company.store.update((state) => {
+      current();
+      const actual = state.dockerEmployeeContinuations?.find((item) => item.employeeId === row.employeeId);
+      if (
+        !actual ||
+        dockerContinuationDigest({ ...actual, tasks: undefined, ephemeralRestoration: undefined }) !==
+          dockerContinuationDigest({ ...row, tasks: undefined, ephemeralRestoration: undefined }) ||
+        !isDeepStrictEqual(actual.ephemeralRestoration, before)
+      )
+        throw new CompanyError('Original ephemeral cursor changed', 409);
+      actual.ephemeralRestoration = structuredClone(checked);
     }, current);
   }
   async savePolicy(

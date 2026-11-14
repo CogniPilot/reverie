@@ -71,8 +71,11 @@ export interface DockerContinuationEngine {
   observeSource(subject: DockerContinuationSubject, containerId?: string): Promise<DockerSourceObservation>;
   validateCapabilities(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void>;
   /** Shared aggregate pool has its own retained controller owner; prepare is never a status action. */
+  assertPreparationCurrent?(row: DockerEmployeeContinuationRecord): void;
   prepareStorage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void>;
-  observeStorage?(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued' | 'unknown'>;
+  observeStorage?(
+    row: DockerEmployeeContinuationRecord
+  ): Promise<'ready' | 'unissued' | 'unknown' | 'ephemeral-unissued'>;
   preparePool(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null>;
   /** Only the captured original's inspected immutable config/home; no HTTP command/mount/path. */
@@ -269,11 +272,12 @@ export class DockerEmployeeContinuation {
       operationId: row.request.operationId,
       phase: row.phase,
       state: code ? 'held' : row.phase === 'ready' ? 'ready' : 'pending',
-      allowedActions: this.#unissuedHelper(row)
-        ? ['observe', 'continue']
-        : code || row.phase === 'ready' || issued.has(row.phase)
-          ? ['observe']
-          : ['observe', 'continue'],
+      allowedActions:
+        code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
+          ? ['observe', 'continue']
+          : code || row.phase === 'ready' || issued.has(row.phase)
+            ? ['observe']
+            : ['observe', 'continue'],
       ...(code ? { code } : {}),
     };
   }
@@ -478,8 +482,8 @@ export class DockerEmployeeContinuation {
     const actual = this.store.record(row.employeeId);
     if (
       !actual ||
-      dockerContinuationDigest({ ...actual, tasks: undefined }) !==
-        dockerContinuationDigest({ ...row, tasks: undefined })
+      dockerContinuationDigest({ ...actual, tasks: undefined, ephemeralRestoration: undefined }) !==
+        dockerContinuationDigest({ ...row, tasks: undefined, ephemeralRestoration: undefined })
     )
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
     return actual;
@@ -488,10 +492,14 @@ export class DockerEmployeeContinuation {
     subject: DockerContinuationSubject,
     initial: DockerEmployeeContinuationRecord,
     authority: DockerContinuationAuthority,
-    current: () => void,
+    requireCurrent: () => void,
     effects: boolean
   ): Promise<DockerContinuationResult> {
     let row = initial;
+    const current = () => {
+      requireCurrent();
+      this.engine.assertPreparationCurrent?.(row);
+    };
     try {
       for (let steps = 0; steps < 24; steps++) {
         current();
@@ -523,7 +531,14 @@ export class DockerEmployeeContinuation {
           current();
           if (storage !== 'ready') {
             if (!effects)
-              return this.#result(row, storage === 'unknown' ? 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED' : undefined);
+              return this.#result(
+                row,
+                storage === 'ephemeral-unissued'
+                  ? 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED'
+                  : storage === 'unknown'
+                    ? 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED'
+                    : undefined
+              );
             await this.engine.prepareStorage!(row, current);
             row = this.#refresh(row, current);
             storage = await this.engine.observeStorage(row);

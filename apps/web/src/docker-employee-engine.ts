@@ -1,5 +1,7 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
+import { DockerEphemeralRestoration } from './docker-ephemeral-restoration.js';
+import { ephemeralProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
 import { DockerEmployeeCredentialInstaller } from './docker-employee-credential-installer.js';
 /** Fixed adapter for a new boxed destination; the old laptop is read-only.
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
@@ -175,6 +177,7 @@ function rowSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSu
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
+  readonly #ephemeral: DockerEphemeralRestoration | undefined;
   constructor(
     private readonly command: DockerEngineCommand,
     private readonly deployment: string,
@@ -191,6 +194,17 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       (row) => this.#storage.credentialHome(row),
       boxId
     );
+    const ephemeralJournal = journal as DockerContinuationTaskJournal & Partial<EphemeralJournal>;
+    if (ephemeralJournal.readEphemeral && ephemeralJournal.publishEphemeral)
+      this.#ephemeral = new DockerEphemeralRestoration(
+        command,
+        ephemeralJournal as EphemeralJournal,
+        boxId,
+        workerImage.imageId,
+        (row) => this.#source(row),
+        (row) => this.#destination(row),
+        (row) => this.#storage.protectedDirectories(row)
+      );
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(deployment)) throw Error('Registered deployment required');
     if (!/^sha256:[a-f0-9]{64}$/.test(workerImage.imageId) || !/^[a-f0-9]{64}$/.test(workerImage.clientManifestDigest))
@@ -301,12 +315,30 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     await this.image(original);
     await this.resources.validate(original, policy);
   }
-  prepareStorage(row: DockerEmployeeContinuationRecord, current: () => void) {
-    return this.#storage.prepare(row, current);
+  async prepareStorage(row: DockerEmployeeContinuationRecord, current: () => void) {
+    await this.#storage.prepare(row, current);
+    current();
+    if (!this.#ephemeral && ephemeralProjection(await this.#source(row), row.employeeId, row.request.sessionId))
+      refuse('DOCKER_EPHEMERAL_JOURNAL_REQUIRED');
+    await this.#ephemeral?.prepare(row, current);
+    current();
   }
-  observeStorage(row: DockerEmployeeContinuationRecord) {
-    return this.#storage.observe(row);
+  async observeStorage(
+    row: DockerEmployeeContinuationRecord
+  ): Promise<'ready' | 'unissued' | 'unknown' | 'ephemeral-unissued'> {
+    const storage = await this.#storage.observe(row);
+    if (storage !== 'ready') return storage;
+    if (!this.#ephemeral && ephemeralProjection(await this.#source(row), row.employeeId, row.request.sessionId))
+      refuse('DOCKER_EPHEMERAL_JOURNAL_REQUIRED');
+    return (await this.#ephemeral?.observe(row)) === 'unissued' ? 'ephemeral-unissued' : 'ready';
   }
+  assertPreparationCurrent(row: DockerEmployeeContinuationRecord): void {
+    this.#ephemeral?.assertCurrent(row);
+  }
+  close(): void {
+    this.#ephemeral?.close();
+  }
+
   preparePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     return this.resources.preparePool(row, current);
   }
@@ -410,6 +442,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (!pool || !isDeepStrictEqual(pool, row.pool)) refuse('DOCKER_CONTINUATION_POOL_CHANGED');
     const config = this.#configuration(row, source);
+    await this.#ephemeral?.require(row);
     current();
     await this.command.create(
       'reverie-boxed-' + dockerContinuationDigest([this.boxId, 'destination', row.request.operationId]),
@@ -503,7 +536,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           credentialDigest = readback.tokenDigest;
         }
       }
-      if (row.destination) await this.#storage.verifyDestination(row);
+      if (row.destination) {
+        await this.#storage.verifyDestination(row);
+        await this.#ephemeral?.verifyDestination(row);
+      }
     }
     const resources = raw.State.Running ? await this.resources.read(row) : null;
     const after = await this.#destination(row);
@@ -515,6 +551,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const raw = await this.#destination(row);
     current();
     if (!raw || !row.destination || raw.State.Running) refuse('DOCKER_CONTINUATION_STOPPED_DESTINATION_REQUIRED');
+    await this.#ephemeral?.require(row);
+    current();
+    this.assertPreparationCurrent(row);
     await this.command.run(['container', 'start', raw.Id]);
   }
   async observeCodexWorkspace(
@@ -728,6 +767,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       try {
         current();
+        this.assertPreparationCurrent(checked);
         if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       } catch (cause) {
         revoked = true;
@@ -783,6 +823,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (Buffer.byteLength(raw) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       return providerPane.parse(JSON.parse(raw));
     };
+    await this.#ephemeral?.verifyDestination(checked);
+    requireCurrent();
     await inspect();
     const first = await pane();
     await inspect();

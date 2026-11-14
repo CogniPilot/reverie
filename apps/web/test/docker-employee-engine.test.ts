@@ -345,6 +345,20 @@ describe('Engine-owned existing Docker provider view', () => {
   );
 });
 describe('new boxed Docker destination', () => {
+  it('rechecks current grant after the preparation await before issuing destination START', async () => {
+    const f = await dockerEncodedDestination();
+    f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+    let revoked = false;
+    const current = () => {
+      if (revoked) throw Error('revoked after preparation await');
+      queueMicrotask(() => {
+        revoked = true;
+      });
+    };
+    await expect(f.engine.start(f.row, current)).rejects.toThrow('revoked after preparation await');
+    expect(f.command.run).not.toHaveBeenCalledWith(['container', 'start', dest]);
+  });
+
   it('tightens only the NEW worker no-new-privileges setting and preserves exact seccomp and source', async () => {
     const f = fixture();
     const seccomp = 'seccomp={"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}';
