@@ -15,6 +15,7 @@ export const CANARY_SID = '22222222-2222-4222-8222-222222222222';
 export const CANARY_EID = '11111111-1111-4111-8111-111111111111';
 export const CANARY_OPERATION = '85c5b805-0b16-46e7-8fee-8870c9e39fcc';
 export const CANARY_THREAD = '44444444-4444-4444-8444-444444444444';
+const CANARY_MAX_MODULES = 20;
 const stamp = (value) =>
   [value.dev, value.ino, value.uid, value.gid, value.mode, value.nlink, value.size, value.mtimeMs, value.ctimeMs].join(
     ':'
@@ -76,7 +77,7 @@ export function verifyCanaryModuleMounts(control, proof) {
   let modules = [];
   if (proof.overlay) modules = [{ ...proof.overlay, generatedFile: proof.overlay.source }];
   if (proof.modules) {
-    assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= 16);
+    assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= CANARY_MAX_MODULES);
     modules = proof.modules;
   }
   const actual = control.Mounts.filter((m) =>
@@ -133,7 +134,7 @@ export async function verifyCanaryServedGui(page, canary) {
   const url = matches[0];
   assert(url.origin === canary.endpoint.origin && !url.hash, 'Same-origin app script required');
   const modules = canary.proof.modules;
-  assert(Array.isArray(modules) && modules.length <= 16);
+  assert(Array.isArray(modules) && modules.length <= CANARY_MAX_MODULES);
   const selected = modules.filter(
     (module) =>
       module.source === 'apps/web/src/web/public/app.js' &&

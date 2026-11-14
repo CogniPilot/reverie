@@ -100,6 +100,19 @@ it('checks decoded actual HTTP bytes against raw plus both exact compressed over
   });
   expect(request).toHaveBeenCalledOnce();
 });
+it('verifies the served app with the complete seventeen-module startup recovery census', async () => {
+  const f = gui();
+  for (let index = 3; index < 17; index++)
+    f.modules.push({
+      ...f.modules[0],
+      source: 'apps/web/src/fixture-' + index + '.ts',
+      target: '/nix/store/controlled-console/lib/reverie/dist/fixture-' + index + '.js',
+    });
+  const request = vi.fn(async () => new Response(f.body));
+  vi.stubGlobal('fetch', request);
+  await expect(verifyCanaryServedGui(f.page, f.canary)).resolves.toMatchObject({ sha256: hash(f.body) });
+  expect(request).toHaveBeenCalledOnce();
+});
 it('accepts the real relative hashed app URL with its exact content cache buster', async () => {
   const f = gui(),
     expected = hash(f.body).slice(0, 16);

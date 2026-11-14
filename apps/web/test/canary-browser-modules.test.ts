@@ -88,8 +88,18 @@ describe('bounded real-browser development module verifier', () => {
       '/nix/store/controlled-console/lib/reverie/src/web/public/other.js';
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
   });
-  it('accepts sixteen exact read-only modules and checks the final module too', () => {
-    const f = fixture(16);
+  it('accepts the seventeen-module runtime and asset census without skipping the added route', () => {
+    const f = fixture(17);
+    const last = f.modules[16];
+    last.source = 'apps/web/src/web/routes/company-routes.ts';
+    last.target = '/nix/store/controlled-console/lib/reverie/dist/web/routes/company-routes.js';
+    f.control.Mounts[16].Destination = last.target;
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();
+    f.control.Mounts[16].RW = true;
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
+  it('accepts twenty exact read-only modules and checks the final module too', () => {
+    const f = fixture(20);
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();
     const last = f.modules.at(-1)!;
     last.inContainerSha = '0'.repeat(64);
@@ -101,8 +111,8 @@ describe('bounded real-browser development module verifier', () => {
     fs.writeFileSync(last.generatedFile, 'changed last actual module');
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
   });
-  it('refuses seventeen otherwise exact read-only modules', () => {
-    const f = fixture(17);
+  it('refuses twenty-one otherwise exact read-only modules', () => {
+    const f = fixture(21);
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
   });
   it('checks all three actual file hashes and exact readonly mappings', () => {
