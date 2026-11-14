@@ -24,7 +24,6 @@ reverie-workspaces = "reverie.workspaces:main"
 reverie-credentials = "reverie.github_credentials:main"
 reverie-opencode = "reverie.opencode:main"
 reverie-chat = "reverie.chat:main"
-reverie-gpu-publisher = "reverie.gpu_publisher:main"
 reverie-sleep = "reverie.sleep:main"
 reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
 

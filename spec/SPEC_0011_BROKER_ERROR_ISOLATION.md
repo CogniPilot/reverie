@@ -4,6 +4,9 @@
 
 DRAFT
 
+Historical native-broker design context. This draft grants no authority to install
+or recreate a host broker; current deployment follows the Docker runtime boundary.
+
 ## Summary
 
 Keep ordinary request failures local, retain every uncertain original owner, and

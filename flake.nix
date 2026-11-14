@@ -14,11 +14,8 @@
         let
           pkgs = pkgsFor system;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
-          nativeWorkerPackages = import ./nix/native-worker-packages.nix {
+          workerImageArtifacts = import ./nix/worker-image-artifacts.nix {
             inherit pkgs; src = source; inherit (packages) console;
-          };
-          terminalPackages = import ./nix/owner-terminal-packages.nix {
-            inherit pkgs packages; src = source;
           };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
@@ -38,25 +35,7 @@
             runtimeInputs = [ pkgs.nodejs_22 pkgs.nix pkgs.docker-client pkgs.jq pkgs.curl pkgs.coreutils (pkgs.lib.getBin pkgs.util-linux) ];
             text = pkgs.lib.removePrefix "#!/usr/bin/env bash\n" (builtins.readFile ./scripts/reverie-update);
           };
-          gpuPublisher = pkgs.writeShellApplication {
-            name = "reverie-gpu-publisher";
-            runtimeInputs = [ pkgs.nodejs_22 ];
-            text = ''exec node --experimental-strip-types ${source}/apps/host/gpu-publisher.ts "$@"'';
-          };
-          localModelProgram = import ./nix/local-model.nix { inherit pkgs; src = source; };
-          localModel = pkgs.writeShellApplication {
-            name = "reverie-local-model";
-            runtimeInputs = [ pkgs.nix pkgs.coreutils pkgs.docker-client pkgs.systemd ];
-            text = ''
-              export REVERIE_MODEL_NIXPKGS=${llama-nixpkgs}
-              export REVERIE_MODEL_BUILD_EXPR=${source}/nix/local-model-runtime.nix
-              export REVERIE_MODEL_SYSTEM=${system}
-              REVERIE_MODEL_LAUNCHER="$(readlink -f "$0")"
-              export REVERIE_MODEL_LAUNCHER
-              exec ${localModelProgram}/bin/reverie-local-model "$@"
-            '';
-          };
-        in packages // nativeWorkerPackages // {
+        in packages // workerImageArtifacts // {
           default = packages.reverie;
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
@@ -90,11 +69,9 @@
             peerArtifact = self.packages.${system}.leasePeer;
           };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
-          opsCore = import ./nix/ops-core.nix { inherit pkgs; src = source; };
           adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
-          inherit (terminalPackages) ownerTerminalCore ownerTerminalHost ownerTerminalWebsiteManifest
-            ownerTerminalImageProvenance ownerTerminalImage humanTerminalToolkit
-            ownerTerminalLifecycle ownerTerminalWebsiteSetup;
+          ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
+          humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
           codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
           codexObserverVendor = self.packages.${system}.codexObserver.cargoDeps;
@@ -112,7 +89,7 @@
               modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
             };
           };
-          inherit container-memory start update gpuPublisher localModel;
+          inherit container-memory start update;
           containerRuntime = import ./nix/container-runtime.nix { inherit pkgs; src = source; };
           launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = source; };
           dockerImage = import ./nix/image.nix {
@@ -129,7 +106,6 @@
           workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
           workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
-          workerGpuSupport = import ./nix/worker-gpu-support.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
           browserJobRuntime = import ./nix/browser-job-runtime.nix { inherit pkgs; src = source; };
           workerBrowserImage = import ./nix/image.nix {
@@ -138,45 +114,6 @@
             inherit (packages) reverie console memory runtime;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
-          };
-          employeeLaptopMigrate = pkgs.writeShellApplication {
-            name = "reverie-employee-laptop-migrate";
-            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
-            text = ''
-              export PYTHONPATH=${source}/python
-              exec python3 -m reverie.employee_laptop_migrate "$@"
-            '';
-          };
-          previewProxy = pkgs.writeShellApplication {
-            name = "reverie-preview-proxy";
-            runtimeInputs = [ (pkgs.python3.withPackages (ps: [ ps.aiohttp ])) pkgs.docker-client ];
-            text = ''exec python3 ${source}/python/reverie/preview.py "$@"'';
-          };
-          previewService = pkgs.writeTextDir "share/systemd/user/reverie-preview-proxy.service" ''
-            [Unit]
-            Description=Reverie isolated HTTPS laptop previews
-            [Service]
-            EnvironmentFile=%h/.config/reverie/preview-proxy.env
-            ExecStart=${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy --config ''${REVERIE_PREVIEW_CONFIG}
-            Restart=on-failure
-            RestartSec=5
-            UMask=0077
-            NoNewPrivileges=true
-            MemoryMax=256M
-            TasksMax=32
-            LimitNOFILE=256
-            CPUWeight=50
-            TimeoutStopSec=10
-            [Install]
-            WantedBy=default.target
-          '';
-          workerNixMigrate = pkgs.writeShellApplication {
-            name = "reverie-nix-store-migrate";
-            runtimeInputs = [ pkgs.python3 pkgs.docker-client pkgs.coreutils ];
-            text = ''
-              export PYTHONPATH=${source}/python
-              exec python3 -m reverie.worker_nix_migrate "$@"
-            '';
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
@@ -201,79 +138,6 @@
             console = self.packages.${system}.resourceNativeQFixtureConsole;
             clientManifest = packages.workerResourceClientManifest;
           };
-          resourceTerminalHost = import ./nix/owner-terminal-host.nix {
-            inherit pkgs; src = source;
-            inherit (packages) console memory memoryPackage entrypoint;
-            resourceReplacement = true;
-          };
-          resourceTerminalWebsiteManifest = self.packages.${system}.resourceTerminalHost.websiteManifest;
-          resourceTerminalImage = import ./nix/image.nix {
-            inherit pkgs; src = source;
-            inherit (packages) reverie console memory runtime;
-            ownerTerminalWebsite = self.packages.${system}.resourceTerminalHost.website;
-          };
-          resourceTerminalImageProvenance = import ./nix/website-image-provenance.nix {
-            inherit pkgs; src = source;
-            image = self.packages.${system}.resourceTerminalImage;
-            console = packages.console;
-            clientManifest = packages.workerResourceClientManifest;
-            startupManifest = self.packages.${system}.resourceTerminalWebsiteManifest;
-          };
-          resourceTerminalLifecycle = import ./nix/owner-terminal-lifecycle.nix {
-            inherit pkgs; src = source; memory = packages.memory;
-            profile = "resource-terminal";
-            websiteManifest = self.packages.${system}.resourceTerminalWebsiteManifest;
-            imageProvenance = self.packages.${system}.resourceTerminalImageProvenance;
-            toolkit = self.packages.${system}.humanTerminalToolkit;
-          };
-          resourceActorBootstrap = pkgs.writeShellApplication {
-            name = "reverie-resource-actor-enable";
-            text = ''
-              case "''${1-}" in
-                prepare) action=prepare-resource-actor-enable ;;
-                apply) action=apply-resource-actor-enable ;;
-                *) echo "Use prepare or apply with the private operation arguments" >&2; exit 2 ;;
-              esac
-              shift
-              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service "$action" "$@"
-            '';
-          };
-          resourceActorInstaller = pkgs.writeShellApplication {
-            name = "reverie-resource-actor-install";
-            text = ''
-              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service install \
-                --resource-actor-provenance ${self.packages.${system}.resourceActorImageProvenance}/share/reverie/website-image.json "$@"
-            '';
-          };
-          resourceActorRefresh = pkgs.writeShellApplication {
-            name = "reverie-resource-actor-refresh";
-            text = ''
-              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service refresh-resource-actor \
-                --resource-actor-provenance ${self.packages.${system}.resourceActorImageProvenance}/share/reverie/website-image.json "$@"
-            '';
-          };
-          resourceTerminalInstaller = pkgs.writeShellApplication {
-            name = "reverie-resource-terminal-install";
-            text = ''
-              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service install \
-                --resource-actor-provenance ${self.packages.${system}.resourceTerminalImageProvenance}/share/reverie/website-image.json "$@"
-            '';
-          };
-          resourceTerminalRefresh = pkgs.writeShellApplication {
-            name = "reverie-resource-terminal-refresh";
-            text = ''
-              exec ${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service refresh-resource-actor \
-                --resource-actor-provenance ${self.packages.${system}.resourceTerminalImageProvenance}/share/reverie/website-image.json "$@"
-            '';
-          };
-          isolate = pkgs.writeShellApplication {
-            name = "reverie-isolate";
-            runtimeInputs = [ pkgs.python3 pkgs.nix pkgs.docker-client pkgs.systemd pkgs.gnutar ];
-            text = ''
-              export REVERIE_REPO="''${REVERIE_REPO:-${source}}"
-              exec python3 ${source}/apps/host/isolate.py "$@"
-            '';
-          };
         };
     in {
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
@@ -282,17 +146,15 @@
           pkgs = pkgsFor system;
           src = source;
           inherit baseImage baseConfig;
-          inherit (self.packages.${system}) containerRuntime gpuPublisher;
+          inherit (self.packages.${system}) containerRuntime;
+          gpuTelemetry = import ./nix/container-gpu-telemetry.nix {
+            pkgs = pkgsFor system; src = source;
+          };
           inferenceRuntime = import ./nix/local-model-runtime.nix {
             nixpkgs = toString llama-nixpkgs;
             inherit system capability;
           };
         };
-      nixosModules.workerIsolation = { config, lib, pkgs, ... }: import ./nix/worker-isolation.nix {
-        inherit config lib pkgs;
-        brokerPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.workerBroker;
-        softLimitHelperPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.softLimitHelper;
-      };
       nixosModules.reveriePrune = { config, lib, pkgs, ... }: {
         imports = [
           (import ./nix/prune-service.nix {
@@ -316,13 +178,6 @@
         observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
       };
       packages = forAllSystems packagesFor;
-      lib.nativeWorkerPackages = import ./nix/native-worker-packages.nix;
-      lib.ownerTerminalPackages = { system, serviceAuthConfig ? null }:
-        let pkgs = pkgsFor system;
-        in import ./nix/owner-terminal-packages.nix {
-          inherit pkgs serviceAuthConfig; src = source;
-          packages = import ./nix/package.nix { inherit pkgs; src = source; };
-        };
       lib.workerRuntimePackages = { system, runtimeSource ? source, runtimePkgs ? pkgsFor system, runChecks ? true }:
         import ./nix/worker-runtime-packages.nix {
           pkgs = runtimePkgs; src = runtimeSource; artifactSource = source; inherit runChecks;
@@ -357,45 +212,41 @@
         prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
         prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
         lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
-        worker-service = { type = "app"; program = "${self.packages.${system}.workerServiceSetup}/bin/reverie-worker-service"; meta.description = "Install/control the existing owner user laptop broker without host OS configuration"; };
-        worker-resume = { type = "app"; program = "${self.packages.${system}.workerResumeClient}/bin/reverie-worker-resume"; meta.description = "Preview and consume a fixed host-owner batch through normal saved employee recovery"; };
-        worker-task-perf = { type = "app"; program = "${self.packages.${system}.workerTaskPerfClient}/bin/reverie-worker-task-perf"; meta.description = "Queue, preview and explicitly apply a fixed stopped-employee task perf policy"; };
-        resource-actor-enable = { type = "app"; program = "${self.packages.${system}.resourceActorBootstrap}/bin/reverie-resource-actor-enable"; meta.description = "Explicit pristine existing-domain actor-key enablement; no installation or service start"; };
-        resource-actor-install = { type = "app"; program = "${self.packages.${system}.resourceActorInstaller}/bin/reverie-resource-actor-install"; meta.description = "Explicit inactive resource-actor installation using the matching immutable website image"; };
-        resource-actor-refresh = { type = "app"; program = "${self.packages.${system}.resourceActorRefresh}/bin/reverie-resource-actor-refresh"; meta.description = "Explicit facts rebind for a registered running broker, without employee restart or owner approval"; };
-        resource-terminal-install = { type = "app"; program = "${self.packages.${system}.resourceTerminalInstaller}/bin/reverie-resource-terminal-install"; meta.description = "Explicit resource actor installation for the matching protected terminal website"; };
-        resource-terminal-refresh = { type = "app"; program = "${self.packages.${system}.resourceTerminalRefresh}/bin/reverie-resource-terminal-refresh"; meta.description = "Rebind resource facts after a coordinated protected terminal website replacement"; };
-        owner-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.ownerTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the fixed protected terminal website lifecycle using private owner installation data"; };
-        owner-terminal-website = { type = "app"; program = "${self.packages.${system}.ownerTerminalWebsiteSetup}/bin/reverie-owner-terminal-website"; meta.description = "Prepare and apply the first protected laptop-terminal website using fixed native owner tools"; };
-        resource-terminal-lifecycle = { type = "app"; program = "${self.packages.${system}.resourceTerminalLifecycle}/bin/reverie-owner-terminal-lifecycle"; meta.description = "Coordinate the matching protected resource and terminal website lifecycle"; };
-        worker-gpu = { type = "app"; program = "${self.packages.${system}.workerGpuSupport}/bin/reverie-worker-gpu"; meta.description = "Read-only selected employee GPU/CDI/image preflight; no setup or laptop effects"; };
-        ops-service = { type = "app"; program = "${self.packages.${system}.opsCore}/bin/reverie-ops-service"; meta.description = "Install/control the private authenticated OPS executor; no grants or automatic effects"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
         container-memory = { type = "app"; program = "${self.packages.${system}.container-memory}/bin/container-memory"; meta.description = "Manage Reverie container memory"; };
         start = { type = "app"; program = "${self.packages.${system}.start}/bin/reverie-start"; meta.description = "Start the Nix-built Docker image with optional --scratch DIR; --force recreates a stopped ordinary website container"; };
         update = { type = "app"; program = "${self.packages.${system}.update}/bin/reverie-update"; meta.description = "Rebuild and replace an existing Docker deployment"; };
         kokoro = { type = "app"; program = "${self.packages.${system}.kokoro}/bin/reverie-kokoro"; meta.description = "Local Kokoro speech service with persistent models"; };
-        local-model = { type = "app"; program = "${self.packages.${system}.localModel}/bin/reverie-local-model"; meta.description = "Run GGUF models on a host NVIDIA GPU or CPU"; };
-        isolate = { type = "app"; program = "${self.packages.${system}.isolate}/bin/reverie-isolate"; meta.description = "Prepare and activate host-managed agent containers"; };
         collect = { type = "app"; program = "${self.packages.${system}.cleanupObservations}/bin/reverie-observations"; meta.description = "Explicit opt-in user resource observations; no cleanup authority"; };
-        preview-proxy = { type = "app"; program = "${self.packages.${system}.previewProxy}/bin/reverie-preview-proxy"; meta.description = "Serve isolated HTTPS previews of opted-in laptop ports"; };
-        worker-nix-migrate = { type = "app"; program = "${self.packages.${system}.workerNixMigrate}/bin/reverie-nix-store-migrate"; meta.description = "Inventory and explicitly migrate one stopped laptop Nix store"; };
-        employee-laptop-migrate = { type = "app"; program = "${self.packages.${system}.employeeLaptopMigrate}/bin/reverie-employee-laptop-migrate"; meta.description = "Publish stopped paired home and Nix data by permanent employee identity"; };
       });
       checks = forAllSystems (system:
         let
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update gpuPublisher previewProxy previewService prune pruneR12 cleanupObservations ownerTerminalCore;
+          inherit (packages) reverie memoryPackage start update prune pruneR12 cleanupObservations ownerTerminalCore;
+          # Legacy attach transport remains a component-only CI fixture.
+          # It is not an installable public package, app or host module.
+          nativeViewerFixtureImage = import ./nix/worker-viewer-image.nix {
+            inherit pkgs;
+            broker = import ./nix/native-worker-broker.nix { inherit pkgs; src = source; };
+          };
+          boxedRuntimeBoundary = let
+            actual = {
+              packages = builtins.attrNames self.packages.${system};
+              apps = builtins.attrNames self.apps.${system};
+              nixosModules = builtins.attrNames self.nixosModules;
+              lib = builtins.attrNames self.lib;
+            };
+            checked = import ./nix/boxed-runtime-boundary.nix { inherit actual; source = ./.; };
+            mutations = import ./tests/boxed_runtime_boundary_eval.nix;
+          in assert checked.passed; pkgs.writeText "reverie-boxed-runtime-boundary.json"
+            (builtins.toJSON { inherit (checked) checks; inherit mutations; });
+
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
           workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
-          nativeWorkerBrokerStoreInputs = pkgs.writeText "reverie-native-broker-store-inputs.json"
-            (builtins.toJSON (import ./tests/native_worker_broker_store_inputs_eval.nix {
-              inherit pkgs; src = source;
-            }));
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
@@ -414,23 +265,7 @@
             mkdir -p "$out"
             printf '%s\n' "$checks" > "$out/checks.json"
           '';
-          softLimitHelperService = let
-            evaluated = import ./tests/soft_limit_helper_eval.nix {
-              inherit nixpkgs system;
-              brokerPackage = packages.workerBroker;
-              softLimitHelperPackage = packages.softLimitHelper;
-            };
-          in pkgs.runCommand "reverie-soft-limit-helper-evaluation" {
-            checks = builtins.toJSON evaluated.checks;
-          } ''
-            mkdir -p "$out"
-            printf '%s\n' "$checks" > "$out/checks.json"
-          '';
           # Builds the helper and imports it from its immutable source; usage only, no socket or cgroup.
-          softLimitHelperPackage = pkgs.runCommand "reverie-soft-limit-helper-package" { } ''
-            ${packages.softLimitHelper}/bin/reverie-soft-limit-helper --help > "$out"
-            grep -q -- '--broker-uid' "$out"
-          '';
           pruneService = let
             evaluated = import ./tests/prune_service_eval.nix {
               inherit nixpkgs system;

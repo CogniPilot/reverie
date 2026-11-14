@@ -31,8 +31,10 @@ For private registry access, custom host mounts or an existing deployment, see t
 
 For NVIDIA inference and telemetry inside the container, see the
 [self-contained GPU deployment](docs/container-gpu.md).
-Existing isolated-worker deployments can use a separate persistent terminal
-viewer service. See [viewer configuration](docs/runtime-configuration.md#isolated-worker-terminal-viewers).
+Employee continuation and terminals belong to the Docker-contained office API.
+Do not install a separate host broker or persistent terminal viewer. Historical
+isolated-worker instructions do not authorize recreating the retired host stack.
+See [Docker runtime boundaries](docs/host-runtime-retirement.md).
 
 ## Automatic startup
 

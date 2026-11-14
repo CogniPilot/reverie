@@ -1,3 +1,6 @@
+> Historical host-service and native-broker migration reference. These commands
+> are not current Docker installation instructions. See [runtime boundaries](host-runtime-retirement.md).
+
 # Reverie service setup
 
 Choose one website deployment. Native `reverie service` manages the existing

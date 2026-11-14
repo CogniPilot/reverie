@@ -23,6 +23,10 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - name: Enforce retired host-launch boundaries without building images
+        run: |
+          nix eval --raw .#checks.x86_64-linux.boxedRuntimeBoundary.drvPath
+          nix eval --raw .#checks.aarch64-linux.boxedRuntimeBoundary.drvPath
       - name: Prepare exact owned user-namespace test prerequisite
         env:
           REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}

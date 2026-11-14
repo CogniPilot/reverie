@@ -291,12 +291,12 @@ jobs:
             --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
-      - name: Qualify the actual packaged native viewer without restarting a provider
+      - name: Qualify the legacy attach-only component fixture without a public launcher
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
         run: |
           set -euo pipefail
-          nix build .#nativeWorkerViewerImage --out-link "$RUNNER_TEMP/native-viewer-image" --print-build-logs
+          nix build .#checks.x86_64-linux.nativeViewerFixtureImage --out-link "$RUNNER_TEMP/native-viewer-image" --print-build-logs
           docker load --input "$RUNNER_TEMP/native-viewer-image"
           viewer_image=$(docker image inspect --format '{{.Id}}' reverie-worker-viewer:native-v1)
           # The test rejects mutable tags and verifies both loaded image IDs.

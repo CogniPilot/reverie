@@ -1,5 +1,5 @@
 #!/usr/bin/env -S node --experimental-strip-types
-/** Host display telemetry only. No device access or driver files enter the image. */
+/** Container display telemetry for the selected GPU; no host service is installed. */
 import { constants } from 'node:fs';
 import { access, mkdir, open, rename, unlink, lstat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';

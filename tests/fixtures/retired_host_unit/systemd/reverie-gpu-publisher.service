@@ -1,0 +1,3 @@
+# Inert negative DATA for the retirement policy. Never installed or run.
+[Service]
+ExecStart=/unavailable/retired-fixture

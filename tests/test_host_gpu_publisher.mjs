@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-const publisher = resolve(import.meta.dirname, '../apps/host/gpu-publisher.ts');
+const publisher = resolve(import.meta.dirname, '../apps/container/gpu-telemetry.ts');
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'reverie-gpu-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

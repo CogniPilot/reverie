@@ -3,9 +3,12 @@
 Read README.md. Use the self-contained native flake environment with
 `nix develop` for development. The optional isolated development container is
 available through `./scripts/reverie-container exec COMMAND ...`; Podman is not
-required for the native runtime. Bootstrap/engine control and private migration
-brokers run on the host. Never mount personal instance data into a development
-or shared container.
+required for the native runtime. The shipped office and employee runtime run inside Docker. Do not install
+Reverie brokers, model launchers, GPU publishers, terminal viewers or application
+systemd services on the host. Docker and the host NVIDIA driver/Container Toolkit
+are platform prerequisites, not Reverie application services. Build-time Nix and
+container-internal helpers remain supported. Never mount personal instance data
+into a development or shared container.
 
 Read the [specification index](spec/README.md) and the owning specs for the
 component being changed. DRY and valid-by-construction boundaries are explicit

@@ -1,3 +1,7 @@
+> Current deployments use the Docker-contained runtime described in the
+> [README](../README.md) and [runtime boundaries](host-runtime-retirement.md).
+> Host broker/model/viewer service commands below are historical migration records.
+
 # Reverie manual
 
 Operator and contributor reference for published images and source development. Start with the
