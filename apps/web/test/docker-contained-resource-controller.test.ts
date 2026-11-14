@@ -8,8 +8,15 @@ import { retainedDockerPoolTasks } from '../src/docker-shared-pool-lineage.js';
 import { DockerEmployeeContinuationRecord as ContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import type { DockerContinuationTaskRole } from '../src/docker-continuation-task.js';
 import { fixture, helper, policy, deployment, writer } from './helpers/docker-resource-physical.js';
-import { DockerResourceRevisionStore, dockerRevisedPolicy, type DockerResourceDesiredRevision } from '../src/docker-resource-revisions.js';
-import { requireDockerEffectiveResourceProof, dockerOtherResourceLimitsMatch } from '../src/docker-contained-resource-controller.js';
+import {
+  DockerResourceRevisionStore,
+  dockerRevisedPolicy,
+  type DockerResourceDesiredRevision,
+} from '../src/docker-resource-revisions.js';
+import {
+  requireDockerEffectiveResourceProof,
+  dockerOtherResourceLimitsMatch,
+} from '../src/docker-contained-resource-controller.js';
 
 describe('fixed Docker resource orchestration', () => {
   it('a real canonical owner-row archival/reload leaves the native pool proof available to another employee', async () => {

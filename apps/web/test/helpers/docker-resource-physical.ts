@@ -32,7 +32,8 @@ export const policy = {
 };
 export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisionStore, writeImage?: string) {
   let retained: DockerContinuationTask[] = [];
-  let parentInode = '2', anchorBirth = '10';
+  let parentInode = '2',
+    anchorBirth = '10';
   const parent = `/reverie.slice/reverie-box.slice/reverie-box-${boxId}.slice`;
   let row = {
     employeeId: '11111111-1111-4111-8111-111111111111',
@@ -355,7 +356,12 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       beforeRun = run;
     },
     controllerWith: (retained: () => readonly DockerContinuationTask[]) =>
-      new DockerContainedResources(command, journal, { ...configuration, retainedPoolConfigurationTasks: retained }, revisions),
+      new DockerContainedResources(
+        command,
+        journal,
+        { ...configuration, retainedPoolConfigurationTasks: retained },
+        revisions
+      ),
     driftEpoch: () => {
       parentInode = '999';
       anchorBirth = '999';

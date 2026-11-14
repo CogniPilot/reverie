@@ -929,12 +929,15 @@ describe('in-place Docker existing-view renewal', () => {
       InfraPort);
     return { ...f, employee, companyFile, sessions, runtime, captured, attach };
   }
-  it('actual Runtime.wake renews a revoked same-provider view after unrelated wake bookkeeping without another attach', async () => {
+  it('actual Runtime.wake renews a revoked same-provider view after caller lease completion without another attach', async () => {
     const f = await runtimeFixture();
+    let allowed = true;
     await f.companyFile.update((state) => {
       state.employees[0]!.wakeAttempts = [Date.now()];
     });
-    await expect(f.runtime.wake(f.employee, () => true)).resolves.toBe(true);
+    await expect(f.runtime.wake(f.employee, () => allowed)).resolves.toBe(true);
+    // Finishing the one-shot office request must not revoke the published viewer.
+    allowed = false;
     expect(f.captured).toHaveBeenCalledOnce();
     expect(f.attach).not.toHaveBeenCalled();
     expect(f.sessions.get(sid)).toBe(f.session);
@@ -946,6 +949,23 @@ describe('in-place Docker existing-view renewal', () => {
     expect(native.writes).toHaveLength(f.before.writes);
     expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
     expect(() => DockerEmployeeProviderView.prototype.require.call(f.old, sid, f.docker)).toThrow();
+  });
+  it('a lease failure after renewing the candidate poisons that new viewer permanently', async () => {
+    const f = await runtimeFixture();
+    let allowed = true;
+    const renew = Session.prototype.renewDockerContinuationView;
+    vi.spyOn(Session.prototype, 'renewDockerContinuationView').mockImplementation(function (this: Session, ...args) {
+      renew.apply(this, args);
+      allowed = false;
+    });
+    await expect(f.runtime.wake(f.employee, () => allowed)).rejects.toThrow();
+    allowed = true;
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    expect(f.session.providerDispatchHeld).toBe(true);
+    expect(f.session.pid).toBe(f.before.pid);
+    expect(native.ptys).toHaveLength(f.before.ptys);
+    expect(native.writes).toHaveLength(f.before.writes);
+    expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
   });
   it.each(['account', 'mode', 'grant', 'session-replaced'] as const)(
     'actual Runtime.wake refuses %s drift during fresh capture',
