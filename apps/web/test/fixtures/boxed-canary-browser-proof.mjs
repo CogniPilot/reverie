@@ -6,6 +6,7 @@ import { URL } from 'node:url';
 import fs from 'node:fs/promises';
 import { constants, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { loadCanaryFixtureContract } from './boxed-canary-fixture-contract.mjs';
@@ -96,6 +97,80 @@ export function verifyCanaryModuleMounts(control, proof) {
     assert(bytes.length <= 1024 * 1024 && createHash('sha256').update(bytes).digest('hex') === module.sha256);
   }
 }
+/** Ordinary fixture navigation; never opens a global API or creates a room. */
+export async function selectCanaryDebugChannel(page) {
+  const company = page.getByRole('navigation', { name: 'Workspaces', exact: true }).locator('[data-key="ws:"]');
+  assert((await company.count()) === 1, 'Exactly one default company workspace required');
+  await company.click({ timeout: 10000 });
+  const room = page.getByRole('button', { name: /^Channel Boxed terminal canary(?:,.*)?$/ });
+  assert((await room.count()) === 1, 'Exactly one prepared fixture channel required');
+  await room.click({ timeout: 10000 });
+}
+async function readCanaryBody(response, maximum) {
+  const reader = response.body.getReader(),
+    chunks = [];
+  let size = 0;
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    size += next.value.byteLength;
+    if (size > maximum) {
+      await reader.cancel();
+      throw Error('Canary response bound exceeded');
+    }
+    chunks.push(next.value);
+  }
+  return Buffer.concat(chunks);
+}
+/** Actual decoded HTTP bytes must match the fixture's mounted source and both compressed forms. */
+export async function verifyCanaryServedGui(page, canary) {
+  const sources = await page
+    .locator('script[src]')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src')));
+  const scripts = sources.map((source) => new URL(source, canary.endpoint));
+  const matches = scripts.filter((url) => /^\/app\.[a-f0-9]{8,64}\.js$/.test(url.pathname));
+  assert(matches.length === 1, 'Exactly one hashed app script required');
+  const url = matches[0];
+  assert(url.origin === canary.endpoint.origin && !url.search && !url.hash, 'Same-origin app script required');
+  const modules = canary.proof.modules;
+  assert(Array.isArray(modules) && modules.length <= 16);
+  const selected = modules.filter(
+    (module) =>
+      module.source === 'apps/web/src/web/public/app.js' &&
+      module.target.endsWith('/lib/reverie/dist/web/public' + url.pathname)
+  );
+  assert(selected.length === 1, 'Actual served app overlay descriptor required');
+  const app = selected[0],
+    maximum = 1024 * 1024;
+  const bytes = (module) => {
+    assert(module.readOnly === true && /^[a-f0-9]{64}$/.test(module.sha256) && module.inContainerSha === module.sha256);
+    const raw = readFileSync(module.generatedFile);
+    assert(raw.length <= maximum && createHash('sha256').update(raw).digest('hex') === module.sha256);
+    return raw;
+  };
+  const expected = bytes(app);
+  for (const [suffix, decompress] of [
+    ['.br', brotliDecompressSync],
+    ['.gz', gunzipSync],
+  ]) {
+    const compressed = modules.filter((module) => module.target === app.target + suffix);
+    assert(compressed.length === 1, 'Both exact compressed app overlays required');
+    const decoded = decompress(bytes(compressed[0]), { maxOutputLength: maximum });
+    assert(decoded.equals(expected), 'Compressed app differs from source');
+  }
+  const response = await globalThis.fetch(url, {
+    headers: { cookie: canary.cookie, 'accept-encoding': 'br, gzip, deflate' },
+    redirect: 'manual',
+    signal: globalThis.AbortSignal.timeout(10000),
+  });
+  assert(response.status === 200, 'Actual app response refused');
+  const body = await readCanaryBody(response, maximum);
+  assert(
+    createHash('sha256').update(body).digest('hex') === app.sha256,
+    'Actual served app bytes differ from mounted source'
+  );
+  return { path: url.pathname, sha256: app.sha256, encoding: response.headers.get('content-encoding') || 'identity' };
+}
 export async function canaryGet(canary, path) {
   assert(path.startsWith('/api/') && !path.includes('://'));
   const response = await globalThis.fetch(new URL(path, canary.endpoint), {
@@ -104,20 +179,7 @@ export async function canaryGet(canary, path) {
     signal: globalThis.AbortSignal.timeout(10000),
   });
   assert(response.status === 200);
-  const reader = response.body.getReader(),
-    chunks = [];
-  let size = 0;
-  for (;;) {
-    const next = await reader.read();
-    if (next.done) break;
-    size += next.value.byteLength;
-    if (size > 65536) {
-      await reader.cancel();
-      throw Error('Canary response bound exceeded');
-    }
-    chunks.push(next.value);
-  }
-  const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  const result = JSON.parse((await readCanaryBody(response, 65536)).toString('utf8'));
   assert(result.success === true);
   return result.data;
 }

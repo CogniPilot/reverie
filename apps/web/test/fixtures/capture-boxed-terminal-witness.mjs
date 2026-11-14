@@ -15,6 +15,8 @@ import {
   inspectCanaryContainer,
   readPrivateCanaryJson,
   canaryGet,
+  selectCanaryDebugChannel,
+  verifyCanaryServedGui,
 } from './boxed-canary-browser-proof.mjs';
 
 const [proofFile, sourceProofFile, output, sessionName = 'owner-session-after-control1.json', contractFile] =
@@ -45,7 +47,7 @@ const report = {
   network: [],
   pageErrors: [],
   limitations: [
-    'Fake external provider and self-image6d only; no real Claude/production readiness claim.',
+    'Fake external provider with the fixture image only; no real Claude/production readiness claim.',
     'Ready is required from the actual API and fresh Engine facts; no mock transport or synthetic ready response.',
     'Runtime integration only; final baked Console image qualification remains a separate mandatory gate.',
   ],
@@ -175,6 +177,8 @@ try {
     await onboarding.getByRole('button', { name: 'Cancel', exact: true }).click();
     await onboarding.waitFor({ state: 'hidden' });
   }
+  report.gui = await verifyCanaryServedGui(page, canary);
+  await selectCanaryDebugChannel(page);
   const member = page.locator('[data-key="member:' + fixture.sessionId + '"]');
   if (!(await member.isVisible())) {
     const toggle = page.locator('[aria-controls="ca-members-list"]');
