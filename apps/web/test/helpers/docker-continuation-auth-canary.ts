@@ -1,6 +1,6 @@
 /** Disposable canary only: real owner API, no cookie construction, Engine or continuation dispatch. */
 import { randomBytes } from 'node:crypto';
-import { constants, promises as fs } from 'node:fs';
+import { constants, promises as fs, type Stats } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const CANARY_EMPLOYEE = '11111111-1111-4111-8111-111111111111';
@@ -110,11 +110,20 @@ async function authenticate(
   const password = randomBytes(32).toString('base64url');
   await privateRecord(directory, 'owner-enrollment-intent.json', { username, password });
   await success(await request('/api/owner/setup', 'POST', { username, password, confirmation: password }));
+  return signIn(request, directory, username, password, 'owner-session.json');
+}
+async function signIn(
+  request: ReturnType<typeof client>,
+  directory: string,
+  username: string,
+  password: string,
+  sessionName: string
+): Promise<{ cookie: string; sessionFile: string }> {
   const login = await request('/api/owner/login', 'POST', { username, password });
   const cookie = ownerCookie(login);
   const result = await success(login);
   if (result.next !== 'done') throw Error('Canary owner login is not complete');
-  const sessionFile = await privateRecord(directory, 'owner-session.json', { cookie });
+  const sessionFile = await privateRecord(directory, sessionName, { cookie });
   const current = await success(await request('/api/owner/status', 'GET', undefined, { cookie }));
   if (current.configured !== true || current.signedIn !== true || current.policy !== 'enforce')
     throw Error('Actual owner session currentness refused');
@@ -177,5 +186,102 @@ export async function enrollDockerCanaryOwner(endpoint: string, directory: strin
     limitation: 'Synthetic owner/Company fixture only; no provider, Engine or production readiness claim.',
   };
   await privateRecord(directory, 'owner-http-report.json', report);
+  return { report, ownerSessionFile: owner.sessionFile };
+}
+
+function credentialStamp(value: Stats): string {
+  return [
+    value.dev,
+    value.ino,
+    value.uid,
+    value.gid,
+    value.mode,
+    value.nlink,
+    value.size,
+    value.mtimeMs,
+    value.ctimeMs,
+  ].join(':');
+}
+async function savedEnrollment(directory: string): Promise<{ username: string; password: string }> {
+  const path = join(directory, 'owner-enrollment-intent.json');
+  const file = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let failure: unknown, value: { username: string; password: string } | undefined;
+  try {
+    const before = await file.stat();
+    if (
+      !before.isFile() ||
+      before.uid !== process.getuid?.() ||
+      (before.mode & 0o777) !== 0o600 ||
+      before.nlink !== 1 ||
+      before.size < 1 ||
+      before.size > 4096 ||
+      credentialStamp(before) !== credentialStamp(await fs.lstat(path))
+    )
+      throw Error('Saved synthetic credential custody refused');
+    const bytes = Buffer.alloc(4097);
+    let count = 0;
+    for (;;) {
+      const read = await file.read(bytes, count, bytes.length - count, count);
+      count += read.bytesRead;
+      if (!read.bytesRead || count === bytes.length) break;
+    }
+    if (
+      count !== before.size ||
+      credentialStamp(before) !== credentialStamp(await file.stat()) ||
+      credentialStamp(before) !== credentialStamp(await fs.lstat(path))
+    )
+      throw Error('Saved synthetic credential changed');
+    const raw = bytes.subarray(0, count).toString('utf8');
+    if (!Buffer.from(raw).equals(bytes.subarray(0, count))) throw Error('Saved credential encoding refused');
+    const decoded = record(JSON.parse(raw));
+    if (
+      Object.keys(decoded).sort().join(',') !== 'password,username' ||
+      decoded.username !== 'canary-owner' ||
+      typeof decoded.password !== 'string' ||
+      !/^[A-Za-z0-9_-]{43}$/.test(decoded.password)
+    )
+      throw Error('Saved synthetic enrollment differs');
+    value = { username: decoded.username, password: decoded.password };
+  } catch (cause) {
+    failure = cause;
+  }
+  try {
+    await file.close();
+  } catch (cause) {
+    failure = failure === undefined ? cause : new AggregateError([failure, cause], 'Saved credential close failed');
+  }
+  if (failure !== undefined) throw failure;
+  if (!value) throw Error('Saved enrollment absent');
+  return value;
+}
+/** Same caller-owned fresh Docker identity proof as enrollment is required.
+ * This issues exactly one login using existing saved synthetic credentials.
+ * It never calls setup, policy selection, observe, continuation or reset. */
+export async function loginDockerCanaryOwner(endpoint: string, directory: string) {
+  const url = target(endpoint);
+  await privateDirectory(directory);
+  const requests: RecordedRequest[] = [];
+  const request = client(url, requests);
+  const status = await success(await request('/api/owner/status'));
+  if (status.configured !== true || status.setupAvailable !== false || status.policy !== 'enforce')
+    throw Error('Existing canary owner account required; no setup/reset attempted');
+  const saved = await savedEnrollment(directory);
+  await privateRecord(directory, 'owner-relogin1-intent.json', { endpoint: url.origin, at: new Date().toISOString() });
+  const owner = await signIn(request, directory, saved.username, saved.password, 'owner-session-after-control1.json');
+  await verifyFixture(request, owner.cookie);
+  await refusalControls(request, owner.cookie);
+  const report = {
+    version: 1,
+    purpose: 'reverie-disposable-owner-login-only-v1',
+    endpoint: url.origin,
+    employeeId: CANARY_EMPLOYEE,
+    sessionId: CANARY_SESSION,
+    sessionGeneration: CANARY_GENERATION,
+    ownerAuthenticated: true,
+    loginOnly: true,
+    requests,
+    noSetupResetOrContinuation: true,
+  };
+  await privateRecord(directory, 'owner-relogin1-report.json', report);
   return { report, ownerSessionFile: owner.sessionFile };
 }
