@@ -17,6 +17,7 @@ import {
   DockerEmployeeContinuation,
   DockerEmployeeContinuationError,
   dockerContinuationDigest,
+  dockerContinuationFailureCauses,
 } from './docker-employee-continuation.js';
 import { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
@@ -145,11 +146,44 @@ export function guardDockerRuntimeOrigin(
     },
   };
 }
+export type DockerExistingViewRestoration = {
+  readonly employeeId: string;
+  readonly sessionId: string;
+  readonly sessionGeneration: number;
+  readonly operationId: string;
+  readonly bindingDigest: string;
+} & (
+  | { readonly state: 'attached' }
+  | {
+      readonly state: 'held';
+      readonly code:
+        | 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'
+        | 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED'
+        | 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED';
+    }
+);
 const runtimeOrigin = Symbol('actual boxed runtime configuration');
 export class DockerEmployeeRuntime {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly #key: DockerRuntimeKey;
   #attached?: Attached;
+  #restorationReports: readonly DockerExistingViewRestoration[] = [];
+  readonly #restorationFailures = new Map<string, unknown>();
+  get restorationReports(): readonly DockerExistingViewRestoration[] {
+    const attached = this.#attached;
+    if (!attached || !this.current()) return [];
+    const employees = attached.company.store.snapshot().employees;
+    return this.#restorationReports.filter((report) =>
+      employees.some(
+        (employee) =>
+          employee.id === report.employeeId &&
+          employee.sessionId === report.sessionId &&
+          employee.sessionGeneration === report.sessionGeneration &&
+          employee.dockerBinding?.operationId === report.operationId &&
+          dockerContinuationDigest(employee.dockerBinding) === report.bindingDigest
+      )
+    );
+  }
   constructor(
     origin: typeof runtimeOrigin,
     private readonly selected: ReturnType<typeof config>,
@@ -305,9 +339,14 @@ export class DockerEmployeeRuntime {
     if (!row || !binding || row.phase !== 'ready') return false;
     const current = () => {
       const subject = a.store.subject(employee.id);
+      const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
         !allowed() ||
+        !live ||
+        live.owner !== employee.owner ||
+        dockerContinuationDigest(live.dockerBinding) !== dockerContinuationDigest(binding) ||
+        dockerContinuationDigest(a.store.record(employee.id)) !== dockerContinuationDigest(row) ||
         !subject ||
         subject.onVacation ||
         subject.desiredRunning !== true ||
@@ -344,6 +383,68 @@ export class DockerEmployeeRuntime {
     await a.provider.attach(row, binding, current, view);
     current();
     return true;
+  }
+  /** Restore a viewer of a current running provider, independently of auto-wake.
+   * A ready record is only correlation: wake still earns fresh physical proof.
+   * No branch creates a container, launches a provider, or releases a disk fence.
+   */
+  async restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    const a = this.#attached;
+    if (!a) throw Error('Boxed runtime is not attached');
+    const reports: DockerExistingViewRestoration[] = [];
+    for (const employee of a.company.store.snapshot().employees) {
+      if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
+      const base = {
+        employeeId: employee.id,
+        sessionId: employee.sessionId,
+        sessionGeneration: employee.sessionGeneration,
+        operationId: employee.dockerBinding.operationId,
+        bindingDigest: dockerContinuationDigest(employee.dockerBinding),
+      };
+      const allowed = () => {
+        const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
+        return (
+          this.current() &&
+          !!live &&
+          live.owner === employee.owner &&
+          live.sessionId === employee.sessionId &&
+          live.sessionGeneration === employee.sessionGeneration &&
+          !live.onVacation &&
+          live.desiredRunning === true &&
+          dockerContinuationDigest(live.dockerBinding) === dockerContinuationDigest(employee.dockerBinding)
+        );
+      };
+      try {
+        const row = a.store.record(employee.id);
+        if (row?.phase !== 'ready') {
+          reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' }));
+          continue;
+        }
+        const attached = await this.wake(employee, allowed);
+        reports.push(
+          Object.freeze(
+            attached
+              ? { ...base, state: 'attached' }
+              : { ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' }
+          )
+        );
+      } catch (cause) {
+        if (!this.#restorationFailures.has(employee.id) && this.#restorationFailures.size < 64) {
+          this.#restorationFailures.set(employee.id, cause);
+          try {
+            console.error(
+              '[docker-employee-continuation] existing viewer held',
+              JSON.stringify({ ...base, causes: dockerContinuationFailureCauses(cause) })
+            );
+          } catch {
+            /* Reporting cannot change the held result or another employee's admission. */
+          }
+        }
+        reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }));
+      }
+    }
+    this.#restorationReports = Object.freeze(reports);
+    return this.#restorationReports;
   }
   close(): void {
     this.authentication.close();

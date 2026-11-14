@@ -1974,6 +1974,7 @@ export class WebServer extends EventEmitter {
       {
         verifiedOwner,
         boxedRuntime: this.dockerEmployeeRuntime !== undefined,
+        boxedViewRestorations: () => this.dockerEmployeeRuntime?.restorationReports ?? [],
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
@@ -4526,6 +4527,13 @@ export class WebServer extends EventEmitter {
     if (this.mux instanceof TmuxManager) this.muxMetadataUnsubscribe ??= this.mux.onMuxMetadataPublicationStatus(status => {
       this.broadcast(SseEvent.MuxMetadataPublication, status);
     });
+    // An existing boxed provider survives the control container. Restore its
+    // freshly proved viewer after HTTP/origin readiness and before chat replay.
+    // Auto-wake may be disabled: this branch cannot start a provider.
+    if (this.dockerEmployeeRuntime) {
+      getHookSecret();
+      await this.dockerEmployeeRuntime.restoreExistingViews();
+    }
     // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
     try {
       await this.chatroomService.startDelivery();

@@ -1,3 +1,4 @@
+import type {DockerExistingViewRestoration} from '../../docker-employee-runtime.js';
 import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -74,6 +75,7 @@ export function registerCompanyRoutes(
     resourceReplacement?: boolean;
     /** Explicit configured backend capability, never readiness proof. */
     boxedRuntime?: boolean;
+    boxedViewRestorations?: () => readonly DockerExistingViewRestoration[];
     refreshHealth?: () => Promise<void>;
     startEmployee?: (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, current: () => boolean) => Promise<unknown>;
   } = {}
@@ -210,7 +212,10 @@ export function registerCompanyRoutes(
     const view = service.view(ownerFor(req));
     return {
       success: true,
-      data: { ...view, boxedRuntime:authority.boxedRuntime===true, employees: view.employees.map(employee =>
+      data: { ...view, boxedRuntime:authority.boxedRuntime===true,
+        boxedViewRestorations: (authority.boxedViewRestorations?.() ?? []).filter(result =>
+          view.employees.some(employee => employee.id === result.employeeId && employee.sessionId === result.sessionId && employee.sessionGeneration === result.sessionGeneration)),
+        employees: view.employees.map(employee =>
         presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
         canManageAttendance: verifiedOwner(req) || view.employees.some(e=>e.sessionId===caller(req) && e.permissions.manageOffice===true),
         // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.
