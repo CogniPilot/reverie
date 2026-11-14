@@ -78,6 +78,7 @@ let
         test/docker-employee-continuation.test.ts \
         test/docker-employee-credential-installer.test.ts \
         test/docker-employee-engine.test.ts \
+        test/docker-engine-command.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
         test/docker-employee-saved-attach.test.ts \

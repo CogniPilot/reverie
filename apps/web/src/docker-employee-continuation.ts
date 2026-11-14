@@ -171,6 +171,7 @@ export function dockerContinuationFailureCauses(cause: unknown): DockerContinuat
   const modules = new Set([
     'docker-employee-continuation',
     'docker-employee-engine',
+    'docker-engine-command',
     'docker-employee-runtime',
     'docker-employee-session-provider',
     'docker-employee-store',

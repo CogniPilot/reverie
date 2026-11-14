@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import {
   DockerEmployeeContinuation,
+  DockerEmployeeContinuationError,
   dockerContinuationFailureCauses,
   dockerContinuationDigest,
   type DockerContinuationAuthority,
@@ -308,6 +309,31 @@ describe('owned boxed Docker employee continuation', () => {
       expect(f.engine[effect]).toHaveBeenCalledOnce();
     }
   );
+  it.each([
+    'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED',
+    'DOCKER_CONTINUATION_CREATE_DEPENDENCY_MISSING',
+    'DOCKER_CONTINUATION_CREATE_NAME_CONFLICT',
+    'DOCKER_CONTINUATION_CREATE_UNCONFIRMED',
+  ])('preserves typed create cause %s without granting another effect', async (code) => {
+    const f = fixture();
+    f.engine.createDestination.mockImplementationOnce(async () => {
+      throw new DockerEmployeeContinuationError(code);
+    });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'destination-issued',
+      code,
+      allowedActions: ['observe'],
+    });
+    expect(await f.make().begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'destination-issued',
+      allowedActions: ['observe'],
+    });
+    expect(f.engine.createDestination).toHaveBeenCalledOnce();
+    expect(f.engine.start).not.toHaveBeenCalled();
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
   it('a genuinely unknown create stays held after a fresh service and never creates again', async () => {
     const f = fixture();
     f.engine.createDestination.mockImplementationOnce(async () => {
