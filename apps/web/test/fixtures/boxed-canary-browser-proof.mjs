@@ -1,5 +1,8 @@
 /** Shared proof/auth for real browsers against labelled disposable canaries only. */
 import assert from 'node:assert/strict';
+import process from 'node:process';
+import { Buffer } from 'node:buffer';
+import { URL } from 'node:url';
 import fs from 'node:fs/promises';
 import { constants, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -75,10 +78,10 @@ export function verifyCanaryControl(canary) {
 }
 export async function canaryGet(canary, path) {
   assert(path.startsWith('/api/') && !path.includes('://'));
-  const response = await fetch(new URL(path, canary.endpoint), {
+  const response = await globalThis.fetch(new URL(path, canary.endpoint), {
     headers: { cookie: canary.cookie },
     redirect: 'manual',
-    signal: AbortSignal.timeout(10000),
+    signal: globalThis.AbortSignal.timeout(10000),
   });
   assert(response.status === 200);
   const reader = response.body.getReader(),

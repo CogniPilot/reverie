@@ -1,5 +1,7 @@
 /** Real browser keyboard -> actual synthetic provider receipt. Never starts a provider. */
 import assert from 'node:assert/strict';
+import process from 'node:process';
+import { URL } from 'node:url';
 import fs from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -165,12 +167,13 @@ try {
   await member.click({ button: 'right', timeout: 10000 });
   await page.locator('.ca-member-menu').getByText('Debug terminal', { exact: true }).click();
   await page.waitForFunction(
-    (sid) => globalThis.app?.activeSessionId === sid && document.documentElement.dataset.reverieView === 'debug',
+    (sid) =>
+      globalThis.app?.activeSessionId === sid && globalThis.document.documentElement.dataset.reverieView === 'debug',
     CANARY_SID
   );
   const input = page.locator('#terminalContainer .xterm-helper-textarea');
   await input.focus();
-  assert(await input.evaluate((element) => element === document.activeElement));
+  assert(await input.evaluate((element) => element === globalThis.document.activeElement));
   await readiness();
   const uuid = randomUUID(),
     challenge = 'BOXED_CANARY_INPUT_' + uuid,
