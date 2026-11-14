@@ -22,7 +22,7 @@ import { EmployeeRecoveryService, registerEmployeeRecoveryRoutes, isEmployeeReco
 import { agentPlanJournalRecovery } from '../agent-plan-journal-recovery.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall, type CompanyEmployee } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -252,6 +252,8 @@ import { telemetrySignature } from '../usage-telemetry.js';
 import { readCodexPlanUsage, resolveCodexBinaryPath } from '../utils/codex-cli-resolver.js';
 import type { CronPort, ScheduledRun } from './ports/index.js';
 import { RoutinesGrants } from '../routines-grants.js';
+import { openDockerEmployeeRuntime, type DockerEmployeeRuntime } from '../docker-employee-runtime.js';
+import { registerDockerWorkerIdentity } from '../docker-worker-identity.js';
 import {
   registerAuthMiddleware,
   browserAuthSession,
@@ -485,6 +487,7 @@ function readInitStartedAt(): number | undefined {
 
 export class WebServer extends EventEmitter {
   private app: FastifyInstance;
+  private dockerEmployeeRuntime?: DockerEmployeeRuntime;
   private sessions: Map<string, Session> = new Map();
   private respawnControllers: Map<string, RespawnController> = new Map();
   private decisionAlertTimer: NodeJS.Timeout | null = null;
@@ -1164,6 +1167,14 @@ export class WebServer extends EventEmitter {
       store: new OwnerAuthStore(dataPath('owner-auth.json')),
       auditFile: dataPath('owner-auth-audit.jsonl'),
     }, () => ({ name: this.companyService?.view().settings.ownerName, avatar: this.companyService?.view().settings.ownerAvatar }));
+    // A machine credential is verified before the human transport layer. An
+    // unavailable/mixed boxed backend refuses startup rather than falling back.
+    const dockerRuntime = openDockerEmployeeRuntime(dataPath('docker-runtime'));
+    this.dockerEmployeeRuntime = dockerRuntime;
+    if (dockerRuntime) {
+      registerDockerWorkerIdentity(this.app, dockerRuntime.authentication, this.basePath);
+      this.app.addHook('onClose', async () => { dockerRuntime.close(); });
+    }
     const authState = registerAuthMiddleware(this.app, this.https, this.basePath, ownerAuth, this.allowUnauthenticatedNetwork);
     if (authState) {
       this.authSessions = authState.authSessions;
@@ -1781,7 +1792,9 @@ export class WebServer extends EventEmitter {
         this.broadcast(SseEvent.SessionUpdated, { session: this.getSessionStateWithRespawn(session) });
       },
     });
-    this.workerProviderHealth = new WorkerProviderHealth({
+    dockerRuntime?.attach(this.companyService, ctx);
+    dockerRuntime?.registerRoutes(this.app, { verifiedOwner, owner: ownerFor });
+    if (!dockerRuntime) this.workerProviderHealth = new WorkerProviderHealth({
       employees: () => this.companyService.registeredEmployees(),
       query: signal => laptopPower('provider-health', undefined, signal),
       changed: () => {
@@ -1832,6 +1845,7 @@ export class WebServer extends EventEmitter {
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
+      ...(dockerRuntime ? { dockerWake: (employee: CompanyEmployee, allowed: () => boolean) => dockerRuntime.wake(employee, allowed) } : {}),
       ...(process.env.REVERIE_WORKER_SOCKET ? { nativeHealth: (id: string) => {
         const employee=this.companyService.registeredEmployees().find(e=>e.sessionId===id);
         return employee ? this.workerProviderHealth?.read(employee)?.state ?? 'unknown' as const : 'unknown' as const;
@@ -1959,6 +1973,7 @@ export class WebServer extends EventEmitter {
       (id, options) => this.companyWake.wakeOne(id, options),
       {
         verifiedOwner,
+        boxedRuntime: this.dockerEmployeeRuntime !== undefined,
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
@@ -1971,6 +1986,9 @@ export class WebServer extends EventEmitter {
       }
     );
     const startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
+      // Boxed creation/reattachment belongs to its authenticated runtime. A
+      // missing saved row must never create a local control-plane employee.
+      if (dockerRuntime) return undefined;
       const employee = this.companyService.registeredEmployees().find((e) => e.sessionId === id);
       const recipe = employee?.runtimeRecipe;
       const saved = this.store.getSession(id) ?? (recipe ? { ...recipe, ...recipe.configs, id, owner: employee?.owner, name: employee?.name } : undefined);
