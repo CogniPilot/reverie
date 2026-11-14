@@ -39,6 +39,7 @@
     "src/web/public/constants.js",
     "src/web/public/cron-ui.js",
     "src/web/public/display-time.js",
+    "src/web/public/docker-employee-recovery.js",
     "src/web/public/embassy-invite-bootstrap.js",
     "src/web/public/employee-recovery.js",
     "src/web/public/entrance-animations.js",
@@ -724,6 +725,107 @@
         "expect(operations).toHaveLength(2)"
       ],
       "outcome": "Existing actual320/1280 component scenario uses real GUI/API/Company/StateStore plus a synthetic framed AF_UNIX native port. Inspect submits the retained parent Observe, app settlement commits before the HTTP reply is lost, and explicit read-only Refresh recovers the closed stopped result without another Q/effect or draft loss. This is component evidence only; installed native/guest execution and readiness remain unqualified."
+    },
+    "docker-recovery.review-refresh": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "shows the exact reviewed policy and only reads status until the human acts",
+      "assertions": [
+        "expect(f.calls).toHaveLength(1)",
+        "f.button('Refresh recovery status')!.click()",
+        "expect(f.calls.map((call) => call.method)).toEqual(['GET', 'GET'])",
+        "expect(f.starts()).toHaveLength(0)"
+      ],
+      "outcome": "The actual profile module displays reviewed limits and an explicit refresh performs only another GET, without dispatching recovery."
+    },
+    "docker-recovery.lost-start-observe": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "keeps a lost start across profile reopen and never automatically replays it",
+      "assertions": [
+        "f.button('Recover and enter office')!.click()",
+        "expect(f.starts()).toHaveLength(1)",
+        "f.button('Check original recovery')!.click()",
+        "expect(f.starts()).toHaveLength(1)",
+        "expect(f.panel().textContent).toContain('could not be verified')"
+      ],
+      "outcome": "A lost POST is retained across profile reopen. Explicit observation does not issue a second start and shows its unconfirmed outcome."
+    },
+    "docker-recovery.approve-continue": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "an explicitly offered continuation uses the exact original request without approving policy twice",
+      "assertions": [
+        "f.button('Approve displayed limits and recover')!.click()",
+        "expect(first!.policyApproval!.policy).toEqual(policy)",
+        "f.button('Continue original recovery')!.click()",
+        "expect(f.starts()[1].body).toEqual({ request: first!.request })"
+      ],
+      "outcome": "The approval control sends the displayed policy once; explicit continuation uses exactly the retained original request without repeating approval."
+    },
+    "docker-recovery.held-visible": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "HTTP success with held state is visibly held and cannot offer a fresh start",
+      "assertions": [
+        "f.button('Recover and enter office')!.click()",
+        "expect(f.panel().textContent).toContain('Recovery held: resources-issued')",
+        "expect(f.panel().querySelector('[role=\"alert\"]')!.textContent).toContain('RESOURCES_UNCONFIRMED')",
+        "expect(f.button('Recover and enter office')).toBeUndefined()"
+      ],
+      "outcome": "An HTTP success containing a held operation remains visibly held; the profile does not present a fresh recovery."
+    },
+    "docker-recovery.foreign-response": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "a foreign operation response stays unconfirmed and never reports completion",
+      "assertions": [
+        "f.button('Recover and enter office')!.click()",
+        "expect(f.panel().textContent).toContain('Recovery outcome is unconfirmed')",
+        "expect(f.panel().textContent).not.toContain('recovery completed')",
+        "expect(f.button('Recover and enter office')).toBeUndefined()"
+      ],
+      "outcome": "A response for another operation is refused and cannot cause the actual profile to claim completion or offer a second start."
+    },
+    "docker-recovery.rejoin-original": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "rejoins the server-owned original after reload and offers only its exact allowed continuation",
+      "assertions": [
+        "expect(f.starts()).toHaveLength(0)",
+        "f.button('Continue original recovery')!.click()",
+        "expect(f.starts()[0].body).toEqual({ request: s.originalRequest })",
+        "expect(f.button('Continue original recovery')).toBeUndefined()"
+      ],
+      "outcome": "Reload rejoins the original server request without starting anything; its explicitly offered continuation sends that exact request and an unconfirmed reply removes the continuation action."
+    },
+    "docker-recovery.script-dependency": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "ships the recovery script once and renders its profile controls through the actual module",
+      "assertions": [
+        "expect(index.querySelectorAll('script[src=\"docker-employee-recovery.js\"][defer]')).toHaveLength(1)",
+        "expect(f.panel().isConnected).toBe(true)",
+        "expect(f.button('Refresh recovery status')).toBeDefined()",
+        "expect(f.starts()).toHaveLength(0)"
+      ],
+      "outcome": "Parsed shipped index markup includes the deferred dependency once, and the actual module renders the profile controls in the DOM harness without starting an employee. This is not a real browser bootstrap test."
+    },
+    "publication.close-secret-cleared": {
+      "test": "test/company-publication-ui.test.ts",
+      "title": "clears secret input on failed saves and close, without echoing untrusted errors",
+      "assertions": [
+        "secret.value = 'FAKE_UNSAVED_SECRET'",
+        "(dialog.querySelector('[aria-label=\"Close Manage PATs\"]') as HTMLButtonElement).click()",
+        "expect(secret.value).toBe('')",
+        "expect(dialog.isConnected).toBe(false)"
+      ],
+      "outcome": "The actual PAT close button clears an unsaved synthetic secret and disconnects its editor after a failed save; untrusted errors do not echo credentials."
+    },
+    "publication.delete-confirmation": {
+      "test": "test/company-publication-ui.test.ts",
+      "title": "requires an explicit delete confirmation and does not expose vault management to nonowners",
+      "assertions": [
+        "(dialog.querySelector('[aria-label=\"Delete PAT release-pat\"]') as HTMLButtonElement).click()",
+        "expect(writes).toEqual([])",
+        "confirm.mockResolvedValue(true)",
+        "expect(writes).toEqual([{ path: '/api/publication/tokens/' + ID, method: 'DELETE', body: undefined }])",
+        "expect(denied.h.document.querySelector('[aria-label=\"Manage PATs\"]')).toBeNull()"
+      ],
+      "outcome": "The actual delete control sends no write when confirmation is declined, sends exactly the selected DELETE when confirmed, and vault management remains absent for a nonowner."
     }
   },
   "mappings": [
@@ -965,6 +1067,45 @@
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeeLifecycleFields::officeToggle::input:[binding label]",
       "scenarios": ["office.employee-lifecycle.enter-cancel"],
       "remaining": "Only real Enter confirmation cancellation for an OFF employee is qualified. Confirmed Enter/Leave, active employee, native startup/stop, lost replies, permission denial and cross-binding changes remain gaps. Wake/restart handlers remain unmapped."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.paint::inline::button:Refresh recovery status",
+      "scenarios": ["docker-recovery.review-refresh"],
+      "remaining": "Actual DOM module actions with synthetic API decisions only; real browser layout/bootstrap and Engine/provider/lifecycle fault coverage require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.paint::inline::button:Check original recovery",
+      "scenarios": ["docker-recovery.lost-start-observe"],
+      "remaining": "Actual DOM module actions with synthetic API decisions only; real browser layout/bootstrap and Engine/provider/lifecycle fault coverage require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.paint::inline::button:Continue original recovery",
+      "scenarios": ["docker-recovery.approve-continue", "docker-recovery.rejoin-original"],
+      "remaining": "Actual DOM module actions with synthetic API decisions only; real browser layout/bootstrap and Engine/provider/lifecycle fault coverage require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.paint::inline::button:Recover and enter office",
+      "scenarios": [
+        "docker-recovery.lost-start-observe",
+        "docker-recovery.held-visible",
+        "docker-recovery.foreign-response"
+      ],
+      "remaining": "Actual DOM module actions with synthetic API decisions only; real browser layout/bootstrap and Engine/provider/lifecycle fault coverage require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.paint::inline::button:Approve displayed limits and recover",
+      "scenarios": ["docker-recovery.approve-continue"],
+      "remaining": "Actual DOM module actions with synthetic API decisions only; real browser layout/bootstrap and Engine/provider/lifecycle fault coverage require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inline::button:Close Manage PATs",
+      "scenarios": ["publication.close-secret-cleared"],
+      "remaining": "DOM event/secret cleanup only; actual browser and durable vault storage qualification are separate."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inventory::button:Delete PAT ${token.name}",
+      "scenarios": ["publication.delete-confirmation"],
+      "remaining": "DOM authorization presentation and synthetic API dispatch only; real owner/vault enforcement has separate API tests."
     }
   ],
   "gaps": [
@@ -1673,16 +1814,8 @@
       "reason": "Detection gap: dynamic-constructor:6000ebec91a5"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inline::button:Close Manage PATs",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::input::dynamic-constructor:03d28a0ec236",
       "reason": "Detection gap: dynamic-constructor:03d28a0ec236"
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inventory::button:Delete PAT ${token.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inventory::button:Edit PAT ${token.name}",
@@ -6943,6 +7076,14 @@
     {
       "declaration": "src/web/public/webview-tabs.js::renderWebviewMenuItems::inline::embedded-control-markup:02300ea81d62",
       "reason": "Detection gap: embedded-control-markup:02300ea81d62"
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.button::button::button:[dynamic label:982d9e3eb996]",
+      "reason": "Detection gap: generic button factory has a dynamic label. Its five static call sites are independently mapped to actual DOM action tests; do not infer blanket coverage of the wrapper."
+    },
+    {
+      "declaration": "src/web/public/index.html::external-script::docker-employee-recovery.js",
+      "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
   "gapBudget": 1494,

@@ -1,5 +1,6 @@
 /** Real profile DOM. Wire fixtures supply server decisions; no runtime effects. */
 import { afterEach, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { EmployeePermissionsSchema } from '../src/company-types.js';
 import { createHarness } from './helpers/chat-app-harness.mjs';
 
@@ -113,6 +114,21 @@ it('shows the exact reviewed policy and only reads status until the human acts',
   expect(f.calls[0].method).toBe('GET');
   expect(f.button('Recover and enter office')).toBeDefined();
   expect(f.h.document.querySelector('.ca-employee-recovery')).toBeNull();
+  expect(f.starts()).toHaveLength(0);
+  f.button('Refresh recovery status')!.click();
+  await f.h.flush();
+  expect(f.calls.map((call) => call.method)).toEqual(['GET', 'GET']);
+  expect(f.starts()).toHaveLength(0);
+});
+it('ships the recovery script once and renders its profile controls through the actual module', async () => {
+  const f = await fixture();
+  const index = new f.h.window.DOMParser().parseFromString(
+    readFileSync(new URL('../src/web/public/index.html', import.meta.url), 'utf8'),
+    'text/html'
+  );
+  expect(index.querySelectorAll('script[src="docker-employee-recovery.js"][defer]')).toHaveLength(1);
+  expect(f.panel().isConnected).toBe(true);
+  expect(f.button('Refresh recovery status')).toBeDefined();
   expect(f.starts()).toHaveLength(0);
 });
 it('keeps a lost start across profile reopen and never automatically replays it', async () => {

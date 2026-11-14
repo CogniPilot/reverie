@@ -58,9 +58,9 @@
       }
       return response.data.data ?? response.data;
     }
-    button(text, action) {
+    button(className, text, action) {
       const button = this.shell.button(
-        'ca-btn',
+        className,
         text,
         () => {
           void action();
@@ -72,21 +72,23 @@
     }
     paint() {
       if (!this.live()) return;
-      this.controls.replaceChildren(this.button('Refresh recovery status', () => this.refresh()));
+      this.controls.replaceChildren(this.button('ca-btn', 'Refresh recovery status', () => this.refresh()));
       const held = pending.get(this.key);
       const operationId = held?.request.operationId ?? this.selection?.operationId;
       if (uuid(operationId)) {
-        this.controls.append(this.button('Check original recovery', () => this.observe(operationId)));
+        this.controls.append(this.button('ca-btn', 'Check original recovery', () => this.observe(operationId)));
         if (held && this.operation?.operationId === operationId && this.operation.allowedActions.includes('continue'))
-          this.controls.append(this.button('Continue original recovery', () => this.start({ request: held.request })));
+          this.controls.append(
+            this.button('ca-btn', 'Continue original recovery', () => this.start({ request: held.request }))
+          );
         return;
       }
       const s = this.selection;
       if (!s || s.state !== 'stopped') return;
       if (s.allowedActions.includes('continue') && s.policy && digest(s.policyDigest))
-        this.controls.append(this.button('Recover and enter office', () => this.create(false)));
+        this.controls.append(this.button('ca-btn', 'Recover and enter office', () => this.create(false)));
       else if (s.canApprovePolicy === true && s.proposedPolicy && digest(s.proposedPolicyDigest))
-        this.controls.append(this.button('Approve displayed limits and recover', () => this.create(true)));
+        this.controls.append(this.button('ca-btn', 'Approve displayed limits and recover', () => this.create(true)));
     }
     showPolicy(s) {
       this.policy.replaceChildren();
@@ -190,7 +192,7 @@
       }
       const body = {
         request: {
-          operationId: crypto.randomUUID(),
+          operationId: globalThis.crypto.randomUUID(),
           sessionId: s.sessionId,
           sessionGeneration: s.sessionGeneration,
           containerId: s.containerId,
