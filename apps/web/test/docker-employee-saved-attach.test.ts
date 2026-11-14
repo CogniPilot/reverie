@@ -1,5 +1,7 @@
 /** Actual private Engine capture over controlled OS replies, real saved StateStore
  * and Session. No installed/native/provider acceptance; no view/receipt DTO grant. */
+import fs from 'node:fs';
+import { openDockerEmployeeRuntime } from '../src/docker-employee-runtime.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
 import type { CompanyServiceDeps } from '../src/company-service.js';
@@ -222,7 +224,12 @@ async function dockerEncodedDestination() {
   return { ...f, observed };
 }
 
-const native = vi.hoisted(() => ({ ptys: [] as Array<{ file: string; args: string[] }>, writes: [] as string[] }));
+const native = vi.hoisted(() => ({
+  ptys: [] as Array<{ file: string; args: string[] }>,
+  writes: [] as string[],
+  data: [] as Array<(data: string) => void>,
+  exits: [] as Array<(value: { exitCode: number; signal: number }) => void>,
+}));
 vi.mock('node-pty', () => ({
   spawn: vi.fn((file: string, args: string[]) => {
     native.ptys.push({ file, args });
@@ -246,9 +253,13 @@ vi.mock('node-pty', () => ({
       resize: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
-      onData: () => ({ dispose: () => {} }),
+      onData: (callback: (data: string) => void) => {
+        native.data.push(callback);
+        return { dispose: () => {} };
+      },
       onExit: (fn: typeof exit) => {
         exit = fn;
+        if (fn) native.exits.push(fn);
         return { dispose: () => {} };
       },
       kill: () => exit?.({ exitCode: 0, signal: 0 }),
@@ -284,6 +295,9 @@ afterEach(async () => {
   for (const finish of cleanup.splice(0).reverse()) await finish();
   native.ptys.length = 0;
   native.writes.length = 0;
+  native.data.length = 0;
+  native.exits.length = 0;
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 async function savedFixture(explicitUnknown = false, savedInputUnknown = false) {
@@ -337,6 +351,8 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
     mode: 'claude',
     workingDir: '/workspace',
     status: 'busy',
+    currentTaskId: null,
+    lastActivityAt: 1,
     pid: 23,
     createdAt: 1,
     lastActivityAt: 1,
@@ -783,4 +799,243 @@ describe('actual saved Docker Session private attachment', () => {
     expect(native.ptys).toEqual([]);
     expect(f.session.providerDispatchHeld).toBe(true);
   });
+});
+
+describe('in-place Docker existing-view renewal', () => {
+  async function running() {
+    const f = await savedFixture(),
+      old = await f.capture();
+    f.session.bindDockerContinuationView(old);
+    await f.session.startInteractive();
+    native.data.at(-1)!('retained terminal output');
+    const before = {
+      pid: f.session.pid,
+      mux: f.mux.getSession(sid),
+      buffer: f.session.terminalBuffer,
+      intent: JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY]),
+      ptys: native.ptys.length,
+      writes: native.writes.length,
+    };
+    f.revoke();
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    return { ...f, old, before };
+  }
+  async function runtimeFixture() {
+    const f = await running();
+    const companyFile = new CompanyStore(join(dirname(f.path), 'company.json'));
+    await companyFile.init();
+    const employee = EmployeeSchema.parse({
+      id: eid,
+      sessionId: sid,
+      sessionGeneration: 3,
+      name: 'Synthetic',
+      icon: 'S',
+      position: 'Employee',
+      expertise: ['testing'],
+      createdAt: 1,
+      onVacation: false,
+      desiredRunning: true,
+      dockerBinding: {
+        version: 1,
+        operationId: oid,
+        credentialId: f.row.credentialId,
+        sessionId: sid,
+        sessionGeneration: 3,
+        containerId: dest,
+        imageId: target,
+        originalDigest: f.row.original.configurationDigest,
+        policyDigest: dockerContinuationDigest(f.row.policy),
+      },
+    });
+    f.row.sourceDigest = dockerEmployeeSourceDigest(employee, f.loaded.getSession(sid)!);
+    await companyFile.update((state) => {
+      state.employees = [employee];
+      state.dockerEmployeeContinuations = [f.row];
+    });
+    const sessions = new Map([[sid, f.session]]);
+    const company = new CompanyService(companyFile, {
+      getSession: (id: string) => sessions.get(id),
+      chatrooms: { rooms: () => [] },
+      research: {},
+    } as unknown as CompanyServiceDeps);
+    const configPath = join(dirname(f.path), 'boxed-runtime.json');
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 1,
+        purpose: 'reverie-boxed-runtime-v1',
+        deployment: 'fixture',
+        workerImageId: target,
+        clientManifestDigest: '4'.repeat(64),
+        sourceImageIds: [image],
+        helperImageId: helper,
+        apiUrl: 'http://synthetic.invalid:3000',
+      }),
+      { mode: 0o600 }
+    );
+    // The configuration filesystem port maps one fixed read to a real private fixture inode.
+    // Its real fstat/read/retained-FD currency and the real key remain enforced.
+    const open = fs.openSync,
+      lstat = fs.lstatSync;
+    vi.spyOn(fs, 'openSync').mockImplementation(((name: fs.PathLike, flags: number, mode?: number) =>
+      open(name === '/etc/reverie/boxed-runtime.json' ? configPath : name, flags, mode)) as typeof fs.openSync);
+    vi.spyOn(fs, 'lstatSync').mockImplementation(((name: fs.PathLike, options?: unknown) =>
+      lstat(name === '/etc/reverie/boxed-runtime.json' ? configPath : name, options as never)) as typeof fs.lstatSync);
+    vi.stubEnv('REVERIE_RUNTIME_BACKEND', 'boxed-docker-v1');
+    vi.stubEnv('REVERIE_WORKER_SOCKET', undefined);
+    vi.stubEnv('REVERIE_WORKER_VIEWER_SOCKET', undefined);
+    const runtime = openDockerEmployeeRuntime(join(dirname(f.path), 'runtime-key'))!;
+    cleanup.push(async () => runtime.close());
+    const capture = DockerEmployeeEngine.prototype.captureProviderView;
+    // Runtime's actual composition uses the same real Engine implementation over
+    // this controlled physical port; no fabricated view or readiness proof enters it.
+    const captured = vi
+      .spyOn(DockerEmployeeEngine.prototype, 'captureProviderView')
+      .mockImplementation((row, current) => capture.call(f.engine, row, current));
+    vi.spyOn(DockerEmployeeEngine.prototype, 'observeDestination').mockResolvedValue({
+      state: 'running',
+      provider: { kind: 'running', operationId: oid, sessionId: sid },
+      resources: f.policy,
+    } as Awaited<ReturnType<DockerEmployeeEngine['observeDestination']>>);
+    const attach = vi
+      .spyOn(DockerEmployeeSessionProvider.prototype, 'attach')
+      .mockRejectedValue(Error('Unexpected provider attach'));
+    runtime.attach(company, { sessions, store: f.loaded, mux: f.mux } as unknown as SessionPort &
+      ConfigPort &
+      InfraPort);
+    return { ...f, employee, companyFile, sessions, runtime, captured, attach };
+  }
+  it('actual Runtime.wake renews a revoked same-provider view after unrelated wake bookkeeping without another attach', async () => {
+    const f = await runtimeFixture();
+    await f.companyFile.update((state) => {
+      state.employees[0]!.wakeAttempts = [Date.now()];
+    });
+    await expect(f.runtime.wake(f.employee, () => true)).resolves.toBe(true);
+    expect(f.captured).toHaveBeenCalledOnce();
+    expect(f.attach).not.toHaveBeenCalled();
+    expect(f.sessions.get(sid)).toBe(f.session);
+    expect(f.session.pid).toBe(f.before.pid);
+    expect(f.session.dockerContinuationViewCurrent).toBe(true);
+    expect(f.session.providerDispatchHeld).toBe(true);
+    expect(f.session.terminalBuffer).toBe(f.before.buffer);
+    expect(native.ptys).toHaveLength(f.before.ptys);
+    expect(native.writes).toHaveLength(f.before.writes);
+    expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
+    expect(() => DockerEmployeeProviderView.prototype.require.call(f.old, sid, f.docker)).toThrow();
+  });
+  it.each(['account', 'mode', 'grant', 'session-replaced'] as const)(
+    'actual Runtime.wake refuses %s drift during fresh capture',
+    async (kind) => {
+      const f = await runtimeFixture();
+      let allowed = true;
+      const capture = f.captured.getMockImplementation()!;
+      f.captured.mockImplementation(async (row, current) => {
+        const view = await capture(row, current);
+        if (kind === 'account')
+          f.session.subscriptionProfile = { id: 'changed', label: 'Changed', provider: 'anthropic' };
+        if (kind === 'mode') vi.spyOn(f.session, 'mode', 'get').mockReturnValue('codex');
+        if (kind === 'grant') allowed = false;
+        if (kind === 'session-replaced') f.sessions.delete(sid);
+        return view;
+      });
+      await expect(f.runtime.wake(f.employee, () => allowed)).rejects.toThrow();
+      expect(f.attach).not.toHaveBeenCalled();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(native.ptys).toHaveLength(f.before.ptys);
+      expect(native.writes).toHaveLength(f.before.writes);
+    }
+  );
+  it('projects the same persisted recipe without consulting a view callback', async () => {
+    const f = await running(),
+      persisted = f.session.toPersistedState(),
+      data = f.session.providerRecipeState();
+    for (const [key, value] of Object.entries(data))
+      expect(value).toEqual((persisted as unknown as Record<string, unknown>)[key]);
+  });
+  it('replaces only the stale view with fresh same-provider proof, preserving transport/output/unsent input and paid intent', async () => {
+    const f = await running(),
+      inputs = new TerminalInputService(),
+      fresh = await f.engine.captureProviderView(f.row, () => {});
+    const unsent = { input: 'unsent owner draft', useMux: false, clientId: 'view-renewal', seq: 1 };
+    const tag = { clientId: unsent.clientId, seq: unsent.seq, fingerprint: terminalInputFingerprint(unsent) };
+    expect(inputs.begin(f.session, unsent, () => true).state).toBe('held');
+    f.session.renewDockerContinuationView(fresh, () => true);
+    expect(f.session.dockerContinuationViewCurrent).toBe(true);
+    expect(f.session.pid).toBe(f.before.pid);
+    expect(f.mux.getSession(sid)).toBe(f.before.mux);
+    expect(f.session.terminalBuffer).toBe(f.before.buffer);
+    expect(f.before.buffer).toContain('retained terminal output');
+    expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
+    expect(f.session.providerDispatchHeld).toBe(true);
+    expect(f.session.providerInputHeld).toBe(false);
+    expect(native.ptys).toHaveLength(f.before.ptys);
+    expect(native.writes).toHaveLength(f.before.writes);
+    expect(inputs.inspect(f.session, tag, () => true)).toBe('unknown');
+    expect(() => DockerEmployeeProviderView.prototype.require.call(f.old, sid, f.docker)).toThrow();
+  });
+  it.each(['paneId', 'panePid', 'paneStartTicks', 'hookGeneration'] as const)(
+    'refuses fresh genuine changed %s without reviving the old view',
+    async (field) => {
+      const f = await running();
+      if (field === 'panePid') f.nativeRead.panePid++;
+      else if (field === 'paneId') f.nativeRead.paneId = '%2';
+      else if (field === 'paneStartTicks') f.nativeRead.paneStartTicks = '12346';
+      else f.nativeRead.hookGeneration += 'changed';
+      const fresh = await f.engine.captureProviderView(f.row, () => {});
+      expect(() => f.session.renewDockerContinuationView(fresh, () => true)).toThrow();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(native.ptys).toHaveLength(f.before.ptys);
+      expect(native.writes).toHaveLength(f.before.writes);
+    }
+  );
+  it.each(['container', 'image', 'operation', 'generation', 'employee', 'client-manifest'] as const)(
+    'refuses changed Session %s correlation against a fresh genuine view',
+    async (kind) => {
+      const f = await running(),
+        fresh = await f.engine.captureProviderView(f.row, () => {}),
+        docker = f.session.docker!;
+      if (kind === 'container') docker.containerName = 'e'.repeat(64);
+      if (kind === 'image') docker.image = 'sha256:' + 'e'.repeat(64);
+      if (kind === 'operation') docker.continuation!.operationId = '90000000-0000-4000-8000-000000000009';
+      if (kind === 'generation') docker.continuation!.sessionGeneration++;
+      if (kind === 'employee') docker.continuation!.employeeId = '90000000-0000-4000-8000-000000000009';
+      if (kind === 'client-manifest') docker.continuation!.clientManifestDigest = 'e'.repeat(64);
+      expect(() => f.session.renewDockerContinuationView(fresh, () => true)).toThrow();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(native.ptys).toHaveLength(f.before.ptys);
+    }
+  );
+  it('refuses a prototype/DTO view without invoking its supplied authority', async () => {
+    const f = await running(),
+      claimed = vi.fn(),
+      forged = Object.create(DockerEmployeeProviderView.prototype, { require: { value: claimed } });
+    expect(() => f.session.renewDockerContinuationView(forged, () => true)).toThrow();
+    expect(claimed).not.toHaveBeenCalled();
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+  });
+  it.each(['account', 'revoked-view', 'revoked-grant', 'closing', 'stopped', 'transport-exit'] as const)(
+    'holds %s without changing the Session or launch fence',
+    async (kind) => {
+      const f = await running();
+      let current = true;
+      const fresh = await f.engine.captureProviderView(f.row, () => {
+        if (!current) throw Error('Fresh view revoked');
+      });
+      const selected = f.session.subscriptionProfile;
+      if (kind === 'account')
+        f.session.subscriptionProfile = { id: 'changed-account', label: 'Changed', provider: 'anthropic' };
+      if (kind === 'revoked-view') current = false;
+      if (kind === 'closing') f.session.markClosing(true);
+      if (kind === 'stopped') await f.session.stop(false);
+      if (kind === 'transport-exit') native.exits.at(-1)!({ exitCode: 0, signal: 0 });
+      expect(() =>
+        f.session.renewDockerContinuationView(
+          fresh,
+          () => kind !== 'revoked-grant' && f.session.subscriptionProfile === selected
+        )
+      ).toThrow();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
+    }
+  );
 });

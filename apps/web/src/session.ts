@@ -1892,6 +1892,59 @@ export class Session extends EventEmitter {
       ? { configuration: 'opted-out' }
       : { configuration: 'prepared', generation: hooks.generation };
   }
+  /** Renew only the proof of this same running provider; no transport or launch is replaced. */
+  renewDockerContinuationView(view: DockerEmployeeProviderView, admitted: () => boolean): void {
+    const original = this.#dockerContinuationView,
+      docker = this._docker;
+    const pty = this.ptyProcess,
+      mux = this._mux,
+      pane = this._muxSession;
+    const lifetime = this.captureRuntimePublicationCurrent();
+    const descriptor = original?.descriptor,
+      recipe = this._providerLaunchConfiguration();
+    const paneFields = pane && structuredClone(pane),
+      dockerFields = docker && structuredClone(docker);
+    const current = () => {
+      if (
+        !admitted() ||
+        !original ||
+        original === view ||
+        !docker?.continuation ||
+        docker.owned !== false ||
+        this.#dockerContinuationView !== original ||
+        this._docker !== docker ||
+        !isDeepStrictEqual(docker, dockerFields) ||
+        !pty ||
+        this.ptyProcess !== pty ||
+        this._pid !== pty.pid ||
+        !mux ||
+        !pane ||
+        this._mux !== mux ||
+        this._muxSession !== pane ||
+        mux.getSession(this.id) !== pane ||
+        !isDeepStrictEqual(pane, paneFields) ||
+        !isDeepStrictEqual(this._providerLaunchConfiguration(), recipe) ||
+        this._dockerContinuationLaunch ||
+        this._remote ||
+        this._workerBacked ||
+        this._isStopped ||
+        this._closing ||
+        this._paneExit ||
+        this._viewerClientLost ||
+        this.paneLifecycleInFlight ||
+        !lifetime()
+      )
+        throw Error('Original running Docker provider view required');
+    };
+    current();
+    // Use the branded method, including its current Engine custody checks.
+    DockerEmployeeProviderView.prototype.require.call(view, this.id, docker!);
+    if (!isDeepStrictEqual(descriptor, view.descriptor)) throw Error('Original Docker provider identity changed');
+    current();
+    DockerEmployeeProviderView.prototype.require.call(view, this.id, docker!);
+    current();
+    this.#dockerContinuationView = view;
+  }
   get dockerContinuationViewCurrent(): boolean {
     const view = this.#dockerContinuationView;
     if (!view || !this._docker || view.descriptor.mode !== this.mode || (view.descriptor.hooks.kind === 'none' && dockerProviderHookPolicy(this.mode)?.kind !== 'none')) return false;
@@ -3005,6 +3058,31 @@ export class Session extends EventEmitter {
     };
   }
 
+  /** Provider recipe DATA only, without runtime/view getters. Never an API serializer or a grant. */
+  providerRecipeState() {
+    return {
+      mode: this.mode,
+      workingDir: this.workingDir,
+      subscriptionProfile: this.subscriptionProfile,
+      model: cliTakesSessionModel(this.mode) ? this._model : undefined,
+      effort: this._effort,
+      advisorModel: this._advisorModel,
+      customModel: this.customModel,
+      runtimeThreads: { ...this._runtimeThreads },
+      openCodeConfig: this._openCodeConfig,
+      codexConfig: this._codexConfig,
+      geminiConfig: this._geminiConfig,
+      antigravityConfig: this._antigravityConfig,
+      piConfig: this._piConfig,
+      grokConfig: this._grokConfig,
+      deepSeekConfig: this._deepSeekConfig,
+      ompConfig: this._ompConfig,
+      resumeSessionId: this._resumeSessionId,
+      claudeSessionChain: this._claudeSessionChain.length > 0 ? [...this._claudeSessionChain] : undefined,
+      __envOverrides: this.getEnvOverridesForPersist(),
+      __customModel: this.getCustomModelForPersist(),
+    };
+  }
   /** Complete Session-owned disk snapshot; this must never be used by API/SSE serializers. */
   toPersistedState(): SessionState {
     const snapshot = { ...this.toState(),
