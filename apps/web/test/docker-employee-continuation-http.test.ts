@@ -8,9 +8,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { CompanyService, type CompanyServiceDeps } from '../src/company-service.js';
 import { CompanyStore } from '../src/company-store.js';
+import { guardDockerRuntimeOrigin } from '../src/docker-employee-runtime.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import {
   DockerEmployeeContinuation,
+  DockerEmployeeContinuationError,
   dockerContinuationDigest,
   type DockerContinuationEngine,
 } from '../src/docker-employee-continuation.js';
@@ -173,6 +175,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     { issue: () => 'synthetic-unused-credential' }
   );
   let identityCurrent = true;
+  let runtimeCurrent = true;
   const binding = {
     employeeId: actor,
     sessionId: actorSid,
@@ -205,11 +208,22 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       admin: () => false,
     },
   });
-  registerDockerEmployeeContinuationRoutes(app, company, store, service, {
-    verifiedOwner: ownerVerifier({ service: ownerAuth, ctx }),
-    worker: dockerWorkerIdentityOf,
-    owner: ownerFor,
-  });
+  registerDockerEmployeeContinuationRoutes(
+    app,
+    company,
+    store,
+    service,
+    guardDockerRuntimeOrigin(
+      {
+        verifiedOwner: ownerVerifier({ service: ownerAuth, ctx }),
+        worker: dockerWorkerIdentityOf,
+        owner: ownerFor,
+      },
+      () => {
+        if (!runtimeCurrent) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      }
+    )
+  );
   await app.ready();
   cleanups.push(async () => {
     await app.close();
@@ -246,6 +260,9 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     request,
     effects: () => effects,
     observations: () => observations,
+    revokeRuntime: () => {
+      runtimeCurrent = false;
+    },
     revokeIdentity: () => {
       identityCurrent = false;
     },
@@ -256,6 +273,44 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
 }
 
 describe('boxed recovery HTTP and canonical employee permissions', () => {
+  it.each(['owner', 'worker'] as const)(
+    'revoked runtime origin refuses genuine %s before any observation or effect',
+    async (caller) => {
+      const f = await fixture({ office: true, storedPolicy: true }),
+        before = f.companyStore.snapshot();
+      f.revokeRuntime();
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-continuation',
+        headers: caller === 'owner' ? f.ownerHeaders : f.workerHeaders,
+        payload: { request: f.request },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      expect(f.observations()).toBe(0);
+      expect(f.effects()).toBe(0);
+      expect(f.companyStore.snapshot()).toEqual(before);
+    }
+  );
+  it('runtime origin revoked during an actual source-read await stops the next effect', async () => {
+    const f = await fixture({ office: true, storedPolicy: true }),
+      before = f.companyStore.snapshot();
+    f.beforeObservation(async () => {
+      f.revokeRuntime();
+    });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: { request: f.request },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+    expect(f.observations()).toBe(1);
+    expect(f.effects()).toBe(0);
+    expect(f.companyStore.snapshot()).toEqual(before);
+  });
+
   it('a coordinator title without a recovery grant cannot inspect or start a worker', async () => {
     const f = await fixture({ recover: false, office: true, storedPolicy: true });
     const before = f.companyStore.snapshot();

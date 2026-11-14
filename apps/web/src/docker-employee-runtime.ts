@@ -13,14 +13,21 @@ import {
   dockerWorkerIdentityOf,
   type DockerWorkerIdentityBinding,
 } from './docker-worker-identity.js';
-import { DockerEmployeeContinuation, dockerContinuationDigest } from './docker-employee-continuation.js';
+import {
+  DockerEmployeeContinuation,
+  DockerEmployeeContinuationError,
+  dockerContinuationDigest,
+} from './docker-employee-continuation.js';
 import { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
 import { DockerEmployeeSessionProvider } from './docker-employee-session-provider.js';
 import { readLegacyDockerPolicyProposal, parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
-import { registerDockerEmployeeContinuationRoutes } from './web/routes/docker-employee-continuation-routes.js';
+import {
+  registerDockerEmployeeContinuationRoutes,
+  type DockerContinuationRouteAuthentication,
+} from './web/routes/docker-employee-continuation-routes.js';
 const sha = z.string().regex(/^sha256:[a-f0-9]{64}$/),
   digest = z.string().regex(/^[a-f0-9]{64}$/);
 export const DockerRuntimeConfiguration = z
@@ -117,6 +124,26 @@ function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current:
     }
     throw error;
   }
+}
+/** Retain runtime currency around every use of the original verified identity ports. */
+export function guardDockerRuntimeOrigin(
+  auth: DockerContinuationRouteAuthentication,
+  requireCurrent: () => void
+): DockerContinuationRouteAuthentication {
+  return {
+    verifiedOwner(request) {
+      requireCurrent();
+      return auth.verifiedOwner(request);
+    },
+    worker(request) {
+      requireCurrent();
+      return auth.worker(request);
+    },
+    owner(request) {
+      requireCurrent();
+      return auth.owner(request);
+    },
+  };
 }
 const runtimeOrigin = Symbol('actual boxed runtime configuration');
 export class DockerEmployeeRuntime {
@@ -256,7 +283,9 @@ export class DockerEmployeeRuntime {
       a.company,
       a.store,
       a.service,
-      { ...auth, worker: dockerWorkerIdentityOf },
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, () => {
+        if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      }),
       readLegacyDockerPolicyProposal
     );
   }
