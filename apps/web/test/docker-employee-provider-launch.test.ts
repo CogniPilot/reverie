@@ -87,7 +87,7 @@ describe('boxed original provider publication', () => {
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, current);
     f.session.bindDockerContinuationLaunch(owner);
     const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
-    expect(command).toContain('new-session');
+    expect(command).toContain('source-file -');
     expect(command).toContain('preserved');
     expect(command).toContain('REVERIE_DOCKER_OPERATION_ID');
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
@@ -161,6 +161,15 @@ describe('boxed original provider publication', () => {
       }
     }
   );
+  it('refuses an oversized program before consuming its actual first-provider owner', () => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    expect(() =>
+      buildDockerLaunchCommand({ ...f.opts, canonicalCommand: 'x'.repeat(96 * 1024), continuationLaunch: owner })
+    ).toThrow('Bounded exact UTF-8');
+    expect(buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toContain('source-file -');
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+  });
   it('revoked currentness and destination substitution cannot consume another provider slot', () => {
     const f = fixture();
     let active = true;

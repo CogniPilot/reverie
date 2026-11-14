@@ -1,3 +1,4 @@
+import { tmuxSourceCommands } from './tmux-source-command.js';
 import type {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
 import { MuxSessionMetadataStore, type MuxMetadataPublicationStatus, type MuxMetadataReconciliation, type MuxMetadataIncidentSelector } from './mux-session-metadata-store.js';
@@ -32,7 +33,7 @@ import { pastesInsteadOfKeys, typeAndSubmit, writeGateActive, writeGateOpen, wri
 import { EventEmitter } from 'node:events';
 import { collectDescendants } from './proc-tree.js';
 import { isSameProcess, parseLivePane, PANE_LIVENESS_FORMAT, readProcStat, resolveLivePaneTarget, signalDescendants } from './signal-target.js';
-import { execSync, exec, execFile } from 'node:child_process';
+import { execSync, exec, execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { workerLaunchCommand, WorkerViewerEndpoint, WorkerViewerEndpointCustodyError } from './worker-execution.js';
 import { MuxMutationRefusedError } from './mux-interface.js';
@@ -1562,16 +1563,21 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  let inner:string;
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');
-   opts.continuationLaunch.claim(sessionId,docker);
-   inner='tmux -u -L reverie-docker new-session -d -s '+shellescape(target)+' -c '+shellescape(docker.containerWorkdir)+' '+shellescape(opts.canonicalCommand)+
-    ' '+shellescape(';')+' setenv -t '+shellescape(target)+' REVERIE_SESSION_ID '+shellescape(sessionId)+
-    ' '+shellescape(';')+' setenv -t '+shellescape(target)+' REVERIE_DOCKER_OPERATION_ID '+shellescape(placement.operationId)+
-    ' '+shellescape(';')+' set -t '+shellescape(target)+' status off '+shellescape(';')+' attach-session -t '+shellescape(target);
+   const source = tmuxSourceCommands([
+    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, opts.canonicalCommand],
+    ['setenv', '-t', target, 'REVERIE_SESSION_ID', sessionId],
+    ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],
+    ['set', '-t', target, 'status', 'off'],
+   ]);
+   inner='printf %s '+shellescape(source)+' | tmux -u -L reverie-docker start-server '+shellescape(';')+' source-file - && exec tmux -u -L reverie-docker attach-session -t '+shellescape(target);
  }else inner='tmux -u -L reverie-docker attach-session -t '+shellescape(target);
  inner='export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner;
  const expected=shellescape(docker.image+' true '+docker.containerName);
  const checked=base+' inspect -f '+shellescape('{{.Image}} {{.State.Running}} {{.Id}}')+' '+name+' | grep -Fx '+expected;
- return checked+' && exec '+base+' exec -it --workdir '+shellescape(docker.containerWorkdir)+' '+flags.join(' ')+' '+name+' sh -lc '+shellescape(inner);
+ const command = checked+' && exec '+base+' exec -it --workdir '+shellescape(docker.containerWorkdir)+' '+flags.join(' ')+' '+name+' sh -lc '+shellescape(inner);
+ tmuxSourceCommands([['bash', '-c', command]]);
+ opts.continuationLaunch?.claim(sessionId,docker);
+ return command;
 }
 
 /**
@@ -2544,6 +2550,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
           : attachOnly && viewerEndpoint ? viewerEndpoint.command(localFullCmd, workingDir, sessionId)
             : workerLaunchCommand(localFullCmd, workingDir, sessionId, attachOnly, options.workerResourceLaunch, publication);
 
+      const sourceLaunch = docker?.continuation
+        ? tmuxSourceCommands([['respawn-pane', '-k', '-c', TMUX_LAUNCH_CWD, '-t', muxName, 'bash', '-c', fullCmd]])
+        : undefined;
       const cleanEnv = { ...process.env };
       delete cleanEnv.TMUX;
       const mergedEnvironment = this.mergedCliEnv(mode, options, envOverrides);
@@ -2615,14 +2624,23 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       notifyMuxDispatch(options, requiresPublication);
       if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
       requireCurrent();
-      execSync(
-        buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
-        {
+      if (docker?.continuation) {
+        execFileSync('tmux', ['-L', this.tmuxSocket, 'source-file', '-'], {
+          input: sourceLaunch,
           timeout: EXEC_TIMEOUT_MS,
-          stdio: 'ignore',
+          stdio: ['pipe', 'ignore', 'ignore'],
           env: cleanEnv,
-        }
-      );
+        });
+      } else {
+        execSync(
+          buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd),
+          {
+            timeout: EXEC_TIMEOUT_MS,
+            stdio: 'ignore',
+            env: cleanEnv,
+          }
+        );
+      }
 
       // Wait for tmux session to be queryable
       await new Promise((resolve) => setTimeout(resolve, TMUX_CREATION_WAIT_MS));
@@ -2699,7 +2717,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return session;
     } catch (err) {
       if (err instanceof MuxMutationRefusedError) throw err;
-      throw new Error(`Failed to create tmux session: ${getErrorMessage(err)}`);
+      throw new Error(`Failed to create tmux session: ${getErrorMessage(err)}`, { cause: err });
     }
   }
 
