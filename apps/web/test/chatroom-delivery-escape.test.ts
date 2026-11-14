@@ -311,3 +311,11 @@ describe('the delivery header is a contract: the room parsing, the owner gate, t
   });
 });
 
+
+
+it('escapes each combining or filler code point independently rather than as a composed class', () => {
+  const points = [0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x3164, 0xffa0];
+  const escaped = (code: number) => '\\u' + code.toString(16).padStart(4, '0');
+  for (const code of points) expect(quoteForPane(String.fromCodePoint(code))).toBe('"' + escaped(code) + '"');
+  expect(quoteForPane(points.map(code => String.fromCodePoint(code)).join(''))).toBe('"' + points.map(escaped).join('') + '"');
+});

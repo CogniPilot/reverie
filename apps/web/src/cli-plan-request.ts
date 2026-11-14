@@ -1,3 +1,4 @@
+import { containsHandoffControls } from './text-controls.js';
 import { constants, promises as fs } from 'node:fs';
 import type { AgentDeps } from './cli-agent.js';
 import { randomUUID } from 'node:crypto';
@@ -10,8 +11,7 @@ import { PlanRequestCapabilities, PlanRequestId } from './plan-request-capabilit
 export function serverReason(body: unknown): string {
   const error = (body as { error?: unknown } | undefined)?.error;
   const raw = typeof error === 'string' ? error : typeof (error as { message?: unknown } | undefined)?.message === 'string' ? (error as { message: string }).message : '';
-  // eslint-disable-next-line no-control-regex -- a server message is shown on one terminal line, without control characters.
-  return raw.replace(/[\x00-\x1f\x7f-\x9f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  return raw.replace(/\p{Cc}+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
 /** Request a move through the scoped company API; session creation remains private to the executor. */
@@ -80,7 +80,7 @@ export async function agentPlanRequest(
           read = await handle.read(bytes, 0, bytes.length, 0);
         if (read.bytesRead > 48000) throw new Error('Invalid handoff file');
         handoff = bytes.subarray(0, read.bytesRead).toString('utf8').trim();
-        if (!handoff || handoff.length > 12000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(handoff))
+        if (!handoff || handoff.length > 12000 || containsHandoffControls(handoff))
           throw new Error('Invalid handoff text');
       } finally {
         await handle.close();

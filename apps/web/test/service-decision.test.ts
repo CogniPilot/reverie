@@ -1,3 +1,4 @@
+import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import Fastify from 'fastify';
 import * as fs from 'node:fs';
@@ -356,6 +357,28 @@ it('r2c: owner setup page shows one button per configured grant with current ids
     resources: ['website'],
   });
   expect(html.body).toContain('does not resolve to exactly one active employee');
+  const dom = new JSDOM(html.body, { url: 'http://localhost/api/service-grants/setup', runScripts: 'outside-only' });
+  try {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    dom.window.fetch = async (url, init) => {
+      requests.push({ url: String(url), init });
+      return new Response(JSON.stringify({ success: false, error: 'Synthetic refusal' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+    dom.window.eval(dom.window.document.querySelector('script')!.textContent!);
+    expect(requests).toEqual([]);
+    dom.window.document.querySelector<HTMLButtonElement>('button[data-body]')!.click();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe('/api/service-grants');
+    expect(requests[0]!.init?.method).toBe('POST');
+    expect(requests[0]!.init?.credentials).toBe('same-origin');
+    expect(JSON.parse(String(requests[0]!.init?.body))).toEqual(buttons[0]);
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    dom.window.close();
+  }
+
   expect(f.store.snapshot().serviceGrants).toEqual([]);
   await app.close();
   const none = Fastify();

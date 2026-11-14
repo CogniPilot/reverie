@@ -13,8 +13,10 @@
  * lookalikes (curly, low, fullwidth, double prime, CJK). Written with escapes only so no hidden character sits in this file.
  */
 const ESCAPED = new RegExp(
-  '[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}\\u00a0\\u034f\\u1680\\u115f\\u1160\\u17b4\\u17b5\\u180b-\\u180f\\u2000-\\u200a\\u202f\\u205f\\u2800\\u3000\\u3164\\uffa0' +
-    '\\ufe00-\\ufe0f\\u{e0100}-\\u{e01ef}\\u201c-\\u201f\\uff02\\u2033\\u301d-\\u301f]',
+  '[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]' +
+    '|[\\u180b-\\u180f]|[\\u2000-\\u200a]|[\\ufe00-\\ufe0f]|[\\u{e0100}-\\u{e01ef}]' +
+    '|[\\u201c-\\u201f]|[\\u301d-\\u301f]' +
+    '|\\u00a0|\\u034f|\\u1680|\\u115f|\\u1160|\\u17b4|\\u17b5|\\u202f|\\u205f|\\u2800|\\u3000|\\u3164|\\uffa0|\\uff02|\\u2033',
   'u'
 );
 /** Characters named by code so that no invisible character sits in this file. */

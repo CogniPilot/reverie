@@ -1,3 +1,4 @@
+import { containsHandoffControls } from './text-controls.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoves, type PlanMoveSnapshot } from './plan-move.js';
@@ -441,7 +442,7 @@ export class PlanMoveRequests {
         await this.audit(record, 'plan_request_rejected');
         return view(record);
       }
-      if (!handoff.trim() || handoff.length > 12000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(handoff))
+      if (!handoff.trim() || handoff.length > 12000 || containsHandoffControls(handoff))
         throw new PlanMoveError('Provide a work-safe handoff of 1–12000 characters');
       const snapshot = await execution.executor.snapshot(record.employeeId, record.owner, record.purpose);
       if (

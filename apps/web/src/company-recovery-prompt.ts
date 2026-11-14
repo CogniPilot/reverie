@@ -18,11 +18,15 @@ export interface RecoveryPromptSession {
   ): Promise<boolean>;
 }
 
+// Protocol bytes are named explicitly rather than embedded as invisible regex characters.
+const ESCAPE = String.fromCharCode(0x1b), BELL = String.fromCharCode(0x07);
+const OSC = new RegExp(ESCAPE + '\\][^' + BELL + ESCAPE + ']*(?:' + BELL + '|' + ESCAPE + '\\\\)', 'g');
+const CSI = new RegExp(ESCAPE + '\\[[0-?]*[ -/]*[@-~]', 'g');
 /** Color/OSC sequences may divide a visible marker across terminal writes. */
 export function recoveryComposerReady(session: RecoveryPromptSession, mark: string): boolean {
   const text = session.terminalBuffer
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+    .replace(OSC, '')
+    .replace(CSI, '');
   return !session.paneDialog && !session.isWorking && text.includes(mark);
 }
 

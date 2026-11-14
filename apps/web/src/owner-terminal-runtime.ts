@@ -37,7 +37,6 @@ export function createOwnerTerminalRuntime<R extends TerminalRequest>(
   if (!socket) return undefined;
   const selected = socket; socket = undefined;
   const initial = projection();
-  let bridge: OwnerLedgerBridge<R>;
   const authority = new OwnerLaptopTerminalAuthority<R>({verifiedOwner, officeAuth,
     ingress: {externalOrigin: initial.externalOrigin, assertRequestBinding(request) {
       const current = projection();
@@ -50,6 +49,6 @@ export function createOwnerTerminalRuntime<R extends TerminalRequest>(
     protectedChannel: {async assertCurrent() { bridge.assertCurrent(); projection(); }},
     contextLifetimeMs: 300_000,
   });
-  bridge = new OwnerLedgerBridge(selected, authority);
+  const bridge = new OwnerLedgerBridge(selected, authority);
   return {authority, bridge};
 }

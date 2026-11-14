@@ -150,7 +150,7 @@ let
         test/employee-recovery-authority.test.ts test/employee-recovery-service.test.ts test/employee-recovery-diagnostics-wire.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
         test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
-        test/control-behavior-inventory.test.ts test/control-behavior-ratchet.test.ts
+        test/control-behavior-inventory.test.ts test/control-behavior-ratchet.test.ts test/text-controls.test.ts
       npm test -- test/fixed-resume-message.test.ts test/recovery-authority.test.ts \
         test/recovery-transaction.test.ts test/recovery-operation-clock.test.ts test/recovery-ledger-client.test.ts \
         test/rest-canonical-metadata.test.ts \

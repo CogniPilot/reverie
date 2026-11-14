@@ -198,7 +198,7 @@ td,th{border:1px solid #8884;padding:6px;text-align:left;vertical-align:top}butt
 with POST /api/service-grants/&lt;id&gt;/revoke.</p><table><tr><th>Purpose</th><th>Principal / epoch</th><th>Employees</th>
 <th>Resources</th><th>Expires</th><th></th></tr>${rows.join('')}</table>
 <script>document.querySelectorAll('button[data-body]').forEach(function(b){b.addEventListener('click',function(){
-b.disabled=true;var out=document.getElementById('r'+b.dataset.row);fetch(location.pathname.replace(/\/setup$/,''),{method:'POST',
+b.disabled=true;var out=document.getElementById('r'+b.dataset.row);fetch(location.pathname.replace(/\\/setup$/,''),{method:'POST',
 credentials:'same-origin',headers:{'content-type':'application/json'},body:b.dataset.body}).then(function(r){return r.json()})
 .then(function(j){out.textContent=j.success?('issued '+j.data.id):('refused: '+(j.error||'?'));if(!j.success)b.disabled=false})
 .catch(function(){out.textContent='failed';b.disabled=false})})})</script></body></html>`;

@@ -1,7 +1,7 @@
 import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { Session } from '../src/session.js';
-import { deliverRecoveryPrompt, submitRecoveryPrompt } from '../src/company-recovery-prompt.js';
+import { deliverRecoveryPrompt, submitRecoveryPrompt, recoveryComposerReady } from '../src/company-recovery-prompt.js';
 import { placeholderHoldsPrompt } from '../src/session-submit-verifier.js';
 
 function fixture() {
@@ -144,4 +144,19 @@ describe('actual Session recovery submission ownership', () => {
     })).rejects.toThrow('not confirmed');
     expect(f.writes).toHaveLength(1); expect(f.pane()).toBe(codexPane('new owner draft'));
   });
+});
+
+
+it('keeps exact OSC and CSI stripping for fragmented visible composer markers', () => {
+  const session = fixture(), escape = String.fromCharCode(27), bell = String.fromCharCode(7);
+  for (const buffer of [
+    'rea' + escape + '[31mdy',
+    'rea' + escape + ']0;window title' + bell + 'dy',
+    'rea' + escape + ']0;window title' + escape + '\\' + 'dy',
+  ]) {
+    session.terminalBuffer = buffer;
+    expect(recoveryComposerReady(session, 'ready')).toBe(true);
+  }
+  session.terminalBuffer = escape + ']0;ready' + bell;
+  expect(recoveryComposerReady(session, 'ready')).toBe(false);
 });

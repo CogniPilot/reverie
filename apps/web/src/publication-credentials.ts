@@ -1,3 +1,4 @@
+import { containsC0OrDel } from './text-controls.js';
 /** Server-private named PAT storage. Repository labels describe owner intent, not GitHub-enforced scopes. */
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -14,7 +15,7 @@ const Name = z.string().regex(PUBLICATION_TOKEN_NAME);
 const Token = z.string().min(1).max(4096).regex(/^[!-~]+$/);
 const Repositories = z.array(z.string().regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/)).max(50)
   .refine(values => new Set(values).size === values.length);
-const Label = z.string().trim().min(1).max(120).refine(value => !/[\x00-\x1f\x7f]/.test(value));
+const Label = z.string().trim().min(1).max(120).refine(value => !containsC0OrDel(value));
 export const PublicationTokenCreateSchema = z.object({
   name: Name, token: Token, label: Label.optional(), repositories: Repositories.optional(),
 }).strict();
@@ -185,7 +186,11 @@ export class PublicationCredentialVault {
           });
           const timeout = setTimeout(() => { child.kill('SIGKILL'); reject(new PublicationVaultError()); }, 7000);
           child.once('error', () => { clearTimeout(timeout); reject(new PublicationVaultError()); });
-          child.once('close', code => { clearTimeout(timeout); code === 0 ? resolveLock() : reject(new PublicationVaultError()); });
+          child.once('close', code => {
+            clearTimeout(timeout);
+            if (code === 0) resolveLock();
+            else reject(new PublicationVaultError());
+          });
         });
         checkLock();
         const result = await work(checkLock);

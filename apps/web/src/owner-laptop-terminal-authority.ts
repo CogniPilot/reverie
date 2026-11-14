@@ -1,3 +1,4 @@
+import { containsC0OrDel } from './text-controls.js';
 /** Private authority context only; no HTTP, issuance, broker or shell side effects. */
 import { createHash, randomBytes } from 'node:crypto';
 import { inspect } from 'node:util';
@@ -60,7 +61,7 @@ const TARGET_KEYS = ['employeeId', 'sessionId', 'sessionGeneration', 'containerI
 function requireThat(ok: unknown, code: string): asserts ok { if (!ok) throw new AuthorityRefusal(code); }
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 function text(value: unknown): value is string {
-  return typeof value === 'string' && value.length > 0 && value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value);
+  return typeof value === 'string' && value.length > 0 && value.length <= 256 && !containsC0OrDel(value);
 }
 function exactOrigin(value: unknown): string {
   requireThat(typeof value === 'string' && value.length <= 2048, 'ORIGIN');
