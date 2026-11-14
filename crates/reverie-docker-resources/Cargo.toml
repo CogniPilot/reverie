@@ -1,0 +1,18 @@
+[package]
+name = "reverie-docker-resources"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { workspace = true, features = ["fs", "user"] }
+rustix = { version = "=1.1.4", default-features = false, features = ["std", "fs", "use-libc"] }
+
+[lints]
+workspace = true
