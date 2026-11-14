@@ -765,11 +765,15 @@
       "title": "HTTP success with held state is visibly held and cannot offer a fresh start",
       "assertions": [
         "f.button('Recover and enter office')!.click()",
-        "expect(f.panel().textContent).toContain('Recovery held: resources-issued')",
-        "expect(f.panel().querySelector('[role=\"alert\"]')!.textContent).toContain('RESOURCES_UNCONFIRMED')",
+        "expect(f.panel().textContent).toContain('Recovery needs attention. Check the original recovery before trying again.')",
+        "expect(details.open).toBe(false)",
+        "details.querySelector('summary')!.click()",
+        "expect(details.open).toBe(true)",
+        "expect(f.panel().querySelector('.ca-recovery-details code')!.textContent).toContain('RESOURCES_UNCONFIRMED')",
+        "expect(f.starts()).toHaveLength(1)",
         "expect(f.button('Recover and enter office')).toBeUndefined()"
       ],
-      "outcome": "An HTTP success containing a held operation remains visibly held; the profile does not present a fresh recovery."
+      "outcome": "An HTTP success containing a held operation displays a readable alert; its technical details can be opened and closed without a second recovery POST. The profile does not offer a fresh recovery. Browser layout and disclosure checks run separately against closed synthetic API responses."
     },
     "docker-recovery.foreign-response": {
       "test": "test/docker-employee-recovery-ui.test.ts",
@@ -1106,6 +1110,11 @@
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPublicationTokens::inventory::button:Delete PAT ${token.name}",
       "scenarios": ["publication.delete-confirmation"],
       "remaining": "DOM authorization presentation and synthetic API dispatch only; real owner/vault enforcement has separate API tests."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.constructor::inline::summary:Recovery details",
+      "scenarios": ["docker-recovery.held-visible"],
+      "remaining": "Actual DOM disclosure open/close preserves one original recovery POST; desktop/mobile browser tests also exercise this control without API writes. Live Docker recovery acceptance and other failure states require separate evidence."
     }
   ],
   "gaps": [

@@ -5337,6 +5337,25 @@ button.ca-company-profile-trigger:focus-visible {
 .ca-expert-profile .ca-profile-management > p {
   margin: 0 0 7px;
 }
+.ca-profile-docker-recovery .ca-btn {
+  min-height: 44px;
+  max-width: 100%;
+  white-space: normal;
+}
+.ca-profile-docker-recovery .ca-fleet-table caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.ca-profile-docker-recovery .ca-recovery-details {
+  font-size: 12px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.ca-profile-docker-recovery .ca-recovery-details summary {
+  cursor: pointer;
+  padding: 8px 0;
+}
 .ca-profile-docker-recovery [role='alert'] {
   color: var(--error, #f38b8b);
   overflow-wrap: anywhere;

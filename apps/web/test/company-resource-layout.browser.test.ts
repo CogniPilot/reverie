@@ -24,6 +24,7 @@ async function fixture(
     pressure?: 'high' | 'stale';
     viewerObservation?: boolean;
     viewerReason?: 'native-health-unavailable' | 'backoff';
+    boxedRecovery?: 'approval' | 'held';
   } = {}
 ) {
   // Keep the shipped document structure, but bootstrap only the conversation
@@ -60,7 +61,7 @@ async function fixture(
     window.__viewerObservation='unconfirmed'; window.__viewerReason=${JSON.stringify(options.viewerReason ?? null)};
     window.__viewerRetryAfterMs=window.__viewerReason?5000:0;
     const employee={id:${JSON.stringify(employeeId)},sessionId:${JSON.stringify(sessionId)},sessionGeneration:2,
-      name:${JSON.stringify(options.name ?? 'River')},position:'Compiler engineer',expertise:['Systems'],responsibilities:[],permissions:{},
+      name:${JSON.stringify(options.name ?? 'River')},position:'Compiler engineer',expertise:['Systems'],responsibilities:[],permissions:${options.boxedRecovery ? JSON.stringify({ recoverEmployees: true, manageOffice: false, manageGoals: false, moveOwnPlan: true, managePlans: false }) : '{}'},
       desiredRunning:${!options.pressure},onVacation:${!!options.pressure},runtimeHealth:'unknown',runtimeHealthScope:'terminal',
       workerViewerReconnect:${options.viewerObservation === true},
       effectiveBoardPermissions:{editBoardIssues:true,manageBoard:false,manageDecisions:false},
@@ -74,11 +75,30 @@ async function fixture(
         {employeeId:'22222222-3333-4444-8555-666666666666',name:'Unverified employee',state:'unverified',
         reason:'Native observation unavailable',desired:policy,observed:null,desiredImageId:image,observedImageId:null}],
       operations:[],unmanagedLaptops:[]};
-    window.__server.company={canManage:true,resourceReplacement:true,employees:[employee],settings:{ownerName:'Fixture owner',autoWakeEnabled:false}};
+    window.__server.company={canManage:true,boxedRuntime:${!!options.boxedRecovery},resourceReplacement:${!options.boxedRecovery},employees:[employee],settings:{ownerName:'Fixture owner',autoWakeEnabled:false}};
     const original=window.__server.handle;
     window.__server.handle=async(path,opts={})=>{
       const ok=data=>({ok:true,status:200,json:async()=>({success:true,data})});
       if(opts.method && opts.method!=='GET' && path!=='/api/company/resources/operations')window.__writes.push({path,method:opts.method,body:opts.body});
+      if(path==='/api/company/employees/'+employee.id+'/docker-policy' && ${!!options.boxedRecovery}) {
+        const held=${JSON.stringify(options.boxedRecovery)};
+        const resourcePolicy={memoryHighBytes:24*1024**3,memoryMaxBytes:48*1024**3,swapMaxBytes:0,pidsMax:512,
+          cpuWeight:100,allowedCpus:Array.from({length:32},(_,i)=>i),
+          pool:{memoryMaxBytes:48*1024**3,swapMaxBytes:0,pidsMax:8192,cpuWeight:100,allowedCpus:Array.from({length:32},(_,i)=>i)}};
+        const operationId='44444444-5555-4666-8777-888888888888';
+        const source={sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,
+          sourceDigest:'a'.repeat(64),containerId:'b'.repeat(64),imageId:'sha256:'+'c'.repeat(64),
+          destinationImageId:'sha256:'+'d'.repeat(64),state:'stopped',enforcement:'unverified'};
+        const operation={operationId,state:'held',phase:'provider-issued',allowedActions:['observe'],
+          code:'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED'};
+        return ok({...source,operationId:held==='held'?operationId:null,policy:held==='held'?resourcePolicy:null,
+          policyDigest:held==='held'?'e'.repeat(64):null,canApprovePolicy:held==='approval',
+          proposedPolicy:held==='approval'?resourcePolicy:undefined,proposedPolicyDigest:'e'.repeat(64),
+          allowedActions:held==='held'?['observe']:['approve-policy'],
+          ...(held==='held'?{operation,originalRequest:{operationId,sessionId:employee.sessionId,
+            sessionGeneration:employee.sessionGeneration,containerId:source.containerId,imageId:source.imageId,
+            expectedDestinationImageId:source.destinationImageId,expectedPolicyDigest:'e'.repeat(64),enterOffice:true}}:{})});
+      }
       if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});
       if(path==='/api/owner/status')return ok({configured:true,signedIn:true,identity:{id:'owner',role:'owner'}});
       if(path==='/api/company/resources/fleet')return ok(fleet);
@@ -126,7 +146,7 @@ async function fixture(
     ${appStub}
   `,
   });
-  for (const name of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js'])
+  for (const name of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js', 'docker-employee-recovery.js'])
     await page.addScriptTag({ content: read(name) });
   await page.addScriptTag({ content: 'window.app=new ReverieApp();' });
   // chatroom-ui loads the real shell through its ordinary asset loader.
@@ -657,3 +677,94 @@ for (const width of [1280, 390, 320])
       await browser.close();
     }
   });
+
+for (const width of [320, 1280])
+  for (const state of ['approval', 'held'] as const)
+    it(`keeps Docker recovery ${state} readable and actionable at ${width}px`, async () => {
+      const browser = await chromium.launch({
+        headless: true,
+        chromiumSandbox: true,
+        ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+          ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+          : {}),
+      });
+      try {
+        const page = await browser.newPage({ viewport: { width, height: 900 } }),
+          errors: string[] = [];
+        page.on('pageerror', (error) => errors.push(error.message));
+        await fixture(page, { boxedRecovery: state });
+        await page.evaluate(() =>
+          (
+            window as unknown as { reverieChat: { openCompany(section: string): Promise<void> } }
+          ).reverieChat.openCompany('people')
+        );
+        await page.getByRole('button', { name: 'Edit profile for River', exact: true }).click();
+        const profile = page.getByRole('dialog', { name: 'Edit profile: River', exact: true });
+        await profile.getByRole('tab', { name: 'Permissions', exact: true }).click();
+        const recovery = profile.getByRole('region', { name: 'Docker session recovery', exact: true });
+        await recovery.locator('table').waitFor();
+        await recovery.scrollIntoViewIfNeeded();
+        expect(await recovery.locator('caption').textContent()).toBe(
+          state === 'approval' ? 'Proposed resource policy — approval required' : 'Approved resource policy'
+        );
+        expect(await recovery.getByRole('cell', { name: '24 GiB', exact: true }).count()).toBe(1);
+        expect(await recovery.getByRole('cell', { name: '0–31', exact: true }).count()).toBe(1);
+        if (state === 'held') {
+          expect(await recovery.locator('[role="alert"]').textContent()).toContain(
+            'previous recovery step could not be confirmed'
+          );
+          expect(await recovery.locator('.ca-recovery-details').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(
+            false
+          );
+          await recovery.locator('.ca-recovery-details summary').click();
+          expect(await recovery.locator('.ca-recovery-details').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(
+            true
+          );
+          await recovery.locator('.ca-recovery-details summary').click();
+          expect(await recovery.locator('.ca-recovery-details').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(
+            false
+          );
+        }
+        const controls = recovery.locator('button');
+        expect(await controls.allTextContents()).toEqual(
+          state === 'approval'
+            ? ['Refresh recovery status', 'Approve displayed limits and recover']
+            : ['Refresh recovery status', 'Check original recovery']
+        );
+        const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
+        if (output) {
+          await mkdir(output, { recursive: true });
+          await page.screenshot({ path: join(output, `docker-recovery-${state}-${width}.png`) });
+        }
+        const geometry = await recovery.evaluate((element) => {
+          const body = element.closest('.ca-profile-editor-body')!,
+            bounds = body.getBoundingClientRect();
+          return {
+            overflow: body.scrollWidth > body.clientWidth + 1,
+            buttons: [...element.querySelectorAll('button')].map((button) => {
+              const r = button.getBoundingClientRect();
+              return {
+                height: r.height,
+                left: r.left,
+                right: r.right,
+                content: button.scrollWidth > button.clientWidth + 1,
+              };
+            }),
+            left: bounds.left,
+            right: bounds.right,
+          };
+        });
+        expect(geometry.overflow).toBe(false);
+        for (const button of geometry.buttons) {
+          expect(button.height).toBeGreaterThanOrEqual(44);
+          expect(button.left).toBeGreaterThanOrEqual(geometry.left);
+          expect(button.right).toBeLessThanOrEqual(geometry.right + 1);
+          expect(button.content).toBe(false);
+        }
+        expect(await profile.getByLabel('Soft RAM (MiB)', { exact: true }).count()).toBe(0);
+        expect(await page.evaluate(() => (window as unknown as { __writes: unknown[] }).__writes)).toEqual([]);
+        expect(errors).toEqual([]);
+      } finally {
+        await browser.close();
+      }
+    });

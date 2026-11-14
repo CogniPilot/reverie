@@ -7,6 +7,28 @@
   const image = (v) => typeof v === 'string' && /^sha256:[a-f0-9]{64}$/.test(v);
   const gib = (v) =>
     v === null ? 'No soft threshold' : Number.isSafeInteger(v) ? `${v / 1024 ** 3} GiB` : 'Unavailable';
+  const cpuRanges = (values) => {
+    if (
+      !Array.isArray(values) ||
+      !values.length ||
+      !values.every(
+        (value, index) => Number.isSafeInteger(value) && value >= 0 && (index === 0 || values[index - 1] < value)
+      )
+    )
+      return 'Unavailable';
+    const ranges = [];
+    let start = values[0],
+      end = start;
+    for (const value of values.slice(1)) {
+      if (value === end + 1) end = value;
+      else {
+        ranges.push(start === end ? String(start) : start + '–' + end);
+        start = end = value;
+      }
+    }
+    ranges.push(start === end ? String(start) : start + '–' + end);
+    return ranges.join(', ');
+  };
   const copy = (v) => JSON.parse(JSON.stringify(v));
   class Panel {
     constructor(shell, host, dialog, employee) {
@@ -21,12 +43,17 @@
       this.status.setAttribute('role', 'status');
       this.error = shell.el('p', 'ca-error');
       this.error.setAttribute('role', 'alert');
+      this.details = shell.el('details', 'ca-recovery-details');
+      this.details.hidden = true;
+      this.diagnostic = shell.el('code');
+      this.details.append(shell.el('summary', '', 'Recovery details'), this.diagnostic);
       this.policy = shell.el('div');
       this.controls = shell.el('div', 'ca-company-actions ca-fleet-actions');
       this.root.append(
         shell.el('h3', '', 'Docker session recovery'),
         this.status,
         this.error,
+        this.details,
         this.policy,
         this.controls
       );
@@ -114,7 +141,7 @@
         ['Shared pool hard RAM ceiling', gib(policy.pool?.memoryMaxBytes)],
         ['Swap allowance', gib(policy.swapMaxBytes)],
         ['CPU weight', String(policy.cpuWeight)],
-        ['Allowed CPUs', Array.isArray(policy.allowedCpus) ? policy.allowedCpus.join(', ') : 'Unavailable'],
+        ['Allowed CPUs', cpuRanges(policy.allowedCpus)],
         ['Employee process limit', String(policy.pidsMax)],
         ['Shared pool process limit', String(policy.pool?.pidsMax)],
       ]) {
@@ -138,6 +165,7 @@
       this.busy = true;
       this.operation = null;
       this.error.textContent = '';
+      this.details.hidden = true;
       this.paint();
       try {
         const s = await this.api('docker-policy');
@@ -253,8 +281,19 @@
       this.operation = copy(data);
       if (this.selection) this.selection.operationId = operationId;
       this.status.textContent =
-        data.state === 'ready' ? 'Employee session recovery completed.' : `Recovery ${data.state}: ${data.phase}.`;
-      this.error.textContent = typeof data.code === 'string' ? data.code : '';
+        data.state === 'ready'
+          ? 'Employee session recovery completed.'
+          : data.state === 'held'
+            ? 'Recovery needs attention. Check the original recovery before trying again.'
+            : 'Recovery is in progress. Check the original recovery for an update.';
+      this.error.textContent =
+        typeof data.code === 'string'
+          ? 'The previous recovery step could not be confirmed. Check the original recovery for its outcome.'
+          : '';
+      this.diagnostic.textContent = [data.phase, typeof data.code === 'string' ? data.code : '']
+        .filter(Boolean)
+        .join(' · ');
+      this.details.hidden = data.state === 'ready';
       if (data.state === 'ready') pending.delete(this.key);
     }
     async start(body) {
@@ -262,6 +301,7 @@
       this.busy = true;
       this.operation = null;
       this.error.textContent = '';
+      this.details.hidden = true;
       this.status.textContent = 'Recovering this employee…';
       this.paint();
       try {
@@ -281,6 +321,7 @@
       this.busy = true;
       this.operation = null;
       this.error.textContent = '';
+      this.details.hidden = true;
       this.paint();
       try {
         this.outcome(await this.api('docker-continuation/observe', { operationId }), operationId);

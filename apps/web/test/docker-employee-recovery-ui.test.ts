@@ -236,8 +236,20 @@ it('HTTP success with held state is visibly held and cannot offer a fresh start'
   });
   f.button('Recover and enter office')!.click();
   await f.h.flush();
-  expect(f.panel().textContent).toContain('Recovery held: resources-issued');
-  expect(f.panel().querySelector('[role="alert"]')!.textContent).toContain('RESOURCES_UNCONFIRMED');
+  expect(f.panel().textContent).toContain('Recovery needs attention. Check the original recovery before trying again.');
+  expect(f.panel().querySelector('[role="alert"]')!.textContent).toContain(
+    'previous recovery step could not be confirmed'
+  );
+  const details = f.panel().querySelector('.ca-recovery-details') as HTMLDetailsElement;
+  expect(details.open).toBe(false);
+  details.querySelector('summary')!.click();
+  await f.h.flush();
+  expect(details.open).toBe(true);
+  expect(f.panel().querySelector('.ca-recovery-details code')!.textContent).toContain('RESOURCES_UNCONFIRMED');
+  details.querySelector('summary')!.click();
+  await f.h.flush();
+  expect(details.open).toBe(false);
+  expect(f.starts()).toHaveLength(1);
   expect(f.panel().textContent).not.toContain('recovery completed');
   expect(f.button('Recover and enter office')).toBeUndefined();
   expect(f.button('Continue original recovery')).toBeUndefined();
@@ -319,4 +331,21 @@ it('rejoins the server-owned original after reload and offers only its exact all
   expect(f.starts()).toHaveLength(1);
   expect(f.starts()[0].body).toEqual({ request: s.originalRequest });
   expect(f.button('Continue original recovery')).toBeUndefined(); // Lost reply requires fresh observation.
+});
+
+it.each([
+  { cpus: [0, 1, 2, 4, 6, 7], label: '0–2, 4, 6–7' },
+  { cpus: [0], label: '0' },
+  { cpus: [0, 2], label: '0, 2' },
+  { cpus: [], label: 'Unavailable' },
+  { cpus: [2, 1], label: 'Unavailable' },
+])('formats CPU placement read-only as $label', async ({ cpus, label }) => {
+  const selected = selection();
+  selected.policy = { ...policy, allowedCpus: cpus };
+  const f = await fixture({ selection: selected });
+  const row = [...f.panel().querySelectorAll('tr')].find(
+    (row) => row.querySelector('th')?.textContent === 'Allowed CPUs'
+  );
+  expect(row?.querySelector('td')?.textContent).toBe(label);
+  expect(f.starts()).toHaveLength(0);
 });
