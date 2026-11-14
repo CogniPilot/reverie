@@ -110,8 +110,8 @@ let
         boxedCredentialCheck
       ''}
       ${lib.optionalString pkgs.stdenv.isLinux ''
-        # Actual listener startup must preserve fixed boxed configuration/key
-        # currency. The fixture owns an isolated root/network/PID namespace.
+        # Actual tmux stdin IPC (cold/literal/40KiB) and listener startup must
+        # preserve boxed startup. The fixture owns a root/network/PID namespace.
         node node_modules/typescript/bin/tsc --noEmit -p config/tsconfig.scripts.json
         node --import tsx test/fixtures/boxed-webserver-startup.ts
       ''}

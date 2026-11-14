@@ -5,6 +5,7 @@ import { lstatSync, mkdtempSync, mkdirSync, readlinkSync, realpathSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { exerciseNativeTmux } from './tmux-source-native.js';
 
 const selectedUrl = 'http://reverie:3000';
 
@@ -12,6 +13,7 @@ async function startup(): Promise<void> {
   assert.equal(process.env.REVERIE_TEST_BOXED_STARTUP, '1');
   assert.equal(process.getuid?.(), 0);
   assert.equal(process.cwd(), '/source');
+  await exerciseNativeTmux('/fixture/tmp');
   const { WebServer } = await import('../../src/web/server.js');
   const server = new WebServer(0, false, true, '0.0.0.0');
   const internal = server as unknown as {
