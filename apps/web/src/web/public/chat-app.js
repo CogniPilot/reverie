@@ -655,14 +655,20 @@ function caProviderContext(employee) {
   return caProviderBinding(employee) + '\0' + (caProviderPlacement(employee) ?? '');
 }
 function caBoxedProvider(employee, session, member) {
-  return !!employee?.dockerBinding || !!session?.docker?.continuation ||
-    [employee?.providerHealth, session?.providerHealth, member?.providerHealth].some(value => value?.dockerPlacement !== undefined);
+  return (
+    !!employee?.dockerBinding ||
+    !!session?.docker?.continuation ||
+    [employee?.providerHealth, session?.providerHealth, member?.providerHealth].some(
+      (value) => value?.dockerPlacement !== undefined
+    )
+  );
 }
 function caProviderHealth(employee, session, member) {
   if (!employee?.id || !Number.isInteger(employee.sessionGeneration) || employee.bindingMigration) return undefined;
   const sid = employee?.sessionId || session?.id || member?.sessionId;
   const now = Date.now();
-  const boxed = caBoxedProvider(employee, session, member), placement = caProviderPlacement(employee);
+  const boxed = caBoxedProvider(employee, session, member),
+    placement = caProviderPlacement(employee);
   return [session?.providerHealth, employee?.providerHealth, member?.providerHealth]
     .filter(
       (value) =>
