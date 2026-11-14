@@ -100,6 +100,38 @@ it('checks decoded actual HTTP bytes against raw plus both exact compressed over
   });
   expect(request).toHaveBeenCalledOnce();
 });
+it('accepts the real relative hashed app URL with its exact content cache buster', async () => {
+  const f = gui(),
+    expected = hash(f.body).slice(0, 16);
+  f.page.locator = () => ({ evaluateAll: async () => ['app.1234abcd.js?v=' + expected] });
+  const fetch = vi.fn(async (url: URL) => {
+    expect(url.search).toBe('?v=' + expected);
+    return new Response(f.body);
+  });
+  vi.stubGlobal('fetch', fetch);
+  await expect(verifyCanaryServedGui(f.page, f.canary)).resolves.toMatchObject({ sha256: hash(f.body) });
+  expect(fetch).toHaveBeenCalledOnce();
+});
+it.each(['wrong-v', 'duplicate', 'extra', 'unknown', 'fragment', 'encoded-key'] as const)(
+  'refuses %s app cache-buster before credential transport',
+  async (kind) => {
+    const f = gui(),
+      v = hash(f.body).slice(0, 16),
+      request = vi.fn();
+    const query = {
+      'wrong-v': '?v=' + '0'.repeat(16),
+      duplicate: '?v=' + v + '&v=' + v,
+      extra: '?v=' + v + '&other=1',
+      unknown: '?other=' + v,
+      fragment: '?v=' + v + '#fragment',
+      'encoded-key': '?%76=' + v,
+    }[kind];
+    f.page.locator = () => ({ evaluateAll: async () => ['app.1234abcd.js' + query] });
+    vi.stubGlobal('fetch', request);
+    await expect(verifyCanaryServedGui(f.page, f.canary)).rejects.toThrow();
+    expect(request).not.toHaveBeenCalled();
+  }
+);
 it('refuses the formerly unused source-tree app overlay before any HTTP request', async () => {
   const f = gui(),
     request = vi.fn();

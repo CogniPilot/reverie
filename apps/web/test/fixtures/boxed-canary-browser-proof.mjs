@@ -131,7 +131,7 @@ export async function verifyCanaryServedGui(page, canary) {
   const matches = scripts.filter((url) => /^\/app\.[a-f0-9]{8,64}\.js$/.test(url.pathname));
   assert(matches.length === 1, 'Exactly one hashed app script required');
   const url = matches[0];
-  assert(url.origin === canary.endpoint.origin && !url.search && !url.hash, 'Same-origin app script required');
+  assert(url.origin === canary.endpoint.origin && !url.hash, 'Same-origin app script required');
   const modules = canary.proof.modules;
   assert(Array.isArray(modules) && modules.length <= 16);
   const selected = modules.filter(
@@ -142,6 +142,7 @@ export async function verifyCanaryServedGui(page, canary) {
   assert(selected.length === 1, 'Actual served app overlay descriptor required');
   const app = selected[0],
     maximum = 1024 * 1024;
+  assert(!url.search || url.search === '?v=' + app.sha256.slice(0, 16), 'Exact app content cache buster required');
   const bytes = (module) => {
     assert(module.readOnly === true && /^[a-f0-9]{64}$/.test(module.sha256) && module.inContainerSha === module.sha256);
     const raw = readFileSync(module.generatedFile);
