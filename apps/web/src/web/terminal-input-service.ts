@@ -87,7 +87,7 @@ export class TerminalInputService {
     tag: { clientId: string; seq: number; fingerprint: string },
     current: () => boolean
   ): TerminalInputReceiptState {
-    if (!current() || session.terminalInputHeld || session.providerDispatchHeld) return 'held';
+    if (!current() || session.terminalInputHeld || session.providerInputHeld !== false) return 'held';
     const admission = session.captureInputAdmission(current);
     if (!admission()) return 'held';
     const state = this.#receipts.lookup(
@@ -111,7 +111,7 @@ export class TerminalInputService {
     const subject = inputAdmissionSubject(original),
       owner = session.owner,
       sid = session.id;
-    if (!current() || session.terminalInputHeld || session.providerDispatchHeld) return { state: 'held' };
+    if (!current() || session.terminalInputHeld || session.providerInputHeld !== false) return { state: 'held' };
     const { clientId, seq, input, useMux } = intent;
     const rawInput = intent.rawInput ?? input;
     const selectedMux = useMux ?? isPlainPromptInput(input);

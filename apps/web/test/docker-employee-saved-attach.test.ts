@@ -8,6 +8,7 @@ import { CompanyDockerContinuationStore, dockerEmployeeSourceDigest } from '../s
 import { DockerEmployeeSessionProvider } from '../src/docker-employee-session-provider.js';
 import type { SessionPort, ConfigPort, InfraPort } from '../src/web/ports/index.js';
 import { dirname } from 'node:path';
+import { TerminalInputService, terminalInputFingerprint } from '../src/web/terminal-input-service.js';
 import { StateStore } from '../src/state-store.js';
 import { PROVIDER_LAUNCH_DISK_KEY } from '../src/provider-launch-publication.js';
 import { Session } from '../src/session.js';
@@ -220,7 +221,7 @@ async function dockerEncodedDestination() {
   return { ...f, observed };
 }
 
-const native = vi.hoisted(() => ({ ptys: [] as Array<{ file: string; args: string[] }> }));
+const native = vi.hoisted(() => ({ ptys: [] as Array<{ file: string; args: string[] }>, writes: [] as string[] }));
 vi.mock('node-pty', () => ({
   spawn: vi.fn((file: string, args: string[]) => {
     native.ptys.push({ file, args });
@@ -240,7 +241,7 @@ vi.mock('node-pty', () => ({
       rows: 24,
       process: 'tmux',
       handleFlowControl: false,
-      write: vi.fn(),
+      write: vi.fn((data: string) => native.writes.push(data)),
       resize: vi.fn(),
       pause: vi.fn(),
       resume: vi.fn(),
@@ -281,9 +282,10 @@ const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const finish of cleanup.splice(0).reverse()) await finish();
   native.ptys.length = 0;
+  native.writes.length = 0;
   vi.restoreAllMocks();
 });
-async function savedFixture(explicitUnknown = false) {
+async function savedFixture(explicitUnknown = false, savedInputUnknown = false) {
   const f = await dockerEncodedDestination();
   f.observed.State.Running = true;
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
@@ -367,8 +369,12 @@ async function savedFixture(explicitUnknown = false) {
   const denial = JSON.parse(readFileSync(path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY];
   expect(denial.rows[sid].phase).toBe('dispatch-intent');
   const loaded = new StateStore(path);
-  if (explicitUnknown) {
-    loaded.setSession(sid, { ...loaded.getSession(sid)!, providerDispatchHeld: true });
+  if (explicitUnknown || savedInputUnknown) {
+    loaded.setSession(sid, {
+      ...loaded.getSession(sid)!,
+      ...(explicitUnknown ? { providerDispatchHeld: true } : {}),
+      ...(savedInputUnknown ? { terminalInputHeld: true } : {}),
+    });
     loaded.flush();
   }
   const saved = loaded.getSession(sid)!;
@@ -398,6 +404,88 @@ async function savedFixture(explicitUnknown = false) {
   };
 }
 describe('actual saved Docker Session private attachment', () => {
+  it('normal input reservation and readback use the actual private view without clearing dispatch denial', async () => {
+    const f = await savedFixture(),
+      service = new TerminalInputService();
+    const current = () => {
+      f.requireCurrent();
+      return true;
+    };
+    const intent = { input: 'controlled private-view input', useMux: false, clientId: 'restored-browser', seq: 1 };
+    const tag = { clientId: intent.clientId, seq: intent.seq, fingerprint: terminalInputFingerprint(intent) };
+    expect(service.begin(f.session, intent, current).state).toBe('held');
+    expect(service.inspect(f.session, tag, current)).toBe('held');
+    const creates = vi.mocked(f.command.create).mock.calls.length;
+    f.session.bindDockerContinuationView(await f.capture());
+    await f.session.startInteractive();
+    expect(f.session.providerDispatchHeld).toBe(true);
+    expect(f.session.providerInputHeld).toBe(false);
+    expect(service.inspect(f.session, tag, current)).toBe('unknown');
+    const input = service.begin(f.session, intent, current);
+    expect(input.state).toBe('admitted');
+    if (input.state !== 'admitted') throw Error('Expected original private-view input reservation');
+    expect(service.inspect(f.session, tag, current)).toBe('pending');
+    expect(input.operation.writeRaw()).toBe(true);
+    expect(service.inspect(f.session, tag, current)).toBe('confirmed');
+    expect(service.begin(f.session, intent, current).state).toBe('duplicate');
+    expect(native.writes).toEqual([intent.input]);
+    expect(vi.mocked(f.command.create).mock.calls.length).toBe(creates);
+    expect(
+      vi
+        .mocked(f.command.run)
+        .mock.calls.some(([args]) => args[0] === 'container' && ['start', 'restart'].includes(args[1]))
+    ).toBe(false);
+    f.loaded.flush();
+    expect(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY]).toEqual(f.denial);
+    f.session.holdUnconfirmedInput(Error('controlled input response lost after original dispatch'));
+    expect(service.begin(f.session, { ...intent, seq: 2 }, current).state).toBe('held');
+    expect(service.inspect(f.session, tag, current)).toBe('held');
+    expect(native.writes).toEqual([intent.input]);
+    expect(f.session.providerDispatchHeld).toBe(true);
+  });
+  it('a saved input unknown stays held even with a current observed provider view', async () => {
+    const f = await savedFixture(false, true),
+      service = new TerminalInputService();
+    f.session.bindDockerContinuationView(await f.capture());
+    expect(f.session.providerInputHeld).toBe(false);
+    expect(f.session.terminalInputHeld).toBe(true);
+    const intent = { input: 'must remain unissued', clientId: 'saved-input', seq: 1 };
+    expect(service.begin(f.session, intent, () => true).state).toBe('held');
+    expect(
+      service.inspect(
+        f.session,
+        { clientId: intent.clientId, seq: 1, fingerprint: terminalInputFingerprint(intent) },
+        () => true
+      )
+    ).toBe('held');
+    expect(native.writes).toEqual([]);
+    expect(native.ptys).toEqual([]);
+    expect(f.session.toPersistedState().terminalInputHeld).toBe(true);
+  });
+  it('DTOs and an overridden public input-hold getter cannot mint the private input subject', async () => {
+    const f = await savedFixture(),
+      service = new TerminalInputService();
+    const intent = { input: 'must remain unissued', useMux: false, clientId: 'forged-input', seq: 1 };
+    const tag = { clientId: intent.clientId, seq: 1, fingerprint: terminalInputFingerprint(intent) };
+    const fake = {
+      ...f.session.toState(),
+      providerInputHeld: false,
+      terminalInputHeld: false,
+      captureInputAdmission: () => () => true,
+    } as unknown as Session;
+    expect(() => service.begin(fake, intent, () => true)).toThrow('Missing original input subject');
+    expect(() => service.inspect(fake, tag, () => true)).toThrow('Missing original input subject');
+    const prototype = Object.create(Session.prototype, { providerInputHeld: { value: false } });
+    expect(() => service.begin(prototype, intent, () => true)).toThrow();
+    Object.defineProperty(f.session, 'providerInputHeld', { value: false });
+    const reserved = service.begin(f.session, intent, () => true);
+    if (reserved.state === 'admitted') expect(reserved.operation.writeRaw()).toBe(false);
+    else expect(reserved.state).toBe('held');
+    expect(service.inspect(f.session, tag, () => true)).toBe('held');
+    expect(native.writes).toEqual([]);
+    expect(native.ptys).toEqual([]);
+    expect(f.session.providerDispatchHeld).toBe(true);
+  });
   it('attaches an Engine-observed existing provider without clearing its saved launch denial', async () => {
     const f = await savedFixture();
     const view = await f.capture();
