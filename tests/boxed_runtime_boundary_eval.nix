@@ -20,6 +20,16 @@ let
   };
   checks = {
     actualSurfaceAccepted = passes expected ../.;
+    exactRetiredUnitNamesPreserved = (verify expected ../.).retiredUnits == [
+      "reverie.service"
+      "reverie-engine.service"
+      "reverie-host.service"
+      "reverie-gpu-publisher.service"
+      "reverie-worker-broker.service"
+      "reverie-local-model.service"
+      "reverie-worker-viewer.service"
+      "reverie-ops.service"
+    ];
     brokerCannotReturn = !(passes (add "packages" "workerBroker") ../.);
     renamedHostAliasCannotSneakIn = !(passes (add "packages" "newHostDaemon") ../.);
     opsExecutorCannotReturn = !(passes (add "packages" "opsCore") ../.);

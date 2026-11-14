@@ -20,9 +20,9 @@ let
     nixosModules = [ "workerIsolation" ];
     lib = [ "nativeWorkerPackages" "ownerTerminalPackages" ];
   };
-  retiredUnits = [
-    "reverie.service" "reverie-engine.service" "reverie-host.service" "reverie-gpu-publisher.service"
-    "reverie-worker-broker.service" "reverie-local-model.service" "reverie-worker-viewer.service" "reverie-ops.service"
+  retiredUnits = map (stem: "${stem}.service") [
+    "reverie" "reverie-engine" "reverie-host" "reverie-gpu-publisher"
+    "reverie-worker-broker" "reverie-local-model" "reverie-worker-viewer" "reverie-ops"
   ];
   groups = [ "packages" "apps" "nixosModules" "lib" ];
   sorted = values: builtins.sort builtins.lessThan values;
@@ -37,5 +37,5 @@ let
       [ "dockerImage" "containerRuntime" "workerImage" "workerChild" "workerDocker" "workerGpuToolkit" ];
     containerGpuFactoryRetained = builtins.elem "mkContainerGpuImage" actual.lib;
   };
-in if builtins.all (value: value) (builtins.attrValues checks) then { passed = true; inherit checks; }
+in if builtins.all (value: value) (builtins.attrValues checks) then { passed = true; inherit checks retiredUnits; }
 else throw "Retired host launch export/unit returned, unreviewed public export changed, or Docker input disappeared"

@@ -154,6 +154,20 @@ fn attribute_keys_do_not_hide_quoted_module_values_or_execution() {
     );
 }
 
+#[test]
+fn constructed_unit_metadata_does_not_hide_a_real_retired_python_module_selection() {
+    let problems = nix_problems(
+        &workspace_root(),
+        "fixture.nix",
+        r#"units = map (stem: "${stem}.service") [ "reverie" ];
+           python3 -m reverie.service;"#,
+    );
+    assert_eq!(
+        problems,
+        ["fixture.nix: selects missing module reverie.service"]
+    );
+}
+
 fn closure_problems(root: &Path) -> Vec<String> {
     let mut problems = Vec::new();
     let pyproject = fs::read_to_string(root.join("python/pyproject.toml")).unwrap_or_default();
