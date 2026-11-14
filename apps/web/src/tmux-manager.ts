@@ -1,7 +1,8 @@
+import { DOCKER_CODEX_WORKSPACE_PROGRAM } from './docker-employee-codex-workspace.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
-import type {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
+import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
 import { MuxSessionMetadataStore, type MuxMetadataPublicationStatus, type MuxMetadataReconciliation, type MuxMetadataIncidentSelector } from './mux-session-metadata-store.js';
 import {TerminalInputAttempt} from './terminal-input-outcome.js';
@@ -1575,8 +1576,11 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  let inner:string;
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');
+   const workspace = DockerEmployeeProviderLaunch.prototype.workspaceForCommand.call(opts.continuationLaunch, sessionId, docker);
+   const nativeEnv = DOCKER_PROVIDER_VIEW_ENV.filter((_, i) => i % 2 === 1).map(value => { const n=value.indexOf('='); return value.slice(0,n)+'='+shellescape(value.slice(n+1)); }).join(' ');
+   const cwdCheck = workspace ? nativeEnv + ' ' + ['/opt/reverie-worker-client/bin/node', '--input-type=commonjs', '-e', DOCKER_CODEX_WORKSPACE_PROGRAM, '--', 'verify', workspace.realPath, workspace.dev, workspace.ino].map(shellescape).join(' ') + ' && ' : '';
    const source = tmuxSourceCommands([
-    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, opts.canonicalCommand],
+    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + opts.canonicalCommand],
     ['setenv', '-t', target, 'REVERIE_SESSION_ID', sessionId],
     ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],
     ['set', '-t', target, 'status', 'off'],

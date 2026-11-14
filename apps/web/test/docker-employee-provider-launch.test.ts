@@ -340,4 +340,28 @@ describe('boxed provider command contract', () => {
     expect(command.match(/--settings/g)).toHaveLength(3);
     expect(command.match(/advisorModel/g)).toHaveLength(3);
   });
+  it('holds command construction during or after an unconfirmed workspace observation without consuming launch', async () => {
+    const f = fixture();
+    let reject!: (error: Error) => void;
+    const reader = vi.fn(
+      () =>
+        new Promise<never>((_, deny) => {
+          reject = deny;
+        })
+    );
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}, reader);
+    const preparation = DockerEmployeeProviderLaunch.prototype.prepareCodexWorkspace.call(owner, f.session);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'workspace observation held'
+    );
+    reject(Error('read outcome unknown'));
+    await expect(preparation).rejects.toThrow('read outcome unknown');
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'workspace observation held'
+    );
+    await expect(DockerEmployeeProviderLaunch.prototype.prepareCodexWorkspace.call(owner, f.session)).rejects.toThrow(
+      'unopened'
+    );
+    expect(reader).toHaveBeenCalledOnce();
+  });
 });

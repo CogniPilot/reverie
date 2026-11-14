@@ -36,7 +36,11 @@ type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 function sorted(value: Json): Json {
   if (Array.isArray(value)) return value.map(sorted);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, sorted(value[key]!)]));
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, sorted(value[key]!)])
+    );
   }
   return value;
 }
@@ -67,7 +71,12 @@ export function codexHookHash(event: string, matcher: unknown, handler: unknown)
   if (typeof h.statusMessage === 'string') normalized.statusMessage = h.statusMessage;
   const identity: Record<string, Json> = { event_name: label, hooks: [normalized] };
   if (typeof matcher === 'string') identity.matcher = matcher;
-  return 'sha256:' + createHash('sha256').update(JSON.stringify(sorted(identity))).digest('hex');
+  return (
+    'sha256:' +
+    createHash('sha256')
+      .update(JSON.stringify(sorted(identity)))
+      .digest('hex')
+  );
 }
 
 /** The hashes of the handlers Reverie installs, per hooks.json event name. */
@@ -97,21 +106,44 @@ export async function reverieCodexHookTrust(workingDir: string): Promise<Record<
   try {
     const dir = await lstat(join(workingDir, '.codex'));
     const file = await lstat(hooksPath);
-    if (!dir.isDirectory() || dir.isSymbolicLink() || !file.isFile() || file.isSymbolicLink() || file.size > MAX_HOOKS_FILE_BYTES) return {};
+    if (
+      !dir.isDirectory() ||
+      dir.isSymbolicLink() ||
+      !file.isFile() ||
+      file.isSymbolicLink() ||
+      file.size > MAX_HOOKS_FILE_BYTES
+    )
+      return {};
     text = await readFile(hooksPath, 'utf8');
   } catch {
     return {};
   }
-  let parsed: unknown;
-  try { parsed = JSON.parse(text); } catch { return {}; }
-  const events = (parsed as { hooks?: unknown } | null)?.hooks;
-  if (!events || typeof events !== 'object' || Array.isArray(events)) return {};
-  const ours = reverieCodexHookHashes();
   const roots = [workingDir];
   try {
     const real = await realpath(workingDir);
     if (real !== workingDir) roots.push(real);
-  } catch { /* the unresolved path is still the one Codex was started in */ }
+  } catch {
+    /* the unresolved path is still the one Codex was started in */
+  }
+  return reverieCodexHookTrustFromText(text, roots);
+}
+
+/** Pure classifier for actual bounded worker readback; DATA alone grants no workspace trust. */
+export function reverieCodexHookTrustFromText(text: string, roots: readonly string[]): Record<string, string> {
+  if (
+    Buffer.byteLength(text) > MAX_HOOKS_FILE_BYTES ||
+    roots.some((root) => !isAbsolute(root) || /[\0\r\n]/.test(root))
+  )
+    return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return {};
+  }
+  const events = (parsed as { hooks?: unknown } | null)?.hooks;
+  if (!events || typeof events !== 'object' || Array.isArray(events)) return {};
+  const ours = reverieCodexHookHashes();
   const trust: Record<string, string> = {};
   for (const [event, groups] of Object.entries(events as Record<string, unknown>)) {
     const label = EVENT_LABELS[event];
@@ -132,7 +164,9 @@ export async function reverieCodexHookTrust(workingDir: string): Promise<Record<
 
 /** One shell-escaped --config value: an inline hooks.state table (dotted override keys would split the path keys). */
 export function codexHookTrustArgument(trust: Record<string, string>): string | undefined {
-  const entries = Object.entries(trust).filter(([key, hash]) => !/[\0\r\n]/.test(key) && /^sha256:[0-9a-f]{64}$/.test(hash));
+  const entries = Object.entries(trust).filter(
+    ([key, hash]) => !/[\0\r\n]/.test(key) && /^sha256:[0-9a-f]{64}$/.test(hash)
+  );
   if (!entries.length) return undefined;
   const value = `hooks.state={${entries.map(([key, hash]) => `${JSON.stringify(key)}={trusted_hash=${JSON.stringify(hash)}}`).join(',')}}`;
   return "'" + value.replace(/'/g, "'\\''") + "'";

@@ -294,7 +294,9 @@ export class DockerEmployeeRuntime {
       configuration.helperImageId,
       boxId
     );
-    const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl);
+    const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl, (row, workingDir, current) =>
+      engine.observeCodexWorkspace(row, workingDir, current)
+    );
     const service = new DockerEmployeeContinuation(
       store,
       engine,

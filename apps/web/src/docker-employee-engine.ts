@@ -1,3 +1,4 @@
+import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import { DockerEmployeeCredentialInstaller } from './docker-employee-credential-installer.js';
 /** Fixed adapter for a new boxed destination; the old laptop is read-only.
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
@@ -462,6 +463,83 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (!raw || !row.destination || raw.State.Running) refuse('DOCKER_CONTINUATION_STOPPED_DESTINATION_REQUIRED');
     await this.command.run(['container', 'start', raw.Id]);
+  }
+  async observeCodexWorkspace(
+    row: DockerEmployeeContinuationRecord,
+    workingDir: string,
+    current: () => void
+  ): Promise<DockerCodexWorkspace> {
+    if (
+      !workingDir.startsWith('/') ||
+      /[\0\r\n]/.test(workingDir) ||
+      workingDir.split('/').includes('..') ||
+      workingDir.length > 4096
+    )
+      refuse('DOCKER_CONTINUATION_WORKSPACE_CHANGED');
+    const checked = DockerEmployeeContinuationRecord.parse(row),
+      digest = dockerContinuationDigest(checked);
+    const inspect = async () => {
+      current();
+      if (dockerContinuationDigest(row) !== digest || checked.phase !== 'provider-issued' || !checked.destination)
+        refuse('DOCKER_CONTINUATION_WORKSPACE_CHANGED');
+      const raw = await this.#destination(checked);
+      current();
+      if (
+        !raw?.State.Running ||
+        !isDeepStrictEqual(boxedOriginal(raw, rowSubject(checked), this.deployment, true), checked.destination)
+      )
+        refuse('DOCKER_CONTINUATION_WORKSPACE_CHANGED');
+      return raw;
+    };
+    const before = await inspect();
+    const mounts = before.Mounts.filter(
+      (m) => workingDir === m.Destination || workingDir.startsWith(m.Destination + '/')
+    ).sort((a, b) => b.Destination.length - a.Destination.length);
+    const mount = mounts[0];
+    if (
+      !mount ||
+      mount.Type !== 'bind' ||
+      !mount.Source ||
+      mount.Destination === '/' ||
+      mount.Destination.startsWith('/proc')
+    )
+      refuse('DOCKER_CONTINUATION_WORKSPACE_MOUNT_REQUIRED');
+    current();
+    const text = await this.command.run([
+      'exec',
+      ...DOCKER_PROVIDER_VIEW_ENV,
+      checked.destination!.containerId,
+      '/opt/reverie-worker-client/bin/node',
+      '--input-type=commonjs',
+      '-e',
+      DOCKER_CODEX_WORKSPACE_PROGRAM,
+      '--',
+      'observe',
+      workingDir,
+      mount.Destination,
+    ]);
+    current();
+    if (Buffer.byteLength(text) > 2 * 1024 * 1024) refuse('DOCKER_CONTINUATION_WORKSPACE_CHANGED');
+    const result = z
+      .object({
+        realPath: z.string().max(4096),
+        dev: z.string().regex(/^[0-9]{1,20}$/),
+        ino: z.string().regex(/^[1-9][0-9]{0,19}$/),
+        hooksText: z
+          .string()
+          .max(1024 * 1024)
+          .nullable(),
+      })
+      .strict()
+      .parse(JSON.parse(text));
+    if (
+      !(result.realPath === mount.Destination || result.realPath.startsWith(mount.Destination + '/')) ||
+      /[\0\r\n]/.test(result.realPath)
+    )
+      refuse('DOCKER_CONTINUATION_WORKSPACE_CHANGED');
+    await inspect();
+    current();
+    return Object.freeze(result);
   }
   async captureProviderView(
     row: DockerEmployeeContinuationRecord,

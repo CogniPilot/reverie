@@ -1,3 +1,4 @@
+import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
 import { describe, it, expect, vi } from 'vitest';
 import {
   DockerEmployeeEngine,
@@ -535,4 +536,70 @@ it('the same client operation in two private Boxes cannot share a destination na
   await a.engine.createDestination(a.row, () => {});
   await b.engine.createDestination(b.row, () => {});
   expect(vi.mocked(a.command.create).mock.calls[0]![0]).not.toBe(vi.mocked(b.command.create).mock.calls[0]![0]);
+});
+
+describe('Engine-owned first-launch Codex workspace observation', () => {
+  async function workspaceFixture() {
+    const f = await dockerEncodedDestination();
+    f.observed.State.Running = true;
+    f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+    f.row.phase = 'provider-issued';
+    const run = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      if (args.includes(DOCKER_CODEX_WORKSPACE_PROGRAM))
+        return JSON.stringify({ realPath: '/workspace/case', dev: '7', ino: '8', hooksText: null });
+      return run(args, input);
+    });
+    return f;
+  }
+  it('brackets fixed protected-Node read with actual producer configuration and selects its covering mount', async () => {
+    const f = await workspaceFixture();
+    vi.mocked(f.command.run).mockClear();
+    expect(await f.engine.observeCodexWorkspace(f.row, '/workspace/case', () => {})).toEqual({
+      realPath: '/workspace/case',
+      dev: '7',
+      ino: '8',
+      hooksText: null,
+    });
+    const calls = vi.mocked(f.command.run).mock.calls.map(([a]) => a);
+    const native = calls.filter((a) => a.includes(DOCKER_CODEX_WORKSPACE_PROGRAM));
+    expect(native).toHaveLength(1);
+    expect(native[0]!.slice(-4)).toEqual(['--', 'observe', '/workspace/case', '/workspace']);
+    expect(native[0]).toContain('NODE_OPTIONS=');
+    expect(calls.filter((a) => a[0] === 'container' && a[1] === 'inspect' && a[2] === dest)).toHaveLength(2);
+    expect(f.command.create).toHaveBeenCalledTimes(1); // only fixture's inert creation
+  });
+  it.each(['outside', 'changed-config', 'revoked', 'wrong-phase', 'escape-readback'])(
+    'refuses %s without a provider mutation',
+    async (kind) => {
+      const f = await workspaceFixture();
+      if (kind === 'changed-config') f.observed.Config.Env.push('CHANGED=1');
+      if (kind === 'wrong-phase') f.row.phase = 'ready';
+      if (kind === 'escape-readback') {
+        const run = vi.mocked(f.command.run).getMockImplementation()!;
+        vi.mocked(f.command.run).mockImplementation((a, i) =>
+          a.includes(DOCKER_CODEX_WORKSPACE_PROGRAM)
+            ? Promise.resolve(JSON.stringify({ realPath: '/other', dev: '7', ino: '8', hooksText: null }))
+            : run(a, i)
+        );
+      }
+      await expect(
+        f.engine.observeCodexWorkspace(f.row, kind === 'outside' ? '/other' : '/workspace/case', () => {
+          if (kind === 'revoked') throw Error('revoked');
+        })
+      ).rejects.toThrow();
+      expect(f.command.create).toHaveBeenCalledTimes(1);
+    }
+  );
+  it('refuses a native read whose exact committed destination changes before final observation', async () => {
+    const f = await workspaceFixture();
+    const run = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (a, i) => {
+      const value = await run(a, i);
+      if (a.includes(DOCKER_CODEX_WORKSPACE_PROGRAM)) f.observed.Config.Env.push('CHANGED=1');
+      return value;
+    });
+    await expect(f.engine.observeCodexWorkspace(f.row, '/workspace/case', () => {})).rejects.toThrow();
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
 });

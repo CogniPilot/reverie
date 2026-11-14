@@ -12,6 +12,7 @@ import { CompanyDockerContinuationStore, dockerEmployeeSourceDigest } from './do
 import type { DockerContinuationProvider } from './docker-employee-continuation.js';
 import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { SessionPort, ConfigPort, InfraPort } from './web/ports/index.js';
+import type { DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { SessionDocker, SessionState } from './types.js';
 interface OriginalSessionAttempt {
   readonly source: Session | undefined;
@@ -24,7 +25,12 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
   constructor(
     private readonly store: CompanyDockerContinuationStore,
     private readonly ctx: SessionPort & ConfigPort & Pick<InfraPort, 'mux'>,
-    private readonly apiUrl: string
+    private readonly apiUrl: string,
+    private readonly observeCodexWorkspace?: (
+      row: DockerEmployeeContinuationRecord,
+      workingDir: string,
+      current: () => void
+    ) => Promise<DockerCodexWorkspace>
   ) {
     const url = new URL(apiUrl);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
@@ -164,10 +170,17 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       bindInitialLaunchAdmission(candidate, admission);
       if (first)
         candidate.bindDockerContinuationLaunch(
-          captureDockerEmployeeProviderLaunch(candidate, binding, () => {
-            current();
-            if (!admission()) throw Error('Original Docker launch authorization changed');
-          })
+          captureDockerEmployeeProviderLaunch(
+            candidate,
+            binding,
+            () => {
+              current();
+              if (!admission()) throw Error('Original Docker launch authorization changed');
+            },
+            this.observeCodexWorkspace
+              ? (workingDir) => this.observeCodexWorkspace!(row, workingDir, currentCandidate)
+              : undefined
+          )
         );
       if (!first) {
         if (!view) throw Error('Original Docker provider view required');

@@ -11,8 +11,8 @@ import {prepareWorkspaceHooks, workspaceHookPolicy, consumeWorkspaceHookPreparat
 import { prepareWorkspaceSummaryHooks } from './workspace-summary-hooks.js';
 import { cliConfigContent } from './cli-config-content.js';
 import { prepareSelectedClaudeProfile } from './selected-claude-profile.js';
-import { managedCodexTrust } from './managed-codex-trust.js';
-import { codexHookTrustArgument, reverieCodexHookTrust } from './codex-hook-trust.js';
+import { managedCodexTrust, managedCodexTrustEligible } from './managed-codex-trust.js';
+import { codexHookTrustArgument, reverieCodexHookTrust, reverieCodexHookTrustFromText } from './codex-hook-trust.js';
 import type {ResourceWorkerLaunch} from './resource-worker-launch.js';
 /**
  * @fileoverview Core PTY session wrapper for Claude CLI interactions.
@@ -3767,6 +3767,7 @@ export class Session extends EventEmitter {
    * hashes are of the file Codex will load.
    */
   private async _prepareCodexHookTrust(): Promise<void> {
+    if (this._docker) return;
     this._codexHookTrust = this._codexTrustWorkspace
       ? codexHookTrustArgument(await reverieCodexHookTrust(this.workingDir))
       : undefined;
@@ -3778,10 +3779,42 @@ export class Session extends EventEmitter {
   }
 
   private async _prepareManagedCodexTrust(): Promise<void> {
+    this._codexTrustWorkspace = undefined;
+    this._codexHookTrust = undefined;
+    if (this._docker) {
+      if (
+        !this._dockerContinuationLaunch ||
+        !(await managedCodexTrustEligible({
+          mode: this.mode,
+          fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
+          workingDir: this.workingDir,
+          owner: this._owner,
+          remote: this._remote,
+          discovered: this._muxSession?.discovered,
+        }))
+      )
+        return;
+      const workspace = await DockerEmployeeProviderLaunch.prototype.prepareCodexWorkspace.call(
+        this._dockerContinuationLaunch,
+        this
+      );
+      this._codexTrustWorkspace = workspace.realPath;
+      this._codexHookTrust =
+        workspace.hooksText === null
+          ? undefined
+          : codexHookTrustArgument(
+              reverieCodexHookTrustFromText(workspace.hooksText, [this.workingDir, workspace.realPath])
+            );
+      return;
+    }
     this._codexTrustWorkspace = await managedCodexTrust({
-      mode: this.mode, fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
-      workingDir: this.workingDir, owner: this._owner,
-      remote: this._remote, docker: this._docker, customModel: this._customModel,
+      mode: this.mode,
+      fullAccess: this._codexConfig?.dangerouslyBypassApprovals,
+      workingDir: this.workingDir,
+      owner: this._owner,
+      remote: this._remote,
+      docker: this._docker,
+      customModel: this._customModel,
       discovered: this._muxSession?.discovered,
     });
   }
