@@ -7,6 +7,7 @@ pub enum ImageLayout {
     Memory,
     Perf,
     Idmap,
+    WorkerClient,
 }
 impl ImageLayout {
     pub const fn prefix(self) -> &'static str {
@@ -14,6 +15,7 @@ impl ImageLayout {
             Self::Memory => "/opt/reverie/memory",
             Self::Perf => "/opt/reverie/perf",
             Self::Idmap => "/opt/reverie-idmap",
+            Self::WorkerClient => "/opt/reverie-worker-client",
         }
     }
     pub const fn absent_fallback(self) -> &'static str {
@@ -21,6 +23,7 @@ impl ImageLayout {
             Self::Memory => "/opt/rvmem/",
             Self::Perf => "/opt/rvprf/",
             Self::Idmap => "/opt/idmap/",
+            Self::WorkerClient => "/opt/rvwrk/",
         }
     }
     pub const fn absent_preload(self) -> &'static str {
@@ -29,6 +32,7 @@ impl ImageLayout {
             Self::Perf => "/opt/rvprf/preload.off",
             // Preserve the existing ID-map builder's system-preload behavior.
             Self::Idmap => "/etc/ld-nix.so.preload",
+            Self::WorkerClient => "/opt/rvwrk/preload.off",
         }
     }
     pub fn install_libraries(
