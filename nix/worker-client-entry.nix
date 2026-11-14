@@ -11,6 +11,11 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-worker-client-entry" ];
   cargoTestFlags = [ "-p" "reverie-worker-client-entry" ];
   doCheck = true;
+  # Native custody tests require their own private parent, including in Nix.
+  preCheck = ''
+    mkdir -m 0700 "$NIX_BUILD_TOP/credential-fixtures"
+    export TMPDIR="$NIX_BUILD_TOP/credential-fixtures"
+  '';
   meta = {
     description = "Static fixed-purpose worker client entry";
     license = pkgs.lib.licenses.mit;
