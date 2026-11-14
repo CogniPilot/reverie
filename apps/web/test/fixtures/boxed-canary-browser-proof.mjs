@@ -75,7 +75,7 @@ export function verifyCanaryModuleMounts(control, proof) {
   let modules = [];
   if (proof.overlay) modules = [{ ...proof.overlay, generatedFile: proof.overlay.source }];
   if (proof.modules) {
-    assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= 8);
+    assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= 16);
     modules = proof.modules;
   }
   const actual = control.Mounts.filter((m) => /\/lib\/reverie\/dist(?:\/|$)/.test(m.Destination));

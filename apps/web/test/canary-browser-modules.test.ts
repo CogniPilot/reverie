@@ -9,10 +9,12 @@ const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
-function fixture() {
+function fixture(count = 3) {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'canary-modules-'));
   roots.push(root);
-  const modules = ['engine-data.js', 'runtime.js', 'web/server.js'].map((name, index) => {
+  const names = ['engine-data.js', 'runtime.js', 'web/server.js'];
+  const modules = Array.from({ length: count }, (_, index) => {
+    const name = names[index] ?? 'module-' + index + '.js';
     const file = path.join(root, index + '.js'),
       bytes = Buffer.from('controlled public module ' + index);
     fs.writeFileSync(file, bytes);
@@ -32,6 +34,23 @@ function fixture() {
   };
 }
 describe('bounded real-browser development module verifier', () => {
+  it('accepts sixteen exact read-only modules and checks the final module too', () => {
+    const f = fixture(16);
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();
+    const last = f.modules.at(-1)!;
+    last.inContainerSha = '0'.repeat(64);
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+    last.inContainerSha = last.sha256;
+    f.control.Mounts.at(-1)!.RW = true;
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+    f.control.Mounts.at(-1)!.RW = false;
+    fs.writeFileSync(last.generatedFile, 'changed last actual module');
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
+  it('refuses seventeen otherwise exact read-only modules', () => {
+    const f = fixture(17);
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
   it('checks all three actual file hashes and exact readonly mappings', () => {
     const f = fixture();
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();
