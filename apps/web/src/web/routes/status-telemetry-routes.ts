@@ -17,6 +17,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
+import { dockerWorkerIdentityOf } from '../../docker-worker-identity.js';
 import { StatusTelemetrySchema } from '../schemas.js';
 import { parseBody } from '../route-helpers.js';
 import {
@@ -40,7 +41,8 @@ type RelocatedAccount = { id: string; label: string; provider: 'anthropic' };
 const CATALOGUE_TTL_MS = 60_000;
 let cachedCatalogue: { at: number; accounts: Awaited<ReturnType<typeof planCatalogue>> } | null = null;
 async function catalogue() {
-  if (!cachedCatalogue || Date.now() - cachedCatalogue.at > CATALOGUE_TTL_MS) cachedCatalogue = { at: Date.now(), accounts: await planCatalogue() };
+  if (!cachedCatalogue || Date.now() - cachedCatalogue.at > CATALOGUE_TTL_MS)
+    cachedCatalogue = { at: Date.now(), accounts: await planCatalogue() };
   return cachedCatalogue.accounts;
 }
 
@@ -49,8 +51,14 @@ async function catalogue() {
  * to, 'default' when it resolves to the default directory, or 'unknown' when it matches no account (the report is then filed
  * nowhere, never under another account's series). undefined means no override.
  */
-async function relocatedAccount(session: PlanSessionLike): Promise<RelocatedAccount | 'default' | 'unknown' | undefined> {
-  if (typeof session.getEnvOverridesForPersist !== 'function' || !session.getEnvOverridesForPersist()?.CLAUDE_CONFIG_DIR) return undefined;
+async function relocatedAccount(
+  session: PlanSessionLike
+): Promise<RelocatedAccount | 'default' | 'unknown' | undefined> {
+  if (
+    typeof session.getEnvOverridesForPersist !== 'function' ||
+    !session.getEnvOverridesForPersist()?.CLAUDE_CONFIG_DIR
+  )
+    return undefined;
   try {
     const account = await accountForSession(session, await catalogue());
     if (!account || account.provider !== 'anthropic') return 'unknown';
@@ -75,12 +83,17 @@ export function registerStatusTelemetryRoutes(
     const { sessionId, data } = parseBody(StatusTelemetrySchema, req.body);
 
     reply.type('text/plain; charset=utf-8');
+    const statusReply = (text: string) => {
+      if (!dockerWorkerIdentityOf(req)) return text;
+      reply.type('application/json; charset=utf-8');
+      return { success: true, data: text };
+    };
 
     // Unknown session: nothing to broadcast and nothing to print. Never a brand
     // word here, it would render as the statusline.
     if (!ctx.sessions.has(sessionId)) {
       lastSig.delete(sessionId);
-      return '';
+      return statusReply('');
     }
 
     const payload = data as RawStatuslinePayload | undefined;
@@ -132,7 +145,9 @@ export function registerStatusTelemetryRoutes(
         const relocated = typeof found === 'object' ? found : undefined;
         if (found === 'unknown' && !warnedUnknown.has(sessionId)) {
           warnedUnknown.add(sessionId);
-          console.warn(`[status-telemetry] session ${sessionId} has a CLAUDE_CONFIG_DIR that matches no known account; its plan usage is not recorded`);
+          console.warn(
+            `[status-telemetry] session ${sessionId} has a CLAUDE_CONFIG_DIR that matches no known account; its plan usage is not recorded`
+          );
         }
         const profile = session?.subscriptionProfile ??
           relocated ?? {
@@ -157,6 +172,6 @@ export function registerStatusTelemetryRoutes(
     // In-terminal statusline footer → CURRENT SESSION status (model / tokens /
     // context %), NOT the plan limits. Available from the first render, even
     // before rate_limits appears.
-    return formatSessionStatusText(parseSessionStatus(payload));
+    return statusReply(formatSessionStatusText(parseSessionStatus(payload)));
   });
 }
