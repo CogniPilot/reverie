@@ -8,6 +8,7 @@ pub enum ImageLayout {
     Perf,
     Idmap,
     WorkerClient,
+    WorkerTools,
 }
 impl ImageLayout {
     pub const fn prefix(self) -> &'static str {
@@ -16,6 +17,7 @@ impl ImageLayout {
             Self::Perf => "/opt/reverie/perf",
             Self::Idmap => "/opt/reverie-idmap",
             Self::WorkerClient => "/opt/reverie-worker-client",
+            Self::WorkerTools => "/opt/reverie-worker-tools",
         }
     }
     pub const fn absent_fallback(self) -> &'static str {
@@ -24,6 +26,7 @@ impl ImageLayout {
             Self::Perf => "/opt/rvprf/",
             Self::Idmap => "/opt/idmap/",
             Self::WorkerClient => "/opt/rvwrk/",
+            Self::WorkerTools => "/opt/rvtls/",
         }
     }
     pub const fn absent_preload(self) -> &'static str {
@@ -33,6 +36,7 @@ impl ImageLayout {
             // Preserve the existing ID-map builder's system-preload behavior.
             Self::Idmap => "/etc/ld-nix.so.preload",
             Self::WorkerClient => "/opt/rvwrk/preload.off",
+            Self::WorkerTools => "/opt/rvtls/preload.off",
         }
     }
     pub fn install_libraries(
@@ -132,5 +136,21 @@ fn replace_bytes(bytes: &mut [u8], original: &[u8], absent: &[u8]) {
         } else {
             cursor += 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn worker_tools_layout_is_fixed_and_loader_replacements_keep_lengths() {
+        let layout = ImageLayout::WorkerTools;
+        assert_eq!(layout.prefix(), "/opt/reverie-worker-tools");
+        assert_eq!(layout.absent_fallback().len(), b"/nix/store/".len());
+        assert_eq!(
+            layout.absent_preload().len(),
+            b"/etc/ld-nix.so.preload".len()
+        );
+        assert_ne!(layout.prefix(), ImageLayout::WorkerClient.prefix());
     }
 }

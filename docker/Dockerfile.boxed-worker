@@ -1,0 +1,9 @@
+# Fixed immutable artifact overlay; no package downloads or worker state input.
+ARG REVERIE_WORKER_BASE
+FROM ${REVERIE_WORKER_BASE}
+ARG REVERIE_CLIENT_MANIFEST
+ARG REVERIE_WORKER_PATH
+ARG SOURCE_DATE_EPOCH=1
+COPY --chown=0:0 opt/ /opt/
+ENV PATH=${REVERIE_WORKER_PATH}
+LABEL org.reverie.worker-client.manifest=${REVERIE_CLIENT_MANIFEST}

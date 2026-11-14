@@ -1537,6 +1537,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-worker-tools-capsule"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "reverie-elf-bundle",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

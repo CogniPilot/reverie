@@ -94,6 +94,7 @@ jobs:
           export TMPDIR="$HOME/scratch/reverie/tmp"
           nix flake check --print-build-logs
           nix develop --command node --test tests/*.mjs
+          nix develop --command node --experimental-strip-types --test scripts/build-boxed-worker-image.test.mts
           nix build .#default --out-link "$HOME/scratch/reverie/build/app"
           "$HOME/scratch/reverie/build/app/bin/reverie" --version
           nix build .#memory --out-link "$HOME/scratch/reverie/build/memory"
@@ -248,7 +249,6 @@ jobs:
           test "$(docker inspect --format '{{.RestartCount}}' boot)" = "$stopped_restarts"
           test "${ok:-}" = 1
 
-
   worker-browser:
     needs: image
     runs-on: ubuntu-24.04
@@ -311,7 +311,7 @@ jobs:
       - name: Qualify the factory-pinned retained controller birth decoder
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
-          CARGO_BUILD_JOBS: '2'
+          CARGO_BUILD_JOBS: "2"
         run: |
           set -euo pipefail
           mkdir -p acceptance
@@ -373,7 +373,7 @@ jobs:
       - name: Qualify private native hook generations through the actual guest and Office
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-viewer-target
-          CARGO_BUILD_JOBS: '2'
+          CARGO_BUILD_JOBS: "2"
         run: |
           set -euo pipefail
           # This factory matches the runner's ordinary UID/GID. The website

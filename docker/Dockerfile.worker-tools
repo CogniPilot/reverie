@@ -1,0 +1,13 @@
+# Fixed trusted worker tools; no downloads, runtime state or host code.
+ARG REVERIE_WORKER_BASE
+FROM ${REVERIE_WORKER_BASE}
+ARG REVERIE_CLIENT_MANIFEST
+ARG REVERIE_WORKER_PATH
+ARG REVERIE_TOOLS_MANIFEST
+ARG SOURCE_DATE_EPOCH=1
+COPY --chown=0:0 opt/ /opt/
+ENV PATH=${REVERIE_WORKER_PATH}
+ENV TERMINFO=/opt/reverie-worker-tools/share/terminfo
+ENV TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo
+LABEL org.reverie.worker-client.manifest=${REVERIE_CLIENT_MANIFEST}
+LABEL org.reverie.worker-tools.manifest=${REVERIE_TOOLS_MANIFEST}
