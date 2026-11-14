@@ -1,3 +1,4 @@
+import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
 /** Launch selection and observations of an existing provider are distinct DATA.
  * Neither digest grants permission to launch or to attach a native process. */
 import type { CompanyEmployee } from './company-types.js';
@@ -74,6 +75,16 @@ export function dockerEmployeeProviderSourceDigest(employee: CompanyEmployee, sa
   if (!profile) return dockerEmployeeSourceDigest(employee, saved);
   const value = sourceValue(employee, saved);
   const fields: Record<string, unknown> = { ...value.saved };
+  if ((saved.mode ?? 'claude') === 'claude') {
+    // Absence already selects this exact locked protocol default. Normalize
+    // only existing-provider facts; never alter the original launch bytes.
+    const permission = resolvedStockProtocol('claude')?.shipped.launch.params.claudeMode;
+    if (fields.claudeMode === null && permission?.type === 'enum') fields.claudeMode = permission.default ?? null;
+  } else {
+    // These top-level flags are used only by the locked Claude protocol.
+    delete fields.claudeMode;
+    delete fields.allowedTools;
+  }
   for (const key of ['runtimeThreads', 'resumeSessionId', 'claudeSessionChain']) delete fields[key];
   const recipe = value.recipe ? { ...value.recipe } : null;
   if (recipe) delete recipe.runtimeThreads;

@@ -211,3 +211,60 @@ it('does not reinterpret a legacy generic native alias as a first learned thread
   const exact = dockerEmployeeSourceDigest(employee, saved);
   expect(legacyDockerProviderSourceMatches(employee, saved, exact)).toBe(true);
 });
+
+it('compares the selected stock Claude permission default without changing legacy launch approval', () => {
+  const { employee, saved } = fixture('claude');
+  const launch = dockerEmployeeSourceDigest(employee, saved);
+  const existing = dockerEmployeeProviderSourceDigest(employee, saved);
+  Object.assign(saved, { claudeMode: 'dangerously-skip-permissions' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).toBe(existing);
+  expect(dockerEmployeeSourceDigest(employee, saved)).not.toBe(launch);
+  Object.assign(saved, { claudeMode: 'normal' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).not.toBe(existing);
+});
+it('keeps actual Claude tool selections in existing-provider facts', () => {
+  const { employee, saved } = fixture('claude');
+  Object.assign(saved, { claudeMode: 'allowedTools' });
+  Object.assign(saved, { allowedTools: 'Read' });
+  const existing = dockerEmployeeProviderSourceDigest(employee, saved);
+  Object.assign(saved, { allowedTools: 'Write' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).not.toBe(existing);
+});
+
+it('does not normalize a changed Claude launch protocol as the shipped default', () => {
+  const launch = structuredClone(getCli('claude')!.launch);
+  const permission = launch.params.claudeMode;
+  if (permission?.type !== 'enum') throw Error('Expected stock permission parameter');
+  permission.default = 'normal';
+  const path = registryFilePath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ schemaVersion: 1, clis: { claude: { launch } } }), { mode: 0o600 });
+  reloadCliRegistry();
+  const { employee, saved } = fixture('claude');
+  const existing = dockerEmployeeProviderSourceDigest(employee, saved);
+  Object.assign(saved, { claudeMode: 'normal' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).not.toBe(existing);
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).toBe(dockerEmployeeSourceDigest(employee, saved));
+});
+
+it.each(['codex', 'opencode'] as const)('keeps inactive Claude flags observational for locked %s only', (mode) => {
+  const { employee, saved } = fixture(mode);
+  const launch = dockerEmployeeSourceDigest(employee, saved);
+  const existing = dockerEmployeeProviderSourceDigest(employee, saved);
+  Object.assign(saved, { claudeMode: 'allowedTools', allowedTools: 'Read' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).toBe(existing);
+  expect(dockerEmployeeSourceDigest(employee, saved)).not.toBe(launch);
+});
+it('retains inactive-looking flags for an overridden non-Claude protocol', () => {
+  const launch = structuredClone(getCli('codex')!.launch);
+  launch.variants[0].args[0] = { lit: 'different-agent' };
+  const path = registryFilePath();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ schemaVersion: 1, clis: { codex: { launch } } }), { mode: 0o600 });
+  reloadCliRegistry();
+  const { employee, saved } = fixture('codex');
+  const original = dockerEmployeeProviderSourceDigest(employee, saved);
+  Object.assign(saved, { claudeMode: 'normal', allowedTools: 'Read' });
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).not.toBe(original);
+  expect(dockerEmployeeProviderSourceDigest(employee, saved)).toBe(dockerEmployeeSourceDigest(employee, saved));
+});
