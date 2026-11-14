@@ -256,6 +256,12 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     url,
     ownerHeaders,
     workerHeaders,
+    headersFor: (caller: 'owner' | 'worker' | 'headless-worker') =>
+      caller === 'owner'
+        ? ownerHeaders
+        : caller === 'worker'
+          ? workerHeaders
+          : { [DOCKER_WORKER_IDENTITY_HEADER]: machineToken },
     approval,
     request,
     effects: () => effects,
@@ -292,24 +298,31 @@ describe('boxed recovery HTTP and canonical employee permissions', () => {
       expect(f.companyStore.snapshot()).toEqual(before);
     }
   );
-  it('runtime origin revoked during an actual source-read await stops the next effect', async () => {
-    const f = await fixture({ office: true, storedPolicy: true }),
-      before = f.companyStore.snapshot();
-    f.beforeObservation(async () => {
-      f.revokeRuntime();
-    });
-    const response = await f.app.inject({
-      method: 'POST',
-      url: f.url + '/docker-continuation',
-      headers: f.ownerHeaders,
-      payload: { request: f.request },
-    });
-    expect(response.statusCode).toBe(409);
-    expect(response.json().error.code).toBe('DOCKER_CONTINUATION_RUNTIME_CHANGED');
-    expect(f.observations()).toBe(1);
-    expect(f.effects()).toBe(0);
-    expect(f.companyStore.snapshot()).toEqual(before);
-  });
+  it.each(['owner', 'worker', 'headless-worker'] as const)(
+    'runtime origin revoked during a genuine %s source-read await stops the next effect',
+    async (caller) => {
+      const f = await fixture({ office: true, storedPolicy: true }),
+        before = f.companyStore.snapshot();
+      f.beforeObservation(async () => {
+        f.revokeRuntime();
+      });
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-continuation',
+        headers: f.headersFor(caller),
+        payload: { request: f.request },
+      });
+      expect({
+        status: response.statusCode,
+        effects: f.effects(),
+        operations: f.companyStore.snapshot().dockerEmployeeContinuations?.length ?? 0,
+      }).toEqual({ status: 409, effects: 0, operations: 0 });
+      expect(response.json().error.code).toBe('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      expect(f.observations()).toBe(1);
+      expect(f.effects()).toBe(0);
+      expect(f.companyStore.snapshot()).toEqual(before);
+    }
+  );
 
   it('a coordinator title without a recovery grant cannot inspect or start a worker', async () => {
     const f = await fixture({ recover: false, office: true, storedPolicy: true });
@@ -378,32 +391,35 @@ describe('boxed recovery HTTP and canonical employee permissions', () => {
     expect(f.companyStore.snapshot()).toEqual(before);
     expect(f.effects()).toBe(0);
   });
-  it('a permitted worker reaches the same durable service and sanitized recovery outcome', async () => {
-    const f = await fixture({ storedPolicy: true, office: true });
-    const response = await f.app.inject({
-      method: 'POST',
-      url: f.url + '/docker-continuation',
-      headers: f.workerHeaders,
-      payload: { request: f.request },
-    });
-    expect(response.statusCode, response.body).toBe(200);
-    expect(response.json().data, response.body).toMatchObject({ phase: 'pool-issued', allowedActions: ['observe'] });
-    expect(response.body).not.toContain('private engine details');
-    expect(f.effects()).toBe(1);
-    expect(f.companyStore.snapshot().employees.find((e) => e.id === target)).toMatchObject({
-      onVacation: false,
-      desiredRunning: true,
-    });
-    const observed = await f.app.inject({
-      method: 'POST',
-      url: f.url + '/docker-continuation/observe',
-      headers: f.workerHeaders,
-      payload: { operationId: f.request.operationId },
-    });
-    expect(observed.statusCode, observed.body).toBe(200);
-    expect(f.effects()).toBe(1);
-  });
-  it.each(['generation', 'permission', 'identity'] as const)(
+  it.each(['owner', 'worker', 'headless-worker'] as const)(
+    'a permitted %s reaches the same durable service and sanitized recovery outcome',
+    async (caller) => {
+      const f = await fixture({ storedPolicy: true, office: true });
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-continuation',
+        headers: f.headersFor(caller),
+        payload: { request: f.request },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      expect(response.json().data, response.body).toMatchObject({ phase: 'pool-issued', allowedActions: ['observe'] });
+      expect(response.body).not.toContain('private engine details');
+      expect(f.effects()).toBe(1);
+      expect(f.companyStore.snapshot().employees.find((e) => e.id === target)).toMatchObject({
+        onVacation: false,
+        desiredRunning: true,
+      });
+      const observed = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-continuation/observe',
+        headers: f.headersFor(caller),
+        payload: { operationId: f.request.operationId },
+      });
+      expect(observed.statusCode, observed.body).toBe(200);
+      expect(f.effects()).toBe(1);
+    }
+  );
+  it.each(['generation', 'session', 'actor-generation', 'actor-session', 'permission', 'identity'] as const)(
     'rejects %s changes during an awaited source read',
     async (change) => {
       const f = await fixture({ storedPolicy: true });
@@ -411,8 +427,11 @@ describe('boxed recovery HTTP and canonical employee permissions', () => {
         if (change === 'identity') f.revokeIdentity();
         else
           await f.companyStore.update((state) => {
-            const employee = state.employees.find((e) => e.id === (change === 'permission' ? actor : target))!;
+            const employee = state.employees.find(
+              (e) => e.id === (change === 'permission' || change.startsWith('actor-') ? actor : target)
+            )!;
             if (change === 'permission') employee.permissions.recoverEmployees = false;
+            else if (change.endsWith('session')) employee.sessionId = '66666666-6666-4666-8666-666666666666';
             else employee.sessionGeneration++;
           });
       });

@@ -138,7 +138,16 @@ export function guardDockerRuntimeOrigin(
     },
     worker(request) {
       requireCurrent();
-      return auth.worker(request);
+      const worker = auth.worker(request);
+      if (!worker) return undefined;
+      return {
+        owner: worker.owner,
+        sessionId: worker.sessionId,
+        require() {
+          requireCurrent();
+          worker.require();
+        },
+      };
     },
     owner(request) {
       requireCurrent();
