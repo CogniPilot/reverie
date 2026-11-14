@@ -2525,8 +2525,18 @@ class ReverieApp {
   }
 
   _onSessionUpdated(data) {
-    const session = data.session || data;
-    this._observeInputRecovery(this.sessions.get(session.id));
+    let session = data.session || data;
+    const previous = this.sessions.get(session.id);
+    if (this._providerInputRecovery(previous).valid &&
+        ['providerDispatchHeld', 'providerInputHeld', 'providerDispatchHoldKind'].every((field) => !Object.hasOwn(session, field))) {
+      // An unrelated partial event cannot discard the current provider gate.
+      session = {...session,
+        providerDispatchHeld: previous.providerDispatchHeld,
+        providerInputHeld: previous.providerInputHeld,
+        providerDispatchHoldKind: previous.providerDispatchHoldKind,
+      };
+    }
+    this._observeInputRecovery(previous);
     this._observeInputRecovery(session);
     // A session this tab is closing stays closed until the server answers
     // (closeSession() puts it back if the delete is refused).
@@ -4081,10 +4091,23 @@ class ReverieApp {
    * @param {string} input
    * @param {{useMux?: boolean}} [opts] - useMux only affects the POST fallback.
    */
+  _providerInputRecovery(session) {
+    const dispatch = session?.providerDispatchHeld, input = session?.providerInputHeld, kind = session?.providerDispatchHoldKind;
+    const valid = typeof dispatch === 'boolean' && typeof input === 'boolean' &&
+      (dispatch ? kind === 'loaded-intent' || (kind === 'intrinsic' && input) : kind === null && !input);
+    const loaded = valid && kind === 'loaded-intent';
+    const newFields = input !== undefined || kind !== undefined;
+    return {
+      valid, loaded,
+      held: valid ? input : dispatch === true || newFields || (dispatch !== undefined && typeof dispatch !== 'boolean'),
+      sticky: dispatch === true && !loaded,
+    };
+  }
+
   _sessionInputHeld(sessionId) {
     const session = this.sessions?.get?.(sessionId);
     return this._inputGlobalHold === true || this._inputRecoveryHolds?.has(sessionId) === true || session?.terminalInputHeld === true ||
-      session?.providerDispatchHeld === true;
+      this._providerInputRecovery(session).held;
   }
 
   _holdInputRecovery(sessionId) {
@@ -4101,13 +4124,14 @@ class ReverieApp {
   }
 
   _observeInputRecovery(session) {
-    if (session?.id && session.providerDispatchHeld === true) {
-      // Retain this observed diagnostic just like the deny-only input hold.
-      // A later partial DTO or status read cannot disprove the original launch.
+    const gate = this._providerInputRecovery(session);
+    if (session?.id && gate.sticky) {
+      // Intrinsic and legacy unknowns remain deny-only history. A complete
+      // loaded-intent DTO instead describes the current private-view gate.
       this._inputStartupRecoveryHolds ||= new Set();
       this._inputStartupRecoveryHolds.add(session.id);
     }
-    if (session?.id && (session.terminalInputHeld === true || session.providerDispatchHeld === true))
+    if (session?.id && (session.terminalInputHeld === true || gate.sticky))
       this._rememberInputRecovery(session.id);
   }
 
@@ -4167,6 +4191,7 @@ class ReverieApp {
   async _refreshInputRecovery(id, button, status) {
     if (button.disabled) return;
     const wasFocused = document.activeElement === button;
+    const observed = this.sessions?.get?.(id);
     button.disabled = true;
     status.textContent = 'Checking status…';
     try {
@@ -4175,13 +4200,26 @@ class ReverieApp {
       if (!response.ok || payload?.success !== true || payload.data?.id !== id)
         throw new Error('Session status could not be verified');
       const session = payload.data;
-      if (['terminalInputHeld', 'providerDispatchHeld'].some((field) => session[field] !== undefined && typeof session[field] !== 'boolean'))
+      if (['terminalInputHeld', 'providerDispatchHeld', 'providerInputHeld'].some((field) => session[field] !== undefined && typeof session[field] !== 'boolean'))
         throw new Error('Session status could not be verified');
-      // A read never clears local uncertainty or replays queued text. A future
-      // reconciliation API must provide its own exact operation outcome.
+      const gate = this._providerInputRecovery(session);
+      const hasNewFields = Object.hasOwn(session, 'providerInputHeld') || Object.hasOwn(session, 'providerDispatchHoldKind');
+      if (hasNewFields && !gate.valid) throw new Error('Session status could not be verified');
+      // A read never clears local uncertainty or replays queued text. Only a
+      // complete provider gate may replace ephemeral metadata, and a newer SSE
+      // object outranks this request's earlier observation.
       this._observeInputRecovery(session);
+      if (gate.valid && observed && this.sessions?.get?.(id) === observed) {
+        this.sessions.set(id, {...observed,
+          providerDispatchHeld: session.providerDispatchHeld,
+          providerInputHeld: session.providerInputHeld,
+          providerDispatchHoldKind: session.providerDispatchHoldKind,
+        });
+      }
       this._renderInputRecoveryBanner();
-      status.textContent = 'Status checked. Input still needs recovery before sending can continue.';
+      status.textContent = this._sessionInputHeld(id)
+        ? 'Status checked. Input still needs recovery before sending can continue.'
+        : 'Status checked. Input is available for the current employee attachment.';
     } catch {
       status.textContent = 'Could not refresh status. Input remains held. Try checking status again when connected.';
     } finally {
