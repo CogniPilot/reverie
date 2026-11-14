@@ -44,6 +44,7 @@ const subject = {
   sessionGeneration: 3,
   owner: undefined,
   sourceDigest: 'e'.repeat(64),
+  providerSourceDigest: 'e'.repeat(64),
   onVacation: false,
   desiredRunning: true,
 };

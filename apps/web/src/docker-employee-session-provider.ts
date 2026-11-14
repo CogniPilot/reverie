@@ -8,7 +8,12 @@ import { rebootRestoreLaunchConfig } from './utils/native-thread-profile.js';
 import { rebootResumeTarget } from './utils/native-thread-profile.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { captureDockerEmployeeProviderLaunch } from './docker-employee-provider-launch.js';
-import { CompanyDockerContinuationStore, dockerEmployeeSourceDigest } from './docker-employee-store.js';
+import {
+  CompanyDockerContinuationStore,
+  dockerEmployeeSourceDigest,
+  dockerEmployeeProviderSourceDigest,
+} from './docker-employee-store.js';
+import { legacyDockerProviderSourceMatches } from './docker-employee-source-correlation.js';
 import type { DockerContinuationProvider } from './docker-employee-continuation.js';
 import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { SessionPort, ConfigPort, InfraPort } from './web/ports/index.js';
@@ -95,7 +100,11 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
     if (
       !saved ||
       !employee ||
-      dockerEmployeeSourceDigest(employee, saved) !== row.sourceDigest ||
+      (first
+        ? dockerEmployeeSourceDigest(employee, saved) !== row.sourceDigest
+        : row.version === 2
+          ? dockerEmployeeProviderSourceDigest(employee, saved) !== row.providerSourceDigest
+          : !legacyDockerProviderSourceMatches(employee, saved, row.sourceDigest)) ||
       saved.providerDispatchHeld ||
       saved.terminalInputHeld
     )
@@ -149,7 +158,10 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       original.candidate = candidate;
       const candidateRecipeCurrent = () =>
         candidate.owner === employee.owner &&
-        dockerEmployeeSourceDigest(employee, candidate.toPersistedState()) === row.sourceDigest;
+        (first
+          ? dockerEmployeeSourceDigest(employee, candidate.toPersistedState()) === row.sourceDigest
+          : dockerEmployeeProviderSourceDigest(employee, candidate.toPersistedState()) ===
+            (row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved)));
       const currentCandidate = () => {
         current();
         if (!allowed() || !candidateRecipeCurrent() || this.ctx.sessions.get(binding.sessionId) !== candidate)

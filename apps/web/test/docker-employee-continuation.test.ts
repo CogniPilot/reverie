@@ -14,6 +14,7 @@ import type {
   DockerEmployeeBinding,
   DockerEmployeePool,
 } from '../src/docker-employee-continuation-data.js';
+import { DockerEmployeeContinuationRecord as ContinuationRecordSchema } from '../src/docker-employee-continuation-data.js';
 const eid = '10000000-0000-4000-8000-000000000001',
   sid = '20000000-0000-4000-8000-000000000002';
 const oid = '30000000-0000-4000-8000-000000000003',
@@ -67,6 +68,7 @@ function fixture() {
     sessionGeneration: 7,
     owner: 'synthetic-owner',
     sourceDigest: 'f'.repeat(64),
+    providerSourceDigest: '7'.repeat(64),
     onVacation: true,
     desiredRunning: false,
   };
@@ -82,6 +84,8 @@ function fixture() {
   };
   const store: DockerContinuationStore = {
     subject: () => ({ ...subject }),
+    existingSubject: (_id, record) =>
+      record.version === 2 && record.providerSourceDigest === subject.providerSourceDigest ? { ...subject } : undefined,
     policy: () => structuredClone(policy),
     record: () => row,
     async replace(before, next, current) {
@@ -206,6 +210,28 @@ function fixture() {
   };
 }
 describe('owned boxed Docker employee continuation', () => {
+  it('round-trips explicit legacy and current formats and rejects ambiguous source contracts', async () => {
+    const f = fixture();
+    await f.service.begin(eid, f.request, f.authority);
+    const current = f.record()!;
+    expect(current.version).toBe(2);
+    expect(ContinuationRecordSchema.parse(JSON.parse(JSON.stringify(current)))).toEqual(current);
+    const { providerSourceDigest: _source, ...common } = current as Extract<
+      DockerEmployeeContinuationRecord,
+      { version: 2 }
+    >;
+    const legacy = { ...common, version: 1, purpose: 'docker-employee-continuation-v1' };
+    expect(ContinuationRecordSchema.parse(JSON.parse(JSON.stringify(legacy)))).toEqual(legacy);
+    for (const invalid of [
+      { ...current, providerSourceDigest: undefined },
+      { ...current, providerSourceDigest: 'not-a-digest' },
+      { ...current, purpose: 'docker-employee-continuation-v1' },
+      { ...legacy, providerSourceDigest: _source },
+      { ...legacy, purpose: 'docker-employee-continuation-v2' },
+      { ...current, version: 3 },
+    ])
+      expect(ContinuationRecordSchema.safeParse(invalid).success).toBe(false);
+  });
   it('reports one bounded failure without secrets, including frames after a large command message', () => {
     const error = Object.assign(new Error('PRIVATE-TOKEN'), { code: 'EACCES' });
     error.stack = 'PRIVATE-TOKEN\n'.repeat(3000) + '    at launch (/private/path/tmux-manager.js:2703:11)';
@@ -284,8 +310,8 @@ describe('owned boxed Docker employee continuation', () => {
     async (effect) => {
       const f = fixture(),
         original = f.engine[effect].getMockImplementation()!;
-      f.engine[effect].mockImplementationOnce(async (...args: never[]) => {
-        await original(...args);
+      f.engine[effect].mockImplementationOnce(async (...args: unknown[]) => {
+        await Reflect.apply(original, undefined, args);
         throw Error('partial reply');
       });
       expect((await f.service.begin(eid, f.request, f.authority)).state).toBe('held');
@@ -510,5 +536,53 @@ describe('same original proven-unissued helper continuation', () => {
     expect((await f.service.begin(eid, f.request, f.authority)).state).toBe('held');
     expect(f.engine.configureResources).toHaveBeenCalledOnce();
     expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+});
+
+describe('existing-provider identity survives observed native thread progress', () => {
+  it('observes the same running provider after native progress without replaying its original launch', async () => {
+    const f = fixture();
+    expect((await f.service.begin(eid, f.request, f.authority)).state).toBe('ready');
+    const originalDigest = f.record()!.sourceDigest;
+    f.subject.sourceDigest = '8'.repeat(64);
+    const result = await f.service.observe(eid, oid, f.authority);
+    expect(result.state).toBe('ready');
+    expect(f.record()!.sourceDigest).toBe(originalDigest);
+    expect(f.provider.launch).toHaveBeenCalledTimes(1);
+    await expect(f.service.begin(eid, f.request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_ORIGINAL_HELD',
+    });
+    expect(f.provider.launch).toHaveBeenCalledTimes(1);
+  });
+  it('refuses an actual existing-provider recipe change even when the physical process remains alive', async () => {
+    const f = fixture();
+    await f.service.begin(eid, f.request, f.authority);
+    f.subject.sourceDigest = '8'.repeat(64);
+    f.subject.providerSourceDigest = '9'.repeat(64);
+    await expect(f.service.observe(eid, oid, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_TARGET_CHANGED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('existing-provider observation keeps its captured operation across awaits', () => {
+  it('refuses a same-employee replacement operation during native observation', async () => {
+    const f = fixture();
+    await f.service.begin(eid, f.request, f.authority);
+    f.engine.observeSource.mockImplementationOnce(async () => {
+      const original = f.record()!;
+      await f.store.replace(
+        original,
+        { ...original, request: { ...original.request, operationId: '40000000-0000-4000-8000-000000000004' } },
+        () => {}
+      );
+      return { original: structuredClone(f.original), state: 'stopped' };
+    });
+    await expect(f.service.observe(eid, oid, f.authority)).resolves.toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_ORIGINAL_CHANGED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledTimes(1);
   });
 });

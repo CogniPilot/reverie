@@ -126,29 +126,42 @@ export const DockerEmployeeContinuationPhase = z.enum([
   'ready',
 ]);
 export type DockerEmployeeContinuationPhase = z.infer<typeof DockerEmployeeContinuationPhase>;
-export const DockerEmployeeContinuationRecord = z
+const continuationRecordFields = {
+  employeeId: uuid,
+  owner: z.string().max(200).optional(),
+  request: DockerEmployeeContinuationRequest,
+  sourceDigest: digest,
+  original: DockerEmployeeOriginal,
+  workerImage: DockerEmployeeWorkerImage,
+  policy: DockerEmployeeResourcePolicy,
+  credentialId: uuid,
+  tasks: z
+    .array(DockerContinuationTask)
+    .max(5)
+    .refine((tasks) => new Set(tasks.map((task) => task.role)).size === tasks.length)
+    .optional(),
+  ephemeralRestoration: z.lazy(() => EphemeralRestoration).optional(),
+  phase: DockerEmployeeContinuationPhase,
+  pool: DockerEmployeePool.optional(),
+  destination: DockerEmployeeOriginal.optional(),
+};
+const legacyContinuationRecord = z
   .object({
     version: z.literal(1),
     purpose: z.literal('docker-employee-continuation-v1'),
-    employeeId: uuid,
-    owner: z.string().max(200).optional(),
-    request: DockerEmployeeContinuationRequest,
-    sourceDigest: digest,
-    original: DockerEmployeeOriginal,
-    workerImage: DockerEmployeeWorkerImage,
-    policy: DockerEmployeeResourcePolicy,
-    credentialId: uuid,
-    tasks: z
-      .array(DockerContinuationTask)
-      .max(5)
-      .refine((tasks) => new Set(tasks.map((task) => task.role)).size === tasks.length)
-      .optional(),
-    ephemeralRestoration: z.lazy(() => EphemeralRestoration).optional(),
-    phase: DockerEmployeeContinuationPhase,
-    pool: DockerEmployeePool.optional(),
-    destination: DockerEmployeeOriginal.optional(),
+    ...continuationRecordFields,
   })
-  .strict()
+  .strict();
+const currentContinuationRecord = z
+  .object({
+    version: z.literal(2),
+    purpose: z.literal('docker-employee-continuation-v2'),
+    ...continuationRecordFields,
+    providerSourceDigest: digest,
+  })
+  .strict();
+export const DockerEmployeeContinuationRecord = z
+  .discriminatedUnion('version', [legacyContinuationRecord, currentContinuationRecord])
   .refine(
     (row) =>
       (!row.ephemeralRestoration ||

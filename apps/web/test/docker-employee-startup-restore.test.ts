@@ -14,6 +14,9 @@ const eid = '11111111-1111-4111-8111-111111111111';
 const sid = '22222222-2222-4222-8222-222222222222';
 const oid = '33333333-3333-4333-8333-333333333333';
 const thread = '44444444-4444-4444-8444-444444444444';
+const staleEid = '66666666-6666-4666-8666-666666666666';
+const staleSid = '77777777-7777-4777-8777-777777777777';
+const staleOperation = '88888888-8888-4888-8888-888888888888';
 const sourceId = '1'.repeat(64),
   destinationId = '2'.repeat(64);
 const target = 'sha256:' + 'a'.repeat(64),
@@ -357,6 +360,7 @@ async function seed(scenario: string) {
     sessionGeneration: 1,
     owner: undefined,
     sourceDigest: 'e'.repeat(64),
+    providerSourceDigest: 'e'.repeat(64),
     onVacation: false,
     desiredRunning: true,
   };
@@ -443,7 +447,7 @@ async function seed(scenario: string) {
     containerName: destinationId,
     hostWorkspacePath: '/',
     containerWorkdir: '/fixture/work',
-    network: 'bridge',
+    network: 'bridge' as const,
     mountCredentials: false,
     hooksEnabled: false,
     resumeOnStart: true,
@@ -529,10 +533,64 @@ async function seed(scenario: string) {
   row.sourceDigest = dockerEmployeeSourceDigest(employee, writer.getSession(sid)!);
   const company = new CompanyStore('/fixture/data/company.json');
   await company.init();
+  let staleEmployee: typeof employee | undefined, staleRow: DockerEmployeeContinuationRecord | undefined;
+  if (scenario === 'attached') {
+    // A second canonical identity is deliberately FIRST in startup order. Its
+    // migration will lose the canonical boundary; the healthy physical provider
+    // above must still restore. These additional descriptors are fixture DATA,
+    // not new Docker CREATE/START operations.
+    const badSourceId = '7'.repeat(64),
+      badDestinationId = '8'.repeat(64);
+    staleRow = structuredClone(row);
+    staleRow.employeeId = staleEid;
+    staleRow.request = { ...row.request, operationId: staleOperation, sessionId: staleSid, containerId: badSourceId };
+    staleRow.original = { ...row.original, employeeId: staleEid, sessionId: staleSid, containerId: badSourceId };
+    staleRow.destination = {
+      ...row.destination!,
+      employeeId: staleEid,
+      sessionId: staleSid,
+      containerId: badDestinationId,
+    };
+    staleEmployee = EmployeeSchema.parse({
+      ...employee,
+      id: staleEid,
+      sessionId: staleSid,
+      name: 'Stale migration',
+      dockerBinding: {
+        ...employee.dockerBinding!,
+        operationId: staleOperation,
+        sessionId: staleSid,
+        containerId: badDestinationId,
+        originalDigest: dockerContinuationDigest(staleRow.destination),
+      },
+    });
+    writer.setSession(staleSid, {
+      ...structuredClone(writer.getSession(sid)!),
+      id: staleSid,
+      name: 'Stale migration',
+      docker: {
+        ...docker,
+        containerName: badDestinationId,
+        continuation: { ...docker.continuation, operationId: staleOperation, employeeId: staleEid },
+      },
+    });
+    writer.flush();
+    staleRow.sourceDigest = dockerEmployeeSourceDigest(staleEmployee, writer.getSession(staleSid)!);
+    const badPhysical = structuredClone(physical.containers.get(destinationId)!);
+    badPhysical.Id = badDestinationId;
+    badPhysical.Config.Labels = {
+      ...badPhysical.Config.Labels,
+      'reverie.boxed.employee': staleEid,
+      'reverie.boxed.session': staleSid,
+      'reverie.boxed.operation': staleOperation,
+    };
+    badPhysical.State = { ...badPhysical.State, Status: 'exited', Running: false, Pid: 0 };
+    physical.containers.set(badDestinationId, badPhysical);
+  }
   await company.update((state) => {
-    state.employees = [employee];
+    state.employees = staleEmployee ? [staleEmployee, employee] : [employee];
     state.settings = [CompanySettingsSchema.parse({ autoWakeEnabled: false })];
-    state.dockerEmployeeContinuations = [row];
+    state.dockerEmployeeContinuations = staleRow ? [staleRow, row] : [row];
   });
   physical.save();
 }
@@ -580,13 +638,41 @@ async function startup(scenario: string) {
   };
   const { PROVIDER_LAUNCH_DISK_KEY } = await import('../src/provider-launch-publication.js');
   const before = JSON.parse(fs.readFileSync('/fixture/data/state.json', 'utf8'))[PROVIDER_LAUNCH_DISK_KEY];
+  const { CompanyDockerContinuationStore } = await import('../src/docker-employee-store.js');
+  const { CompanyError } = await import('../src/company-service.js');
+  const migrationPrototype = CompanyDockerContinuationStore.prototype;
+  const originalMigration = migrationPrototype.migrateProviderSource;
+  const oldBatchDescriptor = Object.getOwnPropertyDescriptor(migrationPrototype, 'migrateProviderSources');
+  const migrations: string[] = [];
+  let legacyBatchCalls = 0;
+  if (scenario === 'attached') {
+    migrationPrototype.migrateProviderSource = function (employeeId, current) {
+      migrations.push(employeeId);
+      if (employeeId === staleEid)
+        return Promise.reject(new CompanyError('Synthetic canonical recipe changed during migration', 409));
+      return originalMigration.call(this, employeeId, current);
+    };
+    // Causal compatibility port for the prior whole-batch Runtime: its global
+    // call encounters exactly the SAME first-row failure before any viewer
+    // restoration. Current Runtime must call the real per-employee boundary.
+    Object.defineProperty(migrationPrototype, 'migrateProviderSources', {
+      configurable: true,
+      value: async function (this: InstanceType<typeof CompanyDockerContinuationStore>, current: () => void) {
+        legacyBatchCalls++;
+        let changed = 0;
+        for (const employee of this.company.store.snapshot().employees)
+          changed += await this.migrateProviderSource(employee.id, current);
+        return changed;
+      },
+    });
+  }
   const { WebServer } = await import('../src/web/server.js');
   const server = new WebServer(0, false, false, '0.0.0.0');
   try {
     await server.start();
     const internal = server as unknown as {
       sessions: Map<string, import('../src/session.js').Session>;
-      dockerEmployeeRuntime: { restorationReports: readonly { state: string; sessionId: string }[] };
+      dockerEmployeeRuntime: { restorationReports: readonly { state: string; sessionId: string; code?: string }[] };
       store: import('../src/state-store.js').StateStore;
       companyService: import('../src/company-service.js').CompanyService;
       terminalInput: import('../src/web/terminal-input-service.js').TerminalInputService;
@@ -684,6 +770,7 @@ async function startup(scenario: string) {
       assert.equal(ptys, 0);
       if (scenario !== 'desired-off') assert(reports.some((r) => r.sessionId === sid && r.state === 'held'));
     }
+    assert.equal(writes.length, 0, 'Restoring an existing viewer must not type or replay a draft');
     if (scenario.startsWith('codex-')) {
       assert(session);
       assert.equal(session.workspaceHookConfiguration, 'opted-out');
@@ -836,6 +923,31 @@ async function startup(scenario: string) {
         });
       }
     }
+    if (scenario === 'attached') {
+      assert.deepEqual(migrations.slice(0, 2), [staleEid, eid], 'Bad identity must be encountered before healthy one');
+      assert.equal(legacyBatchCalls, 0, 'Startup must contain migration failures per employee');
+      assert.equal(internal.sessions.has(staleSid), false);
+      assert(
+        reports.some(
+          (report) =>
+            report.sessionId === staleSid &&
+            report.state === 'held' &&
+            report.code === 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED'
+        )
+      );
+      assert(reports.some((report) => report.sessionId === sid && report.state === 'attached'));
+      const state = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8'));
+      assert.equal(
+        state.dockerEmployeeContinuations.find((row: { employeeId: string }) => row.employeeId === staleEid).version,
+        1,
+        'Failed legacy migration must not publish even metadata'
+      );
+      assert.equal(
+        state.dockerEmployeeContinuations.find((row: { employeeId: string }) => row.employeeId === eid).version,
+        2,
+        'Healthy employee must use the actual canonical migration method'
+      );
+    }
     assert.equal(physical.mutations, 0, 'Startup must not create/start/dispatch any provider');
     internal.store.flush();
     assert.deepEqual(JSON.parse(fs.readFileSync('/fixture/data/state.json', 'utf8'))[PROVIDER_LAUNCH_DISK_KEY], before);
@@ -847,6 +959,9 @@ async function startup(scenario: string) {
     ).sessions.values())
       await session.stop(false);
     pty.spawn = oldSpawn;
+    migrationPrototype.migrateProviderSource = originalMigration;
+    if (oldBatchDescriptor) Object.defineProperty(migrationPrototype, 'migrateProviderSources', oldBatchDescriptor);
+    else Reflect.deleteProperty(migrationPrototype, 'migrateProviderSources');
     PackagedDockerEngineCommand.prototype.run = originalRun;
     PackagedDockerEngineCommand.prototype.create = originalCreate;
   }
@@ -878,6 +993,10 @@ if (process.argv.includes('--namespace')) {
       'codex-stale',
       'codex-identity',
     ])
-      it(scenario, () => runBoxedStartupNamespace('test/docker-employee-startup-restore.test.ts', scenario), 60_000);
+      it(
+        scenario === 'attached' ? 'attached despite an unrelated canonical migration failure' : scenario,
+        () => runBoxedStartupNamespace('test/docker-employee-startup-restore.test.ts', scenario),
+        60_000
+      );
   });
 }

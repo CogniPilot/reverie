@@ -177,6 +177,7 @@ function rowSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSu
     sessionGeneration: row.request.sessionGeneration,
     owner: row.owner,
     sourceDigest: row.sourceDigest,
+    providerSourceDigest: row.version === 2 ? row.providerSourceDigest : row.sourceDigest,
     onVacation: false,
     desiredRunning: true,
   };

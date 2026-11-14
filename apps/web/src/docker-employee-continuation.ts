@@ -51,6 +51,7 @@ export interface DockerContinuationSubject {
   readonly sessionGeneration: number;
   readonly owner: string | undefined;
   readonly sourceDigest: string;
+  readonly providerSourceDigest: string;
   readonly onVacation: boolean;
   readonly desiredRunning: boolean | undefined;
 }
@@ -87,6 +88,7 @@ export interface DockerContinuationEngine {
 }
 export interface DockerContinuationStore {
   subject(employeeId: string): DockerContinuationSubject | undefined;
+  existingSubject(employeeId: string, row: DockerEmployeeContinuationRecord): DockerContinuationSubject | undefined;
   /** Current owner-approved policy; request parameters carry only its expected digest. */
   policy(employeeId: string): DockerEmployeeResourcePolicy;
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined;
@@ -254,6 +256,33 @@ export class DockerEmployeeContinuation {
       originalDigest: dockerContinuationDigest(row.destination),
       policyDigest: dockerContinuationDigest(row.policy),
     });
+  }
+  #requireExisting(
+    subject: DockerContinuationSubject,
+    row: DockerEmployeeContinuationRecord,
+    authority: DockerContinuationAuthority,
+    policy: DockerEmployeeResourcePolicy
+  ): void {
+    authority.require();
+    const actualRow = this.store.record(subject.employeeId);
+    if (
+      !actualRow ||
+      (actualRow.phase !== row.phase && !(row.phase === 'provider-issued' && actualRow.phase === 'ready')) ||
+      !isDeepStrictEqual({ ...actualRow, phase: row.phase }, row)
+    )
+      refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+    const current = this.store.existingSubject(subject.employeeId, actualRow);
+    if (
+      !current ||
+      current.employeeId !== subject.employeeId ||
+      current.owner !== authority.owner ||
+      current.owner !== subject.owner ||
+      current.sessionId !== subject.sessionId ||
+      current.sessionGeneration !== subject.sessionGeneration ||
+      current.providerSourceDigest !== subject.providerSourceDigest
+    )
+      refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
+    if (!isDeepStrictEqual(this.store.policy(subject.employeeId), policy)) refuse('DOCKER_CONTINUATION_POLICY_CHANGED');
   }
   #unissuedHelper(row: DockerEmployeeContinuationRecord): boolean {
     const task = (role: string) => row.tasks?.find((task) => task.role === role);
@@ -432,12 +461,13 @@ export class DockerEmployeeContinuation {
         await this.engine.validateCapabilities(original, policy);
         current();
         row = DockerEmployeeContinuationRecord.parse({
-          version: 1,
-          purpose: 'docker-employee-continuation-v1',
+          version: 2,
+          purpose: 'docker-employee-continuation-v2',
           employeeId,
           owner: subject.owner,
           request,
           sourceDigest: subject.sourceDigest,
+          providerSourceDigest: subject.providerSourceDigest,
           original,
           workerImage,
           policy,
@@ -459,12 +489,16 @@ export class DockerEmployeeContinuation {
   ): Promise<DockerContinuationResult> {
     authority.require();
     const row = this.store.record(employeeId),
-      subject = this.store.subject(employeeId);
-    if (!row || !subject || row.request.operationId !== operationId || row.owner !== authority.owner)
+      existing = row && ['provider-issued', 'ready'].includes(row.phase),
+      subject = row && existing ? this.store.existingSubject(employeeId, row) : this.store.subject(employeeId);
+    if (!row || row.request.operationId !== operationId || row.owner !== authority.owner)
       refuse('DOCKER_CONTINUATION_UNKNOWN_OPERATION');
-    const current = () => this.#require(subject, authority, row.policy);
+    if (!subject) refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
+    const current = existing
+      ? () => this.#requireExisting(subject, row, authority, row.policy)
+      : () => this.#require(subject, authority, row.policy);
     if (
-      row.sourceDigest !== subject.sourceDigest ||
+      (!existing && row.sourceDigest !== subject.sourceDigest) ||
       row.request.sessionId !== subject.sessionId ||
       row.request.sessionGeneration !== subject.sessionGeneration
     )

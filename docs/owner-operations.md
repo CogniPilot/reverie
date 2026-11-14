@@ -150,3 +150,28 @@ local process adapter tests or by Office header-forwarding tests. Native
 enrollment, durable launch and canonical binding reconciliation remain release
 blockers. Do not deploy this partial qualification
 as proof of complete native employee recovery.
+
+## Docker continuation correlation format
+
+Version 2 keeps the original launch fingerprint and approved request unchanged,
+and adds a separate fingerprint for observations of an existing provider. Only
+the shipped native-thread codecs may omit runtime-owned conversation IDs from
+that observational fingerprint. Owner, account, session generation, working
+directory and provider configuration remain part of the binding. A fingerprint
+never grants launch authority or replaces fresh container and native-process
+identity checks.
+
+Startup imports a version 1 record through the canonical company writer only
+when its original fingerprint can still be reproduced. The narrow first-learned
+Codex thread case also requires reproducing the exact original launch bytes;
+unknown previous thread IDs are not guessed. This format import preserves the
+request, resource approval, operation, credential, binding, phase and launch
+fences. Each employee is migrated inside its own viewer-restoration boundary,
+so a stale record remains held while unrelated viewers can reconnect.
+
+Both formats have explicit strict schemas. An older reader that does not
+understand version 2 must refuse the store; it must not discard records or load
+an older backup over them. Do not run competing old and new writers or downgrade
+the data format by editing private files. These source contracts and synthetic
+startup tests do not establish acceptance of a deployed image or grant recovery
+of an uncertain paid launch.

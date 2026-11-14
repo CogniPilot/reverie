@@ -227,13 +227,12 @@ export class DockerEmployeeRuntime {
       employee.bindingMigration
     )
       return;
-    const subject = attached.store.subject(employeeId),
-      row = attached.store.record(employeeId),
+    const row = attached.store.record(employeeId),
+      subject = row && attached.store.existingSubject(employeeId, row),
       session = attached.ctx.sessions.get(employee.sessionId);
     if (
       !subject ||
       !row ||
-      row.sourceDigest !== subject.sourceDigest ||
       row.credentialId !== binding.credentialId ||
       row.destination?.containerId !== binding.containerId ||
       row.request.sessionId !== employee.sessionId ||
@@ -348,30 +347,50 @@ export class DockerEmployeeRuntime {
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
   providerHealthObserver(changed: () => void): DockerProviderHealth {
-    const a=this.#attached;
-    if(!a)throw Error('Boxed runtime is not attached');
+    const a = this.#attached;
+    if (!a) throw Error('Boxed runtime is not attached');
     return new DockerProviderHealth({
-      employees:()=>a.company.registeredEmployees(),
-      active:()=>this.current() && !a.company.store.publicationUnconfirmed,
+      employees: () => a.company.registeredEmployees(),
+      active: () => this.current() && !a.company.store.publicationUnconfirmed,
       changed,
-      observe:async(employee,requireHealthCurrent)=>{
-        const binding=employee.dockerBinding,row=a.store.record(employee.id);
-        if(!binding||!row)throw Error('Original Docker provider binding unavailable');
-        const rowDigest=dockerContinuationDigest(row),publicBinding=providerHealthBinding(employee),bindingDigest=dockerContinuationDigest(binding);
-        let revoked=false;
-        const current=()=>{
-          if(revoked)throw Error('Original Docker provider health changed');
+      observe: async (employee, requireHealthCurrent) => {
+        const binding = employee.dockerBinding,
+          row = a.store.record(employee.id);
+        if (!binding || !row) throw Error('Original Docker provider binding unavailable');
+        const rowDigest = dockerContinuationDigest(row),
+          publicBinding = providerHealthBinding(employee),
+          bindingDigest = dockerContinuationDigest(binding);
+        let revoked = false;
+        const current = () => {
+          if (revoked) throw Error('Original Docker provider health changed');
           try {
             requireHealthCurrent();
-            const live=a.company.employeeForSession(employee.sessionId,employee.owner),subject=a.store.subject(employee.id);
-            if(!this.current()||!live||providerHealthBinding(live)!==publicBinding||dockerContinuationDigest(live.dockerBinding)!==bindingDigest||
-              live.onVacation||live.desiredRunning!==true||live.bindingMigration||!subject||subject.owner!==employee.owner||
-              subject.sessionId!==binding.sessionId||subject.sessionGeneration!==binding.sessionGeneration||subject.sourceDigest!==row.sourceDigest||
-              dockerContinuationDigest(a.store.record(employee.id))!==rowDigest)
+            const live = a.company.employeeForSession(employee.sessionId, employee.owner),
+              subject = a.store.existingSubject(employee.id, row);
+            if (
+              !this.current() ||
+              !live ||
+              providerHealthBinding(live) !== publicBinding ||
+              dockerContinuationDigest(live.dockerBinding) !== bindingDigest ||
+              live.onVacation ||
+              live.desiredRunning !== true ||
+              live.bindingMigration ||
+              !subject ||
+              subject.owner !== employee.owner ||
+              subject.sessionId !== binding.sessionId ||
+              subject.sessionGeneration !== binding.sessionGeneration ||
+              dockerContinuationDigest(a.store.record(employee.id)) !== rowDigest
+            )
               throw Error('Original Docker provider health changed');
-          }catch(error){revoked=true;throw error;}
+          } catch (error) {
+            revoked = true;
+            throw error;
+          }
         };
-        current();const proof=await a.engine.captureProviderHealth(row,binding,current);current();return proof;
+        current();
+        const proof = await a.engine.captureProviderHealth(row, binding, current);
+        current();
+        return proof;
       },
     });
   }
@@ -384,7 +403,7 @@ export class DockerEmployeeRuntime {
       binding = employee.dockerBinding;
     if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
     const current = () => {
-      const subject = a.store.subject(employee.id);
+      const subject = a.store.existingSubject(employee.id, row);
       const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
@@ -396,7 +415,6 @@ export class DockerEmployeeRuntime {
         !subject ||
         subject.onVacation ||
         subject.desiredRunning !== true ||
-        subject.sourceDigest !== row.sourceDigest ||
         subject.sessionId !== binding.sessionId ||
         subject.sessionGeneration !== binding.sessionGeneration
       )
@@ -461,6 +479,9 @@ export class DockerEmployeeRuntime {
         );
       };
       try {
+        await a.store.migrateProviderSource(employee.id, () => {
+          if (!allowed()) throw Error('Boxed format migration custody changed');
+        });
         const row = a.store.record(employee.id);
         if (!row || !['ready', 'provider-issued'].includes(row.phase)) {
           reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' }));

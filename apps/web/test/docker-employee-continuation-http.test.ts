@@ -632,3 +632,65 @@ describe('canonical resource inventory remains independent of launch permission'
     expect(f.store.resourceInventory()).toEqual([]);
   });
 });
+
+describe('explicit legacy source-correlation format migration', () => {
+  async function legacyFixture() {
+    const f = await fixture({ storedPolicy: true, office: true });
+    await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-continuation',
+      headers: f.ownerHeaders,
+      payload: { request: f.request },
+    });
+    await f.companyStore.update((state) => {
+      const row = state.dockerEmployeeContinuations![0]!;
+      if (row.version !== 2) throw Error('Current writes must use v2');
+      const { providerSourceDigest: _existing, ...legacy } = row;
+      void _existing;
+      state.dockerEmployeeContinuations![0] = { ...legacy, version: 1, purpose: 'docker-employee-continuation-v1' };
+    });
+    return f;
+  }
+  it('imports only correlation metadata and preserves every operation, binding, permission and effect count', async () => {
+    const f = await legacyFixture(),
+      before = f.companyStore.snapshot(),
+      effects = f.effects();
+    expect(await f.store.migrateProviderSource(target, () => {})).toBe(1);
+    const after = f.companyStore.snapshot(),
+      upgraded = after.dockerEmployeeContinuations![0]!;
+    expect(upgraded.version).toBe(2);
+    if (upgraded.version !== 2) throw Error('Expected v2');
+    expect(upgraded.providerSourceDigest).toBe(f.store.subject(target)!.providerSourceDigest);
+    const { providerSourceDigest: _existing, ...data } = upgraded;
+    void _existing;
+    after.dockerEmployeeContinuations![0] = { ...data, version: 1, purpose: 'docker-employee-continuation-v1' };
+    expect(after).toEqual(before);
+    expect(f.effects()).toBe(effects);
+    expect(await f.store.migrateProviderSource(target, () => {})).toBe(0);
+  });
+  it.each(['foreign-owner', 'foreign-session', 'changed-recipe'] as const)(
+    'leaves %s legacy metadata unmodified and unapproved',
+    async (change) => {
+      const f = await legacyFixture();
+      if (change === 'foreign-owner') f.saved.owner = 'foreign';
+      else if (change === 'foreign-session') f.saved.id = actorSid;
+      else f.saved.workingDir = '/different';
+      const before = f.companyStore.snapshot(),
+        effects = f.effects();
+      expect(await f.store.migrateProviderSource(target, () => {})).toBe(0);
+      expect(f.companyStore.snapshot()).toEqual(before);
+      expect(f.effects()).toBe(effects);
+    }
+  );
+  it('refuses revoked migration custody before canonical publication', async () => {
+    const f = await legacyFixture(),
+      before = f.companyStore.snapshot();
+    let calls = 0;
+    await expect(
+      f.store.migrateProviderSource(target, () => {
+        if (++calls > 1) throw Error('custody revoked');
+      })
+    ).rejects.toThrow('custody revoked');
+    expect(f.companyStore.snapshot()).toEqual(before);
+  });
+});

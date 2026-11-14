@@ -1,6 +1,14 @@
 import { EphemeralRestoration, allowedEphemeralTransition } from './docker-ephemeral-data.js';
 import { retainedDockerPoolTasks } from './docker-shared-pool-lineage.js';
-import { rebootRestoreLaunchConfig, rebootResumeTarget } from './utils/native-thread-profile.js';
+import {
+  dockerEmployeeSourceDigest,
+  dockerEmployeeProviderSourceDigest,
+  legacyDockerProviderSourceMatches,
+} from './docker-employee-source-correlation.js';
+export {
+  dockerEmployeeSourceDigest,
+  dockerEmployeeProviderSourceDigest,
+} from './docker-employee-source-correlation.js';
 import {
   DockerContinuationTask,
   type DockerContinuationTaskRole,
@@ -12,7 +20,7 @@ import {
  */
 import { isDeepStrictEqual } from 'node:util';
 import { CompanyService, CompanyError } from './company-service.js';
-import type { CompanyEmployee } from './company-types.js';
+import type { CompanyEmployee, CompanyState } from './company-types.js';
 import type { SessionState } from './types.js';
 import { ownerStopPending } from './owner-stop-journal.js';
 import {
@@ -25,48 +33,26 @@ import {
   type DockerContinuationStore,
   type DockerContinuationSubject,
 } from './docker-employee-continuation.js';
-const launchFields = [
-  'mode',
-  'workingDir',
-  'model',
-  'effort',
-  'advisorModel',
-  'claudeMode',
-  'allowedTools',
-  'subscriptionProfile',
-  'customModel',
-  'runtimeThreads',
-  'openCodeConfig',
-  'codexConfig',
-  'geminiConfig',
-  'antigravityConfig',
-  'piConfig',
-  'grokConfig',
-  'deepSeekConfig',
-  'ompConfig',
-  'resumeSessionId',
-  'claudeSessionChain',
-  '__envOverrides',
-  '__customModel',
-] as const;
-export function dockerEmployeeSourceDigest(employee: CompanyEmployee, saved: SessionState): string {
-  // Normalize only the existing shared same-thread launch codec and empty
-  // runtime map. This is correlation DATA, never restoration/launch authority.
-  const target = rebootResumeTarget(saved);
-  const normalized = target === undefined ? saved : { ...saved, ...rebootRestoreLaunchConfig(saved, target) };
-  const value = { ...normalized, runtimeThreads: normalized.runtimeThreads ?? {} } as unknown as Record<
-    string,
-    unknown
-  >;
-  return dockerContinuationDigest({
-    employeeId: employee.id,
-    owner: employee.owner ?? null,
-    sessionId: employee.sessionId,
-    generation: employee.sessionGeneration,
-    recipe: employee.runtimeRecipe ?? null,
-    thread: employee.threadId ?? null,
-    saved: Object.fromEntries(launchFields.map((key) => [key, value[key] ?? null])),
-  });
+function boundProviderRecord(employee: CompanyEmployee, row: DockerEmployeeContinuationRecord): boolean {
+  const binding = employee.dockerBinding,
+    destination = row.destination;
+  return Boolean(
+    employee.id === row.employeeId &&
+    employee.owner === row.owner &&
+    employee.sessionId === row.request.sessionId &&
+    employee.sessionGeneration === row.request.sessionGeneration &&
+    binding &&
+    destination &&
+    ['identity-ready', 'provider-issued', 'ready'].includes(row.phase) &&
+    binding.operationId === row.request.operationId &&
+    binding.credentialId === row.credentialId &&
+    binding.sessionId === row.request.sessionId &&
+    binding.sessionGeneration === row.request.sessionGeneration &&
+    binding.containerId === destination.containerId &&
+    binding.imageId === destination.imageId &&
+    binding.originalDigest === dockerContinuationDigest(destination) &&
+    binding.policyDigest === dockerContinuationDigest(row.policy)
+  );
 }
 function persistedRecord(row: DockerEmployeeContinuationRecord): DockerEmployeeContinuationRecord {
   return DockerEmployeeContinuationRecord.parse(JSON.parse(JSON.stringify(row)));
@@ -79,8 +65,10 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     if (!(company instanceof CompanyService)) throw Error('Actual company service required');
   }
   subject(employeeId: string): DockerContinuationSubject | undefined {
-    const state = this.company.store.snapshot(),
-      rows = state.employees.filter((e) => e.id === employeeId),
+    return this.subjectFromSnapshot(employeeId, this.company.store.snapshot());
+  }
+  private subjectFromSnapshot(employeeId: string, state: CompanyState): DockerContinuationSubject | undefined {
+    const rows = state.employees.filter((e) => e.id === employeeId),
       employee = rows[0];
     if (
       rows.length !== 1 ||
@@ -94,6 +82,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     const saved = this.saved(employee.sessionId);
     if (
       !saved ||
+      saved.id !== employee.sessionId ||
       saved.owner !== employee.owner ||
       saved.remote ||
       saved.providerDispatchHeld ||
@@ -108,9 +97,98 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
       sessionGeneration: employee.sessionGeneration,
       owner: employee.owner,
       sourceDigest: dockerEmployeeSourceDigest(employee, saved),
+      providerSourceDigest: dockerEmployeeProviderSourceDigest(employee, saved),
       onVacation: employee.onVacation,
       desiredRunning: employee.desiredRunning,
     };
+  }
+  /** Existing-provider correlation is not authority for another launch. */
+  existingSubject(employeeId: string, row: DockerEmployeeContinuationRecord): DockerContinuationSubject | undefined {
+    const state = this.company.store.snapshot(),
+      subject = this.subjectFromSnapshot(employeeId, state);
+    const rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
+    const employee = state.employees.find((value) => value.id === employeeId);
+    if (
+      !subject ||
+      !employee ||
+      rows.length !== 1 ||
+      !isDeepStrictEqual(rows[0], row) ||
+      !['provider-issued', 'ready'].includes(row.phase) ||
+      !boundProviderRecord(employee, row)
+    )
+      return;
+    const saved = this.saved(employee.sessionId);
+    if (!saved) return;
+    const matches =
+      row.version === 2
+        ? row.providerSourceDigest === subject.providerSourceDigest
+        : legacyDockerProviderSourceMatches(employee, saved, row.sourceDigest);
+    return matches ? subject : undefined;
+  }
+  private migrationSource(row: DockerEmployeeContinuationRecord, state: CompanyState) {
+    const employees = state.employees.filter((value) => value.id === row.employeeId),
+      employee = employees[0];
+    const saved = employee && this.saved(employee.sessionId);
+    if (
+      employees.length !== 1 ||
+      !employee ||
+      !saved ||
+      employee.bindingMigration ||
+      state.employees.filter((value) => value.sessionId === employee.sessionId).length !== 1 ||
+      saved.id !== employee.sessionId ||
+      saved.owner !== employee.owner ||
+      employee.owner !== row.owner ||
+      employee.sessionId !== row.request.sessionId ||
+      employee.sessionGeneration !== row.request.sessionGeneration
+    )
+      return;
+    return { employee, saved };
+  }
+  /** Version-only import of correlation DATA. No phase, request, native ID,
+   * credential, binding, launch fence or provider effect is changed. */
+  async migrateProviderSource(employeeId: string, current: () => void): Promise<number> {
+    current();
+    const initial = this.company.store.snapshot();
+    const plans =
+      initial.dockerEmployeeContinuations?.flatMap((row) => {
+        if (row.employeeId !== employeeId || row.version !== 1) return [];
+        const source = this.migrationSource(row, initial);
+        if (!source || !legacyDockerProviderSourceMatches(source.employee, source.saved, row.sourceDigest)) return [];
+        return [{ row, providerSourceDigest: dockerEmployeeProviderSourceDigest(source.employee, source.saved) }];
+      }) ?? [];
+    if (!plans.length) return 0;
+    const matches = (plan: (typeof plans)[number], state: CompanyState) => {
+      const source = this.migrationSource(plan.row, state);
+      return (
+        !!source && dockerEmployeeProviderSourceDigest(source.employee, source.saved) === plan.providerSourceDigest
+      );
+    };
+    const unchanged = () => {
+      current();
+      const state = this.company.store.snapshot();
+      if (!plans.every((plan) => matches(plan, state)))
+        throw new CompanyError('Provider recipe changed during correlation format migration', 409);
+    };
+    await this.company.store.update((state) => {
+      unchanged();
+      for (const plan of plans) {
+        const index =
+          state.dockerEmployeeContinuations?.findIndex((row) => row.employeeId === plan.row.employeeId) ?? -1;
+        if (
+          index < 0 ||
+          !isDeepStrictEqual(state.dockerEmployeeContinuations![index], plan.row) ||
+          !matches(plan, state)
+        )
+          throw new CompanyError('Provider operation changed during correlation format migration', 409);
+        state.dockerEmployeeContinuations![index] = DockerEmployeeContinuationRecord.parse({
+          ...plan.row,
+          version: 2,
+          purpose: 'docker-employee-continuation-v2',
+          providerSourceDigest: plan.providerSourceDigest,
+        });
+      }
+    }, unchanged);
+    return plans.length;
   }
   /** Resource membership is DATA for fresh Engine/kernel proof, never launch permission.
    * A retained binding remains accounted for when its saved launch is held or changed. */
@@ -134,27 +212,13 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
         employee.sessionGeneration !== row.request.sessionGeneration
       )
         return false;
-      const binding = employee.dockerBinding,
-        destination = row.destination;
-      const bound = Boolean(
-        binding &&
-        destination &&
-        ['identity-ready', 'provider-issued', 'ready'].includes(row.phase) &&
-        binding.operationId === row.request.operationId &&
-        binding.credentialId === row.credentialId &&
-        binding.sessionId === row.request.sessionId &&
-        binding.sessionGeneration === row.request.sessionGeneration &&
-        binding.containerId === destination.containerId &&
-        binding.imageId === destination.imageId &&
-        binding.originalDigest === dockerContinuationDigest(destination) &&
-        binding.policyDigest === dockerContinuationDigest(row.policy)
-      );
+      const bound = boundProviderRecord(employee, row);
       if (bound) return true;
       // Published destinations require their exact current binding, even if a
       // saved launch recipe still happens to be eligible. Earlier phases may
       // legitimately precede publication and retain the existing subject check.
       if (row.phase === 'provider-issued' || row.phase === 'ready') return false;
-      const subject = this.subject(row.employeeId);
+      const subject = this.subjectFromSnapshot(row.employeeId, state);
       if (
         subject &&
         subject.owner === row.owner &&
