@@ -1,3 +1,4 @@
+import { DOCKER_EMPLOYEE_PROVIDER_RECIPE_FIELDS } from './docker-employee-provider-recipe.js';
 import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
 /** Launch selection and observations of an existing provider are distinct DATA.
  * Neither digest grants permission to launch or to attach a native process. */
@@ -7,30 +8,6 @@ import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import { THREAD_STATE_BINDINGS } from './config/cli-registry/profiles.js';
 import { nativeThreadProfile, rebootRestoreLaunchConfig, rebootResumeTarget } from './utils/native-thread-profile.js';
 
-const launchFields = [
-  'mode',
-  'workingDir',
-  'model',
-  'effort',
-  'advisorModel',
-  'claudeMode',
-  'allowedTools',
-  'subscriptionProfile',
-  'customModel',
-  'runtimeThreads',
-  'openCodeConfig',
-  'codexConfig',
-  'geminiConfig',
-  'antigravityConfig',
-  'piConfig',
-  'grokConfig',
-  'deepSeekConfig',
-  'ompConfig',
-  'resumeSessionId',
-  'claudeSessionChain',
-  '__envOverrides',
-  '__customModel',
-] as const;
 
 function sourceValue(employee: CompanyEmployee, saved: SessionState) {
   const target = rebootResumeTarget(saved);
@@ -46,7 +23,7 @@ function sourceValue(employee: CompanyEmployee, saved: SessionState) {
     generation: employee.sessionGeneration,
     recipe: employee.runtimeRecipe ?? null,
     thread: employee.threadId ?? null,
-    saved: Object.fromEntries(launchFields.map((key) => [key, value[key] ?? null])),
+    saved: Object.fromEntries(DOCKER_EMPLOYEE_PROVIDER_RECIPE_FIELDS.map((key) => [key, value[key] ?? null])),
   };
 }
 

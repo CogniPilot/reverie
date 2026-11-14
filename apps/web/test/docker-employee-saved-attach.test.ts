@@ -1,3 +1,5 @@
+import { DOCKER_EMPLOYEE_PROVIDER_RECIPE_FIELDS } from '../src/docker-employee-provider-recipe.js';
+import type { ClaudeMode } from '../src/types.js';
 /** Actual private Engine capture over controlled OS replies, real saved StateStore
  * and Session. No installed/native/provider acceptance; no view/receipt DTO grant. */
 import fs from 'node:fs';
@@ -300,7 +302,11 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
-async function savedFixture(explicitUnknown = false, savedInputUnknown = false) {
+async function savedFixture(
+  explicitUnknown = false,
+  savedInputUnknown = false,
+  livePermissions: { claudeMode?: ClaudeMode; allowedTools?: string } = {}
+) {
   const f = await dockerEncodedDestination();
   f.observed.State.Running = true;
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
@@ -349,6 +355,8 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
     id: sid,
     name: 'Synthetic',
     mode: 'claude',
+    claudeMode: 'normal',
+    allowedTools: 'Read',
     workingDir: '/workspace',
     status: 'busy',
     currentTaskId: null,
@@ -399,7 +407,15 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
   const saved = loaded.getSession(sid)!;
   expect(saved.providerDispatchHeld === true).toBe(explicitUnknown);
   const mux = new TmuxManager();
-  const session = new Session({ ...saved, publicationStore: loaded, useMux: true, mux });
+  const session = new Session({
+    ...saved,
+    claudeMode: 'normal',
+    allowedTools: 'Read',
+    ...livePermissions,
+    publicationStore: loaded,
+    useMux: true,
+    mux,
+  });
   cleanup.push(async () => {
     await session.stop(false);
     mux.destroy();
@@ -802,8 +818,8 @@ describe('actual saved Docker Session private attachment', () => {
 });
 
 describe('in-place Docker existing-view renewal', () => {
-  async function running() {
-    const f = await savedFixture(),
+  async function running(livePermissions: { claudeMode?: ClaudeMode; allowedTools?: string } = {}) {
+    const f = await savedFixture(false, false, livePermissions),
       old = await f.capture();
     f.session.bindDockerContinuationView(old);
     await f.session.startInteractive();
@@ -820,8 +836,8 @@ describe('in-place Docker existing-view renewal', () => {
     expect(f.session.dockerContinuationViewCurrent).toBe(false);
     return { ...f, old, before };
   }
-  async function runtimeFixture() {
-    const f = await running();
+  async function runtimeFixture(livePermissions: { claudeMode?: ClaudeMode; allowedTools?: string } = {}) {
+    const f = await running(livePermissions);
     const companyFile = new CompanyStore(join(dirname(f.path), 'company.json'));
     await companyFile.init();
     const employee = EmployeeSchema.parse({
@@ -847,6 +863,12 @@ describe('in-place Docker existing-view renewal', () => {
         policyDigest: dockerContinuationDigest(f.row.policy),
       },
     });
+    // Explicit approved permission DATA for this fixture. The production serializer is intentionally unchanged.
+    f.loaded.setSession(sid, {
+      ...f.loaded.getSession(sid)!,
+      claudeMode: 'normal',
+      allowedTools: 'Read',
+    } as SessionState);
     f.row.sourceDigest = dockerEmployeeSourceDigest(employee, f.loaded.getSession(sid)!);
     await companyFile.update((state) => {
       state.employees = [employee];
@@ -945,12 +967,57 @@ describe('in-place Docker existing-view renewal', () => {
       expect(native.writes).toHaveLength(f.before.writes);
     }
   );
+  it.each(['claudeMode', 'allowedTools'] as const)(
+    'actual Runtime.wake refuses preexisting %s permission drift',
+    async (field) => {
+      const f = await runtimeFixture(
+        field === 'claudeMode' ? { claudeMode: 'dangerously-skip-permissions' } : { allowedTools: 'Read,Write' }
+      );
+      await expect(f.runtime.wake(f.employee, () => true)).rejects.toThrow();
+      expect(f.captured).not.toHaveBeenCalled();
+      expect(f.attach).not.toHaveBeenCalled();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(native.ptys).toHaveLength(f.before.ptys);
+      expect(native.writes).toHaveLength(f.before.writes);
+    }
+  );
+  it.each(['claudeMode', 'allowedTools'] as const)(
+    'actual Runtime.wake refuses awaited %s permission drift',
+    async (field) => {
+      const f = await runtimeFixture(),
+        capture = f.captured.getMockImplementation()!;
+      f.captured.mockImplementation(async (row, current) => {
+        const view = await capture(row, current);
+        // Simulate configuration drift on this controlled Session, never a proof/denial flag or a live worker.
+        Reflect.set(
+          f.session,
+          field === 'claudeMode' ? '_claudeMode' : '_allowedTools',
+          field === 'claudeMode' ? 'dangerously-skip-permissions' : 'Read,Write'
+        );
+        return view;
+      });
+      await expect(f.runtime.wake(f.employee, () => true)).rejects.toThrow();
+      expect(f.attach).not.toHaveBeenCalled();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(native.ptys).toHaveLength(f.before.ptys);
+      expect(native.writes).toHaveLength(f.before.writes);
+    }
+  );
+  it('covers exactly the complete owning fingerprint field inventory', async () => {
+    const f = await running();
+    expect(Object.keys(f.session.providerRecipeState()).sort()).toEqual(
+      [...DOCKER_EMPLOYEE_PROVIDER_RECIPE_FIELDS].sort()
+    );
+  });
   it('projects the same persisted recipe without consulting a view callback', async () => {
     const f = await running(),
       persisted = f.session.toPersistedState(),
       data = f.session.providerRecipeState();
-    for (const [key, value] of Object.entries(data))
-      expect(value).toEqual((persisted as unknown as Record<string, unknown>)[key]);
+    for (const [key, value] of Object.entries(data)) {
+      if (key === 'claudeMode') expect(value).toBe(f.session.claudeMode);
+      else if (key === 'allowedTools') expect(value).toBe(f.session.allowedTools);
+      else expect(value).toEqual((persisted as unknown as Record<string, unknown>)[key]);
+    }
   });
   it('replaces only the stale view with fresh same-provider proof, preserving transport/output/unsent input and paid intent', async () => {
     const f = await running(),

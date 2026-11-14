@@ -1,4 +1,5 @@
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
+import type { DockerEmployeeProviderRecipe } from './docker-employee-provider-recipe.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
@@ -3062,6 +3063,8 @@ export class Session extends EventEmitter {
   providerRecipeState() {
     return {
       mode: this.mode,
+      claudeMode: this._claudeMode,
+      allowedTools: this._allowedTools,
       workingDir: this.workingDir,
       subscriptionProfile: this.subscriptionProfile,
       model: cliTakesSessionModel(this.mode) ? this._model : undefined,
@@ -3081,7 +3084,7 @@ export class Session extends EventEmitter {
       claudeSessionChain: this._claudeSessionChain.length > 0 ? [...this._claudeSessionChain] : undefined,
       __envOverrides: this.getEnvOverridesForPersist(),
       __customModel: this.getCustomModelForPersist(),
-    };
+    } satisfies DockerEmployeeProviderRecipe;
   }
   /** Complete Session-owned disk snapshot; this must never be used by API/SSE serializers. */
   toPersistedState(): SessionState {
