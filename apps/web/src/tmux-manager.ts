@@ -1444,6 +1444,10 @@ export interface DockerLaunchOptions {
  * command -> `docker exec … sh -lc '<tmux>'` -> tmux `'<paneCommand>'`.
  */
 export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
+  for (const key of [...opts.execEnvNames, ...Object.keys(opts.execEnv)]) {
+    if (typeof key !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key))
+      throw Error('Invalid Docker environment name');
+  }
   if(opts.docker.continuation)return buildDockerEmployeeContinuationCommand(opts);
   const { mode, docker, sessionId, resumeSessionId, createContext, execEnv, execEnvNames, seedCopies } = opts;
   const base = buildDockerBaseArgs(docker).join(' ');
@@ -1491,7 +1495,7 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   for (const [k, v] of Object.entries(execEnv)) execEnvFlags.push('--env', shellescape(`${k}=${v}`));
   // NAME-ONLY forwards: docker reads the VALUE from Reverie's own process env, so
   // the secret never appears in argv (no `ps` leak) and is not committed.
-  for (const n of execEnvNames) execEnvFlags.push('--env', n);
+  for (const n of execEnvNames) execEnvFlags.push('--env', shellescape(n));
   for (const extra of docker.extraExecArgs ?? []) execEnvFlags.push(shellescape(extra));
 
   const imageMissingMsg = shellescape(
@@ -1566,7 +1570,7 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  const env={...opts.execEnv,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:'/home/agent/.reverie/docker-worker-identity',REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',shellescape(key+'='+value)]);
- flags.push(...opts.execEnvNames.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',key]));
+ flags.push(...opts.execEnvNames.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',shellescape(key)]));
  let inner:string;
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');

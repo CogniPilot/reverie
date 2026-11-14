@@ -404,6 +404,40 @@ async function savedFixture(explicitUnknown = false, savedInputUnknown = false) 
   };
 }
 describe('actual saved Docker Session private attachment', () => {
+  it.each(['forward', 'map'] as const)(
+    'rejects malformed Docker environment %s before an actual observed viewer transport',
+    async (mode) => {
+      const f = await savedFixture(),
+        view = await f.capture();
+      const runs = vi.mocked(f.command.run).mock.calls.length,
+        creates = vi.mocked(f.command.create).mock.calls.length;
+      const options = {
+        mode: 'claude' as const,
+        docker: f.docker,
+        sessionId: sid,
+        createContext: {} as never,
+        execEnv: {},
+        execEnvNames: [] as string[],
+        continuationView: view,
+      };
+      const key = 'CLAUDE_CODE_X;CONTROL_SENTINEL';
+      expect(() =>
+        buildDockerLaunchCommand({
+          ...options,
+          ...(mode === 'forward' ? { execEnvNames: [key] } : { execEnv: { [key]: 'bounded' } }),
+        })
+      ).toThrow('Invalid Docker environment name');
+      expect(vi.mocked(f.command.run).mock.calls.length).toBe(runs);
+      expect(vi.mocked(f.command.create).mock.calls.length).toBe(creates);
+      expect(native.ptys).toEqual([]);
+      expect(native.writes).toEqual([]);
+      const command = buildDockerLaunchCommand({ ...options, execEnvNames: ['CLAUDE_CODE_TOKEN'] });
+      expect(command).toContain('/opt/reverie-worker-client/bin/node');
+      expect(command).not.toMatch(/new-session|respawn-pane/);
+      expect(f.session.providerDispatchHeld).toBe(true);
+    }
+  );
+
   it('normal input reservation and readback use the actual private view without clearing dispatch denial', async () => {
     const f = await savedFixture(),
       service = new TerminalInputService();

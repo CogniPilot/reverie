@@ -71,6 +71,49 @@ function fixture() {
   return { place, session, binding, opts };
 }
 describe('boxed original provider publication', () => {
+  it.each([
+    'CLAUDE_CODE_X;CONTROL_SENTINEL',
+    'CLAUDE_CODE_X\nCONTROL_SENTINEL',
+    'CLAUDE_CODE_X$(CONTROL_SENTINEL)',
+    'CLAUDE_CODE_X`CONTROL_SENTINEL`',
+    'CLAUDE_CODE_X=VALUE',
+    'CLAUDE_CODE_X bad',
+    '-CLAUDE_CODE_X',
+    'CLAUDE_CODE_雪',
+  ])('rejects malformed Docker environment name %j before consuming first-provider authority', (key) => {
+    const f = fixture(),
+      current = vi.fn(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, current);
+    const calls = current.mock.calls.length;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, execEnvNames: [key], continuationLaunch: owner })).toThrow(
+      'Invalid Docker environment name'
+    );
+    expect(current).toHaveBeenCalledTimes(calls);
+    expect(
+      buildDockerLaunchCommand({ ...f.opts, execEnvNames: ['CLAUDE_CODE_TOKEN'], continuationLaunch: owner })
+    ).toContain('source-file -');
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+  });
+  it('rejects malformed Docker environment map keys and ordinary Docker forwards without a transport effect', () => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    expect(() =>
+      buildDockerLaunchCommand({
+        ...f.opts,
+        execEnv: { 'CLAUDE_CODE_X;CONTROL_SENTINEL': 'bounded' },
+        continuationLaunch: owner,
+      })
+    ).toThrow('Invalid Docker environment name');
+    expect(() =>
+      buildDockerLaunchCommand({
+        ...f.opts,
+        docker: { ...f.place, continuation: undefined },
+        execEnvNames: ['CLAUDE_CODE_X;CONTROL_SENTINEL'],
+      })
+    ).toThrow('Invalid Docker environment name');
+    expect(buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toContain('source-file -');
+  });
+
   it('saved Docker placement cannot admit an existing provider viewer or a first provider', () => {
     const f = fixture();
     expect(() => buildDockerLaunchCommand(f.opts)).toThrow('Original boxed provider view required');

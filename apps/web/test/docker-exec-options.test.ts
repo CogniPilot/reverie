@@ -153,8 +153,9 @@ describe('buildDockerLaunchCommand', () => {
     const codex = buildDockerLaunchCommand(
       launchOpts({ mode: 'codex' as SessionMode, execEnvNames: ['OPENAI_API_KEY', 'CODEX_API_KEY'] })
     );
-    expect(codex).toContain('--env OPENAI_API_KEY');
-    expect(codex).not.toMatch(/--env OPENAI_API_KEY=/); // never a value
+    expect(codex).toContain("--env 'OPENAI_API_KEY'");
+    expect(codex).toContain("--env 'CODEX_API_KEY'");
+    expect(codex).not.toContain('OPENAI_API_KEY='); // never a value
   });
 
   it('primes REVERIE_SESSION_ID / REVERIE_MUX at exec time', () => {
