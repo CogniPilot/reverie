@@ -2,10 +2,14 @@
  * No Engine, employee, provider or personal configuration is available here. */
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmuxSourceCommands } from '../../src/tmux-source-command.js';
 import { shellescape } from '../../src/docker-hosts.js';
+import {
+  DOCKER_PROVIDER_VIEW_ENV,
+  DOCKER_PROVIDER_VIEW_PROGRAM,
+} from '../../src/docker-employee-provider-view-native.js';
 
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -30,6 +34,9 @@ setInterval(() => {}, 1000);
     { flag: 'wx', mode: 0o600 }
   );
   const sockets = ['cold', 'warm'].map((name) => join(root, name));
+  const providerSocket = '/tmp/tmux-' + process.getuid() + '/reverie-docker';
+  sockets.push(providerSocket);
+  const closed = new Set<string>();
   const environment = { PATH: process.env.PATH, HOME: root, TMPDIR: root, SHELL: '/bin/bash', LANG: 'C.UTF-8' };
   const run = (socket: string, args: string[], input?: string) =>
     spawnSync('tmux', ['-u', '-f', '/dev/null', '-S', socket, ...args], {
@@ -125,6 +132,83 @@ setInterval(() => {}, 1000);
     );
     await receipt(largeReceipt, [large, ...literals]);
     assert(!existsSync(refusedReceipt + '.executions'), 'The refused attempt must remain unissued');
+    const sid = 'd0000000-0000-4000-8000-000000000001';
+    const operation = 'e0000000-0000-4000-8000-000000000002';
+    const generation = 'native-observed-generation:1';
+    const target = 'reverie-dkr-' + sid;
+    const providerReceipt = join(root, 'provider.json');
+    mkdirSync(dirname(providerSocket), { recursive: true, mode: 0o700 });
+    success(
+      run(
+        providerSocket,
+        ['start-server', ';', 'source-file', '-'],
+        tmuxSourceCommands([
+          ['set-environment', '-g', 'REVERIE_HOOK_GENERATION', generation],
+          ['new-session', '-d', '-s', target, '-c', root, canonical(providerReceipt, ['provider'])],
+          ['set-environment', '-t', target, 'REVERIE_SESSION_ID', sid],
+          ['set-environment', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', operation],
+        ])
+      )
+    );
+    await receipt(providerReceipt, ['provider']);
+    const nativeEnvironment = { ...environment } as NodeJS.ProcessEnv;
+    for (let index = 0; index < DOCKER_PROVIDER_VIEW_ENV.length; index += 2) {
+      assert.equal(DOCKER_PROVIDER_VIEW_ENV[index], '--env');
+      const setting = DOCKER_PROVIDER_VIEW_ENV[index + 1]!;
+      nativeEnvironment[setting.slice(0, setting.indexOf('='))] = setting.slice(setting.indexOf('=') + 1);
+    }
+    const probe = (...args: string[]) =>
+      spawnSync(process.execPath, ['--input-type=commonjs', '-e', DOCKER_PROVIDER_VIEW_PROGRAM, '--', ...args], {
+        encoding: 'utf8',
+        env: nativeEnvironment,
+        timeout: 5000,
+        maxBuffer: 65536,
+      });
+    const inspected = probe('observe', sid, operation);
+    success(inspected);
+    const observed = JSON.parse(inspected.stdout) as {
+      paneId: string;
+      panePid: number;
+      paneStartTicks: string;
+      hookGeneration: string;
+    };
+    assert.equal(observed.hookGeneration, generation);
+    const present = probe('presence', sid, operation);
+    success(present);
+    assert.deepEqual(JSON.parse(present.stdout), observed);
+    const absent = probe('presence', 'a0000000-0000-4000-8000-000000000004', operation);
+    success(absent);
+    assert.equal(absent.stdout, 'ABSENT\n');
+    assert.equal(
+      observed.paneStartTicks,
+      readFileSync('/proc/' + observed.panePid + '/stat', 'utf8')
+        .split(') ')
+        .at(-1)!
+        .trim()
+        .split(/\s+/)[19]
+    );
+    assert.equal(
+      probe('observe', sid, 'f0000000-0000-4000-8000-000000000003').status,
+      1,
+      'Wrong operation must be refused'
+    );
+    assert.equal(
+      probe(
+        'attach',
+        sid,
+        operation,
+        observed.paneId,
+        String(observed.panePid + 1),
+        observed.paneStartTicks,
+        generation
+      ).status,
+      1,
+      'A changed PID must not attach'
+    );
+    await receipt(providerReceipt, ['provider']);
+    success(run(providerSocket, ['kill-server']));
+    closed.add(providerSocket);
+    assert.equal(probe('observe', sid, operation).status, 1, 'Missing provider must not create a server');
     console.log(
       JSON.stringify({
         nativeTmux: true,
@@ -133,6 +217,7 @@ setInterval(() => {}, 1000);
         largeBytes: large.length,
         oldRefusedWithoutChild: true,
         streamedExecutions: 1,
+        providerViewNative: true,
       })
     );
   } catch (cause) {
@@ -140,7 +225,7 @@ setInterval(() => {}, 1000);
   }
   const closes: unknown[] = [];
   for (const socket of sockets) {
-    if (!existsSync(socket)) continue;
+    if (closed.has(socket) || !existsSync(socket)) continue;
     try {
       success(run(socket, ['kill-server']));
       const stopped = run(socket, ['list-sessions']);

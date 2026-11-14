@@ -114,7 +114,8 @@ let
         # Actual tmux stdin IPC (cold/literal/40KiB) and listener startup must
         # preserve boxed startup. The fixture owns a root/network/PID namespace.
         node node_modules/typescript/bin/tsc --noEmit -p config/tsconfig.scripts.json
-        node --import tsx test/fixtures/boxed-webserver-startup.ts
+        REVERIE_TEST_LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive \
+          node --import tsx test/fixtures/boxed-webserver-startup.ts
       ''}
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts

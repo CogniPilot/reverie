@@ -44,7 +44,6 @@ export interface DockerEmployeeImageConfiguration {
   /** Accepted actual source base image IDs. No runtime request can add a base. */
   readonly sourceImageIds: readonly string[];
 }
-const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const providerViewOrigin = Symbol('original Engine-observed Docker provider view');
 const providerPane = z
   .object({
@@ -161,8 +160,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     return raw;
   }
   #requireCapsuleMounts(raw: DockerEmployeeInspect): void {
+    if (Number(raw.Config.User.split(':')[0]) === 0) refuse('DOCKER_CONTINUATION_UNPRIVILEGED_WORKER_REQUIRED');
     for (const mount of raw.Mounts) {
-      for (const prefix of ['/opt/reverie-worker-tools', '/opt/reverie-worker-client']) {
+      for (const prefix of ['/opt/reverie-worker-tools', '/opt/reverie-worker-client', '/proc']) {
         if (
           mount.Destination === '/' ||
           mount.Destination === prefix ||
@@ -284,6 +284,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       'ExtraHosts',
     ])
       if (sourceHost[key] !== undefined) host[key] = structuredClone(sourceHost[key]);
+    const sourceSecurity = sourceHost.SecurityOpt ?? [];
+    if (!Array.isArray(sourceSecurity) || sourceSecurity.some((value) => typeof value !== 'string'))
+      refuse('DOCKER_CONTINUATION_SECURITY_OPTIONS_UNKNOWN');
+    host.SecurityOpt = [
+      ...sourceSecurity.filter((value) => !/^no-new-privileges(?:[=:].*)?$/.test(value)),
+      'no-new-privileges',
+    ];
     Object.assign(host, {
       Privileged: false,
       AutoRemove: false,
@@ -312,6 +319,14 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     );
     if (!environment.some((value) => value.startsWith('REVERIE_CLI=')))
       environment.push('REVERIE_CLI=/opt/reverie-worker-client/bin/reverie');
+    for (const entry of [
+      'TERMINFO=/opt/reverie-worker-tools/share/terminfo',
+      'TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo',
+      'LOCALE_ARCHIVE=/opt/reverie-worker-tools/share/locale/locale-archive',
+    ]) {
+      const name = entry.slice(0, entry.indexOf('=') + 1);
+      if (!environment.some((value) => value.startsWith(name))) environment.push(entry);
+    }
     return {
       Image: row.workerImage.imageId,
       User: source.Config.User,
@@ -396,7 +411,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const original = boxedOriginal(raw, rowSubject(row), this.deployment, true);
     if (row.destination && !isDeepStrictEqual(original, row.destination))
       refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED');
-    const provider = raw.State.Running ? await this.#provider(original) : { kind: 'absent' as const };
+    const provider = raw.State.Running ? await this.#provider(original, row) : { kind: 'absent' as const };
     let credentialDigest: string | null = null;
     if (raw.State.Running) {
       // Read-only self verification of the fixed capsule outside private /nix.
@@ -488,7 +503,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         '--input-type=commonjs',
         '-e',
         DOCKER_PROVIDER_VIEW_PROGRAM,
-        'inspect',
+        '--',
+        'observe',
         checked.request.sessionId,
         checked.request.operationId,
       ]);
@@ -532,30 +548,26 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     await this.#credentials.provision(row, token, current);
   }
 
-  async #provider(original: DockerEmployeeOriginal): Promise<DockerContainerObservation['provider']> {
-    const name = 'reverie-dkr-' + original.sessionId;
+  async #provider(
+    original: DockerEmployeeOriginal,
+    row: DockerEmployeeContinuationRecord
+  ): Promise<DockerContainerObservation['provider']> {
     const output = await this.command.run([
       'exec',
+      ...DOCKER_PROVIDER_VIEW_ENV,
       original.containerId,
-      'sh',
-      '-c',
-      'command -v tmux >/dev/null || exit 45; if tmux -L reverie-docker has-session -t =' +
-        name +
-        ' 2>/dev/null; then ' +
-        'tmux -L reverie-docker display-message -p -t =' +
-        name +
-        ' "#{pane_dead} #{pane_pid}"; ' +
-        'tmux -L reverie-docker show-environment -t =' +
-        name +
-        ' REVERIE_DOCKER_OPERATION_ID; ' +
-        'tmux -L reverie-docker show-environment -t =' +
-        name +
-        ' REVERIE_SESSION_ID; else printf ABSENT; fi',
+      '/opt/reverie-worker-client/bin/node',
+      '--input-type=commonjs',
+      '-e',
+      DOCKER_PROVIDER_VIEW_PROGRAM,
+      '--',
+      'presence',
+      original.sessionId,
+      row.request.operationId,
     ]);
-    if (output === 'ABSENT') return { kind: 'absent' };
-    const match = new RegExp(
-      '^0 [1-9][0-9]*\nREVERIE_DOCKER_OPERATION_ID=(' + uuid + ')\nREVERIE_SESSION_ID=(' + uuid + ')\n$'
-    ).exec(output);
-    return match ? { kind: 'running', operationId: match[1]!, sessionId: match[2]! } : { kind: 'unknown' };
+    if (output === 'ABSENT\n') return { kind: 'absent' };
+    if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+    providerPane.parse(JSON.parse(output));
+    return { kind: 'running', operationId: row.request.operationId, sessionId: original.sessionId };
   }
 }

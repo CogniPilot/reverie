@@ -265,7 +265,7 @@ describe('Engine-owned existing Docker provider view', () => {
       calls.every(
         (args) =>
           (args[0] === 'container' && ['ls', 'inspect'].includes(args[1]!)) ||
-          (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.at(-3) === 'inspect')
+          (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && args.at(-3) === 'observe')
       )
     ).toBe(true);
   });
@@ -338,6 +338,15 @@ describe('Engine-owned existing Docker provider view', () => {
   );
 });
 describe('new boxed Docker destination', () => {
+  it('tightens only the NEW worker no-new-privileges setting and preserves exact seccomp and source', async () => {
+    const f = fixture();
+    const seccomp = 'seccomp={"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}';
+    f.source.HostConfig.SecurityOpt = [seccomp, 'no-new-privileges=false'];
+    f.row.original = boxedOriginal(f.source, subject, 'fixture');
+    await f.engine.createDestination(f.row, () => {});
+    expect((f.created()!.HostConfig as Record<string, unknown>).SecurityOpt).toEqual([seccomp, 'no-new-privileges']);
+    expect(f.source.HostConfig.SecurityOpt).toEqual([seccomp, 'no-new-privileges=false']);
+  });
   it.each([false, null])('known effective OOM-enabled form %j preserves the original complete descriptor', (value) => {
     const f = fixture();
     f.source.HostConfig.OomKillDisable = value;
@@ -459,6 +468,9 @@ describe('new boxed Docker destination', () => {
       'HOME=/home/agent',
       'PATH=/opt/reverie-worker-client/bin:/bin',
       'REVERIE_CLI=/opt/reverie-worker-client/bin/reverie',
+      'TERMINFO=/opt/reverie-worker-tools/share/terminfo',
+      'TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo',
+      'LOCALE_ARCHIVE=/opt/reverie-worker-tools/share/locale/locale-archive',
     ]);
     expect(JSON.stringify(config)).not.toContain('host-script');
     expect(f.source.State.Running).toBe(false);

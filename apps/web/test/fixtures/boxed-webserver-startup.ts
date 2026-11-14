@@ -1,11 +1,22 @@
 /** Actual WebServer/config/key currency across listen, inside an owned root namespace.
  * No Engine socket, provider process, personal state or fabricated runtime. */
 import assert from 'node:assert/strict';
-import { lstatSync, mkdtempSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { exerciseNativeTmux } from './tmux-source-native.js';
+import { DOCKER_PROVIDER_VIEW_TMUX } from '../../src/docker-employee-provider-view-native.js';
 
 const selectedUrl = 'http://reverie:3000';
 
@@ -52,11 +63,13 @@ function isolated(): void {
   ];
   const bash = realpathSync(process.env.SHELL || '/bin/bash');
   assert(bash.startsWith('/nix/store/'), 'Use the self-contained Nix development environment');
+  let tmuxProgram: string | undefined;
   const toolDirectories = ['which', 'tmux'].map((command) => {
     const result = spawnSync('which', [command], { encoding: 'utf8', timeout: 1000 });
     assert.equal(result.status, 0, `Required development tool absent: ${command}`);
     const path = realpathSync(result.stdout.trim());
     assert(path.startsWith('/nix/store/'), 'Only immutable development tools enter the fixture');
+    if (command === 'tmux') tmuxProgram = path;
     return dirname(path);
   });
   const base = mkdtempSync(join(tmpdir(), 'boxed-startup-'));
@@ -70,10 +83,25 @@ function isolated(): void {
     'proc',
     'dev',
     'etc/reverie',
+    'tmp',
+    dirname(DOCKER_PROVIDER_VIEW_TMUX).slice(1),
+    'opt/reverie-worker-tools/share/locale',
     ...dependencyTargets.map((path) => path.slice(1)),
   ])
     mkdirSync(join(root, path), { recursive: true, mode: 0o700 });
   for (const path of ['home', 'tmp', 'data']) mkdirSync(join(fixture, path), { recursive: true, mode: 0o700 });
+  // This namespace tests the fixed native protocol with a protected copy of the
+  // pinned development tool. The worker capsule's ELF closure has its own gate.
+  assert(tmuxProgram);
+  copyFileSync(tmuxProgram, join(root, DOCKER_PROVIDER_VIEW_TMUX));
+  chmodSync(join(root, DOCKER_PROVIDER_VIEW_TMUX), 0o555);
+  const archive = process.env.REVERIE_TEST_LOCALE_ARCHIVE || process.env.LOCALE_ARCHIVE;
+  assert(archive, 'The Nix check must supply its immutable UTF-8 locale archive');
+  const localeArchive = realpathSync(archive);
+  assert(localeArchive.startsWith('/nix/store/'), 'Only the declared Nix locale archive enters this fixture');
+  const copiedArchive = join(root, 'opt/reverie-worker-tools/share/locale/locale-archive');
+  copyFileSync(localeArchive, copiedArchive);
+  chmodSync(copiedArchive, 0o444);
   writeFileSync(
     join(root, 'etc/reverie/boxed-runtime.json'),
     JSON.stringify({
@@ -127,6 +155,9 @@ function isolated(): void {
         '--ro-bind',
         '/nix',
         '/nix',
+        '--bind',
+        join(fixture, 'tmp'),
+        '/tmp',
         '--ro-bind',
         source,
         '/source',
