@@ -88,6 +88,9 @@ jobs:
         run: |
           printf 'Nix cache restored: %s\n' "${RESTORED_KEY:-none}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Allow isolated fixture namespaces on this ephemeral runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Check and build the flake on vanilla Ubuntu
         run: |
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"

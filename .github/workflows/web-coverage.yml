@@ -23,6 +23,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+      - name: Allow isolated fixture namespaces on this ephemeral runner
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install locked test dependencies
         run: nix develop --command npm ci --prefix apps/web --ignore-scripts
       - name: Verify the native PTY

@@ -374,8 +374,10 @@
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
-              pkgs.gnutar pkgs.attr pkgs.acl (pkgs.lib.getBin pkgs.util-linux)
-            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 ];
+              pkgs.gnutar pkgs.attr pkgs.acl pkgs.which pkgs.bash (pkgs.lib.getBin pkgs.util-linux)
+            ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 pkgs.bubblewrap ];
+            SHELL = "${pkgs.bash}/bin/bash";
+            LOCALE_ARCHIVE = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.glibcLocales}/lib/locale/locale-archive";
             REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
             REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";
             REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";

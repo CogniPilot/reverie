@@ -51,6 +51,9 @@ jobs:
           nix develop .#voice-ci --command python3 -m unittest tests.test_voice_ci_audio
           nix develop .#voice-ci --command node --test tests/test_voice_ci_launch.mjs
           nix develop .#voice-ci --command node --test apps/web/scripts/voice-ci-launch.test.mjs
+      - name: Build and verify the native PTY used by the Console
+        working-directory: apps/web
+        run: nix develop .#voice-ci --command node scripts/fix-node-pty.mjs
       - name: Run real Chromium, Kokoro and Whisper audio acceptance
         env:
           REVERIE_VOICE_CI_ARTIFACTS: ${{ runner.temp }}/voice-ci-artifacts
