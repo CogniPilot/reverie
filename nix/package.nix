@@ -78,6 +78,12 @@ let
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
         test/docker-employee-saved-attach.test.ts \
+        test/docker-employee-startup-restore.test.ts \
+        test/boxed-fake-provider-input.test.ts \
+        test/canary-cookie-files.test.ts \
+        test/canary-browser-modules.test.ts \
+        test/canary-fixture-contract.test.ts \
+        test/canary-browser-witness-proof.test.ts \
         test/tmux-source-command.test.ts \
         test/docker-employee-recovery-ui.test.ts \
         test/docker-employee-storage.test.ts \
