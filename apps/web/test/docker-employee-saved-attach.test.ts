@@ -1,5 +1,13 @@
 /** Actual private Engine capture over controlled OS replies, real saved StateStore
  * and Session. No installed/native/provider acceptance; no view/receipt DTO grant. */
+import { CompanyStore } from '../src/company-store.js';
+import { CompanyService } from '../src/company-service.js';
+import type { CompanyServiceDeps } from '../src/company-service.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { CompanyDockerContinuationStore, dockerEmployeeSourceDigest } from '../src/docker-employee-store.js';
+import { DockerEmployeeSessionProvider } from '../src/docker-employee-session-provider.js';
+import type { SessionPort, ConfigPort, InfraPort } from '../src/web/ports/index.js';
+import { dirname } from 'node:path';
 import { StateStore } from '../src/state-store.js';
 import { PROVIDER_LAUNCH_DISK_KEY } from '../src/provider-launch-publication.js';
 import { Session } from '../src/session.js';
@@ -256,8 +264,13 @@ vi.mock('node:child_process', async (original) => {
       if (typeof fn === 'function') queueMicrotask(() => fn(null, '', ''));
       return { pid: 2147483647, on: vi.fn(), kill: vi.fn() };
     }),
-    spawn: vi.fn(() => {
-      throw Error('Unexpected OS subprocess');
+    spawn: vi.fn((command: string, args: string[], options: import('node:child_process').SpawnOptions) => {
+      if (
+        command !== 'flock' ||
+        JSON.stringify(args) !== JSON.stringify(['--exclusive', '--wait', '5', '--conflict-exit-code', '75', '3'])
+      )
+        throw Error('Unexpected OS subprocess');
+      return actual.spawn(command, args, options);
     }),
     execFile: vi.fn(() => {
       throw Error('Unexpected OS subprocess');
@@ -530,6 +543,91 @@ describe('actual saved Docker Session private attachment', () => {
     expect(other.providerDispatchHeld).toBe(true);
     await other.stop(false);
   });
+  it.each(['foreign-owner', 'changed-thread'] as const)(
+    'actual provider facade refuses a %s live candidate while canonical saved recipe remains unchanged',
+    async (mutation) => {
+      const f = await savedFixture(),
+        saved = f.loaded.getSession(sid)!;
+      const companyFile = new CompanyStore(join(dirname(f.path), 'company.json'));
+      await companyFile.init();
+      const employee = EmployeeSchema.parse({
+        id: eid,
+        sessionId: sid,
+        sessionGeneration: 3,
+        name: 'Synthetic',
+        icon: 'S',
+        position: 'Employee',
+        expertise: ['testing'],
+        createdAt: 1,
+        onVacation: false,
+        desiredRunning: true,
+      });
+      await companyFile.update((state) => {
+        state.employees = [employee];
+      });
+      const candidate = new Session({
+        ...saved,
+        publicationStore: f.loaded,
+        useMux: true,
+        mux: f.mux,
+        ...(mutation === 'foreign-owner'
+          ? { owner: 'foreign-owner' }
+          : {
+              claudeSessionChain: ['70000000-0000-4000-8000-000000000007'],
+            }),
+      });
+      cleanup.push(() => candidate.stop(false));
+      const sessions = new Map([[sid, candidate]]);
+      const company = new CompanyService(companyFile, {
+        getSession: (id: string) => sessions.get(id),
+        chatrooms: { rooms: () => [] },
+        research: {},
+      } as unknown as CompanyServiceDeps);
+      const store = new CompanyDockerContinuationStore(company, (id) => f.loaded.getSession(id));
+      f.row.sourceDigest = dockerEmployeeSourceDigest(employee, saved);
+      const canonical = structuredClone(saved);
+      const view = await f.capture();
+      const add = vi.fn(),
+        discard = vi.fn(),
+        publish = vi.fn();
+      const provider = new DockerEmployeeSessionProvider(
+        store,
+        {
+          store: f.loaded,
+          sessions,
+          mux: f.mux,
+          addSession: add,
+          discardPartiallyBuiltSession: discard,
+          reapplyPersistedSessionState: vi.fn(),
+          setupSessionListeners: vi.fn(),
+          persistSessionStateNow: publish,
+        } as unknown as SessionPort & ConfigPort & Pick<InfraPort, 'mux'>,
+        'http://boxed-office:3000'
+      );
+      const binding = {
+        version: 1 as const,
+        operationId: oid,
+        credentialId: '40000000-0000-4000-8000-000000000004',
+        sessionId: sid,
+        sessionGeneration: 3,
+        containerId: dest,
+        imageId: target,
+        originalDigest: f.row.original.configurationDigest,
+        policyDigest: f.row.policyDigest,
+      };
+      await expect(provider.attach(f.row, binding, f.requireCurrent, view)).rejects.toThrow(
+        'Initial launch protocol changed before publication'
+      );
+      expect(add).not.toHaveBeenCalled();
+      expect(discard).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(native.ptys).toEqual([]);
+      expect(candidate.providerDispatchHeld).toBe(true);
+      expect(f.loaded.getSession(sid)).toEqual(canonical);
+      f.loaded.flush();
+      expect(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY]).toEqual(f.denial);
+    }
+  );
   it('holds actual Session input and attachment when a bound view later loses currentness', async () => {
     const f = await savedFixture(),
       view = await f.capture();
