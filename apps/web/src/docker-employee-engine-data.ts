@@ -95,6 +95,11 @@ export function boxedOriginal(
     row.Mounts.some((m) => m.Destination === '/var/run/docker.sock' || m.Destination.startsWith('/run/reverie-engine'))
   )
     dockerEngineRefuse('DOCKER_CONTINUATION_WORKER_ENGINE_ACCESS_DENIED');
+  // Engine inspect enumerates mounts from a map; order is not mount identity.
+  // Keep every field and refuse ambiguous destinations before canonical hashing.
+  const mounts = [...row.Mounts].sort((a, b) => a.Destination.localeCompare(b.Destination));
+  if (new Set(mounts.map((mount) => mount.Destination)).size !== mounts.length)
+    dockerEngineRefuse('DOCKER_CONTINUATION_DUPLICATE_MOUNT_DESTINATION');
   const original = {
     containerId: row.Id,
     imageId: row.Image,
@@ -102,9 +107,9 @@ export function boxedOriginal(
     employeeId: subject.employeeId,
     sessionId: subject.sessionId,
     home: { type: homes[0]!.Type, source: homes[0]!.Source, destination: '/home/agent', readWrite: true },
-    mountDigest: dockerContinuationDigest([...row.Mounts].sort((a, b) => a.Destination.localeCompare(b.Destination))),
+    mountDigest: dockerContinuationDigest(mounts),
     storageDigest: dockerContinuationDigest(boxedStorageMounts(row)),
-    configurationDigest: dockerContinuationDigest({ config: row.Config, host: row.HostConfig, mounts: row.Mounts }),
+    configurationDigest: dockerContinuationDigest({ config: row.Config, host: row.HostConfig, mounts }),
   };
   return DockerEmployeeOriginal.parse(original);
 }

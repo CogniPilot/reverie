@@ -152,6 +152,45 @@ function fixture(boxId = '7'.repeat(64)) {
   return { source, row, engine, command, resources, policy, created: () => created };
 }
 describe('new boxed Docker destination', () => {
+  it.each([
+    [0, 1, 2],
+    [0, 2, 1],
+    [1, 0, 2],
+    [1, 2, 0],
+    [2, 0, 1],
+    [2, 1, 0],
+  ])('canonical original accepts actual mount permutation %j without changing storage', async (...indices) => {
+    const f = fixture(),
+      mounts = structuredClone(f.source.Mounts);
+    f.source.Mounts = indices.map((index) => mounts[index]!);
+    const before = structuredClone(f.source.Mounts);
+    expect(boxedOriginal(f.source, subject, 'fixture')).toEqual(f.row.original);
+    await f.engine.createDestination(f.row, () => {});
+    expect(f.command.create).toHaveBeenCalledOnce();
+    expect(f.source.Mounts).toEqual(before);
+  });
+  it.each(['source', 'readWrite', 'propagation', 'mode', 'environment', 'hostConfig'] as const)(
+    'canonical original still refuses changed %s before any create',
+    async (fault) => {
+      const f = fixture();
+      f.source.Mounts.reverse();
+      const nix = f.source.Mounts.find((m) => m.Destination === '/nix')!;
+      if (fault === 'source') nix.Source = '/synthetic/replacement';
+      if (fault === 'readWrite') nix.RW = false;
+      if (fault === 'propagation') nix.Propagation = 'shared';
+      if (fault === 'mode') nix.Mode = 'z';
+      if (fault === 'environment') f.source.Config.Env.push('EXTRA=changed');
+      if (fault === 'hostConfig') f.source.HostConfig.CpuShares = 2048;
+      await expect(f.engine.createDestination(f.row, () => {})).rejects.toThrow();
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+  it('canonical original rejects duplicate destinations instead of dropping a mount', () => {
+    const f = fixture();
+    f.source.Mounts.push({ ...f.source.Mounts[1]!, Source: '/synthetic/second-nix' });
+    expect(() => boxedOriginal(f.source, subject, 'fixture')).toThrow();
+  });
+
   it('captures original observed home while preserving desired48/high16 separately from old16 drift', async () => {
     const f = fixture(),
       seen = await f.engine.observeSource(subject, cid);
