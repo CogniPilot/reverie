@@ -23,6 +23,7 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
     let closure = immutable_input(&args.closure)?;
     let terminfo = directory(&args.terminfo)?;
     let notices = directory(&args.notices)?;
+    let locale_archive = immutable_input(&args.locale_archive)?;
     let architecture = executable_machine(&tmux)?;
     let tools = Tools::new(&args.patchelf, &args.readelf)?;
     let mut libraries = Libraries::new(&closure)?;
@@ -50,6 +51,8 @@ pub(crate) fn build(args: Arguments) -> Result<()> {
     LAYOUT.relocate(&installed, loader_name, &tools)?;
     tree(&terminfo, &target.join("share/terminfo"))?;
     tree(&notices, &target.join("notices"))?;
+    fs::create_dir(target.join("share/locale"))?;
+    copy(&locale_archive, &target.join("share/locale/locale-archive"))?;
     manifest::write(&target)?;
     readonly(&args.output)
 }
@@ -83,6 +86,7 @@ mod tests {
             closure: root.join("closure"),
             terminfo: root.join("terminfo"),
             notices: root.join("notices"),
+            locale_archive: root.join("locale-archive"),
             patchelf: root.join("patchelf"),
             readelf: root.join("readelf"),
             output,

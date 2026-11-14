@@ -155,6 +155,7 @@ test("trusted tools preserve existing client PATH and pin terminal data", () => 
       "KEEP=value",
       "TERMINFO=/opt/reverie-worker-tools/share/terminfo",
       "TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo",
+      "LOCALE_ARCHIVE=/opt/reverie-worker-tools/share/locale/locale-archive",
     ],
   );
 });
@@ -165,8 +166,15 @@ test("worker tools require their own fixed manifest roles", () => {
       purpose: "reverie-worker-tools-v1",
       entry: "/opt/reverie-worker-tools/bin/tmux",
       terminfo: "/opt/reverie-worker-tools/share/terminfo",
+      locale_archive: "/opt/reverie-worker-tools/share/locale/locale-archive",
       files: [
         { path: "bin/tmux", sha256: "a".repeat(64), bytes: 1, mode: 0o555 },
+        {
+          path: "share/locale/locale-archive",
+          sha256: "c".repeat(64),
+          bytes: 1,
+          mode: 0o444,
+        },
         {
           path: "share/terminfo/x/xterm",
           sha256: "b".repeat(64),
@@ -176,6 +184,6 @@ test("worker tools require their own fixed manifest roles", () => {
       ],
     }),
   );
-  assert.equal(workerToolsMembers(raw, sha(raw)).length, 2);
+  assert.equal(workerToolsMembers(raw, sha(raw)).length, 3);
   assert.throws(() => capsuleMembers(raw, sha(raw)));
 });

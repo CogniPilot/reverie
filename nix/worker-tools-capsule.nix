@@ -3,6 +3,7 @@
 let
   producer = import ./worker-tools-capsule-producer.nix { inherit pkgs src; };
   tmux = pkgs.tmux;
+  locales = pkgs.glibcLocales.override { allLocales = false; locales = [ "C.UTF-8/UTF-8" "en_US.UTF-8/UTF-8" ]; };
   closure = pkgs.closureInfo { rootPaths = [ tmux ]; };
   terminfo = pkgs.runCommand "reverie-worker-terminfo" {} ''
     mkdir -p "$out"
@@ -25,6 +26,6 @@ in pkgs.runCommand "reverie-worker-tools-capsule" {
   };
 } ''
   reverie-worker-tools-capsule --tmux ${tmux}/bin/tmux --closure ${closure}/store-paths \
-    --terminfo ${terminfo} --notices ${notices} \
+    --terminfo ${terminfo} --notices ${notices} --locale-archive ${locales}/lib/locale/locale-archive \
     --patchelf ${pkgs.patchelf}/bin/patchelf --readelf ${pkgs.binutils}/bin/readelf --output "$out"
 ''

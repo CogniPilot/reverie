@@ -48,9 +48,18 @@ export function workerToolsMembers(raw: Buffer, expected: string): Member[] {
   assert(m.version === 1 && m.purpose === "reverie-worker-tools-v1");
   assert(m.entry === "/opt/reverie-worker-tools/bin/tmux");
   assert(m.terminfo === "/opt/reverie-worker-tools/share/terminfo");
+  assert(
+    m.locale_archive ===
+      "/opt/reverie-worker-tools/share/locale/locale-archive",
+  );
   const members = artifactMembers(m, 8192);
   assert(members.some((f) => f.path === "bin/tmux" && f.mode === 0o555));
   assert(members.some((f) => f.path.startsWith("share/terminfo/")));
+  assert(
+    members.some(
+      (f) => f.path === "share/locale/locale-archive" && f.mode === 0o444,
+    ),
+  );
   return members;
 }
 function artifactMembers(m: ObjectData, maximum: number): Member[] {
@@ -166,10 +175,13 @@ export function toolsEnvironment(value: unknown): string[] {
   return [
     ...workerEnvironment(value).filter(
       (entry) =>
-        !entry.startsWith("TERMINFO=") && !entry.startsWith("TERMINFO_DIRS="),
+        !entry.startsWith("TERMINFO=") &&
+        !entry.startsWith("TERMINFO_DIRS=") &&
+        !entry.startsWith("LOCALE_ARCHIVE="),
     ),
     "TERMINFO=/opt/reverie-worker-tools/share/terminfo",
     "TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo",
+    "LOCALE_ARCHIVE=/opt/reverie-worker-tools/share/locale/locale-archive",
   ];
 }
 function fixedFile(root: string, relative: string, maximum: number): Buffer {

@@ -20,6 +20,7 @@ struct Manifest {
     purpose: &'static str,
     entry: String,
     terminfo: String,
+    locale_archive: String,
     files: Vec<Entry>,
 }
 fn inventory(root: &Path) -> Result<Vec<Entry>> {
@@ -66,6 +67,9 @@ pub(crate) fn write(root: &Path) -> Result<()> {
         .iter()
         .any(|f| f.path == "bin/tmux" && f.mode == 0o555)
         || !files.iter().any(|f| f.path.starts_with("share/terminfo/"))
+        || !files
+            .iter()
+            .any(|f| f.path == "share/locale/locale-archive" && f.mode == 0o444)
     {
         return Err(refused("fixed executable tmux and terminal data required"));
     }
@@ -74,6 +78,7 @@ pub(crate) fn write(root: &Path) -> Result<()> {
         purpose: "reverie-worker-tools-v1",
         entry: format!("{PREFIX}/bin/tmux"),
         terminfo: format!("{PREFIX}/share/terminfo"),
+        locale_archive: format!("{PREFIX}/share/locale/locale-archive"),
         files,
     };
     let raw = serde_json::to_vec(&manifest)?;
@@ -111,6 +116,12 @@ mod tests {
         let root = Scratch::new();
         fs::create_dir_all(root.0.join("share/terminfo/x")).unwrap();
         fs::create_dir(root.0.join("bin")).unwrap();
+        fs::create_dir(root.0.join("share/locale")).unwrap();
+        fs::write(
+            root.0.join("share/locale/locale-archive"),
+            b"UTF8 locale fixture DATA",
+        )
+        .unwrap();
         fs::write(root.0.join("bin/tmux"), b"ELF data only, not executed").unwrap();
         fs::set_permissions(root.0.join("bin/tmux"), fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(root.0.join("share/terminfo/x/xterm"), b"terminal data").unwrap();

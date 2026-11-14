@@ -19,6 +19,8 @@ struct Arguments {
     #[arg(long)]
     notices: PathBuf,
     #[arg(long)]
+    locale_archive: PathBuf,
+    #[arg(long)]
     patchelf: PathBuf,
     #[arg(long)]
     readelf: PathBuf,
