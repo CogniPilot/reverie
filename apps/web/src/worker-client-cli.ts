@@ -1,7 +1,7 @@
 /** Standalone worker client entry. No web server, host broker or startup script. */
 import { Command } from 'commander';
 import { workerCallback, workerHookSettings } from './worker-client-callback.js';
-import { workerClientStatus } from './worker-client-manifest.js';
+import { workerClientStatus, workerCredentialStatus } from './worker-client-manifest.js';
 const program = new Command().name('reverie');
 if (!['worker-client', 'worker-callback', '--help', '-h'].includes(process.argv[2] ?? '')) {
   const { registerAgentCommands } = await import('./cli-agent.js');
@@ -18,6 +18,17 @@ client
       console.log(JSON.stringify(workerClientStatus(options.expectedDigest)));
     } catch {
       console.error('Worker client qualification refused');
+      process.exitCode = 1;
+    }
+  });
+client
+  .command('credential-status')
+  .requiredOption('--expected-digest <sha256>', 'Exact selected immutable manifest digest')
+  .action((options: { expectedDigest: string }) => {
+    try {
+      console.log(JSON.stringify(workerCredentialStatus(options.expectedDigest)));
+    } catch {
+      console.error('Worker credential qualification refused');
       process.exitCode = 1;
     }
   });

@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { readDockerWorkerIdentity } from './docker-worker-identity-client.js';
 export const WORKER_CLIENT_PREFIX = '/opt/reverie-worker-client';
 export const WORKER_CLIENT_ENTRY = WORKER_CLIENT_PREFIX + '/bin/reverie';
 const digest = z.string().regex(/^[0-9a-f]{64}$/);
@@ -151,10 +152,16 @@ export function inspectWorkerClientFiles(root: string, expectedDigest: string) {
   };
 }
 /** Strict claimed readback DATA; an exit code or old bundle reply alone is insufficient. */
+function readbackText(raw: string): string {
+  if (Buffer.byteLength(raw) > 4096) throw Error('Worker readback bound exceeded');
+  return raw.endsWith('\n') ? raw.slice(0, -1) : raw;
+}
 export function parseWorkerClientReadback(raw: string, expectedDigest: string) {
   digest.parse(expectedDigest);
   if (Buffer.byteLength(raw) > 4096) throw Error('Worker client readback bound exceeded');
-  const value = Readback.parse(JSON.parse(raw));
+  const text = readbackText(raw);
+  const value = Readback.parse(JSON.parse(text));
+  if (JSON.stringify(value) !== text) throw Error('Canonical worker readback required');
   if (value.manifestDigest !== expectedDigest) throw Error('Worker client readback differs');
   return value;
 }
@@ -163,3 +170,42 @@ export function workerClientStatus(expectedDigest: string) {
   return Readback.parse(value);
 }
 export const workerClientDigest = hash;
+
+const CredentialReadback = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-worker-credential-readback-v1'),
+    manifestDigest: digest,
+    sessionId: z
+      .string()
+      .uuid()
+      .refine((value) => value === value.toLowerCase()),
+    tokenDigest: digest,
+  })
+  .strict();
+/** Actual private-file bytes only; a digest is not caller or native authority. */
+export function workerCredentialDigest(env: NodeJS.ProcessEnv) {
+  const sessionId = env.REVERIE_SESSION_ID;
+  if (!sessionId) throw Error('Full worker session required');
+  const token = readDockerWorkerIdentity(env, sessionId);
+  if (!token) throw Error('Selected private worker credential required');
+  return { sessionId, tokenDigest: hash(token) };
+}
+export function workerCredentialStatus(expectedDigest: string) {
+  const capsule = workerClientStatus(expectedDigest);
+  return CredentialReadback.parse({
+    version: 1,
+    purpose: 'reverie-worker-credential-readback-v1',
+    manifestDigest: capsule.manifestDigest,
+    ...workerCredentialDigest(process.env),
+  });
+}
+export function parseWorkerCredentialReadback(raw: string, expectedDigest: string, expectedSID: string) {
+  if (Buffer.byteLength(raw) > 4096) throw Error('Worker credential readback bound exceeded');
+  const text = readbackText(raw);
+  const result = CredentialReadback.parse(JSON.parse(text));
+  if (JSON.stringify(result) !== text) throw Error('Canonical worker credential readback required');
+  if (result.manifestDigest !== expectedDigest || result.sessionId !== expectedSID)
+    throw Error('Worker credential readback differs');
+  return result;
+}

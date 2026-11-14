@@ -80,7 +80,8 @@ const packages = new Set<string>();
 for (const input of Object.keys(meta.inputs)) {
   let current = dirname(resolve(working, input));
   while (current.startsWith('/nix/store/')) {
-    if (fs.existsSync(join(current, 'package.json'))) {
+    const key = current.startsWith(modules + '/') ? 'node_modules/' + current.slice(modules.length + 1) : undefined;
+    if (fs.existsSync(join(current, 'package.json')) && (key === undefined || installedLock.packages[key])) {
       packages.add(current);
       break;
     }
@@ -96,7 +97,7 @@ for (const root of [...packages].sort()) {
       actual = installedLock.packages[key],
       expected = sourceLock.packages[key];
     if (!actual || !expected || actual.version !== expected.version || actual.integrity !== expected.integrity)
-      throw Error('Selected package differs from the locked source dependency');
+      throw Error('Selected package differs from locked source dependency: ' + key);
   }
   const names = fs
     .readdirSync(root)

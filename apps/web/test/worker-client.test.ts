@@ -12,6 +12,8 @@ import {
   inspectWorkerClientFiles,
   parseWorkerClientReadback,
   workerClientDigest,
+  workerCredentialDigest,
+  parseWorkerCredentialReadback,
 } from '../src/worker-client-manifest.js';
 import {
   DockerWorkerIdentityAuthentication,
@@ -143,6 +145,12 @@ describe('canonical read-only worker capsule data', () => {
       ownerUid: 0,
     };
     expect(parseWorkerClientReadback(JSON.stringify(data), 'a'.repeat(64))).toEqual(data);
+    expect(() =>
+      parseWorkerClientReadback(
+        JSON.stringify(data).replace('{\"version\":1', '{\"version\":0,\"version\":1'),
+        'a'.repeat(64)
+      )
+    ).toThrow('Canonical');
     expect(() => parseWorkerClientReadback(JSON.stringify(data), 'c'.repeat(64))).toThrow('differs');
     expect(() => parseWorkerClientReadback(JSON.stringify({ ...data, ownerUid: 1000 }), 'a'.repeat(64))).toThrow();
   });
@@ -197,6 +205,26 @@ async function callbackFixture() {
   };
 }
 describe('safe worker callback transport', () => {
+  it('reports only a private token digest and refuses absent or changed custody without HTTP', async () => {
+    const f = await callbackFixture(),
+      token = fs.readFileSync(f.file, 'utf8').trimEnd();
+    const value = workerCredentialDigest(f.env);
+    expect(value).toEqual({ sessionId: SID, tokenDigest: workerClientDigest(token) });
+    expect(JSON.stringify(value)).not.toContain(token);
+    const frame = {
+      version: 1,
+      purpose: 'reverie-worker-credential-readback-v1',
+      manifestDigest: 'a'.repeat(64),
+      ...value,
+    };
+    expect(parseWorkerCredentialReadback(JSON.stringify(frame), 'a'.repeat(64), SID)).toEqual(frame);
+    expect(() => parseWorkerCredentialReadback(JSON.stringify(frame), 'b'.repeat(64), SID)).toThrow('differs');
+    expect(() => parseWorkerCredentialReadback(JSON.stringify(frame), 'a'.repeat(64), EID)).toThrow('differs');
+    fs.chmodSync(f.file, 0o644);
+    expect(() => workerCredentialDigest(f.env)).toThrow('credential unavailable');
+    expect(f.calls).toHaveLength(0);
+  });
+
   it('uses actual signed caller proof, own full SID and generation without Basic or response leakage', async () => {
     const f = await callbackFixture(),
       input = { session_id: 'original-provider-thread', sessionId: 'untrusted-nested-hint' };
