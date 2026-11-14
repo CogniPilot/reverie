@@ -60,21 +60,38 @@ export function verifyCanaryControl(canary) {
   assert(control.Config.Labels['org.reverie.fixture'] === 'boxed-provider-canary-v1');
   assert(control.Config.Labels['org.reverie.fixture.role'] === 'control');
   assert(control.Config.Labels['org.reverie.fixture.instance'] === proof.labels['org.reverie.fixture.instance']);
+  for (const [name, value] of Object.entries(proof.labels)) assert(control.Config.Labels[name] === value);
   assert(
     control.NetworkSettings.Ports['3000/tcp'].some((p) => p.HostIp === '127.0.0.1' && p.HostPort === endpoint.port)
   );
   assert(control.Mounts.some((m) => m.Source === proof.dataDirectory && m.RW === true));
-  if (proof.overlay) {
-    const mount = control.Mounts.filter((m) => m.Destination === proof.overlay.target);
-    assert(mount.length === 1 && mount[0].Source === proof.overlay.source && mount[0].RW === false);
-    assert(
-      proof.overlay.readOnly === true &&
-        control.Config.Labels['org.reverie.fixture.module-sha256'] === proof.overlay.sha256
-    );
-    const bytes = readFileSync(proof.overlay.source);
-    assert(bytes.length <= 1024 * 1024 && createHash('sha256').update(bytes).digest('hex') === proof.overlay.sha256);
-  }
+  verifyCanaryModuleMounts(control, proof);
   return control;
+}
+/** Checks data only; the public verifier supplies a freshly inspected actual control. */
+export function verifyCanaryModuleMounts(control, proof) {
+  assert(!(proof.overlay && proof.modules), 'Ambiguous development module descriptors');
+  let modules = [];
+  if (proof.overlay) modules = [{ ...proof.overlay, generatedFile: proof.overlay.source }];
+  if (proof.modules) {
+    assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= 8);
+    modules = proof.modules;
+  }
+  const actual = control.Mounts.filter((m) => /\/lib\/reverie\/dist(?:\/|$)/.test(m.Destination));
+  assert(actual.length === modules.length, 'Undescribed development code mount');
+  const targets = new Set();
+  for (const module of modules) {
+    assert(typeof module.generatedFile === 'string' && module.generatedFile.startsWith('/'));
+    assert(typeof module.target === 'string' && module.target.startsWith('/nix/store/'));
+    assert(!targets.has(module.target), 'Duplicate development module target');
+    targets.add(module.target);
+    assert(/^[a-f0-9]{64}$/.test(module.sha256) && module.readOnly === true);
+    if (proof.modules) assert(module.inContainerSha === module.sha256, 'Recorded in-container hash differs');
+    const mount = actual.filter((m) => m.Destination === module.target);
+    assert(mount.length === 1 && mount[0].Source === module.generatedFile && mount[0].RW === false);
+    const bytes = readFileSync(module.generatedFile);
+    assert(bytes.length <= 1024 * 1024 && createHash('sha256').update(bytes).digest('hex') === module.sha256);
+  }
 }
 export async function canaryGet(canary, path) {
   assert(path.startsWith('/api/') && !path.includes('://'));
