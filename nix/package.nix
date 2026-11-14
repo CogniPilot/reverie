@@ -77,6 +77,7 @@ let
         test/docker-employee-engine.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
+        test/docker-employee-saved-attach.test.ts \
         test/tmux-source-command.test.ts \
         test/docker-employee-recovery-ui.test.ts \
         test/docker-employee-storage.test.ts \
