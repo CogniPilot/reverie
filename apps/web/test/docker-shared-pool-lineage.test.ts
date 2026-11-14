@@ -132,6 +132,76 @@ async function fixture() {
   return { store, file, company, row };
 }
 describe('canonical shared pool intent survives its original owner', () => {
+  it('serializes different employee configure START intents under the real canonical lock', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'pool-writer-race-'));
+    directories.push(directory);
+    const store = new CompanyStore(join(directory, 'company.json'));
+    await store.init();
+    const first = record(),
+      second = record('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    second.employeeId = second.original.employeeId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    second.request.sessionId = second.original.sessionId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+    for (const [index, row] of [first, second].entries()) {
+      const { role, name, imageId, configurationDigest } = row.tasks![1]!;
+      row.tasks![1] = {
+        role,
+        name,
+        imageId,
+        configurationDigest,
+        phase: 'created',
+        containerId: (index === 0 ? '1' : '2').repeat(64),
+      };
+    }
+    await store.update((state) => {
+      state.dockerEmployeeContinuations = [first, second];
+    });
+    const results = await Promise.allSettled(
+      [first, second].map((original) =>
+        store.update((state) => {
+          const row = state.dockerEmployeeContinuations!.find(
+            (value) => value.request.operationId === original.request.operationId
+          )!;
+          const before = row.tasks![1]!;
+          if (!('containerId' in before)) throw Error('fixture requires CID');
+          row.tasks![1] = { ...before, phase: 'start-issued' };
+        })
+      )
+    );
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.find((result) => result.status === 'rejected')).toMatchObject({
+      reason: { code: 'DOCKER_SHARED_POOL_WRITER_UNCONFIRMED' },
+    });
+    expect(
+      store
+        .snapshot()
+        .dockerSharedPoolLineages!.map((value) => value.configuration.phase)
+        .sort()
+    ).toEqual(['created', 'start-issued']);
+    const started = store
+      .snapshot()
+      .dockerEmployeeContinuations!.find((row) => row.tasks![1]!.phase === 'start-issued')!;
+    await store.update((state) => {
+      const row = state.dockerEmployeeContinuations!.find(
+        (value) => value.request.operationId === started.request.operationId
+      )!;
+      const task = row.tasks![1]!;
+      if (!('containerId' in task)) throw Error('fixture requires CID');
+      row.tasks![1] = { ...task, phase: 'completed', resultDigest: 'f'.repeat(64) };
+    });
+    await store.update((state) => {
+      const row = state.dockerEmployeeContinuations!.find(
+        (value) => value.request.operationId !== started.request.operationId
+      )!;
+      row.tasks![1] = { ...row.tasks![1]!, phase: 'start-issued' } as DockerContinuationTask;
+    });
+    expect(
+      store
+        .snapshot()
+        .dockerSharedPoolLineages!.map((value) => value.configuration.phase)
+        .sort()
+    ).toEqual(['completed', 'start-issued']);
+  });
+
   it('does not silently hide an unscoped possibly-started legacy writer', () => {
     const row = record();
     row.tasks = [row.tasks![1]!];

@@ -43,6 +43,7 @@ export class DockerSharedPoolLineageError extends DockerEmployeeContinuationErro
       | 'DOCKER_SHARED_POOL_LINEAGE_CHANGED'
       | 'DOCKER_SHARED_POOL_LINEAGE_LIMIT'
       | 'DOCKER_SHARED_POOL_SCOPE_UNCONFIRMED'
+      | 'DOCKER_SHARED_POOL_WRITER_UNCONFIRMED'
   ) {
     super(code);
   }
@@ -86,7 +87,8 @@ export function captureDockerSharedPoolLineages(state: PoolState): DockerSharedP
 }
 function merge(
   retained: readonly DockerSharedPoolLineage[],
-  incoming: readonly DockerSharedPoolLineage[]
+  incoming: readonly DockerSharedPoolLineage[],
+  admitStarts = false
 ): DockerSharedPoolLineage[] {
   const result = structuredClone(DockerSharedPoolLineages.parse(retained));
   for (const value of incoming) {
@@ -99,6 +101,20 @@ function merge(
     const before = result[index]!;
     if (!isDeepStrictEqual(before.origin, value.origin) || !isDeepStrictEqual(before.poolPolicy, value.poolPolicy))
       throw new DockerSharedPoolLineageError('DOCKER_SHARED_POOL_LINEAGE_CHANGED');
+    if (
+      admitStarts &&
+      ['start-issued', 'running'].includes(value.configuration.phase) &&
+      before.configuration.phase === 'created' &&
+      result.some(
+        (other) =>
+          other.origin.operationId !== value.origin.operationId &&
+          ['start-issued', 'running'].includes(other.configuration.phase) &&
+          (value.anchor && other.anchor
+            ? value.anchor.name === other.anchor.name
+            : value.configuration.imageId === other.configuration.imageId)
+      )
+    )
+      throw new DockerSharedPoolLineageError('DOCKER_SHARED_POOL_WRITER_UNCONFIRMED');
     result[index] = {
       ...before,
       anchor: before.anchor && value.anchor ? nextTask(before.anchor, value.anchor) : (before.anchor ?? value.anchor),
@@ -111,7 +127,7 @@ function merge(
  * Never evict an unresolved task or the sole ACK to make room. Exhaustion is a
  * pre-publication hold requiring a separate reviewed compaction workflow. */
 export function preserveDockerSharedPoolLineages(before: readonly DockerSharedPoolLineage[], state: PoolState): void {
-  const result = merge(before, candidates(state.dockerEmployeeContinuations ?? []));
+  const result = merge(before, candidates(state.dockerEmployeeContinuations ?? []), true);
   if (result.length) state.dockerSharedPoolLineages = result;
 }
 /** Includes legacy accepted rows before their first metadata transaction.
