@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { exerciseNativeTmux } from './tmux-source-native.js';
 import { DOCKER_PROVIDER_VIEW_TMUX } from '../../src/docker-employee-provider-view-native.js';
 
@@ -50,7 +51,9 @@ async function startup(): Promise<void> {
   assert.equal(runtime?.current(), false, 'Closing the server must revoke its runtime');
 }
 
-function isolated(): void {
+export function runBoxedStartupNamespace(entry = 'test/fixtures/boxed-webserver-startup.ts', scenario?: string): void {
+  assert(['test/fixtures/boxed-webserver-startup.ts', 'test/docker-employee-startup-restore.test.ts'].includes(entry));
+  assert(scenario === undefined || ['attached', 'absent', 'desired-off', 'unknown'].includes(scenario));
   assert.equal(process.platform, 'linux', 'This mandatory native check requires Linux user namespaces');
   const source = resolve(import.meta.dirname, '../..');
   const modules = join(source, 'node_modules');
@@ -64,7 +67,7 @@ function isolated(): void {
   const bash = realpathSync(process.env.SHELL || '/bin/bash');
   assert(bash.startsWith('/nix/store/'), 'Use the self-contained Nix development environment');
   let tmuxProgram: string | undefined;
-  const toolDirectories = ['which', 'tmux'].map((command) => {
+  const toolDirectories = ['which', 'tmux', ...(scenario ? ['flock'] : [])].map((command) => {
     const result = spawnSync('which', [command], { encoding: 'utf8', timeout: 1000 });
     assert.equal(result.status, 0, `Required development tool absent: ${command}`);
     const path = realpathSync(result.stdout.trim());
@@ -133,6 +136,7 @@ function isolated(): void {
     REVERIE_USERNAME: 'synthetic-startup',
     REVERIE_PASSWORD: 'Synthetic-startup-only-42!',
     DOCKER_HOST: 'unix:///fixture/no-engine.sock',
+    ...(scenario ? { VITEST: '1' } : {}),
   };
   try {
     const result = spawnSync(
@@ -178,8 +182,9 @@ function isolated(): void {
         process.execPath,
         '--import',
         'tsx',
-        '/source/test/fixtures/boxed-webserver-startup.ts',
+        '/source/' + entry,
         '--namespace',
+        ...(scenario ? [scenario] : []),
       ],
       { encoding: 'utf8', timeout: 60_000, maxBuffer: 2 * 1024 * 1024 }
     );
@@ -193,5 +198,7 @@ function isolated(): void {
   }
 }
 
-if (process.argv.includes('--namespace')) await startup();
-else isolated();
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  if (process.argv.includes('--namespace')) await startup();
+  else runBoxedStartupNamespace();
+}
