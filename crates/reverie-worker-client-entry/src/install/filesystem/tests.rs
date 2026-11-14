@@ -5,7 +5,7 @@ use std::{
     fs,
     os::{
         fd::AsRawFd,
-        unix::fs::{MetadataExt, PermissionsExt, symlink},
+        unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt, symlink},
     },
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -17,17 +17,16 @@ struct Tree {
 impl Tree {
     fn new() -> Self {
         let base = std::env::temp_dir();
-        let metadata = fs::symlink_metadata(&base).unwrap();
-        assert!(metadata.is_dir());
-        assert_eq!(metadata.uid(), geteuid().as_raw());
-        assert_eq!(metadata.permissions().mode() & 0o077, 0);
         let path = base.join(format!(
             "credential-fs-{}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
-        fs::create_dir(&path).unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
+        let metadata = fs::symlink_metadata(&path).unwrap();
+        assert!(metadata.is_dir());
+        assert_eq!(metadata.uid(), geteuid().as_raw());
+        assert_eq!(metadata.permissions().mode() & 0o077, 0);
         fs::create_dir(path.join("agent")).unwrap();
         fs::set_permissions(path.join("agent"), fs::Permissions::from_mode(0o700)).unwrap();
         Self { path }
