@@ -630,6 +630,9 @@
                 this._inputFlights.get(sid) !== flight
               )
                 throw new Error('Input admission changed before transport');
+              // Arm the receipt deadline before sending: an ACK may settle
+              // while the durable dispatch task is still returning.
+              this._inputRetryAt.set(sid, Date.now() + 1000);
               socket.ws.send(
                 JSON.stringify({
                   t: 'i',
@@ -641,7 +644,6 @@
               );
             });
             if (!dispatched) throw new Error('Input custody changed');
-            this._inputRetryAt.set(sid, Date.now() + 1000);
           } else {
             let response;
             const dispatched = await this._inputJournal.dispatch(claimed, () => {
@@ -715,7 +717,11 @@
       await this._refreshInputJournal();
       if (final(phase))
         setTimeout(() => {
-          void this._drainSession(sid);
+          // The original dispatch may still be unwinding after its ACK. Join
+          // it before draining the next record, rather than losing this wake
+          // to the in-flight guard and waiting for a recurring sweep.
+          const original = this._inputDrainTasks.get(sid) || Promise.resolve();
+          void original.then(() => this._drainSession(sid)).catch(() => this._holdInputRecovery(sid));
         }, 80);
     },
 

@@ -49,6 +49,7 @@ export interface InputApp {
     issuer: string;
     snapshot(): Promise<{ records: InputRow[]; retained: InputRow[]; holds: { sid: string; reason: string }[] }>;
     close(): void;
+    dispatch(record: InputRow, effect: () => void): Promise<boolean>;
     accept(
       sid: string,
       frames: string[],

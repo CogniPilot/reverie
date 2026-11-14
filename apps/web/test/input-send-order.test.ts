@@ -1,5 +1,5 @@
 /** Actual journal/mixin transaction controls; Chromium separately qualifies real Web Locks/IDB. */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { browserInputFixture, FixtureLocks } from './helpers/browser-input-fixture.js';
 let fixture: ReturnType<typeof browserInputFixture>;
 afterEach(async () => {
@@ -10,6 +10,41 @@ const body = (options?: RequestInit) =>
   JSON.parse(String(options?.body)) as { input: string; seq: number; clientId: string };
 
 describe('committed ordering and original transport ownership', () => {
+  it('advances after a confirmed ACK received before the original dispatch task finishes', async () => {
+    fixture = browserInputFixture();
+    const app = await fixture.page();
+    const frames: { seq: number; d: string }[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const dispatch = app._inputJournal.dispatch.bind(app._inputJournal);
+    const original = vi.spyOn(app._inputJournal, 'dispatch').mockImplementation(async (record, effect) => {
+      const result = await dispatch(record, effect);
+      if (record.seq === 1) await gate;
+      return result;
+    });
+    app._ws = { readyState: 1, send: (value) => frames.push(JSON.parse(value)) };
+    app._wsSessionId = 'session-1';
+    try {
+      await Promise.all(['a', 'b'].map((text) => app._sendInputAsync('session-1', text)));
+      await expect.poll(() => frames.length).toBe(1);
+      await app._onWsInputAck(1, { t: 'ia', seq: 1, confirmed: true }, 'session-1');
+      // Drive the real settlement timer while the original dispatch is still
+      // pending, then release it. A recurring sweep must not be needed.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(app._inputDrainTasks.has('session-1')).toBe(true);
+      expect(frames.map((row) => row.d)).toEqual(['a']);
+      release();
+      await expect.poll(() => frames.map((row) => row.d)).toEqual(['a', 'b']);
+      await app._onWsInputAck(2, { t: 'ia', seq: 2, confirmed: true }, 'session-1');
+      await expect.poll(() => app._pendingDeliveries.get('session-1')?.length || 0).toBe(0);
+    } finally {
+      release();
+      await app._inputDrainTasks.get('session-1');
+      original.mockRestore();
+    }
+  });
   it('rapid input retains distinct original-issuer frames and advances only on confirmed ACKs', async () => {
     fixture = browserInputFixture();
     const app = await fixture.page(),
