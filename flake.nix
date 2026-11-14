@@ -37,6 +37,8 @@
           };
         in packages // workerImageArtifacts // {
           default = packages.reverie;
+          docker-memory-high-helper = import ./nix/docker-resource-helper.nix { inherit pkgs; src = source; };
+          docker-memory-high-helper-image = import ./nix/docker-memory-high-helper-image.nix { inherit pkgs; src = source; };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };

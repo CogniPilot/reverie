@@ -38,6 +38,8 @@
     "containerRuntime",
     "default",
     "deployment",
+    "docker-memory-high-helper",
+    "docker-memory-high-helper-image",
     "dockerImage",
     "dockerImageWithChatLanguages",
     "entrypoint",
