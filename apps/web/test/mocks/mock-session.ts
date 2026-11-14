@@ -297,6 +297,9 @@ export class MockSession extends EventEmitter {
     return capability === 'supervised' ? 'supervised' : capability === 'always' ? 'legacy-attachment' : 'refused';
   }
 
+  /** This synthetic existing transport never owns a private restored-provider view. */
+  providerDispatchHeld = false;
+  get providerInputHeld(): boolean { return this.providerDispatchHeld; }
   private terminalInputError?: TerminalInputUnconfirmedError;
   get terminalInputHeld(): boolean {return this.terminalInputError !== undefined;}
   holdUnconfirmedInput(cause?: unknown): TerminalInputUnconfirmedError {
@@ -307,7 +310,7 @@ export class MockSession extends EventEmitter {
     const epoch = this.providerEpoch, mode = this.mode, owner = this.owner;
     const identity = () => this.providerEpoch === epoch && this.mode === mode && this.owner === owner;
     if (!this.inputSubject?.identity()) this.inputSubject = {identity, token: Object.freeze({})};
-    return issueInputAdmission(this.inputSubject.token, () => !this.terminalInputHeld && (!caller || caller()) && identity());
+    return issueInputAdmission(this.inputSubject.token, () => !this.providerInputHeld && !this.terminalInputHeld && (!caller || caller()) && identity());
   }
   private providerEpoch = 0;
   captureApprovalProviderLease(currentOwner: () => boolean = () => true): SessionProviderLease {
