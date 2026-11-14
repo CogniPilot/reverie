@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { DockerEmployeeResourcePolicy } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
+const defaultMemoryHighMiB = 24 * 1024;
 const mib = z.number().int().positive().max(1048576);
 const legacy = z
   .object({
@@ -82,7 +83,7 @@ export function proposeLegacyDockerPolicy(body: string, employeeId: string): Doc
   const config = legacy.parse(parseBoxedConfigurationJson(body)),
     resource = config.employeeResources[employeeId],
     memory = config.employeeMemoryPolicies[employeeId];
-  if (!resource || !memory) return;
+  if (!resource) return;
   const pool = config.workerPoolProvider.policy,
     member = config.workerPoolProvider.memberOverrides?.[employeeId];
   if (
@@ -93,7 +94,7 @@ export function proposeLegacyDockerPolicy(body: string, employeeId: string): Doc
     throw Error('Legacy desired pool policy is inconsistent');
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: resource.memoryMiB * 1048576,
-    memoryHighBytes: memory.memoryHighMiB * 1048576,
+    memoryHighBytes: (memory?.memoryHighMiB ?? member?.memoryHighMiB ?? defaultMemoryHighMiB) * 1048576,
     swapMaxBytes: 0,
     pidsMax: resource.pidsLimit,
     cpuWeight: member?.cpuWeight ?? pool.cpuWeight,
