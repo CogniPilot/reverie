@@ -34,6 +34,60 @@ function fixture(count = 3) {
   };
 }
 describe('bounded real-browser development module verifier', () => {
+  function publicAppFixture() {
+    const f = fixture(14);
+    const target = '/nix/store/controlled-console/lib/reverie/src/web/public/app.js';
+    f.modules[13].source = 'src/web/public/app.js';
+    f.modules[13].target = target;
+    f.control.Mounts[13].Destination = target;
+    return f;
+  }
+  it('accepts the exact fourteen-module census including thirteen dist files and shipped public app', () => {
+    const f = publicAppFixture();
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();
+  });
+  it('refuses an unlisted or duplicate actual public app mount', () => {
+    const f = publicAppFixture();
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules.slice(0, 13) })).toThrow();
+    f.control.Mounts.push({ ...f.control.Mounts[13] });
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
+  it('checks the public app readonly mapping and both recorded and actual file hashes', () => {
+    const f = publicAppFixture();
+    const app = f.modules[13];
+    for (const mutate of [
+      (value: typeof f) => {
+        value.control.Mounts[13].RW = true;
+      },
+      (value: typeof f) => {
+        value.control.Mounts[13].Source = value.modules[0].generatedFile;
+      },
+      (value: typeof f) => {
+        value.modules[13].inContainerSha = '0'.repeat(64);
+      },
+      (value: typeof f) => {
+        value.modules[13].sha256 = '0'.repeat(64);
+      },
+      (value: typeof f) => {
+        value.control.Mounts.pop();
+      },
+      (value: typeof f) => {
+        value.modules[13].target = value.modules[0].target;
+      },
+    ]) {
+      const copy = structuredClone(f);
+      mutate(copy);
+      expect(() => verifyCanaryModuleMounts(copy.control, { modules: copy.modules })).toThrow();
+    }
+    fs.writeFileSync(app.generatedFile, 'changed shipped public app');
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
+  it('does not admit arbitrary public code as the reviewed app target', () => {
+    const f = publicAppFixture();
+    f.modules[13].target = f.control.Mounts[13].Destination =
+      '/nix/store/controlled-console/lib/reverie/src/web/public/other.js';
+    expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).toThrow();
+  });
   it('accepts sixteen exact read-only modules and checks the final module too', () => {
     const f = fixture(16);
     expect(() => verifyCanaryModuleMounts(f.control, { modules: f.modules })).not.toThrow();

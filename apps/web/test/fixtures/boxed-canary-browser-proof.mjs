@@ -78,7 +78,9 @@ export function verifyCanaryModuleMounts(control, proof) {
     assert(Array.isArray(proof.modules) && proof.modules.length > 0 && proof.modules.length <= 16);
     modules = proof.modules;
   }
-  const actual = control.Mounts.filter((m) => /\/lib\/reverie\/dist(?:\/|$)/.test(m.Destination));
+  const actual = control.Mounts.filter((m) =>
+    /(?:\/lib\/reverie\/dist(?:\/|$)|\/lib\/reverie\/src\/web\/public\/app\.js$)/.test(m.Destination)
+  );
   assert(actual.length === modules.length, 'Undescribed development code mount');
   const targets = new Set();
   for (const module of modules) {
