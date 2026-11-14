@@ -20,6 +20,7 @@
     "../test/fixtures/operator-legacy-sdk-program.ts",
     "../test/fixtures/provider-launch-lifetime.mts",
     "../test/fixtures/provider-launch-mux.mts",
-    "../test/fixtures/employee-recovery-restart.mts"
+    "../test/fixtures/employee-recovery-restart.mts",
+    "../test/fixtures/boxed-webserver-startup.ts"
   ]
 }

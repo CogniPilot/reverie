@@ -4605,10 +4605,14 @@ export class WebServer extends EventEmitter {
       }
     }
 
-    // Set API URL for child processes (MCP server, spawned sessions)
+    // The boxed runtime retains its selected worker URL under configuration
+    // custody. Publishing the listener's loopback URL would revoke it.
+    // Other child processes keep the legacy bound-listener URL.
     const apiHost =
       this.host === '0.0.0.0' || this.host === 'localhost' || this.host === '::1' ? '127.0.0.1' : this.host;
-    process.env.REVERIE_API_URL = `${protocol}://${apiHost}:${this.port}`;
+    if (!this.dockerEmployeeRuntime) {
+      process.env.REVERIE_API_URL = `${protocol}://${apiHost}:${this.port}`;
+    }
 
     // Ensure the COD-54 hook secret exists on disk before any session exports
     // $REVERIE_HOOK_SECRET_FILE — hook curls cat that path at execution time.

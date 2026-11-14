@@ -108,6 +108,12 @@ let
       '' else ''
         boxedCredentialCheck
       ''}
+      ${lib.optionalString pkgs.stdenv.isLinux ''
+        # Actual listener startup must preserve fixed boxed configuration/key
+        # currency. The fixture owns an isolated root/network/PID namespace.
+        node node_modules/typescript/bin/tsc --noEmit -p config/tsconfig.scripts.json
+        node --import tsx test/fixtures/boxed-webserver-startup.ts
+      ''}
       npm test -- test/account-replacement-profile.test.ts
       npm test -- test/startup-account-profile.test.ts
       npm test -- test/native-thread-profile.test.ts
