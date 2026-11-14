@@ -205,11 +205,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
         CgroupnsMode: 'host',
         Binds: binds,
         AutoRemove: false,
-        RestartPolicy: { Name: 'no' },
+        RestartPolicy: { Name: 'no', MaximumRetryCount: 0 },
         Memory: 64 * 1024 ** 2,
         MemorySwap: 64 * 1024 ** 2,
         PidsLimit: 32,
-        ...(role === 'anchor' ? { CgroupParent: this.#slice } : {}),
+        CgroupParent: role === 'anchor' ? this.#slice : '',
       },
     };
   }
@@ -235,6 +235,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
       'Memory',
       'MemorySwap',
       'PidsLimit',
+      'RestartPolicy',
+      'CgroupParent',
     ])
       if (!isDeepStrictEqual(host[key], expected[key])) refuse('DOCKER_RESOURCE_HELPER_CHANGED');
     for (const key of ['CapAdd', 'Devices', 'DeviceRequests', 'Mounts', 'VolumesFrom'])
@@ -250,8 +252,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const ordered = (values: typeof expectedMounts) =>
       [...values].sort((a, b) => a.Destination!.localeCompare(b.Destination!));
     if (!isDeepStrictEqual(ordered(mounts), ordered(expectedMounts))) refuse('DOCKER_RESOURCE_HELPER_MOUNTS_CHANGED');
-    if (expected.CgroupParent !== undefined && host.CgroupParent !== expected.CgroupParent)
-      refuse('DOCKER_RESOURCE_HELPER_PARENT_CHANGED');
     return raw;
   }
   async #created(
@@ -597,7 +597,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
     const seen = await this.#probe(anchor, await this.#worker(row));
     const issued = this.journal.read(row, 'leaf-helper');
-    if (!issued) return null;
+    if (!issued || issued.phase === 'create-issued' || issued.phase === 'created') return null;
     if (!(await this.#ack(issued, seen, row.policy, true))) refuse('DOCKER_RESOURCE_WORKER_HELPER_UNACKNOWLEDGED');
     if (!this.#matches(seen, row.policy, row.policy.memoryHighBytes)) return null;
     return structuredClone(row.policy);

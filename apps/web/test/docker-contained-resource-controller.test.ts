@@ -48,6 +48,7 @@ function fixture() {
     current = true,
     foreignMount = false,
     failedRole: string | undefined,
+    changedHelper: { role: string; field: 'restart' | 'parent' } | undefined,
     weight = 100;
   const resources = (worker: boolean) => ({
     memoryMax: configured ? String(policy.memoryMaxBytes) : 'max',
@@ -146,6 +147,15 @@ function fixture() {
       if (args[0] === 'image') return JSON.stringify([{ Id: helper }]);
       if (args[0] === 'container' && args[1] === 'inspect') {
         const value = structuredClone(containers.get(args[2]!)!);
+        if (
+          changedHelper &&
+          (value.Config as { Labels?: Record<string, string> }).Labels?.['reverie.box.resource.role'] ===
+            changedHelper.role
+        ) {
+          const host = value.HostConfig as Record<string, unknown>;
+          if (changedHelper.field === 'restart') host.RestartPolicy = { Name: 'always', MaximumRetryCount: 0 };
+          else host.CgroupParent = 'legacy.slice';
+        }
         if (foreignMount && args[2] !== workerId)
           (value.Mounts as unknown[]).push({
             Type: 'bind',
@@ -242,9 +252,26 @@ function fixture() {
     failHelper: (role: string) => {
       failedRole = role;
     },
+    changeHelper: (role: string, field: 'restart' | 'parent') => {
+      changedHelper = { role, field };
+    },
   };
 }
 describe('fixed Docker resource orchestration', () => {
+  it.each(['restart', 'parent'] as const)(
+    'a changed helper %s cannot acknowledge successful resource enforcement',
+    async (field) => {
+      const f = fixture();
+      await f.controller.preparePool(f.row(), f.current);
+      await f.setPool();
+      f.makeWorker();
+      await f.controller.configure(f.row(), f.current);
+      const before = [...f.starts];
+      f.changeHelper('leaf-helper', field);
+      await expect(f.controller.read(f.row())).rejects.toThrow('HELPER');
+      expect(f.starts).toEqual(before);
+    }
+  );
   it.each(['pool-helper', 'leaf-helper'])(
     'matching kernel values cannot replace the original %s success acknowledgement',
     async (role) => {
