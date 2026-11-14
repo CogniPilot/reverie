@@ -13588,7 +13588,9 @@ class ReverieChatApp {
         ])
           if (Object.hasOwn(current, key)) employee[key] = current[key];
         management.replaceChildren();
-        globalThis.ReverieEmployeeRecovery?.mount(this, management, dialog, employee);
+        if (company.data?.boxedRuntime === true)
+          globalThis.ReverieDockerEmployeeRecovery?.mount(this, management, dialog, employee);
+        else globalThis.ReverieEmployeeRecovery?.mount(this, management, dialog, employee);
         this.employeePermissionFields(management, employee, dialog);
         this.employeeHiringFields(management, employee, dialog);
         const resources = this.el('section', 'ca-profile-resources');
@@ -13598,7 +13600,8 @@ class ReverieChatApp {
           this.el('p', 'ca-hint', 'Requested policy and verified running limits are shown separately.')
         );
         management.append(resources);
-        globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
+        if (company.data?.boxedRuntime !== true)
+          globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
         this.employeeGpuFields(resources, employee, dialog);
         if (company.data?.resourceReplacement === true) this.employeeMemoryFields(resources, employee, dialog);
         credentials.replaceChildren();

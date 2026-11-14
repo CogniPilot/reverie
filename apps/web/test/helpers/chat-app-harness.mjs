@@ -467,7 +467,7 @@ export async function createHarness({
     }
     window.ReverieApp = ReverieApp;
   `);
-  for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js', 'employee-recovery.js']) window.eval(read(f));
+  for (const f of ['chatroom-ui.js', 'chat-media.js', 'company-resources.js', 'employee-recovery.js', 'docker-employee-recovery.js']) window.eval(read(f));
   // Full-state SSE handlers depend on the same sticky input-recovery policy as
   // the page. Load those real methods rather than stubbing away their holds.
   const recoverySource = read('app.js');
