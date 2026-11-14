@@ -1,0 +1,157 @@
+#!/opt/reverie-worker-client/bin/node
+/** Disposable provider fixture. Actual bound capsule/Console probes, no model or Engine. */
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const { createHash } = require('node:crypto');
+const { spawnSync } = require('node:child_process');
+const args = process.argv.slice(2);
+if (args.includes('--version') || args.includes('-v')) {
+  process.stdout.write('2.1.251 (Claude Code; synthetic boxed fixture)\n');
+  process.exit(0);
+}
+if (args.includes('--help') || args.includes('-h')) {
+  process.stdout.write('Synthetic boxed provider: --resume <thread>, --version\n');
+  process.exit(0);
+}
+const entry = '/opt/reverie-worker-client/bin/reverie';
+const sid = '22222222-2222-4222-8222-222222222222';
+const thread = '44444444-4444-4444-8444-444444444444';
+const digest = (value) => createHash('sha256').update(value).digest('hex');
+if (process.env.HOME !== '/home/agent' || process.env.REVERIE_SESSION_ID !== sid)
+  throw Error('Synthetic boxed identity required');
+const marker = path.join(process.env.HOME, 'boxed-canary-provider-start.json');
+const fd = fs.openSync(
+  marker,
+  fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW,
+  0o600
+);
+const report = {
+  version: 2,
+  purpose: 'synthetic-boxed-provider-probes-v2',
+  pid: process.pid,
+  sessionId: sid,
+  startedAt: new Date().toISOString(),
+  argvSha256: digest(JSON.stringify(args)),
+  probes: [],
+  completed: false,
+  limitation: 'Fake external provider; callback ACKs prove transport only, never provider or native readiness.',
+};
+function checkpoint() {
+  const bytes = Buffer.from(JSON.stringify(report) + '\n');
+  fs.writeSync(fd, bytes, 0, bytes.length, 0);
+  fs.ftruncateSync(fd, bytes.length);
+  fs.fsyncSync(fd);
+}
+function oneValue(flag) {
+  const matches = args.flatMap((value, index) => (value === flag ? [index] : []));
+  if (matches.length !== 1 || typeof args[matches[0] + 1] !== 'string') throw Error('Canonical fixture launch refused');
+  return args[matches[0] + 1];
+}
+function probe(command, expected, input) {
+  if (command !== expected) throw Error('Generated capsule command differs');
+  const words = command.split(' ');
+  const result = spawnSync(words[0], words.slice(1), {
+    input,
+    encoding: 'utf8',
+    timeout: 20000,
+    maxBuffer: 65536,
+    windowsHide: true,
+  });
+  const receipt = {
+    command: expected,
+    at: new Date().toISOString(),
+    exitCode: result.status,
+    signal: result.signal,
+    errorCode: result.error?.code ?? null,
+    stdoutSha256: digest(result.stdout ?? ''),
+    stderrSha256: digest(result.stderr ?? ''),
+  };
+  report.probes.push(receipt);
+  checkpoint();
+  if (result.error || result.status !== 0 || result.signal) throw Error('Actual capsule probe failed');
+  return result.stdout;
+}
+function runProbes() {
+  const actualThread = oneValue('--resume');
+  if (actualThread !== thread) throw Error('Original synthetic provider thread differs');
+  const rawSettings = oneValue('--settings');
+  const settings = JSON.parse(rawSettings);
+  report.resumeThread = actualThread;
+  report.settingsSha256 = digest(rawSettings);
+  const generation = process.env.REVERIE_HOOK_GENERATION;
+  if (!generation || !/^[A-Za-z0-9_.:-]{1,256}$/.test(generation)) throw Error('Actual current hook generation absent');
+  report.hookGenerationSha256 = digest(generation);
+  checkpoint();
+  const capabilities = JSON.parse(probe(entry + ' agent capabilities --json', entry + ' agent capabilities --json'));
+  if (capabilities.identity?.kind !== 'agent' || capabilities.identity.sessionId !== sid)
+    throw Error('Actual authenticated capsule identity differs');
+  report.capabilityIdentity = { kind: capabilities.identity.kind, sessionId: capabilities.identity.sessionId };
+  const policyCommand = entry + ' agent docker-policy 11111111-1111-4111-8111-111111111111 --json';
+  const selection = JSON.parse(probe(policyCommand, policyCommand));
+  if (
+    selection.sessionId !== sid ||
+    selection.sessionGeneration !== 1 ||
+    !selection.operation ||
+    typeof selection.operation.phase !== 'string' ||
+    typeof selection.operation.state !== 'string'
+  )
+    throw Error('Actual scoped operation read differs');
+  report.operationRead = {
+    sessionId: selection.sessionId,
+    sessionGeneration: selection.sessionGeneration,
+    phase: selection.operation.phase,
+    state: selection.operation.state,
+    observedBeforeReady: selection.operation.phase !== 'ready' && selection.operation.state !== 'ready',
+    limitation:
+      selection.operation.phase === 'ready' || selection.operation.state === 'ready'
+        ? 'Read already observed ready; no before-Ready timing claim.'
+        : 'Authenticated read of current operation phase only; not a native grant or effect dispatch.',
+  };
+  checkpoint();
+  const hook = settings.hooks?.UserPromptSubmit?.[0]?.hooks?.[0];
+  if (hook?.type !== 'command' || settings.statusLine?.type !== 'command')
+    throw Error('Actual generated callback settings absent');
+  const hookOutput = probe(
+    hook.command,
+    entry + ' worker-callback hook-event --event prompt_submitted',
+    JSON.stringify({ session_id: thread, source: 'synthetic-boxed-provider-canary' })
+  );
+  if (hookOutput !== '') throw Error('Hook output unexpectedly nonempty');
+  report.hookTransportAcknowledged = true;
+  const status = probe(
+    settings.statusLine.command,
+    entry + ' worker-callback status-telemetry',
+    JSON.stringify({
+      model: { display_name: 'Synthetic canary' },
+      context_window: { used_percentage: 7, total_input_tokens: 1200, total_output_tokens: 12 },
+    })
+  );
+  if (status !== 'Synthetic canary  in:1,200 out:12  ctx:7%\n') throw Error('Actual status callback text differs');
+  report.statusTransportAcknowledged = true;
+  report.statusText = status.trimEnd();
+  report.completed = true;
+  report.completedAt = new Date().toISOString();
+  checkpoint();
+}
+let failed = false;
+try {
+  checkpoint();
+  runProbes();
+} catch {
+  failed = true;
+  report.failed = true;
+  report.failedAt = new Date().toISOString();
+  checkpoint();
+} finally {
+  fs.closeSync(fd);
+}
+if (failed) {
+  process.stderr.write('Synthetic boxed provider probe failed; no retry.\n');
+  process.exit(1);
+}
+process.stdout.write('Synthetic boxed provider; no model request.\n> ');
+process.stdin.resume();
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => process.exit(0));
+setInterval(() => {}, 60_000);
