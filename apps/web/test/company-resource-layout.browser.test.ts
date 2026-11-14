@@ -8,6 +8,10 @@ import { JSDOM } from 'jsdom';
 import { createServer, member, room, message } from './helpers/chat-app-harness.mjs';
 import { EmployeeMemoryDiagnostics, memoryPressureAdvisory } from '../src/resource-employee-data.js';
 
+type LayoutWindow = Window & {
+  reverieChat: { openCompanySettings(): Promise<void>; openCompany(section: string): Promise<void> };
+  __writes: unknown[];
+};
 const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
 const harness = readFileSync(resolve(import.meta.dirname, 'helpers/chat-app-harness.mjs'), 'utf8');
@@ -25,6 +29,7 @@ async function fixture(
     viewerObservation?: boolean;
     viewerReason?: 'native-health-unavailable' | 'backoff';
     boxedRecovery?: 'approval' | 'held';
+    dockerResources?: boolean;
   } = {}
 ) {
   // Keep the shipped document structure, but bootstrap only the conversation
@@ -99,6 +104,9 @@ async function fixture(
             sessionGeneration:employee.sessionGeneration,containerId:source.containerId,imageId:source.imageId,
             expectedDestinationImageId:source.destinationImageId,expectedPolicyDigest:'e'.repeat(64),enterOffice:true}}:{})});
       }
+      if(path==='/api/company/docker-resources')return ok({allowedActions:['approve-default'],desired:{revision:'33333333-3333-4333-8333-333333333333',scope:'all-current-and-future',memoryHighBytes:48*1024**3},employees:[{employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'not-observed',enforcement:'not-observed'}]});
+      if(path==='/api/company/employees/'+employee.id+'/docker-resources')return ok({employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,revision:'33333333-3333-4333-8333-333333333333',actualMemoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,approved:true,approvalSource:'original-policy',approvedRevision:null,enforcement:'fresh-native-readback',allowedActions:['apply']});
+      if(path==='/api/company/employees/'+employee.id+'/docker-pool/status')return ok({sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'held',code:'DOCKER_POOL_ORIGINAL_ACK_MISSING',allowedActions:[]});
       if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});
       if(path==='/api/owner/status')return ok({configured:true,signedIn:true,identity:{id:'owner',role:'owner'}});
       if(path==='/api/company/resources/fleet')return ok(fleet);
@@ -434,7 +442,7 @@ for (const width of [1280, 390, 320])
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await fixture(page);
-      await page.evaluate(() => (window as any).reverieChat.openCompanySettings());
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompanySettings());
       const settings = page.getByRole('dialog', { name: 'Company settings', exact: true });
       await settings.getByRole('button', { name: 'Resource permissions for River', exact: true }).waitFor();
       expect(await settings.getByRole('tab', { name: 'Employees', exact: true }).getAttribute('aria-selected')).toBe(
@@ -549,7 +557,7 @@ for (const width of [1280, 390, 320])
           JSON.stringify({ geometry, layout, errors }, null, 2)
         );
       }
-      expect(await page.evaluate(() => (window as any).__writes)).toEqual([]);
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
       expect(errors).toEqual([]);
     } finally {
       await browser.close();
@@ -568,7 +576,7 @@ it('shows an unavailable-resource error and long synthetic employee name without
     const page = await browser.newPage({ viewport: { width: 320, height: 900 } });
     const name = 'SyntheticWorkerWithAnUnusuallyLongUnbrokenDisplayNameForLayoutChecks';
     await fixture(page, { name, resourceUnavailable: true });
-    await page.evaluate(() => (window as any).reverieChat.openCompanySettings());
+    await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompanySettings());
     const settings = page.getByRole('dialog', { name: 'Company settings', exact: true });
     const open = settings.getByRole('button', { name: `Resource permissions for ${name}`, exact: true });
     await open.waitFor();
@@ -611,7 +619,7 @@ it('shows an unavailable-resource error and long synthetic employee name without
     expect(geometry.close).toBeLessThanOrEqual(geometry.right);
     if (screenshotDir)
       await page.screenshot({ path: join(screenshotDir, 'employee-resource-error-long-name-320.png') });
-    expect(await page.evaluate(() => (window as any).__writes)).toEqual([]);
+    expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
   } finally {
     await browser.close();
   }
@@ -631,7 +639,7 @@ for (const width of [1280, 390, 320])
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await fixture(page, { retainedHiring: true, name: 'Synthetic ' + 'longname'.repeat(10) });
-      await page.evaluate(() => (window as any).reverieChat.openCompanySettings());
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompanySettings());
       const dialog = page.getByRole('dialog', { name: 'Company settings', exact: true });
       await dialog.getByRole('tab', { name: 'Hiring', exact: true }).click();
       const form = dialog.getByRole('form', { name: 'Hiring', exact: true });
@@ -671,7 +679,7 @@ for (const width of [1280, 390, 320])
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.width + 1);
       expect(geometry.closeRight).toBeLessThanOrEqual(geometry.right + 1);
       await form.dispatchEvent('submit');
-      expect(await page.evaluate(() => (window as any).__writes)).toEqual([]);
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
       expect(errors).toEqual([]);
     } finally {
       await browser.close();
@@ -702,7 +710,13 @@ for (const width of [320, 1280])
         const profile = page.getByRole('dialog', { name: 'Edit profile: River', exact: true });
         await profile.getByRole('tab', { name: 'Permissions', exact: true }).click();
         const recovery = profile.getByRole('region', { name: 'Docker session recovery', exact: true });
-        await recovery.locator('table').waitFor();
+        await recovery.locator('table').waitFor({ state: 'attached' });
+        if (state === 'held') {
+          expect(
+            await recovery.locator('.ca-recovery-policy-details').evaluate((el) => (el as HTMLDetailsElement).open)
+          ).toBe(false);
+          await recovery.getByText('Approved resource policy details', { exact: true }).click();
+        }
         await recovery.scrollIntoViewIfNeeded();
         expect(await recovery.locator('caption').textContent()).toBe(
           state === 'approval' ? 'Proposed resource policy — approval required' : 'Approved resource policy'
@@ -725,6 +739,7 @@ for (const width of [320, 1280])
             false
           );
         }
+        if (state === 'held') await recovery.getByText('Approved resource policy details', { exact: true }).click();
         const controls = recovery.locator('button');
         expect(await controls.allTextContents()).toEqual(
           state === 'approval'
@@ -768,3 +783,71 @@ for (const width of [320, 1280])
         await browser.close();
       }
     });
+
+for (const width of [320, 1280])
+  it(`shows desired and actual Docker RAM without overflow at ${width}px`, async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1 });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await fixture(page, { boxedRecovery: 'held', dockerResources: true });
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompanySettings());
+      const settings = page.getByRole('dialog', { name: 'Company settings', exact: true });
+      const company = settings.getByRole('region', { name: 'Docker employee resource defaults', exact: true });
+      await company
+        .getByText('Owner-approved soft RAM default: 48 GiB for current and future employees.', { exact: true })
+        .waitFor();
+      expect(await company.textContent()).toContain('not fresh enforcement');
+      expect(await company.locator('details').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+      await company.scrollIntoViewIfNeeded();
+      expect(await company.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `docker-resource-company-${width}.png`),
+        });
+      }
+      await settings.getByRole('button', { name: 'Close company settings', exact: true }).click();
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompany('people'));
+      await page.getByRole('button', { name: 'Edit profile for River', exact: true }).click();
+      const profile = page.getByRole('dialog', { name: 'Edit profile: River', exact: true });
+      await profile.getByRole('tab', { name: 'Permissions', exact: true }).click();
+      const panel = profile.getByRole('region', { name: 'Docker resources for River', exact: true });
+      await panel.getByText('Fresh native readback', { exact: true }).waitFor();
+      expect(await panel.textContent()).toContain('Owner-approved default: 48 GiB');
+      expect(await panel.textContent()).toContain('Actual soft RAM: 16 GiB. Hard RAM ceiling: 64 GiB');
+      expect(await panel.textContent()).toContain('DOCKER_POOL_ORIGINAL_ACK_MISSING');
+      await panel.scrollIntoViewIfNeeded();
+      const geometry = await panel.evaluate((el) => ({
+        width: el.clientWidth,
+        scroll: el.scrollWidth,
+        ratio: window.devicePixelRatio,
+        buttons: [...el.querySelectorAll('button')].map((b) => ({
+          height: b.getBoundingClientRect().height,
+          overflow: b.scrollWidth > b.clientWidth + 1,
+        })),
+      }));
+      expect(geometry.ratio).toBe(1);
+      expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
+      for (const b of geometry.buttons) {
+        expect(b.height).toBeGreaterThanOrEqual(44);
+        expect(b.overflow).toBe(false);
+      }
+      const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
+      if (output) {
+        await mkdir(output, { recursive: true });
+        await page.screenshot({ path: join(output, `docker-resource-profile-${width}.png`) });
+      }
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  });

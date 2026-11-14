@@ -151,7 +151,12 @@
         row.append(heading, this.shell.el('td', '', value));
         table.append(row);
       }
-      this.policy.append(
+      const content = s.policy ? this.shell.el('details', 'ca-recovery-policy-details') : this.policy;
+      if (s.policy) {
+        content.append(this.shell.el('summary', '', 'Approved resource policy details'));
+        this.policy.append(content);
+      }
+      content.append(
         table,
         this.shell.el(
           'p',

@@ -1795,3 +1795,434 @@
     mountEmployee: (shell, container, dialog, employee) => new EmployeePanel(shell, container, dialog, employee),
   };
 })();
+
+/** Owner resource controls. API decisions and fresh native facts remain authoritative. */
+(() => {
+  const ROOT = '/api/company/docker-resources';
+  const HIGH = 48 * 1024 ** 3;
+  const uuid = (v) =>
+    typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(v);
+  const bytes = (v) => v === null || (Number.isSafeInteger(v) && v > 0);
+  const gib = (v) =>
+    v === null ? 'unbounded' : `${(v / 1024 ** 3).toLocaleString(undefined, { maximumFractionDigits: 2 })} GiB`;
+  const desired = (v) =>
+    v === null || (v && uuid(v.revision) && v.scope === 'all-current-and-future' && bytes(v.memoryHighBytes));
+  const actions = (v) =>
+    Array.isArray(v) &&
+    v.every((a) => ['apply', 'reconcile', 'new-revision'].includes(a)) &&
+    new Set(v).size === v.length;
+  const digest = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
+  const pending = new Map();
+  const errorText = (failure) =>
+    typeof failure === 'string' ? failure : failure?.code || 'Resource status is unconfirmed.';
+  const nonce = () => {
+    if (window.crypto.randomUUID) return window.crypto.randomUUID();
+    const b = window.crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 15) | 64;
+    b[8] = (b[8] & 63) | 128;
+    const h = [...b].map((v) => v.toString(16).padStart(2, '0')).join('');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  };
+  class Panel {
+    constructor(shell, container, dialog, label) {
+      this.shell = shell;
+      this.dialog = dialog;
+      this.sequence = 0;
+      this.busy = false;
+      this.host = shell.el('section', 'ca-docker-resources');
+      this.host.setAttribute('aria-label', label);
+      this.status = shell.el('p', 'ca-hint', 'Checking Docker resources…');
+      this.status.setAttribute('role', 'status');
+      this.error = shell.el('p', 'ca-company-error');
+      this.error.setAttribute('role', 'alert');
+      this.content = shell.el('div');
+      this.controls = shell.el('div', 'ca-profile-actions');
+      this.refresh = shell.button('ca-btn', 'Refresh Docker resources', () => this.load(), {
+        text: 'Refresh resources',
+      });
+      this.host.append(this.status, this.error, this.content, this.controls, this.refresh);
+      container.append(this.host);
+      dialog.addEventListener(
+        'close',
+        () => {
+          this.sequence++;
+        },
+        { once: true }
+      );
+    }
+    live(sequence = this.sequence) {
+      return this.dialog.isConnected && sequence === this.sequence;
+    }
+    note(text) {
+      return this.shell.el('p', 'ca-hint', text);
+    }
+    technical(message) {
+      const details = this.shell.el('details', 'ca-docker-resource-details');
+      details.append(this.shell.el('summary', '', 'Resource verification details'), this.note(message));
+      this.content.append(details);
+    }
+    showError(message) {
+      this.status.textContent = 'Resource status unconfirmed';
+      if (/^[A-Z][A-Z0-9_]{2,127}$/.test(message)) {
+        this.error.textContent =
+          'Resource status could not be confirmed. Refresh before another change; the original request is not repeated automatically.';
+        this.technical(message);
+      } else this.error.textContent = message;
+    }
+    async api(path, request) {
+      const r = await this.shell.app._chatApi(path, request);
+      if (!r.ok) throw Error(errorText(r.error));
+      return r.data;
+    }
+    async owner() {
+      const r = await this.api('/api/chatrooms/phone-status');
+      if (r?.self !== 'owner' || r.canSetOwn !== true) throw Error('Sign in as the owner to manage Docker resources.');
+    }
+    async run(body) {
+      if (this.busy || !this.live()) return;
+      this.busy = true;
+      const sequence = ++this.sequence;
+      this.error.textContent = '';
+      this.refresh.disabled = true;
+      this.controls.replaceChildren();
+      this.content.replaceChildren();
+      try {
+        await body(sequence);
+      } catch (e) {
+        if (this.live(sequence)) this.showError(e.message || 'Resource status is unconfirmed.');
+      } finally {
+        if (this.live(sequence)) {
+          this.busy = false;
+          this.refresh.disabled = false;
+        }
+      }
+    }
+  }
+  class EmployeePanel extends Panel {
+    constructor(shell, container, dialog, employee) {
+      super(shell, container, dialog, `Docker resources for ${employee.name}`);
+      this.employee = employee;
+      this.path = `/api/company/employees/${encodeURIComponent(employee.id)}`;
+      this.binding = { id: employee.id, sid: employee.sessionId, gen: employee.sessionGeneration };
+      this.key = `${employee.id}:${employee.sessionId}:${employee.sessionGeneration}`;
+      void this.load();
+    }
+    requestKey(revision) {
+      return `${this.key}:${revision}`;
+    }
+    matches(v) {
+      return v && v.sessionId === this.binding.sid && v.sessionGeneration === this.binding.gen;
+    }
+    async current() {
+      await this.owner();
+      const company = await this.api('/api/company');
+      const e = company?.employees?.find((v) => v.id === this.binding.id);
+      if (company.canManage !== true || !this.matches(e))
+        throw Error('Employee identity changed. Reopen this profile.');
+    }
+    load() {
+      return this.run(async (sequence) => {
+        await this.current();
+        const overview = await this.api(ROOT);
+        if (!desired(overview?.desired)) throw Error('The approved default could not be verified.');
+        const row = overview.employees?.find((v) => v.employeeId === this.binding.id);
+        if (!this.matches(row)) throw Error('Employee resource identity changed. Reopen this profile.');
+        const [read, pool] = await Promise.allSettled([
+          this.api(`${this.path}/docker-resources`),
+          this.api(`${this.path}/docker-pool/status`),
+        ]);
+        await this.current();
+        if (!this.live(sequence)) return;
+        this.content.replaceChildren();
+        this.snapshot = {
+          revision: overview.desired?.revision,
+          allowed: actions(row.allowedActions) ? row.allowedActions.filter((a) => a !== 'apply') : [],
+        };
+        this.content.append(
+          this.note(
+            overview.desired
+              ? `Owner-approved default: ${gib(overview.desired.memoryHighBytes)} soft RAM.`
+              : 'No soft RAM default is approved. Review the proposal in Company settings.'
+          )
+        );
+        if (read.status === 'fulfilled') {
+          const r = read.value;
+          if (
+            !this.matches(r) ||
+            r.employeeId !== this.binding.id ||
+            r.enforcement !== 'fresh-native-readback' ||
+            !(
+              r.actualMemoryHighBytes === null ||
+              (Number.isSafeInteger(r.actualMemoryHighBytes) && r.actualMemoryHighBytes >= 0)
+            ) ||
+            !Number.isSafeInteger(r.memoryMaxBytes) ||
+            r.memoryMaxBytes <= 0 ||
+            typeof r.approved !== 'boolean' ||
+            !desired(overview.desired)
+          )
+            throw Error('Fresh resource readback could not be verified.');
+          this.status.textContent = 'Fresh native readback';
+          this.content.append(
+            this.note(`Actual soft RAM: ${gib(r.actualMemoryHighBytes)}. Hard RAM ceiling: ${gib(r.memoryMaxBytes)}.`),
+            this.note(
+              r.approved
+                ? r.approvalSource === 'original-policy'
+                  ? 'Actual limits match the original approved policy.'
+                  : 'Actual limits match an owner-approved resource revision.'
+                : 'Observed values have not been adopted as approved enforcement.'
+            )
+          );
+          if (overview.desired && r.actualMemoryHighBytes !== overview.desired.memoryHighBytes)
+            this.content.append(
+              this.note(
+                `The ${gib(overview.desired.memoryHighBytes)} default is not currently applied to this employee.`
+              )
+            );
+          this.snapshot = {
+            revision: overview.desired?.revision,
+            allowed: actions(r.allowedActions) ? r.allowedActions : [],
+          };
+        } else {
+          this.status.textContent = 'Running limits unconfirmed';
+          this.showError(read.reason.message);
+        }
+        if (pending.has(this.requestKey(overview.desired?.revision)))
+          this.content.append(
+            this.note(
+              'The original resource application has an unknown outcome. Refresh reads status only; do not approve a replacement to retry it.'
+            )
+          );
+        if (this.snapshot?.revision) {
+          const r = this.snapshot.revision;
+          if (this.snapshot.allowed.includes('reconcile'))
+            this.controls.append(
+              this.shell.button('ca-btn', 'Check original resource application', () => this.change('reconcile', r), {
+                text: 'Check original resource application',
+              })
+            );
+          else if (!pending.has(this.requestKey(overview.desired?.revision)) && this.snapshot.allowed.includes('apply'))
+            this.controls.append(
+              this.shell.button('ca-btn', 'Apply approved soft RAM default', () => this.change('apply', r), {
+                text: 'Apply approved soft RAM default',
+              })
+            );
+        }
+        if (this.snapshot?.allowed.includes('new-revision')) {
+          this.content.append(
+            this.note(
+              'The original writer is closed. Review and approve a new default revision before another application. The original helper is never restarted.'
+            )
+          );
+          this.controls.append(
+            this.shell.button('ca-btn', 'Review resource default', () => this.shell.openCompanySettings(), {
+              text: 'Review resource default',
+            })
+          );
+        }
+        this.renderPool(pool);
+      });
+    }
+    renderPool(result) {
+      if (result.status !== 'fulfilled') {
+        this.content.append(
+          this.note(
+            'Shared pool verification is unavailable. Refresh to recheck the original evidence; no resource limits are changed here.'
+          )
+        );
+        this.technical(result.reason.message);
+        return;
+      }
+      const p = result.value;
+      if (
+        !this.matches(p) ||
+        !['retained', 'reconciliation-required', 'held'].includes(p.state) ||
+        !Array.isArray(p.allowedActions) ||
+        p.allowedActions.some((v) => v !== 'reconcile-pool') ||
+        p.allowedActions.length > 1
+      ) {
+        this.content.append(this.note('Shared pool status could not be verified.'));
+        return;
+      }
+      this.content.append(
+        this.note(
+          p.state === 'retained'
+            ? 'Shared pool observation retained. Future use still requires fresh native checks.'
+            : p.state === 'reconciliation-required'
+              ? 'The shared pool observation needs to be restored. Reconciliation checks the original confirmation and changes metadata only.'
+              : 'Shared pool verification needs attention. Refresh to recheck the original evidence. Reconciliation is offered only when the original confirmation can be verified.'
+        )
+      );
+      if (typeof p.code === 'string' && /^[A-Z][A-Z0-9_]{2,127}$/.test(p.code)) this.technical(p.code);
+      if (p.state === 'reconciliation-required' && p.allowedActions.includes('reconcile-pool') && digest(p.scopeDigest))
+        this.controls.append(
+          this.shell.button('ca-btn', 'Reconcile shared pool observation', () => this.pool(p.scopeDigest), {
+            text: 'Reconcile shared pool observation',
+          })
+        );
+    }
+    async change(action, revision) {
+      let refreshed = false;
+      await this.run(async (sequence) => {
+        await this.current();
+        if (this.snapshot?.revision !== revision || !this.snapshot.allowed.includes(action))
+          throw Error('Resource action changed. Refresh this profile.');
+        const key = this.requestKey(revision);
+        pending.set(key, { revision });
+        const result = await this.api(`${this.path}/docker-resources/${action}`, {
+          method: 'POST',
+          body: { revision },
+        });
+        await this.current();
+        if (!this.live(sequence)) return;
+        if (
+          !this.matches(result) ||
+          result.employeeId !== this.binding.id ||
+          result.revision !== revision ||
+          (action === 'apply'
+            ? !['observed', 'applied'].includes(result.state) || result.enforcement !== 'fresh-native-readback'
+            : result.writerClosed !== true ||
+              result.originalOutcome !== 'unknown' ||
+              (result.state === 'observed'
+                ? result.enforcement !== 'fresh-native-readback'
+                : result.state !== 'closed-writer' ||
+                  result.enforcement !== 'not-observed' ||
+                  !Array.isArray(result.allowedActions) ||
+                  result.allowedActions.length !== 1 ||
+                  result.allowedActions[0] !== 'new-revision'))
+        )
+          throw Error('The original resource outcome remains unconfirmed.');
+        pending.delete(key);
+        this.status.textContent = 'Resource action confirmed. Refreshing actual limits…';
+        refreshed = true;
+      });
+      if (refreshed) await this.load();
+    }
+    async pool(scopeDigest) {
+      let refreshed = false;
+      await this.run(async (sequence) => {
+        await this.current();
+        const result = await this.api(`${this.path}/docker-pool/reconcile`, {
+          method: 'POST',
+          body: { sessionId: this.binding.sid, sessionGeneration: this.binding.gen, expectedScopeDigest: scopeDigest },
+        });
+        await this.current();
+        if (!this.live(sequence)) return;
+        if (
+          !this.matches(result) ||
+          result.state !== 'retained' ||
+          !Array.isArray(result.allowedActions) ||
+          result.allowedActions.length
+        )
+          throw Error('Pool metadata publication is unconfirmed. Refresh status; no limits were requested.');
+        refreshed = true;
+      });
+      if (refreshed) await this.load();
+    }
+  }
+  class CompanyPanel extends Panel {
+    constructor(shell, container, dialog) {
+      super(shell, container, dialog, 'Docker employee resource defaults');
+      this.host.prepend(shell.el('h3', '', 'Employee resources'));
+      void this.load();
+    }
+    load() {
+      return this.run(async (sequence) => {
+        await this.owner();
+        const r = await this.api(ROOT);
+        await this.owner();
+        if (!this.live(sequence)) return;
+        if (
+          !desired(r?.desired) ||
+          !Array.isArray(r.employees) ||
+          r.employees.length > 256 ||
+          r.employees.some(
+            (v) =>
+              !uuid(v.employeeId) ||
+              !uuid(v.sessionId) ||
+              !Number.isSafeInteger(v.sessionGeneration) ||
+              v.sessionGeneration < 1 ||
+              !['helper', 'observed', 'applied', 'not-observed', 'offline-or-unbound'].includes(v.state) ||
+              v.enforcement !== 'not-observed'
+          )
+        )
+          throw Error('Company resource summary could not be verified.');
+        this.snapshot = r.desired;
+        this.canApprove =
+          Array.isArray(r.allowedActions) && r.allowedActions.length === 1 && r.allowedActions[0] === 'approve-default';
+        this.status.textContent = `${r.employees.length} employee${r.employees.length === 1 ? '' : 's'} · history: ${r.employees.filter((v) => ['applied', 'observed'].includes(v.state)).length} confirmed, ${r.employees.filter((v) => v.state === 'helper').length} unresolved outcomes`;
+        this.content.replaceChildren(
+          this.note(
+            r.desired
+              ? `Owner-approved soft RAM default: ${gib(r.desired.memoryHighBytes)} for current and future employees.`
+              : 'Proposed soft RAM default: 48 GiB for current and future employees. Owner approval is required.'
+          ),
+          this.note(
+            'This is desired policy and history, not fresh enforcement. Open each employee’s Permissions tab to observe or apply it. Hard RAM, shared pool, swap, CPU and process limits stay unchanged.'
+          )
+        );
+        if (pending.has('default'))
+          this.content.append(
+            this.note(
+              'Default approval outcome is unconfirmed. Refresh checks the retained default without issuing another approval.'
+            )
+          );
+        if (
+          Array.isArray(r.allowedActions) &&
+          r.allowedActions.length === 1 &&
+          r.allowedActions[0] === 'approve-default' &&
+          !pending.has('default')
+        ) {
+          if (!r.desired || r.desired.memoryHighBytes !== HIGH)
+            this.controls.append(
+              this.shell.button('ca-btn', 'Approve 48 GiB soft RAM default', () => this.approve(), {
+                text: 'Approve 48 GiB soft RAM default',
+              })
+            );
+          else {
+            const details = this.shell.el('details');
+            details.append(
+              this.shell.el('summary', '', 'Approved default details'),
+              this.note(
+                'A new revision needs explicit owner approval, including when its soft RAM value stays the same.'
+              ),
+              this.shell.button('ca-btn', 'Approve new 48 GiB default revision', () => this.approve(), {
+                text: 'Approve new 48 GiB default revision',
+              })
+            );
+            this.controls.append(details);
+          }
+        }
+      });
+    }
+    async approve() {
+      let refreshed = false;
+      await this.run(async (sequence) => {
+        await this.owner();
+        if (!this.canApprove) throw Error('Default approval is unavailable. Refresh company resources.');
+        const revision = nonce(),
+          expectedRevision = this.snapshot?.revision ?? null;
+        pending.set('default', { revision });
+        const result = await this.api(`${ROOT}/default`, {
+          method: 'PUT',
+          body: { revision, expectedRevision, scope: 'all-current-and-future', memoryHighBytes: HIGH },
+        });
+        await this.owner();
+        if (!this.live(sequence)) return;
+        if (
+          !desired(result?.desired) ||
+          result.desired?.revision !== revision ||
+          result.desired.memoryHighBytes !== HIGH ||
+          result.enforcement !== 'not-observed'
+        )
+          throw Error('Default approval outcome is unconfirmed.');
+        pending.delete('default');
+        refreshed = true;
+      });
+      if (refreshed) await this.load();
+    }
+  }
+  window.ReverieDockerResources = {
+    mount: (...args) => new CompanyPanel(...args),
+    mountEmployee: (...args) => new EmployeePanel(...args),
+  };
+})();

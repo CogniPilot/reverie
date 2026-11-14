@@ -5049,10 +5049,7 @@ class ReverieChatApp {
       if (manage) {
         this.companyRecoveryFields(runtime, data, status);
         if (data.boxedRuntime === true) {
-          runtime.append(
-            this.el('h3', '', 'Employee resources'),
-            this.el('p', 'ca-hint', 'Review resource limits and recover sessions in each employee’s Permissions tab.')
-          );
+          this.doc.defaultView.ReverieDockerResources?.mount(this, runtime, dialog);
         } else {
           this.doc.defaultView.ReverieFleetResources?.mount(this, runtime, dialog);
         }
@@ -13626,8 +13623,9 @@ class ReverieChatApp {
           this.el('p', 'ca-hint', 'Requested policy and verified running limits are shown separately.')
         );
         management.append(resources);
-        if (company.data?.boxedRuntime !== true)
-          globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
+        if (company.data?.boxedRuntime === true)
+          globalThis.ReverieDockerResources?.mountEmployee(this, resources, dialog, employee);
+        else globalThis.ReverieFleetResources?.mountEmployee(this, resources, dialog, employee);
         this.employeeGpuFields(resources, employee, dialog);
         if (company.data?.resourceReplacement === true) this.employeeMemoryFields(resources, employee, dialog);
         credentials.replaceChildren();
