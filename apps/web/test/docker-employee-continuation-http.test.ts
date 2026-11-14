@@ -509,13 +509,65 @@ describe('canonical resource inventory remains independent of launch permission'
     });
     return f;
   }
+  it('signed API callers cannot overwrite private retained ownership or receive it as permission', async () => {
+    const f = await boundFixture();
+    const imageId = destinationImage;
+    await f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations![0]!.tasks = [
+        {
+          role: 'anchor',
+          name: 'reverie-boxed-anchor-' + 'a'.repeat(32),
+          imageId,
+          configurationDigest: '1'.repeat(64),
+          phase: 'running',
+          containerId: '2'.repeat(64),
+          initPid: 101,
+          initStartTicks: '202',
+        },
+        {
+          role: 'pool-helper',
+          name: 'reverie-boxed-pool-helper-synthetic',
+          imageId,
+          configurationDigest: '3'.repeat(64),
+          phase: 'completed',
+          containerId: '4'.repeat(64),
+          resultDigest: '5'.repeat(64),
+        },
+      ];
+    });
+    const before = f.companyStore.snapshot();
+    for (const headers of [f.ownerHeaders, f.workerHeaders]) {
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-continuation',
+        headers,
+        payload: { request: f.request, dockerSharedPoolLineages: [] },
+      });
+      expect([400, 403, 409]).toContain(response.statusCode);
+      expect(response.body).not.toContain('reverie-boxed-shared-pool-lineage');
+    }
+    expect(f.companyStore.snapshot()).toEqual(before);
+    expect(f.company.view()).not.toHaveProperty('dockerSharedPoolLineages');
+    expect(f.effects()).toBe(1);
+    f.revokeIdentity();
+    const denied = await f.app.inject({ method: 'GET', url: f.url + '/docker-policy', headers: f.workerHeaders });
+    expect(denied.statusCode).toBe(403);
+    expect(f.companyStore.snapshot()).toEqual(before);
+  });
   it.each(['held', 'changed-source', 'remote-saved'] as const)(
     'retains exact current bound destination when %s prevents launching',
     async (change) => {
       const f = await boundFixture();
       if (change === 'held') f.saved.providerDispatchHeld = true;
       else if (change === 'changed-source') f.saved.workingDir = '/changed-launch-recipe';
-      else f.saved.remote = true;
+      else
+        f.saved.remote = {
+          hostId: 'synthetic',
+          label: 'Synthetic',
+          host: 'example.invalid',
+          username: 'synthetic',
+          remotePath: '/synthetic',
+        };
       const row = f.store.record(target)!;
       expect(f.store.subject(target)?.sourceDigest).not.toBe(row.sourceDigest);
       expect(f.store.resourceInventory().map((value) => value.destination?.containerId)).toEqual(['8'.repeat(64)]);

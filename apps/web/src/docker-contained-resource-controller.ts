@@ -243,7 +243,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (host[key] !== null && host[key] !== undefined && !isDeepStrictEqual(host[key], []))
         refuse('DOCKER_RESOURCE_HELPER_PRIVILEGES_CHANGED');
     const mounts = z
-      .array(z.object({ Type: z.literal('bind'), Source: z.string(), Destination: z.string(), RW: z.boolean() }))
+      .array(
+        z.object({
+          Type: z.literal('bind'),
+          Source: z.string(),
+          Destination: z.string(),
+          RW: z.boolean(),
+        })
+      )
       .parse(raw.Mounts);
     const expectedMounts = (expected.Binds as string[]).map((value) => {
       const [Source, Destination, mode] = value.split(':');
@@ -310,7 +317,12 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (current) task = await this.#created(row, 'anchor', name, config, current);
     if (!task || !('containerId' in task)) return null;
     const raw = await this.#fixed(task.containerId, config);
-    const state = z.object({ Running: z.boolean(), Pid: z.number().int().nonnegative().safe() }).parse(raw.State);
+    const state = z
+      .object({
+        Running: z.boolean(),
+        Pid: z.number().int().nonnegative().safe(),
+      })
+      .parse(raw.State);
     if (!state.Running && task.phase === 'created' && current) {
       if ((raw.State as { Status?: unknown }).Status !== 'created') refuse('DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED');
       await this.journal.publish(row, task, { ...task, phase: 'start-issued' }, current);
@@ -440,14 +452,71 @@ export class DockerContainedResources implements DockerContainedResourceControll
       this.#matches(result, worker ? policy : policy.pool, worker ? policy.memoryHighBytes : null)
     );
   }
+  async #poolWriterClosed(task: DockerContinuationTask): Promise<boolean> {
+    if (task.phase === 'create-issued' || task.phase === 'created') return true;
+    if (task.role !== 'pool-helper' || task.imageId !== this.configuration.helperImageId || !('containerId' in task))
+      return false;
+    const raw = await this.#inspect(task.containerId);
+    const args = z.array(z.string()).min(1).max(512).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Cmd);
+    if (args[0] !== 'configure-pool') return false;
+    const expected = this.#configuration('pool-helper', task.name, args, {
+      path: this.#parent,
+      target: '/run/reverie-box-pool',
+    });
+    if (dockerContinuationDigest(expected) !== task.configurationDigest) return false;
+    await this.#fixed(task.containerId, expected);
+    const state = z
+      .object({
+        Status: z.string(),
+        Running: z.boolean(),
+        Paused: z.boolean(),
+        Restarting: z.boolean(),
+        Dead: z.boolean(),
+        ExitCode: z.number().int(),
+        OOMKilled: z.boolean().optional(),
+        Error: z.string().optional(),
+      })
+      .parse(raw.State);
+    // Terminal failure can close a possible writer, but can NEVER acknowledge
+    // resource configuration. Only #ack below supplies that independent proof.
+    return (
+      state.Status === 'exited' &&
+      !state.Running &&
+      !state.Paused &&
+      !state.Restarting &&
+      !state.Dead &&
+      state.ExitCode >= 0 &&
+      state.ExitCode <= 255 &&
+      (state.Error ?? '') === ''
+    );
+  }
+  async #poolWritersClosed(except?: DockerContinuationTask): Promise<void> {
+    const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    if (prior.length > 128) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
+    for (const task of prior) {
+      if (
+        except &&
+        task.name === except.name &&
+        task.imageId === except.imageId &&
+        task.configurationDigest === except.configurationDigest &&
+        ('containerId' in task ? task.containerId : undefined) ===
+          ('containerId' in except ? except.containerId : undefined)
+      )
+        continue;
+      if (!(await this.#poolWriterClosed(task))) refuse('DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED');
+    }
+  }
   async #poolAck(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<void> {
     const own = this.journal.read(row, 'pool-helper');
+    const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    if (prior.length > 128) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
+    // A delayed earlier configure must not race this fresh probe. Its persisted
+    // START fence remains unknown until the ORIGINAL fixed container is terminal.
+    await this.#poolWritersClosed();
     if (own) {
       if (!(await this.#ack(own, fresh, row.policy, false))) refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
       return;
     }
-    const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
-    if (prior.length > 64) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
     for (const task of prior) if (await this.#ack(task, fresh, row.policy, false)) return;
     refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
   }
@@ -515,6 +584,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
       current();
       return;
     }
+    await this.#poolWritersClosed(this.journal.read(row, 'pool-helper'));
+    current();
     const p = row.policy.pool;
     await this.#configureTask(
       row,

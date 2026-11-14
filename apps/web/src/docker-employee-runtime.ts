@@ -272,7 +272,9 @@ export class DockerEmployeeRuntime {
           ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
         ],
         retainedPoolConfigurationTasks: () =>
-          inventory().flatMap((row) => row.tasks?.filter((task) => task.role === 'pool-helper') ?? []),
+          store.retainedPoolConfigurationTasks(
+            'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId
+          ),
       });
     const engine = new DockerEmployeeEngine(
       command,

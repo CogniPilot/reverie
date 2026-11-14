@@ -1,4 +1,5 @@
 import { EphemeralRestoration, allowedEphemeralTransition } from './docker-ephemeral-data.js';
+import { retainedDockerPoolTasks } from './docker-shared-pool-lineage.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from './utils/native-thread-profile.js';
 import {
   DockerContinuationTask,
@@ -113,6 +114,9 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   }
   /** Resource membership is DATA for fresh Engine/kernel proof, never launch permission.
    * A retained binding remains accounted for when its saved launch is held or changed. */
+  retainedPoolConfigurationTasks(anchorName: string, helperImageId: string): DockerContinuationTask[] {
+    return retainedDockerPoolTasks(this.company.store.snapshot(), anchorName, helperImageId);
+  }
   resourceInventory(): DockerEmployeeContinuationRecord[] {
     const state = this.company.store.snapshot(),
       rows = state.dockerEmployeeContinuations ?? [];

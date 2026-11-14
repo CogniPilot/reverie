@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanyStateSchema, type CompanyEmployee, type CompanyState } from './company-types.js';
+import { captureDockerSharedPoolLineages, preserveDockerSharedPoolLineages, DockerSharedPoolLineageError } from './docker-shared-pool-lineage.js';
 import { restMetadataId, restMetadataSessionId, type RestEmployeeMetadata } from './rest-canonical-metadata.js';
 import {EmployeeRecoveryAttempt} from './employee-recovery-attempt.js';
 import { recoveryDataDigest, supersedeStoppedRecoveryHistory } from './employee-recovery-operation.js';
@@ -541,7 +542,12 @@ export class CompanyStore {
             if (observation || stopped) observationBefore = JSON.stringify(current);
             const validation = validateAuthority();
             if (validation !== undefined) await validation;
+            const poolLineages = captureDockerSharedPoolLineages(current);
+            const poolLineageBytes = JSON.stringify(current.dockerSharedPoolLineages);
             const result = mutate(current);
+            if (JSON.stringify(current.dockerSharedPoolLineages) !== poolLineageBytes)
+              throw new DockerSharedPoolLineageError('DOCKER_SHARED_POOL_LINEAGE_CHANGED');
+            preserveDockerSharedPoolLineages(poolLineages, current);
             CompanyStateSchema.parse(current);
             const goalBytes = Buffer.byteLength(
               JSON.stringify({ goals: current.goals, grants: current.goalGrants, proofs: current.goalUnblockProofs })

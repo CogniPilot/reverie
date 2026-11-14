@@ -1,4 +1,5 @@
 import {DockerEmployeeBinding,DockerEmployeeResourcePolicy,DockerEmployeeContinuationRecord} from './docker-employee-continuation-data.js';
+import { DockerSharedPoolLineages } from './docker-shared-pool-lineage.js';
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
 import { EmployeeRecoveryOperation } from './employee-recovery-operation.js';
@@ -377,6 +378,8 @@ export const CompanyMemorySchema = z.object({
 });
 export const CompanyStateSchema = z.object({
   version: z.literal(1),
+  /** Private shared pool task lineage; independent of employee/plan lifetime, never a native grant. */
+  dockerSharedPoolLineages: DockerSharedPoolLineages.optional(),
   /** Private bounded deny-only Docker operation journal, never a native grant. */
   dockerEmployeeContinuations: z.array(DockerEmployeeContinuationRecord).max(64).refine(rows =>
     new Set(rows.map(row=>row.employeeId)).size===rows.length &&

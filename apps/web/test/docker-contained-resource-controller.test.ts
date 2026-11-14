@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CompanyStore } from '../src/company-store.js';
+import { retainedDockerPoolTasks } from '../src/docker-shared-pool-lineage.js';
+import { DockerEmployeeContinuationRecord as ContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import { isDeepStrictEqual } from 'node:util';
 import { DockerContainedResources } from '../src/docker-contained-resource-controller.js';
 import {
@@ -19,9 +25,16 @@ const policy = {
   pidsMax: 512,
   cpuWeight: 100,
   allowedCpus: [0, 1],
-  pool: { memoryMaxBytes: 48 * 1024 ** 3, swapMaxBytes: 0, pidsMax: 8192, cpuWeight: 100, allowedCpus: [0, 1] },
+  pool: {
+    memoryMaxBytes: 48 * 1024 ** 3,
+    swapMaxBytes: 0,
+    pidsMax: 8192,
+    cpuWeight: 100,
+    allowedCpus: [0, 1],
+  },
 };
 function fixture(boxId = 'b'.repeat(64)) {
+  let retained: DockerContinuationTask[] = [];
   const parent = `/reverie.slice/reverie-box.slice/reverie-box-${boxId}.slice`;
   let row = {
     employeeId: '11111111-1111-4111-8111-111111111111',
@@ -41,6 +54,8 @@ function fixture(boxId = 'b'.repeat(64)) {
     names: string[] = [],
     starts: string[] = [],
     phases: string[] = [];
+  let parentInode = '2',
+    anchorBirth = '10';
   let configured = false,
     high = false,
     lostCreate = false,
@@ -65,11 +80,11 @@ function fixture(boxId = 'b'.repeat(64)) {
     version: 1,
     purpose: 'reverie-boxed-resource-observation-v1',
     boxId,
-    parent: { path: parent, dev: '1', ino: '2' },
+    parent: { path: parent, dev: '1', ino: parentInode },
     anchor: {
       id: anchor,
       pid: 100,
-      startTicks: '10',
+      startTicks: anchorBirth,
       path: parent + '/docker-' + anchor + '.scope',
       dev: '1',
       ino: '3',
@@ -100,7 +115,14 @@ function fixture(boxId = 'b'.repeat(64)) {
         },
       },
       HostConfig: { PidMode: '' },
-      State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 200 },
+      State: {
+        Status: 'running',
+        Running: true,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Pid: 200,
+      },
     });
   const journal = {
     read: (_row: DockerEmployeeContinuationRecord, role: DockerContinuationTaskRole) => tasks.get(role),
@@ -136,7 +158,14 @@ function fixture(boxId = 'b'.repeat(64)) {
           const [Source, Destination, mode] = value.split(':');
           return { Type: 'bind', Source, Destination, RW: mode === 'rw' };
         }),
-        State: { Status: 'created', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0 },
+        State: {
+          Status: 'created',
+          Running: false,
+          Paused: false,
+          Restarting: false,
+          Dead: false,
+          Pid: 0,
+        },
       });
       if (lostCreate) {
         lostCreate = false;
@@ -220,6 +249,7 @@ function fixture(boxId = 'b'.repeat(64)) {
     deployment,
     helperImageId: helper,
     selectedWorkerContainerIds: () => [],
+    retainedPoolConfigurationTasks: () => retained,
   });
   return {
     controller,
@@ -233,6 +263,18 @@ function fixture(boxId = 'b'.repeat(64)) {
     starts,
     phases,
     tasks,
+    retain: (values: DockerContinuationTask[]) => {
+      retained = structuredClone(values);
+    },
+    containers,
+    logs,
+    driftEpoch: () => {
+      parentInode = '999';
+      anchorBirth = '999';
+    },
+    requireConfigure: () => {
+      configured = false;
+    },
     revoke: () => {
       current = false;
     },
@@ -260,6 +302,142 @@ function fixture(boxId = 'b'.repeat(64)) {
   };
 }
 describe('fixed Docker resource orchestration', () => {
+  it('a real canonical owner-row archival/reload leaves the native pool proof available to another employee', async () => {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    const directory = await mkdtemp(join(tmpdir(), 'pool-canonical-native-'));
+    try {
+      const file = join(directory, 'company.json'),
+        canonical = new CompanyStore(file);
+      await canonical.init();
+      const request = f.row().request;
+      const original = {
+        containerId: 'c'.repeat(64),
+        imageId: 'sha256:' + 'd'.repeat(64),
+        deployment,
+        employeeId: f.row().employeeId,
+        sessionId: request.sessionId,
+        home: { type: 'bind', source: '/synthetic/home', destination: '/home/agent', readWrite: true },
+        mountDigest: '1'.repeat(64),
+        storageDigest: '2'.repeat(64),
+        configurationDigest: '3'.repeat(64),
+      };
+      const row = ContinuationRecord.parse({
+        version: 1,
+        purpose: 'docker-employee-continuation-v1',
+        employeeId: f.row().employeeId,
+        sourceDigest: '4'.repeat(64),
+        original,
+        policy,
+        request: {
+          ...request,
+          containerId: original.containerId,
+          imageId: original.imageId,
+          expectedPolicyDigest: '5'.repeat(64),
+          expectedDestinationImageId: f.row().workerImage.imageId,
+          enterOffice: false,
+        },
+        workerImage: { ...f.row().workerImage, sourceImageId: original.imageId, clientManifestDigest: '6'.repeat(64) },
+        credentialId: '44444444-4444-4444-8444-444444444444',
+        phase: 'pool-issued',
+        tasks: [...f.tasks.values()],
+      });
+      await canonical.update((state) => {
+        state.dockerEmployeeContinuations = [row];
+      });
+      await canonical.update((state) => {
+        delete state.dockerEmployeeContinuations;
+      });
+      const restarted = new CompanyStore(file);
+      await restarted.init();
+      f.tasks.delete('pool-helper');
+      // The old current-employee-only callback is now empty: the same fresh
+      // native kernel values cannot supply the forgotten execution ACK.
+      await expect(f.controller.observePool(f.row())).rejects.toThrow('POOL_HELPER_UNACKNOWLEDGED');
+      f.retain(retainedDockerPoolTasks(restarted.snapshot(), 'reverie-boxed-anchor-' + 'b'.repeat(32), helper));
+      f.row().employeeId = '77777777-7777-4777-8777-777777777777';
+      f.row().request.operationId = '88888888-8888-4888-8888-888888888888';
+      const before = { creates: [...f.creates], starts: [...f.starts] };
+      expect(await f.controller.observePool(f.row())).not.toBeNull();
+      expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+      f.changeHelper('pool-helper', 'restart');
+      await expect(f.controller.observePool(f.row())).rejects.toThrow();
+      expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('changed native epoch never adopts an old ACK or replays the anchor START', async () => {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    f.retain([f.tasks.get('pool-helper')!]);
+    f.tasks.delete('pool-helper');
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    f.driftEpoch();
+    await expect(f.controller.observePool(f.row())).rejects.toThrow('ANCHOR_REPLACED');
+    expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+  });
+  it('another unresolved writer blocks new configuration before CREATE or START', async () => {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    const pending = f.tasks.get('pool-helper')!;
+    if (!('containerId' in pending)) throw Error('fixture requires CID');
+    (f.containers.get(pending.containerId)!.State as Record<string, unknown>).Running = true;
+    f.retain([pending]);
+    f.tasks.delete('pool-helper');
+    f.requireConfigure();
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    await expect(f.controller.preparePool(f.row(), f.current)).rejects.toThrow('WRITER_UNCONFIRMED');
+    expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+  });
+
+  it('reuses a retired owner ACK only after fresh native proof and without effects', async () => {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    const completed = f.tasks.get('pool-helper')!;
+    f.retain([completed]);
+    f.tasks.delete('pool-helper');
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    expect(await f.controller.observePool(f.row())).toMatchObject({
+      policyDigest: expect.any(String),
+    });
+    expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+    f.logs.set(('containerId' in completed && completed.containerId) || '', '{}');
+    await expect(f.controller.observePool(f.row())).rejects.toThrow();
+    expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+  });
+  it.each(['running', 'missing', 'failed', 'stale-ack'] as const)(
+    'retained %s writer cannot be hidden behind another completed ACK',
+    async (mode) => {
+      const f = fixture();
+      await f.controller.preparePool(f.row(), f.current);
+      const good = f.tasks.get('pool-helper')!;
+      if (!('containerId' in good)) throw Error('fixture requires actual CID');
+      const original = f.containers.get(good.containerId)!;
+      const otherId = 'f'.repeat(64);
+      f.containers.set(otherId, { ...structuredClone(original), Id: otherId });
+      const { role, name, imageId, configurationDigest } = good;
+      const other = {
+        role,
+        name,
+        imageId,
+        configurationDigest,
+        containerId: otherId,
+        phase: 'start-issued' as const,
+      };
+      if (mode === 'running') (f.containers.get(otherId)!.State as Record<string, unknown>).Running = true;
+      else if (mode === 'missing') f.containers.delete(otherId);
+      else if (mode === 'failed') (f.containers.get(otherId)!.State as Record<string, unknown>).ExitCode = 1;
+      else f.logs.set(good.containerId, '{}');
+      f.retain([good, other]);
+      const before = { creates: [...f.creates], starts: [...f.starts] };
+      if (mode === 'failed') expect(await f.controller.observePool(f.row())).not.toBeNull();
+      else await expect(f.controller.observePool(f.row())).rejects.toThrow();
+      expect({ creates: f.creates, starts: f.starts }).toEqual(before);
+    }
+  );
+
   it('isolates helper names when two instances receive the same public operation ID', async () => {
     const first = fixture('b'.repeat(64)),
       second = fixture('c'.repeat(64));
