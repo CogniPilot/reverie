@@ -101,9 +101,15 @@ export async function canaryGet(canary, path) {
   assert(result.success === true);
   return result.data;
 }
+export function validCanaryCookieName(name) {
+  return (
+    ['owner-session.json', 'owner-session-after-control1.json'].includes(name) ||
+    /^owner-session-control-[a-f0-9]{64}\.json$/.test(name)
+  );
+}
 export async function loadVerifiedCanaryOwner(proofFile, sessionName = 'owner-session.json') {
   assert(resolve(proofFile) === proofFile);
-  assert(['owner-session.json', 'owner-session-after-control1.json'].includes(sessionName));
+  assert(validCanaryCookieName(sessionName));
   assert((await fs.stat(proofFile)).size <= 65536);
   const proof = JSON.parse(await fs.readFile(proofFile, 'utf8')),
     endpoint = new URL(proof.endpoint);
@@ -128,7 +134,12 @@ export async function loadVerifiedCanaryOwner(proofFile, sessionName = 'owner-se
   canary.cookie = cookie;
   const owner = await canaryGet(canary, '/api/owner/status');
   assert(
-    owner.configured === true && owner.signedIn === true && owner.policy === 'enforce' && owner.mustChange === false
+    owner.configured === true &&
+      owner.signedIn === true &&
+      owner.policy === 'enforce' &&
+      owner.mustChange === false &&
+      owner.identity?.role === 'owner' &&
+      owner.identity?.primary === true
   );
   return canary;
 }

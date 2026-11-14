@@ -202,10 +202,10 @@ function credentialStamp(value: Stats): string {
     value.ctimeMs,
   ].join(':');
 }
-async function savedEnrollment(directory: string): Promise<{ username: string; password: string }> {
-  const path = join(directory, 'owner-enrollment-intent.json');
+async function privateSavedObject(directory: string, name: string): Promise<Json> {
+  const path = join(directory, name);
   const file = await fs.open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  let failure: unknown, value: { username: string; password: string } | undefined;
+  let failure: unknown, value: Json | undefined;
   try {
     const before = await file.stat();
     if (
@@ -233,15 +233,11 @@ async function savedEnrollment(directory: string): Promise<{ username: string; p
       throw Error('Saved synthetic credential changed');
     const raw = bytes.subarray(0, count).toString('utf8');
     if (!Buffer.from(raw).equals(bytes.subarray(0, count))) throw Error('Saved credential encoding refused');
-    const decoded = record(JSON.parse(raw));
-    if (
-      Object.keys(decoded).sort().join(',') !== 'password,username' ||
-      decoded.username !== 'canary-owner' ||
-      typeof decoded.password !== 'string' ||
-      !/^[A-Za-z0-9_-]{43}$/.test(decoded.password)
-    )
-      throw Error('Saved synthetic enrollment differs');
-    value = { username: decoded.username, password: decoded.password };
+    try {
+      value = record(JSON.parse(raw));
+    } catch {
+      throw Error('Saved canary JSON refused');
+    }
   } catch (cause) {
     failure = cause;
   }
@@ -254,34 +250,98 @@ async function savedEnrollment(directory: string): Promise<{ username: string; p
   if (!value) throw Error('Saved enrollment absent');
   return value;
 }
-/** Same caller-owned fresh Docker identity proof as enrollment is required.
- * This issues exactly one login using existing saved synthetic credentials.
- * It never calls setup, policy selection, observe, continuation or reset. */
-export async function loginDockerCanaryOwner(endpoint: string, directory: string) {
+export function validCanaryCookieName(name: string): boolean {
+  return (
+    ['owner-session.json', 'owner-session-after-control1.json'].includes(name) ||
+    /^owner-session-control-[a-f0-9]{64}\.json$/.test(name)
+  );
+}
+async function savedEnrollment(directory: string): Promise<{ username: string; password: string }> {
+  const decoded = await privateSavedObject(directory, 'owner-enrollment-intent.json');
+  if (
+    Object.keys(decoded).sort().join(',') !== 'password,username' ||
+    decoded.username !== 'canary-owner' ||
+    typeof decoded.password !== 'string' ||
+    !/^[A-Za-z0-9_-]{43}$/.test(decoded.password)
+  )
+    throw Error('Saved synthetic enrollment differs');
+  return { username: decoded.username, password: decoded.password };
+}
+/** Caller must freshly verify this exact disposable control CID, endpoint and SAME
+ * data/key. A previously issued immutable cookie is reused only after actual
+ * signedIn/enforce owner proof. Only explicit signedIn:false permits one login.
+ * No setup, reset, policy selection, observation or continuation is called. */
+export async function loginDockerCanaryOwner(
+  endpoint: string,
+  directory: string,
+  controlId: string,
+  previousSessionName: string
+) {
+  if (!/^[a-f0-9]{64}$/.test(controlId) || !validCanaryCookieName(previousSessionName))
+    throw Error('Exact control CID and closed prior cookie filename required');
   const url = target(endpoint);
   await privateDirectory(directory);
   const requests: RecordedRequest[] = [];
   const request = client(url, requests);
-  const status = await success(await request('/api/owner/status'));
-  if (status.configured !== true || status.setupAvailable !== false || status.policy !== 'enforce')
-    throw Error('Existing canary owner account required; no setup/reset attempted');
-  const saved = await savedEnrollment(directory);
-  await privateRecord(directory, 'owner-relogin1-intent.json', { endpoint: url.origin, at: new Date().toISOString() });
-  const owner = await signIn(request, directory, saved.username, saved.password, 'owner-session-after-control1.json');
+  await privateRecord(directory, 'owner-control-' + controlId + '-intent.json', {
+    controlId,
+    endpoint: url.origin,
+    previousSessionName,
+    at: new Date().toISOString(),
+  });
+  const previous = await privateSavedObject(directory, previousSessionName);
+  if (
+    Object.keys(previous).join(',') !== 'cookie' ||
+    typeof previous.cookie !== 'string' ||
+    !/^reverie_owner=[^;\r\n]+$/.test(previous.cookie)
+  )
+    throw Error('Prior cookie frame refused');
+  const status = await success(await request('/api/owner/status', 'GET', undefined, { cookie: previous.cookie }));
+  if (
+    status.configured !== true ||
+    status.setupAvailable !== false ||
+    status.policy !== 'enforce' ||
+    typeof status.signedIn !== 'boolean'
+  )
+    throw Error('Existing enforced canary owner account required');
+  let owner: { cookie: string; sessionFile: string },
+    loginIssued = false;
+  if (status.signedIn) {
+    if (
+      status.mustChange !== false ||
+      status.username !== 'canary-owner' ||
+      record(status.identity).role !== 'owner' ||
+      record(status.identity).primary !== true
+    )
+      throw Error('Prior session is not the unrestricted expected owner');
+    owner = { cookie: previous.cookie, sessionFile: join(directory, previousSessionName) };
+  } else {
+    const saved = await savedEnrollment(directory);
+    loginIssued = true;
+    owner = await signIn(
+      request,
+      directory,
+      saved.username,
+      saved.password,
+      'owner-session-control-' + controlId + '.json'
+    );
+  }
   await verifyFixture(request, owner.cookie);
   await refusalControls(request, owner.cookie);
   const report = {
-    version: 1,
-    purpose: 'reverie-disposable-owner-login-only-v1',
+    version: 2,
+    purpose: 'reverie-disposable-owner-current-or-login-v2',
+    controlId,
     endpoint: url.origin,
     employeeId: CANARY_EMPLOYEE,
     sessionId: CANARY_SESSION,
     sessionGeneration: CANARY_GENERATION,
     ownerAuthenticated: true,
-    loginOnly: true,
+    loginIssued,
+    previousCookieReused: !loginIssued,
     requests,
     noSetupResetOrContinuation: true,
   };
-  await privateRecord(directory, 'owner-relogin1-report.json', report);
+  await privateRecord(directory, 'owner-control-' + controlId + '-report.json', report);
   return { report, ownerSessionFile: owner.sessionFile };
 }
