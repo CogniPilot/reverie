@@ -1520,6 +1520,12 @@ dependencies = [
 [[package]]
 name = "reverie-worker-client-entry"
 version = "0.1.0"
+dependencies = [
+ "nix",
+ "serde",
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "reverie-worker-resource-controller"

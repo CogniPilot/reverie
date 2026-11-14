@@ -1,6 +1,7 @@
 //! Static fixed client entry: sanitize before a dynamic loader or Node can run.
 #![forbid(unsafe_code)]
 use std::{ffi::OsString, os::unix::process::CommandExt, process::Command};
+mod install;
 const NODE: &str = "/opt/reverie-worker-client/bin/node";
 const SCRIPT: &str = "/opt/reverie-worker-client/bin/reverie.mjs";
 const KEYS: &[&str] = &[
@@ -59,6 +60,15 @@ fn command(
 }
 fn main() -> std::process::ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some(result) = install::arguments(&args) {
+        return match result.and_then(install::run) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("worker credential install refused or unconfirmed: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     let error = match command(&args, std::env::vars_os()) {
         Ok(mut command) => command.exec().to_string(),
         Err(message) => message.to_owned(),

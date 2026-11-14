@@ -7,3 +7,9 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+nix = { workspace = true, features = ["fs", "poll", "user"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
