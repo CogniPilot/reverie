@@ -43,7 +43,7 @@ async function fixture() {
     name = 'reverie-' + randomUUID(),
     env = { ...process.env, TMUX: undefined, TMUX_TMPDIR: root, TERM: 'xterm-256color' };
   const tm = (args: string[]) =>
-    cp.execFileSync('tmux', ['-L', socket, ...args], { encoding: 'utf8', timeout: 2000, env });
+    cp.execFileSync('tmux', ['-f', '/dev/null', '-L', socket, ...args], { encoding: 'utf8', timeout: 2000, env });
   const clients: pty.IPty[] = [];
   const exited = new Set<pty.IPty>();
   const owned: { pid?: number; birth?: string } = {};
@@ -189,7 +189,16 @@ describe.runIf(process.platform === 'linux')('actual exact website-owned tmux cl
     expect(f.exited.has(f.second)).toBe(false);
     const mutations = calls.mock.calls.map(([, args]) => args as string[]).filter((a) => a.includes('detach-client'));
     expect(mutations).toHaveLength(1);
-    expect(mutations[0]).toEqual(['-L', f.socket, 'detach-client', '-t', Reflect.get(f.first, 'ptsName')]);
+    expect(mutations[0]).toEqual([
+      '-N',
+      '-f',
+      '/dev/null',
+      '-L',
+      f.socket,
+      'detach-client',
+      '-t',
+      Reflect.get(f.first, 'ptsName'),
+    ]);
     expect(
       calls.mock.calls.some(([, args]) =>
         (args as string[]).some((a) =>
@@ -320,5 +329,62 @@ describe.runIf(process.platform === 'linux')('client metadata and checked-close 
     expect(birth(f.first.pid)).toBeUndefined();
     expect(f.census()).toEqual([f.second.pid]);
     await expect(f.capture.detach(null, f.mux, f.record, () => {})).rejects.toThrow('unconfirmed');
+  });
+});
+
+describe.runIf(process.platform === 'linux')('no-autostart observations and self namespace', () => {
+  it('refuses an absent server after currency without starting a replacement or reading personal config', async () => {
+    const f = await fixture(),
+      socketPath = f.tm(['display-message', '-p', '#{socket_path}']).trim(),
+      original = cp.execFileSync,
+      socketIdentity = fs.lstatSync(socketPath, { bigint: true });
+    let closed = false;
+    const calls = vi.spyOn(cp, 'execFileSync').mockImplementation(((
+      file: string,
+      args: readonly string[],
+      options: unknown
+    ) => {
+      if (!closed && args.includes('display-message')) {
+        closed = true;
+        f.tm(['kill-server']);
+      }
+      return Reflect.apply(original, cp, [file, args, options]);
+    }) as typeof cp.execFileSync);
+    expect(() => DockerPlanLocalClient.capture(f.first, f.mux, f.record)).toThrow();
+    expect(closed).toBe(true);
+    const observation = calls.mock.calls.find(([, args]) => (args as string[]).includes('display-message'));
+    expect(observation?.[1]?.slice(0, 5)).toEqual(['-N', '-f', '/dev/null', '-L', f.socket]);
+    await until(() => f.exited.has(f.first) && f.exited.has(f.second));
+    expect(birth(f.server)).toBeUndefined();
+    // A dead tmux server can leave its old socket pathname. Its inode must not
+    // be replaced by a newly started server, and a no-autostart probe must fail.
+    if (fs.existsSync(socketPath)) {
+      const remaining = fs.lstatSync(socketPath, { bigint: true });
+      expect([remaining.dev, remaining.ino]).toEqual([socketIdentity.dev, socketIdentity.ino]);
+    }
+    const absent = cp.spawnSync('tmux', ['-N', '-f', '/dev/null', '-L', f.socket, 'display-message', '-p', '#{pid}'], {
+      encoding: 'utf8',
+      timeout: 1000,
+      env: process.env,
+    });
+    expect(absent.status).not.toBe(0);
+    expect(absent.stdout).toBe('');
+    expect(
+      calls.mock.calls.some(([, args]) =>
+        (args as string[]).some((a) => ['new-session', 'start-server', 'detach-client'].includes(a))
+      )
+    ).toBe(false);
+  });
+  it('refuses a foreign proc self namespace before any tmux observation or detach', async () => {
+    const f = await fixture(),
+      original = fs.readFileSync,
+      calls = vi.spyOn(cp, 'execFileSync');
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((p: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+      const out = Reflect.apply(original, fs, [p, ...args]);
+      return p === '/proc/self/stat' && typeof out === 'string' ? out.replace(/^\d+/, String(process.pid + 1)) : out;
+    }) as typeof fs.readFileSync);
+    expect(() => DockerPlanLocalClient.capture(f.first, f.mux, f.record)).toThrow('unconfirmed');
+    expect(calls).not.toHaveBeenCalled();
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
   });
 });

@@ -7,6 +7,7 @@ import type { IPty } from 'node-pty';
 import type { TerminalMultiplexer, MuxSession } from './mux-interface.js';
 const clientFormat = '#{client_pid}\t#{client_tty}\t#{client_name}\t#{session_name}\t#{pid}\t#{socket_path}';
 const serverFormat = '#{pid}\t#{socket_path}';
+const observationArgs = (socket: string): readonly string[] => ['-N', '-f', '/dev/null', '-L', socket];
 function refuse(): never {
   throw Error('The original local tmux client is unconfirmed');
 }
@@ -139,6 +140,8 @@ export class DockerPlanLocalClient {
       record.discovered
     )
       return refuse();
+    const self = fs.readFileSync('/proc/self/stat', 'utf8');
+    if (Number(self.match(/^(\d+) \(/)?.[1]) !== process.pid) return refuse();
     if (mux.getSession(record.sessionId) !== record) return refuse();
     if (
       !isDeepStrictEqual(mux.getAttachArgs(record.muxName), [
@@ -167,7 +170,7 @@ export class DockerPlanLocalClient {
       if (!device.isCharacterDevice() || device.uid !== BigInt(process.getuid?.() ?? -1)) return refuse();
       const env = environment(),
         body = cp
-          .execFileSync('tmux', ['-L', mux.muxSocket, 'display-message', '-p', serverFormat], {
+          .execFileSync('tmux', [...observationArgs(mux.muxSocket), 'display-message', '-p', serverFormat], {
             encoding: 'utf8',
             timeout: 1000,
             maxBuffer: 8192,
@@ -208,7 +211,7 @@ export class DockerPlanLocalClient {
   }
   #command(args: readonly string[]): string {
     try {
-      return cp.execFileSync('tmux', ['-L', this.#socket, ...args], {
+      return cp.execFileSync('tmux', [...observationArgs(this.#socket), ...args], {
         encoding: 'utf8',
         timeout: 1000,
         maxBuffer: 65536,
