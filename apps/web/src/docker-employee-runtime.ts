@@ -1,6 +1,7 @@
+import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
 import type{PlanService}from'./plan-accounts.js';
-import type{PlanMoveStore}from'./plan-move-store.js';
+import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
@@ -195,6 +196,7 @@ export class DockerEmployeeRuntime {
   readonly #key: DockerRuntimeKey;
   #attached?: Attached;
   readonly #planActors=new Set<DockerPlanMoveActor>();
+  #planMoves?:PlanMoveStore;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -291,9 +293,7 @@ export class DockerEmployeeRuntime {
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
-        selectedWorkerContainerIds: () => [
-          ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
-        ],
+        selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
             'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId, boxId
@@ -380,6 +380,7 @@ export class DockerEmployeeRuntime {
    * requester; no request body selects Engine, paths, accounts or commands. */
   planMoveActor(plans:PlanService,moves:PlanMoveStore,chat:ChatroomService):DockerPlanMoveActor|undefined{
     const a=this.#attached;if(!a||!this.current())return;
+    if(!(moves instanceof PlanMoveStore)||(this.#planMoves&&this.#planMoves!==moves))throw Error('Original private plan journal required');this.#planMoves=moves;
     const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
     return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,retain:actor=>this.#planActors.add(actor)});
   }

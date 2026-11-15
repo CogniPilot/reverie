@@ -1,3 +1,4 @@
+import { dockerPlanWorkerContainerIds } from './docker-plan-worker-inventory.js';
 /** One original target's existing Engine/helper tasks in the SAME PlanMoves
  * journal. No independent task writer or replacement effect retry exists. */
 import { isDeepStrictEqual } from 'node:util';
@@ -104,18 +105,12 @@ export class DockerPlanMoveWork {
         deployment: d.deployment,
         helperImageId: d.helperImageId,
         memoryHighHelperImageId: d.memoryHighHelperImageId,
-        selectedWorkerContainerIds: async () => {
-          journal.current();
-          const staged = await d.moves.stagedDockerResourceInventory();
-          journal.current();
-          return [
-            ...new Set(
-              [...d.canonical.resourceInventory(), ...staged].flatMap((row) =>
-                row.destination ? [row.destination.containerId] : []
-              )
-            ),
-          ];
-        },
+        selectedWorkerContainerIds: () =>
+          dockerPlanWorkerContainerIds(
+            () => d.canonical.resourceInventory(),
+            d.moves,
+            () => journal.current()
+          ),
         retainedPoolConfigurationTasks: () =>
           d.canonical.retainedPoolConfigurationTasks(
             'reverie-boxed-anchor-' + d.boxId.slice(0, 32),

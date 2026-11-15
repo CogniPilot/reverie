@@ -1,3 +1,4 @@
+import { captureDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { dockerPlanAccountStatusArguments, DockerPlanAccountStatus } from './docker-plan-account-status.js';
 /** The one PlanMoves native actor. Request DATA cannot construct its captured
  * requester, native source observation or provider-dispatch admission. */
@@ -68,7 +69,9 @@ import type { DockerRuntimeConfiguration } from './docker-employee-runtime.js';
 import type { SessionState } from './types.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
-type Context = SessionPort & ConfigPort & Pick<InfraPort, 'mux'>;
+type Context = SessionPort &
+  ConfigPort &
+  Pick<InfraPort, 'mux'> & { retireDockerPlanSource?(proof: unknown): Promise<void> };
 export interface DockerPlanMoveComposition {
   readonly company: CompanyService;
   readonly ctx: Context;
@@ -199,7 +202,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       saved.id !== scope.sessionId ||
       saved.remote ||
       saved.customModel ||
-      !accountReplacementProfile(saved.mode)
+      !accountReplacementProfile(saved.mode) ||
+      !nativeThreadProfile(saved.mode ?? 'claude')
     )
       throw new PlanMoveError('The current native account recipe is unavailable', 409);
     const subject = this.#d.store.existingSubject(employeeId, row);
@@ -342,6 +346,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       );
     current();
     snapshot.require();
+    if (!nativeThreadProfile(target.saved.mode ?? 'claude'))
+      throw new PlanMoveError('A qualified stock target protocol is required', 409);
     // Closed managed lineage is selected by the actual private ancestry below;
     // never by display labels, timestamps or an arbitrary HOME directory.
     const accountSource = await this.#accountSource(source.row, snapshot, current);
@@ -430,6 +436,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     this.current(record, journal.read());
     const state = journal.read();
     requireDockerPlanProtocol(state.seed.target.workerImage.clientManifestDigest, () => journal.current());
+    if (!nativeThreadProfile(state.seed.target.provider === 'anthropic' ? 'claude' : 'codex'))
+      throw new PlanMoveError('The selected target protocol changed', 409);
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
     if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
       throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
@@ -1352,6 +1360,41 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       }
     }
     return new NativeContinuation(this, journal.read(), () => journal.current(), false);
+  }
+  /** Core calls only after its checked completed ACK. Failure affects local
+   * cleanup status only; no business cursor/provider input is replayed. */
+  async retireSource(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
+    journal.current();
+    if (record.phase !== 'completed' || journal.publication !== 'published' || !this.#d.ctx.retireDockerPlanSource)
+      throw new PlanMoveError('Published source-view retirement is unavailable', 409);
+    const state = journal.read(),
+      row = publishedWork(state.work),
+      current = this.#targetCurrent(record, journal),
+      target = this.#d.ctx.sessions.get(row.request.sessionId),
+      old = this.#d.ctx.sessions.get(record.oldSession);
+    if (!target) throw new PlanMoveError('The genuine current target viewer is required', 409);
+    const check = () => {
+      journal.current();
+      current();
+      if (
+        this.#d.ctx.sessions.get(target.id) !== target ||
+        (this.#d.ctx.sessions.get(record.oldSession) !== old &&
+          this.#d.ctx.sessions.get(record.oldSession) !== undefined)
+      )
+        throw new PlanMoveError('The retirement Session references changed', 409);
+    };
+    const source = await this.#source.capture(state.seed.source.record, state.seed.source.binding, check, true);
+    check();
+    const view = await this.#d.engine.captureProviderView(row, check);
+    check();
+    const proof = captureDockerPlanSourceRetirement(record, state, source, view, old, target, check);
+    await this.#d.ctx.retireDockerPlanSource(proof);
+    // The server deliberately removes the old slot. Only target/runtime/native
+    // currency remains relevant after its acknowledged metadata retirement.
+    journal.current();
+    current();
+    if (this.#d.ctx.sessions.get(target.id) !== target)
+      throw new PlanMoveError('The completed target Session changed', 409);
   }
   requireContinuation(proof: unknown, state: Readonly<DockerPlanMoveJournalState>): void {
     if (!(proof instanceof NativeContinuation))

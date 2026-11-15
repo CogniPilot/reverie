@@ -19,6 +19,7 @@ import {
 import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
 import type { SessionDocker } from '../src/types.js';
 import {
+  DockerEmployeePlanReplacementWorkRecord,
   DockerEmployeeResourcePolicy,
   DockerEmployeeContinuationRecord,
 } from '../src/docker-employee-continuation-data.js';
@@ -1483,14 +1484,14 @@ describe('resource revision observation boundary', () => {
       const f = await planReplacementMetadata();
       vi.mocked(f.command.create).mockClear();
       await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();
-      await expect(f.engine.createPlanReplacementDestination({...f.row,phase:'destination-issued',destination:undefined}, () => {})).rejects.toThrow('NETWORKS_REQUIRED');
+      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...f.row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORKS_REQUIRED');
       expect(f.command.create).not.toHaveBeenCalled();
     });
     it('copies both current source networks by immutable ID and omits IP/alias data', async () => {
       const f = await planReplacementMetadata(),
         row = select(f);
       vi.mocked(f.command.create).mockClear();
-      await f.engine.createPlanReplacementDestination({...row,phase:'destination-issued',destination:undefined}, () => {});
+      await f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {});
       const body = f.created()!;
       expect(body.NetworkingConfig).toEqual({
         EndpointsConfig: { [first]: {}, [second]: {} },
@@ -1505,7 +1506,7 @@ describe('resource revision observation boundary', () => {
         row = select(f);
       f.source.NetworkSettings = members([first, third]);
       vi.mocked(f.command.create).mockClear();
-      await expect(f.engine.createPlanReplacementDestination({...row,phase:'destination-issued',destination:undefined}, () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
       expect(f.command.create).not.toHaveBeenCalled();
       f.source.NetworkSettings = members([first, second]);
       f.observed.NetworkSettings = members([first, third]);
@@ -1600,7 +1601,7 @@ describe('resource revision observation boundary', () => {
         f.source.NetworkSettings = members([first, third]);
         return row.pool!;
       });
-      await expect(f.engine.createPlanReplacementDestination({...row,phase:'destination-issued',destination:undefined}, () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
       expect(f.command.create).not.toHaveBeenCalled();
     });
     it('refuses a Created selector mutation across the readonly name resolution await', async () => {

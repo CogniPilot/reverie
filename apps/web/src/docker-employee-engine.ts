@@ -712,7 +712,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   /** The normal continuation never obtains v3 paid/work authority. */
   async createDestination(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{if(row.version===3)refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');return this.#createDestination(row,current,false);}
-  async createPlanReplacementDestination(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='destination-issued')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');return this.#createDestination(row,current,true);}
+  async createPlanReplacementDestination(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='destination-issued'||row.destination)refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');return this.#createDestination(row,current,true);}
   async validatePlanReplacement(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{
     const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();const source=await this.#source(row);current();this.#requireCapsuleMounts(source);
     if(source.Config.Entrypoint?.length!==1||source.Config.Entrypoint[0]!=='/opt/reverie/perf/bin/reverie-worker-init'||(source.Config.Cmd?.length??0)!==0||source.Config.Env.filter(v=>v.startsWith('PATH=')).length!==1||source.Config.Env.some(v=>/^REVERIE_(USERNAME|PASSWORD|HOOK_SECRET|SERVICE_TOKEN|RECOVERY_[A-Z_]+)=/.test(v)))refuse('DOCKER_CONTINUATION_INERT_ORIGINAL_REQUIRED');
