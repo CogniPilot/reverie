@@ -19,7 +19,7 @@ import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-vi
 import type { SessionDocker } from '../src/types.js';
 import {
   DockerEmployeeResourcePolicy,
-  type DockerEmployeeContinuationRecord,
+  DockerEmployeeContinuationRecord,
 } from '../src/docker-employee-continuation-data.js';
 import {
   DockerEmployeeInspect,
@@ -1099,6 +1099,90 @@ describe('ephemeral health boundary integration', () => {
 });
 
 describe('resource revision observation boundary', () => {
+  /** Controlled Engine replies test only cross-SID metadata correlation. They do
+   * not claim native account custody, actual process closure or paid admission. */
+  async function planReplacementMetadata() {
+    const f = await providerViewFixture();
+    f.source.Config.Labels = {
+      'reverie.boxed.instance': 'fixture',
+      'reverie.boxed.employee': eid,
+      'reverie.boxed.session': sid,
+    };
+    const original = boxedOriginal(f.source, subject, 'fixture', true),
+      nextSid = '60000000-0000-4000-8000-000000000006',
+      nextOperation = '70000000-0000-4000-8000-000000000007';
+    Object.assign(f.observed.Config.Labels!, {
+      'reverie.boxed.session': nextSid,
+      'reverie.boxed.operation': nextOperation,
+      'reverie.boxed.generation': '4',
+    });
+    const row = DockerEmployeeContinuationRecord.parse({
+      ...f.row,
+      version: 3,
+      purpose: 'docker-employee-plan-replacement-v3',
+      request: { ...f.row.request, sessionId: nextSid, sessionGeneration: 4, operationId: nextOperation },
+      original,
+      destination: boxedOriginal(f.observed, { ...subject, sessionId: nextSid }, 'fixture', true),
+      credentialId: '80000000-0000-4000-8000-000000000008',
+      providerSourceDigest: '9'.repeat(64),
+      tasks: (['storage-holder', 'leaf-helper', 'identity-helper'] as const).map((role, i) => ({
+        role,
+        name: 'reverie-boxed-synthetic-' + role,
+        imageId: helper,
+        configurationDigest: String(i + 1).repeat(64),
+        containerId: String(i + 4).repeat(64),
+        ...(role === 'storage-holder'
+          ? { phase: 'running', initPid: 123, initStartTicks: '456' }
+          : { phase: 'completed', resultDigest: '7'.repeat(64) }),
+      })),
+      planReplacement: {
+        version: 1,
+        purpose: 'docker-plan-replacement-provenance-v1',
+        moveId: 'synthetic-move',
+        source: {
+          binding: {
+            version: 1,
+            operationId: oid,
+            credentialId: f.row.credentialId,
+            sessionId: sid,
+            sessionGeneration: 3,
+            containerId: cid,
+            imageId: image,
+            originalDigest: dockerContinuationDigest(original),
+            policyDigest: dockerContinuationDigest(f.policy),
+          },
+          continuationDigest: dockerContinuationDigest(f.row),
+          providerSourceDigest: subject.providerSourceDigest,
+        },
+        account: {
+          id: 'synthetic-account',
+          provider: 'anthropic',
+          projectionDigest: '8'.repeat(64),
+          contextDigest: '6'.repeat(64),
+        },
+      },
+    });
+    return { ...f, row, nextSid };
+  }
+  it('reads old and target metadata under their exact distinct session identities without an effect', async () => {
+    const f = await planReplacementMetadata();
+    vi.mocked(f.command.run).mockClear();
+    vi.mocked(f.command.create).mockClear();
+    await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(f.command.run).mock.calls.every(([a]) => a[0] === 'container' && ['ls', 'inspect'].includes(a[1]!))
+    ).toBe(true);
+  });
+  it.each(['source', 'target'] as const)(
+    'rejects a replacement whose %s placement was relabeled to the other SID',
+    async (which) => {
+      const f = await planReplacementMetadata();
+      if (which === 'source') f.source.Config.Labels!['reverie.boxed.session'] = f.nextSid;
+      else f.observed.Config.Labels!['reverie.boxed.session'] = sid;
+      await expect(f.engine.verifyResourceDestination(f.row, () => {})).rejects.toThrow();
+    }
+  );
   it('fixed metadata verification accepts only the exact current running original', async () => {
     const f = await providerViewFixture();
     await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();

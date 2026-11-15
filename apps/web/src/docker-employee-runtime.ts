@@ -475,7 +475,7 @@ export class DockerEmployeeRuntime {
       const saved = a.ctx.store.getSession(employee.sessionId);
       if (!saved) throw Error('Boxed existing viewer saved recipe missing');
       const providerSource =
-        row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved);
+        row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
       const renewalCurrent = () => {
         current();
         if (

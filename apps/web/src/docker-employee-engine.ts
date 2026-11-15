@@ -179,9 +179,21 @@ function rowSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSu
     sessionGeneration: row.request.sessionGeneration,
     owner: row.owner,
     sourceDigest: row.sourceDigest,
-    providerSourceDigest: row.version === 2 ? row.providerSourceDigest : row.sourceDigest,
+    providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
     onVacation: false,
     desiredRunning: true,
+  };
+}
+/** A replacement reads its retained old placement under the old SID. The target
+ * subject above is used only for the new destination; neither is launch authority. */
+function sourceSubject(row: DockerEmployeeContinuationRecord): DockerContinuationSubject {
+  if (row.version !== 3) return rowSubject(row);
+  const source = row.planReplacement.source;
+  return {
+    ...rowSubject(row),
+    sessionId: source.binding.sessionId,
+    sessionGeneration: source.binding.sessionGeneration,
+    providerSourceDigest: source.providerSourceDigest,
   };
 }
 export class DockerEmployeeEngine implements DockerContinuationEngine {
@@ -234,7 +246,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   async #source(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
     const raw = await this.#inspect(row.original.containerId);
-    if (raw.State.Running || !isDeepStrictEqual(boxedOriginal(raw, rowSubject(row), this.deployment), row.original))
+    if (
+      raw.State.Running ||
+      !isDeepStrictEqual(boxedOriginal(raw, sourceSubject(row), this.deployment, row.version === 3), row.original)
+    )
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
     return raw;
   }
@@ -667,7 +682,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       b = DockerEmployeeBinding.parse(binding),
       digest = dockerContinuationDigest(checked),
       hooks = this.providerHooks(checked);
-    let revoked = false, livePreparation = false;
+    let revoked = false,
+      livePreparation = false;
     const requireCurrent = () => {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       try {

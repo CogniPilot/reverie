@@ -76,6 +76,7 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
     );
   }
   launch(row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void): Promise<void> {
+    if (row.version === 3) throw Error('A plan replacement requires its original paid-dispatch actor');
     return this.#install(row, binding, current, true);
   }
   attach(
@@ -102,7 +103,7 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       !employee ||
       (first
         ? dockerEmployeeSourceDigest(employee, saved) !== row.sourceDigest
-        : row.version === 2
+        : row.version === 2 || row.version === 3
           ? dockerEmployeeProviderSourceDigest(employee, saved) !== row.providerSourceDigest
           : !legacyDockerProviderSourceMatches(employee, saved, row.sourceDigest)) ||
       saved.providerDispatchHeld ||
@@ -157,7 +158,7 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
         });
       original.candidate = candidate;
       const providerSource =
-        row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved);
+        row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
       const candidateRecipeCurrent = () =>
         candidate.owner === employee.owner &&
         dockerEmployeeProviderSourceDigest(employee, { ...saved, ...candidate.providerRecipeState() }) ===
