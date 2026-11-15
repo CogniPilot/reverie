@@ -47,6 +47,7 @@ function run(
     kind?: string;
     prefix?: string;
     protected?: boolean;
+    retainInheritedCapabilities?: boolean;
     operation?: string;
     projection?: string;
     accountId?: string;
@@ -86,7 +87,14 @@ function run(
   ];
   return spawnSync(
     options.protected === false ? process.execPath : 'setpriv',
-    options.protected === false ? args : ['--no-new-privs', process.execPath, ...args],
+    options.protected === false
+      ? args
+      : [
+          '--no-new-privs',
+          ...(options.retainInheritedCapabilities ? [] : ['--inh-caps=-all', '--ambient-caps=-all']),
+          process.execPath,
+          ...args,
+        ],
     {
       encoding: 'utf8',
       timeout: 11000,
@@ -164,6 +172,14 @@ function generation(f: ReturnType<typeof fixture>) {
   };
 }
 describe.runIf(process.platform === 'linux' && process.getuid!() > 0)('fixed source metadata protocol', () => {
+  it.skipIf(
+    process.platform !== 'linux' ||
+      !/^CapInh:\s*0*[1-9a-f][0-9a-f]*$/im.test(fs.readFileSync('/proc/self/status', 'utf8'))
+  )('refuses actual inherited capabilities even with genuine no-new-privileges', () => {
+    const result = run(fixture(), { mode: 'home', retainInheritedCapabilities: true });
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stdout).toBe('');
+  });
   it('checks genuine protection and refuses projected NoNewPrivs=0 under inherited sandbox protection', () => {
     const f = fixture(),
       good = run(f, { mode: 'home' }),
