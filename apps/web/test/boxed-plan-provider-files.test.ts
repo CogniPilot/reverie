@@ -110,3 +110,28 @@ it('reports only selected synthetic SDK auth and never exports credential bytes'
   fs.writeFileSync(path.join(legacy, '.credentials.json'), f.original, { mode: 0o600 });
   expect(new PlanProviderFixtureFiles(f.home, undefined).authStatus().loggedIn).toBe(true);
 });
+
+it('keeps separate process receipts when a replacement container reuses the same namespace PID and SID', () => {
+  const f = fixture();
+  const report = {
+    version: 1 as const,
+    purpose: 'synthetic-plan-provider-turn-v1' as const,
+    employeeId: f.config.employeeId,
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    providerThread: '22222222-2222-4222-8222-222222222222',
+    namespacePid: 485,
+    hookGenerationSha256: 'a'.repeat(64),
+    requestId: null,
+    accountId: null,
+    state: 'idle' as const,
+    probes: [],
+    limitation: 'External fake provider only; no native, permission, policy or paid-dispatch proof.' as const,
+  };
+  f.files.record(report);
+  new PlanProviderFixtureFiles(f.home, f.generation).record(report);
+  const names = fs.readdirSync(path.join(f.home, '.fixture')).filter((name) => name.startsWith('plan-turn-'));
+  expect(names).toHaveLength(2);
+  expect(new Set(names).size).toBe(2);
+  for (const name of names)
+    expect(JSON.parse(fs.readFileSync(path.join(f.home, '.fixture', name), 'utf8'))).toEqual(report);
+});

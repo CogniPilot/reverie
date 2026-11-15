@@ -113,6 +113,8 @@ function write(fd: number, leaf: string, bytes: Buffer): void {
 }
 export class PlanProviderFixtureFiles {
   #serial = 0;
+  // Namespace PIDs may repeat across replacement containers retaining the same HOME.
+  #publicationId = randomUUID();
   /** home is a test-owned mapping in unit cases; the image entry always supplies literal /home/agent. */
   constructor(
     readonly home: string,
@@ -177,7 +179,7 @@ export class PlanProviderFixtureFiles {
     return this.#scope((_home, fixture) =>
       write(
         fixture,
-        `plan-turn-${report.sessionId}-${report.namespacePid}-${this.#serial++}.json`,
+        `plan-turn-${report.sessionId}-${report.namespacePid}-${this.#publicationId}-${this.#serial++}.json`,
         Buffer.from(JSON.stringify(report) + '\n')
       )
     );
