@@ -27,6 +27,8 @@
     "../test/plan-move-docker-runner.test.ts",
     "../test/fixtures/tmux-source-native.ts",
     "../scripts/docker-memory-high-ci.mts",
+    "../scripts/plan-office-ci.mts",
+    "../test/plan-office-ci.test.ts",
     "../test/fixtures/docker-memory-high-canary.ts",
     "../test/docker-memory-high-canary.test.ts",
     "../test/docker-resource-original-writer.test.ts",

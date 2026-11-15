@@ -780,7 +780,8 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       [controlNode, input.runtimePath + '/lib/reverie/plan-office-bootstrap.mjs'],
       [driver.bind(evidence.root, '/fixture')]
     );
-    const front = await driver.network(names.front, false),
+    // Both fixture networks block external provider egress; the host reaches only the mapped loopback API.
+    const front = await driver.network(names.front, true),
       network = await driver.network(names.network, true),
       sources: Json[] = [];
     const closures = fs.readFileSync(path.join(input.platformClosure, 'store-paths'), 'utf8').trim().split('\n');

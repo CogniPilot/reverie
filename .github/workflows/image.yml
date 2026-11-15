@@ -144,6 +144,21 @@ jobs:
           # old outputs and the multi-GB image tar instead of caching it twice.
           rm "$HOME/scratch/reverie/build/docker-image"
 
+      - name: Prove an actual ordinary employee self plan move in a fresh Docker office
+        timeout-minutes: 60
+        env:
+          REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        run: nix develop --command node --experimental-strip-types apps/web/scripts/plan-office-ci.mts --ci
+
+      # Only closed acceptance summaries are artifacts. Private synthetic owner
+      # credentials, HMAC keys, raw replies and one-attempt latches stay in RUNNER_TEMP.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: plan-office-ordinary-self-acceptance
+          path: acceptance/plan-office/
+          if-no-files-found: error
+
       - name: Start the native application with an empty instance
         run: |
           app="$HOME/scratch/reverie/build/app/bin/reverie"
