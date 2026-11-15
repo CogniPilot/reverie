@@ -22,6 +22,7 @@ async function fixture(
     reply?: (path: string, body: unknown) => unknown | Promise<unknown>;
     malformed?: boolean;
     readFailure?: string;
+    summary?: Record<string, unknown>;
   } = {}
 ) {
   const employee = {
@@ -44,7 +45,8 @@ async function fixture(
     owner = options.owner !== false;
   let actual = 16 * 1024 ** 3,
     allowed = options.action ?? ['apply'];
-  let currentRevision = revision;
+  let currentRevision = revision,
+    defaultHigh = high;
   const original = h.app._chatApi.bind(h.app);
   h.app._chatApi = async (path: string, request?: { method?: string; body?: unknown }) => {
     if (path === '/api/company') return { ok: true, data: structuredClone(company) };
@@ -58,13 +60,15 @@ async function fixture(
       const method = request?.method ?? 'GET';
       calls.push({ path, method, body: structuredClone(request?.body) });
       if (method !== 'GET' && options.reply) return options.reply(path, request?.body);
+      if (path === '/api/company/docker-resources' && options.summary)
+        return { ok: true, data: structuredClone(options.summary) };
       if (path === '/api/company/docker-resources')
         return {
           ok: true,
           data: {
             allowedActions: ['approve-default'],
             desired: approved
-              ? { revision: currentRevision, scope: 'all-current-and-future', memoryHighBytes: high }
+              ? { revision: currentRevision, scope: 'all-current-and-future', memoryHighBytes: defaultHigh }
               : null,
             employees: [
               {
@@ -142,6 +146,9 @@ async function fixture(
     },
     setActual: (v: number) => {
       actual = v;
+    },
+    setDefaultHigh: (v: number) => {
+      defaultHigh = v;
     },
     setRevision: (v: string) => {
       currentRevision = v;
@@ -389,4 +396,84 @@ it('preserves the old unknown request without blocking an independently offered 
   expect(f.button('Apply approved soft RAM default')).toBeDefined();
   await f.click('Apply approved soft RAM default');
   expect(f.writes().map((v) => v.body)).toEqual([{ revision }, { revision: next }]);
+});
+
+it('releases only its matching canonically retained lost default and requires a new explicit approval', async () => {
+  const submitted: Array<{
+    revision: string;
+    expectedRevision: string | null;
+    scope: string;
+    memoryHighBytes: number;
+  }> = [];
+  const f = await fixture({
+    view: 'company',
+    approved: false,
+    reply: async (_path, body) => {
+      const request = body as (typeof submitted)[number];
+      submitted.push(request);
+      if (submitted.length === 1) return { ok: false, error: { code: 'DEFAULT_REPLY_LOST' } };
+      f.setApproved(true);
+      f.setRevision(request.revision);
+      return {
+        ok: true,
+        data: {
+          desired: { revision: request.revision, scope: request.scope, memoryHighBytes: request.memoryHighBytes },
+          enforcement: 'not-observed',
+        },
+      };
+    },
+  });
+  await f.click('Approve 48 GiB soft RAM default');
+  expect(f.writes()).toHaveLength(1);
+  f.setApproved(true);
+  f.setRevision('55555555-5555-4555-8555-555555555555');
+  await f.click('Refresh resources');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  f.setRevision(submitted[0]!.revision);
+  f.setDefaultHigh(16 * 1024 ** 3);
+  await f.click('Refresh resources');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  f.setDefaultHigh(high);
+  await f.click('Refresh resources');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Approve new 48 GiB default revision')).toBeDefined();
+  expect(f.panel().textContent).not.toContain('Default approval outcome is unconfirmed');
+  await f.click('Approve new 48 GiB default revision');
+  expect(f.writes()).toHaveLength(2);
+  expect(submitted[1]!.expectedRevision).toBe(submitted[0]!.revision);
+  expect(submitted[1]!.revision).not.toBe(submitted[0]!.revision);
+});
+
+// Producer: actual owner HTTP status after real CompanyStore/revision-ledger
+// transitions. Its owning backend test asserts equality against this SAME file.
+const closedWriterStatus = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-closed-writer-status.json', import.meta.url), 'utf8')
+) as Record<string, unknown> & { employees: Array<Record<string, unknown>> };
+it('roundtrips the actual closed-writer backend golden into the company GUI without claiming application success', async () => {
+  const f = await fixture({ view: 'company', summary: closedWriterStatus });
+  expect(f.panel().textContent).toContain('2 employees');
+  expect(f.panel().textContent).toContain('0 recorded limit observations, 1 unknown original outcome');
+  expect(f.panel().textContent).toContain('1 original resource writer is closed');
+  expect(f.panel().textContent).toContain('does not confirm that the requested limits were applied');
+  expect(f.button('Approve new 48 GiB default revision')).toBeDefined();
+  expect(f.panel().querySelector('[role="alert"]')?.textContent).toBe('');
+  expect(f.writes()).toEqual([]);
+});
+it('refuses a closed-writer summary without its frozen closure flags', async () => {
+  const changed = structuredClone(closedWriterStatus);
+  changed.employees.find((v) => v.state === 'closed-writer')!.writerClosed = false;
+  const f = await fixture({ view: 'company', summary: changed });
+  expect(f.panel().textContent).toContain('Company resource summary could not be verified');
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  expect(f.writes()).toEqual([]);
+});
+it('keeps original uncertainty visible after a later recorded observation', async () => {
+  const changed = structuredClone(closedWriterStatus);
+  Object.assign(changed.employees.find((v) => v.state === 'closed-writer')!, { state: 'observed', allowedActions: [] });
+  const f = await fixture({ view: 'company', summary: changed });
+  expect(f.panel().textContent).toContain('1 recorded limit observations, 1 unknown original outcome');
+  expect(f.panel().textContent).toContain('original execution outcome remains unknown');
+  expect(f.writes()).toEqual([]);
 });

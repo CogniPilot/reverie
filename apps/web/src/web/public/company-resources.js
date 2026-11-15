@@ -2141,15 +2141,35 @@
               !uuid(v.sessionId) ||
               !Number.isSafeInteger(v.sessionGeneration) ||
               v.sessionGeneration < 1 ||
-              !['helper', 'observed', 'applied', 'not-observed', 'offline-or-unbound'].includes(v.state) ||
-              v.enforcement !== 'not-observed'
+              !['helper', 'closed-writer', 'observed', 'applied', 'not-observed', 'offline-or-unbound'].includes(
+                v.state
+              ) ||
+              v.enforcement !== 'not-observed' ||
+              (v.state === 'closed-writer' &&
+                (v.writerClosed !== true ||
+                  v.originalOutcome !== 'unknown' ||
+                  !actions(v.allowedActions) ||
+                  v.allowedActions.length !== 1 ||
+                  v.allowedActions[0] !== 'new-revision'))
           )
         )
           throw Error('Company resource summary could not be verified.');
+        const original = pending.get('default');
+        if (
+          original &&
+          r.desired?.revision === original.revision &&
+          r.desired.memoryHighBytes === original.memoryHighBytes &&
+          r.desired.scope === original.scope
+        )
+          pending.delete('default'); // Fresh canonical correlation, not a replay or historical execution ACK.
         this.snapshot = r.desired;
         this.canApprove =
           Array.isArray(r.allowedActions) && r.allowedActions.length === 1 && r.allowedActions[0] === 'approve-default';
-        this.status.textContent = `${r.employees.length} employee${r.employees.length === 1 ? '' : 's'} · history: ${r.employees.filter((v) => ['applied', 'observed'].includes(v.state)).length} confirmed, ${r.employees.filter((v) => v.state === 'helper').length} unresolved outcomes`;
+        const unknown = r.employees.filter(
+          (v) => ['helper', 'closed-writer'].includes(v.state) || v.originalOutcome === 'unknown'
+        ).length;
+        const closed = r.employees.filter((v) => v.writerClosed === true && v.originalOutcome === 'unknown').length;
+        this.status.textContent = `${r.employees.length} employee${r.employees.length === 1 ? '' : 's'} · history: ${r.employees.filter((v) => ['applied', 'observed'].includes(v.state)).length} recorded limit observations, ${unknown} unknown original outcome${unknown === 1 ? '' : 's'}`;
         this.content.replaceChildren(
           this.note(
             r.desired
@@ -2160,6 +2180,12 @@
             'This is desired policy and history, not fresh enforcement. Open each employee’s Permissions tab to observe or apply it. Hard RAM, shared pool, swap, CPU and process limits stay unchanged.'
           )
         );
+        if (closed)
+          this.content.append(
+            this.note(
+              `${closed} original resource writer${closed === 1 ? ' is' : 's are'} closed. The original execution outcome remains unknown; this does not confirm that the requested limits were applied.`
+            )
+          );
         if (pending.has('default'))
           this.content.append(
             this.note(
@@ -2201,7 +2227,7 @@
         if (!this.canApprove) throw Error('Default approval is unavailable. Refresh company resources.');
         const revision = nonce(),
           expectedRevision = this.snapshot?.revision ?? null;
-        pending.set('default', { revision });
+        pending.set('default', { revision, scope: 'all-current-and-future', memoryHighBytes: HIGH });
         const result = await this.api(`${ROOT}/default`, {
           method: 'PUT',
           body: { revision, expectedRevision, scope: 'all-current-and-future', memoryHighBytes: HIGH },

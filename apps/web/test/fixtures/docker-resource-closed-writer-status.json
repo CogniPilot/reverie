@@ -1,0 +1,35 @@
+{
+  "desired": {
+    "revision": "77777777-7777-4777-8777-777777777777",
+    "owner": null,
+    "scope": "all-current-and-future",
+    "memoryHighBytes": 51539607552
+  },
+  "employees": [
+    {
+      "employeeId": "11111111-1111-4111-8111-111111111111",
+      "sessionId": "aaaaaaaa-1111-4111-8111-111111111111",
+      "sessionGeneration": 1,
+      "desiredMemoryHighBytes": 51539607552,
+      "state": "offline-or-unbound",
+      "allowedActions": [],
+      "enforcement": "not-observed"
+    },
+    {
+      "employeeId": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+      "sessionGeneration": 9,
+      "desiredMemoryHighBytes": 51539607552,
+      "state": "closed-writer",
+      "writerClosed": true,
+      "originalOutcome": "unknown",
+      "allowedActions": [
+        "new-revision"
+      ],
+      "enforcement": "not-observed"
+    }
+  ],
+  "allowedActions": [
+    "approve-default"
+  ]
+}
