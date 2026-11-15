@@ -227,11 +227,18 @@ export function scanHtml(file: string, text: string): Declaration[] {
   const html = text.replace(/<!--[\s\S]*?-->/g, '').replace(/<script\b[\s\S]*?<\/script\s*>/gi, '');
   const declarations: Declaration[] = [];
   const seen = new Map<string, number>();
-  for (const match of html.matchAll(/<(button|input|select|textarea|summary|a)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)) {
+  for (const match of html.matchAll(/<([a-z][a-z0-9:-]*)\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi)) {
     const tag = match[1].toLowerCase(),
       markup = compact(match[0]);
+    const attributes = [...markup.matchAll(/\s([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)];
+    const attribute = (name: string) => {
+      const matches = attributes.filter((entry) => entry[1].toLowerCase() === name);
+      return matches.length === 1 ? (matches[0][2] ?? matches[0][3]) : undefined;
+    };
+    const separator = attribute('role')?.toLowerCase() === 'separator' && /^-?\d+$/.test(attribute('tabindex') ?? '');
+    if (!tags.has(tag) && !separator) continue;
     const id = /\bid\s*=\s*["']([^"']+)["']/i.exec(markup)?.[1];
-    const key = `${file}::html::${tag}:${id || digest(markup)}`;
+    const key = `${file}::html::${separator ? 'separator' : tag}:${id || digest(markup)}`;
     const count = (seen.get(key) || 0) + 1;
     seen.set(key, count);
     declarations.push({ id: `${key}::${count}`, file, owner: 'html', kind: 'control', detail: markup });

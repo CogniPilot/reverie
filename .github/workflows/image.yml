@@ -420,6 +420,8 @@ jobs:
               apps/web/test/office-retirement.browser.test.ts \
               apps/web/test/employee-recovery-settlement.browser.test.ts \
               apps/web/test/browser-coverage-attribution.browser.test.ts \
+              apps/web/test/tab-rail-resize.browser.test.ts \
+              apps/web/test/tab-layout-editing.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           # Validate actual execution/context/source evidence after every suite
           # settles. This raw report does not imply percentage or full-site coverage.

@@ -42,8 +42,15 @@ describe('grouped rail editing in Chromium', () => {
   let puts: any[] = [];
 
   beforeAll(async () => {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
+    await page.route('**/*', (route) => route.abort());
     await page.route('http://reverie.test/', (route) =>
       route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' })
     );
@@ -324,7 +331,9 @@ describe('grouped rail editing in Chromium', () => {
   });
 
   it('paints the inline group editor as you type, then saves the trimmed name', async () => {
-    await page.evaluate(() => (window as any).__app.startTabGroupRename('gx'));
+    await page.locator('[data-tab-group-header="gx"]').hover();
+    await page.locator('[data-tab-group-header="gx"] .tab-layout-group-menu').click();
+    await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click();
     const input = page.locator('.tab-layout-group-rename-input');
     await expect.poll(() => input.evaluate((el) => el === document.activeElement)).toBe(true);
     await page.keyboard.press('Control+A');

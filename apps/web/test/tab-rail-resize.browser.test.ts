@@ -10,19 +10,37 @@ const styles = readFileSync(resolve(publicDir, 'styles.css'), 'utf8');
 const constants = readFileSync(resolve(publicDir, 'constants.js'), 'utf8');
 const settingsUi = readFileSync(resolve(publicDir, 'settings-ui.js'), 'utf8');
 const controller = readFileSync(resolve(publicDir, 'tab-rail-resize.js'), 'utf8');
+const resizeHandle = readFileSync(resolve(publicDir, 'index.html'), 'utf8').match(
+  /<div\s+id="tabRailResizeHandle"[\s\S]*?<\/div>/
+)?.[0];
+
+/** Fields installed by this suite's isolated browser bootstrap. */
+type RailFixtureWindow = Window & {
+  __settings: { tabRailWidth: number };
+  __resizeCount: number;
+  app: { applyTabRailWidth(): number };
+};
 
 describe('COD-358 vertical rail in Chromium', () => {
   let browser: Browser;
   let page: Page;
 
   beforeAll(async () => {
-    browser = await chromium.launch({ headless: true });
+    if (!resizeHandle) throw new Error('The shipped session rail resize handle is missing');
+    browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.route('**/*', (route) => route.abort());
     await page.setContent(`<!doctype html><html data-tab-orientation="vertical"><head><style>${styles}</style></head>
       <body><header class="header"><div id="sessionTabsHost"></div></header><main class="main" style="width:100%;height:700px">
         <aside class="tab-rail" id="tabRail"><div class="session-tabs" id="sessionTabs"><div class="session-tab active">
           <span class="tab-info"><span class="tab-name-row"><span class="tab-name"><span class="tab-name-prefix">w2-reverie: </span>super-long-unbroken-session-name-for-wrapping</span></span></span>
-        </div></div><div id="tabRailResizeHandle" class="tab-rail-resize-handle" role="separator" tabindex="0" aria-valuemin="208" aria-valuemax="360" aria-valuenow="256"></div></aside>
+        </div></div>${resizeHandle}</aside>
         <div class="terminal-wrap"><iframe title="terminal"></iframe></div></main>
         <div id="tabRailResizeShield" class="tab-rail-resize-shield" hidden></div>
         <select id="appSettingsTabRailWidth"><option value="custom">Custom</option><option value="208">Compact</option><option value="256">Default</option><option value="320">Wide</option><option value="360">Maximum</option></select>
@@ -80,6 +98,28 @@ describe('COD-358 vertical rail in Chromium', () => {
     expect(await handle.getAttribute('aria-valuenow')).toBe('264');
     await page.waitForTimeout(180);
     expect(await page.evaluate(() => (window as any).__resizeCount)).toBe(1);
+  });
+
+  it('drags the resize separator across the terminal iframe and settles exactly once', async () => {
+    await page.evaluate(() => {
+      (window as unknown as RailFixtureWindow).__settings.tabRailWidth = 256;
+      (window as unknown as RailFixtureWindow).app.applyTabRailWidth();
+      (window as unknown as RailFixtureWindow).__resizeCount = 0;
+    });
+    const handle = page.locator('#tabRailResizeHandle');
+    const bounds = await handle.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+    await page.mouse.down();
+    expect(await page.locator('#tabRailResizeShield').isVisible()).toBe(true);
+    await page.mouse.move(700, bounds!.y + bounds!.height / 2, { steps: 8 });
+    await expect.poll(() => handle.getAttribute('aria-valuenow')).toBe('360');
+    expect(await page.evaluate(() => (window as unknown as RailFixtureWindow).__resizeCount)).toBe(0);
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => (window as unknown as RailFixtureWindow).__resizeCount)).toBe(1);
+    expect(await page.evaluate(() => (window as unknown as RailFixtureWindow).__settings.tabRailWidth)).toBe(360);
+    expect(await page.locator('#tabRailResizeShield').isVisible()).toBe(false);
+    expect(await page.locator('body').evaluate((body) => body.classList.contains('tab-rail-resizing'))).toBe(false);
   });
 
   it('preserves 360px while a narrow viewport applies only an effective clamp', async () => {

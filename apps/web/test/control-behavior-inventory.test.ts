@@ -316,6 +316,20 @@ it('enumerates static HTML controls including quoted greater-than signs without 
   expect(found.some((entry) => entry.id.includes('button:save'))).toBe(true);
 });
 
+it('inventories an explicitly focusable resize separator without treating structural divs as controls', () => {
+  const found = scanHtml(
+    'src/index.html',
+    '<div id="layout"></div><div role="separator"></div><div data-role="separator" tabindex="0"></div>' +
+      '<div title="role=\'separator\' tabindex=\'0\'"></div><span role="separator" tabindex="0" id="resize"></span>'
+  );
+  expect(found).toEqual([
+    expect.objectContaining({
+      id: 'src/index.html::html::separator:resize::1',
+      kind: 'control',
+    }),
+  ]);
+});
+
 it('does not permit dropping a source surface from the manifest', () => {
   const { root, manifest, declarations } = fixture();
   manifest.sources = manifest.sources.slice(1);
