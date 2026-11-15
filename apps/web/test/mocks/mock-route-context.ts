@@ -67,6 +67,8 @@ export function createMockRouteContext(options?: {
     discardPartiallyBuiltSession: vi.fn(async (id: string) => {
       sessions.delete(id);
     }),
+    // Native cleanup is unavailable unless a fixture supplies its genuine adapter.
+    retireDockerPlanSource: undefined,
     getSessionStateWithRespawn: vi.fn((s: MockSession) => s.toState()),
 
     // -- EventPort --

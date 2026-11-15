@@ -151,6 +151,7 @@ import {
 import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
@@ -3170,7 +3171,10 @@ export class Session extends EventEmitter {
     // intent remains the provider-effect fence, rather than an invented failed launch.
     // A plan generation must keep its explicit permission/tool recipe across
     // replacement and restore. Legacy v1/v2 launch fingerprints stay unchanged.
-    if (this._docker?.continuation?.planReplacement && this.mode === 'claude') {
+    if (
+      this._docker?.continuation?.planReplacement &&
+      accountReplacementProfile(this.mode)?.name === 'anthropic-account-v1'
+    ) {
       snapshot.claudeMode = this._claudeMode;
       snapshot.allowedTools = this._allowedTools;
     }

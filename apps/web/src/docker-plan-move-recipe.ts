@@ -9,6 +9,7 @@ import { expertRuntimeRecipeData } from './expert-runtime-recipe.js';
 import { dockerProviderRuntimeRecipeDigest } from './docker-employee-source-correlation.js';
 import type { SessionState } from './types.js';
 import { nativeThreadProfile } from './utils/native-thread-profile.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 export function dockerPlanMoveTargetRecipe(
   source: SessionState,
   account: PlanAccount,
@@ -50,11 +51,13 @@ export function dockerPlanMoveTargetRecipe(
     codexConfig: payload.codexConfig,
     subscriptionProfile: profile,
   };
+  const threadProfile = nativeThreadProfile(mode);
   if (nativeId) {
-    if (mode === 'claude') saved.resumeSessionId = nativeId;
-    else if (mode === 'codex') saved.codexConfig = { ...saved.codexConfig, resumeSessionId: nativeId };
+    if (threadProfile?.kind === 'conversation-chain') saved.resumeSessionId = nativeId;
+    else if (threadProfile?.kind === 'nested-resume')
+      saved.codexConfig = { ...saved.codexConfig, resumeSessionId: nativeId };
   }
-  if (mode === 'claude') {
+  if (accountReplacementProfile(mode)?.name === 'anthropic-account-v1') {
     saved.claudeMode = policy.claudeMode;
     saved.allowedTools = policy.allowedTools;
   }
