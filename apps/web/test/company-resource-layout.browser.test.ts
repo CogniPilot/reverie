@@ -768,3 +768,109 @@ for (const width of [320, 1280])
         await browser.close();
       }
     });
+
+// Same real Plans methods as the DOM suite, with shipped markup/styles and an
+// intercepted synthetic origin. This cannot authorize a real plan operation.
+for (const width of [320, 1280])
+  it(`keeps an unknown original plan request accessible at ${width}px`, async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1 });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      const originalHtml = read('company-plans.html');
+      const document = new JSDOM(originalHtml);
+      document.window.document.querySelectorAll('script').forEach((el) => el.remove());
+      const html = document.serialize();
+      document.window.close();
+      const employee = {
+        id: '11111111-1111-4111-8111-111111111111',
+        sessionId: '22222222-2222-4222-8222-222222222222',
+        name: 'Synthetic plan employee',
+      };
+      const accounts = [
+        { id: 'first', name: 'Original synthetic plan', provider: 'openai' },
+        { id: 'second', name: 'Destination synthetic plan', provider: 'anthropic' },
+      ];
+      const sent: Array<{ path: string; body: { id: string } }> = [];
+      await page.route('**/*', (route) => {
+        const url = new URL(route.request().url());
+        if (url.origin !== 'https://plans-layout-fixture.test') return route.abort();
+        if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: html });
+        if (url.pathname === '/company-board.css')
+          return route.fulfill({ contentType: 'text/css', body: read('company-board.css') });
+        if (url.pathname === '/api/plans/moves/preview')
+          return route.fulfill({
+            json: { success: true, data: { account: 'first', mode: 'codex', sessionId: employee.sessionId } },
+          });
+        if (url.pathname === '/api/plans/requests') {
+          sent.push({ path: url.pathname, body: route.request().postDataJSON() });
+          return route.fulfill({
+            status: 500,
+            json: {
+              success: false,
+              error: {
+                code: 'OPERATION_FAILED',
+                message:
+                  'The original request response could not be confirmed. Check the original request before another change.',
+              },
+            },
+          });
+        }
+        return route.fulfill({ status: 404, json: { success: false, error: 'Synthetic observation unavailable' } });
+      });
+      await page.goto('https://plans-layout-fixture.test/');
+      const methods = originalHtml.slice(
+        originalHtml.indexOf('function planMemberHtml('),
+        originalHtml.indexOf('// Codex banked resets:')
+      );
+      await page.addScriptTag({
+        content: `const B={planBurn:${JSON.stringify(accounts)}};
+        const planAllocations={employees:[${JSON.stringify(employee)}],accounts:[]};
+        let pendingPlanRequests=[],planMembersBusy=false,planMembersError=false;
+        const fmt=()=>'', esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+        ${methods}
+        window.__openPlanMove=openPlanMove;`,
+      });
+      await page.evaluate(
+        (id) =>
+          (window as unknown as { __openPlanMove(id: string, account: string): Promise<void> }).__openPlanMove(
+            id,
+            'second'
+          ),
+        employee.id
+      );
+      const dialog = page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+      await dialog.getByRole('button', { name: 'Request move', exact: true }).click();
+      const inspect = dialog.getByRole('button', { name: 'Check original request', exact: true });
+      await inspect.waitFor();
+      expect(sent).toHaveLength(1);
+      expect(await dialog.getByRole('alert').textContent()).toContain(sent[0]!.body.id);
+      expect(await dialog.getByRole('button', { name: 'Force move now', exact: true }).isDisabled()).toBe(true);
+      expect(await dialog.getByRole('button', { name: 'Request move', exact: true }).isDisabled()).toBe(true);
+      const geometry = await dialog.evaluate((el) => ({
+        ratio: window.devicePixelRatio,
+        overflow: el.scrollWidth > el.clientWidth + 1,
+      }));
+      expect(geometry.ratio).toBe(1);
+      expect(geometry.overflow).toBe(false);
+      expect(await inspect.evaluate((el) => el.getBoundingClientRect().height)).toBeGreaterThanOrEqual(32); // Existing Plans button baseline.
+      await inspect.click({ trial: true });
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-original-unknown-${width}.png`),
+        });
+      }
+      expect(sent).toHaveLength(1); // Trial click never repeats the mutation or consumes a status.
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  });
