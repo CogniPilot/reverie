@@ -102,6 +102,12 @@ it('refuses product/native images without exact CI factory config and namespace 
     },
   };
   expect(() => requirePlanOfficeImage(image, input, 'worker')).not.toThrow();
+  for (const Cmd of [undefined, null, []])
+    expect(() => requirePlanOfficeImage({ ...image, Config: { ...image.Config, Cmd } }, input, 'worker')).not.toThrow();
+  const omitted = Object.fromEntries(Object.entries(image.Config).filter(([key]) => key !== 'Cmd'));
+  expect(() => requirePlanOfficeImage({ ...image, Config: omitted }, input, 'worker')).not.toThrow();
+  for (const Cmd of [['unexpected'], '', false, {}])
+    expect(() => requirePlanOfficeImage({ ...image, Config: { ...image.Config, Cmd } }, input, 'worker')).toThrow();
   expect(() => requirePlanOfficeImage({ ...image, RepoTags: ['reverie-worker:latest'] }, input, 'worker')).toThrow();
   expect(() =>
     requirePlanOfficeImage({ ...image, Config: { ...image.Config, Entrypoint: ['/bin/bash'] } }, input, 'worker')

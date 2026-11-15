@@ -210,7 +210,7 @@ export function requirePlanOfficeImage(row: Json, input: Input, role: 'source' |
       assert.equal(entries[1], input.runtimePath + '/lib/reverie/dist/index.js');
     } else {
       assert.deepEqual(cfg.Entrypoint, ['/opt/reverie/perf/bin/reverie-worker-init']);
-      assert.ok(cfg.Cmd === null || (Array.isArray(cfg.Cmd) && cfg.Cmd.length === 0));
+      assert.ok(cfg.Cmd == null || (Array.isArray(cfg.Cmd) && cfg.Cmd.length === 0));
       assert.equal((cfg.Labels as Json)['org.reverie.worker-client.manifest'], input.clientManifestDigest);
     }
   }
