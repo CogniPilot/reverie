@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PlanRequestId } from '../../src/plan-request-capability.js';
 import { PlanProviderFixtureContract, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
+import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
 const C = fs.constants,
   mode = (stat: fs.Stats) => stat.mode & 0o7777;
 const identity = (s: fs.Stats) => [s.dev, s.ino, s.uid, s.gid, mode(s)].join(':');
@@ -211,6 +212,40 @@ export class PlanProviderFixtureFiles {
   contract() {
     return this.#scope((_home, fixture) =>
       PlanProviderFixtureContract.parse(json(read(fixture, 'plan-provider.json')))
+    );
+  }
+  permissionProbe(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficePermissionProbe.parse(json(read(fixture, `plan-permission-probe-${id}.json`)));
+      if (value.id !== id) throw Error('Permission probe ID changed');
+      return value;
+    });
+  }
+  allowApproval(id: string): boolean {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      try {
+        const value = z
+          .object({
+            version: z.literal(1),
+            purpose: z.literal('reverie-ci-team-positive-cooperation-v1'),
+            id: z.literal(id),
+          })
+          .strict()
+          .parse(json(read(fixture, `plan-team-cooperation-${id}.json`)));
+        return value.id === id;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+    });
+  }
+  permissionProbeRecord(kind: 'intent' | 'returned', value: unknown) {
+    const parsed =
+      kind === 'intent' ? PlanOfficePermissionProbe.parse(value) : PlanOfficePermissionReceipt.parse(value);
+    return this.#scope((_home, fixture) =>
+      write(fixture, `plan-permission-${kind}-${parsed.id}.json`, Buffer.from(JSON.stringify(parsed) + '\n'))
     );
   }
   prepareApproval(id: string, handoff: string): 'prepared' | 'existing' {

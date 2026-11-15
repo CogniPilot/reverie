@@ -1,5 +1,5 @@
 /** External fake model protocol tests; transport injection cannot mint office/native grants. */
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import {
   BoxedPlanProviderFixture,
   PlanProviderFixtureContract,
@@ -196,6 +196,24 @@ it('exhaustion disables cooperation without bypassing any plan or native fence',
     exhausted = new BoxedPlanProviderFixture({ ...contract, exhausted: true }, identity, f.ports, workerHookSettings());
   expect((await exhausted.turn())!.state).toBe('cooperation-disabled');
   expect(f.calls.some((args) => args[2] === 'approve')).toBe(false);
+});
+it('keeps unexpected denied team requests from reaching target approval until the exact positive ID is allowed', async () => {
+  const f = fixture();
+  const allow = vi.fn(async () => false);
+  f.ports.allowApproval = allow;
+  const provider = new BoxedPlanProviderFixture(
+    { ...contract, approvalAllowlistOnly: true },
+    identity,
+    f.ports,
+    workerHookSettings()
+  );
+  expect((await provider.turn())!.state).toBe('cooperation-disabled');
+  expect(allow).toHaveBeenCalledWith('request-1');
+  expect(f.latches.size).toBe(0);
+  expect(f.calls.some((args) => args[2] === 'approve')).toBe(false);
+  allow.mockResolvedValue(true);
+  expect((await provider.turn())!.state).toBe('approval-returned');
+  expect(f.calls.filter((args) => args[2] === 'approve')).toHaveLength(1);
 });
 it('does not print completion or composer when receipt consuming close fails', async () => {
   const f = fixture();

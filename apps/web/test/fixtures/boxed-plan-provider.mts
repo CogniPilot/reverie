@@ -13,6 +13,7 @@ import {
   type PlanFixtureDiagnosticStage,
 } from '../helpers/boxed-plan-provider-files.js';
 import { WORKER_CLIENT_ENTRY } from '../../src/worker-client-manifest.js';
+import { runPlanOfficePermissionProbe } from '../helpers/plan-office-permission-probe.js';
 
 export function planProviderLaunch(args: readonly string[], env: NodeJS.ProcessEnv) {
   if (env.HOME !== '/home/agent') throw Error('Fixed synthetic HOME required');
@@ -169,6 +170,7 @@ export async function planProviderMain(args = process.argv.slice(2)) {
     {
       cli: observedPlanFixtureCli(files),
       prepareApproval: async (id, handoff) => files.prepareApproval(id, handoff),
+      allowApproval: async (id) => files.allowApproval(id),
       refreshAuthOnce: async (id) => {
         // Legacy source auth is NOT installed-generation lineage and never counts as a refresh.
         if (process.env.CLAUDE_CONFIG_DIR === undefined || process.env.CLAUDE_CONFIG_DIR === '/home/agent/.claude')
@@ -221,7 +223,16 @@ export async function planProviderMain(args = process.argv.slice(2)) {
       }
       serial = serial
         .then(async () => {
-          if (!stopped) await fake.turn();
+          if (stopped) return;
+          const probe = /^BOXED_PLAN_PERMISSION_PROBE_([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(line);
+          if (probe) {
+            const input = files.permissionProbe(probe[1]!);
+            await runPlanOfficePermissionProbe(input, contract.employeeId, (kind, value) =>
+              files.permissionProbeRecord(kind, value)
+            );
+            process.stdout.write('BCPLAN_PERMISSION_RETURNED_' + input.id + '\n');
+            await fake.turn(); // real Stop/consuming-close barrier restores the final empty composer
+          } else await fake.turn();
         })
         .catch(() => {
           // No retry, fabricated idle or diagnostic secret output after an unknown physical callback.

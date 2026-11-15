@@ -672,6 +672,28 @@ it('uses the current installed v3 generation credential for the return instead o
   ).not.toBe(actual);
   expect(() => planOfficeSelfIdentityFile(f.work)).toThrow();
 });
+it('admits team moves only with two distinct real employees/threads and initially denied explicit caller grants', () => {
+  const caller = { ...employee, permissions: { managePlans: false, moveOwnPlan: false } };
+  const target = {
+    ...employee,
+    employeeId: oid,
+    sessionId: thread,
+    nativeThreadId: sid,
+    permissions: { managePlans: false, moveOwnPlan: true },
+  };
+  const good = { ...raw, acceptance: 'team-plan-move', bootstrap: { ...raw.bootstrap, employees: [caller, target] } };
+  expect(PlanOfficeDriverInput.parse(good).acceptance).toBe('team-plan-move');
+  for (const employees of [
+    [caller],
+    [caller, { ...target, nativeThreadId: caller.nativeThreadId }],
+    [{ ...caller, permissions: { managePlans: true, moveOwnPlan: false } }, target],
+    [caller, { ...target, permissions: { managePlans: false, moveOwnPlan: false } }],
+  ])
+    expect(() => PlanOfficeDriverInput.parse({ ...good, bootstrap: { ...good.bootstrap, employees } })).toThrow();
+  expect(() =>
+    PlanOfficeDriverInput.parse({ ...good, sourceProviders: [{ employeeId: eid, mode: 'exhausted' }] })
+  ).toThrow();
+});
 
 it('refuses mutable ready-only admission without touching existing fixture state or Engine', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-ready-refuse-'));

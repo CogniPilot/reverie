@@ -41,6 +41,7 @@ export const PLAN_OFFICE_TEST_ENTRIES = [
   'test/helpers/plan-office-bootstrap.ts',
   'test/helpers/plan-office-driver.ts',
   'test/helpers/plan-office-move-driver.ts',
+  'test/helpers/plan-office-permission-probe.ts',
   'test/helpers/plan-office-move-verifier.ts',
   'test/helpers/boxed-plan-provider.ts',
   'test/helpers/docker-continuation-auth-canary.ts',

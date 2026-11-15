@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import { z } from 'zod';
 import { PlanRequestSchema } from '../../src/plan-request.js';
+import { PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
 const uuid = z.string().uuid(),
   account = z.enum(['ci-plan-a', 'ci-plan-b']);
 export const PlanOfficeMoveScenario = z
@@ -28,6 +29,48 @@ export interface PlanOfficeSelfCompletion {
   scenario: PlanOfficeMoveScenario;
   /** Returned only after runPlanOfficeMoveScenario's independent physical verifier succeeds. */
   record: ApiRecord;
+}
+/** Permission probes finish, with unchanged native/journal facts checked by the
+ * adapter, before the one team capsule request can be allocated or dispatched. */
+export async function runPlanOfficeTeamSequence(ports: {
+  grant(enabled: boolean): Promise<void>;
+  probe(scope: 'team-request' | 'team-pending'): Promise<unknown>;
+  move(receipts: readonly z.infer<typeof PlanOfficePermissionReceipt>[]): Promise<PlanOfficeSelfCompletion>;
+}) {
+  const receipts: z.infer<typeof PlanOfficePermissionReceipt>[] = [];
+  const probe = async (scope: 'team-request' | 'team-pending', status: number) => {
+    const receipt = PlanOfficePermissionReceipt.parse(await ports.probe(scope));
+    assert.equal(receipt.scope, scope);
+    assert.equal(receipt.status, status);
+    assert.equal(receipt.success, status === 200);
+    assert.equal(receipt.code, status === 403 ? 'FORBIDDEN' : null);
+    assert.notEqual(receipt.employeeId, receipt.callerEmployeeId);
+    assert.notEqual(receipt.sessionId, receipt.callerSessionId);
+    for (const previous of receipts) {
+      assert.notEqual(receipt.id, previous.id);
+      for (const key of ['callerEmployeeId', 'callerSessionId', 'employeeId', 'sessionId', 'namespacePid'] as const)
+        assert.equal(receipt[key], previous[key]);
+    }
+    receipts.push(receipt);
+  };
+  await probe('team-request', 403);
+  await ports.grant(true);
+  await probe('team-pending', 200);
+  await ports.grant(false);
+  await probe('team-request', 403);
+  await ports.grant(true);
+  await probe('team-pending', 200);
+  const completed = await ports.move([...receipts]);
+  const scenario = PlanOfficeMoveScenario.parse(completed.scenario);
+  assert.equal(scenario.kind, 'team');
+  assert.equal(scenario.employeeId, receipts[0]!.employeeId);
+  assert.equal(scenario.sessionId, receipts[0]!.sessionId);
+  assert.equal(scenario.fromAccount, 'ci-plan-a');
+  assert.equal(scenario.toAccount, 'ci-plan-b');
+  assert.ok(receipts.every((receipt) => receipt.id !== scenario.id));
+  const record = planOfficeMoveRecord(completed.record, scenario);
+  assert.equal(record.phase, 'completed');
+  return { receipts, scenario, record };
 }
 export type PlanOfficeSelfLeg = 'first' | 'return';
 export function planOfficeSelfDirection(leg: PlanOfficeSelfLeg) {

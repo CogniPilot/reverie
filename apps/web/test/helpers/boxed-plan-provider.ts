@@ -14,6 +14,7 @@ export const PlanProviderFixtureContract = z
     exhausted: z.boolean(),
     refreshAccountId: PlanRequestId.nullable(),
     pauseBeforeApproval: z.boolean(),
+    approvalAllowlistOnly: z.boolean().optional(),
   })
   .strict()
   .refine(
@@ -55,6 +56,7 @@ export interface PlanProviderFixturePorts {
   /** Fixed private generation only. Canonical account data must never be modified. */
   refreshAuthOnce(accountId: string): Promise<void>;
   beforeApproval(requestId: string): Promise<void>;
+  allowApproval?(requestId: string): Promise<boolean>;
   /** Consuming file+directory closes must succeed before the completion stdout below. */
   record(report: Readonly<PlanProviderFixtureReport>): Promise<void>;
   output(text: string): void;
@@ -259,6 +261,10 @@ export class BoxedPlanProviderFixture {
       )
         throw Error('Fixture exact request scope differs');
       report.requestId = status.id;
+      if (this.contract.approvalAllowlistOnly && !(await this.ports.allowApproval?.(status.id))) {
+        report.state = 'cooperation-disabled';
+        return await this.#idle(report);
+      }
       const handoff = `Synthetic plan fixture ${this.identity.sessionId}; request ${status.id}. No real work or paid credentials. Preserve original unknown outcomes; never replay them.`;
       if ((await this.ports.prepareApproval(status.id, handoff)) === 'existing') {
         report.state = 'already-attempted';

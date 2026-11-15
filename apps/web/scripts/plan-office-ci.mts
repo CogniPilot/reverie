@@ -1,6 +1,6 @@
 /** Mandatory hosted acceptance. All model executables and credentials are synthetic;
  * the ordinary owner API, HMAC client, Docker lifecycle and native verifier are real.
- * --ci keeps the ordinary-self gate; self-roundtrip and self-owner-force are explicit scenario extensions. */
+ * --ci keeps the ordinary-self gate; other scenarios require explicit selection. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,9 +11,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip' | 'self-owner-force';
+export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip' | 'self-owner-force' | 'team-plan-move';
 function requireSelection(value: string): asserts value is PlanOfficeCiSelection {
-  assert.ok(value === 'ordinary-self' || value === 'self-roundtrip' || value === 'self-owner-force');
+  assert.ok(
+    value === 'ordinary-self' ||
+      value === 'self-roundtrip' ||
+      value === 'self-owner-force' ||
+      value === 'team-plan-move'
+  );
 }
 function object(value: unknown): Json {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value));
@@ -91,10 +96,22 @@ export function planOfficeCiContract(
           employeeId,
           sessionId,
           nativeThreadId,
-          name: 'CI Ordinary Self',
+          name: selection === 'team-plan-move' ? 'CI Team Caller' : 'CI Ordinary Self',
           account: 'ci-plan-a',
-          permissions: { moveOwnPlan: true, managePlans: false },
+          permissions: { moveOwnPlan: selection !== 'team-plan-move', managePlans: false },
         },
+        ...(selection === 'team-plan-move'
+          ? [
+              {
+                employeeId: randomUUID(),
+                sessionId: randomUUID(),
+                nativeThreadId: randomUUID(),
+                name: 'CI Team Target',
+                account: 'ci-plan-a',
+                permissions: { moveOwnPlan: true, managePlans: false },
+              },
+            ]
+          : []),
       ],
     },
     sourceProviders: [{ employeeId, mode: 'ordinary' }],
@@ -111,6 +128,7 @@ export function requirePlanOfficeCiAcceptance(
   roundtrip?: { returned: unknown; summary: unknown; physical?: unknown }
 ) {
   requireSelection(selection);
+  assert.notEqual(selection, 'team-plan-move', 'Team acceptance requires its separate permission/native receipts');
   const r = object(result),
     proof = object(receipt);
   assert.equal(r.status, 0);
@@ -198,6 +216,115 @@ export function requirePlanOfficeCiAcceptance(
     selfRoundtripAccepted: !ownerForce,
     ownerForceAccepted: ownerForce,
     returnScenarioId: returned.id,
+  };
+}
+/** Team permission scope is explicit: two denied API requests, two granted
+ * read-only probes, one actual capsule request and physically verified target. */
+export function requirePlanOfficeCiTeamAcceptance(
+  result: unknown,
+  summary: unknown,
+  receipt: unknown,
+  physical: unknown,
+  root: string,
+  callerEmployeeId: string,
+  employeeId: string
+) {
+  const r = object(result),
+    s = object(summary),
+    p = object(receipt),
+    native = object(physical);
+  assert.equal(r.status, 0);
+  assert.equal(r.acceptedScenario, 'team-plan-move');
+  assert.equal(r.baselineReady, true);
+  assert.equal(r.planMovesAccepted, true);
+  assert.equal(r.teamAccepted, true);
+  assert.equal(r.evidence, root);
+  assert.equal(r.forceAccepted, false);
+  assert.equal(r.refreshReuseAccepted, false);
+  for (const id of [
+    callerEmployeeId,
+    employeeId,
+    s.id,
+    s.callerSessionId,
+    p.sessionId,
+    p.newSession,
+    p.targetOperationId,
+  ])
+    assert.match(String(id), uuid);
+  assert.notEqual(callerEmployeeId, employeeId);
+  assert.equal(s.employeeId, employeeId);
+  assert.equal(s.callerEmployeeId, callerEmployeeId);
+  assert.equal(s.apiDenialsObserved, true);
+  assert.equal(s.capsulePositive, true);
+  assert.equal(s.callerPreserved, true);
+  assert.equal(p.id, s.id);
+  assert.equal(s.receipt, 'team-move-' + s.id + '-completed');
+  assert.equal(s.physicalReceipt, 'physical-move-' + s.id);
+  assert.equal(p.employeeId, employeeId);
+  assert.equal(p.callerEmployeeId, callerEmployeeId);
+  assert.equal(p.callerSessionId, s.callerSessionId);
+  assert.notEqual(p.sessionId, p.callerSessionId);
+  assert.equal(p.fromAccount, 'ci-plan-a');
+  assert.equal(p.toAccount, 'ci-plan-b');
+  assert.equal(p.realCapsuleHmac, true);
+  assert.equal(p.originalOnly, true);
+  assert.equal(p.physicalReceipt, s.physicalReceipt);
+  assert.notEqual(p.newSession, p.sessionId);
+  assert.notEqual(p.callerContainerId, p.sourceContainerId);
+  assert.notEqual(p.callerContainerId, p.targetContainerId);
+  for (const id of [p.sourceContainerId, p.targetContainerId, p.callerContainerId])
+    assert.match(String(id), /^[a-f0-9]{64}$/);
+  assert.equal(native.sourceStopped, true);
+  assert.equal(native.sourceId, p.sourceContainerId);
+  assert.equal(native.targetId, p.targetContainerId);
+  assert.notEqual(native.sourceId, native.targetId);
+  assert.equal(native.operationId, p.targetOperationId);
+  assert.equal(native.sessionId, p.newSession);
+  assert.ok(Number.isSafeInteger(p.sessionGeneration) && Number(p.sessionGeneration) > 0);
+  assert.equal(native.sessionGeneration, Number(p.sessionGeneration) + 1);
+  assert.match(String(p.nativeThreadId), uuid);
+  assert.equal(native.nativeThreadId, p.nativeThreadId);
+  assert.equal(native.actualCallbacksAndConsumingCloses, true);
+  assert.ok(Array.isArray(s.permissionReceipts) && s.permissionReceipts.length === 4);
+  assert.ok(Array.isArray(s.permissionChecks) && s.permissionChecks.length === 4);
+  const ids = new Set([s.id]);
+  let pid: unknown;
+  for (const [i, raw] of s.permissionReceipts.entries()) {
+    const v = object(raw),
+      denied = i % 2 === 0;
+    const checked = object(s.permissionChecks[i]);
+    assert.equal(checked.unchangedNativeAndJournals, true);
+    assert.equal(checked.actualSdkProcess, true);
+    for (const key of Object.keys(v)) assert.equal(checked[key], v[key]);
+    assert.match(String(v.id), uuid);
+    assert.ok(!ids.has(v.id));
+    ids.add(v.id);
+    assert.equal(v.callerEmployeeId, callerEmployeeId);
+    assert.equal(v.callerSessionId, s.callerSessionId);
+    assert.equal(v.employeeId, employeeId);
+    assert.equal(v.sessionId, p.sessionId);
+    assert.equal(v.scope, denied ? 'team-request' : 'team-pending');
+    assert.equal(v.status, denied ? 403 : 200);
+    assert.equal(v.code, denied ? 'FORBIDDEN' : null);
+    assert.equal(v.success, !denied);
+    assert.ok(Number.isSafeInteger(v.namespacePid) && Number(v.namespacePid) > 1);
+    if (i) assert.equal(v.namespacePid, pid);
+    else pid = v.namespacePid;
+  }
+  return {
+    scenarioId: s.id,
+    employeeId,
+    callerEmployeeId,
+    teamAccepted: true,
+    teamManagePlansGrantRevocationAccepted: true,
+    ordinarySelfAccepted: false,
+    selfRoundtripAccepted: false,
+    forceAccepted: false,
+    agentForceAccepted: false,
+    exhaustedSourceAccepted: false,
+    deadViewerAccepted: false,
+    permissionMatrixAccepted: false,
+    officeReentryAccepted: false,
   };
 }
 function save(file: string, value: unknown) {
@@ -435,7 +562,8 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
   fs.mkdirSync(published, { mode: 0o700 });
   let serial = 0,
     lastStage = 'admission';
-  let lastChild: unknown, ownedEmployeeId: string | undefined;
+  let lastChild: unknown;
+  let ownedEmployeeIds: string[] = [];
   const run = (label: string, program: string, argv: string[], timeout = 120000) => {
     lastStage = label;
     console.log('Plan office: ' + label);
@@ -540,7 +668,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
     );
     load('control', control);
     const contract = planOfficeCiContract(metadata, instance, ids, selection);
-    ownedEmployeeId = contract.bootstrap.employees[0]!.employeeId;
+    ownedEmployeeIds = contract.bootstrap.employees.map((employee) => employee.employeeId);
     const file = path.join(evidence, 'contract.json');
     save(file, contract);
     assert.equal(run('head-current', 'git', ['rev-parse', 'HEAD']).trim(), head);
@@ -554,47 +682,62 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       600000
     );
     const root = path.join(evidence, 'office-' + instance);
-    const proof = JSON.parse(fs.readFileSync(path.join(root, 'first-self-move-completed.json'), 'utf8'));
-    let roundtrip: { returned: unknown; summary: unknown; physical?: unknown } | undefined;
-    if (selection !== 'ordinary-self') {
-      const ownerForce = selection === 'self-owner-force';
-      const summary = object(
-        JSON.parse(
-          fs.readFileSync(
-            path.join(root, ownerForce ? 'self-owner-force-completed.json' : 'self-roundtrip-completed.json'),
-            'utf8'
-          )
-        )
-      );
-      assert.match(String(summary.returnMoveId), uuid);
-      roundtrip = {
+    let acceptance: Json;
+    if (selection === 'team-plan-move') {
+      const summary = object(JSON.parse(fs.readFileSync(path.join(root, 'team-plan-move-completed.json'), 'utf8')));
+      assert.match(String(summary.id), uuid);
+      acceptance = requirePlanOfficeCiTeamAcceptance(
+        JSON.parse(stdout),
         summary,
-        returned: JSON.parse(
-          fs.readFileSync(
-            path.join(
-              root,
-              (ownerForce ? 'owner-force-move-' : 'self-move-') + summary.returnMoveId + '-completed.json'
-            ),
-            'utf8'
+        JSON.parse(fs.readFileSync(path.join(root, 'team-move-' + summary.id + '-completed.json'), 'utf8')),
+        JSON.parse(fs.readFileSync(path.join(root, 'physical-move-' + summary.id + '.json'), 'utf8')),
+        root,
+        contract.bootstrap.employees[0]!.employeeId,
+        contract.bootstrap.employees[1]!.employeeId
+      );
+    } else {
+      const proof = JSON.parse(fs.readFileSync(path.join(root, 'first-self-move-completed.json'), 'utf8'));
+      let roundtrip: { returned: unknown; summary: unknown; physical?: unknown } | undefined;
+      if (selection !== 'ordinary-self') {
+        const ownerForce = selection === 'self-owner-force';
+        const summary = object(
+          JSON.parse(
+            fs.readFileSync(
+              path.join(root, ownerForce ? 'self-owner-force-completed.json' : 'self-roundtrip-completed.json'),
+              'utf8'
+            )
           )
-        ),
-        ...(ownerForce
-          ? {
-              physical: JSON.parse(
-                fs.readFileSync(path.join(root, 'physical-move-' + summary.returnMoveId + '.json'), 'utf8')
+        );
+        assert.match(String(summary.returnMoveId), uuid);
+        roundtrip = {
+          summary,
+          returned: JSON.parse(
+            fs.readFileSync(
+              path.join(
+                root,
+                (ownerForce ? 'owner-force-move-' : 'self-move-') + summary.returnMoveId + '-completed.json'
               ),
-            }
-          : {}),
-      };
+              'utf8'
+            )
+          ),
+          ...(ownerForce
+            ? {
+                physical: JSON.parse(
+                  fs.readFileSync(path.join(root, 'physical-move-' + summary.returnMoveId + '.json'), 'utf8')
+                ),
+              }
+            : {}),
+        };
+      }
+      acceptance = requirePlanOfficeCiAcceptance(
+        JSON.parse(stdout),
+        proof,
+        root,
+        contract.bootstrap.employees[0]!.employeeId,
+        selection,
+        roundtrip
+      );
     }
-    const acceptance = requirePlanOfficeCiAcceptance(
-      JSON.parse(stdout),
-      proof,
-      root,
-      contract.bootstrap.employees[0]!.employeeId,
-      selection,
-      roundtrip
-    );
     save(path.join(published, 'result.json'), {
       status: 0,
       head,
@@ -613,7 +756,9 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       selectedScenario: selection,
       diagnostic: planOfficeCiFailureDiagnostic(
         lastChild,
-        ownedEmployeeId ? readPlanOfficeCiFailureState(path.join(evidence, 'office-' + instance), ownedEmployeeId) : []
+        ownedEmployeeIds.flatMap((employeeId) =>
+          readPlanOfficeCiFailureState(path.join(evidence, 'office-' + instance), employeeId)
+        )
       ),
     });
     throw Error('Actual ' + selection + ' plan acceptance failed at ' + lastStage);

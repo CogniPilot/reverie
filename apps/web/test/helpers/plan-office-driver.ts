@@ -2,6 +2,7 @@
 import {
   runPlanOfficeMoveScenario,
   runPlanOfficeSelfSequence,
+  runPlanOfficeTeamSequence,
   planOfficeSelfDirection,
   planOfficeSelfLegKind,
   type PlanOfficeSelfCompletion,
@@ -28,6 +29,7 @@ import { enrollIsolatedPlanOfficeOwner, resumeIsolatedPlanOfficeOwner } from './
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
 import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
+import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
 import { boxedOriginal, DockerEmployeeInspect } from '../../src/docker-employee-engine-data.js';
 import type { SessionState } from '../../src/types.js';
 import {
@@ -44,7 +46,9 @@ export const PlanOfficeDriverInput = z
   .object({
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-office-baseline-v1'),
-    acceptance: z.enum(['baseline', 'ordinary-self', 'self-roundtrip', 'self-owner-force']).default('baseline'),
+    acceptance: z
+      .enum(['baseline', 'ordinary-self', 'self-roundtrip', 'self-owner-force', 'team-plan-move'])
+      .default('baseline'),
     instance: z.string().regex(/^[a-f0-9]{32}$/),
     sourcePath: store,
     runtimePath: store,
@@ -83,7 +87,15 @@ export const PlanOfficeDriverInput = z
   .refine(
     (v) =>
       (v.acceptance === 'baseline' ||
-        (v.bootstrap.employees.length === 1 &&
+        (v.acceptance === 'team-plan-move' &&
+          v.bootstrap.employees.length === 2 &&
+          v.bootstrap.employees.every((e) => e.account === 'ci-plan-a' && e.permissions.managePlans === false) &&
+          v.bootstrap.employees[0]!.permissions.moveOwnPlan === false &&
+          v.bootstrap.employees[1]!.permissions.moveOwnPlan === true &&
+          new Set(v.bootstrap.employees.map((e) => e.nativeThreadId)).size === 2 &&
+          v.sourceProviders.every((e) => e.mode === 'ordinary')) ||
+        (v.acceptance !== 'team-plan-move' &&
+          v.bootstrap.employees.length === 1 &&
           v.bootstrap.employees[0]!.account === 'ci-plan-a' &&
           v.bootstrap.employees[0]!.permissions.moveOwnPlan === true &&
           v.bootstrap.employees[0]!.permissions.managePlans !== true &&
@@ -744,7 +756,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       limitation:
         input.acceptance === 'baseline'
           ? 'Fake external model; real owner/API/Engine/native/HMAC baseline only.'
-          : 'Fake external model; selected self moves require actual physical verification. No paid vendor, refreshed principal, force, team or recovery-matrix acceptance.',
+          : 'Fake external model; only the explicit selected scenario is checked with actual physical verification. No paid vendor or complete permission/recovery matrix acceptance.',
     });
     const census = driver.docker(['container', 'ls', '--all', '--no-trunc', '--format', 'json']);
     const before = census
@@ -833,6 +845,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
             purpose: 'reverie-ci-plan-provider-v1',
             employeeId: employee.employeeId,
             accounts: ['ci-plan-a', 'ci-plan-b'],
+            ...(input.acceptance === 'team-plan-move' &&
+            employee.employeeId === input.bootstrap.employees[1]!.employeeId
+              ? { approvalAllowlistOnly: true }
+              : {}),
             ...planOfficeProviderMode(
               input.sourceProviders.find((row) => row.employeeId === employee.employeeId)?.mode ?? 'ordinary'
             ),
@@ -1146,8 +1162,222 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     let planMovesAccepted = false;
     let selfRoundtripAccepted = false;
     let ownerForceAccepted = false;
+    let teamAccepted = false;
     const acceptance = input.acceptance;
-    if (acceptance !== 'baseline') {
+    if (acceptance === 'team-plan-move') {
+      const caller = input.bootstrap.employees[0]!,
+        target = input.bootstrap.employees[1]!;
+      const callerHome = sources[0]!.home as string,
+        targetHome = sources[1]!.home as string;
+      const controlEpoch = driver.owned(control, 'control').State as Json;
+      const current = () => {
+        evidence.current();
+        const actual = driver.owned(control, 'control').State as Json;
+        assert.equal(actual.Running, true);
+        assert.equal(actual.Pid, controlEpoch.Pid);
+        assert.equal(actual.StartedAt, controlEpoch.StartedAt);
+      };
+      const employee = (id: string) => {
+        const company = readPrivate(path.join(evidence.root, 'data/company.json')) as Json;
+        const row = DockerEmployeeContinuationRecord.parse(
+          (company.dockerEmployeeContinuations as Json[]).find((e) => e.employeeId === id)
+        );
+        const current = (company.employees as Json[]).find((e) => e.id === id)!;
+        assert.ok(current && row.destination);
+        assert.equal(row.phase, 'ready');
+        return { current, row };
+      };
+      const epoch = () =>
+        [caller, target].map((e) => {
+          current();
+          const { current: employeeRow, row } = employee(e.employeeId);
+          const inspect = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
+          assert.equal(inspect.State.Running, true);
+          return {
+            employeeId: e.employeeId,
+            sessionId: employeeRow.sessionId,
+            sessionGeneration: employeeRow.sessionGeneration,
+            dockerBinding: employeeRow.dockerBinding,
+            row,
+            native: {
+              id: inspect.Id,
+              image: inspect.Image,
+              pid: inspect.State.Pid,
+              startedAt: inspect.State.StartedAt,
+              config: inspect.Config,
+              mounts: inspect.Mounts,
+            },
+          };
+        });
+      const journals = () =>
+        ['plan-requests.json', 'plan-moves.json'].map((name) => {
+          const file = path.join(evidence.root, 'data', name);
+          return {
+            name,
+            digest: fs.existsSync(file) ? createHash('sha256').update(fs.readFileSync(file)).digest('hex') : null,
+          };
+        });
+      const verifyNative = async (e: typeof caller) => {
+        const reports = readPrivate(
+          path.join(evidence.root, 'genuine-capsule-receipts-' + e.employeeId + '.json')
+        ) as Json[];
+        const report = reports.find(
+          (value) =>
+            value.employeeId === e.employeeId &&
+            value.sessionId === e.sessionId &&
+            value.state === 'idle' &&
+            value.requestId === null
+        );
+        assert.ok(report);
+        return (
+          await verifyPlanOfficeReadyNative(
+            employee(e.employeeId).row,
+            e.nativeThreadId,
+            report as unknown as import('./boxed-plan-provider.js').PlanProviderFixtureReport,
+            { current, metadata: async (args) => driver.docker([...args]) }
+          )
+        ).native;
+      };
+      const originalCallerNative = await verifyNative(caller),
+        originalTargetNative = await verifyNative(target);
+      evidence.save('team-initial-native', { caller: originalCallerNative, target: originalTargetNative });
+      const originalCaller = epoch()[0];
+      const completed = await runPlanOfficeTeamSequence({
+        grant: async (enabled) => {
+          const p = '/api/company/employees/' + caller.employeeId;
+          await data(await owner.request(p, 'PUT', { permissions: { managePlans: enabled } }));
+          const readback = await data(await owner.request(p + '/permissions'));
+          assert.equal(readback.employeeId, caller.employeeId);
+          assert.equal((readback.permissions as Json).managePlans, enabled);
+          const actual = employee(caller.employeeId);
+          assert.equal((actual.current.permissions as Json).managePlans, enabled);
+          assert.equal((actual.current.permissions as Json).moveOwnPlan, false);
+          assert.deepEqual(epoch()[0], originalCaller);
+          evidence.save('team-grant-' + randomUUID(), {
+            employeeId: caller.employeeId,
+            managePlans: enabled,
+            apiAndDiskReadback: true,
+          });
+        },
+        probe: async (scope) => {
+          const id = randomUUID();
+          const callerRow = employee(caller.employeeId).row,
+            targetRow = employee(target.employeeId).row;
+          assert.equal((employee(caller.employeeId).current.permissions as Json).managePlans, scope === 'team-pending');
+          const input = PlanOfficePermissionProbe.parse({
+            version: 1,
+            purpose: 'reverie-ci-team-permission-probe-v1',
+            id,
+            scope,
+            callerEmployeeId: caller.employeeId,
+            callerSessionId: callerRow.request.sessionId,
+            employeeId: target.employeeId,
+            sessionId: targetRow.request.sessionId,
+            toAccount: 'ci-plan-b',
+          });
+          const before = { epoch: epoch(), journals: journals() };
+          evidence.save('team-permission-' + id + '-intent', { input, before, noRetry: true });
+          const fixture = new Evidence(path.join(callerHome, '.fixture'), true);
+          try {
+            fixture.save('plan-permission-probe-' + id, input);
+          } finally {
+            fixture.close();
+          }
+          // One ordinary owner input, consumed by the existing caller SDK process.
+          await data(
+            await owner.request('/api/sessions/' + callerRow.request.sessionId + '/input', 'POST', {
+              input: 'BOXED_PLAN_PERMISSION_PROBE_' + id + '\n',
+              useMux: true,
+            })
+          );
+          const receiptFile = path.join(callerHome, '.fixture', 'plan-permission-returned-' + id + '.json');
+          let receipt: z.infer<typeof PlanOfficePermissionReceipt> | undefined;
+          for (let index = 0; index < 100; index++) {
+            current();
+            if (fs.existsSync(receiptFile)) {
+              const value = PlanOfficePermissionReceipt.parse(readPrivate(receiptFile));
+              const session = await planOfficeSession(
+                await owner.request('/api/sessions/' + callerRow.request.sessionId),
+                callerRow.request.sessionId
+              );
+              const output = await planOfficeTerminal(
+                await owner.request('/api/sessions/' + callerRow.request.sessionId + '/terminal')
+              );
+              if (
+                session.status === 'idle' &&
+                session.isWorking === false &&
+                session.providerInputHeld === false &&
+                output.includes('BCPLAN_PERMISSION_RETURNED_' + id) &&
+                output.trimEnd().endsWith('❯')
+              ) {
+                receipt = value;
+                break;
+              }
+            }
+            await wait(250);
+          }
+          assert.ok(receipt, 'Permission transport/idle outcome unknown; never issue another request');
+          for (const key of ['id', 'scope', 'callerEmployeeId', 'callerSessionId', 'employeeId', 'sessionId'] as const)
+            assert.equal(receipt[key], input[key]);
+          assert.equal(
+            receipt.namespacePid,
+            originalCallerNative.panePid,
+            'Probe must run in the physically observed original SDK process'
+          );
+          assert.deepEqual(await verifyNative(caller), originalCallerNative);
+          assert.deepEqual(await verifyNative(target), originalTargetNative);
+          assert.deepEqual(epoch(), before.epoch);
+          assert.deepEqual(
+            journals(),
+            before.journals,
+            'Permission observation must not create request/native move journals'
+          );
+          evidence.save('team-permission-' + id + '-checked', {
+            ...receipt,
+            unchangedNativeAndJournals: true,
+            actualSdkProcess: true,
+          });
+          return receipt;
+        },
+        move: async (permissionReceipts) => {
+          const result = await runPlanOfficeMoveLeg(
+            input,
+            evidence,
+            driver,
+            control,
+            owner,
+            targetHome,
+            'first',
+            undefined,
+            'team',
+            {
+              employeeId: target.employeeId,
+              callerEmployeeId: caller.employeeId,
+              forbiddenIds: permissionReceipts.map((receipt) => receipt.id),
+            }
+          );
+          assert.deepEqual(epoch()[0], originalCaller, 'A team move must preserve its separate caller worker');
+          assert.deepEqual(await verifyNative(caller), originalCallerNative);
+          return result;
+        },
+      });
+      evidence.save('team-plan-move-completed', {
+        employeeId: target.employeeId,
+        callerEmployeeId: caller.employeeId,
+        callerSessionId: caller.sessionId,
+        id: completed.scenario.id,
+        receipt: 'team-move-' + completed.scenario.id + '-completed',
+        physicalReceipt: 'physical-move-' + completed.scenario.id,
+        permissionReceipts: completed.receipts,
+        permissionChecks: completed.receipts.map((receipt) =>
+          readPrivate(path.join(evidence.root, 'team-permission-' + receipt.id + '-checked.json'))
+        ),
+        apiDenialsObserved: true,
+        capsulePositive: true,
+        callerPreserved: true,
+      });
+      planMovesAccepted = teamAccepted = true;
+    } else if (acceptance !== 'baseline') {
       const originalControl = driver.owned(control, 'control').State as Json;
       const sameControl = () => {
         const observed = driver.owned(control, 'control').State as Json;
@@ -1209,6 +1439,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       planMovesAccepted,
       selfRoundtripAccepted,
       ownerForceAccepted,
+      teamAccepted,
       acceptedScenario: input.acceptance,
       refreshReuseAccepted: false,
       forceAccepted: ownerForceAccepted,
@@ -1235,13 +1466,18 @@ async function runPlanOfficeMoveLeg(
   home: string,
   leg: PlanOfficeSelfLeg = 'first',
   previous?: PlanOfficeSelfCompletion,
-  kind: 'self' | 'owner-force' = 'self'
+  kind: 'self' | 'owner-force' | 'team' = 'self',
+  actors?: { employeeId: string; callerEmployeeId: string; forbiddenIds: readonly string[] }
 ) {
   const direction = planOfficeSelfDirection(leg);
   if (kind === 'owner-force') assert.equal(leg, 'return');
   const names = driver.names;
-  assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
-  const initialEmployee = input.bootstrap.employees[0]!;
+  assert.equal(input.bootstrap.employees.length, kind === 'team' ? 2 : 1);
+  assert.equal(kind === 'team', actors !== undefined);
+  const initialEmployee = input.bootstrap.employees.find(
+    (e) => e.employeeId === (actors?.employeeId ?? input.bootstrap.employees[0]!.employeeId)
+  )!;
+  assert.ok(initialEmployee);
   assert.equal(initialEmployee.account, 'ci-plan-a');
   assert.equal(
     input.sourceProviders.find((item) => item.employeeId === initialEmployee.employeeId)?.mode ?? 'ordinary',
@@ -1278,6 +1514,20 @@ async function runPlanOfficeMoveLeg(
     .parse(nativeThreadProfile(saved.mode ?? 'claude')?.read(saved));
   assert.equal(nativeThreadId, initialEmployee.nativeThreadId);
   assert.equal(saved.subscriptionProfile?.id, direction.fromAccount);
+  const caller =
+    actors &&
+    DockerEmployeeContinuationRecord.parse(
+      ((readPrivate(path.join(evidence.root, 'data/company.json')) as Json).dockerEmployeeContinuations as Json[]).find(
+        (e) => e.employeeId === actors.callerEmployeeId
+      )
+    );
+  if (caller) {
+    assert.equal(caller.phase, 'ready');
+    assert.ok(caller.destination);
+    assert.notEqual(caller.employeeId, row.employeeId);
+    assert.notEqual(caller.request.sessionId, row.request.sessionId);
+    assert.notEqual(caller.destination.containerId, row.destination.containerId);
+  }
   if (leg === 'return') {
     assert.ok(previous, 'Return move requires the physically completed first move');
     assert.equal(previous.record.phase, 'completed');
@@ -1299,6 +1549,25 @@ async function runPlanOfficeMoveLeg(
     ...direction,
   };
   if (previous) assert.notEqual(scenario.id, previous.scenario.id);
+  if (kind === 'team') {
+    assert.ok(actors);
+    assert.equal(actors.forbiddenIds.length, 4);
+    for (const id of actors.forbiddenIds) {
+      z.string().uuid().parse(id);
+      assert.notEqual(scenario.id, id, 'Denied or uncertain IDs can never be reused');
+    }
+    const fixture = new Evidence(path.join(home, '.fixture'), true);
+    try {
+      fixture.save('plan-team-cooperation-' + scenario.id, {
+        version: 1,
+        purpose: 'reverie-ci-team-positive-cooperation-v1',
+        id: scenario.id,
+      });
+    } finally {
+      fixture.close();
+    }
+    evidence.save('team-positive-cooperation-' + scenario.id, { id: scenario.id, externalModelOnly: true });
+  }
   const sourceInspect = DockerEmployeeInspect.parse(driver.inspect(row.destination.containerId));
   const instanceId = z
     .string()
@@ -1318,8 +1587,8 @@ async function runPlanOfficeMoveLeg(
     home: { source: home, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
     canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, direction.toAccount),
   };
-  const moveName = kind === 'owner-force' ? 'owner-force-move-' : 'self-move-';
-  evidence.save(leg === 'first' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
+  const moveName = kind === 'owner-force' ? 'owner-force-move-' : kind === 'team' ? 'team-move-' : 'self-move-';
+  evidence.save(leg === 'first' && kind !== 'team' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
   const ownerGet = async (p: string) => {
     current();
     const result = await owner.request(p);
@@ -1361,7 +1630,17 @@ async function runPlanOfficeMoveLeg(
     },
     capsule: async (args) => {
       currentSource();
-      const identityFile = planOfficeSelfIdentityFile(row);
+      const actor = caller ?? row;
+      if (caller) {
+        const actual = (
+          (readPrivate(path.join(evidence.root, 'data/company.json')) as Json).dockerEmployeeContinuations as Json[]
+        ).find((e) => e.employeeId === caller.employeeId);
+        assert.deepEqual(DockerEmployeeContinuationRecord.parse(actual), caller);
+        const observed = DockerEmployeeInspect.parse(driver.inspect(caller.destination!.containerId));
+        assert.equal(observed.State.Running, true);
+        assert.equal(observed.Id, caller.destination!.containerId);
+      }
+      const identityFile = planOfficeSelfIdentityFile(actor);
       const output = driver.docker([
         'exec',
         '--env',
@@ -1369,10 +1648,10 @@ async function runPlanOfficeMoveLeg(
         '--env',
         'REVERIE_API_URL=http://reverie:3000',
         '--env',
-        'REVERIE_SESSION_ID=' + row.request.sessionId,
+        'REVERIE_SESSION_ID=' + actor.request.sessionId,
         '--env',
         'REVERIE_WORKER_IDENTITY_FILE=' + identityFile,
-        row.destination!.containerId,
+        actor.destination!.containerId,
         '/opt/reverie-worker-client/bin/reverie',
         ...args,
       ]);
@@ -1397,23 +1676,33 @@ async function runPlanOfficeMoveLeg(
   assert.equal(target.request.sessionGeneration, scenario.sessionGeneration + 1);
   assert.equal(target.version === 3 && target.planReplacement.moveId, scenario.id);
   assert.ok(target.destination);
-  evidence.save(leg === 'first' ? 'first-self-move-completed' : moveName + scenario.id + '-completed', {
-    id: scenario.id,
-    employeeId: scenario.employeeId,
-    fromAccount: scenario.fromAccount,
-    toAccount: scenario.toAccount,
-    sessionId: scenario.sessionId,
-    sessionGeneration: scenario.sessionGeneration,
-    newSession: record.newSession,
-    realCapsuleHmac: kind === 'self',
-    ownerApiForce: kind === 'owner-force',
-    sourceContainerId: row.destination.containerId,
-    targetContainerId: target.destination.containerId,
-    targetOperationId: target.request.operationId,
-    nativeThreadId,
-    physicalReceipt: 'physical-move-' + scenario.id,
-    originalOnly: true,
-  });
+  evidence.save(
+    leg === 'first' && kind !== 'team' ? 'first-self-move-completed' : moveName + scenario.id + '-completed',
+    {
+      id: scenario.id,
+      employeeId: scenario.employeeId,
+      fromAccount: scenario.fromAccount,
+      toAccount: scenario.toAccount,
+      sessionId: scenario.sessionId,
+      sessionGeneration: scenario.sessionGeneration,
+      newSession: record.newSession,
+      realCapsuleHmac: kind !== 'owner-force',
+      ...(caller
+        ? {
+            callerEmployeeId: caller.employeeId,
+            callerSessionId: caller.request.sessionId,
+            callerContainerId: caller.destination!.containerId,
+          }
+        : {}),
+      ownerApiForce: kind === 'owner-force',
+      sourceContainerId: row.destination.containerId,
+      targetContainerId: target.destination.containerId,
+      targetOperationId: target.request.operationId,
+      nativeThreadId,
+      physicalReceipt: 'physical-move-' + scenario.id,
+      originalOnly: true,
+    }
+  );
   return { scenario, record };
 }
 

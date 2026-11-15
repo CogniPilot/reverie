@@ -13,6 +13,7 @@ import {
   requirePlanOfficeCiAcceptance,
   planOfficeCiFailureDiagnostic,
   readPlanOfficeCiFailureState,
+  requirePlanOfficeCiTeamAcceptance,
 } from '../scripts/plan-office-ci.mjs';
 const instance = 'a'.repeat(32),
   namespace = planOfficeCiNamespace(instance);
@@ -63,7 +64,7 @@ it('offers only closed dispatch choices and passes them as quoted data while PR/
   const input = workflow.on.workflow_dispatch.inputs.plan_office_scenario;
   expect(input.type).toBe('choice');
   expect(input.default).toBe('ordinary-self');
-  expect(input.options).toEqual(['ordinary-self', 'self-roundtrip', 'self-owner-force']);
+  expect(input.options).toEqual(['ordinary-self', 'self-roundtrip', 'self-owner-force', 'team-plan-move']);
   for (const choice of input.options)
     expect(requireHostedPlanOffice(['--ci', '--scenario', choice], env, 'linux', 'x64')).toBe(choice);
   const office = workflow.jobs.image.steps.find((step) => step.run?.includes('scripts/plan-office-ci.mts'))!;
@@ -264,6 +265,14 @@ it('selects only fresh namespaced actual Engine IDs and fixed immutable current-
   expect(c.acceptance).toBe('ordinary-self');
   expect(planOfficeCiContract(metadata, instance, ids, 'self-roundtrip').acceptance).toBe('self-roundtrip');
   expect(planOfficeCiContract(metadata, instance, ids, 'self-owner-force').acceptance).toBe('self-owner-force');
+  const team = planOfficeCiContract(metadata, instance, ids, 'team-plan-move');
+  expect(team.bootstrap.employees).toHaveLength(2);
+  expect(team.bootstrap.employees.map((e) => e.permissions)).toEqual([
+    { moveOwnPlan: false, managePlans: false },
+    { moveOwnPlan: true, managePlans: false },
+  ]);
+  for (const key of ['employeeId', 'sessionId', 'nativeThreadId'] as const)
+    expect(team.bootstrap.employees[0]![key]).not.toBe(team.bootstrap.employees[1]![key]);
   expect(c.bootstrap.employees[0]?.permissions).toEqual({ moveOwnPlan: true, managePlans: false });
   expect(c.sourceProviders[0]?.mode).toBe('ordinary');
   for (const change of [
@@ -274,6 +283,123 @@ it('selects only fresh namespaced actual Engine IDs and fixed immutable current-
   ])
     expect(() => planOfficeCiContract({ ...metadata, ...change }, instance, ids)).toThrow();
   expect(() => planOfficeCiContract(metadata, instance, { ...ids, worker: 'worker:latest' })).toThrow();
+});
+it('requires separate team API denial/revocation, positive capsule and physical receipts without claiming the full matrix', () => {
+  const id = '22222222-2222-4222-8222-222222222222',
+    caller = '33333333-3333-4333-8333-333333333333',
+    callerSession = '44444444-4444-4444-8444-444444444444',
+    source = '55555555-5555-4555-8555-555555555555',
+    target = '66666666-6666-4666-8666-666666666666',
+    operation = '77777777-7777-4777-8777-777777777777';
+  const root = '/private/team';
+  const result = {
+    status: 0,
+    acceptedScenario: 'team-plan-move',
+    baselineReady: true,
+    planMovesAccepted: true,
+    teamAccepted: true,
+    evidence: root,
+    forceAccepted: false,
+    refreshReuseAccepted: false,
+  };
+  const receipt = {
+    id,
+    employeeId,
+    callerEmployeeId: caller,
+    callerSessionId: callerSession,
+    sessionId: source,
+    newSession: target,
+    fromAccount: 'ci-plan-a',
+    toAccount: 'ci-plan-b',
+    realCapsuleHmac: true,
+    originalOnly: true,
+    physicalReceipt: 'physical-move-' + id,
+    callerContainerId: 'a'.repeat(64),
+    sourceContainerId: 'b'.repeat(64),
+    targetContainerId: 'c'.repeat(64),
+    targetOperationId: operation,
+    sessionGeneration: 1,
+    nativeThreadId: operation,
+  };
+  const physical = {
+    sourceStopped: true,
+    sourceId: receipt.sourceContainerId,
+    targetId: receipt.targetContainerId,
+    operationId: operation,
+    sessionId: target,
+    sessionGeneration: 2,
+    nativeThreadId: operation,
+    actualCallbacksAndConsumingCloses: true,
+  };
+  const permissionReceipts = [403, 200, 403, 200].map((status, i) => ({
+    version: 1,
+    purpose: 'reverie-ci-team-permission-receipt-v1',
+    id: `00000000-0000-4000-8000-00000000000${i}`,
+    scope: status === 403 ? 'team-request' : 'team-pending',
+    callerEmployeeId: caller,
+    callerSessionId: callerSession,
+    employeeId,
+    sessionId: source,
+    namespacePid: 55,
+    status,
+    code: status === 403 ? 'FORBIDDEN' : null,
+    success: status === 200,
+  }));
+  const summary = {
+    id,
+    employeeId,
+    callerEmployeeId: caller,
+    callerSessionId: callerSession,
+    apiDenialsObserved: true,
+    capsulePositive: true,
+    callerPreserved: true,
+    receipt: 'team-move-' + id + '-completed',
+    physicalReceipt: receipt.physicalReceipt,
+    permissionReceipts,
+    permissionChecks: permissionReceipts.map((receipt) => ({
+      ...receipt,
+      unchangedNativeAndJournals: true,
+      actualSdkProcess: true,
+    })),
+  };
+  expect(requirePlanOfficeCiTeamAcceptance(result, summary, receipt, physical, root, caller, employeeId)).toMatchObject(
+    {
+      teamAccepted: true,
+      teamManagePlansGrantRevocationAccepted: true,
+      ordinarySelfAccepted: false,
+      permissionMatrixAccepted: false,
+      agentForceAccepted: false,
+    }
+  );
+  for (const change of [
+    { callerPreserved: false },
+    { permissionReceipts: permissionReceipts.slice(1) },
+    { permissionReceipts: permissionReceipts.map((p, i) => (i === 2 ? { ...p, status: 500 } : p)) },
+    { permissionReceipts: permissionReceipts.map((p, i) => (i === 2 ? { ...p, id: permissionReceipts[0]!.id } : p)) },
+  ])
+    expect(() =>
+      requirePlanOfficeCiTeamAcceptance(result, { ...summary, ...change }, receipt, physical, root, caller, employeeId)
+    ).toThrow();
+  for (const change of [
+    { realCapsuleHmac: false },
+    { callerContainerId: receipt.sourceContainerId },
+    { callerSessionId: source },
+  ])
+    expect(() =>
+      requirePlanOfficeCiTeamAcceptance(result, summary, { ...receipt, ...change }, physical, root, caller, employeeId)
+    ).toThrow();
+  expect(() =>
+    requirePlanOfficeCiTeamAcceptance(
+      result,
+      summary,
+      receipt,
+      { ...physical, actualCallbacksAndConsumingCloses: false },
+      root,
+      caller,
+      employeeId
+    )
+  ).toThrow();
+  expect(() => requirePlanOfficeCiAcceptance(result, receipt, root, employeeId, 'team-plan-move')).toThrow();
 });
 it('requires both separately completed opposite moves with linked new sessions to accept opt-in roundtrip', () => {
   const root = '/private/owned/office-' + instance;

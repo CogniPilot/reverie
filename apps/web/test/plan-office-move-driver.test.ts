@@ -5,6 +5,7 @@ import {
   planOfficeMoveRecord,
   runPlanOfficeMoveScenario,
   runPlanOfficeSelfSequence,
+  runPlanOfficeTeamSequence,
   type PlanOfficeMovePorts,
 } from './helpers/plan-office-move-driver.js';
 const sid = '11111111-1111-4111-8111-111111111111',
@@ -35,6 +36,78 @@ const requestRecord = (phase = 'pending') => ({
   expiresAt: 2,
   notified: true,
   ...(phase === 'completed' ? { newSession } : {}),
+});
+function teamPorts() {
+  const events: string[] = [];
+  let index = 0;
+  const probe = vi.fn(async (scope: string) => {
+    index++;
+    events.push(scope);
+    const denied = scope === 'team-request';
+    return {
+      version: 1,
+      purpose: 'reverie-ci-team-permission-receipt-v1',
+      id: `00000000-0000-4000-8000-00000000000${index}`,
+      scope,
+      callerEmployeeId: '77777777-7777-4777-8777-777777777777',
+      callerSessionId: '88888888-8888-4888-8888-888888888888',
+      employeeId: eid,
+      sessionId: sid,
+      namespacePid: 55,
+      status: denied ? 403 : 200,
+      code: denied ? 'FORBIDDEN' : null,
+      success: !denied,
+    };
+  });
+  const grant = vi.fn(async (enabled: boolean) => {
+    events.push('grant:' + enabled);
+  });
+  const move = vi.fn(async () => {
+    events.push('allocate-team-id-and-move');
+    return { scenario: PlanOfficeMoveScenario.parse({ ...base, kind: 'team' }), record: requestRecord('completed') };
+  });
+  return { events, probe, grant, move };
+}
+it('finishes grant/deny/revoke API observations before allocating the one positive team capsule request', async () => {
+  const f = teamPorts();
+  const result = await runPlanOfficeTeamSequence(f);
+  expect(f.events).toEqual([
+    'team-request',
+    'grant:true',
+    'team-pending',
+    'grant:false',
+    'team-request',
+    'grant:true',
+    'team-pending',
+    'allocate-team-id-and-move',
+  ]);
+  expect(result.receipts).toHaveLength(4);
+  expect(result.scenario.kind).toBe('team');
+});
+it('aborts before native effects on unknown transport, wrong status, foreign scope or reused denied IDs', async () => {
+  for (const change of [
+    { status: 500 },
+    { code: null },
+    { success: true },
+    { employeeId: newSession },
+    { callerSessionId: sid },
+    { id: '00000000-0000-4000-8000-000000000001' },
+  ]) {
+    const f = teamPorts();
+    const original = f.probe.getMockImplementation()!;
+    f.probe.mockImplementation(async (scope) => {
+      const value = await original(scope);
+      return f.probe.mock.calls.length === 3 ? { ...value, ...change } : value;
+    });
+    await expect(runPlanOfficeTeamSequence(f)).rejects.toThrow();
+    expect(f.move).not.toHaveBeenCalled();
+  }
+  const unknown = teamPorts();
+  unknown.probe.mockRejectedValue(new DOMException('Lost response', 'TimeoutError'));
+  await expect(runPlanOfficeTeamSequence(unknown)).rejects.toThrow();
+  expect(unknown.probe).toHaveBeenCalledOnce();
+  expect(unknown.grant).not.toHaveBeenCalled();
+  expect(unknown.move).not.toHaveBeenCalled();
 });
 it('allocates the return only after first physical verification and receipt have completed', async () => {
   const actualProtocol = fixture();

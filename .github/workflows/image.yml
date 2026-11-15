@@ -24,6 +24,7 @@ on:
           - ordinary-self
           - self-roundtrip
           - self-owner-force
+          - team-plan-move
 
 permissions:
   contents: read
