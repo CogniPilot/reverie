@@ -1820,6 +1820,10 @@
   const code = (v) => typeof v === 'string' && /^[A-Z][A-Z0-9_]{2,127}$/.test(v);
   const companyStatus = (v) =>
     desired(v?.desired) &&
+    (v.approvalCode === undefined ||
+      (v.approvalCode === 'DOCKER_RESOURCE_REVISION_CAPACITY' &&
+        Array.isArray(v.allowedActions) &&
+        v.allowedActions.length === 0)) &&
     Array.isArray(v.employees) &&
     v.employees.length <= 256 &&
     v.employees.every(
@@ -1844,6 +1848,20 @@
         (r.state !== 'closed-writer' || (closedWriter(r) && recoveryActions(r.allowedActions, true))) &&
         (r.state !== 'unstarted-retired' || (retiredIntent(r) && recoveryActions(r.allowedActions)))
     );
+  const scopeKeys = ['employeeId', 'sessionId', 'sessionGeneration', 'operationId', 'containerId', 'revision'];
+  const resourceScope = (v) =>
+    v &&
+    uuid(v.employeeId) &&
+    uuid(v.sessionId) &&
+    Number.isSafeInteger(v.sessionGeneration) &&
+    v.sessionGeneration > 0 &&
+    uuid(v.operationId) &&
+    typeof v.containerId === 'string' &&
+    /^[a-f0-9]{64}$/.test(v.containerId) &&
+    uuid(v.revision)
+      ? Object.freeze(Object.fromEntries(scopeKeys.map((key) => [key, v[key]])))
+      : null;
+  const sameScope = (a, b) => a && b && scopeKeys.every((key) => a[key] === b[key]);
   class ApiFailure extends Error {
     constructor(status, detail) {
       super(errorText(detail));
@@ -1852,6 +1870,21 @@
         detail && typeof detail === 'object'
           ? Object.freeze(Array.isArray(detail) ? [...detail] : { ...detail })
           : detail;
+    }
+    applyNotIssued(scope) {
+      const d = this.detail;
+      return (
+        this.status === 409 &&
+        d &&
+        typeof d === 'object' &&
+        !Array.isArray(d) &&
+        Object.keys(d).sort().join(',') ===
+          'action,code,containerId,employeeId,operationId,publication,revision,sessionGeneration,sessionId' &&
+        d.code === 'DOCKER_RESOURCE_REVISION_CAPACITY' &&
+        d.action === 'apply' &&
+        d.publication === 'not-issued' &&
+        sameScope(resourceScope(d), scope)
+      );
     }
     defaultNotIssued(revision) {
       const d = this.detail;
@@ -1965,8 +1998,29 @@
       this.key = `${employee.id}:${employee.sessionId}:${employee.sessionGeneration}`;
       void this.load();
     }
-    requestKey(revision) {
-      return `${this.key}:${revision}`;
+    requestKey(revision, scope = this.snapshot?.scope) {
+      const base = `${this.key}:${revision}`;
+      return scope ? `${base}:${scope.operationId}:${scope.containerId}` : base;
+    }
+    pendingCandidates(revision) {
+      const base = this.requestKey(revision, null),
+        found = [];
+      for (const [key, entry] of pending)
+        if (key === base || key.startsWith(`${base}:`)) found.push({ key, entry, marker: entry.notIssued });
+      return found;
+    }
+    pendingAttempt(revision, scope = this.snapshot?.scope) {
+      const key = this.requestKey(revision, scope),
+        exact = pending.get(key);
+      if (exact) return { key, entry: exact };
+      const base = this.requestKey(revision, null),
+        legacy = pending.get(base);
+      if (legacy) return { key: base, entry: legacy };
+      if (!scope)
+        for (const [candidate, entry] of pending) {
+          if (candidate.startsWith(`${base}:`)) return { key: candidate, entry };
+        }
+      return null;
     }
     matches(v) {
       return v && v.sessionId === this.binding.sid && v.sessionGeneration === this.binding.gen;
@@ -1985,6 +2039,8 @@
         if (!desired(overview?.desired)) throw Error('The approved default could not be verified.');
         const row = overview.employees?.find((v) => v.employeeId === this.binding.id);
         if (!this.matches(row)) throw Error('Employee resource identity changed. Reopen this profile.');
+        // Only a receipt present before this fresh owner read can be consumed by it.
+        const before = this.pendingCandidates(overview.desired?.revision);
         const [read, pool] = await Promise.allSettled([
           this.api(`${this.path}/docker-resources`),
           this.api(`${this.path}/docker-pool/status`),
@@ -1997,6 +2053,7 @@
           allowed: actions(row.allowedActions) ? row.allowedActions : [],
           retired: retiredIntent(row),
           closed: closedWriter(row),
+          scope: null,
         };
         this.content.append(
           this.note(
@@ -2043,12 +2100,25 @@
             allowed: actions(r.allowedActions) ? r.allowedActions : [],
             retired: retiredIntent(r) || retiredIntent(row),
             closed: closedWriter(r) || closedWriter(row),
+            scope: r.revision === overview.desired?.revision ? resourceScope(r) : null,
           };
+          for (const candidate of before) {
+            const { entry, marker, key } = candidate;
+            if (
+              marker instanceof ApiFailure &&
+              entry.scope &&
+              marker.applyNotIssued(entry.scope) &&
+              sameScope(entry.scope, this.snapshot.scope) &&
+              pending.get(key) === entry &&
+              entry.notIssued === marker
+            )
+              pending.delete(key);
+          }
         } else {
           this.status.textContent = 'Running limits unconfirmed';
           this.showError(read.reason.message);
         }
-        if (pending.has(this.requestKey(overview.desired?.revision)))
+        if (this.pendingAttempt(overview.desired?.revision))
           this.content.append(
             this.note(
               'The original resource application has an unknown outcome. Refresh reads status only; do not approve a replacement to retry it.'
@@ -2086,7 +2156,7 @@
                 text: 'Check original resource application',
               })
             );
-          else if (!pending.has(this.requestKey(overview.desired?.revision)) && this.snapshot.allowed.includes('apply'))
+          else if (!this.pendingAttempt(overview.desired?.revision) && this.snapshot.allowed.includes('apply'))
             this.controls.append(
               this.shell.button('ca-btn', 'Apply approved soft RAM default', () => this.change('apply', r), {
                 text: 'Apply approved soft RAM default',
@@ -2214,18 +2284,34 @@
         );
     }
     async change(action, revision) {
-      let refreshed = false;
+      let refreshed = false,
+        notIssuedFailure = null;
       await this.run(async (sequence) => {
         await this.current();
         if (this.snapshot?.revision !== revision || !this.snapshot.allowed.includes(action))
           throw Error('Resource action changed. Refresh this profile.');
-        const key = this.requestKey(revision);
-        pending.set(key, { revision });
+        const scope = this.snapshot.scope,
+          key = this.requestKey(revision, scope),
+          entry = { revision, scope };
+        pending.set(key, entry);
         const route = action === 'continue-original' ? 'continue' : action === 'abandon-original' ? 'abandon' : action;
-        const result = await this.api(`${this.path}/docker-resources/${route}`, {
-          method: 'POST',
-          body: { revision },
-        });
+        let result;
+        try {
+          result = await this.api(`${this.path}/docker-resources/${route}`, { method: 'POST', body: { revision } });
+        } catch (failure) {
+          if (
+            action === 'apply' &&
+            scope &&
+            failure instanceof ApiFailure &&
+            failure.applyNotIssued(scope) &&
+            pending.get(key) === entry
+          ) {
+            entry.notIssued = failure;
+            notIssuedFailure = failure;
+            return;
+          }
+          throw failure;
+        }
         await this.current();
         if (!this.live(sequence)) return;
         if (
@@ -2256,7 +2342,11 @@
         this.status.textContent = 'Resource action confirmed. Refreshing actual limits…';
         refreshed = true;
       });
-      if (refreshed) await this.load();
+      if ((refreshed || notIssuedFailure) && this.live()) await this.load();
+      if (notIssuedFailure && this.live()) {
+        this.error.textContent += `${this.error.textContent ? ' ' : ''}This resource application was not issued. Review current status before trying again.`;
+        this.technical(notIssuedFailure.message);
+      }
     }
     async pool(scopeDigest) {
       let refreshed = false;
@@ -2330,13 +2420,17 @@
         if (retired)
           this.content.append(
             this.note(
-              `${retired} unstarted resource application intent${retired === 1 ? ' is' : 's are'} retired. This fences that intent's future START; it is not proof that a container or writer was stopped.`
+              `${retired} unstarted resource application intent${retired === 1 ? ' is' : 's are'} retired. The cancelled application${retired === 1 ? '' : 's'} cannot start. This does not confirm that a running container was stopped.`
             )
           );
         const failures = r.employees.filter((v) => v.code !== undefined);
         if (failures.length) {
           this.error.textContent = `${failures.length} employee resource application${failures.length === 1 ? ' needs' : 's need'} attention. Open the employee profile to check the original attempt or apply an offered change; completion is not confirmed.`;
           this.technical(failures.map((v) => `${v.employeeId}: ${v.code}`).join('\n'));
+        }
+        if (r.approvalCode === 'DOCKER_RESOURCE_REVISION_CAPACITY') {
+          this.error.textContent += `${this.error.textContent ? ' ' : ''}Resource approval history has reached its capacity. New default approvals are blocked. Existing requests and verification records are preserved.`;
+          this.technical(r.approvalCode);
         }
         if (pending.has('default'))
           this.content.append(

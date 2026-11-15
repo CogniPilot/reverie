@@ -28,6 +28,8 @@ async function fixture(
     binding?: { employeeId: string; sessionId: string; sessionGeneration: number };
     writerClosed?: boolean;
     intentRetired?: boolean;
+    legacyRead?: boolean;
+    resourceScope?: { operationId: string; containerId: string };
   } = {}
 ) {
   const employee = {
@@ -52,6 +54,10 @@ async function fixture(
   let actual = 16 * 1024 ** 3,
     allowed = options.action ?? ['apply'];
   let summary = options.summary;
+  let readFailure = options.readFailure,
+    readApproved = true;
+  let operationId = options.resourceScope?.operationId ?? '55555555-5555-4555-8555-555555555555',
+    containerId = options.resourceScope?.containerId ?? '6'.repeat(64);
   let rootFailure: { status: number; error: unknown } | null = null;
   const initialDesired = summary?.desired as { revision: string } | null | undefined;
   let closed = options.writerClosed === true,
@@ -93,8 +99,7 @@ async function fixture(
             ],
           },
         };
-      if (path === profileBase + '/docker-resources' && options.readFailure)
-        return { ok: false, error: { code: options.readFailure } };
+      if (path === profileBase + '/docker-resources' && readFailure) return { ok: false, error: { code: readFailure } };
       if (path === profileBase + '/docker-resources')
         return {
           ok: true,
@@ -104,11 +109,13 @@ async function fixture(
             sessionGeneration: options.malformed ? employee.sessionGeneration - 1 : employee.sessionGeneration,
             revision: approved ? currentRevision : null,
             desiredMemoryHighBytes: approved ? high : null,
+            operationId: options.legacyRead ? undefined : operationId,
+            containerId: options.legacyRead ? undefined : containerId,
             actualMemoryHighBytes: actual,
             memoryMaxBytes: options.actualLimits?.memoryMaxBytes ?? 64 * 1024 ** 3,
             ...(options.actualLimits ? { actualLimits: options.actualLimits } : {}),
-            approved: true,
-            approvalSource: 'original-policy',
+            approved: readApproved,
+            approvalSource: readApproved ? 'original-policy' : null,
             approvedRevision: null,
             writerClosed: closed || undefined,
             intentRetired: retired || undefined,
@@ -156,6 +163,16 @@ async function fixture(
     writes,
     calls,
     click,
+    setReadApproved: (v: boolean) => {
+      readApproved = v;
+    },
+    setReadFailure: (v: string | undefined) => {
+      readFailure = v;
+    },
+    setResourceScope: (v: { operationId: string; containerId: string }) => {
+      operationId = v.operationId;
+      containerId = v.containerId;
+    },
     setRootFailure: (v: { status: number; error: unknown } | null) => {
       rootFailure = v;
     },
@@ -845,5 +862,176 @@ it('does not let an old not-issued reply release a newer pending default nonce',
   (panels[1]!.querySelector('[aria-label="Refresh Docker resources"]') as HTMLButtonElement).click();
   await f.h.flush();
   expect(panels[1]!.querySelector('[aria-label="Approve new 48 GiB default revision"]')).not.toBeNull();
+  expect(f.writes()).toHaveLength(2);
+});
+
+const applyNotIssued = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-apply-not-issued.json', import.meta.url), 'utf8')
+) as {
+  success: false;
+  error: Record<string, unknown> & {
+    employeeId: string;
+    sessionId: string;
+    sessionGeneration: number;
+    operationId: string;
+    containerId: string;
+    revision: string;
+  };
+};
+const capacityStatus = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-capacity-status.json', import.meta.url), 'utf8')
+) as { success: true; data: PhaseStatus };
+const capacityOptions = {
+  summary: capacityStatus.data,
+  binding: targetRow(capacityStatus.data),
+  action: ['apply'],
+  resourceScope: { operationId: applyNotIssued.error.operationId, containerId: applyNotIssued.error.containerId },
+};
+it('releases only the actual scoped capacity refusal after fresh owner resource readback without retrying apply', async () => {
+  const f = await fixture({
+    ...capacityOptions,
+    reply: async () => ({ ok: false, status: 409, error: structuredClone(applyNotIssued.error) }),
+  });
+  expect(f.writes()).toEqual([]);
+  await f.click('Apply approved soft RAM default');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.writes()[0]!.body).toEqual({ revision: applyNotIssued.error.revision });
+  expect(f.button('Apply approved soft RAM default')).toBeDefined();
+  expect(f.panel().textContent).toContain('This resource application was not issued');
+  expect(
+    f.calls.filter(
+      (v) =>
+        v.path === '/api/company/employees/' + applyNotIssued.error.employeeId + '/docker-resources' &&
+        v.method === 'GET'
+    )
+  ).toHaveLength(2);
+});
+it('retains the capacity refusal until authenticated matching readback succeeds', async () => {
+  const f = await fixture({
+    ...capacityOptions,
+    reply: async () => {
+      f.setReadFailure('OWNER_READ_UNCONFIRMED');
+      return { ok: false, status: 409, error: structuredClone(applyNotIssued.error) };
+    },
+  });
+  await f.click('Apply approved soft RAM default');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Apply approved soft RAM default')).toBeUndefined();
+  f.setReadFailure(undefined);
+  await f.click('Refresh resources');
+  expect(f.button('Apply approved soft RAM default')).toBeDefined();
+  expect(f.writes()).toHaveLength(1);
+});
+it('does not consume the new marker when the original read lacked an operation or container', async () => {
+  const f = await fixture({
+    ...capacityOptions,
+    legacyRead: true,
+    reply: async () => ({ ok: false, status: 409, error: structuredClone(applyNotIssued.error) }),
+  });
+  expect(f.button('Apply approved soft RAM default')).toBeDefined();
+  await f.click('Apply approved soft RAM default');
+  await f.click('Refresh resources');
+  expect(f.button('Apply approved soft RAM default')).toBeUndefined();
+  expect(f.writes()).toHaveLength(1);
+});
+it('keeps mismatched or generic capacity responses latched across every scope field', async () => {
+  const e = applyNotIssued.error;
+  const variants = [
+    { status: 409, error: { code: e.code } },
+    { status: 403, error: e },
+    { status: 409, error: { ...e, action: 'approve-default' } },
+    { status: 409, error: { ...e, publication: 'unknown' } },
+    { status: 409, error: { ...e, extra: true } },
+    ...Object.entries({
+      employeeId: '33333333-3333-4333-8333-333333333333',
+      sessionId: 'cccccccc-2222-4222-8222-222222222222',
+      sessionGeneration: 10,
+      operationId: '99999999-9999-4999-8999-999999999999',
+      containerId: 'a'.repeat(64),
+      revision: '99999999-9999-4999-8999-999999999999',
+    }).map(([key, value]) => ({ status: 409, error: { ...e, [key]: value } })),
+  ];
+  for (const response of variants) {
+    const f = await fixture({ ...capacityOptions, reply: async () => ({ ok: false, ...structuredClone(response) }) });
+    await f.click('Apply approved soft RAM default');
+    await f.click('Refresh resources');
+    expect(f.button('Apply approved soft RAM default')).toBeUndefined();
+    expect(f.writes()).toHaveLength(1);
+  }
+});
+it('does not infer an unknown application outcome from matching but unadopted actual values', async () => {
+  const f = await fixture({
+    ...capacityOptions,
+    reply: async () => ({ ok: false, status: 503, error: { code: 'ORIGINAL_REPLY_UNKNOWN' } }),
+  });
+  await f.click('Apply approved soft RAM default');
+  f.setActual(high);
+  f.setReadApproved(false);
+  await f.click('Refresh resources');
+  expect(f.panel().textContent).toContain('Actual soft RAM: 48 GiB');
+  expect(f.panel().textContent).toContain('have not been adopted');
+  expect(f.button('Apply approved soft RAM default')).toBeUndefined();
+  expect(f.writes()).toHaveLength(1);
+});
+it('requires the same fresh container and preserves the original scoped receipt for a later matching read', async () => {
+  const f = await fixture({
+    ...capacityOptions,
+    reply: async () => {
+      f.setResourceScope({ operationId: applyNotIssued.error.operationId, containerId: 'a'.repeat(64) });
+      f.setAllowed(['reconcile']);
+      return { ok: false, status: 409, error: structuredClone(applyNotIssued.error) };
+    },
+  });
+  await f.click('Apply approved soft RAM default');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.panel().textContent).toContain('This resource application was not issued');
+  f.setResourceScope(capacityOptions.resourceScope);
+  f.setAllowed(['apply']);
+  await f.click('Refresh resources');
+  expect(f.button('Apply approved soft RAM default')).toBeDefined();
+  expect(f.writes()).toHaveLength(1);
+});
+it('shows the actual global capacity reason without inventing cleanup or another approval', async () => {
+  const f = await fixture({ view: 'company', summary: capacityStatus.data });
+  expect(f.panel().querySelector('[role="alert"]')?.textContent).toContain(
+    'Resource approval history has reached its capacity'
+  );
+  expect(f.panel().querySelector('[role="alert"]')?.textContent).not.toContain('DOCKER_RESOURCE_');
+  expect(f.panel().querySelector('.ca-docker-resource-details')?.textContent).toContain(
+    'DOCKER_RESOURCE_REVISION_CAPACITY'
+  );
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  expect(f.writes()).toEqual([]);
+  expect([...f.panel().querySelectorAll('button')].map((v) => v.textContent)).toEqual(['Refresh resources']);
+});
+
+it('does not use an older capacity refusal to release a newer pending apply for the same full scope', async () => {
+  const replies: Array<(value: unknown) => void> = [];
+  const f = await fixture({ ...capacityOptions, reply: async () => new Promise((resolve) => replies.push(resolve)) });
+  const second = f.h.document.createElement('dialog') as HTMLDialogElement;
+  f.h.document.body.append(second);
+  second.showModal();
+  const registry = f.h.window as unknown as {
+    ReverieDockerResources: {
+      mountEmployee(shell: unknown, container: HTMLElement, dialog: HTMLDialogElement, employee: unknown): unknown;
+    };
+  };
+  registry.ReverieDockerResources.mountEmployee(f.h.shell, second, second, f.employee);
+  await f.h.flush();
+  const panels = [...f.h.document.querySelectorAll('.ca-docker-resources')];
+  expect(panels).toHaveLength(2);
+  (panels[0]!.querySelector('[aria-label="Apply approved soft RAM default"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  (panels[1]!.querySelector('[aria-label="Apply approved soft RAM default"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(replies).toHaveLength(2);
+  replies[0]!({ ok: false, status: 409, error: structuredClone(applyNotIssued.error) });
+  await f.h.flush();
+  replies[1]!({ ok: false, status: 503, error: { code: 'NEWER_APPLY_UNKNOWN' } });
+  await f.h.flush();
+  (panels[1]!.querySelector('[aria-label="Refresh Docker resources"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(panels[1]!.querySelector('[aria-label="Apply approved soft RAM default"]')).toBeNull();
+  expect(panels[1]!.textContent).toContain('original resource application has an unknown outcome');
   expect(f.writes()).toHaveLength(2);
 });
