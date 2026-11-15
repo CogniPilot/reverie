@@ -6327,3 +6327,31 @@ button.ca-company-profile-trigger:focus-visible {
   padding: 12px 0;
   cursor: pointer;
 }
+
+.ca-docker-resource-facts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+.ca-docker-resource-facts caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.ca-docker-resource-facts th,
+.ca-docker-resource-facts td {
+  padding: 7px 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.24);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.ca-docker-resource-facts th {
+  text-align: left;
+  font-weight: 500;
+  width: 54%;
+}
+.ca-docker-resource-facts td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

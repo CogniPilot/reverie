@@ -276,6 +276,15 @@ describe('approved leaf-only live memory revisions', () => {
     const ledgerBefore = fs.readFileSync(join(f.store.directory, 'revisions.json'));
     expect(await f.controller.observeMemoryHigh(f.row(), f.current)).toMatchObject({
       actualMemoryHighBytes: 48 * 1024 ** 3,
+      actualLimits: {
+        memoryHighBytes: 48 * 1024 ** 3,
+        memoryMaxBytes: policy.memoryMaxBytes,
+        swapMaxBytes: 0,
+        pidsMax: 512,
+        cpuWeight: 100,
+        allowedCpus: [0, 1],
+        cpuQuota: 'unlimited',
+      },
       approved: false,
       approvalSource: null,
     });
@@ -699,4 +708,16 @@ describe('closed-writer finalization and currentness', () => {
     await expect(f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('revoked');
     expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('helper');
   });
+});
+
+it('does not report approved CPU facts when the actual native leaf weight changes', async () => {
+  const f = fixture();
+  await f.controller.preparePool(f.row(), f.current);
+  await f.setPool();
+  f.makeWorker();
+  await f.controller.configure(f.row(), f.current);
+  f.driftWeight();
+  const starts = [...f.starts];
+  await expect(f.controller.observeMemoryHigh(f.row(), f.current)).rejects.toThrow('OTHER_LIMIT_CHANGED');
+  expect(f.starts).toEqual(starts);
 });

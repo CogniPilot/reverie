@@ -1356,6 +1356,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
   ): Promise<{
     actualMemoryHighBytes: number | null;
     memoryMaxBytes: number;
+    actualLimits: Omit<DockerEmployeeResourcePolicy, 'pool'> & { cpuQuota: 'unlimited' };
     approved: boolean;
     approvalSource: 'original-policy' | 'owner-revision' | null;
     approvedRevision: string | null;
@@ -1395,6 +1396,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return {
       actualMemoryHighBytes: actual,
       memoryMaxBytes: row.policy.memoryMaxBytes,
+      // Every non-high value just matched the fresh native leaf observation.
+      // The immutable launch policy alone never supplies a readback.
+      actualLimits: {
+        memoryHighBytes: actual, memoryMaxBytes: row.policy.memoryMaxBytes,
+        swapMaxBytes: row.policy.swapMaxBytes, pidsMax: row.policy.pidsMax,
+        cpuWeight: row.policy.cpuWeight, allowedCpus: [...row.policy.allowedCpus], cpuQuota: 'unlimited',
+      },
       approved: original || approvedRevision !== null,
       approvalSource: original ? 'original-policy' : approvedRevision ? 'owner-revision' : null,
       approvedRevision,

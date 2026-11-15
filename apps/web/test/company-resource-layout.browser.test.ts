@@ -105,7 +105,7 @@ async function fixture(
             expectedDestinationImageId:source.destinationImageId,expectedPolicyDigest:'e'.repeat(64),enterOffice:true}}:{})});
       }
       if(path==='/api/company/docker-resources')return ok({allowedActions:['approve-default'],desired:{revision:'33333333-3333-4333-8333-333333333333',scope:'all-current-and-future',memoryHighBytes:48*1024**3},employees:[{employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'not-observed',enforcement:'not-observed'}]});
-      if(path==='/api/company/employees/'+employee.id+'/docker-resources')return ok({employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,revision:'33333333-3333-4333-8333-333333333333',actualMemoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,approved:true,approvalSource:'original-policy',approvedRevision:null,enforcement:'fresh-native-readback',allowedActions:['apply']});
+      if(path==='/api/company/employees/'+employee.id+'/docker-resources')return ok({employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,revision:'33333333-3333-4333-8333-333333333333',actualMemoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,actualLimits:{memoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,swapMaxBytes:0,pidsMax:512,cpuWeight:100,allowedCpus:Array.from({length:32},(_,index)=>index),cpuQuota:'unlimited'},approved:true,approvalSource:'original-policy',approvedRevision:null,enforcement:'fresh-native-readback',allowedActions:['apply']});
       if(path==='/api/company/employees/'+employee.id+'/docker-pool/status')return ok({sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'held',code:'DOCKER_POOL_ORIGINAL_ACK_MISSING',allowedActions:[]});
       if(path==='/api/chatrooms/phone-status')return ok({self:'owner',canSetOwn:true});
       if(path==='/api/owner/status')return ok({configured:true,signedIn:true,identity:{id:'owner',role:'owner'}});
@@ -822,7 +822,10 @@ for (const width of [320, 1280])
       const panel = profile.getByRole('region', { name: 'Docker resources for River', exact: true });
       await panel.getByText('Fresh native readback', { exact: true }).waitFor();
       expect(await panel.textContent()).toContain('Owner-approved default: 48 GiB');
-      expect(await panel.textContent()).toContain('Actual soft RAM: 16 GiB. Hard RAM ceiling: 64 GiB');
+      expect(await panel.locator('caption').textContent()).toBe('Running CPU and memory limits');
+      expect(await panel.locator('table').textContent()).toContain('CPU weight100');
+      expect(await panel.locator('table').textContent()).toContain('Allowed CPUs0–31');
+      expect(await panel.locator('table').textContent()).toContain('Process limit512');
       expect(await panel.textContent()).toContain('DOCKER_POOL_ORIGINAL_ACK_MISSING');
       await panel.scrollIntoViewIfNeeded();
       const geometry = await panel.evaluate((el) => ({
@@ -843,7 +846,8 @@ for (const width of [320, 1280])
       const output = process.env.TEST_RESOURCE_SCREENSHOT_DIR;
       if (output) {
         await mkdir(output, { recursive: true });
-        await page.screenshot({ path: join(output, `docker-resource-profile-${width}.png`) });
+        await panel.locator('table').scrollIntoViewIfNeeded();
+        await page.screenshot({ path: join(output, `docker-cpu-memory-profile-${width}.png`) });
       }
       expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
       expect(errors).toEqual([]);

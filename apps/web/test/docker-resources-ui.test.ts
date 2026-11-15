@@ -2,6 +2,7 @@
 import { afterEach, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import { fixture as nativeResources } from './helpers/docker-resource-physical.js';
 import { EmployeePermissionsSchema } from '../src/company-types.js';
 import { createHarness } from './helpers/chat-app-harness.mjs';
 const eid = '11111111-1111-4111-8111-111111111111',
@@ -23,6 +24,7 @@ async function fixture(
     malformed?: boolean;
     readFailure?: string;
     summary?: Record<string, unknown>;
+    actualLimits?: Record<string, unknown>;
   } = {}
 ) {
   const employee = {
@@ -94,7 +96,8 @@ async function fixture(
             revision: approved ? currentRevision : null,
             desiredMemoryHighBytes: approved ? high : null,
             actualMemoryHighBytes: actual,
-            memoryMaxBytes: 64 * 1024 ** 3,
+            memoryMaxBytes: options.actualLimits?.memoryMaxBytes ?? 64 * 1024 ** 3,
+            ...(options.actualLimits ? { actualLimits: options.actualLimits } : {}),
             approved: true,
             approvalSource: 'original-policy',
             approvedRevision: null,
@@ -477,3 +480,45 @@ it('keeps original uncertainty visible after a later recorded observation', asyn
   expect(f.panel().textContent).toContain('original execution outcome remains unknown');
   expect(f.writes()).toEqual([]);
 });
+
+it('renders CPU and RAM together from the real native-controller readback DTO without writes', async () => {
+  const native = nativeResources();
+  await native.controller.preparePool(native.row(), native.current);
+  await native.setPool();
+  native.makeWorker();
+  await native.controller.configure(native.row(), native.current);
+  const report = await native.controller.observeMemoryHigh(native.row(), native.current);
+  const f = await fixture({ actualLimits: report.actualLimits });
+  const table = f.panel().querySelector('table')!;
+  expect(table.caption?.textContent).toBe('Running CPU and memory limits');
+  expect([...table.rows].map((row) => row.textContent)).toEqual([
+    'Soft RAM16 GiB',
+    'Hard RAM ceiling48 GiB',
+    'Swap allowance0 GiB',
+    'CPU weight100',
+    'CPU quotaUnlimited',
+    'Allowed CPUs0–1',
+    'Process limit512',
+  ]);
+  expect(f.writes()).toEqual([]);
+});
+it.each([{ cpuWeight: 0 }, { allowedCpus: [1, 1] }, { memoryHighBytes: 0 }, { cpuQuota: 'limited' }])(
+  'refuses incoherent additional native resource facts %j',
+  async (drift) => {
+    const f = await fixture({
+      actualLimits: {
+        memoryHighBytes: 16 * 1024 ** 3,
+        memoryMaxBytes: 48 * 1024 ** 3,
+        swapMaxBytes: 0,
+        pidsMax: 512,
+        cpuWeight: 100,
+        allowedCpus: [0, 1],
+        cpuQuota: 'unlimited',
+        ...drift,
+      },
+    });
+    expect(f.panel().textContent).toContain('CPU and memory readback could not be verified');
+    expect(f.panel().querySelector('table')).toBeNull();
+    expect(f.writes()).toEqual([]);
+  }
+);

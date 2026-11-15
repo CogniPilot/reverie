@@ -1963,7 +1963,7 @@
             throw Error('Fresh resource readback could not be verified.');
           this.status.textContent = 'Fresh native readback';
           this.content.append(
-            this.note(`Actual soft RAM: ${gib(r.actualMemoryHighBytes)}. Hard RAM ceiling: ${gib(r.memoryMaxBytes)}.`),
+            this.resourceFacts(r),
             this.note(
               r.approved
                 ? r.approvalSource === 'original-policy'
@@ -2021,6 +2021,69 @@
         }
         this.renderPool(pool);
       });
+    }
+    resourceFacts(report) {
+      const limits = report.actualLimits;
+      if (limits === undefined)
+        return this.note(
+          'Actual soft RAM: ' +
+            gib(report.actualMemoryHighBytes) +
+            '. Hard RAM ceiling: ' +
+            gib(report.memoryMaxBytes) +
+            '.'
+        );
+      if (
+        !limits ||
+        limits.memoryHighBytes !== report.actualMemoryHighBytes ||
+        limits.memoryMaxBytes !== report.memoryMaxBytes ||
+        !Number.isSafeInteger(limits.swapMaxBytes) ||
+        limits.swapMaxBytes < 0 ||
+        !Number.isSafeInteger(limits.pidsMax) ||
+        limits.pidsMax < 1 ||
+        !Number.isInteger(limits.cpuWeight) ||
+        limits.cpuWeight < 1 ||
+        limits.cpuWeight > 10000 ||
+        limits.cpuQuota !== 'unlimited' ||
+        !Array.isArray(limits.allowedCpus) ||
+        limits.allowedCpus.length < 1 ||
+        limits.allowedCpus.length > 256 ||
+        limits.allowedCpus.some(
+          (cpu, index, all) => !Number.isInteger(cpu) || cpu < 0 || cpu > 4095 || (index > 0 && all[index - 1] >= cpu)
+        )
+      )
+        throw Error('CPU and memory readback could not be verified. Refresh resources.');
+      const ranges = [];
+      let start = limits.allowedCpus[0],
+        last = start;
+      const finish = () => ranges.push(start === last ? String(start) : start + '–' + last);
+      for (const cpu of limits.allowedCpus.slice(1)) {
+        if (cpu !== last + 1) {
+          finish();
+          start = cpu;
+        }
+        last = cpu;
+      }
+      finish();
+      const table = this.shell.el('table', 'ca-docker-resource-facts');
+      table.append(this.shell.el('caption', '', 'Running CPU and memory limits'));
+      const body = this.shell.el('tbody');
+      for (const [label, value] of [
+        ['Soft RAM', gib(limits.memoryHighBytes)],
+        ['Hard RAM ceiling', gib(limits.memoryMaxBytes)],
+        ['Swap allowance', gib(limits.swapMaxBytes)],
+        ['CPU weight', String(limits.cpuWeight)],
+        ['CPU quota', 'Unlimited'],
+        ['Allowed CPUs', ranges.join(', ')],
+        ['Process limit', String(limits.pidsMax)],
+      ]) {
+        const row = this.shell.el('tr'),
+          heading = this.shell.el('th', '', label);
+        heading.scope = 'row';
+        row.append(heading, this.shell.el('td', '', value));
+        body.append(row);
+      }
+      table.append(body);
+      return table;
     }
     renderPool(result) {
       if (result.status !== 'fulfilled') {
