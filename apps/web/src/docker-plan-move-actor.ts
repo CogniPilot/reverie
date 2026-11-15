@@ -120,6 +120,17 @@ function publishedWork(input: unknown): WorkRecord {
   Published.parse(row);
   return row;
 }
+/** Cached login metadata and file digests cannot identify a refreshed OAuth
+ * principal. Ordinary moves use the freshly selected canonical account. */
+export class DockerPlanAccountPrincipalUnconfirmed extends PlanMoveError {
+  readonly code = 'DOCKER_PLAN_ACCOUNT_PRINCIPAL_UNCONFIRMED';
+  constructor() {
+    super('Refreshed account identity requires verified account and organization proof', 409);
+  }
+}
+function requireCanonicalAccountSource(state: Readonly<DockerPlanMoveJournalState>): void {
+  if (state.seed.target.accountSource.kind !== 'canonical') throw new DockerPlanAccountPrincipalUnconfirmed();
+}
 export class DockerPlanMoveActor implements PlanMoveDockerActor {
   #registered = false;
   readonly #work = new Map<string, DockerPlanMoveWork>();
@@ -348,9 +359,9 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     snapshot.require();
     if (!nativeThreadProfile(target.saved.mode ?? 'claude'))
       throw new PlanMoveError('A qualified stock target protocol is required', 409);
-    // Closed managed lineage is selected by the actual private ancestry below;
-    // never by display labels, timestamps or an arbitrary HOME directory.
-    const accountSource = await this.#accountSource(source.row, snapshot, current);
+    // Credentials come from the held canonical selection. Source history is
+    // resolved independently; it never selects refreshed account material.
+    const accountSource = { kind: 'canonical' as const };
     current();
     return DockerPlanMoveSeed.parse({
       version: 1,
@@ -380,59 +391,9 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       requestDigest,
     });
   }
-  async #accountSource(
-    source: DockerEmployeeContinuationRecord,
-    snapshot: DockerPlanAccountSnapshot,
-    current: () => void
-  ): Promise<DockerPlanMoveSeed['target']['accountSource']> {
-    const descriptor = snapshot.descriptor,
-      visited = new Set<string>();
-    let row = source;
-    while (row.version === 3) {
-      const id = row.planReplacement.moveId;
-      if (visited.has(id) || visited.size >= 64)
-        throw new PlanMoveError('The managed account ancestry is ambiguous', 409);
-      visited.add(id);
-      const record = await this.#d.moves.dockerRecord(id);
-      current();
-      const state = record.dockerReplacement;
-      if (
-        !state ||
-        record.owner !== source.owner ||
-        record.employeeId !== source.employeeId ||
-        !state.work ||
-        !same(state.work.destination, row.destination) ||
-        state.work.request.operationId !== row.request.operationId ||
-        state.work.request.sessionId !== row.request.sessionId ||
-        state.work.request.sessionGeneration !== row.request.sessionGeneration ||
-        (row === source &&
-          (!this.#d.company.store.snapshot().employees.find((e) => e.id === source.employeeId)?.runtimeRecipe ||
-            state.seed.target.templateDigest !==
-              dockerProviderRuntimeRecipeDigest(
-                this.#d.company.store.snapshot().employees.find((e) => e.id === source.employeeId)!.runtimeRecipe!
-              )))
-      )
-        throw new PlanMoveError('The original managed account ancestry changed', 409);
-      if (state.seed.target.accountId === descriptor.id && state.seed.target.provider === descriptor.provider) {
-        if (state.seed.target.accountSnapshotDigest !== descriptor.canonicalSnapshotDigest)
-          return { kind: 'canonical' };
-        // Physical closure/HOME and original installer receipts are re-earned before
-        // the later auth read; this selector by itself supplies no account authority.
-        return {
-          kind: 'retained-generation',
-          moveId: id,
-          operationId: row.request.operationId,
-          containerId: row.destination!.containerId,
-          projectionDigest: row.planReplacement.account.projectionDigest,
-          originalCanonicalSnapshotDigest: descriptor.canonicalSnapshotDigest,
-        };
-      }
-      row = state.seed.source.record;
-    }
-    return { kind: 'canonical' };
-  }
   async prepare(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
     journal.current();
+    requireCanonicalAccountSource(journal.read());
     this.current(record, journal.read());
     const state = journal.read();
     requireDockerPlanProtocol(state.seed.target.workerImage.clientManifestDigest, () => journal.current());
@@ -501,6 +462,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
   }
   async stopSource(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
     journal.current();
+    requireCanonicalAccountSource(journal.read());
     let state = journal.read();
     this.current(record, state);
     const seed = state.seed,
@@ -904,6 +866,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     return same(fixed(before), fixed(next));
   }
   async start(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
+    journal.current();
+    requireCanonicalAccountSource(journal.read());
     let state = this.#originalRow(record, journal);
     if (state.paidDispatch)
       throw new PlanMoveError('The original paid dispatch is issued; inspect without replay', 409);

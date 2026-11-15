@@ -1,5 +1,5 @@
-import {dockerPlanJournalFixture}from'./helpers/docker-plan-move-fixture.js';
-import {dockerPlanSourceRecordCurrent}from'../src/docker-plan-move-actor.js';
+import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
+import { dockerPlanSourceRecordCurrent } from '../src/docker-plan-move-actor.js';
 /** Real captured HTTP/HMAC requester, canonical CompanyStore/PlanMoveStore and
  * private native SourceReader over controlled Docker replies. This is NOT an
  * actual Docker/provider or complete move acceptance claim. */
@@ -42,7 +42,7 @@ import {
   requireDockerPlanMoveRequesterCurrent,
 } from '../src/docker-plan-move-requester.js';
 import { dockerContinuationDigest as digest } from '../src/docker-employee-continuation.js';
-import { DockerPlanMoveJournalState } from '../src/docker-plan-move-data.js';
+import { DockerPlanMoveSeed, DockerPlanMoveJournalState } from '../src/docker-plan-move-data.js';
 import type { PlanMoveRecord, PlanMoveInput } from '../src/plan-move.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import type { SessionState } from '../src/types.js';
@@ -51,7 +51,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function fixture(running = true) {
+async function fixture(running = true, retainedAccount = false) {
   const f = dockerPlanSourceFixture(running),
     directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-'));
   fs.chmodSync(directory, 0o700);
@@ -133,7 +133,6 @@ async function fixture(running = true) {
     chatrooms: { rooms: () => [] },
     research: {},
   } as unknown as CompanyServiceDeps);
-  let revisions: DockerResourceRevisionStore;
   const sourceStore = new CompanyDockerContinuationStore(
     company,
     (id) => (id === saved.id ? saved : undefined),
@@ -206,7 +205,7 @@ async function fixture(running = true) {
     } as unknown as DockerPlanMoveComposition['ctx'];
   const provider = new DockerEmployeeSessionProvider(sourceStore, ctx, 'http://reverie:3000'),
     moves = new PlanMoveStore(join(directory, 'moves.json'));
-  revisions = new DockerResourceRevisionStore(join(directory, 'revisions'));
+  const revisions = new DockerResourceRevisionStore(join(directory, 'revisions'));
   await revisions.approve(
     {
       revision: 'b0000000-0000-4000-8000-00000000000b',
@@ -341,7 +340,23 @@ async function fixture(running = true) {
       retain,
     });
   const actor = baseActor.withRequesterAuthority(proof);
-  const seed = await actor.reserve(input, undefined, 'd'.repeat(64)),
+  const selectedSeed = await actor.reserve(input, undefined, 'd'.repeat(64)),
+    seed = retainedAccount
+      ? DockerPlanMoveSeed.parse({
+          ...selectedSeed,
+          target: {
+            ...selectedSeed.target,
+            accountSource: {
+              kind: 'retained-generation',
+              moveId: 'old-account-move',
+              operationId: selectedSeed.source.binding.operationId,
+              containerId: selectedSeed.source.binding.containerId,
+              projectionDigest: 'a'.repeat(64),
+              originalCanonicalSnapshotDigest: selectedSeed.target.accountSnapshotDigest,
+            },
+          },
+        })
+      : selectedSeed,
     epoch = 'e0000000-0000-4000-8000-00000000000e';
   let state = DockerPlanMoveJournalState.parse({ version: 1, purpose: 'docker-plan-replacement-v1', epoch, seed });
   const record: PlanMoveRecord = {
@@ -452,8 +467,53 @@ describe('captured native plan actor before paid dispatch', () => {
   });
 });
 
-describe('immutable source row across legitimate readonly progress',()=>{
- it('allows only provider-issued to ready with every other field identical',()=>{const row=dockerPlanJournalFixture().state.seed.source.record,before={...row,phase:'provider-issued'as const};expect(dockerPlanSourceRecordCurrent(before,row)).toBe(true);expect(dockerPlanSourceRecordCurrent(row,before)).toBe(false);for(const actual of [{...row,sourceDigest:'d'.repeat(64)},{...row,credentialId:'b0000000-0000-4000-8000-00000000000b'},{...row,request:{...row.request,operationId:'c0000000-0000-4000-8000-00000000000c'}}])expect(dockerPlanSourceRecordCurrent(before,actual)).toBe(false);});
- it('rechecks revocation after an awaited physical source read before STOP',async()=>{const f=await fixture();f.afterInit(()=>f.keyLost());await expect(f.actor.stopSource(f.record,f.journal)).rejects.toThrow();expect(f.journal.read().sourceStop).toBeUndefined();expect(f.run.mock.calls.filter(([a])=>a[1]==='stop')).toHaveLength(0);});
- it('requires the current scoped plan grant before the first STOP',async()=>{const f=await fixture();await f.companyStore.update(company=>{company.employees[0]!.permissions.moveOwnPlan=false;});await expect(f.actor.stopSource(f.record,f.journal)).rejects.toThrow();expect(f.journal.read().sourceStop).toBeUndefined();expect(f.run.mock.calls.filter(([a])=>a[1]==='stop')).toHaveLength(0);});
+describe('immutable source row across legitimate readonly progress', () => {
+  it('allows only provider-issued to ready with every other field identical', () => {
+    const row = dockerPlanJournalFixture().state.seed.source.record,
+      before = { ...row, phase: 'provider-issued' as const };
+    expect(dockerPlanSourceRecordCurrent(before, row)).toBe(true);
+    expect(dockerPlanSourceRecordCurrent(row, before)).toBe(false);
+    for (const actual of [
+      { ...row, sourceDigest: 'd'.repeat(64) },
+      { ...row, credentialId: 'b0000000-0000-4000-8000-00000000000b' },
+      { ...row, request: { ...row.request, operationId: 'c0000000-0000-4000-8000-00000000000c' } },
+    ])
+      expect(dockerPlanSourceRecordCurrent(before, actual)).toBe(false);
+  });
+  it('rechecks revocation after an awaited physical source read before STOP', async () => {
+    const f = await fixture();
+    f.afterInit(() => f.keyLost());
+    await expect(f.actor.stopSource(f.record, f.journal)).rejects.toThrow();
+    expect(f.journal.read().sourceStop).toBeUndefined();
+    expect(f.run.mock.calls.filter(([a]) => a[1] === 'stop')).toHaveLength(0);
+  });
+  it('requires the current scoped plan grant before the first STOP', async () => {
+    const f = await fixture();
+    await f.companyStore.update((company) => {
+      company.employees[0]!.permissions.moveOwnPlan = false;
+    });
+    await expect(f.actor.stopSource(f.record, f.journal)).rejects.toThrow();
+    expect(f.journal.read().sourceStop).toBeUndefined();
+    expect(f.run.mock.calls.filter(([a]) => a[1] === 'stop')).toHaveLength(0);
+  });
+});
+
+describe('canonical account selection until real refreshed-principal qualification', () => {
+  it('reserves ordinary selected canonical credentials independently of source conversation history', async () => {
+    const f = await fixture();
+    expect(f.seed.target.accountSource).toEqual({ kind: 'canonical' });
+    expect(f.saved.resumeSessionId).toBe('90000000-0000-4000-8000-000000000009');
+  });
+  it.each(['prepare', 'stopSource', 'start'] as const)(
+    'holds retained refresh before STOP or target effects in %s',
+    async (method) => {
+      const f = await fixture(true, true);
+      await expect(f.actor[method](f.record, f.journal)).rejects.toMatchObject({
+        code: 'DOCKER_PLAN_ACCOUNT_PRINCIPAL_UNCONFIRMED',
+        status: 409,
+      });
+      expect(f.journal.read().sourceStop).toBeUndefined();
+      expect(f.run.mock.calls.some(([a]) => a[1] === 'stop' || a[1] === 'start' || a[1] === 'create')).toBe(false);
+    }
+  );
 });
