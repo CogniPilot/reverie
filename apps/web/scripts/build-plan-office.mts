@@ -5,6 +5,11 @@ import process from 'node:process';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import {
+  PLAN_OFFICE_STARTUP_PREFIX,
+  planOfficeStartupDiagnostic,
+  type PlanOfficeStartupStage,
+} from '../test/helpers/plan-office-startup-diagnostic.ts';
 interface Lock {
   packages: Record<string, { version?: string; integrity?: string; link?: boolean; resolved?: string }>;
 }
@@ -52,6 +57,19 @@ export const PLAN_OFFICE_TEST_ENTRIES = [
   'test/fixtures/plan-office-canary.mts',
 ] as const;
 export function buildPlanOffice(args: readonly string[]) {
+  let stage: PlanOfficeStartupStage = 'build-inputs';
+  try {
+    buildPlanOfficeAtStage(args, (value) => {
+      stage = value;
+    });
+  } catch (error) {
+    process.stdout.write(
+      PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(planOfficeStartupDiagnostic(stage, '0'.repeat(32), error)) + '\n'
+    );
+    throw error;
+  }
+}
+function buildPlanOfficeAtStage(args: readonly string[], entered: (stage: PlanOfficeStartupStage) => void) {
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i]!,
@@ -82,10 +100,12 @@ export function buildPlanOffice(args: readonly string[]) {
   if (!output || !path.isAbsolute(output) || fs.existsSync(output)) throw Error('Fresh CI output required');
   const web = path.join(source, 'apps/web'),
     installed = JSON.parse(fs.readFileSync(path.join(modules, '.package-lock.json'), 'utf8')) as Lock;
+  entered('build-dependency-lock');
   requirePlanOfficeDependencyLock(
     installed,
     JSON.parse(fs.readFileSync(path.join(web, 'package-lock.json'), 'utf8')) as Lock
   );
+  entered('build-product-modules');
   const runtime = path.join(output, 'lib/reverie'),
     dist = path.join(runtime, 'dist');
   fs.mkdirSync(dist, { recursive: true });
@@ -137,6 +157,7 @@ export function buildPlanOffice(args: readonly string[]) {
     '--format=esm',
     '--target=node22',
   ]);
+  entered('build-public-assets');
   fs.cpSync(path.join(web, 'src/web/public'), path.join(dist, 'web/public'), { recursive: true });
   fs.cpSync(path.join(web, 'src/templates'), path.join(dist, 'templates'), { recursive: true });
   run(node, [path.join(runtime, 'scripts/prepare-test-vendor.mjs'), path.join(dist, 'web/public/vendor')]);
@@ -151,6 +172,7 @@ export function buildPlanOffice(args: readonly string[]) {
       '--banner:js=' + banner,
       '--outfile=' + destination,
     ]);
+  entered('build-provider-fixtures');
   const fake = path.join(output, 'opt/reverie-ci-plan-provider/bin/claude');
   fs.mkdirSync(path.dirname(fake), { recursive: true });
   bundle('test/fixtures/boxed-plan-provider.mts', fake);
@@ -159,6 +181,7 @@ export function buildPlanOffice(args: readonly string[]) {
   fs.mkdirSync(path.dirname(workerPrep), { recursive: true });
   bundle('test/fixtures/prepare-plan-office-worker.mts', workerPrep);
   // This exact separate test-only entry seeds inactive DATA. Ordinary control startup is dist/index.js web.
+  entered('build-driver-modules');
   fs.symlinkSync('dist', path.join(runtime, 'src'));
   run(esbuild, [
     ...PLAN_OFFICE_TEST_ENTRIES.map((entry) => path.join(web, entry)),
@@ -182,6 +205,7 @@ export function buildPlanOffice(args: readonly string[]) {
   );
   // Qualify the actual unbundled canary/driver graph. --help exits before import.
   // This minimal contract cannot admit Driver; the mode only checks inert exports.
+  entered('build-import-smoke');
   const smoke = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-office-import-'));
   const smokeContract = path.join(smoke, 'contract.json'),
     smokeInstance = '0'.repeat(32);
@@ -199,6 +223,7 @@ export function buildPlanOffice(args: readonly string[]) {
     runtime,
     { HOME: smoke, TMPDIR: smoke, PATH: path.dirname(node), LANG: 'C.UTF-8' }
   );
+  entered('build-metadata');
   fs.writeFileSync(
     path.join(output, 'metadata.json'),
     JSON.stringify({

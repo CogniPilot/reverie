@@ -11,6 +11,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   readPlanOfficeStartupDiagnostic,
   projectPlanOfficeStartupDiagnostic,
+  readPlanOfficeBuildDiagnostic,
+  PLAN_OFFICE_BUILD_STAGES,
 } from '../test/helpers/plan-office-startup-diagnostic.ts';
 
 type Json = Record<string, unknown>;
@@ -522,11 +524,25 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
     return Object.keys(result).length > 1 ? [result] : [];
   });
   const startup = instance ? projectPlanOfficeStartupDiagnostic(c.startup, instance) : undefined;
+  const build = c.build && typeof c.build === 'object' ? (c.build as Json) : {};
+  const builder = projectPlanOfficeStartupDiagnostic(build.builder, '0'.repeat(32));
+  const importSmoke = projectPlanOfficeStartupDiagnostic(build.importSmoke, '0'.repeat(32));
+  const fixtureBuild =
+    builder && (PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(builder.stage)
+      ? { builder, ...(importSmoke ? { importSmoke } : {}) }
+      : undefined;
   return {
     child: childStatus,
     operations,
     ...(startup ? { startup } : {}),
-    observation: operations.length ? 'last-known-retained-data' : startup ? 'last-known-entered-stage' : 'unavailable',
+    ...(fixtureBuild ? { fixtureBuild } : {}),
+    observation: operations.length
+      ? 'last-known-retained-data'
+      : startup
+        ? 'last-known-entered-stage'
+        : fixtureBuild
+          ? 'last-known-build-stage'
+          : 'unavailable',
   };
 }
 /** Fixed files in this run's owned fixture only. Missing/partial evidence is not a reason to replay or sign in. */
@@ -672,6 +688,9 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       signal: result.signal,
       errorName: result.error?.name,
       ...(label === 'actual-' + selection ? { startup: readPlanOfficeStartupDiagnostic(result.stdout, instance) } : {}),
+      ...(label === 'build-fixture-inputs' || label === 'build-control'
+        ? { build: readPlanOfficeBuildDiagnostic(result.stderr) }
+        : {}),
     };
     // Raw replies can contain synthetic passwords/tokens. They stay outside artifacts and console logs.
     save(path.join(evidence, key + '-result.json'), {
@@ -696,6 +715,8 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
         'build',
         '--expr',
         expression,
+        '--log-format',
+        'internal-json',
         '--no-write-lock-file',
         '--max-jobs',
         '1',

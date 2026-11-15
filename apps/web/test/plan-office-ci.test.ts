@@ -12,6 +12,7 @@ import {
   planOfficeStartupDiagnostic,
   readPlanOfficeStartupDiagnostic,
   projectPlanOfficeStartupDiagnostic,
+  readPlanOfficeBuildDiagnostic,
 } from './helpers/plan-office-startup-diagnostic.js';
 import {
   requireHostedPlanOffice,
@@ -37,6 +38,63 @@ const metadata = {
   platformClosure: '/nix/store/' + 'e'.repeat(32) + '-closure',
   clientManifestDigest: 'f'.repeat(64),
 };
+it('retains the actual producer refusal through closed Nix builder records without publishing raw errors', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-build-diagnostic-'));
+  const token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
+  const nil = '0'.repeat(32);
+  const record = (frame: string) =>
+    '@nix ' + JSON.stringify({ action: 'result', id: 123, type: 101, fields: [frame] }) + '\n';
+  try {
+    const result = spawnSync(
+      process.execPath,
+      ['--experimental-strip-types', path.resolve('scripts/build-plan-office.mts'), '--source', path.join(root, token)],
+      {
+        encoding: 'utf8',
+        timeout: 10000,
+        maxBuffer: 65536,
+        env: { HOME: root, TMPDIR: root, PATH: path.dirname(process.execPath), LANG: 'C.UTF-8' },
+      }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(1);
+    // The raw stack contains the deliberately hostile pathname; only the closed
+    // producer frame is eligible for the public CI artifact.
+    expect(result.stderr).toContain(token);
+    expect(result.stdout).not.toContain(token);
+    const build = readPlanOfficeBuildDiagnostic(record(result.stdout.trimEnd()));
+    expect(build?.builder).toMatchObject({ stage: 'build-inputs', errorClass: 'Error', errorCode: 'ENOENT' });
+    const report = planOfficeCiFailureDiagnostic({ status: result.status, signal: result.signal, build }, [], instance);
+    expect(report).toMatchObject({ observation: 'last-known-build-stage', fixtureBuild: build });
+    expect(JSON.stringify(report)).not.toContain(token);
+    const smoke = planOfficeStartupDiagnostic(
+      'entry-driver-import',
+      nil,
+      Object.assign(new Error(token), { code: 'ERR_MODULE_NOT_FOUND' })
+    );
+    const combined = record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(smoke)) + record(result.stdout.trimEnd());
+    expect(readPlanOfficeBuildDiagnostic(combined)).toEqual({ builder: build!.builder, importSmoke: smoke });
+    const ignored = '@nix ' + JSON.stringify({ action: 'msg', msg: token }) + '\n';
+    expect(readPlanOfficeBuildDiagnostic(ignored + combined)).toEqual(readPlanOfficeBuildDiagnostic(combined));
+    for (const raw of [
+      combined + record(result.stdout.trimEnd()), // Ambiguous repeated builders.
+      combined + record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(smoke)),
+      combined.slice(0, -1),
+      result.stdout, // Raw stdout is not a Nix builder record.
+      record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...build!.builder, message: token })),
+      record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...build!.builder, instance })),
+      record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...build!.builder, stage: token })),
+      record(PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...build!.builder, errorCode: token })),
+      '@nix {"action":"result","type":101,"fields":[' + token + '\n',
+    ])
+      expect(readPlanOfficeBuildDiagnostic(raw)).toBeUndefined();
+    expect(
+      planOfficeCiFailureDiagnostic({ build: { builder: { ...build!.builder, message: token } } }, []).fixtureBuild
+    ).toBeUndefined();
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 it('projects only complete correlated startup stages/classes/codes and never hostile error content', () => {
   const token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
   const error = Object.assign(new Error(token), {

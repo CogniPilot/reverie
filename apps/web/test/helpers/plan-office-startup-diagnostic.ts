@@ -1,6 +1,17 @@
 /** Closed CI observations only. A checkpoint records entry, never an effect's
  * outcome, absence of dispatch, permission or reason to retry. */
+export const PLAN_OFFICE_BUILD_STAGES = [
+  'build-inputs',
+  'build-dependency-lock',
+  'build-product-modules',
+  'build-public-assets',
+  'build-provider-fixtures',
+  'build-driver-modules',
+  'build-import-smoke',
+  'build-metadata',
+] as const;
 export const PLAN_OFFICE_STARTUP_STAGES = [
+  ...PLAN_OFFICE_BUILD_STAGES,
   'entry-arguments',
   'entry-contract',
   'entry-private-home',
@@ -149,4 +160,34 @@ export function readPlanOfficeStartupDiagnostic(stdout: unknown, instance: strin
   } catch {
     return undefined;
   }
+}
+
+/** Nix's structured builder-log records only. Never return a raw Nix message,
+ * path, environment, command or exception. The zero instance is the inert build
+ * smoke contract, not a business operation or proof that no effects occurred. */
+export function readPlanOfficeBuildDiagnostic(stderr: unknown) {
+  if (typeof stderr !== 'string' || Buffer.byteLength(stderr) > 32 * 1024 ** 2 || !stderr.endsWith('\n'))
+    return undefined;
+  const frames = [];
+  for (const line of stderr.split('\n')) {
+    if (!line.startsWith('@nix ') || Buffer.byteLength(line) > 256 * 1024) continue;
+    try {
+      const record = JSON.parse(line.slice(5));
+      if (
+        record?.action !== 'result' ||
+        record.type !== 101 ||
+        !Array.isArray(record.fields) ||
+        typeof record.fields[0] !== 'string'
+      )
+        continue;
+      const frame = readPlanOfficeStartupDiagnostic(record.fields[0] + '\n', '0'.repeat(32));
+      if (frame) frames.push(frame);
+    } catch {
+      // A malformed/partial record supplies no diagnostic authority.
+    }
+  }
+  const builders = frames.filter((frame) => (PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(frame.stage));
+  const imports = frames.filter((frame) => !(PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(frame.stage));
+  if (builders.length !== 1 || imports.length > 1) return undefined;
+  return { builder: builders[0]!, ...(imports.length ? { importSmoke: imports[0]! } : {}) };
 }
