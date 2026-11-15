@@ -45,8 +45,20 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   expect(v.worker.fakeRootCommands).toContain('cp /helper/bin/reverie-docker-resources');
   expect(v.control.config.Cmd).toEqual(['web', '--host', '0.0.0.0', '--port', '3000']);
   expect(v.control.contents).toEqual(
-    expect.arrayContaining(['/fake/platform', '/fake/tmux', '/fake/which', '/fake/procps'])
+    expect.arrayContaining([
+      '/fake/bash',
+      '/fake/core',
+      '/fake/util',
+      '/fake/tmux',
+      '/fake/which',
+      '/fake/grep',
+      '/fake/sed',
+      '/fake/awk',
+      '/fake/find',
+      '/fake/procps',
+    ])
   );
+  expect(v.control.contents).not.toContain('/fake/platform'); // Its /etc symlink cannot host the protected config.
   expect(v.control.config.Entrypoint).toEqual([
     '/fake/node/bin/node',
     '/fake/reverie-ci-plan-office-runtime/lib/reverie/dist/index.js',
