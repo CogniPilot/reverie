@@ -66,3 +66,36 @@ remain the actor's separate responsibility.
 These grants authorize admission through final publication. They must not become
 enduring viewer/health currency after the operation finishes. A published native
 view retains its independent canonical/runtime/native checks.
+
+## Reserved settlement space
+
+The whole journal, not each operation, is bounded to 8 MiB and 100 records.
+Before a native seed is admitted, the same locked writer reserves the remaining
+maximum encoded record growth. The constructive witness is decoded by the actual
+Zod schemas. It includes the retained source row, both source/destination HOME
+copies, all five task roles, 32 ephemeral attempts with 4096 UTF16-unit paths
+encoded at six bytes per unit, duplicated request/ACK identities, the optional
+source-reader closure, safe-integer extrema and every coarse failure/recovery field.
+No credential or context bytes are stored in the journal.
+
+The private versioned dockerSettlementBudget field is written before dispatch.
+Previous strict readers refuse that field; exclude old runtimes before activation.
+Private records without a published reserve cannot dispatch. Immutable completed
+or failed histories release future growth reserve but remain present for account
+lineage; they cannot be resumed, rewritten or silently evicted. Full retained
+history can refuse a new request rather than delete evidence.
+
+A genuine capacity refusal is correlated only to the new, absent original ID
+under the canonical lock and only after its checked consuming close. The force
+API may return the exact origin-marked notIssued DATA; cooperative failed-request
+status retains startRefusal. Message/status/cause lookalikes, mismatched originals,
+post-write failures and uncertain closes never receive that marker. It confers
+no permission and never authorizes automatic retry.
+
+The optional sourceReader cursor belongs to this same journal outside the five
+target work tasks. Source CID closure precedes its creation; CREATE/START/close
+intent precedes each corresponding effect, exact scope stays immutable, and a
+known reader must close before provider-issued. Its raw source bytes remain
+private in the native actor, not in this DATA. Normal close follows durable
+target material installation; uncertain helper effects remain held and are never
+restarted from metadata.

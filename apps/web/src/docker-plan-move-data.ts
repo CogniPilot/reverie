@@ -1,3 +1,4 @@
+import { allowedEphemeralTransition } from './docker-ephemeral-data.js';
 /** Private PlanMoves journal DATA. None of these references mint effect authority.
  * An actor epoch fences publishers; it never changes an already-issued task. */
 import { z } from 'zod';
@@ -22,6 +23,31 @@ const identifier = z
   .max(100)
   .regex(/^[a-zA-Z0-9_-]+$/);
 const ticks = z.string().regex(/^[1-9][0-9]{0,19}$/);
+const readerBase = {
+  version: z.literal(1),
+  purpose: z.literal('docker-plan-source-reader-v1'),
+  name: z.string().regex(/^reverie-boxed-[a-z0-9-]{1,100}$/),
+  imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  configurationDigest: digest,
+};
+const readerInit = z.object({ pid: z.number().int().positive().safe(), startTicks: ticks }).strict();
+export const DockerPlanMoveSourceReader = z.discriminatedUnion('phase', [
+  z.object({ ...readerBase, phase: z.literal('create-issued'), containerId: digest.optional() }).strict(),
+  z.object({ ...readerBase, phase: z.literal('created'), containerId: digest }).strict(),
+  z.object({ ...readerBase, phase: z.literal('start-issued'), containerId: digest }).strict(),
+  z.object({ ...readerBase, phase: z.literal('running'), containerId: digest, init: readerInit }).strict(),
+  z.object({ ...readerBase, phase: z.literal('close-issued'), containerId: digest, init: readerInit }).strict(),
+  z
+    .object({
+      ...readerBase,
+      phase: z.literal('closed'),
+      containerId: digest,
+      init: readerInit.optional(),
+      terminalStateDigest: digest,
+    })
+    .strict(),
+]);
+export type DockerPlanMoveSourceReader = z.infer<typeof DockerPlanMoveSourceReader>;
 export const DockerPlanMoveSeed = z
   .object({
     version: z.literal(1),
@@ -133,6 +159,7 @@ export const DockerPlanMoveJournalState = z
     epoch: uuid,
     seed: DockerPlanMoveSeed,
     sourceStop: DockerPlanMoveSourceStop.optional(),
+    sourceReader: DockerPlanMoveSourceReader.optional(),
     work: DockerEmployeePlanReplacementWorkRecord.optional(),
     paidDispatch: z
       .object({
@@ -154,7 +181,14 @@ export const DockerPlanMoveJournalState = z
   })
   .strict()
   .refine((state) => {
-    const { seed, sourceStop: stop, work, paidDispatch: paid, companyPublication: publication } = state;
+    const {
+      seed,
+      sourceStop: stop,
+      sourceReader: reader,
+      work,
+      paidDispatch: paid,
+      companyPublication: publication,
+    } = state;
     const source = seed.source.record.destination!,
       target = seed.target;
     if (
@@ -163,6 +197,11 @@ export const DockerPlanMoveJournalState = z
         stop.sourceConfigurationDigest !== source.configurationDigest ||
         !isEqual(stop.sourceInit, seed.source.observation.kind === 'running' ? seed.source.observation.init : null) ||
         (stop.phase === 'issued' && seed.source.observation.kind === 'stopped'))
+    )
+      return false;
+    if (
+      reader &&
+      (stop?.phase !== 'closed' || reader.imageId !== target.workerImage.imageId || (paid && reader.phase !== 'closed'))
     )
       return false;
     if (
@@ -225,6 +264,35 @@ export function assertDockerPlanMoveTransition(
     if ('terminalStateDigest' in newStop) delete (newStop as Partial<typeof newStop>).terminalStateDigest;
     if (!unchanged(oldStop, newStop)) throw Error('Docker plan source closure changed');
   }
+  const oldReader = before.sourceReader,
+    reader = next.sourceReader;
+  if (!oldReader && reader && reader.phase !== 'create-issued')
+    throw Error('Source reader requires its original create intent');
+  if (oldReader) {
+    if (
+      !reader ||
+      oldReader.name !== reader.name ||
+      oldReader.imageId !== reader.imageId ||
+      oldReader.configurationDigest !== reader.configurationDigest ||
+      ('containerId' in oldReader &&
+        oldReader.containerId !== undefined &&
+        (!('containerId' in reader) || oldReader.containerId !== reader.containerId)) ||
+      ('init' in oldReader &&
+        oldReader.init !== undefined &&
+        (!('init' in reader) || !unchanged(oldReader.init, reader.init)))
+    )
+      throw Error('Source reader immutable scope changed');
+    const transitions: Record<DockerPlanMoveSourceReader['phase'], readonly DockerPlanMoveSourceReader['phase'][]> = {
+      'create-issued': ['created', 'closed'],
+      created: ['start-issued', 'running', 'closed'],
+      'start-issued': ['running', 'closed'],
+      running: ['close-issued', 'closed'],
+      'close-issued': ['closed'],
+      closed: [],
+    };
+    if (!unchanged(oldReader, reader) && !transitions[oldReader.phase].includes(reader.phase))
+      throw Error('Source reader cursor changed');
+  }
   for (const field of ['paidDispatch', 'companyPublication'] as const) {
     if (!before[field]) continue;
     if (
@@ -238,8 +306,27 @@ export function assertDockerPlanMoveTransition(
   }
   if (!before.work) return;
   if (!next.work) throw Error('Docker plan native work disappeared');
-  const { phase: oldPhase, tasks: oldTasks = [], pool: oldPool, destination: oldDestination, ...oldWork } = before.work;
-  const { phase: newPhase, tasks: newTasks = [], pool: newPool, destination: newDestination, ...newWork } = next.work;
+  const {
+    phase: oldPhase,
+    tasks: oldTasks = [],
+    pool: oldPool,
+    destination: oldDestination,
+    ephemeralRestoration: oldEphemeral,
+    ...oldWork
+  } = before.work;
+  const {
+    phase: newPhase,
+    tasks: newTasks = [],
+    pool: newPool,
+    destination: newDestination,
+    ephemeralRestoration: newEphemeral,
+    ...newWork
+  } = next.work;
+  if (
+    !unchanged(oldEphemeral ?? null, newEphemeral ?? null) &&
+    (before.paidDispatch || !newEphemeral || !allowedEphemeralTransition(oldEphemeral, newEphemeral))
+  )
+    throw Error('Docker plan ephemeral task changed');
   const phases = DockerEmployeeContinuationPhase.options;
   if (
     !unchanged(oldWork, newWork) ||

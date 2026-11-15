@@ -7,11 +7,35 @@ import type { DockerPlanMoveJournalState, DockerPlanMoveSeed } from './docker-pl
 export interface PlanMoveDockerJournal {
   readonly moveId: string;
   readonly epoch: string;
+  readonly publication: 'admitting' | 'published' | 'failed';
   /** Live actor epoch + original request grant, not a cached cursor digest. */
   current(): void;
   read(): Readonly<DockerPlanMoveJournalState>;
   /** Exact original state CAS. No request may provide this private port. */
   publish(before: Readonly<DockerPlanMoveJournalState>, next: Readonly<DockerPlanMoveJournalState>): Promise<void>;
+}
+export interface PlanMoveDockerJournalStore {
+  phase(
+    id: string,
+    before: Readonly<DockerPlanMoveJournalState>,
+    status: { phase: PlanMoveRecord['phase']; error?: string },
+    current: () => void
+  ): Promise<Readonly<PlanMoveRecord>>;
+  record(id: string): Promise<Readonly<PlanMoveRecord>>;
+  current(id: string, epoch: string, seedDigest: string): void;
+  publish(
+    id: string,
+    before: Readonly<DockerPlanMoveJournalState>,
+    next: Readonly<DockerPlanMoveJournalState>,
+    current: () => void
+  ): Promise<Readonly<PlanMoveRecord>>;
+  claim(
+    id: string,
+    before: Readonly<DockerPlanMoveJournalState>,
+    epoch: string,
+    requireNative: () => void,
+    current: () => void
+  ): Promise<Readonly<PlanMoveRecord>>;
 }
 export interface PlanMoveDockerActor {
   /** Genuine captured requester/runtime grant, including only this journal's exact planned self transition. */

@@ -31,6 +31,16 @@ const targetSchema = z
   .strict();
 export type DockerPlanMoveRequesterTarget = z.input<typeof targetSchema>;
 export interface DockerPlanMoveRequesterScope {
+  /** Correlation/audit DATA only; current permissions are checked independently. */
+  readonly requester:
+    | { readonly kind: 'owner' }
+    | {
+        readonly kind: 'agent';
+        readonly employeeId: string;
+        readonly sessionId: string;
+        readonly sessionGeneration: number;
+        readonly containerId: string;
+      };
   readonly employeeId: string;
   readonly owner: string | undefined;
   readonly sessionId: string;
@@ -51,7 +61,11 @@ export class DockerPlanMoveRequester {
     current: (record: Readonly<PlanMoveRecord>, state: Readonly<DockerPlanMoveJournalState>) => void
   ) {
     if (token !== origin) throw new PlanMoveError('Genuine Docker plan requester required', 403);
-    this.#scope = Object.freeze({ ...scope, ...(scope.choice ? { choice: Object.freeze({ ...scope.choice }) } : {}) });
+    this.#scope = Object.freeze({
+      ...scope,
+      requester: Object.freeze({ ...scope.requester }),
+      ...(scope.choice ? { choice: Object.freeze({ ...scope.choice }) } : {}),
+    });
     this.#source = source;
     this.#current = current;
     Object.freeze(this);
@@ -159,6 +173,15 @@ function captureRequester(
   const sourceKey = JSON.stringify([sourceBinding.sessionId, sourceBinding.sessionGeneration, sourceBinding]);
   const callerKey = caller && JSON.stringify([caller.sessionId, caller.sessionGeneration, caller.dockerBinding]);
   const scope: DockerPlanMoveRequesterScope = {
+    requester: identity
+      ? {
+          kind: 'agent',
+          employeeId: identity.employeeId,
+          sessionId: identity.sessionId,
+          sessionGeneration: identity.sessionGeneration,
+          containerId: identity.containerId,
+        }
+      : { kind: 'owner' },
     employeeId: employee.id,
     owner,
     sessionId: sourceBinding.sessionId,

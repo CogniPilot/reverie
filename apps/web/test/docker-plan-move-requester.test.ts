@@ -244,6 +244,7 @@ describe('genuine requester grant for one Docker plan journal', () => {
     const f = await fixture();
     expect(await f.capture()).toBe(200);
     expect(requireDockerPlanMoveRequesterSource(f.proof(), f.record.employeeId, undefined)).toMatchObject({
+      requester: { kind: 'agent', employeeId: f.record.employeeId, sessionId: f.record.oldSession },
       employeeId: f.record.employeeId,
       sessionId: f.record.oldSession,
       sessionGeneration: 1,

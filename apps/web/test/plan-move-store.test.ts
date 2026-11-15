@@ -43,7 +43,12 @@ describe('private bounded durable plan move journal', () => {
   });
 
   it('retains the explicit same-account runtime binding across reopen and refuses incomplete refresh journals', async () => {
-    const refresh = { ...record, toAccount: 'first', purpose: 'runtime-refresh' as const, runtimeDigest: 'a'.repeat(64) };
+    const refresh = {
+      ...record,
+      toAccount: 'first',
+      purpose: 'runtime-refresh' as const,
+      runtimeDigest: 'a'.repeat(64),
+    };
     await store.save([refresh]);
     expect(await new PlanMoveStore(store.file).load()).toEqual([refresh]);
     for (const change of [{ runtimeDigest: undefined }, { toAccount: 'second' }, { purpose: undefined }])
@@ -67,7 +72,7 @@ describe('private bounded durable plan move journal', () => {
     await expect(store.load()).rejects.toThrow('Duplicate');
     expect(() => store.save([{ ...record, cookie: 'never persist' } as PlanMoveRecord])).toThrow();
     expect(() => store.save(Array.from({ length: 101 }, (_, index) => ({ ...record, id: String(index) })))).toThrow();
-    await writeFile(store.file, ' '.repeat(1024 * 1024 + 1));
+    await writeFile(store.file, ' '.repeat(8 * 1024 * 1024 + 1));
     await expect(store.load()).rejects.toThrow('size bound');
   });
 
@@ -78,31 +83,51 @@ describe('private bounded durable plan move journal', () => {
     expect(await readFile(store.file, 'utf8')).toBe(before);
   });
   it('persists verified cleanup and terminal owner adoption across restart with private mode', async () => {
-    const adopted = {...record, newSession: 'new', phase: 'completed' as const, sourceStopRequested: true,
-      sourceCleanupVerified: true, recoveryAction: 'adopt-existing' as const, recoveredAt: 2};
-    await store.recoveryPending(adopted); await store.save([adopted]); await store.recoveryConfirmed(adopted);
+    const adopted = {
+      ...record,
+      newSession: 'new',
+      phase: 'completed' as const,
+      sourceStopRequested: true,
+      sourceCleanupVerified: true,
+      recoveryAction: 'adopt-existing' as const,
+      recoveredAt: 2,
+    };
+    await store.recoveryPending(adopted);
+    await store.save([adopted]);
+    await store.recoveryConfirmed(adopted);
     expect(await new PlanMoveStore(store.file).load()).toEqual([adopted]);
-    expect(() => store.save([{...record, sourceCleanupVerified: true}])).toThrow('cleanup proof');
-    expect(() => store.save([{...adopted, phase: 'waiting'}])).toThrow('terminal receipt');
+    expect(() => store.save([{ ...record, sourceCleanupVerified: true }])).toThrow('cleanup proof');
+    expect(() => store.save([{ ...adopted, phase: 'waiting' }])).toThrow('terminal receipt');
   });
 
   it('never treats terminal recovery journal bytes alone as verified completion', async () => {
-    const adopted = {...record, newSession: 'new', phase: 'completed' as const, sourceStopRequested: true,
-      sourceCleanupVerified: true, recoveryAction: 'adopt-existing' as const, recoveredAt: 2};
-    await store.recoveryPending(adopted); await store.save([adopted]);
+    const adopted = {
+      ...record,
+      newSession: 'new',
+      phase: 'completed' as const,
+      sourceStopRequested: true,
+      sourceCleanupVerified: true,
+      recoveryAction: 'adopt-existing' as const,
+      recoveredAt: 2,
+    };
+    await store.recoveryPending(adopted);
+    await store.save([adopted]);
     expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('recovery-required');
-    await store.recoveryConfirmed(adopted); expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('completed');
-    await writeFile(store.file, JSON.stringify([{...adopted, toAccount: 'other'}]));
+    await store.recoveryConfirmed(adopted);
+    expect((await new PlanMoveStore(store.file).load())[0].phase).toBe('completed');
+    await writeFile(store.file, JSON.stringify([{ ...adopted, toAccount: 'other' }]));
     await expect(new PlanMoveStore(store.file).load()).rejects.toThrow('differs from terminal');
   });
   it('hashes even legacy path-like identifiers and refuses malformed or duplicate-key private receipts', async () => {
-    const id = '../legacy/move', legacy = {...record, id}; await store.save([legacy]); await store.recoveryPending(legacy);
-    const pending = (await readdir(directory)).find(name => name.endsWith('.pending.json'))!;
+    const id = '../legacy/move',
+      legacy = { ...record, id };
+    await store.save([legacy]);
+    await store.recoveryPending(legacy);
+    const pending = (await readdir(directory)).find((name) => name.endsWith('.pending.json'))!;
     expect(pending).toMatch(/^moves.json[.]recovery-[0-9a-f]{64}[.]pending[.]json$/);
-    await writeFile(join(directory, pending), JSON.stringify({version: 1, id, unknown: true}));
+    await writeFile(join(directory, pending), JSON.stringify({ version: 1, id, unknown: true }));
     await expect(store.load()).rejects.toThrow();
     await writeFile(join(directory, pending), '{"version":0,"version":1,"id":"../legacy/move"}');
     await expect(store.load()).rejects.toThrow('Noncanonical');
   });
-
 });
