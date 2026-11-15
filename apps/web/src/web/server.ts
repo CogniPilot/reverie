@@ -358,6 +358,11 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import {
+  captureDockerPlanMoveRequester,
+  captureDockerPlanMoveOriginalRequester,
+  requireDockerPlanMoveRequesterSource,
+} from '../docker-plan-move-requester.js';
 import { PlanMoveRequests } from '../plan-request.js';
 import { PlanRequestStore } from '../plan-request-store.js';
 import { PlanRequestCapabilities } from '../plan-request-capability.js';
@@ -2452,7 +2457,22 @@ export class WebServer extends EventEmitter {
       sessions: this.sessions,
       mux: this.mux,
       cleanup: (id, killMux, reason) => this.cleanupSession(id, killMux, reason),
+      dockerReplacement: dockerRuntime?.planMoveActor(this.planService, planMoveStore, this.chatroomService),
     };
+    const requirePlanRuntime = () => {
+      if (!dockerRuntime?.current()) throw new PlanMoveError('The boxed runtime changed', 403);
+    };
+    const originalPlanRequester = (request: FastifyRequest, id: string) =>
+      captureDockerPlanMoveOriginalRequester(request, id, planMoveStore, this.companyService,
+        ctx, ownerAuth, requirePlanRuntime);
+    // One HTTP request owns its grants. Neither a preview nor another caller
+    // can replace an operation's captured requester or select a native adapter.
+    const requestPlanRuntime = (request: FastifyRequest): Omit<PlanMoveRuntime, 'authorized' | 'request'> => ({
+      ...planMoveRuntime,
+      dockerRequester: target => captureDockerPlanMoveRequester(request, target, this.companyService,
+        ctx, ownerAuth, requirePlanRuntime),
+      dockerOriginalRequester: id => originalPlanRequester(request, id),
+    });
     const unavailableMoveExecutor = planMoveExecutor({
       ...planMoveRuntime,
       authorized: () => false,
@@ -2466,6 +2486,15 @@ export class WebServer extends EventEmitter {
       save: (records) => planMoveStore.save(records),
       recoveryPending: (record) => planMoveStore.recoveryPending(record),
       recoveryConfirmed: (record) => planMoveStore.recoveryConfirmed(record),
+      dockerJournal: {
+        reserve: (...args) => planMoveStore.dockerReserve(...args),
+        readCurrent: (...args) => planMoveStore.dockerReadCurrent(...args),
+        record: id => planMoveStore.dockerRecord(id),
+        current: (...args) => planMoveStore.dockerCurrent(...args),
+        publish: (...args) => planMoveStore.dockerPublish(...args),
+        claim: (...args) => planMoveStore.dockerClaim(...args),
+        phase: (...args) => planMoveStore.dockerPhase(...args),
+      },
     });
     this.workerViewerReconnect = new WorkerViewerReconnect({
       company: this.companyService,
@@ -2505,7 +2534,7 @@ export class WebServer extends EventEmitter {
     const capturePlanMove = (request: FastifyRequest) =>
       planMoveExecutor(
         {
-          ...planMoveRuntime,
+          ...requestPlanRuntime(request),
           authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
           request: async (method, url, payload) => {
             if (!authenticatedPlanMover(request, ctx.authSessions, ownerAuth))
@@ -2567,12 +2596,12 @@ export class WebServer extends EventEmitter {
       request => {
         const caller = callerOf(request, { service: ownerAuth, ctx });
         return caller.kind === 'agent' && request.headers['x-reverie-parent-session'] === caller.session
-          ? ownPlanRecovery(request, planMoveRuntime) : undefined;
+          ? ownPlanRecovery(request, requestPlanRuntime(request)) : undefined;
       },
       async (request, input) => {
         let authority;
         try { authority = await recoveryAuthentication.authenticate(request); } catch { return undefined; }
-        return agentPlanRequestExecution(request, input, planMoveRuntime, async (method, url, payload) => {
+        return agentPlanRequestExecution(request, input, requestPlanRuntime(request), async (method, url, payload) => {
           const result = await this.app.inject({ method, url, headers: {
             ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
             'x-reverie-parent-session': input.sessionId,
@@ -2587,8 +2616,13 @@ export class WebServer extends EventEmitter {
       async (request, employeeId) => {
         try {
           const authority = await recoveryAuthentication.authenticate(request);
-          return agentPlanJournalRecovery(authority, employeeId, planMoveRuntime);
+          return agentPlanJournalRecovery(authority, employeeId, requestPlanRuntime(request));
         } catch { return undefined; }
+      },
+      async (request, id) => {
+        const record = await planMoveStore.dockerRecord(id);
+        const proof = await originalPlanRequester(request, id);
+        return () => { requireDockerPlanMoveRequesterSource(proof, record.employeeId, record.owner); };
       }
     );
     const planRequestStore = new PlanRequestStore(dataPath('plan-requests.json'));
@@ -2615,7 +2649,7 @@ export class WebServer extends EventEmitter {
     registerPlanRequestRoutes(this.app, planRequests, ctx, ownerAuth, request => ({
       executor: capturePlanMove(request),
       authorized: () => authenticatedPlanMover(request, ctx.authSessions, ownerAuth),
-    }), (request, input) => agentPlanRequestExecution(request, input, planMoveRuntime, async (method, url, payload) => {
+    }), (request, input) => agentPlanRequestExecution(request, input, requestPlanRuntime(request), async (method, url, payload) => {
       const result = await this.app.inject({ method, url, headers: {
         ...(request.headers.authorization ? { authorization: request.headers.authorization } : {}),
         ...(request.headers.cookie ? { cookie: request.headers.cookie } : {}),
