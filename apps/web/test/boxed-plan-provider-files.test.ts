@@ -3,7 +3,7 @@ import { afterEach, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PlanProviderFixtureFiles } from './helpers/boxed-plan-provider-files.js';
+import { PlanProviderFixtureFiles, preparePlanOfficeWorkerHome } from './helpers/boxed-plan-provider-files.js';
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -134,4 +134,96 @@ it('keeps separate process receipts when a replacement container reuses the same
   expect(new Set(names).size).toBe(2);
   for (const name of names)
     expect(JSON.parse(fs.readFileSync(path.join(f.home, '.fixture', name), 'utf8'))).toEqual(report);
+});
+
+it('prepares only private initial fake files and a matching real synthetic conversation without native authority', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-prep-'));
+  roots.push(root);
+  fs.chmodSync(root, 0o700);
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home, 0o700);
+  const provider = {
+    version: 1,
+    purpose: 'reverie-ci-plan-provider-v1',
+    employeeId: '11111111-1111-4111-8111-111111111111',
+    accounts: ['ci-plan-a', 'ci-plan-b'],
+    autoApprove: true,
+    exhausted: false,
+    refreshAccountId: 'ci-plan-a',
+    pauseBeforeApproval: false,
+  };
+  const input = {
+    version: 1,
+    purpose: 'reverie-ci-plan-worker-home-v1',
+    sessionId: '22222222-2222-4222-8222-222222222222',
+    nativeThreadId: '33333333-3333-4333-8333-333333333333',
+    initialAccountId: 'ci-plan-a',
+    provider,
+  };
+  const result = preparePlanOfficeWorkerHome(home, input);
+  expect(result.home.uid).toBe(process.getuid!());
+  expect(result.nativeThreadId).toBe(input.nativeThreadId);
+  expect(new PlanProviderFixtureFiles(home, undefined).contract()).toEqual(provider);
+  const history = path.join(
+    home,
+    '.claude/projects/-reverie-workspace-cases-boxed-canary',
+    input.nativeThreadId + '.jsonl'
+  );
+  const lines = fs
+    .readFileSync(history, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  expect(lines.map((line) => line.sessionId)).toEqual([input.nativeThreadId, input.nativeThreadId]);
+  expect(fs.statSync(history).mode & 0o777).toBe(0o600);
+  const before = fs.readFileSync(history, 'utf8');
+  expect(() => preparePlanOfficeWorkerHome(home, input)).toThrow('already exists');
+  expect(fs.readFileSync(history, 'utf8')).toBe(before);
+  expect(fs.readdirSync(home).sort()).toEqual(['.claude', '.fixture']);
+});
+it('refuses malformed initial scope and alias/nonprivate HOME before writing initial fake files', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-prep-deny-'));
+  roots.push(root);
+  fs.chmodSync(root, 0o700);
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home, 0o700);
+  expect(() => preparePlanOfficeWorkerHome(home, { nativeThreadId: '../escape' })).toThrow();
+  expect(fs.readdirSync(home)).toEqual([]);
+  const alias = path.join(root, 'alias');
+  fs.symlinkSync(home, alias);
+  const input = {
+    version: 1,
+    purpose: 'reverie-ci-plan-worker-home-v1',
+    sessionId: '22222222-2222-4222-8222-222222222222',
+    nativeThreadId: '33333333-3333-4333-8333-333333333333',
+    initialAccountId: 'ci-plan-a',
+    provider: {
+      version: 1,
+      purpose: 'reverie-ci-plan-provider-v1',
+      employeeId: '11111111-1111-4111-8111-111111111111',
+      accounts: ['ci-plan-a', 'ci-plan-b'],
+      autoApprove: true,
+      exhausted: false,
+      refreshAccountId: null,
+      pauseBeforeApproval: false,
+    },
+  };
+  expect(() => preparePlanOfficeWorkerHome(alias, input)).toThrow();
+  fs.chmodSync(home, 0o755);
+  expect(() => preparePlanOfficeWorkerHome(home, input)).toThrow();
+  expect(fs.readdirSync(home)).toEqual([]);
+});
+
+it('startup SDK refresh declines the other actual synthetic account without mutation or a false refresh marker', () => {
+  const f = fixture(),
+    file = path.join(f.generation, '.credentials.json');
+  const other = JSON.stringify({
+    claudeAiOauth: { accessToken: 'synthetic-original-plan-b', refreshToken: 'synthetic-refresh-plan-b' },
+  });
+  fs.writeFileSync(file, other);
+  const before = fs.statSync(file);
+  f.files.refreshAuthOnce('plan-a');
+  expect(fs.readFileSync(file, 'utf8')).toBe(other);
+  expect(fs.statSync(file).ino).toBe(before.ino);
+  expect(fs.existsSync(path.join(f.home, '.fixture/plan-refresh-plan-a.json'))).toBe(false);
 });

@@ -124,8 +124,24 @@ export function buildPlanOffice(args: readonly string[]) {
   fs.mkdirSync(path.dirname(fake), { recursive: true });
   bundle('test/fixtures/boxed-plan-provider.mts', fake);
   fs.chmodSync(fake, 0o555);
+  const workerPrep = path.join(output, 'opt/reverie-ci-plan-provider/lib/prepare-home.mjs');
+  fs.mkdirSync(path.dirname(workerPrep), { recursive: true });
+  bundle('test/fixtures/prepare-plan-office-worker.mts', workerPrep);
   // This exact separate test-only entry seeds inactive DATA. Ordinary control startup is dist/index.js web.
-  bundle('test/fixtures/plan-office-bootstrap.ts', path.join(runtime, 'plan-office-bootstrap.mjs'));
+  fs.symlinkSync('dist', path.join(runtime, 'src'));
+  run(esbuild, [
+    path.join(web, 'test/fixtures/plan-office-bootstrap.ts'),
+    path.join(web, 'test/helpers/plan-office-bootstrap.ts'),
+    '--outdir=' + path.join(runtime, 'test'),
+    '--outbase=' + path.join(web, 'test'),
+    '--platform=node',
+    '--format=esm',
+    '--target=node22',
+  ]);
+  fs.writeFileSync(
+    path.join(runtime, 'plan-office-bootstrap.mjs'),
+    "import './test/fixtures/plan-office-bootstrap.js';\n"
+  );
   fs.writeFileSync(
     path.join(output, 'metadata.json'),
     JSON.stringify({

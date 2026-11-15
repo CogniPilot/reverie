@@ -261,6 +261,15 @@ export class PlanProviderFixtureFiles {
           !value.claudeAiOauth.accessToken.startsWith('synthetic-')
         )
           throw Error('Only fake SDK credentials are accepted');
+        const token = value.claudeAiOauth.accessToken;
+        if (
+          contract.accounts.some(
+            (id) => id !== accountId && (token === 'synthetic-original-' + id || token === 'synthetic-refreshed-' + id)
+          )
+        )
+          return;
+        if (token !== 'synthetic-original-' + accountId && token !== 'synthetic-refreshed-' + accountId)
+          throw Error('Only exact synthetic selected account refresh is accepted');
         value.claudeAiOauth.accessToken = 'synthetic-refreshed-' + accountId;
         const after = Buffer.from(JSON.stringify(value) + '\n'),
           stage = 'sdk-refresh-' + randomUUID() + '.json';
@@ -309,4 +318,106 @@ export function planFixtureAccountStatus(configDir: string | undefined) {
       })
     )
   );
+}
+
+export const PlanOfficeWorkerHomeInput = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-ci-plan-worker-home-v1'),
+    sessionId: z.string().uuid(),
+    nativeThreadId: z.string().uuid(),
+    initialAccountId: PlanRequestId,
+    provider: PlanProviderFixtureContract,
+  })
+  .strict()
+  .refine((v) => v.provider.accounts.includes(v.initialAccountId));
+/** Unit cases map home to owned private directories. The baked command below fixes /home/agent. */
+export function preparePlanOfficeWorkerHome(home: string, input: unknown) {
+  const value = PlanOfficeWorkerHomeInput.parse(input);
+  if (!path.isAbsolute(home) || path.resolve(home) !== home || !process.getuid?.())
+    throw Error('Positive owned HOME required');
+  return owned(directory(home), (root) => {
+    const before = identity(fs.fstatSync(root));
+    for (const name of ['.fixture', '.claude']) {
+      try {
+        fs.lstatSync(at(root, name));
+        throw Error('Initial fixture already exists');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    const child = <T>(parent: number, name: string, operation: (fd: number) => T): T => {
+      fs.mkdirSync(at(parent, name), { mode: 0o700 });
+      fs.fsyncSync(parent);
+      return owned(directory(at(parent, name)), operation);
+    };
+    child(root, '.fixture', (fixture) =>
+      write(fixture, 'plan-provider.json', Buffer.from(JSON.stringify(value.provider) + '\n'))
+    );
+    child(root, '.claude', (claude) => {
+      write(
+        claude,
+        '.credentials.json',
+        Buffer.from(
+          JSON.stringify({
+            claudeAiOauth: {
+              accessToken: 'synthetic-original-' + value.initialAccountId,
+              refreshToken: 'synthetic-refresh-' + value.initialAccountId,
+              expiresAt: 4102444800000,
+            },
+          }) + '\n'
+        )
+      );
+      child(claude, 'projects', (projects) =>
+        child(projects, '-reverie-workspace-cases-boxed-canary', (project) => {
+          const user = randomUUID(),
+            assistant = randomUUID();
+          const lines = [
+            {
+              type: 'user',
+              sessionId: value.nativeThreadId,
+              uuid: user,
+              parentUuid: null,
+              cwd: '/reverie_workspace/cases/boxed-canary',
+              message: {
+                role: 'user',
+                content: 'Synthetic unpaid plan-office context; preserve this conversation across the move.',
+              },
+            },
+            {
+              type: 'assistant',
+              sessionId: value.nativeThreadId,
+              uuid: assistant,
+              parentUuid: user,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'Synthetic context acknowledged.' }] },
+            },
+          ];
+          write(
+            project,
+            value.nativeThreadId + '.jsonl',
+            Buffer.from(lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
+          );
+        })
+      );
+    });
+    fs.fsyncSync(root);
+    if (identity(fs.fstatSync(root)) !== before || identity(fs.lstatSync(home)) !== before)
+      throw Error('Initial HOME changed');
+    return {
+      version: 1,
+      purpose: 'synthetic-plan-worker-home-prepared-v1',
+      sessionId: value.sessionId,
+      nativeThreadId: value.nativeThreadId,
+      employeeId: value.provider.employeeId,
+      initialAccountId: value.initialAccountId,
+      home: {
+        uid: process.getuid!(),
+        gid: process.getgid!(),
+        dev: String(fs.fstatSync(root).dev),
+        ino: String(fs.fstatSync(root).ino),
+      },
+      limitation:
+        'Initial fake SDK files only; no binding, grant, native receipt, token, Ready state or paid dispatch.',
+    };
+  });
 }

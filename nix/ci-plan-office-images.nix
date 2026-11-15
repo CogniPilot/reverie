@@ -20,6 +20,8 @@ let
     HOME="$TMPDIR/ci-help-home" ${node}/bin/node "$out/lib/reverie/dist/index.js" --help > "$TMPDIR/help.txt"
     grep -q 'web' "$TMPDIR/help.txt"
     ${node}/bin/node "$out/opt/reverie-ci-plan-provider/bin/claude" --version | grep -q 'synthetic plan fixture'
+    ln -s "$out/opt/reverie-ci-plan-provider/bin/claude" "$TMPDIR/claude-alias"
+    ${node}/bin/node "$TMPDIR/claude-alias" --version | grep -q 'synthetic plan fixture'
   '';
   platform = pkgs.buildEnv { name = "reverie-ci-plan-worker-platform"; paths = [ pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.util-linux pkgs.python3 ]; };
   platformClosure = pkgs.closureInfo { rootPaths = [ platform ]; };

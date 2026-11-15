@@ -40,6 +40,7 @@
     "../test/boxed-plan-provider-entry.test.ts",
     "../test/fixtures/boxed-plan-provider.mts",
     "../scripts/build-plan-office.mts",
-    "../test/plan-office-image-factory.test.ts"
+    "../test/plan-office-image-factory.test.ts",
+    "../test/fixtures/prepare-plan-office-worker.mts"
   ]
 }

@@ -1,6 +1,7 @@
 #!/opt/reverie-worker-client/bin/node
 /** Build-only external SDK fake. The image, not a production override, selects this executable. */
 import process from 'node:process';
+import { realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -83,6 +84,13 @@ export async function planProviderMain(args = process.argv.slice(2)) {
   const launch = planProviderLaunch(args, process.env),
     files = new PlanProviderFixtureFiles('/home/agent', process.env.CLAUDE_CONFIG_DIR);
   const contract = files.contract();
+  // Simulate SDK startup refresh BEFORE the measured request captures source material.
+  if (
+    contract.refreshAccountId !== null &&
+    process.env.CLAUDE_CONFIG_DIR !== undefined &&
+    process.env.CLAUDE_CONFIG_DIR !== '/home/agent/.claude'
+  )
+    files.refreshAuthOnce(contract.refreshAccountId);
   let release: { id: string; resolve: () => void } | undefined;
   const fake = new BoxedPlanProviderFixture(
     contract,
@@ -119,12 +127,14 @@ export async function planProviderMain(args = process.argv.slice(2)) {
     launch.settings
   );
   await fake.start();
+  let stopped = false;
   let buffer = '',
     serial = Promise.resolve();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (chunk: string) => {
     buffer += chunk;
     if (Buffer.byteLength(buffer) > 65536) {
+      stopped = true;
       process.stderr.write('Synthetic input bound refused\n');
       process.exitCode = 1;
       process.stdin.destroy();
@@ -140,10 +150,11 @@ export async function planProviderMain(args = process.argv.slice(2)) {
       }
       serial = serial
         .then(async () => {
-          await fake.turn();
+          if (!stopped) await fake.turn();
         })
         .catch(() => {
           // No retry, fabricated idle or diagnostic secret output after an unknown physical callback.
+          stopped = true;
           process.stderr.write('Synthetic plan turn unconfirmed\n');
           process.exitCode = 1;
           process.stdin.destroy();
@@ -152,7 +163,16 @@ export async function planProviderMain(args = process.argv.slice(2)) {
   });
   process.stdin.resume();
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+export function planProviderIsMain(file: string | undefined) {
+  if (!file) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(file)).href;
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
+    throw error;
+  }
+}
+if (planProviderIsMain(process.argv[1]))
   await planProviderMain().catch(() => {
     process.stderr.write('Synthetic plan provider refused\n');
     process.exitCode = 1;
