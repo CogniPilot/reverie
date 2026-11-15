@@ -285,3 +285,113 @@ describe('real contained plan installer observation', () => {
     expect(f.command.create).not.toHaveBeenCalled();
   });
 });
+
+async function installFixture() {
+  const f = await fixture();
+  let task: import('../src/docker-continuation-task.js').DockerContinuationTask | undefined;
+  const row = {
+    ...f.row,
+    phase: 'identity-issued' as const,
+    tasks: f.row.tasks!.filter((t) => t.role !== 'identity-helper'),
+  };
+  f.journal.read = () => task;
+  f.journal.publish = vi.fn(async (r, before, next, current) => {
+    current();
+    expect(task).toEqual(before);
+    task = structuredClone(next);
+    return { ...r, tasks: [...r.tasks!.filter((t) => t.role !== 'identity-helper'), task] };
+  });
+  const original = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.create).mockImplementation(async (_name, config, current) => {
+    current();
+    expect(task?.phase).toBe('create-issued');
+    Object.assign(f.raw, {
+      Config: Object.fromEntries(Object.entries(config).filter(([k]) => k !== 'HostConfig')),
+      HostConfig: structuredClone(config.HostConfig),
+      State: {
+        Status: 'created',
+        Running: false,
+        Pid: 0,
+        ExitCode: 0,
+        OOMKilled: false,
+        Dead: false,
+        Restarting: false,
+        Paused: false,
+      },
+    });
+    return '9'.repeat(64);
+  });
+  vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+    if (a[0] === 'container' && a[1] === 'ls')
+      return task?.phase === 'create-issued' && !('containerId' in task) ? '' : '9'.repeat(64);
+    if (a[0] === 'container' && a[1] === 'start') {
+      expect(task?.phase).toBe('start-issued');
+      expect(b).toBe('synthetic-private-payload');
+      expect(a).not.toContain(b);
+      f.raw.State = {
+        Status: 'exited',
+        Running: false,
+        Pid: 0,
+        ExitCode: 0,
+        OOMKilled: false,
+        Dead: false,
+        Restarting: false,
+        Paused: false,
+      };
+      return JSON.stringify(f.initial) + '\n';
+    }
+    if (a[0] === 'exec') return JSON.stringify(f.initial) + '\n';
+    return original(a, b);
+  });
+  return { ...f, row, getTask: () => task };
+}
+describe('same-journal contained plan install dispatch', () => {
+  it('persists CREATE and START before each original effect, then requires original and guest initial receipts', async () => {
+    const f = await installFixture();
+    expect(await f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {})).toEqual(f.initial);
+    expect(f.getTask()?.phase).toBe('completed');
+    expect(f.command.create).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
+    expect(JSON.stringify(f.getTask())).not.toContain('synthetic-private-payload');
+  });
+  it('settles an unknown START from original terminal ACK and guest custody without retransmitting', async () => {
+    const f = await installFixture(),
+      native = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+      const v = await native(a, b);
+      if (a[1] === 'start') throw Error('lost START reply');
+      return v;
+    });
+    await expect(f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {})).rejects.toThrow(
+      'lost START reply'
+    );
+    expect(f.getTask()?.phase).toBe('start-issued');
+    expect(await f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {})).toEqual(f.initial);
+    expect(f.getTask()?.phase).toBe('completed');
+    expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
+    expect(f.command.create).toHaveBeenCalledOnce();
+  });
+  it('retains uncertain CREATE and refuses another allocation after a proven empty census', async () => {
+    const f = await installFixture();
+    vi.mocked(f.command.create).mockRejectedValue(Error('unknown CREATE'));
+    await expect(f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {})).rejects.toThrow(
+      'unknown CREATE'
+    );
+    await expect(f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {})).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_INSTALL_CREATE_UNCONFIRMED',
+    });
+    expect(f.command.create).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(0);
+  });
+  it('holds changed private material after original issuance without rewriting its task or issuing another effect', async () => {
+    const f = await installFixture();
+    await f.installer.provision(f.row, 'synthetic-private-payload', undefined, () => {});
+    const before = structuredClone(f.getTask());
+    await expect(f.installer.provision(f.row, 'changed-payload', undefined, () => {})).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_INSTALL_TASK_CHANGED',
+    });
+    expect(f.getTask()).toEqual(before);
+    expect(f.command.create).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
+  });
+});
