@@ -1236,7 +1236,7 @@
       async function forcePlanMove(dialog, employee, target, requestId) {
         if (
           !window.confirm(
-            `Force ${employee.name} to move now? This skips their handoff approval. Unfinished work may be interrupted after the replacement is ready.`
+            `Force ${employee.name} to move now? This skips their handoff approval. The current session is stopped before the replacement starts and becomes ready. Unfinished work may be interrupted, and downtime or recovery may be required.`
           )
         )
           return;

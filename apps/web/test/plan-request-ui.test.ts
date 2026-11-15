@@ -115,6 +115,17 @@ describe('owner plan request presentation', () => {
     expect(JSON.parse(sent[1]!.body)).toMatchObject({ employeeId: 'alex', sessionId: 'source', toAccount: 'second' });
     expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/requests')).toBe(false);
   });
+  it('explains stop-before-start downtime before confirmation and sends no forced move when declined', async () => {
+    const h = harness();
+    const confirm = vi.spyOn(h.dom.window, 'confirm').mockReturnValue(false);
+    await h.methods.openPlanMove('alex', 'second');
+    h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+    expect(confirm).toHaveBeenCalledWith(
+      'Force Alex to move now? This skips their handoff approval. The current session is stopped before the replacement starts and becomes ready. Unfinished work may be interrupted, and downtime or recovery may be required.'
+    );
+    expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/moves/force')).toBe(false);
+    expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/requests')).toBe(false);
+  });
   it('accepts a drop across providers and explains the automatically selected destination harness', async () => {
     const h = harness();
     h.context.B.planBurn.push({ id: 'claude', name: 'Claude Work', provider: 'anthropic' });
