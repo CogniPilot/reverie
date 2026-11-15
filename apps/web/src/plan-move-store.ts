@@ -539,6 +539,66 @@ export class PlanMoveStore {
   }
 
   /** Private read for the SAME native journal owner. No physical credit. */
+  async dockerReserve(input: Readonly<PlanMoveRecord>, current: () => void): Promise<Readonly<PlanMoveRecord>> {
+    const record = structuredClone(input),
+      state = record.dockerReplacement;
+    if (
+      !state ||
+      record.phase !== 'waiting' ||
+      state.sourceStop ||
+      state.sourceReader ||
+      state.work ||
+      state.paidDispatch ||
+      state.companyPublication ||
+      state.handoff
+    )
+      throw Error('A fresh Docker reservation cannot contain effects');
+    this.nativeSettlement(record);
+    RecordSchema.parse(record);
+    let result: Readonly<PlanMoveRecord> | undefined, capacity: unknown;
+    const write = this.chain.then(() =>
+      withCanonicalStateLock(
+        this.file,
+        async () => {
+          current();
+          const disk = await this.readPrivateList(this.file, 8 * 1024 * 1024, JournalSchema);
+          current();
+          if (
+            disk.some(
+              (row) =>
+                row.id === record.id ||
+                (row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase))
+            )
+          )
+            throw Error('The employee already has an original plan reservation');
+          if (disk.length >= 100) {
+            const error = new SettlementCapacityLimit();
+            capacity = error;
+            throw error;
+          }
+          let data: string;
+          try {
+            data = this.encode([...disk, record]);
+          } catch (error) {
+            if (error instanceof SettlementCapacityLimit) capacity = error;
+            throw error;
+          }
+          current();
+          await writeCompanyStateFile(this.file, data);
+          current();
+          result = Object.freeze(structuredClone(record));
+        },
+        (handle) => this.inspectLock(handle)
+      )
+    );
+    const outcome = write.catch((error) => {
+      if (capacity !== undefined && capacity === error) throw new NativeMoveNotIssued(record);
+      throw error;
+    });
+    this.chain = outcome.catch(() => {});
+    await outcome;
+    return result!;
+  }
   async dockerRecord(id: string): Promise<Readonly<PlanMoveRecord>> {
     await this.chain;
     return this.requireDockerRecord(await this.readPrivateList(this.file, 8 * 1024 * 1024, JournalSchema), id);
@@ -571,6 +631,12 @@ export class PlanMoveStore {
   /** Called immediately before every native effect/publication. Old epochs and
    * late callbacks lose authority even if another process performed takeover. */
   dockerCurrent(id: string, epoch: string, seedDigest: string): void {
+    this.dockerCurrency(id, epoch, seedDigest, false);
+  }
+  dockerReadCurrent(id: string, epoch: string, seedDigest: string): void {
+    this.dockerCurrency(id, epoch, seedDigest, true);
+  }
+  private dockerCurrency(id: string, epoch: string, seedDigest: string, readonlyTerminal: boolean): void {
     const fd = openSync(this.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       const before = fstatSync(fd, { bigint: true });
@@ -604,7 +670,8 @@ export class PlanMoveStore {
       if (JSON.stringify(records) !== text) throw Error('Noncanonical Docker plan move journal');
       const record = this.requireDockerRecord(records, id),
         state = record.dockerReplacement!;
-      if (['completed', 'failed'].includes(record.phase)) throw Error('Terminal native plan history cannot dispatch');
+      if (['completed', 'failed'].includes(record.phase) && !(readonlyTerminal && record.phase === 'completed'))
+        throw Error('Terminal native plan history cannot dispatch');
       const checked = structuredClone(record);
       this.nativeSettlement(checked);
       if (
@@ -700,6 +767,8 @@ export class PlanMoveStore {
     assertDockerPlanMoveTransition(original, checked);
     return this.dockerTransaction(id, original, current, (record) => {
       record.dockerReplacement = checked;
+      if (checked.sourceStop) record.sourceStopRequested = true;
+      if (checked.sourceStop?.phase === 'closed') record.sourceCleanupVerified = true;
     });
   }
 

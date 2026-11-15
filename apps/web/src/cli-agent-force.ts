@@ -163,6 +163,8 @@ export async function agentMoveJournal(
         newSession?: unknown;
         toAccount?: unknown;
         phase?: unknown;
+        backend?: unknown;
+        allowedActions?: unknown;
       }
     | undefined;
   if (record?.id !== options.id || record.employeeId !== options.employeeId || typeof record.phase !== 'string')
@@ -185,7 +187,12 @@ export async function agentMoveJournal(
         );
       body = {
         ...body,
-        action: 'adopt-existing',
+        action:
+          record.backend === 'docker' &&
+          Array.isArray(record.allowedActions) &&
+          record.allowedActions.includes('continue-original')
+            ? 'continue-original'
+            : 'adopt-existing',
         oldSession: record.oldSession,
         newSession: record.newSession,
         toAccount: record.toAccount,

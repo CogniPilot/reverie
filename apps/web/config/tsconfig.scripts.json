@@ -24,6 +24,7 @@
     "../test/fixtures/employee-recovery-restart.mts",
     "../test/fixtures/boxed-webserver-startup.ts",
     "../test/fixtures/plan-move-docker-cas.ts",
+    "../test/plan-move-docker-runner.test.ts",
     "../test/fixtures/tmux-source-native.ts",
     "../scripts/docker-memory-high-ci.mts",
     "../test/fixtures/docker-memory-high-canary.ts",

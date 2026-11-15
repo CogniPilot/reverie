@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
 import { ResourceHistoricalSettlement } from './resource-native-client.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { reserveDockerPlanMove, runDockerPlanMove } from './plan-move-docker-runner.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -58,6 +59,7 @@ export interface PlanMoveInput {
   id: string;
   employeeId: string;
   sessionId: string;
+  sessionGeneration?: number;
   fromAccount: string;
   toAccount: string;
   forceBusy: boolean;
@@ -73,6 +75,9 @@ export interface PlanMoveInput {
 }
 
 export interface PlanMoveRecord {
+  /** Public view DATA only. Never persisted as effect authority. */
+  backend?: 'docker';
+  allowedActions?: readonly 'continue-original'[];
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
@@ -251,6 +256,13 @@ export class PlanMoves {
       dockerSettlementBudget: _privateSettlementBudget,
       ...record
     } = source;
+    if (source.dockerReplacement) {
+      record.backend = 'docker';
+      record.allowedActions =
+        record.phase === 'recovery-required' && !this.aborts.has(record.id) && !this.intents.has(record.id)
+          ? ['continue-original']
+          : [];
+    }
     // A completion journal write is provisional while final native/audit fences
     // are still pending. Readers must not turn that window into successful Apply.
     if (record.phase === 'completed' && (this.aborts.has(record.id) || this.intents.has(record.id))) {
@@ -514,6 +526,7 @@ export class PlanMoves {
           input.handoff,
           input.model ?? '',
           input.targetMode ?? '',
+          ...(input.sessionGeneration === undefined ? [] : ['session-generation', input.sessionGeneration]),
           ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
           ...(input.resourceIntent
             ? [
@@ -552,6 +565,12 @@ export class PlanMoves {
       checkOwnerScope();
       if (snapshot.sessionId !== input.sessionId || snapshot.account !== input.fromAccount)
         throw new PlanMoveError('The employee or account changed; refresh before moving');
+      if (
+        snapshot.backend === 'docker' &&
+        input.sessionGeneration !== undefined &&
+        input.sessionGeneration !== snapshot.sessionGeneration
+      )
+        throw new PlanMoveError('The employee generation changed; refresh before moving');
       if (input.purpose === 'runtime-refresh') {
         if (
           input.fromAccount !== input.toAccount ||
@@ -592,10 +611,17 @@ export class PlanMoves {
         ...(input.resourceIntent ? { resourceIntent: input.resourceIntent } : {}),
         ...(input.resourceOwnerScope === undefined ? {} : { resourceOwnerScope: input.resourceOwnerScope }),
       };
+      if (snapshot.backend === 'docker') await reserveDockerPlanMove(record, input, executor, this.port.dockerJournal);
       this.records.set(record.id, record);
-      await this.save();
+      if (record.dockerReplacement) {
+        const saved = await this.port.dockerJournal!.reserve(record, () =>
+          executor.dockerReplacement!.current(record, record.dockerReplacement!)
+        );
+        Object.assign(record, structuredClone(saved));
+      } else await this.save();
       checkOwnerScope();
-      void this.run(record, input, executor);
+      if (record.dockerReplacement) void this.runDocker(record, executor);
+      else void this.run(record, input, executor);
       return this.view(record);
     } catch (error) {
       const uncertain = this.records.get(input.id),
@@ -703,6 +729,8 @@ export class PlanMoves {
     if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
     if (record.resourceIntent)
       throw new PlanMoveError('Resource transactions require their own verified recovery actor');
+    if (record.dockerReplacement)
+      throw new PlanMoveError('Use the original Docker recovery action; legacy adoption cannot recover this move');
     if (
       record.oldSession !== expected.oldSession ||
       record.newSession !== expected.newSession ||
@@ -921,6 +949,85 @@ export class PlanMoves {
     } finally {
       this.aborts.delete(record.id);
       if (['completed', 'failed'].includes(record.phase)) this.locked.delete(record.employeeId);
+    }
+  }
+  async continueDocker(
+    id: string,
+    expected: { oldSession: string; newSession: string; toAccount: string },
+    owner: string | undefined,
+    executor: PlanMoveExecutor
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    if (
+      !record.dockerReplacement ||
+      record.phase !== 'recovery-required' ||
+      !this.port.dockerJournal ||
+      !executor.dockerReplacement
+    )
+      throw new PlanMoveError('Original Docker recovery is unavailable', 409);
+    if (
+      record.oldSession !== expected.oldSession ||
+      record.newSession !== expected.newSession ||
+      record.toAccount !== expected.toAccount
+    )
+      throw new PlanMoveError('The original recovery target changed');
+    if (this.intents.has(id) || this.aborts.has(id)) throw new PlanMoveError('The move is still active');
+    this.intents.add(id);
+    try {
+      const actual = await this.port.dockerJournal.record(id);
+      if (
+        actual.owner !== owner ||
+        actual.id !== id ||
+        actual.oldSession !== record.oldSession ||
+        actual.newSession !== record.newSession ||
+        actual.requestDigest !== record.requestDigest ||
+        !actual.dockerReplacement
+      )
+        throw new PlanMoveError('The original Docker journal changed');
+      Object.assign(record, structuredClone(actual), { phase: 'recovery-required' });
+      void this.runDocker(
+        record,
+        executor,
+        actual.phase === 'completed' ? 'reconcile' : actual.dockerReplacement.paidDispatch ? 'adopt' : 'continue'
+      );
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
+  }
+  private async runDocker(
+    record: PlanMoveRecord,
+    executor: PlanMoveExecutor,
+    mode: 'new' | 'continue' | 'adopt' | 'reconcile' = 'new'
+  ): Promise<void> {
+    const abort = new AbortController();
+    this.aborts.set(record.id, abort);
+    try {
+      if (!this.port.dockerJournal) throw new PlanMoveError('The private Docker journal is unavailable', 503);
+      await runDockerPlanMove(
+        record,
+        executor,
+        this.port.dockerJournal,
+        {
+          signal: abort.signal,
+          current: () => {
+            if (
+              this.records.get(record.id) !== record ||
+              (record.phase !== 'completed' && this.aborts.get(record.id) !== abort)
+            )
+              throw new PlanMoveError('The original Docker move flight changed');
+          },
+        },
+        mode
+      );
+    } catch (error) {
+      record.phase = 'recovery-required';
+      record.error = error instanceof Error ? error.message : 'Docker move unavailable';
+    } finally {
+      if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
+      if (record.phase === 'completed' || record.phase === 'failed') this.locked.delete(record.employeeId);
     }
   }
 }

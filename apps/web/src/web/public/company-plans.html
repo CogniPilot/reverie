@@ -948,7 +948,9 @@
           record.phase === 'recovery-required' &&
           !!record.newSession &&
           !record.resourceIntent &&
-          record.sourceCleanupVerified === true;
+          (record.backend === 'docker'
+            ? record.allowedActions?.includes('continue-original') === true
+            : record.sourceCleanupVerified === true);
         const readStatus = async (expected) => {
           const generation = ++statusGeneration;
           const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(expected.id)}/status`);
@@ -973,6 +975,7 @@
           cancel.disabled = busy;
           resolve.hidden = record.phase !== 'recovery-required' || !record.newSession || !!record.resourceIntent;
           resolve.disabled = busy || unconfirmed || !eligible();
+          resolve.textContent = record.backend === 'docker' ? 'Recover original move' : 'Adopt existing destination';
           refresh.disabled = busy;
           dialog.querySelector('[data-recovery-info]').textContent = unconfirmed
             ? 'The recovery response is unconfirmed. Refresh status; do not replay recovery or start another move. The journal is retained.'
@@ -980,14 +983,18 @@
               ? ''
               : record.resourceIntent
                 ? 'This resource change requires protected native recovery before another move can begin. The journal is retained.'
-                : !record.newSession
-                  ? 'No destination session was recorded. Both sessions and the move journal need inspection before another move; Force move cannot bypass this hold.'
-                  : record.sourceCleanupVerified !== true
-                    ? 'Source cleanup was not durably verified. Refresh status or inspect both sessions; the journal is retained and Force move cannot bypass this hold.'
-                    : 'Adopt existing destination verifies the stopped source and current destination. It does not start or stop sessions or replay the handoff. This must finish before a new move.';
+                : record.backend === 'docker'
+                  ? 'Recovery uses the original recorded destination and checks what already happened. It never repeats an unconfirmed provider launch or work handoff.'
+                  : !record.newSession
+                    ? 'No destination session was recorded. Both sessions and the move journal need inspection before another move; Force move cannot bypass this hold.'
+                    : record.sourceCleanupVerified !== true
+                      ? 'Source cleanup was not durably verified. Refresh status or inspect both sessions; the journal is retained and Force move cannot bypass this hold.'
+                      : 'Adopt existing destination verifies the stopped source and current destination. It does not start or stop sessions or replay the handoff. This must finish before a new move.';
           resolve.title = resolve.disabled
             ? 'Recovery requires confirmed current status and durable source-cleanup proof.'
-            : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
+            : record.backend === 'docker'
+              ? 'Inspect and safely continue the original recorded Docker move.'
+              : 'Validate and adopt the already-running destination without launching or replaying its handoff.';
           if (['completed', 'failed', 'recovery-required'].includes(record.phase)) {
             stopped = true;
             if (record.phase === 'completed') {
@@ -1015,8 +1022,7 @@
               // checking), so adoption may be offered again; the server refuses an overlapping attempt.
               if (unconfirmed && record.phase === 'recovery-required') {
                 unconfirmed = false;
-                feedback =
-                  'Status shows the recovery did not take effect; the move is still held, so Adopt existing destination is available again.';
+                feedback = 'The move still needs recovery. Its original journal is retained for inspection.';
               } else feedback = unconfirmed ? 'Status checked; the unconfirmed recovery is retained.' : '';
             }
           } catch (error) {
@@ -1051,7 +1057,10 @@
           if (busy || unconfirmed || !current() || !eligible()) return;
           busy = true;
           clearTimeout(timer);
-          feedback = 'Checking the current move; no session will be started or stopped.';
+          feedback =
+            record.backend === 'docker'
+              ? 'Checking the original move before recovery.'
+              : 'Checking the current move; no session will be started or stopped.';
           paint();
           let dispatched = false;
           try {
@@ -1061,7 +1070,7 @@
             if (!eligible()) throw new Error('Recovery is not available for the current move; the hold is retained.');
             dispatched = true;
             const next = await planMoveRequest(`/api/plans/moves/${encodeURIComponent(record.id)}/resolve`, {
-              action: 'adopt-existing',
+              action: record.backend === 'docker' ? 'continue-original' : 'adopt-existing',
               oldSession: record.oldSession,
               newSession: record.newSession,
               toAccount: record.toAccount,
@@ -1087,7 +1096,10 @@
               : `${error.message} · Recovery was not requested; the move journal is retained.`;
           } finally {
             busy = false;
-            if (current()) paint();
+            if (current()) {
+              stopped = false;
+              if (!paint()) timer = setTimeout(poll, 1000);
+            }
           }
         };
         const poll = async () => {

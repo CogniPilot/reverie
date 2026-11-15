@@ -15,6 +15,9 @@ export interface PlanMoveDockerJournal {
   publish(before: Readonly<DockerPlanMoveJournalState>, next: Readonly<DockerPlanMoveJournalState>): Promise<void>;
 }
 export interface PlanMoveDockerJournalStore {
+  /** Append only the new reservation under the actual whole-file lock. Active
+   * native rows are read there, never overwritten by a stale caller snapshot. */
+  reserve(record: Readonly<PlanMoveRecord>, current: () => void): Promise<Readonly<PlanMoveRecord>>;
   phase(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
@@ -23,6 +26,8 @@ export interface PlanMoveDockerJournalStore {
   ): Promise<Readonly<PlanMoveRecord>>;
   record(id: string): Promise<Readonly<PlanMoveRecord>>;
   current(id: string, epoch: string, seedDigest: string): void;
+  /** Deny-only original file currency for a completed read. Never dispatch. */
+  readCurrent(id: string, epoch: string, seedDigest: string): void;
   publish(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,

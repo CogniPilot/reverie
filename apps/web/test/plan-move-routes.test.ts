@@ -73,20 +73,56 @@ describe('owner browser plan move API', () => {
     expect(response.body).not.toContain(input.handoff);
   });
   it('allows only the owner to force a move through the normal replacement transaction', async () => {
-    await app.close(); app = Fastify(); await app.register(cookie);
-    const executor = {snapshot: vi.fn(async () => ({sessionId: 'old', name: 'Casey', account: 'first', mode: 'codex', working: true}))} as never;
+    await app.close();
+    app = Fastify();
+    await app.register(cookie);
+    const executor = {
+      snapshot: vi.fn(async () => ({
+        sessionId: 'old',
+        name: 'Casey',
+        account: 'first',
+        mode: 'codex',
+        working: true,
+      })),
+    } as never;
     const target = vi.fn(async () => 'claude' as const);
-    registerPlanMoveRoutes(app, moves as unknown as PlanMoves, {
-      authSessions: new Map([['owner', {ip: '127.0.0.1', ua: 'fixture', createdAt: 1, method: 'basic'}]]) as never,
-    }, undefined, () => executor, target);
-    moves.begin.mockResolvedValue({id: 'move', phase: 'creating'});
-    const payload = {id: 'move', employeeId: 'casey', sessionId: 'old', toAccount: 'second', handoff: 'Owner checkpoint.'};
-    const result = await app.inject({method: 'POST', url: '/api/plans/moves/force', headers, payload});
+    registerPlanMoveRoutes(
+      app,
+      moves as unknown as PlanMoves,
+      {
+        authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'fixture', createdAt: 1, method: 'basic' }]]) as never,
+      },
+      undefined,
+      () => executor,
+      target
+    );
+    moves.begin.mockResolvedValue({ id: 'move', phase: 'creating' });
+    const payload = {
+      id: 'move',
+      employeeId: 'casey',
+      sessionId: 'old',
+      toAccount: 'second',
+      handoff: 'Owner checkpoint.',
+    };
+    const result = await app.inject({ method: 'POST', url: '/api/plans/moves/force', headers, payload });
     expect(result.statusCode).toBe(202);
-    expect(moves.begin).toHaveBeenCalledWith({...payload, fromAccount: 'first', forceBusy: true, targetMode: 'claude'}, undefined, executor);
+    expect(moves.begin).toHaveBeenCalledWith(
+      { ...payload, fromAccount: 'first', forceBusy: true, targetMode: 'claude' },
+      undefined,
+      executor
+    );
     moves.begin.mockClear();
-    for (const extra of [{'x-reverie-parent-session': 'source'}, {origin: 'https://other.test'}, {cookie: ''}]) {
-      expect((await app.inject({method: 'POST', url: '/api/plans/moves/force', headers: {...headers,...extra}, payload})).statusCode).toBe(403);
+    for (const extra of [{ 'x-reverie-parent-session': 'source' }, { origin: 'https://other.test' }, { cookie: '' }]) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/plans/moves/force',
+            headers: { ...headers, ...extra },
+            payload,
+          })
+        ).statusCode
+      ).toBe(403);
     }
     expect(moves.begin).not.toHaveBeenCalled();
   });
@@ -128,84 +164,243 @@ describe('owner browser plan move API', () => {
   });
 
   it('previews a valid owned move when General is the only channel, without auditing or launching', async () => {
-    await app.close(); app = Fastify(); await app.register(cookie);
+    await app.close();
+    app = Fastify();
+    await app.register(cookie);
     const runtime: PlanMoveRuntime = {
       company: { view: () => ({ employees: [{ id: 'casey', sessionId: 'old' }] }) as never, rebind: vi.fn() },
-      plans: { allocations: async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['old'] }] }), account: vi.fn() },
-      chat: { rooms: () => [{ id: 'general', name: 'general', members: [] }] as never, post: vi.fn(), auditEntry: vi.fn() },
-      sessions: new Map([['old', { name: 'Casey', pid: 1, muxName: 'old', isWorking: false, toState: () => ({ mode: 'codex', codexConfig: { model: 'chosen-model' } }) } as never]]),
-      mux: { getSession: vi.fn(), isPaneDead: () => false }, cleanup: vi.fn(), authorized: () => true, request: vi.fn(),
+      plans: {
+        allocations: async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['old'] }] }),
+        account: vi.fn(),
+      },
+      chat: {
+        rooms: () => [{ id: 'general', name: 'general', members: [] }] as never,
+        post: vi.fn(),
+        auditEntry: vi.fn(),
+      },
+      sessions: new Map([
+        [
+          'old',
+          {
+            name: 'Casey',
+            pid: 1,
+            muxName: 'old',
+            isWorking: false,
+            toState: () => ({ mode: 'codex', codexConfig: { model: 'chosen-model' } }),
+          } as never,
+        ],
+      ]),
+      mux: { getSession: vi.fn(), isPaneDead: () => false },
+      cleanup: vi.fn(),
+      authorized: () => true,
+      request: vi.fn(),
     };
-    registerPlanMoveRoutes(app, moves as unknown as PlanMoves, {
-      authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' }]]) as unknown as AuthPort['authSessions'],
-    }, undefined, () => planMoveExecutor(runtime));
-    const response = await app.inject({ method: 'POST', url: '/api/plans/moves/preview', headers, payload: { employeeId: 'casey', sessionId: 'old' } });
-    expect(response.statusCode).toBe(200); expect(response.json().data).toMatchObject({ sessionId: 'old', account: 'first' });
-    expect(runtime.chat.auditEntry).not.toHaveBeenCalled(); expect(runtime.chat.post).not.toHaveBeenCalled(); expect(runtime.request).not.toHaveBeenCalled();
+    registerPlanMoveRoutes(
+      app,
+      moves as unknown as PlanMoves,
+      {
+        authSessions: new Map([
+          ['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' }],
+        ]) as unknown as AuthPort['authSessions'],
+      },
+      undefined,
+      () => planMoveExecutor(runtime)
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plans/moves/preview',
+      headers,
+      payload: { employeeId: 'casey', sessionId: 'old' },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({ sessionId: 'old', account: 'first' });
+    expect(runtime.chat.auditEntry).not.toHaveBeenCalled();
+    expect(runtime.chat.post).not.toHaveBeenCalled();
+    expect(runtime.request).not.toHaveBeenCalled();
   });
 });
-
 
 describe('explicit owner recovery endpoint', () => {
+  it('queues only the exact original Docker recovery action through the scoped executor', async () => {
+    const app = Fastify();
+    await app.register(cookie);
+    const continueDocker = vi.fn(async () => ({ id: 'move', phase: 'checking' })),
+      resolve = vi.fn(),
+      executor = {} as never;
+    registerPlanMoveRoutes(
+      app,
+      { continueDocker, resolve } as unknown as PlanMoves,
+      { authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' }]]) as never },
+      undefined,
+      () => executor
+    );
+    const payload = { action: 'continue-original', oldSession: 'old', newSession: 'new', toAccount: 'second' };
+    const result = await app.inject({
+      method: 'POST',
+      url: '/api/plans/moves/move/resolve',
+      headers: { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' },
+      payload,
+    });
+    expect(result.statusCode).toBe(202);
+    expect(continueDocker).toHaveBeenCalledWith('move', payload, undefined, executor);
+    expect(resolve).not.toHaveBeenCalled();
+    await app.close();
+  });
   it('uses the authenticated scoped executor and exact target without permitting agent callers', async () => {
-    const app = Fastify(); await app.register(cookie);
-    const resolve = vi.fn(async () => ({id: 'move', phase: 'completed'}));
+    const app = Fastify();
+    await app.register(cookie);
+    const resolve = vi.fn(async () => ({ id: 'move', phase: 'completed' }));
     const executor = {} as never;
-    registerPlanMoveRoutes(app, {resolve} as unknown as PlanMoves, {
-      authSessions: new Map([['owner', {ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic'}]]) as never,
-    }, undefined, () => executor);
-    const headers = {host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner'};
-    const payload = {action: 'adopt-existing', oldSession: 'old', newSession: 'new', toAccount: 'second'};
-    const accepted = await app.inject({method: 'POST', url: '/api/plans/moves/move/resolve', headers, payload});
-    expect(accepted.statusCode).toBe(200); expect(resolve).toHaveBeenCalledWith('move', payload, undefined, executor);
+    registerPlanMoveRoutes(
+      app,
+      { resolve } as unknown as PlanMoves,
+      {
+        authSessions: new Map([['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' }]]) as never,
+      },
+      undefined,
+      () => executor
+    );
+    const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' };
+    const payload = { action: 'adopt-existing', oldSession: 'old', newSession: 'new', toAccount: 'second' };
+    const accepted = await app.inject({ method: 'POST', url: '/api/plans/moves/move/resolve', headers, payload });
+    expect(accepted.statusCode).toBe(200);
+    expect(resolve).toHaveBeenCalledWith('move', payload, undefined, executor);
     resolve.mockClear();
-    for (const extra of [{'x-reverie-parent-session': 'agent'}, {origin: 'https://evil.test'}, {cookie: ''}]) {
-      expect((await app.inject({method: 'POST', url: '/api/plans/moves/move/resolve', headers: {...headers, ...extra}, payload})).statusCode).toBe(403);
+    for (const extra of [{ 'x-reverie-parent-session': 'agent' }, { origin: 'https://evil.test' }, { cookie: '' }]) {
+      expect(
+        (
+          await app.inject({
+            method: 'POST',
+            url: '/api/plans/moves/move/resolve',
+            headers: { ...headers, ...extra },
+            payload,
+          })
+        ).statusCode
+      ).toBe(403);
     }
-    expect(resolve).not.toHaveBeenCalled(); await app.close();
+    expect(resolve).not.toHaveBeenCalled();
+    await app.close();
   });
 });
 
-describe('purpose-authenticated delegated recovery routes',()=>{
+describe('purpose-authenticated delegated recovery routes', () => {
   async function setup() {
-    const app=Fastify(); const moves={get:vi.fn(async()=>({id:'held',employeeId:'expert',oldSession:'old',newSession:'new',toAccount:'plan'})),
-      cancel:vi.fn(async(_id,_owner,check)=>{check?.();}),resolve:vi.fn(async()=>({phase:'completed'})),begin:vi.fn(),list:vi.fn()};
-    let valid=true; const actor={employeeId:'manager',sessionId:'manager-session',owner:undefined,
-      assertCurrent:()=>{if(!valid)throw new PlanMoveError('grant revoked',403);},inspect:vi.fn(()=>({verifyRecovery:vi.fn()}))};
-    const auth=vi.fn(async()=>actor);
-    registerPlanMoveRoutes(app,moves as any,{authSessions:new Map() as any},undefined,()=>({}) as any,undefined,undefined,undefined,auth);
-    const send=(action:string,payload:unknown={employeeId:'expert'},headers={ 'x-reverie-recovery-assertion':'synthetic-proof'})=>
-      app.inject({method:'POST',url:'/api/plans/moves/held/'+action,headers,payload});
-    return{app,moves,actor,auth,send,revoke:()=>{valid=false;}};
+    const app = Fastify();
+    const moves = {
+      get: vi.fn(async () => ({
+        id: 'held',
+        employeeId: 'expert',
+        oldSession: 'old',
+        newSession: 'new',
+        toAccount: 'plan',
+      })),
+      cancel: vi.fn(async (_id, _owner, check) => {
+        check?.();
+      }),
+      resolve: vi.fn(async () => ({ phase: 'completed' })),
+      begin: vi.fn(),
+      list: vi.fn(),
+    };
+    let valid = true;
+    const actor = {
+      employeeId: 'manager',
+      sessionId: 'manager-session',
+      owner: undefined,
+      assertCurrent: () => {
+        if (!valid) throw new PlanMoveError('grant revoked', 403);
+      },
+      inspect: vi.fn(() => ({ verifyRecovery: vi.fn() })),
+    };
+    const auth = vi.fn(async () => actor);
+    registerPlanMoveRoutes(
+      app,
+      moves as any,
+      { authSessions: new Map() as any },
+      undefined,
+      () => ({}) as any,
+      undefined,
+      undefined,
+      undefined,
+      auth
+    );
+    const send = (
+      action: string,
+      payload: unknown = { employeeId: 'expert' },
+      headers = { 'x-reverie-recovery-assertion': 'synthetic-proof' }
+    ) => app.inject({ method: 'POST', url: '/api/plans/moves/held/' + action, headers, payload });
+    return {
+      app,
+      moves,
+      actor,
+      auth,
+      send,
+      revoke: () => {
+        valid = false;
+      },
+    };
   }
-  it('exposes only the named same-owner record and rechecks permission after journal reads',async()=>{
-    const f=await setup();try{
+  it('exposes only the named same-owner record and rechecks permission after journal reads', async () => {
+    const f = await setup();
+    try {
       expect((await f.send('status')).statusCode).toBe(200);
-      f.moves.get.mockImplementationOnce(async()=>{f.revoke();return{id:'held',employeeId:'expert'} as any;});
+      f.moves.get.mockImplementationOnce(async () => {
+        f.revoke();
+        return { id: 'held', employeeId: 'expert' } as any;
+      });
       expect((await f.send('status')).statusCode).toBe(403);
-      expect(f.moves.resolve).not.toHaveBeenCalled();expect(f.moves.cancel).not.toHaveBeenCalled();
-    }finally{await f.app.close();}
-  });
-  it('does not treat raw parent headers or an invalid proof as recovery authority',async()=>{
-    const f=await setup();try{
-      expect((await f.send('status',{employeeId:'expert'},{'x-reverie-parent-session':'manager-session'} as any)).statusCode).toBe(403);
-      f.auth.mockResolvedValueOnce(undefined as any);expect((await f.send('cancel')).statusCode).toBe(403);
+      expect(f.moves.resolve).not.toHaveBeenCalled();
       expect(f.moves.cancel).not.toHaveBeenCalled();
-    }finally{await f.app.close();}
+    } finally {
+      await f.app.close();
+    }
   });
-  it('rejects another employee journal and passes exact adoption tuple to native-only executor',async()=>{
-    const f=await setup();try{
-      expect((await f.send('status',{employeeId:'other'})).statusCode).toBe(404);
-      const input={employeeId:'expert',action:'adopt-existing',oldSession:'old',newSession:'new',toAccount:'plan'};
-      expect((await f.send('resolve',input)).statusCode).toBe(200);
-      expect(f.actor.inspect).toHaveBeenCalledOnce();expect(f.moves.resolve).toHaveBeenCalledWith('held',
-        {action:'adopt-existing',oldSession:'old',newSession:'new',toAccount:'plan'},undefined,expect.any(Object));
-    }finally{await f.app.close();}
-  });
-  it('rechecks authority inside asynchronous cancellation and preserves the hold on revocation',async()=>{
-    const f=await setup();try{
-      f.moves.cancel.mockImplementationOnce(async(_id,_owner,check)=>{f.revoke();check();});
+  it('does not treat raw parent headers or an invalid proof as recovery authority', async () => {
+    const f = await setup();
+    try {
+      expect(
+        (await f.send('status', { employeeId: 'expert' }, { 'x-reverie-parent-session': 'manager-session' } as any))
+          .statusCode
+      ).toBe(403);
+      f.auth.mockResolvedValueOnce(undefined as any);
       expect((await f.send('cancel')).statusCode).toBe(403);
-    }finally{await f.app.close();}
+      expect(f.moves.cancel).not.toHaveBeenCalled();
+    } finally {
+      await f.app.close();
+    }
+  });
+  it('rejects another employee journal and passes exact adoption tuple to native-only executor', async () => {
+    const f = await setup();
+    try {
+      expect((await f.send('status', { employeeId: 'other' })).statusCode).toBe(404);
+      const input = {
+        employeeId: 'expert',
+        action: 'adopt-existing',
+        oldSession: 'old',
+        newSession: 'new',
+        toAccount: 'plan',
+      };
+      expect((await f.send('resolve', input)).statusCode).toBe(200);
+      expect(f.actor.inspect).toHaveBeenCalledOnce();
+      expect(f.moves.resolve).toHaveBeenCalledWith(
+        'held',
+        { action: 'adopt-existing', oldSession: 'old', newSession: 'new', toAccount: 'plan' },
+        undefined,
+        expect.any(Object)
+      );
+    } finally {
+      await f.app.close();
+    }
+  });
+  it('rechecks authority inside asynchronous cancellation and preserves the hold on revocation', async () => {
+    const f = await setup();
+    try {
+      f.moves.cancel.mockImplementationOnce(async (_id, _owner, check) => {
+        f.revoke();
+        check();
+      });
+      expect((await f.send('cancel')).statusCode).toBe(403);
+    } finally {
+      await f.app.close();
+    }
   });
 });

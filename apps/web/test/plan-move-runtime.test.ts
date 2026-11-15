@@ -4,6 +4,9 @@ import type { Session } from '../src/session.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
 import { composerReadyMark } from '../src/cli-agent.js';
 import type { PlanMoveInput } from '../src/plan-move.js';
+import type { PlanMoveDockerActor } from '../src/plan-move-docker.js';
+import type { DockerPlanMoveRequesterTarget } from '../src/docker-plan-move-requester.js';
+import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 
 const input: PlanMoveInput = {
   id: 'move',
@@ -47,29 +50,124 @@ function harness(owner?: string) {
       allocations: vi.fn(async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['old'] }] })),
       account: vi.fn(async (id) => ({ id, provider: 'openai', label: id, profileId: id }) as PlanAccount),
     },
-    chat: { rooms: () => [{ id: 'audit', name: 'reverie', owner, members: [] } as never], post: vi.fn(), auditEntry: vi.fn(async () => {}) },
+    chat: {
+      rooms: () => [{ id: 'audit', name: 'reverie', owner, members: [] } as never],
+      post: vi.fn(),
+      auditEntry: vi.fn(async () => {}),
+    },
     sessions,
     mux: { getSession: vi.fn(() => ({ pid: 123 }) as never), isPaneDead: vi.fn(() => false) },
     cleanup: vi.fn(async () => {}),
     authorized: vi.fn(() => true),
     request: vi.fn(async (method, path) =>
-      method === 'POST' && path === '/api/sessions' ? { success: true, data: { session: { id: 'new' } } } : { data: { wait: { matched: true } } }
+      method === 'POST' && path === '/api/sessions'
+        ? { success: true, data: { session: { id: 'new' } } }
+        : { data: { wait: { matched: true } } }
     ),
     capture: vi.fn(async () => [{ pid: 123, start: '456' }]),
     survivors: vi.fn(async () => []),
   };
   return { runtime, sessions, executor: planMoveExecutor(runtime, owner) };
 }
+describe('boxed request-scoped runtime adapter with recording private actor', () => {
+  function boxed() {
+    const h = harness(),
+      f = dockerPlanJournalFixture();
+    h.runtime.company.view = vi.fn(
+      () =>
+        ({
+          employees: [
+            { id: 'casey', sessionId: 'old', sessionGeneration: 1, dockerBinding: f.state.seed.source.binding },
+          ],
+        }) as never
+    );
+    let last: unknown;
+    const noEffect = async () => {
+      throw Error('unexpected native effect');
+    };
+    const snapshot = vi.fn(async () => ({
+      backend: 'docker' as const,
+      sessionId: 'old',
+      name: 'Casey',
+      account: 'first',
+      working: false,
+    }));
+    const base: PlanMoveDockerActor = {
+      current: () => {},
+      snapshot,
+      idle: noEffect,
+      reserve: async () => f.state.seed,
+      prepare: noEffect,
+      stopSource: noEffect,
+      start: noEffect,
+      verify: noEffect,
+      finalize: noEffect,
+      inspectForContinuation: noEffect,
+      requireContinuation: () => {},
+      withRequesterAuthority: (proof) => ({
+        ...base,
+        current: () => {
+          last = proof;
+        },
+      }),
+    };
+    const capture = vi.fn((target: DockerPlanMoveRequesterTarget) => ({ target }));
+    h.runtime.dockerReplacement = base;
+    h.runtime.dockerRequester = capture;
+    return { ...h, snapshot, capture, last: () => last, executor: planMoveExecutor(h.runtime) };
+  }
+  it('uses the canonical Docker binding before requiring an absent controller Session or viewer', async () => {
+    const h = boxed();
+    h.sessions.clear();
+    vi.mocked(h.runtime.authorized).mockReturnValue(false);
+    expect(await h.executor.snapshot('casey')).toMatchObject({ backend: 'docker', sessionId: 'old' });
+    expect(h.snapshot).toHaveBeenCalledTimes(1);
+    expect(h.capture).toHaveBeenCalledWith({ employeeId: 'casey', sessionId: 'old', sessionGeneration: 1 });
+    expect(h.runtime.request).not.toHaveBeenCalled();
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+  it('captures authority for the actual choice and keeps it when later previews run', async () => {
+    const h = boxed(),
+      native = h.executor.dockerReplacement!,
+      f = dockerPlanJournalFixture();
+    await h.executor.snapshot('casey');
+    await native.reserve({ ...input, forceBusy: true }, undefined, 'a'.repeat(64));
+    const selected = h.capture.mock.results[1]!.value;
+    expect(selected.target.choice).toEqual({ moveId: 'move', toAccount: 'second', forceBusy: true });
+    await h.executor.snapshot('casey');
+    native.current({ ...f.record, id: 'move' }, f.state);
+    expect(h.last()).toBe(selected);
+    expect(h.capture.mock.calls[0]![0]).not.toHaveProperty('choice');
+    expect(h.capture.mock.calls[2]![0]).not.toHaveProperty('choice');
+  });
+  it('refuses canonical boxed moves when its genuine requester factory is absent', async () => {
+    const h = boxed();
+    delete h.runtime.dockerRequester;
+    await expect(planMoveExecutor(h.runtime).snapshot('casey')).rejects.toThrow('Docker plan actor is unavailable');
+    expect(h.runtime.request).not.toHaveBeenCalled();
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
+});
 
 describe('runtime adapter uses normal creation and interactive paths, never changes live account env', () => {
   async function refreshHarness() {
     const h = harness();
-    const source = h.sessions.get('old')!, candidate = h.sessions.get('new')!;
+    const source = h.sessions.get('old')!,
+      candidate = h.sessions.get('new')!;
     const saved = source.toState();
-    candidate.toState = () => ({ ...saved, id: 'new', codexConfig: { ...saved.codexConfig, resumeSessionId: undefined } });
+    candidate.toState = () => ({
+      ...saved,
+      id: 'new',
+      codexConfig: { ...saved.codexConfig, resumeSessionId: undefined },
+    });
     const snapshot = await h.executor.snapshot('casey', undefined, 'runtime-refresh');
-    const refresh: PlanMoveInput = { ...input, model: undefined, toAccount: 'first',
-      purpose: 'runtime-refresh', runtimeDigest: snapshot.runtimeDigest };
+    const refresh: PlanMoveInput = {
+      ...input,
+      model: undefined,
+      toAccount: 'first',
+      purpose: 'runtime-refresh',
+      runtimeDigest: snapshot.runtimeDigest,
+    };
     return { ...h, source, candidate, saved, refresh };
   }
 
@@ -77,8 +175,15 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     const h = await refreshHarness();
     expect(await h.executor.create(h.refresh, undefined)).toBe('new');
     await h.executor.beforeStop(h.refresh);
-    expect(h.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({
-      subscriptionProfileId: 'first', codexConfig: { reasoningEffort: 'high', renderMode: 'hybrid' }, workingDir: '/scratch/casey' }));
+    expect(h.runtime.request).toHaveBeenCalledWith(
+      'POST',
+      '/api/sessions',
+      expect.objectContaining({
+        subscriptionProfileId: 'first',
+        codexConfig: { reasoningEffort: 'high', renderMode: 'hybrid' },
+        workingDir: '/scratch/casey',
+      })
+    );
     expect(h.runtime.cleanup).not.toHaveBeenCalled();
   });
 
@@ -87,10 +192,15 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
       const h = await refreshHarness();
       await h.executor.create(h.refresh, undefined);
       const target = drift === 'source' ? h.source : h.candidate;
-      target.toState = () => ({ ...h.saved, id: drift === 'source' ? 'old' : 'new', codexConfig: {
-        ...h.saved.codexConfig, resumeSessionId: drift === 'resume' ? 'old-thread' : undefined,
-        reasoningEffort: drift === 'resume' ? 'high' : 'low',
-      } });
+      target.toState = () => ({
+        ...h.saved,
+        id: drift === 'source' ? 'old' : 'new',
+        codexConfig: {
+          ...h.saved.codexConfig,
+          resumeSessionId: drift === 'resume' ? 'old-thread' : undefined,
+          reasoningEffort: drift === 'resume' ? 'high' : 'low',
+        },
+      });
       await expect(h.executor.beforeStop(h.refresh)).rejects.toThrow();
       expect(h.runtime.cleanup).not.toHaveBeenCalled();
       expect(h.runtime.request).toHaveBeenCalledTimes(1);
@@ -146,7 +256,9 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
 
   function workerViewer(test: ReturnType<typeof harness>, reconnects: boolean) {
     const candidate = test.sessions.get('new') as unknown as {
-      pid: number | null; workerViewerReconnect: boolean; reconnectWorkerViewer: ReturnType<typeof vi.fn>;
+      pid: number | null;
+      workerViewerReconnect: boolean;
+      reconnectWorkerViewer: ReturnType<typeof vi.fn>;
     };
     test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
     candidate.pid = null; // The local viewer client dropped; the laptop agent keeps running.
@@ -176,13 +288,18 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
       const candidate = workerViewer(test, false);
       let now = 0;
       const clock = vi.spyOn(Date, 'now').mockImplementation(() => (now += 30_000));
-      if (failure === 'authority') candidate.reconnectWorkerViewer.mockImplementation(async () => {
-        (test.runtime.authorized as ReturnType<typeof vi.fn>).mockReturnValue(false);
-        return false;
-      });
+      if (failure === 'authority')
+        candidate.reconnectWorkerViewer.mockImplementation(async () => {
+          (test.runtime.authorized as ReturnType<typeof vi.fn>).mockReturnValue(false);
+          return false;
+        });
       try {
-        await expect(test.executor.ready('new')).rejects.toThrow(failure === 'deadline' ? 'pane exited' : 'sign-in expired');
-      } finally { clock.mockRestore(); }
+        await expect(test.executor.ready('new')).rejects.toThrow(
+          failure === 'deadline' ? 'pane exited' : 'sign-in expired'
+        );
+      } finally {
+        clock.mockRestore();
+      }
       expect(test.sessions.get('new')?.writeViaMux).not.toHaveBeenCalled();
       expect(test.runtime.cleanup).not.toHaveBeenCalled();
     }
@@ -202,8 +319,12 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
         return true;
       });
       try {
-        await expect(test.executor.ready('new')).rejects.toThrow(failure === 'late' ? 'before the deadline' : 'session changed');
-      } finally { clock.mockRestore(); }
+        await expect(test.executor.ready('new')).rejects.toThrow(
+          failure === 'late' ? 'before the deadline' : 'session changed'
+        );
+      } finally {
+        clock.mockRestore();
+      }
       expect(candidate.reconnectWorkerViewer).toHaveBeenCalledTimes(1);
       expect((candidate as unknown as Session).writeViaMux).not.toHaveBeenCalled();
       expect(test.runtime.cleanup).not.toHaveBeenCalled();
@@ -213,7 +334,10 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
   it('never reattaches an ordinary candidate whose pane exited', async () => {
     const test = harness();
     await test.executor.create(input, undefined);
-    const candidate = test.sessions.get('new') as unknown as { pid: number | null; reconnectWorkerViewer: ReturnType<typeof vi.fn> };
+    const candidate = test.sessions.get('new') as unknown as {
+      pid: number | null;
+      reconnectWorkerViewer: ReturnType<typeof vi.fn>;
+    };
     test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
     candidate.pid = null;
     candidate.reconnectWorkerViewer = vi.fn(async () => true);
@@ -223,9 +347,15 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
 
   it('reserves cross-provider metadata through the normal API without starting its CLI', async () => {
     const test = harness();
-    test.runtime.plans.account = vi.fn(async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
+    test.runtime.plans.account = vi.fn(
+      async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount
+    );
     expect(await test.executor.create({ ...input, targetMode: 'claude' }, undefined)).toBe('new');
-    expect(test.runtime.request).toHaveBeenCalledWith('POST', '/api/sessions', expect.objectContaining({ mode: 'claude', subscriptionProfileId: 'second', employeeId: 'casey' }));
+    expect(test.runtime.request).toHaveBeenCalledWith(
+      'POST',
+      '/api/sessions',
+      expect.objectContaining({ mode: 'claude', subscriptionProfileId: 'second', employeeId: 'casey' })
+    );
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
     expect(test.runtime.request).toHaveBeenCalledTimes(1);
     const payload = (test.runtime.request as ReturnType<typeof vi.fn>).mock.calls[0][2];
@@ -308,7 +438,16 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
       { kind: 'system', name: 'Plans' },
       'AUDIT plan move completed: Owner moved Casey from first to second'
     );
-    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(expect.objectContaining({ event: 'plan_move', actor: 'owner', employeeId: 'casey', fromAccount: 'first', toAccount: 'second', phase: 'completed' }));
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'plan_move',
+        actor: 'owner',
+        employeeId: 'casey',
+        fromAccount: 'first',
+        toAccount: 'second',
+        phase: 'completed',
+      })
+    );
   });
 
   it('previews and audits privately when only General exists, without posting or creating a channel', async () => {
@@ -316,21 +455,35 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     test.runtime.chat.rooms = () => [{ id: 'general', name: 'general', owner: 'alice', members: [] } as never];
     await expect(test.executor.snapshot('casey')).resolves.toMatchObject({ account: 'first' });
     await test.executor.audit({ ...input, owner: 'alice', name: 'Casey', oldSession: 'old', phase: 'stopping', at: 1 });
-    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(expect.objectContaining({ owner: 'alice', actor: 'alice', moveId: 'move' }));
-    expect(test.runtime.chat.post).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: 'alice', actor: 'alice', moveId: 'move' })
+    );
+    expect(test.runtime.chat.post).not.toHaveBeenCalled();
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
   });
 
   it('never mirrors into another owner’s channel, a DM, or an archived room', async () => {
     const test = harness('alice');
-    test.runtime.chat.rooms = () => [
-      { id: 'foreign', name: 'reverie', owner: 'bob', members: [] },
-      { id: 'dm', name: 'reverie', owner: 'alice', kind: 'dm', members: [] },
-      { id: 'archived', name: 'reverie', owner: 'alice', archivedAt: 1, members: [] },
-    ] as never;
+    test.runtime.chat.rooms = () =>
+      [
+        { id: 'foreign', name: 'reverie', owner: 'bob', members: [] },
+        { id: 'dm', name: 'reverie', owner: 'alice', kind: 'dm', members: [] },
+        { id: 'archived', name: 'reverie', owner: 'alice', archivedAt: 1, members: [] },
+      ] as never;
     await expect(test.executor.snapshot('casey')).resolves.toMatchObject({ sessionId: 'old' });
-    await test.executor.audit({ ...input, owner: 'alice', name: 'Casey', oldSession: 'old', phase: 'completed', at: 1 });
-    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(1); expect(test.runtime.chat.post).not.toHaveBeenCalled();
-    await expect(test.executor.audit({ ...input, owner: 'bob', name: 'Foreign', oldSession: 'old', phase: 'completed', at: 1 })).rejects.toThrow('another owner');
+    await test.executor.audit({
+      ...input,
+      owner: 'alice',
+      name: 'Casey',
+      oldSession: 'old',
+      phase: 'completed',
+      at: 1,
+    });
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(1);
+    expect(test.runtime.chat.post).not.toHaveBeenCalled();
+    await expect(
+      test.executor.audit({ ...input, owner: 'bob', name: 'Foreign', oldSession: 'old', phase: 'completed', at: 1 })
+    ).rejects.toThrow('another owner');
     expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(1);
   });
 
@@ -340,107 +493,178 @@ describe('runtime adapter uses normal creation and interactive paths, never chan
     vi.mocked(test.runtime.chat.auditEntry).mockRejectedValueOnce(new Error('Audit storage unavailable'));
     await expect(test.executor.audit(record)).rejects.toThrow('Audit storage unavailable');
     expect(test.runtime.chat.post).not.toHaveBeenCalled();
-    vi.mocked(test.runtime.chat.post).mockImplementationOnce(() => { throw new Error('Channel read-only'); });
+    vi.mocked(test.runtime.chat.post).mockImplementationOnce(() => {
+      throw new Error('Channel read-only');
+    });
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(test.executor.audit(record)).resolves.toBeUndefined();
-    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(2); warning.mockRestore();
+    expect(test.runtime.chat.auditEntry).toHaveBeenCalledTimes(2);
+    warning.mockRestore();
   });
 });
 
-
 describe('read-only owner inspection of an interrupted move destination', () => {
-  const record = {id: 'move', employeeId: 'casey', name: 'Casey', oldSession: 'old', newSession: 'new',
-    fromAccount: 'first', toAccount: 'second', phase: 'recovery-required' as const, at: 1,
-    sourceStopRequested: true, sourceCleanupVerified: true};
+  const record = {
+    id: 'move',
+    employeeId: 'casey',
+    name: 'Casey',
+    oldSession: 'old',
+    newSession: 'new',
+    fromAccount: 'first',
+    toAccount: 'second',
+    phase: 'recovery-required' as const,
+    at: 1,
+    sourceStopRequested: true,
+    sourceCleanupVerified: true,
+  };
   function recovery() {
-    const test = harness(); test.sessions.delete('old');
-    test.runtime.company.view = vi.fn(() => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: true, onVacation: false}]}) as never);
-    test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'second', sessionIds: ['new']}]}));
+    const test = harness();
+    test.sessions.delete('old');
+    test.runtime.company.view = vi.fn(
+      () =>
+        ({
+          employees: [{ id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: true, onVacation: false }],
+        }) as never
+    );
+    test.runtime.plans.allocations = vi.fn(async () => ({
+      generatedAt: 1,
+      accounts: [{ id: 'second', sessionIds: ['new'] }],
+    }));
     test.runtime.mux.capturePaneText = vi.fn(() => composerReadyMark('codex')!);
     return test;
   }
   it('verifies current binding, actual target allocation and composer without submitting a handoff or touching sessions', async () => {
-    const test = recovery(); const fence = await test.executor.verifyRecovery!(record); fence();
-    expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    const test = recovery();
+    const fence = await test.executor.verifyRecovery!(record);
+    fence();
+    expect(test.runtime.request).not.toHaveBeenCalled();
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
     expect(test.sessions.get('new')!.writeViaMux).not.toHaveBeenCalled();
   });
   it('validates the actual destination allocation for viewer repair without requiring its dead viewer or reading its composer', async () => {
-    const test = recovery(), candidate = test.sessions.get('new')!;
-    Object.assign(candidate, { pid: null }); vi.mocked(test.runtime.mux.isPaneDead).mockReturnValue(true);
-    const fence = await test.executor.verifyViewerRepair!(record); fence();
+    const test = recovery(),
+      candidate = test.sessions.get('new')!;
+    Object.assign(candidate, { pid: null });
+    vi.mocked(test.runtime.mux.isPaneDead).mockReturnValue(true);
+    const fence = await test.executor.verifyViewerRepair!(record);
+    fence();
     expect(test.runtime.mux.capturePaneText).not.toHaveBeenCalled();
-    expect(test.runtime.request).not.toHaveBeenCalled(); expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    expect(test.runtime.request).not.toHaveBeenCalled();
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
     await expect(test.executor.verifyRecovery!(record)).rejects.toThrow('pane exited');
-    test.runtime.plans.allocations = vi.fn(async () => ({ generatedAt: 1, accounts: [{ id: 'first', sessionIds: ['new'] }] }));
+    test.runtime.plans.allocations = vi.fn(async () => ({
+      generatedAt: 1,
+      accounts: [{ id: 'first', sessionIds: ['new'] }],
+    }));
     await expect(test.executor.verifyViewerRepair!(record)).rejects.toThrow('allocated');
   });
   it('does not infer source cleanup from a missing source session or journal stop request', async () => {
-    const test = recovery(); await expect(test.executor.verifyRecovery!({...record, sourceCleanupVerified: undefined})).rejects.toThrow('durably confirmed');
+    const test = recovery();
+    await expect(test.executor.verifyRecovery!({ ...record, sourceCleanupVerified: undefined })).rejects.toThrow(
+      'durably confirmed'
+    );
     expect(test.runtime.plans.allocations).not.toHaveBeenCalled();
   });
   it('refuses an alive source, wrong account, absent composer and busy destination', async () => {
     for (const failure of ['source', 'account', 'composer', 'busy']) {
       const test = recovery();
-      if (failure === 'source') test.sessions.set('old', {...test.sessions.get('new')!, id: 'old'} as never);
-      if (failure === 'account') test.runtime.plans.allocations = vi.fn(async () => ({generatedAt: 1, accounts: [{id: 'first', sessionIds: ['new']}]}));
+      if (failure === 'source') test.sessions.set('old', { ...test.sessions.get('new')!, id: 'old' } as never);
+      if (failure === 'account')
+        test.runtime.plans.allocations = vi.fn(async () => ({
+          generatedAt: 1,
+          accounts: [{ id: 'first', sessionIds: ['new'] }],
+        }));
       if (failure === 'composer') test.runtime.mux.capturePaneText = () => '';
-      if (failure === 'busy') (test.sessions.get('new') as unknown as {isWorking: boolean}).isWorking = true;
+      if (failure === 'busy') (test.sessions.get('new') as unknown as { isWorking: boolean }).isWorking = true;
       await expect(test.executor.verifyRecovery!(record)).rejects.toThrow();
-      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled();
+      expect(test.runtime.request).not.toHaveBeenCalled();
     }
   });
   it('the final fence notices revoked owner authority and changed employee intent', async () => {
     for (const failure of ['authority', 'intent', 'generation', 'selection']) {
-      const test = recovery(); const fence = await test.executor.verifyRecovery!(record);
+      const test = recovery();
+      const fence = await test.executor.verifyRecovery!(record);
       if (failure === 'authority') test.runtime.authorized = () => false;
-      if (failure === 'intent') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: false}]}) as never;
-      if (failure === 'generation') test.runtime.company.view = () => ({employees: [{id: 'casey', sessionId: 'new', sessionGeneration: 3, desiredRunning: true}]}) as never;
-      if (failure === 'selection') (test.sessions.get('new') as unknown as {subscriptionProfile: unknown}).subscriptionProfile = {id: 'changed'};
+      if (failure === 'intent')
+        test.runtime.company.view = () =>
+          ({ employees: [{ id: 'casey', sessionId: 'new', sessionGeneration: 2, desiredRunning: false }] }) as never;
+      if (failure === 'generation')
+        test.runtime.company.view = () =>
+          ({ employees: [{ id: 'casey', sessionId: 'new', sessionGeneration: 3, desiredRunning: true }] }) as never;
+      if (failure === 'selection')
+        (test.sessions.get('new') as unknown as { subscriptionProfile: unknown }).subscriptionProfile = {
+          id: 'changed',
+        };
       expect(fence).toThrow();
     }
   });
   it('refuses already-unsupported remote, nested-container and custom-model candidates', async () => {
-    for (const change of [{remote: {host: 'remote'}}, {docker: {containerName: 'nested'}}, {customModel: {modelId: 'local'}}]) {
-      const test = recovery(), candidate = test.sessions.get('new')!, saved = candidate.toState();
-      candidate.toState = () => ({...saved, ...change}) as never;
+    for (const change of [
+      { remote: { host: 'remote' } },
+      { docker: { containerName: 'nested' } },
+      { customModel: { modelId: 'local' } },
+    ]) {
+      const test = recovery(),
+        candidate = test.sessions.get('new')!,
+        saved = candidate.toState();
+      candidate.toState = () => ({ ...saved, ...change }) as never;
       await expect(test.executor.verifyRecovery!(record)).rejects.toThrow('cannot be adopted');
-      expect(test.runtime.cleanup).not.toHaveBeenCalled(); expect(test.runtime.request).not.toHaveBeenCalled();
+      expect(test.runtime.cleanup).not.toHaveBeenCalled();
+      expect(test.runtime.request).not.toHaveBeenCalled();
     }
   });
-
 });
-
 
 describe('normal replacement composer uses the strict Claude task footer', () => {
   const hud = [
-    'Goal active · generic task', '──────────────────── generic-worker ─', '❯\u00a0',
-    '────────────────────────────────────', 'Generic model · usage 12%',
+    'Goal active · generic task',
+    '──────────────────── generic-worker ─',
+    '❯\u00a0',
+    '────────────────────────────────────',
+    'Generic model · usage 12%',
     '⏵⏵ bypass permissions on · 1 shell · 1 feedback draft',
   ].join('\n');
   it('verifies the new Claude composer then submits the original handoff once through normal guarded input', async () => {
-    const h = harness(), candidate = h.sessions.get('new')!;
+    const h = harness(),
+      candidate = h.sessions.get('new')!;
     Object.defineProperty(candidate, 'mode', { value: 'claude', configurable: true });
-    h.runtime.plans.account = vi.fn(async id => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount);
+    h.runtime.plans.account = vi.fn(
+      async (id) => ({ id, provider: 'anthropic', label: id, profileId: id }) as PlanAccount
+    );
     h.runtime.mux.capturePaneText = vi.fn(() => hud);
     await h.executor.create({ ...input, targetMode: 'claude' }, undefined);
     await h.executor.ready('new');
     expect(h.runtime.mux.capturePaneText).toHaveBeenCalledWith('new');
     expect(candidate.writeViaMux).toHaveBeenCalledTimes(1);
-    expect(candidate.writeViaMux).toHaveBeenCalledWith(input.handoff + '\r', expect.objectContaining({ requireEmptyComposer: true, fromUser: true }));
+    expect(candidate.writeViaMux).toHaveBeenCalledWith(
+      input.handoff + '\r',
+      expect.objectContaining({ requireEmptyComposer: true, fromUser: true })
+    );
     expect(h.runtime.cleanup).not.toHaveBeenCalled();
   });
-  it.each(['draft', 'dialog', 'busy', 'codex'] as const)('does not submit a handoff for %s even with the task footer', async kind => {
-    const h = harness(), candidate = h.sessions.get('new')!;
-    Object.defineProperty(candidate, 'mode', { value: kind === 'codex' ? 'codex' : 'claude', configurable: true });
-    h.runtime.plans.account = vi.fn(async id => ({ id, provider: kind === 'codex' ? 'openai' : 'anthropic', label: id, profileId: id }) as PlanAccount);
-    h.runtime.mux.capturePaneText = vi.fn(() => kind === 'draft' ? hud.replace('❯\u00a0', '❯ unsent draft') : hud);
-    if (kind === 'dialog') Object.defineProperty(candidate, 'paneDialog', { value: 'trust', configurable: true });
-    if (kind === 'busy') Object.defineProperty(candidate, 'isWorking', { value: true, configurable: true });
-    await h.executor.create({ ...input, targetMode: kind === 'codex' ? 'codex' : 'claude' }, undefined);
-    const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(90_001);
-    try { await expect(h.executor.ready('new')).rejects.toThrow('composer before the deadline'); }
-    finally { clock.mockRestore(); }
-    expect(candidate.writeViaMux).not.toHaveBeenCalled();
-    expect(h.runtime.cleanup).not.toHaveBeenCalled();
-  });
+  it.each(['draft', 'dialog', 'busy', 'codex'] as const)(
+    'does not submit a handoff for %s even with the task footer',
+    async (kind) => {
+      const h = harness(),
+        candidate = h.sessions.get('new')!;
+      Object.defineProperty(candidate, 'mode', { value: kind === 'codex' ? 'codex' : 'claude', configurable: true });
+      h.runtime.plans.account = vi.fn(
+        async (id) =>
+          ({ id, provider: kind === 'codex' ? 'openai' : 'anthropic', label: id, profileId: id }) as PlanAccount
+      );
+      h.runtime.mux.capturePaneText = vi.fn(() => (kind === 'draft' ? hud.replace('❯\u00a0', '❯ unsent draft') : hud));
+      if (kind === 'dialog') Object.defineProperty(candidate, 'paneDialog', { value: 'trust', configurable: true });
+      if (kind === 'busy') Object.defineProperty(candidate, 'isWorking', { value: true, configurable: true });
+      await h.executor.create({ ...input, targetMode: kind === 'codex' ? 'codex' : 'claude' }, undefined);
+      const clock = vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(90_001);
+      try {
+        await expect(h.executor.ready('new')).rejects.toThrow('composer before the deadline');
+      } finally {
+        clock.mockRestore();
+      }
+      expect(candidate.writeViaMux).not.toHaveBeenCalled();
+      expect(h.runtime.cleanup).not.toHaveBeenCalled();
+    }
+  );
 });
