@@ -1014,6 +1014,51 @@
         "expect(await page.evaluate(() => (window as any).__activation)).toBeNull()"
       ],
       "outcome": "Existing Chromium pointer test moves an actual rendered row to a group, sends one expected-version synthetic PUT and suppresses the release click. This scenario records motion evidence without treating the dynamic renderer as a resolved control declaration."
+    },
+    "office.employee-general-permissions.real-roundtrip": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "persists and revokes all general profile grants through the real owner API at ${width}px",
+      "assertions": [
+        "await dialog.getByLabel('Role title', { exact: true }).fill('Unsubmitted general permission draft')",
+        "for (const [key, label] of generalGrants)",
+        "expect(await control.isChecked()).toBe(false)",
+        "await control.check()",
+        "await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(true)",
+        "expect((await diskPermissions())[key]).toBe(true)",
+        "await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect((await current()).position).toBe(before.position)",
+        "expect(await control.isChecked()).toBe(true)",
+        "await control.uncheck()",
+        "await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(false)",
+        "expect((await diskPermissions())[key]).toBe(false)",
+        "expect(responses.filter((response) => /\\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([])"
+      ],
+      "outcome": "At320 and1280px the actual owner Chromium UI grants and revokes all five general profile permissions, observes the real canonical permission API and independently decoded company.json, retains grants across Cancel/reopen and does not persist the unsaved profile edit. Synthetic employees remain OFF; no wake/restart/vacation action is requested. This qualifies grant persistence and UI consumption, not delegated action authority or native execution."
+    },
+    "office.employee-office-goals-permissions.committed-lost-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "retains a committed general profile grant after a lost reply without replay (case %i)",
+      "assertions": [
+        "const width = caseIndex < 2 ? 320 : 1280",
+        "['manageOffice', 'Manage office attendance and restarts'] as const",
+        "['manageGoals', 'Manage team goals'] as const",
+        "expect(reply.status()).toBe(200)",
+        "await route.fulfill({ status: 503, json: { success: false, error: 'Synthetic reply unconfirmed' } })",
+        "await control.check()",
+        "await expect.poll(() => error.textContent()).toContain('It may already have saved')",
+        "await errorInViewport(error)",
+        "return !!bounds && !!body && bounds.y >= body.y && bounds.y + bounds.height <= body.y + body.height",
+        "expect(writes).toEqual([{ permissions: { [key]: true } }])",
+        "expect((await diskPermissions())[key]).toBe(true)",
+        "await refresh.click()",
+        "expect(writes).toHaveLength(1)",
+        "await control.uncheck()",
+        "expect(writes).toEqual([{ permissions: { [key]: true } }, { permissions: { [key]: false } }])",
+        "expect((await diskPermissions())[key]).toBe(false)",
+        "expect(await draft.inputValue()).toBe('Unsubmitted permission lost-reply draft')",
+        "expect((await current()).position).toBe(before.position)"
+      ],
+      "outcome": "Four static Chromium cases cover Office/Goals at phone/desktop widths. The real owner API commits before an injected503 loses its acknowledgement. All general grant controls stay held, the error and explicit Refresh fit the viewport, a readback observes the actual committed permission without replay, and an explicit revocation is independently confirmed on disk while the profile draft stays unsaved. No provider or delegated/native action is invoked."
     }
   },
   "mappings": [
@@ -1080,7 +1125,8 @@
         "office.employee-recovery.cancel-keeps-saved",
         "office.employee-permission.lost-reply-readback",
         "office.employee-permission.disconnected-readback",
-        "office.employee-permission.malformed-readback"
+        "office.employee-permission.malformed-readback",
+        "office.employee-general-permissions.real-roundtrip"
       ]
     },
     {
@@ -1197,9 +1243,10 @@
         "office.employee-permission.lost-reply-readback",
         "office.employee-permission.disconnected-readback",
         "office.employee-permission.malformed-readback",
-        "office.employee-permission.derived-board-readback"
+        "office.employee-permission.derived-board-readback",
+        "office.employee-office-goals-permissions.committed-lost-readback"
       ],
-      "remaining": "These states exercise recovery and dependent board permissions. Other permission types, cross-account owner loss and stale-dialog responses still require actual browser scenarios; metadata/native recovery authority is separate."
+      "remaining": "Named recovery, dependent Board, Office and Goals lost-reply readback states are qualified. Other acknowledgement failures, hiring-form controls, cross-account owner loss, stale-dialog responses and delegated/native action authority remain separate."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::inline::button:Close profile for ${employee.name}",
@@ -1409,6 +1456,22 @@
       "declaration": "src/web/public/index.html::html::separator:tabRailResizeHandle::1",
       "scenarios": ["ui.motion.rail-keyboard", "ui.motion.rail-pointer"],
       "remaining": "Only named desktop Chromium keyboard/pointer and settled callback behavior. Real terminal geometry/backend resize, pointer-cancel/lost-capture recovery, mobile touch, all viewport extrema and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageOffice::input:[binding label]",
+      "scenarios": [
+        "office.employee-general-permissions.real-roundtrip",
+        "office.employee-office-goals-permissions.committed-lost-readback"
+      ],
+      "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageGoals::input:[binding label]",
+      "scenarios": [
+        "office.employee-general-permissions.real-roundtrip",
+        "office.employee-office-goals-permissions.committed-lost-readback"
+      ],
+      "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
     }
   ],
   "gaps": [
@@ -1599,14 +1662,6 @@
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::input::input:[binding label]::ambiguous-2",
       "reason": "Detection gap: input:[binding label]"
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageGoals::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageOffice::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.ensureBackButton::back::button:Back to chat",
@@ -7381,7 +7436,7 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1492,
+  "gapBudget": 1490,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
