@@ -42,7 +42,12 @@ import {
   requireDockerPlanMoveRequesterCurrent,
 } from '../src/docker-plan-move-requester.js';
 import { dockerContinuationDigest as digest } from '../src/docker-employee-continuation.js';
-import { DockerPlanMoveSeed, DockerPlanMoveJournalState } from '../src/docker-plan-move-data.js';
+import {
+  DockerPlanMoveSeed,
+  DockerPlanMoveJournalState,
+  dockerPlanMoveHandoffDigest,
+} from '../src/docker-plan-move-data.js';
+import { dockerPlanMaterial } from '../src/docker-plan-material.js';
 import type { PlanMoveRecord, PlanMoveInput, PlanMoves, PlanMoveExecutor } from '../src/plan-move.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
@@ -168,7 +173,7 @@ async function fixture(running = true, retainedAccount = false) {
     return base(args, input);
   });
   vi.spyOn(PackagedDockerEngineCommand.prototype, 'run').mockImplementation(run);
-  vi.spyOn(PackagedDockerEngineCommand.prototype, 'create').mockImplementation(async () => {
+  const nativeCreate = vi.spyOn(PackagedDockerEngineCommand.prototype, 'create').mockImplementation(async () => {
     throw Error('CREATE forbidden');
   });
   const resources: DockerContainedResourceController = {
@@ -404,8 +409,13 @@ async function fixture(running = true, retainedAccount = false) {
     companyStore,
     sourceStore,
     run,
+    nativeCreate,
     retain,
     sessions,
+    plans,
+    accounts,
+    moves,
+    freshActor: () => baseActor.withRequesterAuthority(proof),
     auth,
     token,
     loseStop: () => {
@@ -415,6 +425,139 @@ async function fixture(running = true, retainedAccount = false) {
       key = false;
     },
   };
+}
+
+/** Historical cursor DATA, published through the real journal CAS. This fixture
+ * deliberately supplies no target Session, installed material or native proof;
+ * recovering actors must not confuse these entries with effect authority. */
+async function issuedCheckpoint(
+  f: Awaited<ReturnType<typeof fixture>>,
+  handoff?: 'issued' | 'submitted',
+  publication: 'issued' | 'published' = 'published'
+) {
+  await f.actor.stopSource(f.record, f.journal);
+  const before = f.journal.read(),
+    seed = before.seed,
+    prior = dockerPlanJournalFixture(),
+    material = prior.material,
+    selected = dockerPlanMaterial(
+      {
+        operationId: seed.target.operationId,
+        sessionId: seed.target.sessionId,
+        provider: seed.target.provider,
+        accountId: seed.target.accountId,
+        context: material.context,
+      },
+      material.authDigest
+    ),
+    destination = {
+      ...seed.source.record.destination!,
+      containerId: 'f'.repeat(64),
+      sessionId: seed.target.sessionId,
+    },
+    work = {
+      ...prior.work,
+      employeeId: f.record.employeeId,
+      owner: f.record.owner,
+      request: {
+        ...prior.work.request,
+        sessionId: seed.target.sessionId,
+        sessionGeneration: seed.target.sessionGeneration,
+        operationId: seed.target.operationId,
+        containerId: seed.source.binding.containerId,
+        imageId: seed.source.binding.imageId,
+        expectedPolicyDigest: digest(seed.source.record.policy),
+        expectedDestinationImageId: seed.target.workerImage.imageId,
+      },
+      original: seed.source.record.destination,
+      workerImage: seed.target.workerImage,
+      policy: seed.source.record.policy,
+      credentialId: seed.target.credentialId,
+      phase: 'ready',
+      pool: {
+        containerId: '1'.repeat(64),
+        cgroupParent: '/synthetic-pool',
+        policyDigest: digest(seed.source.record.policy.pool),
+        physicalDigest: '2'.repeat(64),
+      },
+      destination,
+      tasks: [
+        {
+          role: 'storage-holder',
+          name: 'reverie-boxed-storage-synthetic',
+          imageId: seed.target.workerImage.imageId,
+          configurationDigest: '3'.repeat(64),
+          containerId: '4'.repeat(64),
+          phase: 'running',
+          initPid: 42,
+          initStartTicks: '1234',
+        },
+        ...(['identity-helper', 'leaf-helper'] as const).map((role) => ({
+          role,
+          name: 'reverie-boxed-' + role + '-synthetic',
+          imageId: seed.target.workerImage.imageId,
+          configurationDigest: '5'.repeat(64),
+          containerId: (role === 'identity-helper' ? '6' : '7').repeat(64),
+          phase: 'completed',
+          resultDigest: '8'.repeat(64),
+        })),
+      ],
+      planReplacement: {
+        ...prior.work.planReplacement,
+        moveId: seed.moveId,
+        source: {
+          binding: seed.source.binding,
+          continuationDigest: digest(seed.source.record),
+          providerSourceDigest: seed.source.providerSourceDigest,
+        },
+        account: {
+          id: seed.target.accountId,
+          provider: seed.target.provider,
+          projectionDigest: selected.projectionDigest,
+          contextDigest: selected.contextInputDigest,
+        },
+      },
+    };
+  await f.journal.publish(
+    before,
+    DockerPlanMoveJournalState.parse({
+      ...before,
+      material,
+      work,
+      paidDispatch: {
+        phase: 'issued',
+        epoch: before.epoch,
+        operationId: seed.target.operationId,
+        sessionId: seed.target.sessionId,
+        containerId: destination.containerId,
+        recipeDigest: work.sourceDigest,
+      },
+      companyPublication: {
+        phase: publication,
+        digest: digest({
+          row: { ...work, phase: 'provider-issued' },
+          binding: {
+            version: 1,
+            operationId: work.request.operationId,
+            sessionId: work.request.sessionId,
+            sessionGeneration: work.request.sessionGeneration,
+            credentialId: work.credentialId,
+            containerId: destination.containerId,
+            imageId: destination.imageId,
+            originalDigest: digest(destination),
+            policyDigest: digest(work.policy),
+          },
+          templateDigest: seed.target.templateDigest,
+        }),
+      },
+      ...(handoff ? { handoff: { phase: 'issued', digest: dockerPlanMoveHandoffDigest(seed.handoff) } } : {}),
+    })
+  );
+  if (handoff === 'submitted') {
+    const state = f.journal.read();
+    await f.journal.publish(state, { ...state, handoff: { ...state.handoff!, phase: 'submitted' } });
+  }
+  return f.journal.read();
 }
 describe('captured native plan actor before paid dispatch', () => {
   it('admits the genuine HMAC force route with the observed generation and refuses a stale generation before effects', async () => {
@@ -567,4 +710,126 @@ describe('canonical account selection until real refreshed-principal qualificati
       expect(f.run.mock.calls.some(([a]) => a[1] === 'stop' || a[1] === 'start' || a[1] === 'create')).toBe(false);
     }
   );
+});
+
+describe('actor authority across an actual account-selection await', () => {
+  it.each(['grant revoked', 'employee removed', 'employee stopped'] as const)(
+    'refuses target preparation when %s while the selected account lookup is pending',
+    async (change) => {
+      const f = await fixture(false);
+      await f.actor.stopSource(f.record, f.journal);
+      const before = f.journal.read();
+      let entered = false,
+        release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(f.plans.account).mockImplementationOnce(async (id) => {
+        entered = true;
+        await gate;
+        return f.accounts.get(id);
+      });
+      f.run.mockClear();
+      const pending = f.actor.start(f.record, f.journal).then(
+        () => undefined,
+        (error: unknown) => error
+      );
+      try {
+        await expect.poll(() => entered, { timeout: 2000 }).toBe(true);
+        await f.companyStore.update((company) => {
+          if (change === 'employee removed') company.employees = [];
+          else if (change === 'employee stopped') company.employees[0]!.desiredRunning = false;
+          else company.employees[0]!.permissions.moveOwnPlan = false;
+        });
+        release();
+        expect(await pending).toMatchObject({ status: 403 });
+        expect(f.journal.read()).toEqual(before);
+        expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+        expect(f.run).not.toHaveBeenCalled();
+        expect(f.command.create).not.toHaveBeenCalled();
+        expect(f.nativeCreate).not.toHaveBeenCalled();
+        expect(f.sessions.size).toBe(0);
+      } finally {
+        release();
+        await pending;
+      }
+    }
+  );
+
+  it('refuses changed canonical credential bytes after reservation before creating target work', async () => {
+    const f = await fixture(false);
+    await f.actor.stopSource(f.record, f.journal);
+    const before = f.journal.read();
+    fs.writeFileSync(
+      join(f.accounts.get('b')!.configDir, '.credentials.json'),
+      JSON.stringify({ synthetic: 'changed' })
+    );
+    f.run.mockClear();
+    await expect(f.actor.start(f.record, f.journal)).rejects.toMatchObject({ status: 409 });
+    await expect(f.freshActor().start(f.record, f.journal)).rejects.toThrow('material changed after reservation');
+    expect(f.journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.sessions.size).toBe(0);
+  });
+});
+
+describe('issued cursors remain data after actor reconstruction', () => {
+  it('never dispatches an issued paid operation again when its canonical Company target is absent', async () => {
+    const f = await fixture(false),
+      before = await issuedCheckpoint(f, undefined, 'issued'),
+      company = f.companyStore.snapshot();
+    f.run.mockClear();
+    for (const actor of [f.actor, f.freshActor()]) {
+      await expect(actor.start(f.record, f.journal)).rejects.toThrow('paid dispatch is issued');
+      // An issued publication cannot create or adopt a missing canonical target.
+      await expect(actor.verify(f.record, f.journal)).rejects.toThrow('target binding or recipe changed');
+    }
+    expect(f.journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(f.companyStore.snapshot()).toEqual(company);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.sessions.size).toBe(0);
+  });
+
+  it('does not type an issued handoff again or erase its uncertainty without a native target view', async () => {
+    const f = await fixture(false),
+      before = await issuedCheckpoint(f, 'issued'),
+      company = f.companyStore.snapshot();
+    f.run.mockClear();
+    for (const actor of [f.actor, f.freshActor()]) {
+      await expect(actor.finalize(f.record, f.journal)).rejects.toThrow('will not be typed again');
+      await expect(actor.verify(f.record, f.journal)).rejects.toThrow('target binding or recipe changed');
+    }
+    expect(f.journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(f.companyStore.snapshot()).toEqual(company);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.sessions.size).toBe(0);
+  });
+
+  it('treats submitted handoff finalization as a no-op while still requiring proof to verify the target', async () => {
+    const f = await fixture(false),
+      before = await issuedCheckpoint(f, 'submitted'),
+      company = f.companyStore.snapshot();
+    f.run.mockClear();
+    for (const actor of [f.actor, f.freshActor()]) {
+      await actor.finalize(f.record, f.journal);
+      await expect(actor.verify(f.record, f.journal)).rejects.toThrow('target binding or recipe changed');
+      await expect(actor.start(f.record, f.journal)).rejects.toThrow('paid dispatch is issued');
+    }
+    expect(f.journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(f.companyStore.snapshot()).toEqual(company);
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.sessions.size).toBe(0);
+  });
 });
