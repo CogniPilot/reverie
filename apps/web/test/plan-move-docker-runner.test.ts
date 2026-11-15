@@ -118,7 +118,10 @@ async function fixture(forceBusy = false) {
   };
   const moves = new PlanMoves(port);
   const settled = async () => {
-    for (let i = 0; i < 150; i++) {
+    // The positive composer case includes a real one-second read interval,
+    // followed by several durable file acknowledgements on shared CI storage.
+    const deadline = performance.now() + 10_000;
+    while (performance.now() < deadline) {
       const value = await moves.get(input.id, f.record.owner);
       if (
         value &&
