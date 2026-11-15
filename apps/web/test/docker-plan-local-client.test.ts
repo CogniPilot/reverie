@@ -130,6 +130,8 @@ async function fixture() {
     getAttachArgs: (n: string) => ['-L', socket, 'attach-session', '-t', n],
     getSession: () => active,
   } as unknown as TerminalMultiplexer;
+  const socketPath = tm(['display-message', '-p', '#{socket_path}']).trim(),
+    unattachedSocket = fs.lstatSync(socketPath, { bigint: true });
   function attach() {
     const client = pty.spawn('tmux', mux.getAttachArgs(name), {
       name: 'xterm-256color',
@@ -162,6 +164,8 @@ async function fixture() {
     census,
     server,
     serverBirth,
+    socketPath,
+    unattachedSocket,
     pane,
     tm,
     exited,
@@ -171,6 +175,54 @@ async function fixture() {
   };
 }
 describe.runIf(process.platform === 'linux')('actual exact website-owned tmux client detach', () => {
+  it.each(['live', 'already-exited'] as const)(
+    'joins the last captured %s client across the real socket attachment signal',
+    async (state) => {
+      const f = await fixture(),
+        attached = fs.lstatSync(f.socketPath, { bigint: true }),
+        capture = DockerPlanLocalClient.capture(f.first, f.mux, f.record);
+      expect(attached.ino).toBe(f.unattachedSocket.ino);
+      expect(attached.dev).toBe(f.unattachedSocket.dev);
+      expect(f.unattachedSocket.mode & 0o111n).toBe(0n);
+      expect(attached.mode).toBe(f.unattachedSocket.mode | ((f.unattachedSocket.mode & 0o444n) >> 2n));
+      f.tm(['detach-client', '-t', String(Reflect.get(f.second, 'ptsName'))]);
+      await until(() => f.exited.has(f.second));
+      if (state === 'already-exited') {
+        f.tm(['detach-client', '-t', String(Reflect.get(f.first, 'ptsName'))]);
+        await until(() => f.exited.has(f.first));
+      }
+      const calls = vi.spyOn(cp, 'execFileSync');
+      try {
+        await capture.detach(state === 'already-exited' ? null : f.first, f.mux, f.record, () => {});
+      } finally {
+        const final = fs.lstatSync(f.socketPath, { bigint: true });
+        console.info(
+          '[owned-socket-transition]',
+          JSON.stringify({
+            dev: String(final.dev),
+            ino: String(final.ino),
+            uid: String(final.uid),
+            unattached: String(f.unattachedSocket.mode & 0o777n),
+            attached: String(attached.mode & 0o777n),
+            final: String(final.mode & 0o777n),
+            sameServerBirth: birth(f.server) === f.serverBirth,
+          })
+        );
+      }
+      expect(f.exited.has(f.first)).toBe(true);
+      expect(birth(f.first.pid)).toBeUndefined();
+      expect(f.census()).toEqual([]);
+      const final = fs.lstatSync(f.socketPath, { bigint: true });
+      expect(final.ino).toBe(attached.ino);
+      expect(final.dev).toBe(attached.dev);
+      expect(final.uid).toBe(attached.uid);
+      expect(final.mode).toBe(f.unattachedSocket.mode);
+      expect(birth(f.server)).toBe(f.serverBirth);
+      expect(calls.mock.calls.filter(([, args]) => (args as string[]).includes('detach-client'))).toHaveLength(
+        state === 'live' ? 1 : 0
+      );
+    }
+  );
   it.each(['C', 'C.UTF-8'])('preserves exact portable tmux client readback under locale %s', async (locale) => {
     vi.stubEnv('LC_ALL', locale);
     const f = await fixture();
@@ -287,6 +339,71 @@ describe('genuine native proof remains distinct from local-client custody', () =
 });
 
 describe.runIf(process.platform === 'linux')('client metadata and checked-close uncertainty', () => {
+  it.each([
+    'dev',
+    'ino',
+    'rdev',
+    'uid',
+    'type',
+    'read',
+    'write',
+    'special',
+    'partial-execute',
+    'extra-execute',
+  ] as const)('refuses changed socket %s without detaching either client', async (kind) => {
+    const f = await fixture(),
+      original = fs.lstatSync;
+    vi.spyOn(fs, 'lstatSync').mockImplementation(((file: fs.PathLike, options: unknown) => {
+      const actual = Reflect.apply(original, fs, [file, options]);
+      if (file !== f.socketPath) return actual;
+      const changed = Object.assign(Object.create(Object.getPrototypeOf(actual)), actual);
+      if (kind === 'dev' || kind === 'ino' || kind === 'rdev' || kind === 'uid') changed[kind] += 1n;
+      else if (kind === 'type') changed.mode = (changed.mode & ~0o170000n) | 0o100000n;
+      else {
+        const bit = {
+          read: 0o040n,
+          write: 0o200n,
+          special: 0o4000n,
+          'partial-execute': 0o010n,
+          'extra-execute': 0o001n,
+        }[kind];
+        changed.mode ^= bit;
+      }
+      return changed;
+    }) as typeof fs.lstatSync);
+    const calls = vi.spyOn(cp, 'execFileSync');
+    await expect(f.capture.detach(f.first, f.mux, f.record, () => {})).rejects.toThrow('unconfirmed');
+    expect(calls.mock.calls.some(([, args]) => (args as string[]).includes('detach-client'))).toBe(false);
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+  });
+  it('rejects a partial socket execute signal at capture instead of normalizing arbitrary permissions', async () => {
+    const f = await fixture(),
+      original = fs.lstatSync;
+    vi.spyOn(fs, 'lstatSync').mockImplementation(((file: fs.PathLike, options: unknown) => {
+      const actual = Reflect.apply(original, fs, [file, options]);
+      if (file !== f.socketPath) return actual;
+      return Object.assign(Object.create(Object.getPrototypeOf(actual)), actual, {
+        mode: (actual.mode & ~0o111n) | 0o100n | 0o040n,
+      });
+    }) as typeof fs.lstatSync);
+    const calls = vi.spyOn(cp, 'execFileSync');
+    expect(() => DockerPlanLocalClient.capture(f.first, f.mux, f.record)).toThrow('unconfirmed');
+    expect(calls.mock.calls.some(([, args]) => (args as string[]).includes('detach-client'))).toBe(false);
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+  });
+  it('keeps the captured TTY mode strict when the socket attachment signal is normalized', async () => {
+    const f = await fixture(),
+      original = fs.fstatSync;
+    vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, options: unknown) => {
+      const actual = Reflect.apply(original, fs, [fd, options]);
+      if (fs.readlinkSync('/proc/self/fd/' + fd) !== Reflect.get(f.first, 'ptsName')) return actual;
+      return Object.assign(Object.create(Object.getPrototypeOf(actual)), actual, { mode: actual.mode ^ 0o100n });
+    }) as typeof fs.fstatSync);
+    const calls = vi.spyOn(cp, 'execFileSync');
+    await expect(f.capture.detach(f.first, f.mux, f.record, () => {})).rejects.toThrow('unconfirmed');
+    expect(calls.mock.calls.some(([, args]) => (args as string[]).includes('detach-client'))).toBe(false);
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+  });
   it.each(['server-extra', 'server-tab', 'client-extra'] as const)(
     'refuses malformed %s readback without detaching either client',
     async (kind) => {

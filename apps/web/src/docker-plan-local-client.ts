@@ -41,6 +41,14 @@ function proc(pid: number): Readonly<{ parent: number; birth: string }> | undefi
 function stamp(value: fs.BigIntStats): string {
   return [value.dev, value.ino, value.rdev, value.uid, value.mode].join(':');
 }
+function socketStamp(value: fs.BigIntStats): string {
+  const execute = value.mode & 0o111n,
+    attachedExecute = (value.mode & 0o444n) >> 2n;
+  // tmux advertises attachment by setting execute bits for readable classes.
+  // Only that complete signal is mutable; identity and all other mode bits stay exact.
+  if (!value.isSocket() || (execute !== 0n && execute !== attachedExecute)) return refuse();
+  return [value.dev, value.ino, value.rdev, value.uid, value.mode & ~0o111n].join(':');
+}
 function stable(record: MuxSession): unknown {
   return {
     sessionId: record.sessionId,
@@ -114,7 +122,7 @@ export class DockerPlanLocalClient {
     this.#server = server;
     this.#serverBirth = serverBirth;
     this.#socketPath = socketPath;
-    this.#socketStamp = stamp(fs.lstatSync(socketPath, { bigint: true }));
+    this.#socketStamp = socketStamp(fs.lstatSync(socketPath, { bigint: true }));
     this.#socket = mux.muxSocket;
     this.#env = env;
     pty.onExit(() => {
@@ -244,7 +252,7 @@ export class DockerPlanLocalClient {
     if (
       !server ||
       server.birth !== this.#serverBirth ||
-      stamp(fs.lstatSync(this.#socketPath, { bigint: true })) !== this.#socketStamp
+      socketStamp(fs.lstatSync(this.#socketPath, { bigint: true })) !== this.#socketStamp
     )
       return refuse();
     current();
