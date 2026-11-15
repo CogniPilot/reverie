@@ -148,15 +148,19 @@ describe('same-journal Docker actor publication', () => {
     ).rejects.toThrow('permission revoked');
     expect((await b.dockerRecord(f.record.id)).dockerReplacement).toEqual(prior);
   });
-  it('serializes separate processes without letting either rewrite an issued cursor', async () => {
+  it('serializes separate processes claiming the same captured original state', async () => {
     const f = dockerPlanJournalFixture(),
       store = new PlanMoveStore(join(dir, 'moves.json'));
     await store.save([f.record]);
+    const beforeFile = join(dir, 'same-original.json');
+    await writeFile(beforeFile, JSON.stringify((await store.dockerRecord(f.record.id)).dockerReplacement), {
+      mode: 0o600,
+    });
     const child = (epoch: string) =>
       new Promise<string>((resolve, reject) => {
         const proc = spawn(
           process.execPath,
-          ['--import', 'tsx', 'test/fixtures/plan-move-docker-cas.ts', store.file, f.record.id, epoch],
+          ['--import', 'tsx', 'test/fixtures/plan-move-docker-cas.ts', store.file, f.record.id, epoch, beforeFile],
           { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 }
         );
         let output = '',
@@ -178,6 +182,44 @@ describe('same-journal Docker actor publication', () => {
         ])
       ).sort()
     ).toEqual(['claimed\n', 'refused\n']);
+  });
+
+  it('permits an explicit sequential claim of fresh state and immediately fences the earlier actor', async () => {
+    const f = dockerPlanJournalFixture(),
+      store = new PlanMoveStore(join(dir, 'moves.json'));
+    await store.save([f.record]);
+    const child = async (epoch: string) => {
+      const beforeFile = join(dir, 'before-' + epoch + '.json');
+      await writeFile(beforeFile, JSON.stringify((await store.dockerRecord(f.record.id)).dockerReplacement), {
+        mode: 0o600,
+      });
+      return new Promise<string>((resolve, reject) => {
+        const proc = spawn(
+          process.execPath,
+          ['--import', 'tsx', 'test/fixtures/plan-move-docker-cas.ts', store.file, f.record.id, epoch, beforeFile],
+          { stdio: ['ignore', 'pipe', 'pipe'], timeout: 10000 }
+        );
+        let output = '',
+          error = '';
+        proc.stdout.on('data', (chunk) => {
+          output += String(chunk);
+        });
+        proc.stderr.on('data', (chunk) => {
+          error += String(chunk);
+        });
+        proc.once('error', reject);
+        proc.once('close', (code) => (code === 0 ? resolve(output) : reject(Error(error || 'child failed'))));
+      });
+    };
+    const first = '90000000-0000-4000-8000-000000000009',
+      second = 'a0000000-0000-4000-8000-00000000000a';
+    expect(await child(first)).toBe('claimed\n');
+    expect(await child(second)).toBe('claimed\n');
+    expect(() => store.dockerCurrent(f.record.id, first, dockerContinuationDigest(f.state.seed))).toThrow(
+      'no longer current'
+    );
+    store.dockerCurrent(f.record.id, second, dockerContinuationDigest(f.state.seed));
+    await expect(store.dockerPublish(f.record.id, f.state, f.closed, () => {})).rejects.toThrow('cursor changed');
   });
   it('holds uncertain finalization after publication and exact reads reveal the committed cursor', async () => {
     const f = dockerPlanJournalFixture(),
