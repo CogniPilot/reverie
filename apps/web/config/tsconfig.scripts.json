@@ -38,6 +38,8 @@
     "../test/helpers/boxed-plan-provider-files.ts",
     "../test/boxed-plan-provider-files.test.ts",
     "../test/boxed-plan-provider-entry.test.ts",
-    "../test/fixtures/boxed-plan-provider.mts"
+    "../test/fixtures/boxed-plan-provider.mts",
+    "../scripts/build-plan-office.mts",
+    "../test/plan-office-image-factory.test.ts"
   ]
 }
