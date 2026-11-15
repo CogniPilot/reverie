@@ -5,7 +5,7 @@ import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
 import { DockerEphemeralRestoration } from './docker-ephemeral-restoration.js';
-import { ephemeralProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
+import { ephemeralContinuationProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
 import {
   DockerEmployeeCredentialInstaller,
   type DockerCredentialHome,
@@ -447,7 +447,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async prepareStorage(row: DockerEmployeeContinuationRecord, current: () => void) {
     await this.#storage.prepare(row, current);
     current();
-    if (!this.#ephemeral && ephemeralProjection(await this.#source(row), row.employeeId, row.request.sessionId))
+    if (!this.#ephemeral && ephemeralContinuationProjection(await this.#source(row), row))
       refuse('DOCKER_EPHEMERAL_JOURNAL_REQUIRED');
     await this.#ephemeral?.prepare(row, current);
     current();
@@ -457,7 +457,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<'ready' | 'unissued' | 'unknown' | 'ephemeral-unissued'> {
     const storage = await this.#storage.observe(row);
     if (storage !== 'ready') return storage;
-    if (!this.#ephemeral && ephemeralProjection(await this.#source(row), row.employeeId, row.request.sessionId))
+    if (!this.#ephemeral && ephemeralContinuationProjection(await this.#source(row), row))
       refuse('DOCKER_EPHEMERAL_JOURNAL_REQUIRED');
     return (await this.#ephemeral?.observe(row)) === 'unissued' ? 'ephemeral-unissued' : 'ready';
   }

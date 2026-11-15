@@ -177,6 +177,7 @@ export const DockerEmployeePlanReplacementProvenance = z
         binding: DockerEmployeeBinding,
         continuationDigest: digest,
         providerSourceDigest: digest,
+        ephemeralSessionId: uuid.optional(),
       })
       .strict(),
     account: z
@@ -210,7 +211,10 @@ function correlatedRecord(row: CorrelatedRecord): boolean {
           attempt.ordinal === index + 1 &&
           attempt.request.operationId === row.request.operationId &&
           attempt.request.employeeId === row.employeeId &&
-          attempt.request.sessionId === row.request.sessionId &&
+          attempt.request.sessionId ===
+            (row.version === 3
+              ? (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+              : row.request.sessionId) &&
           attempt.request.sessionGeneration === row.request.sessionGeneration &&
           attempt.imageId === row.workerImage.imageId
       )) &&
