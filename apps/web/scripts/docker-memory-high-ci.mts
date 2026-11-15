@@ -69,7 +69,16 @@ const archived = JSON.parse(
 ) as { path: string };
 assert.match(archived.path, /^\/nix\/store\/[a-z0-9]{32}-source$/u);
 assert.equal(fs.realpathSync(archived.path), archived.path);
-const expression = `let source = builtins.getFlake ${JSON.stringify(archived.path)}; in import ${JSON.stringify(archived.path + '/nix/docker-memory-high-native-images.nix')} { pkgs = import source.inputs.nixpkgs { system = "x86_64-linux"; }; src = source.outPath; namePrefix = ${JSON.stringify(prefix)}; }`;
+const locked = JSON.parse(
+  run('lock-archived-source', 'nix', ['flake', 'metadata', '--json', '--no-write-lock-file', archived.path])
+) as { path: string; url: string; locked: { type: string; path: string; narHash: string } };
+assert.equal(locked.path, archived.path);
+assert.equal(locked.locked.type, 'path');
+assert.equal(locked.locked.path, archived.path);
+assert.match(locked.locked.narHash, /^sha256-[A-Za-z0-9+/]+=*$/u);
+assert.ok(locked.url.startsWith('path:' + archived.path + '?'));
+save('locked-source', { path: locked.path, lockedReference: locked.url, narHash: locked.locked.narHash });
+const expression = `let source = builtins.getFlake ${JSON.stringify(locked.url)}; in import (source.outPath + "/nix/docker-memory-high-native-images.nix") { pkgs = import source.inputs.nixpkgs { system = "x86_64-linux"; }; src = source.outPath; namePrefix = ${JSON.stringify(prefix)}; }`;
 const out = path.join(evidence, 'images');
 run(
   'build-images',
