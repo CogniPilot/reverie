@@ -1,3 +1,4 @@
+import { fixture as resourcePhysical, writer as highWriter } from './helpers/docker-resource-physical.js';
 import { resourceCapacityHistory } from './helpers/docker-resource-capacity.js';
 /** Actual HTTP authentication and canonical CompanyStore; engine ports are inert,
  * synthetic observations. No Docker socket, provider, or live data is used. */
@@ -1730,5 +1731,425 @@ describe('actual retained-ledger capacity status', () => {
     expect(actual).toEqual(
       JSON.parse(fs.readFileSync(new URL('./fixtures/docker-resource-capacity-status.json', import.meta.url), 'utf8'))
     );
+  });
+});
+
+const originalBase = '/api/company/docker-resources/original-attempts';
+async function originalFixture(kind: 'terminal' | 'created' | 'absent' | 'running' = 'terminal') {
+  const f = await fixture({ storedPolicy: true });
+  const physical = resourcePhysical('7'.repeat(64), f.revisions, highWriter);
+  physical.row().employeeId = target;
+  physical.row().request.sessionId = sid;
+  physical.row().request.operationId = f.request.operationId;
+  await physical.controller.preparePool(physical.row(), physical.current);
+  await physical.setPool();
+  physical.makeWorker();
+  await physical.controller.configure(physical.row(), physical.current);
+  physical.ready();
+  const desired = {
+    revision: '44444444-4444-4444-8444-444444444444',
+    owner: null,
+    scope: 'all-current-and-future' as const,
+    memoryHighBytes: 48 * 1024 ** 3,
+  };
+  await f.revisions.approve(desired, null, physical.current);
+  if (kind === 'absent') physical.rejectNextCreate();
+  else if (kind === 'created') physical.loseCreate();
+  else if (kind === 'running') physical.delayNextLeaf();
+  else physical.loseStart();
+  await expect(
+    physical.controller.reviseMemoryHigh(physical.row(), desired.revision, physical.current)
+  ).rejects.toThrow();
+  const raw = physical.containers.get(physical.row().destination!.containerId)!;
+  raw.State = { Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0, ExitCode: 0 };
+  const reader = physical.controller.originalWriterReader();
+  vi.spyOn(f.resources, 'originalWriterReader').mockReturnValue(reader);
+  const pendingResponse = await f.app.inject({ method: 'GET', url: originalBase, headers: f.ownerHeaders });
+  expect(pendingResponse.statusCode).toBe(200);
+  const pendingData = pendingResponse.json().data;
+  const dto = pendingData.items[0] as ReturnType<DockerResourceRevisionStore['originals']>['items'][number];
+  const effects = { creates: [...physical.creates], starts: [...physical.starts] };
+  return { ...f, physical, dto, pendingData, desired, originalEffects: effects };
+}
+describe('historical owner resource cursors survive worker and employee changes', () => {
+  it.each(['stopped', 'rebound', 'removed'] as const)(
+    'closes terminal original with %s worker/employee, without resource probe or policy claim',
+    async (change) => {
+      const f = await originalFixture();
+      await f.companyStore.update((state) => {
+        if (change === 'removed') state.employees = state.employees.filter((e) => e.id !== target);
+        else if (change === 'rebound') {
+          const e = state.employees.find((e) => e.id === target)!;
+          e.sessionGeneration++;
+          e.sessionId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+        }
+      });
+      expect(
+        (await f.app.inject({ method: 'GET', url: f.url + '/docker-resources', headers: f.ownerHeaders })).statusCode
+      ).toBe(409);
+      const commands: string[][] = [];
+      f.physical.beforeRun((args) => {
+        commands.push([...args]);
+      });
+      const response = await f.app.inject({
+        method: 'POST',
+        url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+        headers: f.ownerHeaders,
+        payload: { expectedDigest: f.dto.expectedDigest },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data).toMatchObject({
+        cursorId: f.dto.cursorId,
+        state: 'closed',
+        taskPhase: 'start-issued',
+        originalOutcome: 'unknown',
+        enforcement: 'not-observed',
+        allowedActions: [],
+      });
+      const golden = JSON.parse(
+        fs.readFileSync(new URL('./fixtures/docker-resource-original-attempts.json', import.meta.url), 'utf8')
+      ).terminal;
+      expect(f.pendingData).toEqual(golden.pending);
+      expect(response.json().data).toEqual(golden.closed);
+      const exact = await f.app.inject({
+        method: 'GET',
+        url: originalBase + '/' + f.dto.cursorId,
+        headers: f.ownerHeaders,
+      });
+      expect(exact.json()).toEqual(response.json());
+      expect(
+        (await f.app.inject({ method: 'GET', url: originalBase, headers: f.ownerHeaders })).json().data.items
+      ).toEqual([]);
+      expect(f.revisions.canApprove(undefined)).toBe(true);
+      const approved = await f.app.inject({
+        method: 'PUT',
+        url: '/api/company/docker-resources/default',
+        headers: f.ownerHeaders,
+        payload: {
+          revision: '88888888-8888-4888-8888-888888888888',
+          expectedRevision: f.desired.revision,
+          scope: 'all-current-and-future',
+          memoryHighBytes: 48 * 1024 ** 3,
+        },
+      });
+      expect(approved.statusCode).toBe(200);
+      expect(f.revisions.approved(f.physical.row())).toEqual([]);
+      expect(f.revisions.attempt(f.physical.row(), f.desired.revision)?.state).toBe('original-closed');
+      expect(
+        commands.every(
+          (args) => args[0] === 'image' || (args[0] === 'container' && ['inspect', 'ls'].includes(args[1]!))
+        )
+      ).toBe(true);
+      expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.originalEffects);
+      expect(f.resourceReads()).toBe(0);
+      expect(f.effects()).toBe(0);
+    }
+  );
+  it.each(['created', 'absent'] as const)(
+    'retires %s original preSTART by canonical CAS without claiming terminal writer/kernel',
+    async (kind) => {
+      const f = await originalFixture(kind);
+      const response = await f.app.inject({
+        method: 'POST',
+        url: originalBase + '/' + f.dto.cursorId + '/retire',
+        headers: f.ownerHeaders,
+        payload: { expectedDigest: f.dto.expectedDigest },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().data).toMatchObject({
+        state: 'retired',
+        originalOutcome: 'unknown',
+        enforcement: 'not-observed',
+        allowedActions: [],
+      });
+      expect(f.revisions.canApprove(undefined)).toBe(true);
+      const golden = JSON.parse(
+        fs.readFileSync(new URL('./fixtures/docker-resource-original-attempts.json', import.meta.url), 'utf8')
+      )[kind];
+      expect(f.pendingData).toEqual(golden.pending);
+      expect(response.json().data).toEqual(golden.retired);
+      expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.originalEffects);
+      const approved = await f.app.inject({
+        method: 'PUT',
+        url: '/api/company/docker-resources/default',
+        headers: f.ownerHeaders,
+        payload: {
+          revision: '88888888-8888-4888-8888-888888888888',
+          expectedRevision: f.desired.revision,
+          scope: 'all-current-and-future',
+          memoryHighBytes: 48 * 1024 ** 3,
+        },
+      });
+      expect(approved.statusCode).toBe(200);
+      const stale = await f.app.inject({
+        method: 'POST',
+        url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+        headers: f.ownerHeaders,
+        payload: { expectedDigest: f.dto.expectedDigest },
+      });
+      expect(stale.statusCode).toBe(409);
+      expect(
+        (
+          await f.app.inject({ method: 'GET', url: originalBase + '/' + f.dto.cursorId, headers: f.ownerHeaders })
+        ).json()
+      ).toEqual(response.json());
+    }
+  );
+  it('retains running/unknown original and refuses retirement after START, with zero effects', async () => {
+    const f = await originalFixture('running');
+    for (const action of ['retire', 'reconcile']) {
+      const response = await f.app.inject({
+        method: 'POST',
+        url: originalBase + '/' + f.dto.cursorId + '/' + action,
+        headers: f.ownerHeaders,
+        payload: { expectedDigest: f.dto.expectedDigest },
+      });
+      expect(response.statusCode).toBe(409);
+    }
+    expect(f.revisions.original(undefined, f.dto.cursorId).dto).toEqual(f.dto);
+    expect(f.revisions.canApprove(undefined)).toBe(false);
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.originalEffects);
+  });
+  it('wrong owner scope, worker credentials, stale CAS and revoked runtime never disclose/settle the original', async () => {
+    const f = await originalFixture();
+    expect(() => f.revisions.original('other-owner', f.dto.cursorId)).toThrow('NOT_FOUND');
+    const worker = await f.app.inject({ method: 'GET', url: originalBase, headers: f.workerHeaders });
+    expect(worker.statusCode).toBe(403);
+    const stale = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: '0'.repeat(64) },
+    });
+    expect(stale.statusCode).toBe(409);
+    f.revokeRuntime();
+    expect((await f.app.inject({ method: 'GET', url: originalBase, headers: f.ownerHeaders })).statusCode).toBe(409);
+    expect(f.revisions.original(undefined, f.dto.cursorId).dto).toEqual(f.dto);
+  });
+  it('actor revocation during the terminal observation cannot publish', async () => {
+    const f = await originalFixture();
+    f.physical.beforeRun(async () => {
+      await f.logout();
+    });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: f.dto.expectedDigest },
+    });
+    expect(response.statusCode).not.toBe(200);
+    expect(f.revisions.original(undefined, f.dto.cursorId).dto).toEqual(f.dto);
+  });
+});
+
+describe('original-resource cursor publication and concurrency boundaries', () => {
+  it('canonical preSTART retirement fences a delayed successful CREATE callback without a START', async () => {
+    const f = await fixture({ storedPolicy: true });
+    const physical = resourcePhysical('7'.repeat(64), f.revisions, highWriter);
+    await physical.controller.preparePool(physical.row(), physical.current);
+    await physical.setPool();
+    physical.makeWorker();
+    await physical.controller.configure(physical.row(), physical.current);
+    physical.ready();
+    const desired = {
+      revision: '44444444-4444-4444-8444-444444444444',
+      owner: null,
+      scope: 'all-current-and-future' as const,
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    await f.revisions.approve(desired, null, physical.current);
+    const pause = physical.pauseNextCreate();
+    const pending = physical.controller.reviseMemoryHigh(physical.row(), desired.revision, physical.current).then(
+      () => undefined,
+      (e) => e
+    );
+    await pause.entered;
+    const original = f.revisions.originals(undefined).items[0]!;
+    vi.spyOn(f.resources, 'originalWriterReader').mockReturnValue(physical.controller.originalWriterReader());
+    const starts = [...physical.starts];
+    const response = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + original.cursorId + '/retire',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: original.expectedDigest },
+    });
+    expect(response.statusCode).toBe(200);
+    pause.release();
+    expect(await pending).toBeInstanceOf(Error);
+    expect(physical.starts).toEqual(starts);
+    expect(f.revisions.original(undefined, original.cursorId).dto.state).toBe('retired');
+    expect(physical.creates).toHaveLength(4); // late orphan remains present and inert
+    expect([...physical.containers.values()].at(-1)?.State).toMatchObject({
+      Status: 'created',
+      Running: false,
+      Pid: 0,
+    });
+  });
+  it('a concurrent canonical task advancement defeats stale native closure CAS', async () => {
+    const f = await originalFixture();
+    let changed = false;
+    f.physical.beforeRun(async () => {
+      if (changed) return;
+      changed = true;
+      const original = f.revisions.original(undefined, f.dto.cursorId);
+      if (original.attempt.state !== 'helper' || !('containerId' in original.attempt.task))
+        throw Error('issued helper required');
+      await f.revisions.publish(
+        f.physical.row(),
+        f.desired,
+        original.attempt,
+        {
+          ...original.key,
+          state: 'helper',
+          task: { ...original.attempt.task, phase: 'completed', resultDigest: 'f'.repeat(64) },
+        },
+        () => {}
+      );
+    });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: f.dto.expectedDigest },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(f.revisions.original(undefined, f.dto.cursorId).dto).toMatchObject({
+      state: 'pending',
+      taskPhase: 'completed',
+    });
+  });
+  it('serialized or overridden proof objects cannot publish original closure', async () => {
+    const f = await originalFixture();
+    await expect(
+      f.revisions.settleOriginal(
+        undefined,
+        f.dto.cursorId,
+        f.dto.expectedDigest,
+        { require: () => ({}) },
+        'close',
+        () => {}
+      )
+    ).rejects.toThrow('PROOF_REQUIRED');
+    expect(f.revisions.original(undefined, f.dto.cursorId).dto).toEqual(f.dto);
+  });
+  it.each(['directory-sync', 'revoked-after-rename'] as const)(
+    'lost %s remains unknown to caller; fresh reader sees complete retained closure',
+    async (kind) => {
+      const f = await originalFixture();
+      const rename = fs.renameSync,
+        sync = fs.fsyncSync;
+      let published = false;
+      const r = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+        rename(...args);
+        if (fs.realpathSync(args[1]) === join(f.revisions.directory, 'revisions.json')) {
+          published = true;
+          if (kind === 'revoked-after-rename') f.revokeRuntime();
+        }
+      });
+      const q = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+        sync(fd);
+        if (published && kind === 'directory-sync') throw Error('lost publication reply');
+      });
+      const response = await f.app.inject({
+        method: 'POST',
+        url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+        headers: f.ownerHeaders,
+        payload: { expectedDigest: f.dto.expectedDigest },
+      });
+      expect(response.statusCode).toBe(409);
+      q.mockRestore();
+      r.mockRestore();
+      const fresh = new DockerResourceRevisionStore(f.revisions.directory);
+      try {
+        expect(fresh.original(undefined, f.dto.cursorId).dto).toMatchObject({
+          state: 'closed',
+          originalOutcome: 'unknown',
+          enforcement: 'not-observed',
+          allowedActions: [],
+        });
+        expect(fresh.originals(undefined).items).toEqual([]);
+        expect(fresh.canApprove(undefined)).toBe(true);
+      } finally {
+        fresh.close();
+      }
+      expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.originalEffects);
+    }
+  );
+});
+
+describe('original cursor phase/status actions remain independent of current target', () => {
+  it.each(['create-issued', 'created', 'start-issued', 'running', 'completed'] as const)(
+    '%s offers the finite metadata-only operation family after current generation changes',
+    async (phase) => {
+      const f = await resourcePhaseFixture(phase);
+      await f.companyStore.update((state) => {
+        state.employees.find((e) => e.id === target)!.sessionGeneration++;
+      });
+      const response = await f.app.inject({ method: 'GET', url: originalBase, headers: f.ownerHeaders });
+      expect(response.statusCode).toBe(200);
+      const dto = response.json().data.items[0];
+      expect(dto).toMatchObject({
+        taskPhase: phase,
+        state: 'pending',
+        enforcement: 'not-observed',
+        originalOutcome: 'unknown',
+        allowedActions: ['create-issued', 'created'].includes(phase) ? ['reconcile', 'retire'] : ['reconcile'],
+      });
+      expect(
+        (await f.app.inject({ method: 'GET', url: originalBase + '/' + dto.cursorId, headers: f.ownerHeaders })).json()
+          .data
+      ).toEqual(dto);
+      expect(f.resourceReads()).toBe(0);
+      expect(f.effects()).toBe(0);
+    }
+  );
+  it('a preSTART cursor whose actual original helper is terminal can close without rewriting its task phase', async () => {
+    const f = await originalFixture('created');
+    const beforeAttempt = f.revisions.original(undefined, f.dto.cursorId).attempt;
+    if (!('task' in beforeAttempt)) throw Error('Original task required');
+    const beforeTask = beforeAttempt.task;
+    f.physical.mutateRevisionHelper((raw) => {
+      raw.State = {
+        Status: 'exited',
+        Running: false,
+        Pid: 0,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        ExitCode: 1,
+      };
+    });
+    const response = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: f.dto.expectedDigest },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().data).toMatchObject({
+      state: 'closed',
+      taskPhase: 'create-issued',
+      originalOutcome: 'unknown',
+      enforcement: 'not-observed',
+    });
+    expect(f.revisions.original(undefined, f.dto.cursorId).attempt).toMatchObject({ task: beforeTask });
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.originalEffects);
+  });
+  it('retained closure cannot become a policy proof after a same-CID target scope changes', async () => {
+    const f = await originalFixture();
+    const response = await f.app.inject({
+      method: 'POST',
+      url: originalBase + '/' + f.dto.cursorId + '/reconcile',
+      headers: f.ownerHeaders,
+      payload: { expectedDigest: f.dto.expectedDigest },
+    });
+    expect(response.statusCode).toBe(200);
+    const original = f.revisions.original(undefined, f.dto.cursorId);
+    const moved = { ...f.physical.row(), sourceDigest: '1'.repeat(64) };
+    expect(f.revisions.history(moved).map((v) => v.attempt)).toEqual([original.attempt]);
+    expect(f.revisions.approved(moved)).toEqual([]);
+    expect(() =>
+      f.physical.controller.existingPolicy(moved, { ...moved.policy, memoryHighBytes: 48 * 1024 ** 3 })
+    ).toThrow();
   });
 });

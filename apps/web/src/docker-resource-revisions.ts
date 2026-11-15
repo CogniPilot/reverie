@@ -1,3 +1,14 @@
+import {
+  DockerOriginalWriterReceipt,
+  DockerOriginalPrestartReceipt,
+  DockerResourceOriginalCursorDTO,
+} from './docker-resource-original-data.js';
+import {
+  requireDockerOriginalResourceWriterProof,
+  requireDockerOriginalResourcePrestartProof,
+} from './docker-resource-original-writer.js';
+import { DockerResourceAttemptKey } from './docker-resource-attempt-key.js';
+export { DockerResourceAttemptKey } from './docker-resource-attempt-key.js';
 /** Separate durable desired/live leaf revisions. Original launch rows and key custody never change. */
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
@@ -62,17 +73,7 @@ export const DockerResourceLeafIdentity = z
   })
   .strict();
 export type DockerResourceLeafIdentity = z.infer<typeof DockerResourceLeafIdentity>;
-const base = z
-  .object({
-    revision: uuid,
-    scopeDigest: digest,
-    employeeId: uuid,
-    sessionId: uuid,
-    sessionGeneration: z.number().int().positive().safe(),
-    operationId: uuid,
-    containerId: digest,
-  })
-  .strict();
+const base = DockerResourceAttemptKey;
 export const DockerResourceClosedWriter = z
   .object({
     version: z.literal(1),
@@ -171,6 +172,18 @@ function isPublicationRefusal(error: unknown) {
 }
 
 export const DockerResourceAttempt = z.discriminatedUnion('state', [
+  base.extend({
+    state: z.literal('original-closed'),
+    task: DockerContinuationTask.refine((t) => t.role === 'leaf-helper'),
+    originalClosure: DockerOriginalWriterReceipt,
+  }),
+  base.extend({
+    state: z.literal('original-retired'),
+    task: DockerContinuationTask.refine(
+      (t) => t.role === 'leaf-helper' && ['create-issued', 'created'].includes(t.phase)
+    ),
+    originalRetirement: DockerOriginalPrestartReceipt,
+  }),
   base.extend({
     state: z.literal('helper'),
     task: DockerContinuationTask.refine((task) => task.role === 'leaf-helper'),
@@ -315,6 +328,45 @@ export function dockerResourceCapacityWitnesses(): DockerResourceAttempt[] {
       if (task.phase === 'completed') result.push(make({ state: 'applied', task, identity, observationDigest: hex }));
     }
   }
+  for (const task of tasks) {
+    result.push(
+      make({
+        state: 'original-closed',
+        task,
+        originalClosure: {
+          version: 1,
+          purpose: 'reverie-original-memory-writer-closed-v1',
+          authority: 'fresh-original-helper-terminal-v1',
+          originalKey: key,
+          taskDigest: dockerContinuationDigest(task),
+          originalBoxId: hex,
+          containerId: hex,
+          imageId: task.imageId,
+          configurationDigest: task.configurationDigest,
+          terminalStateDigest: hex,
+          exitCode: 255,
+          originalOutcome: 'unknown',
+        },
+      })
+    );
+    if (task.phase === 'create-issued' || task.phase === 'created')
+      for (const observed of [null, { containerId: hex, originalBoxId: hex, stateDigest: hex }])
+        result.push(
+          make({
+            state: 'original-retired',
+            task,
+            originalRetirement: {
+              version: 1,
+              purpose: 'reverie-original-memory-prestart-observation-v1',
+              authority: 'canonical-retirement-cas-required-v1',
+              originalKey: key,
+              taskDigest: dockerContinuationDigest(task),
+              observed,
+              originalOutcome: 'unknown',
+            },
+          })
+        );
+  }
   return result;
 }
 export const DockerResourceAttemptMaximumBytes = Math.max(...dockerResourceCapacityWitnesses().map(encodedBytes));
@@ -380,6 +432,13 @@ export function dockerResourceAttemptKey(row: DockerEmployeeContinuationRecord, 
     operationId: row.request.operationId,
     containerId: row.destination.containerId,
   };
+}
+export function dockerOriginalAttemptKey(attempt: DockerResourceAttempt) {
+  const { revision, scopeDigest, employeeId, sessionId, sessionGeneration, operationId, containerId } = attempt;
+  return base.parse({ revision, scopeDigest, employeeId, sessionId, sessionGeneration, operationId, containerId });
+}
+function originalMetadataFinal(attempt: DockerResourceAttempt): boolean {
+  return attempt.state === 'original-closed' || attempt.state === 'original-retired';
 }
 function sameKey(a: DockerResourceAttempt, row: DockerEmployeeContinuationRecord, revision: string): boolean {
   const key = dockerResourceAttemptKey(row, revision);
@@ -511,6 +570,28 @@ export class DockerResourceRevisionStore {
       )
         refuse();
       for (const item of value.attempts) {
+        if (item.state === 'original-closed' || item.state === 'original-retired') {
+          const r = item.state === 'original-closed' ? item.originalClosure : item.originalRetirement;
+          if (
+            !isDeepStrictEqual(r.originalKey, dockerOriginalAttemptKey(item)) ||
+            r.taskDigest !== dockerContinuationDigest(item.task)
+          )
+            refuse();
+          if (
+            item.state === 'original-closed' &&
+            (item.originalClosure.imageId !== item.task.imageId ||
+              item.originalClosure.configurationDigest !== item.task.configurationDigest ||
+              ('containerId' in item.task && item.originalClosure.containerId !== item.task.containerId))
+          )
+            refuse();
+          if (
+            item.state === 'original-retired' &&
+            item.originalRetirement.observed &&
+            'containerId' in item.task &&
+            item.originalRetirement.observed.containerId !== item.task.containerId
+          )
+            refuse();
+        }
         if ('retirement' in item && item.retirement.taskDigest !== dockerContinuationDigest(item.task)) refuse();
         if (item.state === 'closed-writer' || item.state === 'observed-after-closure') {
           if (
@@ -524,7 +605,7 @@ export class DockerResourceRevisionStore {
             refuse();
         }
       }
-      if (value.version === 1 && this.#seenFormatTwo) {
+      if (value.version === 1 && (this.#seenFormatTwo || value.attempts.some(originalMetadataFinal))) {
         this.#held = true;
         refuse('DOCKER_RESOURCE_REVISION_FORMAT_CHANGED');
       }
@@ -553,6 +634,7 @@ export class DockerResourceRevisionStore {
       attempt.state === 'helper' ||
       attempt.state === 'closed-writer' ||
       attempt.state === 'unstarted-retired' ||
+      originalMetadataFinal(attempt) ||
       !sameKey(attempt, row, attempt.revision)
     )
       return [];
@@ -570,7 +652,7 @@ export class DockerResourceRevisionStore {
     return state.attempts
       .filter((item) => item.containerId === row.destination?.containerId)
       .map((attempt) => {
-        if (!sameKey(attempt, row, attempt.revision)) refuse();
+        if (!sameKey(attempt, row, attempt.revision) && !originalMetadataFinal(attempt)) refuse();
         const desired = state.desired.find(
           (item) => item.revision === attempt.revision && item.owner === (row.owner ?? null)
         );
@@ -585,7 +667,7 @@ export class DockerResourceRevisionStore {
         item.containerId === row.destination?.containerId &&
         item.revision === revision
     );
-    if (all.length > 1 || (all[0] && !sameKey(all[0], row, revision))) refuse();
+    if (all.length > 1 || (all[0] && !sameKey(all[0], row, revision) && !originalMetadataFinal(all[0]))) refuse();
     return structuredClone(all[0]);
   }
   /** Any issued older revision for this binding must settle before a new effect/adoption. */
@@ -725,6 +807,7 @@ export class DockerResourceRevisionStore {
       return ['create-issued', 'created'].includes(attempt.task.phase)
         ? ['continue-original', 'abandon-original']
         : ['reconcile'];
+    if (originalMetadataFinal(attempt)) return ['new-revision'];
     if (attempt.state === 'closed-writer' || attempt.state === 'unstarted-retired')
       return ['reconcile', 'new-revision'];
     return [];
@@ -756,12 +839,22 @@ export class DockerResourceRevisionStore {
     current: () => void
   ): Promise<void> {
     const checked = DockerResourceAttempt.parse(next);
-    if (!sameKey(checked, row, desired.revision)) refuse();
+    if (!sameKey(checked, row, desired.revision) || originalMetadataFinal(checked)) refuse();
     return this.#update((state) => {
       if (
         !isDeepStrictEqual(
           [...state.desired].reverse().find((item) => item.owner === desired.owner),
           desired
+        )
+      )
+        refuse();
+      if (
+        state.attempts.some(
+          (item) =>
+            item.revision === desired.revision &&
+            item.operationId === row.request.operationId &&
+            item.containerId === row.destination?.containerId &&
+            !sameKey(item, row, desired.revision)
         )
       )
         refuse();
@@ -842,6 +935,119 @@ export class DockerResourceRevisionStore {
       }
       state.attempts = projected.attempts;
     }, current);
+  }
+
+  #original(state: Ledger, owner: string | undefined, cursorId: string) {
+    digest.parse(cursorId);
+    for (const attempt of state.attempts) {
+      if (!('task' in attempt)) continue;
+      const desired = state.desired.find(
+        (value) => value.revision === attempt.revision && value.owner === (owner ?? null)
+      );
+      if (!desired) continue;
+      const key = dockerOriginalAttemptKey(attempt);
+      if (dockerContinuationDigest({ owner: desired.owner, key }) !== cursorId) continue;
+      const pending = attempt.state === 'helper';
+      const stateName = pending
+        ? 'pending'
+        : attempt.state === 'applied'
+          ? 'acknowledged'
+          : attempt.state === 'unstarted-retired' ||
+              attempt.state === 'observed-after-retirement' ||
+              attempt.state === 'original-retired'
+            ? 'retired'
+            : 'closed';
+      const dto = DockerResourceOriginalCursorDTO.parse({
+        revision: key.revision,
+        employeeId: key.employeeId,
+        sessionId: key.sessionId,
+        sessionGeneration: key.sessionGeneration,
+        operationId: key.operationId,
+        containerId: key.containerId,
+        cursorId,
+        expectedDigest: dockerContinuationDigest(attempt),
+        helperContainerId:
+          'containerId' in attempt.task
+            ? attempt.task.containerId
+            : attempt.state === 'original-closed'
+              ? attempt.originalClosure.containerId
+              : attempt.state === 'original-retired'
+                ? (attempt.originalRetirement.observed?.containerId ?? null)
+                : null,
+        taskPhase: attempt.task.phase,
+        state: stateName,
+        originalOutcome: attempt.state === 'applied' ? 'acknowledged' : 'unknown',
+        allowedActions: pending
+          ? ['create-issued', 'created'].includes(attempt.task.phase)
+            ? ['reconcile', 'retire']
+            : ['reconcile']
+          : [],
+        enforcement: 'not-observed',
+      });
+      return structuredClone({ desired, attempt, key, dto });
+    }
+    refuse('DOCKER_RESOURCE_ORIGINAL_NOT_FOUND');
+  }
+  original(owner: string | undefined, cursorId: string) {
+    return this.#original(this.#read(), owner, cursorId);
+  }
+  originals(owner: string | undefined, after?: string) {
+    if (after !== undefined) digest.parse(after);
+    const state = this.#read();
+    const ids = state.attempts
+      .filter((value) => value.state === 'helper')
+      .flatMap((value) => {
+        const desired = state.desired.find((d) => d.revision === value.revision && d.owner === (owner ?? null));
+        return desired
+          ? [dockerContinuationDigest({ owner: desired.owner, key: dockerOriginalAttemptKey(value) })]
+          : [];
+      })
+      .sort()
+      .filter((id) => !after || id > after);
+    const selected = ids.slice(0, 64);
+    return {
+      items: selected.map((id) => this.#original(state, owner, id).dto),
+      next: ids.length > 64 ? selected.at(-1)! : null,
+      enforcement: 'not-observed' as const,
+    };
+  }
+  /** Metadata settlement never supplies current kernel identity or policy authority. */
+  settleOriginal(
+    owner: string | undefined,
+    cursorId: string,
+    expectedDigest: string,
+    proof: unknown,
+    kind: 'close' | 'retire',
+    authority: () => void
+  ): Promise<void> {
+    digest.parse(expectedDigest);
+    return this.#update((state) => {
+      const captured = this.#original(state, owner, cursorId);
+      if (captured.dto.expectedDigest !== expectedDigest || captured.attempt.state !== 'helper') refuse();
+      const before = captured.attempt;
+      let next: DockerResourceAttempt;
+      if (kind === 'close') {
+        const receipt = requireDockerOriginalResourceWriterProof(proof, captured.key, before.task);
+        next = DockerResourceAttempt.parse({
+          ...captured.key,
+          state: 'original-closed',
+          task: before.task,
+          originalClosure: receipt,
+        });
+      } else {
+        if (!['create-issued', 'created'].includes(before.task.phase)) refuse();
+        const receipt = requireDockerOriginalResourcePrestartProof(proof, captured.key, before.task);
+        next = DockerResourceAttempt.parse({
+          ...captured.key,
+          state: 'original-retired',
+          task: before.task,
+          originalRetirement: receipt,
+        });
+      }
+      const index = state.attempts.findIndex((value) => isDeepStrictEqual(value, before));
+      if (index < 0) refuse();
+      state.attempts[index] = next;
+    }, authority);
   }
   close(): void {
     if (this.#closed) {

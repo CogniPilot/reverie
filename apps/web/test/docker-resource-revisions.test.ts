@@ -443,6 +443,14 @@ describe('schema-derived settlement capacity', () => {
         checkIdentity(witness.closure.identity, schema.shape.closure.shape.identity);
       }
       if ('retirement' in witness && 'retirement' in schema.shape) keys(witness.retirement, schema.shape.retirement);
+      if ('originalClosure' in witness && 'originalClosure' in schema.shape) {
+        keys(witness.originalClosure, schema.shape.originalClosure);
+        keys(witness.originalClosure.originalKey, schema.shape.originalClosure.shape.originalKey);
+      }
+      if ('originalRetirement' in witness && 'originalRetirement' in schema.shape) {
+        keys(witness.originalRetirement, schema.shape.originalRetirement);
+        keys(witness.originalRetirement.originalKey, schema.shape.originalRetirement.shape.originalKey);
+      }
       for (const leaf of scalarLeaves(witness)) {
         const mutate = (replacement: string | number) => {
           const copy = structuredClone(witness);

@@ -41,7 +41,9 @@ export function registerDockerResourceRevisionRoutes(
       const notIssued = dockerDefaultPublicationRefusal(error) ?? dockerAttemptPublicationRefusal(error);
       if (notIssued) return reply.code(409).send({ success: false, error: notIssued });
       if (error instanceof DockerEmployeeContinuationError)
-        return reply.code(error.status).send({ success: false, error: { code: error.code } });
+        return reply
+          .code(error.code === 'DOCKER_RESOURCE_ORIGINAL_NOT_FOUND' ? 404 : error.status)
+          .send({ success: false, error: { code: error.code } });
       if (error instanceof CompanyError)
         return reply.code(error.status).send({ success: false, error: { code: 'DOCKER_RESOURCE_REVISION_REFUSED' } });
       if (error instanceof ZodError)
@@ -55,6 +57,37 @@ export function registerDockerResourceRevisionRoutes(
       return service.status(grant.owner, grant.require);
     })
   );
+  const digest = z.string().regex(/^[a-f0-9]{64}$/);
+  app.get('/api/company/docker-resources/original-attempts', async (req, reply) =>
+    run(reply, async () => {
+      const grant = authority(req),
+        query = z.object({ after: digest.optional() }).strict().parse(req.query);
+      return service.originalAttempts(grant.owner, grant.require, query.after);
+    })
+  );
+  app.get('/api/company/docker-resources/original-attempts/:cursorId', async (req, reply) =>
+    run(reply, async () => {
+      const grant = authority(req),
+        cursorId = digest.parse((req.params as { cursorId: string }).cursorId);
+      return service.originalAttempt(grant.owner, cursorId, grant.require);
+    })
+  );
+  for (const action of ['reconcile', 'retire'] as const) {
+    app.post('/api/company/docker-resources/original-attempts/:cursorId/' + action, async (req, reply) =>
+      run(reply, async () => {
+        const grant = authority(req),
+          cursorId = digest.parse((req.params as { cursorId: string }).cursorId);
+        const body = z.object({ expectedDigest: digest }).strict().parse(req.body);
+        return service.settleOriginalAttempt(
+          grant.owner,
+          cursorId,
+          body.expectedDigest,
+          action === 'reconcile' ? 'close' : 'retire',
+          grant.require
+        );
+      })
+    );
+  }
   app.put('/api/company/docker-resources/default', async (req, reply) =>
     run(reply, async () => {
       const grant = authority(req),

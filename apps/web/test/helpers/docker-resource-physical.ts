@@ -166,6 +166,7 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       const binds = (config.HostConfig as { Binds: string[] }).Binds;
       containers.set(id, {
         Id: id,
+        Name: '/' + name,
         Image: config.Image,
         Config: {
           ...structuredClone(config),

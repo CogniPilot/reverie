@@ -67,6 +67,55 @@ export class DockerResourceRevisionService {
     current();
     return { desired, enforcement: 'not-observed' as const };
   }
+  originalAttempts(owner: string | undefined, authority: () => void, after?: string) {
+    authority();
+    const result = this.revisions.originals(owner, after);
+    authority();
+    return result;
+  }
+  originalAttempt(owner: string | undefined, cursorId: string, authority: () => void) {
+    authority();
+    const result = this.revisions.original(owner, cursorId).dto;
+    authority();
+    return result;
+  }
+  async settleOriginalAttempt(
+    owner: string | undefined,
+    cursorId: string,
+    expectedDigest: string,
+    kind: 'close' | 'retire',
+    authority: () => void
+  ) {
+    authority();
+    const captured = this.revisions.original(owner, cursorId);
+    if (captured.dto.expectedDigest !== expectedDigest || captured.attempt.state !== 'helper')
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REVISION_CHANGED');
+    let revoked = false;
+    // This guard is only for native awaits BEFORE publication. The journal's
+    // after-rename authority must not invalidate its own successful settlement.
+    const unchanged = () => {
+      if (revoked) throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REVISION_CHANGED');
+      try {
+        authority();
+        const now = this.revisions.original(owner, cursorId);
+        if (now.dto.expectedDigest !== expectedDigest || !isDeepStrictEqual(now.desired, captured.desired))
+          throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REVISION_CHANGED');
+      } catch (error) {
+        revoked = true;
+        throw error;
+      }
+    };
+    unchanged();
+    const reader = this.resources.originalWriterReader();
+    const proof =
+      kind === 'close'
+        ? await reader.capture(captured.key, captured.attempt.task, unchanged)
+        : await reader.inspectUnstarted(captured.key, captured.attempt.task, unchanged);
+    unchanged();
+    await this.revisions.settleOriginal(owner, cursorId, expectedDigest, proof, kind, authority);
+    authority();
+    return this.originalAttempt(owner, cursorId, authority);
+  }
   status(owner: string | undefined, current: () => void) {
     current();
     const desired = this.revisions.desired(owner);
@@ -88,13 +137,17 @@ export class DockerResourceRevisionService {
         sessionGeneration: employee.sessionGeneration,
         desiredMemoryHighBytes: desired?.memoryHighBytes ?? null,
         state:
-          attempt?.state === 'observed-after-closure' || attempt?.state === 'observed-after-retirement'
-            ? 'observed'
-            : (attempt?.state ?? (row ? 'not-observed' : 'offline-or-unbound')),
-        ...(attempt && 'closure' in attempt
+          attempt?.state === 'original-closed'
+            ? 'closed-writer'
+            : attempt?.state === 'original-retired'
+              ? 'unstarted-retired'
+              : attempt?.state === 'observed-after-closure' || attempt?.state === 'observed-after-retirement'
+                ? 'observed'
+                : (attempt?.state ?? (row ? 'not-observed' : 'offline-or-unbound')),
+        ...(attempt && ('closure' in attempt || attempt.state === 'original-closed')
           ? { writerClosed: true as const, originalOutcome: 'unknown' as const }
           : {}),
-        ...(attempt && 'retirement' in attempt
+        ...(attempt && ('retirement' in attempt || attempt.state === 'original-retired')
           ? { intentRetired: true as const, originalOutcome: 'unknown' as const }
           : {}),
         allowedActions: row ? this.revisions.actions(row, desired?.revision) : [],

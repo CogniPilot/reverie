@@ -1,3 +1,8 @@
+import { dockerOriginalAttemptKey } from './docker-resource-revisions.js';
+import {
+  requireDockerOriginalResourceWriterProof,
+  requireDockerOriginalResourcePrestartProof,
+} from './docker-resource-original-writer.js';
 /** Docker-only orchestration of the fixed Rust resource helper. Canonical task
  * cursors precede create/start; a failed reply never authorizes a second effect. */
 import { isDeepStrictEqual } from 'node:util';
@@ -184,6 +189,8 @@ export class DockerEffectiveResourceProof {
         this.#attempt.state === 'helper' ||
         this.#attempt.state === 'closed-writer' ||
         this.#attempt.state === 'unstarted-retired' ||
+        this.#attempt.state === 'original-closed' ||
+        this.#attempt.state === 'original-retired' ||
         !isDeepStrictEqual(this.#store.revision(row.owner, this.#revision.revision), this.#revision) ||
         !isDeepStrictEqual(this.#store.attempt(row, this.#revision.revision), this.#attempt) ||
         !this.#store.approved(row).some(({ attempt }) => isDeepStrictEqual(attempt, this.#attempt))
@@ -1251,6 +1258,24 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (attempt.revision === exceptRevision) continue;
       if (attempt.state === 'helper') refuse('DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING');
       if (!('task' in attempt)) continue;
+      if (attempt.state === 'original-closed') {
+        const proof = await this.originalWriterReader().capture(
+          dockerOriginalAttemptKey(attempt),
+          attempt.task,
+          current
+        );
+        requireDockerOriginalResourceWriterProof(proof, dockerOriginalAttemptKey(attempt), attempt.task);
+        continue;
+      }
+      if (attempt.state === 'original-retired') {
+        const proof = await this.originalWriterReader().inspectUnstarted(
+          dockerOriginalAttemptKey(attempt),
+          attempt.task,
+          current
+        );
+        requireDockerOriginalResourcePrestartProof(proof, dockerOriginalAttemptKey(attempt), attempt.task);
+        continue;
+      }
       if ('retirement' in attempt) {
         if (attempt.retirement.taskDigest !== dockerContinuationDigest(attempt.task)) refuse();
         seen = await this.#unstartedWriter(row, desired, attempt.task, seen, current);
@@ -1275,6 +1300,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
     stable();
     let attempt = this.revisions.attempt(row, revision);
     if (!attempt || !('task' in attempt)) refuse('DOCKER_RESOURCE_REVISION_WRITER_UNCONFIRMED');
+    if (attempt.state === 'original-closed' || attempt.state === 'original-retired')
+      refuse('DOCKER_RESOURCE_REVISION_NEW_REVISION_REQUIRED');
     if ('retirement' in attempt) return this.#reconcileRetired(row, desired, attempt, stable);
     let seen = await this.#live(row, stable);
     if (!seen) refuse();
@@ -1356,6 +1383,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
         attempt.state === 'helper' ||
         attempt.state === 'closed-writer' ||
         attempt.state === 'unstarted-retired' ||
+        attempt.state === 'original-closed' ||
+        attempt.state === 'original-retired' ||
         !this.#matches(seen, policy, policy.memoryHighBytes) ||
         !isDeepStrictEqual(attempt.identity, this.#identity(seen))
       )
@@ -1534,7 +1563,12 @@ export class DockerContainedResources implements DockerContainedResourceControll
     seen = await this.#closedHistory(row, seen, requireCurrent, revision);
     if (!seen.worker) refuse();
     let attempt = this.revisions.attempt(row, revision);
-    if (attempt?.state === 'closed-writer' || attempt?.state === 'unstarted-retired')
+    if (
+      attempt?.state === 'closed-writer' ||
+      attempt?.state === 'unstarted-retired' ||
+      attempt?.state === 'original-closed' ||
+      attempt?.state === 'original-retired'
+    )
       refuse('DOCKER_RESOURCE_REVISION_NEW_REVISION_REQUIRED');
     if (!attempt && this.#matches(seen, policy, policy.memoryHighBytes)) {
       await this.revisions.publish(
@@ -1655,7 +1689,9 @@ export class DockerContainedResources implements DockerContainedResourceControll
       !final ||
       final.state === 'helper' ||
       final.state === 'closed-writer' ||
-      final.state === 'unstarted-retired'
+      final.state === 'unstarted-retired' ||
+      final.state === 'original-closed' ||
+      final.state === 'original-retired'
     )
       refuse('DOCKER_RESOURCE_REVISION_READBACK');
     return {

@@ -66,3 +66,39 @@ Readers accept versions 1 and 2. Reading accepted version 1 does not rewrite it;
 An actual initial apply/adoption capacity rejection can return HTTP 409 with {code: "DOCKER_RESOURCE_REVISION_CAPACITY", action: "apply", publication: "not-issued", employeeId, sessionId, sessionGeneration, operationId, containerId, revision}. The private outcome is minted only by that transaction's locked prewrite rejection when no prior cursor exists, and escapes only after checked consuming close. Transport/finalizer/aggregate failures remain unknown; the marker is not retry or helper authority. Clients require an exact captured scope and fresh authenticated GET before releasing only that request's pending latch; no automatic POST follows.
 
 Global status exposes approvalCode: "DOCKER_RESOURCE_REVISION_CAPACITY" only when the same actual approval predicate blocks capacity. Ordinary and pending-helper statuses omit it. An apply action may still adopt fresh matching native facts without reserving a new helper; the server distinguishes that path and reports a definite initial capacity refusal where necessary.
+
+## Retained original attempts
+
+An owner can inspect an original resource attempt independently of the current
+employee, generation, binding, worker process, or latest desired revision. The
+four owner-only endpoints are:
+
+- `GET /api/company/docker-resources/original-attempts?after=<cursorId>`
+- `GET /api/company/docker-resources/original-attempts/:cursorId`
+- `POST /api/company/docker-resources/original-attempts/:cursorId/reconcile`
+- `POST /api/company/docker-resources/original-attempts/:cursorId/retire`
+
+Both POST bodies contain only `{expectedDigest}`. The historical approval owner,
+immutable original key, and exact retained task supply the lookup and CAS scope.
+The selector/digest is DATA, never authority. The collection contains up to64
+pending attempts per page. Exact GET retains settled records, allowing a lost
+reply to be checked without interpreting absence as success.
+
+Reconcile inspects the original fixed high-only helper twice. It requires exact
+historically issued image/configuration, capability, terminal PID0 state, and
+no-restart/no-auto-remove protections. It never probes the old worker or claims
+current memory enforcement. Retire is restricted to a preSTART cursor and actual
+fixed created metadata, or observed absence. Its canonical CAS fences later
+application dispatch; absence is not a terminal-writer proof. Existing original
+task phases and unknown outcomes are retained unchanged. No endpoint starts,
+stops, removes, or retries a helper/provider.
+
+The immutable `original-closed` and `original-retired` journal variants contain
+metadata-only receipts and cannot supply effective resource-policy proofs.
+Pending helpers still block the owning approval until settled. New writes
+revalidate original closed/retired metadata separately from fresh current-target
+kernel/admission checks. No original receipt is converted into live policy
+adoption. These new variants publish in journal version2; older readers that do
+not recognize them refuse rather than strip history. Mutable settlement capacity
+is reserved before helper intent, while these immutable final records retain
+only their actual encoded size.
