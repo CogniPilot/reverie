@@ -138,7 +138,8 @@ p.write_text(json.dumps(s))
         publisher=workflow.split('\n  publish-image:',1)[1].split('\n  release-assets:',1)[0]
         assets=workflow.split('\n  release-assets:',1)[1]
         self.assertIn('Image publication verified:',publisher)
-        self.assertIn('needs: [image, debian-install, worker-browser]',assets)
+        for consumer in (publisher, assets):
+            self.assertIn('needs: [image, debian-install, worker-browser, memory-high-native]',consumer)
         self.assertNotIn('needs: [publish-image',assets)
         self.assertIn('see publish-image separately for GHCR status',assets)
 
