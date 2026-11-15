@@ -103,10 +103,13 @@ export class DockerResourceRevisionService {
       };
     });
     current();
+    const approval = this.revisions.approvalAvailability(owner);
+    current();
     return {
       desired: desired ?? null,
       employees: results,
-      allowedActions: this.revisions.canApprove(owner) ? ['approve-default'] : [],
+      allowedActions: approval.allowed ? ['approve-default'] : [],
+      ...(approval.code ? { approvalCode: approval.code } : {}),
     };
   }
   /** Durable owner approval, not a caller/title permission. No HTTP endpoint invokes this with worker authority. */

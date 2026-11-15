@@ -1,3 +1,4 @@
+import { resourceCapacityHistory } from './helpers/docker-resource-capacity.js';
 /** Actual HTTP authentication and canonical CompanyStore; engine ports are inert,
  * synthetic observations. No Docker socket, provider, or live data is used. */
 import fs from 'node:fs';
@@ -7,6 +8,8 @@ import {
   DockerResourceRevisionStore,
   dockerRevisedPolicy,
   dockerResourceAttemptKey,
+  dockerResourceCapacityWitnesses,
+  DockerResourceAttemptMaximumBytes,
 } from '../src/docker-resource-revisions.js';
 import { DockerEmployeeEngine } from '../src/docker-employee-engine.js';
 import { DockerContainedResources } from '../src/docker-contained-resource-controller.js';
@@ -1547,5 +1550,185 @@ describe('resource target currency excludes unrelated progress, retaining real o
       read.mockRestore();
       destination.mockRestore();
     }
+  });
+});
+
+describe('actual apply capacity outcome transport and owner authentication', () => {
+  const revision = '77777777-7777-4777-8777-777777777777';
+  async function ready(freeBytes: number) {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const desired = {
+      revision,
+      owner: null,
+      scope: 'all-current-and-future' as const,
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    await f.revisions.approve(desired, null, () => {});
+    fs.writeFileSync(
+      join(f.revisions.directory, 'revisions.json'),
+      JSON.stringify({ ...resourceCapacityHistory(desired, freeBytes), version: 2 })
+    );
+    // Scope/HTTP error transport only. These controlled method ports DO NOT
+    // represent Engine/native acceptance; separate physical-port tests own it.
+    const engine = vi.spyOn(f.resourceEngine, 'verifyResourceDestination').mockImplementation(async (_row, current) => {
+      current();
+    });
+    const resources = vi.spyOn(f.resources, 'reviseMemoryHigh').mockImplementation(async (row, selected, current) => {
+      current();
+      const sample = dockerResourceCapacityWitnesses().find(
+        (value) => value.state === 'helper' && value.task.phase === 'create-issued'
+      )!;
+      if (sample.state !== 'helper') throw Error('Initial task DATA required');
+      await f.revisions.publish(
+        row,
+        desired,
+        undefined,
+        {
+          ...dockerResourceAttemptKey(row, selected),
+          state: 'helper',
+          task: sample.task,
+        },
+        current
+      );
+      throw Error('Controlled publisher expected a capacity/finalizer refusal');
+    });
+    return {
+      f,
+      restore: () => {
+        engine.mockRestore();
+        resources.mockRestore();
+      },
+    };
+  }
+  it('real locked pre-intent rejection returns the exact scoped not-issued response with no Engine effects', async () => {
+    const { f, restore } = await ready(1024);
+    try {
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-resources/apply',
+        headers: f.ownerHeaders,
+        payload: { revision },
+      });
+      expect(response.statusCode).toBe(409);
+      const actual = response.json();
+      expect(actual).toEqual({
+        success: false,
+        error: {
+          code: 'DOCKER_RESOURCE_REVISION_CAPACITY',
+          action: 'apply',
+          publication: 'not-issued',
+          employeeId: target,
+          sessionId: sid,
+          sessionGeneration: 9,
+          operationId: '55555555-5555-4555-8555-555555555555',
+          containerId: '6'.repeat(64),
+          revision,
+        },
+      });
+      expect(actual).toEqual(
+        JSON.parse(
+          fs.readFileSync(new URL('./fixtures/docker-resource-apply-not-issued.json', import.meta.url), 'utf8')
+        )
+      );
+      expect(f.effects()).toBe(0);
+      expect(f.revisions.attempt(f.store.record(target)!, revision)).toBeUndefined();
+    } finally {
+      restore();
+    }
+  });
+  it('consuming-close loss makes a prewrite refusal unknown, without an outcome marker', async () => {
+    const { f, restore } = await ready(1024),
+      native = fs.closeSync;
+    const close = vi.spyOn(fs, 'closeSync').mockImplementation((fd) => {
+      let own = false;
+      try {
+        own = fs.readlinkSync('/proc/self/fd/' + fd) === join(f.revisions.directory, 'writer.lock');
+      } catch {
+        /* Unrelated descriptor. */
+      }
+      native(fd);
+      if (own) throw Error('lost apply lock close');
+    });
+    try {
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-resources/apply',
+        headers: f.ownerHeaders,
+        payload: { revision },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ success: false, error: { code: 'DOCKER_RESOURCE_REVISION_UNCONFIRMED' } });
+    } finally {
+      close.mockRestore();
+      restore();
+    }
+  });
+  it('postpublication finalizer loss preserves the real cursor and never returns not-issued', async () => {
+    const { f, restore } = await ready(DockerResourceAttemptMaximumBytes + 1024),
+      renameNative = fs.renameSync,
+      syncNative = fs.fsyncSync;
+    let renamed = false;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      renameNative(...args);
+      if (fs.realpathSync(args[1]) === join(f.revisions.directory, 'revisions.json')) renamed = true;
+    });
+    const sync = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+      syncNative(fd);
+      if (renamed) throw Error('lost apply finalize');
+    });
+    try {
+      const response = await f.app.inject({
+        method: 'POST',
+        url: f.url + '/docker-resources/apply',
+        headers: f.ownerHeaders,
+        payload: { revision },
+      });
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({ success: false, error: { code: 'DOCKER_RESOURCE_REVISION_UNCONFIRMED' } });
+      expect(renamed).toBe(true);
+      expect(f.effects()).toBe(0);
+    } finally {
+      rename.mockRestore();
+      sync.mockRestore();
+      restore();
+    }
+    const actual = JSON.parse(fs.readFileSync(join(f.revisions.directory, 'revisions.json'), 'utf8'));
+    expect(
+      actual.attempts.some(
+        (value: { state: string; employeeId: string }) => value.state === 'helper' && value.employeeId === target
+      )
+    ).toBe(true);
+  });
+});
+
+describe('actual retained-ledger capacity status', () => {
+  it('reports an honest bounded approval reason without Engine reads or effects', async () => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const desired = {
+      revision: '77777777-7777-4777-8777-777777777777',
+      owner: null,
+      scope: 'all-current-and-future' as const,
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    await f.revisions.approve(desired, null, () => {});
+    fs.writeFileSync(
+      join(f.revisions.directory, 'revisions.json'),
+      JSON.stringify({ ...resourceCapacityHistory(desired, 50), version: 2 })
+    );
+    const response = await f.app.inject({
+      method: 'GET',
+      url: '/api/company/docker-resources',
+      headers: f.ownerHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    const actual = response.json();
+    expect(actual.data).toMatchObject({ allowedActions: [], approvalCode: 'DOCKER_RESOURCE_REVISION_CAPACITY' });
+    expect(f.effects()).toBe(0);
+    expect(f.resourceReads()).toBe(0);
+    expect(actual).toEqual(
+      JSON.parse(fs.readFileSync(new URL('./fixtures/docker-resource-capacity-status.json', import.meta.url), 'utf8'))
+    );
   });
 });

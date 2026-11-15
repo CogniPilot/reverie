@@ -3,7 +3,11 @@ import type { FastifyInstance } from 'fastify';
 import { z, ZodError } from 'zod';
 import { CompanyError } from '../../company-service.js';
 import { DockerEmployeeContinuationError } from '../../docker-employee-continuation.js';
-import { DockerMemoryHigh, dockerDefaultPublicationRefusal } from '../../docker-resource-revisions.js';
+import {
+  DockerMemoryHigh,
+  dockerDefaultPublicationRefusal,
+  dockerAttemptPublicationRefusal,
+} from '../../docker-resource-revisions.js';
 import type { DockerResourceRevisionService } from '../../docker-resource-revision-service.js';
 import type { DockerContinuationRouteAuthentication } from './docker-employee-continuation-routes.js';
 const uuid = z
@@ -34,7 +38,7 @@ export function registerDockerResourceRevisionRoutes(
     try {
       return { success: true, data: await body() };
     } catch (error) {
-      const notIssued = dockerDefaultPublicationRefusal(error);
+      const notIssued = dockerDefaultPublicationRefusal(error) ?? dockerAttemptPublicationRefusal(error);
       if (notIssued) return reply.code(409).send({ success: false, error: notIssued });
       if (error instanceof DockerEmployeeContinuationError)
         return reply.code(error.status).send({ success: false, error: { code: error.code } });

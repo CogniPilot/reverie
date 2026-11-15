@@ -134,6 +134,42 @@ export function dockerDefaultPublicationRefusal(error: unknown) {
   }
 }
 
+const attemptPublicationOrigin = Symbol('actual initial attempt capacity rejection before publication');
+class DockerAttemptPublicationRefusal extends DockerEmployeeContinuationError {
+  readonly #target: ReturnType<typeof dockerResourceAttemptKey>;
+  constructor(origin: symbol, target: ReturnType<typeof dockerResourceAttemptKey>) {
+    if (origin !== attemptPublicationOrigin) throw Error('Actual initial resource publication refusal required');
+    super('DOCKER_RESOURCE_REVISION_CAPACITY');
+    this.#target = base.parse(target);
+    Object.freeze(this);
+  }
+  describe() {
+    const { employeeId, sessionId, sessionGeneration, operationId, containerId, revision } = this.#target;
+    return {
+      code: this.code,
+      action: 'apply' as const,
+      publication: 'not-issued' as const,
+      employeeId,
+      sessionId,
+      sessionGeneration,
+      operationId,
+      containerId,
+      revision,
+    };
+  }
+}
+Object.freeze(DockerAttemptPublicationRefusal.prototype);
+export function dockerAttemptPublicationRefusal(error: unknown) {
+  try {
+    return DockerAttemptPublicationRefusal.prototype.describe.call(error as DockerAttemptPublicationRefusal);
+  } catch {
+    return undefined;
+  }
+}
+function isPublicationRefusal(error: unknown) {
+  return error instanceof DockerDefaultPublicationRefusal || error instanceof DockerAttemptPublicationRefusal;
+}
+
 export const DockerResourceAttempt = z.discriminatedUnion('state', [
   base.extend({
     state: z.literal('helper'),
@@ -182,13 +218,129 @@ export const DockerResourceAttempt = z.discriminatedUnion('state', [
 export type DockerResourceAttempt = z.infer<typeof DockerResourceAttempt>;
 const ledger = z
   .object({
-    version: z.literal(1),
+    version: z.union([z.literal(1), z.literal(2)]),
     purpose: z.literal('reverie-docker-resource-revisions-v1'),
     desired: z.array(DockerResourceDesiredRevision).max(256),
     attempts: z.array(DockerResourceAttempt).max(4096),
   })
   .strict();
 type Ledger = z.infer<typeof ledger>;
+
+export const DockerResourceLedgerByteLimit = 2 * 1024 ** 2;
+const encodedBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
+/** Constructive upper bounds for the actual closed schemas. JSON needs at most six
+ * bytes per UTF-16 unit; NUL attains that maximum. Safe integers use <=16 decimal
+ * digits. Regex-only fields are ASCII. Every task phase and attempt variant is
+ * represented, including BOTH copies of identity after terminal closure.
+ * Owning tests pin union coverage and each field's accepting/rejecting boundary. */
+export function dockerResourceCapacityWitnesses(): DockerResourceAttempt[] {
+  const hex = 'f'.repeat(64),
+    uuidMax = 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    decimalMax = '9'.repeat(20);
+  const identity = DockerResourceLeafIdentity.parse({
+    boxId: hex,
+    parent: { path: '\0'.repeat(4096), dev: decimalMax, ino: decimalMax },
+    anchor: {
+      id: hex,
+      pid: Number.MAX_SAFE_INTEGER,
+      startTicks: decimalMax,
+      path: '\0'.repeat(4096),
+      dev: decimalMax,
+      ino: decimalMax,
+    },
+    worker: {
+      id: hex,
+      pid: Number.MAX_SAFE_INTEGER,
+      startTicks: decimalMax,
+      path: '\0'.repeat(4096),
+      dev: decimalMax,
+      ino: decimalMax,
+    },
+  });
+  const key = {
+    revision: uuidMax,
+    scopeDigest: hex,
+    employeeId: uuidMax,
+    sessionId: uuidMax,
+    sessionGeneration: Number.MAX_SAFE_INTEGER,
+    operationId: uuidMax,
+    containerId: hex,
+  };
+  const taskBase = {
+    role: 'leaf-helper',
+    name: 'reverie-boxed-' + 'z'.repeat(100),
+    imageId: 'sha256:' + hex,
+    configurationDigest: hex,
+  };
+  const tasks = [
+    { ...taskBase, phase: 'create-issued' },
+    { ...taskBase, phase: 'created', containerId: hex },
+    { ...taskBase, phase: 'start-issued', containerId: hex },
+    { ...taskBase, phase: 'running', containerId: hex, initPid: Number.MAX_SAFE_INTEGER, initStartTicks: decimalMax },
+    { ...taskBase, phase: 'completed', containerId: hex, resultDigest: hex },
+  ].map((task) => DockerContinuationTask.parse(task));
+  const make = (extra: Record<string, unknown>) => DockerResourceAttempt.parse({ ...key, ...extra });
+  const result = tasks.map((task) => make({ state: 'helper', task }));
+  result.push(make({ state: 'observed', identity, observationDigest: hex }));
+  for (const task of tasks) {
+    if (task.phase === 'create-issued' || task.phase === 'created') {
+      const retirement = {
+        version: 1,
+        purpose: 'reverie-memory-unstarted-intent-retired-v1',
+        authority: 'canonical-prestart-cas-v1',
+        taskDigest: dockerContinuationDigest(task),
+        originalOutcome: 'unknown',
+      };
+      result.push(
+        make({ state: 'unstarted-retired', task, retirement }),
+        make({ state: 'observed-after-retirement', task, retirement, identity, observationDigest: hex })
+      );
+    } else {
+      const closure = {
+        version: 1,
+        purpose: 'reverie-memory-writer-closed-v1',
+        authority: 'canonical-issued-high-only-image-v1',
+        containerId: hex,
+        imageId: task.imageId,
+        configurationDigest: task.configurationDigest,
+        terminalStateDigest: hex,
+        exitCode: 255,
+        identity,
+        originalOutcome: 'unknown',
+      };
+      result.push(
+        make({ state: 'closed-writer', task, closure }),
+        make({ state: 'observed-after-closure', task, closure, identity, observationDigest: hex })
+      );
+      if (task.phase === 'completed') result.push(make({ state: 'applied', task, identity, observationDigest: hex }));
+    }
+  }
+  return result;
+}
+export const DockerResourceAttemptMaximumBytes = Math.max(...dockerResourceCapacityWitnesses().map(encodedBytes));
+/** Size DATA, never effect authority. Mutable records occupy their full proven
+ * settlement bound. Old terminal/retired history is immutable after a new owner
+ * revision, so its unused reservation is released without dropping any history. */
+export function dockerResourceLedgerCapacity(input: unknown) {
+  const state = ledger.parse(input);
+  const latest = new Map(state.desired.map((desired) => [desired.owner, desired.revision]));
+  const approvals = new Map(state.desired.map((desired) => [desired.revision, desired]));
+  let reservedBytes = 0;
+  for (const attempt of state.attempts) {
+    const bytes = encodedBytes(attempt);
+    if (bytes > DockerResourceAttemptMaximumBytes) refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
+    const approval = approvals.get(attempt.revision);
+    const stillCurrent = !approval || latest.get(approval.owner) === attempt.revision;
+    if (
+      attempt.state === 'helper' ||
+      (stillCurrent && (attempt.state === 'closed-writer' || attempt.state === 'unstarted-retired'))
+    )
+      reservedBytes += DockerResourceAttemptMaximumBytes - bytes;
+  }
+  const usedBytes = encodedBytes(state);
+  return { usedBytes, reservedBytes, requiredBytes: usedBytes + reservedBytes };
+}
+
 const empty = (): Ledger => ({
   version: 1,
   purpose: 'reverie-docker-resource-revisions-v1',
@@ -249,6 +401,7 @@ export class DockerResourceRevisionStore {
   #held = false;
   #closed = false;
   #seen = false;
+  #seenFormatTwo = false;
   #closeCause: unknown;
   #tail: Promise<unknown> = Promise.resolve();
   constructor(readonly directory: string) {
@@ -327,7 +480,7 @@ export class DockerResourceRevisionStore {
         stat.uid !== process.getuid?.() ||
         (stat.mode & 0o777) !== 0o600 ||
         stat.nlink !== 1 ||
-        stat.size > 2 * 1024 ** 2
+        stat.size > DockerResourceLedgerByteLimit
       )
         refuse();
       const raw = fs.readFileSync(fd);
@@ -371,6 +524,11 @@ export class DockerResourceRevisionStore {
             refuse();
         }
       }
+      if (value.version === 1 && this.#seenFormatTwo) {
+        this.#held = true;
+        refuse('DOCKER_RESOURCE_REVISION_FORMAT_CHANGED');
+      }
+      if (value.version === 2) this.#seenFormatTwo = true;
       this.#current();
       return value;
     } finally {
@@ -453,7 +611,7 @@ export class DockerResourceRevisionStore {
     await previous;
     let lock: number | undefined;
     let failure: { cause: unknown } | undefined;
-    let checkedDefaultRefusal: unknown;
+    let checkedPublicationRefusal: unknown;
     try {
       this.#current();
       current();
@@ -479,11 +637,13 @@ export class DockerResourceRevisionStore {
       try {
         change(state);
       } catch (cause) {
-        if (cause instanceof DockerDefaultPublicationRefusal) checkedDefaultRefusal = cause;
+        if (isPublicationRefusal(cause)) checkedPublicationRefusal = cause;
         throw cause;
       }
+      state.version = 2; // Reserve-aware publications fence literal-v1 rollback readers.
       const data = Buffer.from(JSON.stringify(ledger.parse(state)));
-      if (data.length > 2 * 1024 ** 2) refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
+      if (dockerResourceLedgerCapacity(state).requiredBytes > DockerResourceLedgerByteLimit)
+        refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
       const temporary = join(this.#path, '.stage-' + randomUUID());
       const file = fs.openSync(
         temporary,
@@ -522,7 +682,7 @@ export class DockerResourceRevisionStore {
       release();
     }
     if (failure) {
-      if (failure.cause instanceof DockerDefaultPublicationRefusal && failure.cause !== checkedDefaultRefusal)
+      if (isPublicationRefusal(failure.cause) && failure.cause !== checkedPublicationRefusal)
         throw new AggregateError([failure.cause], 'Resource publication outcome unconfirmed');
       throw failure.cause;
     }
@@ -532,10 +692,30 @@ export class DockerResourceRevisionStore {
     if (old && state.attempts.some((item) => item.revision === old.revision && item.state === 'helper'))
       return 'DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING';
     if (state.desired.length >= 256 || state.attempts.length >= 4096) return 'DOCKER_RESOURCE_REVISION_CAPACITY';
+    const occupied = new Set([...state.desired, ...state.attempts].map((value) => value.revision));
+    let revision = '';
+    for (let index = 0; index <= occupied.size; index++) {
+      const candidate = '00000000-0000-4000-8000-' + index.toString(16).padStart(12, '0');
+      if (!occupied.has(candidate)) {
+        revision = candidate;
+        break;
+      }
+    }
+    if (!revision) refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
+    const next = { revision, owner, scope: 'all-current-and-future' as const, memoryHighBytes: 1024 ** 4 };
+    if (
+      dockerResourceLedgerCapacity({ ...state, desired: [...state.desired, next] }).requiredBytes >
+      DockerResourceLedgerByteLimit
+    )
+      return 'DOCKER_RESOURCE_REVISION_CAPACITY';
     return undefined;
   }
+  approvalAvailability(owner: string | undefined) {
+    const code = this.#approvalCode(this.#read(), owner ?? null);
+    return { allowed: code === undefined, ...(code === 'DOCKER_RESOURCE_REVISION_CAPACITY' ? { code } : {}) };
+  }
   canApprove(owner: string | undefined): boolean {
-    return this.#approvalCode(this.#read(), owner ?? null) === undefined;
+    return this.approvalAvailability(owner).allowed;
   }
   actions(row: DockerEmployeeContinuationRecord, revision: string | undefined): string[] {
     if (!revision || this.desired(row.owner)?.revision !== revision) return [];
@@ -649,8 +829,18 @@ export class DockerResourceRevisionStore {
         )
           refuse();
       } else refuse();
-      if (index < 0) state.attempts.push(checked);
-      else state.attempts[index] = checked;
+      const projected = { ...state, attempts: [...state.attempts] };
+      if (index < 0) projected.attempts.push(checked);
+      else projected.attempts[index] = checked;
+      if (dockerResourceLedgerCapacity(projected).requiredBytes > DockerResourceLedgerByteLimit) {
+        if (!before)
+          throw new DockerAttemptPublicationRefusal(
+            attemptPublicationOrigin,
+            dockerResourceAttemptKey(row, desired.revision)
+          );
+        refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
+      }
+      state.attempts = projected.attempts;
     }, current);
   }
   close(): void {

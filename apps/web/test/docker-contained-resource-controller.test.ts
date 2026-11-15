@@ -1,3 +1,4 @@
+import { resourceCapacityHistory } from './helpers/docker-resource-capacity.js';
 import { describe, expect, it, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -10,6 +11,7 @@ import type { DockerContinuationTaskRole } from '../src/docker-continuation-task
 import { fixture, helper, policy, deployment, writer } from './helpers/docker-resource-physical.js';
 import {
   DockerResourceRevisionStore,
+  dockerAttemptPublicationRefusal,
   dockerRevisedPolicy,
   type DockerResourceDesiredRevision,
 } from '../src/docker-resource-revisions.js';
@@ -920,5 +922,45 @@ describe('unstarted retirement publication finalizer', () => {
     expect(result).toMatchObject({ state: 'observed', intentRetired: true, originalOutcome: 'unknown' });
     expect(result).not.toHaveProperty('writerClosed');
     expect(f.starts).toEqual(starts);
+  });
+});
+
+describe('capacity refusal before any helper publication/effect', () => {
+  it.each([false, true])('fresh actual matching policy=%s cannot bypass the ledger byte budget', async (matching) => {
+    const f = await revisionFixture();
+    if (matching) f.setHigh(48 * 1024 ** 3);
+    const state = { ...resourceCapacityHistory(f.desired, matching ? 50 : 1024), version: 2 as const };
+    fs.writeFileSync(join(f.store.directory, 'revisions.json'), JSON.stringify(state));
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    let error: unknown;
+    try {
+      await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    } catch (cause) {
+      error = cause;
+    }
+    expect(dockerAttemptPublicationRefusal(error)).toMatchObject({
+      action: 'apply',
+      publication: 'not-issued',
+      revision: f.desired.revision,
+    });
+    expect(f.creates).toEqual(before.creates);
+    expect(f.starts).toEqual(before.starts);
+    expect(f.store.attempt(f.row(), f.desired.revision)).toBeUndefined();
+  });
+});
+
+describe('capacity-limited read-only adoption', () => {
+  it('still adopts genuine matching facts when only an entire helper reservation would be too large', async () => {
+    const f = await revisionFixture();
+    f.setHigh(48 * 1024 ** 3);
+    fs.writeFileSync(
+      join(f.store.directory, 'revisions.json'),
+      JSON.stringify({ ...resourceCapacityHistory(f.desired, 4096), version: 2 })
+    );
+    const before = { creates: [...f.creates], starts: [...f.starts] };
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result.state).toBe('observed');
+    expect(f.creates).toEqual(before.creates);
+    expect(f.starts).toEqual(before.starts);
   });
 });
