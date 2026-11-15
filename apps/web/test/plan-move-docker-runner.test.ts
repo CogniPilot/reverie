@@ -4,7 +4,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PlanMoves, type PlanMovePort, type PlanMoveInput } from '../src/plan-move.js';
+import { PlanMoves, PlanMoveComposerNotReady, type PlanMovePort, type PlanMoveInput } from '../src/plan-move.js';
 import { PlanMoveStore, dockerPlanMoveNotIssuedOf } from '../src/plan-move-store.js';
 import type { PlanMoveDockerActor, PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
@@ -144,6 +144,16 @@ async function fixture(forceBusy = false) {
   };
 }
 describe('native plan coordinator with recording actor and actual protected journal', () => {
+  it('polls only a positively pending composer without repeating a provider dispatch or handoff', async () => {
+    const f = await fixture();
+    vi.mocked(f.actor.verify).mockRejectedValueOnce(new PlanMoveComposerNotReady());
+    await f.moves.begin(f.input, f.owner);
+    expect(await f.settled()).toMatchObject({ phase: 'completed' });
+    expect(f.actor.verify).toHaveBeenCalledTimes(3);
+    expect(f.actor.start).toHaveBeenCalledTimes(1);
+    expect(f.actor.finalize).toHaveBeenCalledTimes(1);
+    expect(f.actor.stopSource).toHaveBeenCalledTimes(1);
+  });
   it('releases a cancelled idle wait only after its effect-free failure is durably acknowledged', async () => {
     const f = await fixture();
     let waiting!: () => void;

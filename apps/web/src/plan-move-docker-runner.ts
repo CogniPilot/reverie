@@ -1,10 +1,17 @@
 /** The native move owns its own journal and effects. The legacy session
  * cleanup/rebind path is never a fallback for a boxed worker. */
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import type { PlanMoveDockerJournal, PlanMoveDockerJournalStore } from './plan-move-docker.js';
-import { PlanMoveError, type PlanMoveInput, type PlanMoveRecord, type PlanMoveExecutor } from './plan-move.js';
+import {
+  PlanMoveComposerNotReady,
+  PlanMoveError,
+  type PlanMoveInput,
+  type PlanMoveRecord,
+  type PlanMoveExecutor,
+} from './plan-move.js';
 function frozen<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object') {
     Object.values(value).forEach((child) => frozen(child));
@@ -133,11 +140,30 @@ export async function runDockerPlanMove(
     if (value === 'completed') publication = 'published';
     stable();
   };
+  // Only a genuine, positively observed pending composer permits another read.
+  // Unknown native outcomes never retry STOP, CREATE, START or the work handoff.
+  const readyRead = async <T>(read: () => Promise<T>): Promise<T> => {
+    const deadline = performance.now() + 120_000;
+    for (;;) {
+      journal.current();
+      flight.signal.throwIfAborted();
+      try {
+        const result = await read();
+        journal.current();
+        flight.signal.throwIfAborted();
+        return result;
+      } catch (error) {
+        if (!(error instanceof PlanMoveComposerNotReady) || performance.now() >= deadline) throw error;
+        journal.current();
+        await delay(1000, undefined, { signal: flight.signal });
+      }
+    }
+  };
   try {
     if (mode !== 'new') {
       // A new HTTP request earns an actual original native proof before the
       // atomic epoch takeover. Issued paid work never enters this path.
-      const proof = await actor.inspectForContinuation(record, journal);
+      const proof = await readyRead(() => actor.inspectForContinuation(record, journal));
       if (mode === 'continue') {
         actor.requireContinuation(proof, cursor);
         adopt(
@@ -152,7 +178,7 @@ export async function runDockerPlanMove(
         cursor.handoff?.phase !== 'submitted'
       )
         throw new PlanMoveError('Completed Docker history is inconsistent');
-      const fence = checkedFence(await actor.verify(record, journal));
+      const fence = checkedFence(await readyRead(() => actor.verify(record, journal)));
       fence();
       journal.current();
       record.phase = 'completed';
@@ -179,13 +205,13 @@ export async function runDockerPlanMove(
       journal.current();
     }
     await phase('checking');
-    let fence = checkedFence(await actor.verify(record, journal));
+    let fence = checkedFence(await readyRead(() => actor.verify(record, journal)));
     fence();
     await actor.finalize(record, journal);
     journal.current();
     // Finalize publishes the binding and submits its once-only work handoff.
     // Re-earn the actual running placement after those asynchronous effects.
-    fence = checkedFence(await actor.verify(record, journal));
+    fence = checkedFence(await readyRead(() => actor.verify(record, journal)));
     fence();
     await executor.audit({ ...record, phase: 'completed' });
     journal.current();
