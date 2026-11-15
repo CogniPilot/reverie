@@ -74,6 +74,7 @@ let
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
       # Boxed recovery and bound worker transport use the same default CI gate.
       npm test -- test/docker-memory-high-canary.test.ts \
+        test/docker-resource-original-writer.test.ts \
         test/docker-contained-resource-controller.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
