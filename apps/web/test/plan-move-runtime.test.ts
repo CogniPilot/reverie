@@ -4,7 +4,7 @@ import type { Session } from '../src/session.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
 import { composerReadyMark } from '../src/cli-agent.js';
 import type { PlanMoveInput } from '../src/plan-move.js';
-import type { PlanMoveDockerActor } from '../src/plan-move-docker.js';
+import type { PlanMoveDockerActor, PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import type { DockerPlanMoveRequesterTarget } from '../src/docker-plan-move-requester.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 
@@ -114,8 +114,48 @@ describe('boxed request-scoped runtime adapter with recording private actor', ()
     const capture = vi.fn((target: DockerPlanMoveRequesterTarget) => ({ target }));
     h.runtime.dockerReplacement = base;
     h.runtime.dockerRequester = capture;
-    return { ...h, snapshot, capture, last: () => last, executor: planMoveExecutor(h.runtime) };
+    return { ...h, base, snapshot, capture, last: () => last, executor: planMoveExecutor(h.runtime) };
   }
+  it('returns a continuation proof to its exact inspecting requester actor and rejects uncaptured proofs', async () => {
+    const h = boxed(),
+      f = dockerPlanJournalFixture(),
+      proof = {};
+    const wrongBase = vi.fn(() => {
+      throw Error('base actor cannot own a scoped proof');
+    });
+    h.base.requireContinuation = wrongBase;
+    const inspected = vi.fn();
+    h.base.withRequesterAuthority = () => {
+      const scoped: PlanMoveDockerActor = {
+        ...h.base,
+        inspectForContinuation: async () => proof,
+        requireContinuation(value, state) {
+          expect(this).toBe(scoped);
+          expect(value).toBe(proof);
+          expect(state).toBe(f.state);
+          inspected();
+        },
+      };
+      return scoped;
+    };
+    h.runtime.dockerOriginalRequester = async () => ({ original: true });
+    const native = planMoveExecutor(h.runtime).dockerReplacement!;
+    const journal: PlanMoveDockerJournal = {
+      moveId: f.record.id,
+      epoch: f.state.epoch,
+      publication: 'admitting',
+      current: () => {},
+      read: () => f.state,
+      publish: async () => {
+        throw Error('unexpected publication');
+      },
+    };
+    const captured = await native.inspectForContinuation(f.record, journal);
+    native.requireContinuation(captured, f.state);
+    expect(inspected).toHaveBeenCalledTimes(1);
+    expect(wrongBase).not.toHaveBeenCalled();
+    expect(() => native.requireContinuation({}, f.state)).toThrow('not inspected');
+  });
   it('uses the canonical Docker binding before requiring an absent controller Session or viewer', async () => {
     const h = boxed();
     h.sessions.clear();

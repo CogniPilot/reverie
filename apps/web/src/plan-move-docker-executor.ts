@@ -8,6 +8,7 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
   const base = runtime.dockerReplacement;
   if (!base || !runtime.dockerRequester || !base.withRequesterAuthority) return undefined;
   const actors = new Map<string, PlanMoveDockerActor>();
+  const continuations = new Map<unknown, PlanMoveDockerActor>();
   const selected = (proof: unknown): PlanMoveDockerActor => {
     let actor = base.withRequesterAuthority!(proof);
     if (runtime.dockerDecision !== undefined) {
@@ -59,8 +60,15 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
           throw new PlanMoveError('Original Docker recovery authority is unavailable', 503);
         actors.set(record.id, selected(await runtime.dockerOriginalRequester(record.id)));
       }
-      return actor(record).inspectForContinuation(record, journal);
+      const original = actor(record);
+      const proof = await original.inspectForContinuation(record, journal);
+      continuations.set(proof, original);
+      return proof;
     },
-    requireContinuation: (proof, state) => base.requireContinuation(proof, state),
+    requireContinuation: (proof, state) => {
+      const original = continuations.get(proof);
+      if (!original) throw new PlanMoveError('The original Docker continuation was not inspected', 403);
+      original.requireContinuation(proof, state);
+    },
   } satisfies PlanMoveDockerActor);
 }
