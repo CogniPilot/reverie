@@ -16,7 +16,7 @@ let
     version = manifest.version;
     src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
-    npmDepsHash = "sha256-TdGKa0ICVZoFZ996zLhbluJKdnNgb7EgWnhikmQ0XRg=";
+    npmDepsHash = "sha256-T93KVV1pCvWtWHaI2cPM/PjAkHkqHXfGPK2185mDKfw=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
     npmFlags = [ "--ignore-scripts" ];
     npmRebuildFlags = [ "--ignore-scripts" ];
