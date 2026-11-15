@@ -5,8 +5,10 @@ import { isDeepStrictEqual } from 'node:util';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { IPty } from 'node-pty';
 import type { TerminalMultiplexer, MuxSession } from './mux-interface.js';
-const clientFormat = '#{client_pid}\t#{client_tty}\t#{client_name}\t#{session_name}\t#{pid}\t#{socket_path}';
-const serverFormat = '#{pid}\t#{socket_path}';
+// tmux sanitizes literal TABs to underscores in the C locale used by Nix.
+// A printable separator preserves field boundaries there; extra separators fail closed.
+const clientFormat = '#{client_pid}|#{client_tty}|#{client_name}|#{session_name}|#{pid}|#{socket_path}';
+const serverFormat = '#{pid}|#{socket_path}';
 const observationArgs = (socket: string): readonly string[] => ['-N', '-f', '/dev/null', '-L', socket];
 function refuse(): never {
   throw Error('The original local tmux client is unconfirmed');
@@ -177,7 +179,7 @@ export class DockerPlanLocalClient {
             env,
           })
           .trim(),
-        fields = body.split('\t');
+        fields = body.split('|');
       if (fields.length !== 2 || !fields[1]?.startsWith('/') || /[\0\r\n]/.test(fields[1]) || fields[1].length > 4096)
         return refuse();
       const server = positive(fields[0]!),
@@ -253,7 +255,7 @@ export class DockerPlanLocalClient {
     const lines = raw.trimEnd() ? raw.trimEnd().split('\n') : [];
     if (lines.length > 128) return refuse();
     return lines.map((line) => {
-      const f = line.split('\t');
+      const f = line.split('|');
       if (f.length !== 6 || !f[2] || !f[3] || f[4] !== String(this.#server) || f[5] !== this.#socketPath)
         return refuse();
       return { pid: positive(f[0]!), tty: f[1]!, name: f[2], session: f[3], server: this.#server, socket: f[5] };

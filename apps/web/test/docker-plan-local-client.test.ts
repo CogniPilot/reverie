@@ -171,6 +171,15 @@ async function fixture() {
   };
 }
 describe.runIf(process.platform === 'linux')('actual exact website-owned tmux client detach', () => {
+  it.each(['C', 'C.UTF-8'])('preserves exact portable tmux client readback under locale %s', async (locale) => {
+    vi.stubEnv('LC_ALL', locale);
+    const f = await fixture();
+    await f.capture.detach(f.first, f.mux, f.record, () => {});
+    expect(f.exited.has(f.first)).toBe(true);
+    expect(f.census()).toEqual([f.second.pid]);
+    expect(f.exited.has(f.second)).toBe(false);
+    expect(birth(f.server)).toBe(f.serverBirth);
+  });
   it('detaches only the captured attach client after pane exit and joins its real exit plus absence', async () => {
     const f = await fixture(),
       calls = vi.spyOn(cp, 'execFileSync');
@@ -278,6 +287,30 @@ describe('genuine native proof remains distinct from local-client custody', () =
 });
 
 describe.runIf(process.platform === 'linux')('client metadata and checked-close uncertainty', () => {
+  it.each(['server-extra', 'server-tab', 'client-extra'] as const)(
+    'refuses malformed %s readback without detaching either client',
+    async (kind) => {
+      const f = await fixture(),
+        original = cp.execFileSync;
+      const calls = vi.spyOn(cp, 'execFileSync').mockImplementation(((
+        file: string,
+        args: readonly string[],
+        options: unknown
+      ) => {
+        const out = Reflect.apply(original, cp, [file, args, options]);
+        if (kind.startsWith('server') && args.includes('display-message'))
+          return kind === 'server-tab' ? String(out).replace('|', '\t') : String(out).replace('|', '||');
+        if (kind === 'client-extra' && args.some((arg) => arg.includes('#{client_tty}')))
+          return String(out).replace('|', '||');
+        return out;
+      }) as typeof cp.execFileSync);
+      if (kind.startsWith('server'))
+        expect(() => DockerPlanLocalClient.capture(f.first, f.mux, f.record)).toThrow('unconfirmed');
+      else await expect(f.capture.detach(f.first, f.mux, f.record, () => {})).rejects.toThrow('unconfirmed');
+      expect(calls.mock.calls.some(([, args]) => (args as string[]).includes('detach-client'))).toBe(false);
+      expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+    }
+  );
   it('rejects a changed native client TTY tuple without any detach command', async () => {
     const f = await fixture(),
       original = cp.execFileSync;
@@ -291,12 +324,12 @@ describe.runIf(process.platform === 'linux')('client metadata and checked-close 
         return String(out)
           .split('\n')
           .map((line) => {
-            const fields = line.split('\t');
+            const fields = line.split('|');
             if (fields[0] === String(f.first.pid)) {
               fields[1] = String(Reflect.get(f.second, 'ptsName'));
               fields[2] = fields[1]!;
             }
-            return fields.join('\t');
+            return fields.join('|');
           })
           .join('\n');
       }
