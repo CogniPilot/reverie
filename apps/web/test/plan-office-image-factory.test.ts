@@ -2,7 +2,8 @@
 import { expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { requirePlanOfficeDependencyLock } from '../scripts/build-plan-office.mjs';
+import fs from 'node:fs';
+import { planOfficeAssetSources, requirePlanOfficeDependencyLock } from '../scripts/build-plan-office.mjs';
 const factory = path.resolve('../../nix/ci-plan-office-images.nix');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
@@ -90,4 +91,18 @@ it('accepts only dependency versions and integrity from the same current source 
   expect(() =>
     requirePlanOfficeDependencyLock({ packages: { 'node_modules/unlocked': { version: '1' } } }, source)
   ).toThrow();
+});
+
+it('resolves mandatory assets against the actual monorepo layout and canonical root skill', () => {
+  const source = path.resolve('../..'),
+    assets = planOfficeAssetSources(source);
+  expect(assets.map((asset) => [path.relative(source, asset.source), asset.destination])).toEqual([
+    ['apps/web/scripts', 'scripts'],
+    ['apps/web/packages', 'packages'],
+    ['skills/reverie', 'skills/reverie'],
+  ]);
+  for (const asset of assets) expect(fs.lstatSync(asset.source).isDirectory(), asset.source).toBe(true);
+  const skill = assets.find((asset) => asset.destination === 'skills/reverie')!;
+  expect(fs.statSync(path.join(skill.source, 'SKILL.md')).isFile()).toBe(true);
+  expect(fs.readFileSync(path.join(skill.source, 'SKILL.md'), 'utf8').length).toBeGreaterThan(100);
 });

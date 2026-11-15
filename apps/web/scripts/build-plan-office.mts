@@ -28,6 +28,13 @@ export function requirePlanOfficeDependencyLock(installed: Lock, source: Lock): 
   }
   if (count === 0) throw Error('Nonempty immutable dependency graph required');
 }
+export function planOfficeAssetSources(source: string) {
+  return [
+    { source: path.join(source, 'apps/web/scripts'), destination: 'scripts' },
+    { source: path.join(source, 'apps/web/packages'), destination: 'packages' },
+    { source: path.join(source, 'skills/reverie'), destination: 'skills/reverie' },
+  ];
+}
 export function buildPlanOffice(args: readonly string[]) {
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
@@ -76,8 +83,11 @@ export function buildPlanOffice(args: readonly string[]) {
   }
   for (const file of ['package.json', 'package-lock.json', 'LICENSE'])
     fs.copyFileSync(path.join(web, file), path.join(runtime, file));
-  for (const directory of ['scripts', 'skills', 'packages'])
-    fs.cpSync(path.join(web, directory), path.join(runtime, directory), { recursive: true });
+  for (const asset of planOfficeAssetSources(source)) {
+    const target = path.join(runtime, asset.destination);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.cpSync(asset.source, target, { recursive: true });
+  }
   const run = (command: string, argv: readonly string[], cwd = runtime) => {
     const result = spawnSync(command, [...argv], {
       cwd,
