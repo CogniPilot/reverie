@@ -11,10 +11,21 @@ const pub=join(root,'apps/web/src/web/public');
 const {tsImport}=await import(pathToFileURL(join(modules,'tsx/dist/esm/api/index.mjs')).href);
 const {registerHandbookRoutes}=await tsImport(pathToFileURL(join(root,'apps/web/src/web/routes/handbook-routes.ts')).href,import.meta.url);
 const {default:Fastify}=await import(pathToFileURL(join(modules,'fastify/fastify.js')).href);
+const {EmployeePermissionsSchema}=await tsImport(pathToFileURL(join(root,'apps/web/src/company-types.ts')).href,import.meta.url);
+const {effectiveBoardPermissions}=await tsImport(pathToFileURL(join(root,'apps/web/src/board-permissions.ts')).href,import.meta.url);
+const presentEmployee=value=>{
+ const permissions=EmployeePermissionsSchema.parse(value.permissions);
+ const current={...value,permissions};
+ const effective=effectiveBoardPermissions(current,false);
+ const source=key=>typeof permissions[key]==='boolean'?'explicit':'legacy';
+ return {...current,effectiveBoardPermissions:effective,boardPermissionSources:{
+  editBoardIssues:effective.manageBoard?'included':source('editBoardIssues'),
+  manageBoard:source('manageBoard'),manageDecisions:source('manageDecisions')}};
+};
 const handbook=Fastify();registerHandbookRoutes(handbook,join(pub,'handbook'));
 const harness=await readFile(join(root,'apps/web/test/helpers/chat-app-harness.mjs'),'utf8');
 const stub=harness.match(/window\.eval\(`([\s\S]*?class ReverieApp[\s\S]*?)`\);/)[1];
-const employee=(id,name)=>({id,sessionId:id,name,icon:name[0],reportsTo:'owner',available:true,onVacation:false,permissions:{},sleepEnabled:false,dreamEnabled:false});
+const employee=(id,name)=>({id,sessionId:id,name,icon:name[0],reportsTo:'owner',available:true,onVacation:false,permissions:EmployeePermissionsSchema.parse({}),sleepEnabled:false,dreamEnabled:false});
 const company={canManage:true,employees:[employee('first','River'),employee('second','Lake')],settings:{ownerName:'Owner'}};
 const endpoint={id:'local-qwen',label:'Qwen · RTX 3090',baseUrl:'http://127.0.0.1:8092',models:['qwen-local'],defaultModelId:'qwen-local',apiKeySet:true};
 const board={built:Date.now(),issues:[],agents:{},roster:[],ownerIds:{},pace:{owners:{},milestones:{}},timeZone:'UTC',planBurn:[{id:'paid',name:'Paid plan',used:null}],company:{name:'Office'}};
@@ -28,10 +39,15 @@ const server=createServer(async(req,res)=>{
   if(path.startsWith('/api/')){
    let body='';for await(const part of req)body+=part;
    const target=company.employees.find(e=>path==='/api/company/employees/'+e.id);
-   if(target && req.method==='PUT'){const {permissions,...rest}=JSON.parse(body);Object.assign(target,rest);if(permissions)target.permissions={...target.permissions,...permissions};}
+   if(target && req.method==='PUT'){const {permissions,...rest}=JSON.parse(body);Object.assign(target,rest);if(permissions)target.permissions=EmployeePermissionsSchema.parse({...target.permissions,...permissions});}
+   const permissionTarget=company.employees.find(e=>path==='/api/company/employees/'+e.id+'/permissions');
+   if(permissionTarget && req.method==='GET'){
+    const current=presentEmployee(permissionTarget);
+    res.setHeader('content-type','application/json');res.end(JSON.stringify({success:true,data:{employeeId:current.id,permissions:current.permissions,effectiveBoardPermissions:current.effectiveBoardPermissions,boardPermissionSources:current.boardPermissionSources}}));return;
+   }
    const leaving=company.employees.find(e=>path==='/api/company/employees/'+e.id+'/vacation');
    if(leaving && req.method==='POST'){leaving.onVacation=JSON.parse(body).enabled;leaving.desiredRunning=!leaving.onVacation;}
-   const data=target && req.method==='PUT'?{employee:target}:leaving && req.method==='POST'?{employee:leaving}:path==='/api/company'?company:path==='/api/board'?board:path==='/api/chatrooms'?{self:null,rooms:[],features:{}}:path==='/api/chatrooms/phone-status'?{self:'owner',canSetOwn:true}:path==='/api/model-endpoints'?[endpoint]:path==='/api/system/gpu'?{available:true,utilization:18,memoryUsedMb:18000,memoryTotalMb:24576}:path==='/api/sessions'?[{id:'first',customModel:{endpointId:endpoint.id}}]:path==='/api/company/hire-options'?{sources:[{...endpoint,kind:'local',modes:['opencode'],defaultMode:'opencode'}],harnesses:[{id:'opencode',label:'OpenCode',efforts:[]}]}:path==='/api/plans/allocations'?{accounts:[],employees:company.employees}:path==='/api/voice/options'?{voices:[]}:{};
+   const data=target && req.method==='PUT'?{employee:presentEmployee(target)}:leaving && req.method==='POST'?{employee:presentEmployee(leaving)}:path==='/api/company'?{...company,employees:company.employees.map(presentEmployee)}:path==='/api/board'?board:path==='/api/chatrooms'?{self:null,rooms:[],features:{}}:path==='/api/chatrooms/phone-status'?{self:'owner',canSetOwn:true}:path==='/api/model-endpoints'?[endpoint]:path==='/api/system/gpu'?{available:true,utilization:18,memoryUsedMb:18000,memoryTotalMb:24576}:path==='/api/sessions'?[{id:'first',customModel:{endpointId:endpoint.id}}]:path==='/api/company/hire-options'?{sources:[{...endpoint,kind:'local',modes:['opencode'],defaultMode:'opencode'}],harnesses:[{id:'opencode',label:'OpenCode',efforts:[]}]}:path==='/api/plans/allocations'?{accounts:[],employees:company.employees}:path==='/api/voice/options'?{voices:[]}:{};
    res.setHeader('content-type','application/json');res.end(JSON.stringify(['/api/model-endpoints','/api/system/gpu','/api/sessions'].includes(path)?data:{success:true,data}));return;
   }
   const file=path==='/'?null:path==='/company/plans'?'company-plans.html':path.slice(1);
@@ -43,7 +59,7 @@ await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const origin=`http://127.0.0.1:${server.address().port}`;
 const browser=await chromium.launch({executablePath:process.env.REVERIE_BROWSER_EXECUTABLE||'/run/current-system/sw/bin/microsoft-edge',headless:true,chromiumSandbox:true});
 try{
- const page=await browser.newPage({viewport:{width:1200,height:950}});
+ const page=await browser.newPage({viewport:{width:1200,height:950},deviceScaleFactor:1});
  const out=process.env.REVERIE_BROWSER_ARTIFACTS;
  if(out)await mkdir(out,{recursive:true});
  const profileFor=async name=>{
@@ -74,6 +90,8 @@ try{
    assert.deepEqual(Object.keys(response.request().postDataJSON()),['permissions']);
    await profile.getByText('Preferences saved.',{exact:true}).waitFor();
   }
+  await profile.getByRole('button',{name:'Refresh permissions for '+name,exact:true}).click();
+  await profile.getByText('Current permissions refreshed.',{exact:true}).waitFor();
   assert.equal(await profile.getByRole('button',{name:'Save preferences',exact:true}).count(),0);
   const retirement=profile.getByRole('button',{name:'Retire '+name,exact:true,includeHidden:true});
   assert.equal(await retirement.count(),1);
