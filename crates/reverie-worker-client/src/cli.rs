@@ -18,7 +18,7 @@ pub(crate) struct Args {
     #[arg(long, help_heading = "Private metadata")]
     pub(crate) goal_custody: bool,
     /// Read G bytes from stdin and emit one framed custody reply for each byte.
-    #[arg(long, help_heading = "Private metadata", conflicts_with_all=["goal_custody","control","command_failure_report","employee_id","caller_session","attach_only","resource_ref","session_id","not_after","fence","cwd","command"])]
+    #[arg(long, help_heading = "Private metadata", conflicts_with_all=["goal_custody","control","command_failure_report","employee_id","caller_session","attach_only","resource_ref","attempt_id","session_id","not_after","fence","cwd","command"])]
     pub(crate) goal_custody_stream: bool,
     /// Read bounded self-reported command failure metadata; never command text.
     #[arg(long, help_heading = "Private metadata")]
@@ -35,6 +35,9 @@ pub(crate) struct Args {
     /// Server-private registered resource launch reference.
     #[arg(long, help_heading = "Laptop terminal")]
     resource_ref: Option<String>,
+    /// Website-owned ordinary launch correlation DATA, never a broker grant.
+    #[arg(long, help_heading = "Laptop terminal")]
+    attempt_id: Option<String>,
     /// Existing lowercase session UUID.
     #[arg(long, help_heading = "Laptop terminal")]
     session_id: Option<String>,
@@ -109,6 +112,7 @@ pub(crate) fn uuid(value: &str) -> bool {
 impl Args {
     fn has_launch(&self) -> bool {
         self.attach_only
+            || self.attempt_id.is_some()
             || self.resource_ref.is_some()
             || self.session_id.is_some()
             || self.cwd.is_some()
@@ -160,6 +164,9 @@ impl Args {
         self.launch()
     }
     fn control(self, control: Control) -> Result<Operation> {
+        if self.attempt_id.is_some() {
+            return Err(Error::new("Ordinary launch correlation required"));
+        }
         if control == Control::QuiesceForDeployment
             && (self.has_launch() || self.caller_session.is_some())
         {
@@ -220,6 +227,19 @@ impl Args {
         Ok(Operation::Control(request))
     }
     fn launch(self) -> Result<Operation> {
+        if self.attempt_id.as_ref().is_some_and(|attempt| {
+            !uuid(attempt)
+                || attempt == "00000000-0000-0000-0000-000000000000"
+                || self.attach_only
+                || self.resource_ref.is_some()
+                || self.caller_session.is_some()
+        }) {
+            return Err(Error::new("Ordinary launch correlation required"));
+        }
+        // Deliberately retain the existing strict J wire. This optional CLI
+        // correlation neither supplies broker authority nor implements replay
+        // detection; the website owns its durable one-attempt publication.
+
         if self.resource_ref.as_ref().is_some_and(|reference| {
             !uuid(reference) || self.attach_only || self.caller_session.is_some()
         }) {

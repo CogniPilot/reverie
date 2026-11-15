@@ -31,6 +31,13 @@ Stop-agent preserves the exact session, optional epoch-ms deadline and optional
 and accepts no deadline. These requests are sent once. A lost reply never causes
 reconnect, replay, a fabricated stop settlement or automatic rollback.
 
+The optional `--attempt-id <UUID>` is accepted only for an ordinary launch.
+It validates the website's non-nil lowercase UUID correlation without changing
+the strict J wire. It grants no broker authority, duplicate suppression or retry
+permission. The website still owns its durable one-attempt publication; the
+legacy broker does not enforce idempotency from this argument. Attach-only,
+resource, control and metadata roles refuse it.
+
 ## One-shot Rust control API
 
 The same package exposes `reverie_worker_client::control::call(endpoint,
