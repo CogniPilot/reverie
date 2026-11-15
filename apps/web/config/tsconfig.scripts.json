@@ -45,6 +45,8 @@
     "../test/fixtures/prepare-plan-office-worker.mts",
     "../test/helpers/plan-office-driver.ts",
     "../test/helpers/plan-office-move-driver.ts",
+    "../test/helpers/plan-office-move-verifier.ts",
+    "../test/plan-office-move-verifier.test.ts",
     "../test/plan-office-move-driver.test.ts",
     "../test/fixtures/plan-office-canary.mts",
     "../test/plan-office-driver.test.ts"

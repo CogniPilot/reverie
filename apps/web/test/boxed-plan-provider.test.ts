@@ -3,6 +3,7 @@ import { expect, it } from 'vitest';
 import {
   BoxedPlanProviderFixture,
   PlanProviderFixtureContract,
+  planFixtureTurnBarrier,
   requirePlanFixtureHooks,
   type FixtureCliReply,
   type PlanProviderFixturePorts,
@@ -126,7 +127,8 @@ it('boots with real CLI identity and Stop but defers account reads until the bou
   ]);
   expect(f.trace.slice(-2)).toEqual(['receipt-close', 'stdout']);
   expect(f.reports[0]!.accountId).toBeNull();
-  expect(f.output[0]).toMatch(/^BCPLAN_[a-f0-9]{64}\n❯ $/);
+  expect(f.output[0]).toMatch(/^BCPLAN_[a-f0-9]{64}\nBCPLAN_TURN_[a-f0-9]{64}\n❯ $/);
+  expect(f.output[0]).toContain(planFixtureTurnBarrier(f.reports[0]!) + '\n');
 });
 it('approves one exact own pending request then yields through the actual Stop callback', async () => {
   const f = fixture(),
@@ -221,4 +223,18 @@ it('refuses malformed contract and foreign startup identity without writes', () 
     () =>
       new BoxedPlanProviderFixture(contract, { ...identity, sessionId: 'short' }, fixture().ports, workerHookSettings())
   ).toThrow();
+});
+
+it('binds each successful consuming-close stdout barrier to a distinct turn even when SID/request/state repeat', async () => {
+  const f = fixture();
+  await f.provider.start();
+  await f.provider.start();
+  expect(f.reports[0]!.turnId).not.toBe(f.reports[1]!.turnId);
+  expect(planFixtureTurnBarrier(f.reports[0]!)).not.toBe(planFixtureTurnBarrier(f.reports[1]!));
+  for (let index = 0; index < 2; index++)
+    expect(f.output[index]).toContain(planFixtureTurnBarrier(f.reports[index]!) + '\n');
+  const g = fixture();
+  g.failClose();
+  await expect(g.provider.start()).rejects.toThrow();
+  expect(g.output).toEqual([]);
 });

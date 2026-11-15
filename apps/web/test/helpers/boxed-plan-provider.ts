@@ -1,5 +1,5 @@
 /** External-model fixture protocol only. CLI replies/receipts are DATA, never native grants. */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { WORKER_CLIENT_ENTRY } from '../../src/worker-client-manifest.js';
 import { PlanRequestId } from '../../src/plan-request-capability.js';
@@ -35,6 +35,7 @@ export interface PlanProviderFixtureIdentity {
 export interface PlanProviderFixtureReport {
   version: 1;
   purpose: 'synthetic-plan-provider-turn-v1';
+  turnId: string;
   employeeId: string;
   sessionId: string;
   providerThread: string;
@@ -96,6 +97,21 @@ const Plans = z
   )
   .max(128);
 
+/** A readable receipt alone cannot prove its writer consumed all closes. */
+export function planFixtureTurnBarrier(
+  report: Pick<PlanProviderFixtureReport, 'turnId' | 'sessionId' | 'requestId' | 'state'>
+) {
+  uuid.parse(report.turnId);
+  uuid.parse(report.sessionId);
+  if (report.requestId !== null) PlanRequestId.parse(report.requestId);
+  z.enum(['idle', 'cooperation-disabled', 'denied', 'already-attempted', 'approval-returned', 'unknown']).parse(
+    report.state
+  );
+  return (
+    'BCPLAN_TURN_' +
+    digest(report.turnId + '\0' + report.sessionId + '\0' + (report.requestId ?? '') + '\0' + report.state)
+  );
+}
 /** Only the ordinary generated managed callbacks may be represented by this SDK fake. */
 export function requirePlanFixtureHooks(value: unknown): void {
   const hook = (event: string) =>
@@ -166,6 +182,7 @@ export class BoxedPlanProviderFixture {
     return {
       version: 1,
       purpose: 'synthetic-plan-provider-turn-v1',
+      turnId: randomUUID(),
       employeeId: this.contract.employeeId,
       sessionId: this.identity.sessionId,
       providerThread: this.identity.providerThread,
@@ -187,7 +204,8 @@ export class BoxedPlanProviderFixture {
     if (output !== '') throw Error('Fixture Stop output differs');
     await this.ports.record(report);
     const barrier = digest(this.identity.sessionId + '\0' + (report.requestId ?? '') + '\0' + report.state);
-    this.ports.output(`BCPLAN_${barrier}\n❯ `);
+    const turnBarrier = planFixtureTurnBarrier(report);
+    this.ports.output(`BCPLAN_${barrier}\n${turnBarrier}\n❯ `);
     return report;
   }
   async start() {

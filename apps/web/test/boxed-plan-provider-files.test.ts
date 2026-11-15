@@ -120,6 +120,7 @@ it('keeps separate process receipts when a replacement container reuses the same
   const report = {
     version: 1 as const,
     purpose: 'synthetic-plan-provider-turn-v1' as const,
+    turnId: '33333333-3333-4333-8333-333333333333',
     employeeId: f.config.employeeId,
     sessionId: '11111111-1111-4111-8111-111111111111',
     providerThread: '22222222-2222-4222-8222-222222222222',

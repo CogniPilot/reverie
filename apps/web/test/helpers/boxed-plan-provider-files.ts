@@ -234,6 +234,7 @@ export class PlanProviderFixtureFiles {
   }
   record(report: Readonly<PlanProviderFixtureReport>) {
     z.string().uuid().parse(report.sessionId);
+    z.string().uuid().parse(report.turnId);
     if (!Number.isSafeInteger(report.namespacePid) || report.namespacePid <= 1)
       throw Error('Fixture receipt identity refused');
     return this.#scope((_home, fixture) =>

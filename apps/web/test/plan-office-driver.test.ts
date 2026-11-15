@@ -20,6 +20,7 @@ import {
   PlanOfficeDriverInput,
   planOfficeNames,
   planOfficeScratchParts,
+  planOfficeProviderMode,
   removeEmptyPlanOfficeScratch,
   ciPlanPolicy,
   requireSameOperation,
@@ -603,4 +604,45 @@ it('consumes actual domain selection and enveloped results after completed nativ
   } finally {
     await app.close();
   }
+});
+
+it('defaults canonical move fixtures to nonrotating auth and keeps exhaustion/rotation/pause as closed explicit cases', () => {
+  expect(planOfficeProviderMode('ordinary')).toEqual({
+    autoApprove: true,
+    exhausted: false,
+    refreshAccountId: null,
+    pauseBeforeApproval: false,
+  });
+  expect(planOfficeProviderMode('rotate-a').refreshAccountId).toBe('ci-plan-a');
+  expect(planOfficeProviderMode('exhausted')).toMatchObject({
+    autoApprove: false,
+    exhausted: true,
+    refreshAccountId: null,
+  });
+  expect(planOfficeProviderMode('pause-approval').pauseBeforeApproval).toBe(true);
+  for (const sourceProviders of [
+    [{ employeeId: thread, mode: 'ordinary' }],
+    [{ employeeId: eid, mode: 'arbitrary' }],
+    [
+      { employeeId: eid, mode: 'ordinary' },
+      { employeeId: eid, mode: 'rotate-a' },
+    ],
+  ])
+    expect(() => PlanOfficeDriverInput.parse({ ...raw, sourceProviders })).toThrow();
+});
+
+it('admits the first ordinary self scenario only for one nonrotating A employee with the actual self grant', () => {
+  const good = {
+    ...raw,
+    acceptance: 'ordinary-self',
+    bootstrap: { ...raw.bootstrap, employees: [{ ...employee, permissions: { moveOwnPlan: true } }] },
+  };
+  expect(PlanOfficeDriverInput.parse(good).acceptance).toBe('ordinary-self');
+  for (const changes of [
+    { bootstrap: raw.bootstrap },
+    { bootstrap: { ...good.bootstrap, employees: [{ ...employee, permissions: { managePlans: true } }] } },
+    { sourceProviders: [{ employeeId: eid, mode: 'rotate-a' }] },
+    { acceptance: 'force-implicit' },
+  ])
+    expect(() => PlanOfficeDriverInput.parse({ ...good, ...changes })).toThrow();
 });

@@ -1,5 +1,8 @@
 /** Owned CI office baseline only. No production admission or paid provider override. */
-export { runPlanOfficeMoveScenario } from './plan-office-move-driver.js';
+import { runPlanOfficeMoveScenario } from './plan-office-move-driver.js';
+export { runPlanOfficeMoveScenario };
+import { verifyPlanOfficeMovedProvider, planOfficeCanonicalAuthDigest } from './plan-office-move-verifier.js';
+export { verifyPlanOfficeMovedProvider, planOfficeCanonicalAuthDigest };
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -12,10 +15,15 @@ import { z } from 'zod';
 import { PlanOfficeBootstrap } from './plan-office-bootstrap.js';
 import { enrollIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
+import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
+import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
+import { boxedOriginal, DockerEmployeeInspect } from '../../src/docker-employee-engine-data.js';
+import type { SessionState } from '../../src/types.js';
 import {
   DockerEmployeeResourcePolicy,
   DockerEmployeeContinuationRequest,
   DockerEmployeeContinuationPhase,
+  DockerEmployeeContinuationRecord,
 } from '../../src/docker-employee-continuation-data.js';
 const id = z.string().regex(/^sha256:[a-f0-9]{64}$/),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
@@ -25,6 +33,7 @@ export const PlanOfficeDriverInput = z
   .object({
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-office-baseline-v1'),
+    acceptance: z.enum(['baseline', 'ordinary-self']).default('baseline'),
     instance: z.string().regex(/^[a-f0-9]{32}$/),
     sourcePath: store,
     runtimePath: store,
@@ -35,6 +44,17 @@ export const PlanOfficeDriverInput = z
     controlImageId: id,
     clientManifestDigest: hash,
     bootstrap: PlanOfficeBootstrap,
+    sourceProviders: z
+      .array(
+        z
+          .object({
+            employeeId: z.string().uuid(),
+            mode: z.enum(['ordinary', 'exhausted', 'rotate-a', 'pause-approval']),
+          })
+          .strict()
+      )
+      .max(2)
+      .default([]),
     sourceLayouts: z
       .array(
         z
@@ -51,13 +71,34 @@ export const PlanOfficeDriverInput = z
   .strict()
   .refine(
     (v) =>
+      (v.acceptance !== 'ordinary-self' ||
+        (v.bootstrap.employees.length === 1 &&
+          v.bootstrap.employees[0]!.account === 'ci-plan-a' &&
+          v.bootstrap.employees[0]!.permissions.moveOwnPlan === true &&
+          v.bootstrap.employees[0]!.permissions.managePlans !== true &&
+          (v.sourceProviders.find((row) => row.employeeId === v.bootstrap.employees[0]!.employeeId)?.mode ??
+            'ordinary') === 'ordinary')) &&
       v.bootstrap.employees.length <= 2 &&
+      new Set(v.sourceProviders.map((row) => row.employeeId)).size === v.sourceProviders.length &&
+      v.sourceProviders.every((row) =>
+        v.bootstrap.employees.some((employee) => employee.employeeId === row.employeeId)
+      ) &&
       new Set(v.sourceLayouts.map((row) => row.employeeId)).size === v.sourceLayouts.length &&
       v.sourceLayouts.every((row) => v.bootstrap.employees.some((employee) => employee.employeeId === row.employeeId))
   );
 
 type Input = z.infer<typeof PlanOfficeDriverInput>;
 type Json = Record<string, unknown>;
+/** Fake-only preparation DATA. Rotation is a negative case until principal proof exists. */
+export function planOfficeProviderMode(mode: 'ordinary' | 'exhausted' | 'rotate-a' | 'pause-approval') {
+  z.enum(['ordinary', 'exhausted', 'rotate-a', 'pause-approval']).parse(mode);
+  return {
+    autoApprove: mode !== 'exhausted',
+    exhausted: mode === 'exhausted',
+    refreshAccountId: mode === 'rotate-a' ? 'ci-plan-a' : null,
+    pauseBeforeApproval: mode === 'pause-approval',
+  };
+}
 export function planOfficeScratchParts(
   employee: { employeeId: string; sessionId: string },
   layout: 'employees' | 'operator-recovery' | 'operator-sessions'
@@ -670,7 +711,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
   try {
     evidence.save('plan', {
       ...input,
-      limitation: 'Fake external model; real owner/API/Engine/native/HMAC baseline only, no plan actor acceptance yet.',
+      limitation:
+        input.acceptance === 'baseline'
+          ? 'Fake external model; real owner/API/Engine/native/HMAC baseline only.'
+          : 'Fake external model; one ordinary self move only after actual physical verification. No paid vendor, refreshed principal or force acceptance.',
     });
     const census = driver.docker(['container', 'ls', '--all', '--no-trunc', '--format', 'json']);
     const before = census
@@ -758,10 +802,9 @@ export async function runPlanOfficeBaseline(contractFile: string) {
             purpose: 'reverie-ci-plan-provider-v1',
             employeeId: employee.employeeId,
             accounts: ['ci-plan-a', 'ci-plan-b'],
-            autoApprove: true,
-            exhausted: false,
-            refreshAccountId: 'ci-plan-a',
-            pauseBeforeApproval: false,
+            ...planOfficeProviderMode(
+              input.sourceProviders.find((row) => row.employeeId === employee.employeeId)?.mode ?? 'ordinary'
+            ),
           },
         }
       );
@@ -1068,6 +1111,162 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       privateDirectory(entry.scratch as string);
       privateDirectory(entry.tmp as string);
     }
+    let planMovesAccepted = false;
+    if (input.acceptance === 'ordinary-self') {
+      assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
+      const initialEmployee = input.bootstrap.employees[0]!,
+        entry = sources[0]!;
+      assert.equal(initialEmployee.account, 'ci-plan-a');
+      assert.equal(
+        input.sourceProviders.find((item) => item.employeeId === initialEmployee.employeeId)?.mode ?? 'ordinary',
+        'ordinary'
+      );
+      const controlEpoch = driver.owned(control, 'control').State as Json;
+      const current = () => {
+        evidence.current();
+        const actual = driver.owned(control, 'control').State as Json;
+        assert.equal(actual.Running, true);
+        assert.equal(actual.Pid, controlEpoch.Pid);
+        assert.equal(actual.StartedAt, controlEpoch.StartedAt);
+      };
+      const snapshot = () => {
+        const company = readPrivate(path.join(evidence.root, 'data/company.json')) as Json;
+        const employee = (company.employees as Json[]).find((value) => value.id === initialEmployee.employeeId);
+        const row = (company.dockerEmployeeContinuations as Json[]).find(
+          (value) => value.employeeId === initialEmployee.employeeId
+        );
+        assert.ok(employee && row);
+        return { employee, row };
+      };
+      current();
+      const captured = snapshot(),
+        row = DockerEmployeeContinuationRecord.parse(captured.row);
+      assert.ok(row.destination);
+      assert.equal(row.phase, 'ready');
+      const state = readPrivate(path.join(evidence.root, 'data/state.json')) as Json;
+      const saved = (state.sessions as Record<string, SessionState>)[row.request.sessionId];
+      assert.ok(saved);
+      const nativeThreadId = z
+        .string()
+        .uuid()
+        .parse(nativeThreadProfile(saved.mode ?? 'claude')?.read(saved));
+      assert.equal(nativeThreadId, initialEmployee.nativeThreadId);
+      assert.equal(saved.subscriptionProfile?.id, 'ci-plan-a');
+      const scenario = {
+        version: 1 as const,
+        purpose: 'reverie-ci-plan-move-scenario-v1' as const,
+        kind: 'self' as const,
+        id: randomUUID(),
+        employeeId: row.employeeId,
+        sessionId: row.request.sessionId,
+        sessionGeneration: row.request.sessionGeneration,
+        fromAccount: 'ci-plan-a' as const,
+        toAccount: 'ci-plan-b' as const,
+      };
+      const sourceInspect = DockerEmployeeInspect.parse(driver.inspect(row.destination.containerId));
+      const instanceId = z
+        .string()
+        .uuid()
+        .parse((readPrivate(path.join(evidence.root, 'data/docker-runtime/worker-identity.json')) as Json).instanceId);
+      const homeStat = fs.lstatSync(entry.home as string);
+      const before = {
+        scenario,
+        namespace: names.prefix,
+        fixtureRoot: evidence.root,
+        workerImageId: input.workerImageId,
+        clientManifestDigest: input.clientManifestDigest,
+        boxId: dockerContinuationDigest({ instanceId, deployment: names.prefix }),
+        nativeThreadId,
+        sourceRow: row,
+        sourceInspect,
+        home: { source: entry.home as string, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
+        canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-b'),
+      };
+      evidence.save('before-self-move', before);
+      const ownerGet = async (p: string) => {
+        current();
+        const result = await owner.request(p);
+        current();
+        return result;
+      };
+      await runPlanOfficeMoveScenario(scenario, {
+        assertCurrent: async () => current(),
+        ownerPost: async (p, body) => {
+          current();
+          const result = await owner.request(p, 'POST', body);
+          current();
+          return result;
+        },
+        capsule: async (args) => {
+          current();
+          const actual = DockerEmployeeContinuationRecord.parse(snapshot().row);
+          assert.deepEqual(actual, row);
+          const raw = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
+          assert.deepEqual(
+            boxedOriginal(
+              raw,
+              {
+                employeeId: row.employeeId,
+                sessionId: row.request.sessionId,
+                sessionGeneration: row.request.sessionGeneration,
+                owner: row.owner,
+                sourceDigest: row.sourceDigest,
+                providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
+                onVacation: false,
+                desiredRunning: true,
+              },
+              names.prefix,
+              true
+            ),
+            row.destination
+          );
+          const identityFile =
+            row.version === 3
+              ? dockerPlanGeneration({
+                  operationId: row.request.operationId,
+                  containerId: row.destination!.containerId,
+                  projectionDigest: row.planReplacement.account.projectionDigest,
+                  provider: row.planReplacement.account.provider,
+                }).identityFile
+              : '/home/agent/.reverie/docker-worker-identity';
+          const output = driver.docker([
+            'exec',
+            '--env',
+            'HOME=/home/agent',
+            '--env',
+            'REVERIE_API_URL=http://reverie:3000',
+            '--env',
+            'REVERIE_SESSION_ID=' + row.request.sessionId,
+            '--env',
+            'REVERIE_WORKER_IDENTITY_FILE=' + identityFile,
+            row.destination!.containerId,
+            '/opt/reverie-worker-client/bin/reverie',
+            ...args,
+          ]);
+          current();
+          return { exitCode: 0, signal: null, stdout: output };
+        },
+        record: (name, value) => evidence.save(name, value),
+        pause: () => wait(500),
+        verifyCompleted: async (_scenario, record) =>
+          verifyPlanOfficeMovedProvider(before, record, {
+            current,
+            snapshot,
+            ownerGet,
+            metadata: async (args) => driver.docker([...args]),
+            record: (name, value) => evidence.save(name, value),
+          }),
+      });
+      evidence.save('first-self-move-completed', {
+        id: scenario.id,
+        employeeId: scenario.employeeId,
+        fromAccount: scenario.fromAccount,
+        toAccount: scenario.toAccount,
+        realCapsuleHmac: true,
+        originalOnly: true,
+      });
+      planMovesAccepted = true;
+    }
     const after = driver
       .docker(['container', 'ls', '--all', '--no-trunc', '--format', '{{.ID}}'])
       .trim()
@@ -1084,7 +1283,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       ownerSessionFile: owner.ownerSessionFile,
       evidence: evidence.root,
       baselineReady: true,
-      planMovesAccepted: false,
+      planMovesAccepted,
+      acceptedScenario: input.acceptance,
+      refreshReuseAccepted: false,
+      forceAccepted: false,
       cleanup: 'Preserved only owned fixture state; no stop/prune/paid replay.',
     };
     evidence.save('completed', result);
