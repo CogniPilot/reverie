@@ -129,10 +129,10 @@ async function fixture() {
     operationId: f.targetOp,
     sessionId: f.targetSid,
     containerId: rawTarget.Id,
-    projectionDigest: hex('b'),
+    projectionDigest: f.work.planReplacement.account.projectionDigest,
     accountId: 'ci-plan-b',
     provider: 'anthropic',
-    contextInputDigest: hex('c'),
+    contextInputDigest: f.work.planReplacement.account.contextDigest,
     installedAuthDigest: canonical,
     observedAuthDigest: canonical,
     tokenDigest: hex('2'),
@@ -208,7 +208,7 @@ async function fixture() {
     row,
     homeData,
     box,
-    { projectionDigest: hex('b'), payloadDigest: hex('a'), attempt: f.targetOp }
+    { projectionDigest: f.work.planReplacement.account.projectionDigest, payloadDigest: hex('a'), attempt: f.targetOp }
   );
   row.tasks!.find((t) => t.role === 'identity-helper')!.configurationDigest = digest(config);
   const terminal = {
