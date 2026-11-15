@@ -338,7 +338,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           RootFS: z.object({ Layers: z.array(z.string()) }),
           Config: z.object({
             Entrypoint: z.array(z.string()).nullable(),
-            Cmd: z.array(z.string()).nullable(),
+            Cmd: z.array(z.string()).nullable().default(null),
             Labels: z.record(z.string(), z.string()).nullable(),
           }),
         })

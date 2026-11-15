@@ -33,7 +33,9 @@ export const DockerEmployeeInspect = z
       .object({
         User: z.string().regex(/^[0-9]{1,10}(:[0-9]{1,10})?$/),
         Entrypoint: z.array(z.string()).max(4).nullable(),
-        Cmd: z.array(z.string()).max(4).nullable(),
+        // Docker CLI 29.8 omits an empty Cmd; earlier clients report null.
+        // Keep the same canonical descriptor for that known empty value.
+        Cmd: z.array(z.string()).max(4).nullable().default(null),
         Env: z.array(z.string().max(16384)).max(256),
         Labels: z.record(z.string(), z.string()).nullable(),
         WorkingDir: z.string().max(4096).optional(),

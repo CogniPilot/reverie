@@ -269,6 +269,31 @@ async function providerViewFixture(ephemeral = false, mode = 'claude') {
   return { ...f, pane, docker };
 }
 describe('Engine-owned existing Docker provider view', () => {
+  it('accepts Docker 29.8 omitted empty Cmd with the same canonical old descriptor and image proof', async () => {
+    const f = fixture();
+    const wire = {
+      ...f.source,
+      Config: Object.fromEntries(Object.entries(f.source.Config).filter(([key]) => key !== 'Cmd')),
+    };
+    const parsed = DockerEmployeeInspect.parse(wire);
+    expect(parsed.Config.Cmd).toBeNull();
+    expect(boxedOriginal(parsed, subject, 'fixture')).toEqual(f.row.original);
+    const originalRun = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, options) => {
+      const output = await originalRun(args, options);
+      if (args[0] === 'image') {
+        const rows = JSON.parse(output) as Array<{ Config: Record<string, unknown> }>;
+        for (const row of rows) delete row.Config.Cmd;
+        return JSON.stringify(rows);
+      }
+      return output;
+    });
+    await expect(f.engine.image(f.row.original)).resolves.toEqual(f.row.workerImage);
+    const changed = DockerEmployeeInspect.parse({ ...wire, Config: { ...wire.Config, Cmd: ['unexpected-program'] } });
+    expect(boxedOriginal(changed, subject, 'fixture').configurationDigest).not.toBe(f.row.original.configurationDigest);
+    for (const value of ['', true, {}])
+      expect(() => DockerEmployeeInspect.parse({ ...wire, Config: { ...wire.Config, Cmd: value } })).toThrow();
+  });
   it('keeps a published image readable while selecting an independently built replacement', async () => {
     const f = await providerViewFixture(),
       next = 'sha256:' + '9'.repeat(64);
