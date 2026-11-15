@@ -422,16 +422,19 @@ describe('blocked move contextual recovery', () => {
     h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();await vi.waitFor(()=>expect(h.dialog.open).toBe(false));
     expect(h.fetch.mock.calls.filter(([path])=>path.endsWith('/resolve'))).toHaveLength(1);
   });
-  it('treats a server refusal as definite: shows its reason and keeps Adopt available, not unconfirmed',async()=>{
+  it('keeps a server error after adoption dispatch unknown until exact status is refreshed',async()=>{
     const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');
     h.fetch.mockImplementation(async(path:string)=>path.endsWith('/resolve')
       ?{ok:false,status:409,json:async()=>({success:false,error:'Multiple unresolved moves name this employee; inspect the journal before recovery'})}
       :reply(held));
     h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.click();
-    await vi.waitFor(()=>expect(h.dialog.querySelector('.status')!.textContent).toContain('Recovery refused: Multiple unresolved moves'));
-    expect(h.dialog.querySelector('.status')!.textContent).not.toContain('unconfirmed');
-    expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).not.toContain('unconfirmed');
-    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false);
+    await vi.waitFor(()=>expect(h.dialog.querySelector('.status')!.textContent).toContain('Multiple unresolved moves'));
+    expect(h.dialog.querySelector('.status')!.textContent).toContain('unconfirmed');
+    expect(h.dialog.querySelector('[data-recovery-info]')!.textContent).toContain('unconfirmed');
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(true);
+    expect(h.fetch.mock.calls.filter(([path]) => path.endsWith('/resolve'))).toHaveLength(1);
+    h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    await vi.waitFor(() => expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false));
   });
   it('clears a lost-response hold once Refresh shows the move still held, and adopts again only on a click',async()=>{
     const h=harness();h.dialog.showModal();h.methods.showPlanMoveProgress(h.dialog,held,'Alex');let lost=true;
@@ -541,4 +544,187 @@ describe('blocked move contextual recovery', () => {
     expect(h.fetch.mock.calls.some(([path])=>path.endsWith('/status')||path.endsWith('/resolve'))).toBe(false);
   });
 
+});
+
+
+describe('exact original plan status after an HTTP or transport error', () => {
+  const reply = (data: unknown) => ({ ok: true, status: 200, json: async () => ({ success: true, data }) });
+  const held = {
+    id: 'held',
+    employeeId: 'alex',
+    oldSession: 'source',
+    newSession: 'new',
+    toAccount: 'second',
+    phase: 'recovery-required',
+    sourceCleanupVerified: false,
+  };
+  for (const status of [403, 409, 500])
+    it(`retains the original request after HTTP${status} until explicit exact status`, async () => {
+      const h = harness();
+      await h.methods.openPlanMove('alex', 'second');
+      h.fetch.mockClear();
+      let input: Record<string, unknown> = {};
+      h.fetch.mockImplementation(async (path: string, options?: { body: string }) => {
+        if (path === '/api/plans/requests') {
+          input = JSON.parse(options!.body);
+          return {
+            ok: false,
+            status,
+            json: async () => ({
+              success: false,
+              error: { code: 'OPERATION_FAILED', message: 'The original result could not be confirmed' },
+            }),
+          };
+        }
+        if (path === `/api/plans/requests/${input.id}/status`)
+          return reply({ ...input, name: 'Alex', phase: 'pending', notified: false });
+        return reply([]);
+      });
+      h.dialog
+        .querySelector('form')!
+        .dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(h.dialog.querySelector('.err')!.textContent).toContain('Original ID:'));
+      expect(h.dialog.querySelector('.err')!.textContent).toContain('The original result could not be confirmed');
+      expect(h.dialog.querySelector('.err')!.textContent).toContain(String(input.id));
+      expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+      expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+      const inspect = h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!;
+      expect(inspect.textContent).toBe('Check original request');
+      expect(h.fetch.mock.calls).toHaveLength(1);
+      inspect.click();
+      await vi.waitFor(() => expect(h.dialog.querySelector('h3')!.textContent).toContain('Move request: Alex'));
+      expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests')).toHaveLength(1);
+      expect(
+        h.fetch.mock.calls
+          .filter(([path]) => path.endsWith('/status'))
+          .every(([path]) => path === `/api/plans/requests/${input.id}/status`)
+      ).toBe(true);
+      expect(h.fetch.mock.calls.some(([path]) => path.endsWith('/force') || path.endsWith('/resolve'))).toBe(false);
+    });
+  it('keeps an errored force operation pinned instead of offering another force', async () => {
+    const h = harness();
+    vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+    await h.methods.openPlanMove('alex', 'second');
+    h.fetch.mockClear();
+    let input: Record<string, unknown> = {};
+    h.fetch.mockImplementation(async (path: string, options?: { body: string }) => {
+      if (path.endsWith('/force')) {
+        input = JSON.parse(options!.body);
+        return { ok: false, status: 500, json: async () => ({ success: false, error: 'Final reply failed' }) };
+      }
+      return reply({
+        ...held,
+        id: input.id,
+        employeeId: input.employeeId,
+        oldSession: input.sessionId,
+        toAccount: input.toAccount,
+        sourceCleanupVerified: false,
+      });
+    });
+    h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+    await vi.waitFor(() => expect(h.dialog.querySelector('.err')!.textContent).toContain('Original ID:'));
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+    expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.textContent).toBe('Check original move');
+    h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.click();
+    await vi.waitFor(() => expect(h.dialog.querySelector('[data-move-sessions]')!.textContent).toContain('source'));
+    expect(h.fetch.mock.calls.filter(([path]) => path.endsWith('/force'))).toHaveLength(1);
+    expect(h.fetch.mock.calls.some(([path]) => path === '/api/plans/moves/recent' || path.endsWith('/resolve'))).toBe(
+      false
+    );
+    expect(
+      h.fetch.mock.calls
+        .filter(([path]) => path.endsWith('/status'))
+        .every(([path]) => path === `/api/plans/moves/${input.id}/status`)
+    ).toBe(true);
+  });
+  it('captures the requested account before awaiting and refuses foreign exact status', async () => {
+    for (const changed of ['id', 'employeeId', 'sessionId', 'toAccount']) {
+      const h = harness();
+      await h.methods.openPlanMove('alex', 'second');
+      h.fetch.mockClear();
+      let input: Record<string, unknown> = {},
+        finish!: () => void;
+      h.fetch.mockImplementation(async (path: string, options?: { body: string }) => {
+        if (path === '/api/plans/requests') {
+          input = JSON.parse(options!.body);
+          await new Promise<void>((resolve) => {
+            finish = resolve;
+          });
+          throw Error('Lost reply');
+        }
+        return reply({ ...input, [changed]: 'foreign', phase: 'pending' });
+      });
+      h.dialog
+        .querySelector('form')!
+        .dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+      h.dialog.querySelector<HTMLSelectElement>('[name=target]')!.value = 'first';
+      finish();
+      await vi.waitFor(() =>
+        expect(h.dialog.querySelector('[data-inspect]')!.textContent).toBe('Check original request')
+      );
+      h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.click();
+      await vi.waitFor(() => expect(h.dialog.querySelector('.err')!.textContent).toContain('scope changed'));
+      expect(input.toAccount).toBe('second');
+      expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(true);
+      expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+      expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests')).toHaveLength(1);
+    }
+  });
+  it('keeps exact status404 unknown without manufacturing a new request', async () => {
+    const h = harness();
+    await h.methods.openPlanMove('alex', 'second');
+    h.fetch.mockClear();
+    h.fetch.mockImplementation(async (path: string) => {
+      if (path === '/api/plans/requests') throw Error('Lost');
+      return { ok: false, status: 404, json: async () => ({ success: false, error: 'Original not visible' }) };
+    });
+    h.dialog
+      .querySelector('form')!
+      .dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    await vi.waitFor(() =>
+      expect(h.dialog.querySelector('[data-inspect]')!.textContent).toBe('Check original request')
+    );
+    h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.click();
+    await vi.waitFor(() => expect(h.dialog.querySelector('.err')!.textContent).toContain('Original not visible'));
+    expect(h.dialog.querySelector('.err')!.textContent).toContain('remains unconfirmed');
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-inspect]')!.disabled).toBe(false);
+    expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(true);
+    expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests')).toHaveLength(1);
+  });
+});
+
+describe('local plan preparation failure before any mutation', () => {
+  for (const force of [false, true])
+    it(`keeps the ${force ? 'forced move' : 'request'} editable only when local ID preparation fails before POST`, async () => {
+      const h = harness();
+      vi.spyOn(h.dom.window, 'confirm').mockReturnValue(true);
+      await h.methods.openPlanMove('alex', 'second');
+      h.fetch.mockClear();
+      const originalCrypto = h.context.crypto;
+      Object.defineProperty(h.context, 'crypto', {
+        configurable: true,
+        value: {
+          getRandomValues() {
+            throw Error('Local random source unavailable');
+          },
+        },
+      });
+      if (force) h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.click();
+      else
+        h.dialog
+          .querySelector('form')!
+          .dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(h.dialog.querySelector('.err')!.textContent).toContain('No request was sent'));
+      expect(h.fetch.mock.calls).toEqual([]);
+      expect(h.dialog.querySelector<HTMLButtonElement>('[type=submit]')!.disabled).toBe(false);
+      expect(h.dialog.querySelector<HTMLButtonElement>('[data-force]')!.disabled).toBe(false);
+      Object.defineProperty(h.context, 'crypto', { value: originalCrypto });
+      h.dialog
+        .querySelector('form')!
+        .dispatchEvent(new h.dom.window.Event('submit', { bubbles: true, cancelable: true }));
+      await vi.waitFor(() => expect(h.dialog.querySelector('h3')!.textContent).toContain('Move request: Alex'));
+      expect(h.fetch.mock.calls.filter(([path]) => path === '/api/plans/requests')).toHaveLength(1);
+    });
 });
