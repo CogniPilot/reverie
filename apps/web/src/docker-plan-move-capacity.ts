@@ -125,6 +125,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
         continuationDigest: dockerContinuationDigest(seed.source.record),
         providerSourceDigest: seed.source.providerSourceDigest,
         ephemeralSessionId: source.sessionId,
+        networkIds: Array.from({ length: 16 }, (_, i) => 'f'.repeat(63) + i.toString(16)),
       },
       account: { id: target.accountId, provider: target.provider, projectionDigest: hex, contextDigest: hex },
     },

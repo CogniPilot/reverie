@@ -167,6 +167,13 @@ const planIdentifier = z
   .regex(/^[a-zA-Z0-9_-]+$/);
 /** Correlation DATA for one explicit cross-SID replacement. Account/credential
  * contents and effect authority never enter this read projection. */
+/** Exact Engine network membership DATA. Names, IPs and aliases are never copied. */
+export const DockerPlanReplacementNetworkIds = z
+  .array(digest)
+  .min(1)
+  .max(16)
+  .refine((ids) => ids.every((id, index) => index === 0 || ids[index - 1]! < id));
+export type DockerPlanReplacementNetworkIds = z.infer<typeof DockerPlanReplacementNetworkIds>;
 export const DockerEmployeePlanReplacementProvenance = z
   .object({
     version: z.literal(1),
@@ -178,6 +185,7 @@ export const DockerEmployeePlanReplacementProvenance = z
         continuationDigest: digest,
         providerSourceDigest: digest,
         ephemeralSessionId: uuid.optional(),
+        networkIds: DockerPlanReplacementNetworkIds.optional(),
       })
       .strict(),
     account: z

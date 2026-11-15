@@ -161,6 +161,9 @@ describe('whole-document native settlement capacity', () => {
     expect(maximum).toBeGreaterThan(1_700_000);
     const actual = await s.dockerRecord(f.record.id);
     expect(actual.dockerSettlementBudget?.maxRecordBytes).toBeGreaterThan(maximum + 24000);
+    expect(
+      dockerPlanMaximumStates(f.state.seed, f.state.epoch)[0]!.work!.planReplacement.source.networkIds
+    ).toHaveLength(16);
     for (const witness of dockerPlanMaximumStates(f.state.seed, f.state.epoch))
       expect(DockerPlanMoveJournalState.parse(JSON.parse(JSON.stringify(witness)))).toEqual(witness);
     expect(

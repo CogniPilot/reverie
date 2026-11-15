@@ -99,3 +99,30 @@ known reader must close before provider-issued. Its raw source bytes remain
 private in the native actor, not in this DATA. Normal close follows durable
 target material installation; uncertain helper effects remain held and are never
 restarted from metadata.
+
+## Network membership
+
+New plan replacements persist a sorted set of 1–16 actual Docker NetworkIDs in
+`planReplacement.source.networkIds`. The native actor earns this DATA through
+`Engine.planReplacementNetworkIds(sourcePublishedRow, current)`, which brackets
+the exact stopped current source placement twice. The array does not grant an
+effect. CREATE independently rechecks the stopped source after pool/ephemeral
+awaits and requires that exact set.
+
+The new destination requests only `NetworkingConfig.EndpointsConfig` entries
+whose keys are those immutable IDs and whose values are empty objects. Source
+IP addresses and endpoint aliases are not copied; the control and network objects
+are not changed. The original primary HostConfig network mode is preserved.
+
+Docker reports empty NetworkID values for some Created/PID0 endpoints. At those
+pre-start phases only, the adapter resolves the exact reflected selectors through
+bounded read-only network inspection and checks each returned actual ID against
+the persisted set, while bracketing target config/state. Empty IDs themselves
+never prove identity. After START, target observations require the exact actual
+NetworkID set and never use selector fallback.
+
+Legacy v1/v2 behavior remains unchanged. A previously published v3 record without
+the new field can still be inspected, but cannot create another destination.
+New-field publication remains subject to the documented exclusive control
+activation boundary; this does not claim a fence against an already-running old
+writer.

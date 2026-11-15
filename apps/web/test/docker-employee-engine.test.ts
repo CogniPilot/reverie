@@ -57,7 +57,13 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
     pidsMax: 512,
     cpuWeight: 100,
     allowedCpus: [0, 1],
-    pool: { memoryMaxBytes: 48 * 1024 ** 3, swapMaxBytes: 0, pidsMax: 8192, cpuWeight: 100, allowedCpus: [0, 1] },
+    pool: {
+      memoryMaxBytes: 48 * 1024 ** 3,
+      swapMaxBytes: 0,
+      pidsMax: 8192,
+      cpuWeight: 100,
+      allowedCpus: [0, 1],
+    },
   });
   const source = DockerEmployeeInspect.parse({
     Id: cid,
@@ -69,11 +75,27 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
       Cmd: null,
       Env: ['HOME=/home/agent', 'PATH=/bin'],
       WorkingDir: '/workspace',
-      Labels: { 'reverie.worker': 'fixture', 'reverie.employee': eid, 'reverie.session': sid },
+      Labels: {
+        'reverie.worker': 'fixture',
+        'reverie.employee': eid,
+        'reverie.session': sid,
+      },
     },
     Mounts: [
-      { Type: 'bind', Source: '/synthetic/home', Destination: '/home/agent', RW: true, Propagation: 'rprivate' },
-      { Type: 'bind', Source: '/synthetic/nix', Destination: '/nix', RW: true, Propagation: 'rprivate' },
+      {
+        Type: 'bind',
+        Source: '/synthetic/home',
+        Destination: '/home/agent',
+        RW: true,
+        Propagation: 'rprivate',
+      },
+      {
+        Type: 'bind',
+        Source: '/synthetic/nix',
+        Destination: '/nix',
+        RW: true,
+        Propagation: 'rprivate',
+      },
       {
         Type: 'bind',
         Source: '/synthetic/host-script',
@@ -116,7 +138,11 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
     },
     sourceDigest: subject.sourceDigest,
     original,
-    workerImage: { imageId: target, sourceImageId: image, clientManifestDigest: '4'.repeat(64) },
+    workerImage: {
+      imageId: target,
+      sourceImageId: image,
+      clientManifestDigest: '4'.repeat(64),
+    },
     policy,
     credentialId: '50000000-0000-4000-8000-000000000005',
     phase: 'pool-ready',
@@ -171,13 +197,26 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
     command,
     'fixture',
     resources,
-    { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [image] },
+    {
+      imageId: target,
+      clientManifestDigest: '4'.repeat(64),
+      sourceImageIds: [image],
+    },
     journal,
     helper,
     boxId,
     () => mode
   );
-  return { source, row, engine, command, resources, policy, journal, created: () => created };
+  return {
+    source,
+    row,
+    engine,
+    command,
+    resources,
+    policy,
+    journal,
+    created: () => created,
+  };
 }
 async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
   const f = fixture('7'.repeat(64), ephemeral, mode);
@@ -208,8 +247,18 @@ async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
       ...(desired.HostConfig as Record<string, unknown>),
       OomKillDisable: false,
       Mounts: [
-        { Type: 'bind', Source: '/synthetic/home', Target: '/home/agent', BindOptions: { Propagation: 'rprivate' } },
-        { Type: 'bind', Source: '/synthetic/nix', Target: '/nix', BindOptions: { Propagation: 'rprivate' } },
+        {
+          Type: 'bind',
+          Source: '/synthetic/home',
+          Target: '/home/agent',
+          BindOptions: { Propagation: 'rprivate' },
+        },
+        {
+          Type: 'bind',
+          Source: '/synthetic/nix',
+          Target: '/nix',
+          BindOptions: { Propagation: 'rprivate' },
+        },
         {
           Type: 'bind',
           Source: '/synthetic/workspace',
@@ -282,17 +331,27 @@ describe('Engine-owned existing Docker provider view', () => {
     vi.mocked(f.command.run).mockImplementation(async (args, options) => {
       const output = await originalRun(args, options);
       if (args[0] === 'image') {
-        const rows = JSON.parse(output) as Array<{ Config: Record<string, unknown> }>;
+        const rows = JSON.parse(output) as Array<{
+          Config: Record<string, unknown>;
+        }>;
         for (const row of rows) delete row.Config.Cmd;
         return JSON.stringify(rows);
       }
       return output;
     });
     await expect(f.engine.image(f.row.original)).resolves.toEqual(f.row.workerImage);
-    const changed = DockerEmployeeInspect.parse({ ...wire, Config: { ...wire.Config, Cmd: ['unexpected-program'] } });
+    const changed = DockerEmployeeInspect.parse({
+      ...wire,
+      Config: { ...wire.Config, Cmd: ['unexpected-program'] },
+    });
     expect(boxedOriginal(changed, subject, 'fixture').configurationDigest).not.toBe(f.row.original.configurationDigest);
     for (const value of ['', true, {}])
-      expect(() => DockerEmployeeInspect.parse({ ...wire, Config: { ...wire.Config, Cmd: value } })).toThrow();
+      expect(() =>
+        DockerEmployeeInspect.parse({
+          ...wire,
+          Config: { ...wire.Config, Cmd: value },
+        })
+      ).toThrow();
   });
   it('keeps a published image readable while selecting an independently built replacement', async () => {
     const f = await providerViewFixture(),
@@ -317,7 +376,11 @@ describe('Engine-owned existing Docker provider view', () => {
       f.command,
       'fixture',
       f.resources,
-      { imageId: next, clientManifestDigest: '5'.repeat(64), sourceImageIds: [image, target] },
+      {
+        imageId: next,
+        clientManifestDigest: '5'.repeat(64),
+        sourceImageIds: [image, target],
+      },
       f.journal,
       helper,
       '7'.repeat(64),
@@ -410,7 +473,11 @@ describe('Engine-owned existing Docker provider view', () => {
     );
   });
   it('keeps custom NONE declarations on the prior generation-required path', async () => {
-    const custom = { ...cliRegistry.getCli('codex')!, id: cliRegistry.asCliId('custom-none'), stock: false };
+    const custom = {
+      ...cliRegistry.getCli('codex')!,
+      id: cliRegistry.asCliId('custom-none'),
+      stock: false,
+    };
     const registry = vi.spyOn(cliRegistry, 'getCli').mockReturnValue(custom);
     try {
       const f = await providerViewFixture(false, 'custom-none');
@@ -482,7 +549,10 @@ describe('Engine-owned existing Docker provider view', () => {
         ...f.docker,
         continuation: {
           ...f.docker.continuation!,
-          planReplacement: { provider: 'anthropic', projectionDigest: '8'.repeat(64) },
+          planReplacement: {
+            provider: 'anthropic',
+            projectionDigest: '8'.repeat(64),
+          },
         },
       })
     ).toThrow();
@@ -495,7 +565,12 @@ describe('Engine-owned existing Docker provider view', () => {
     'refuses readonly capsule shadow %s before creating a worker',
     async (path) => {
       const f = fixture();
-      f.source.Mounts.push({ Type: 'bind', Source: '/synthetic/shadow', Destination: path, RW: false });
+      f.source.Mounts.push({
+        Type: 'bind',
+        Source: '/synthetic/shadow',
+        Destination: path,
+        RW: false,
+      });
       f.row.original = boxedOriginal(f.source, subject, 'fixture');
       await expect(f.engine.createDestination(f.row, () => {})).rejects.toMatchObject({
         code: 'DOCKER_CONTINUATION_CAPSULE_MOUNT_SHADOW',
@@ -615,7 +690,10 @@ describe('new boxed Docker destination', () => {
   );
   it('canonical original rejects duplicate destinations instead of dropping a mount', () => {
     const f = fixture();
-    f.source.Mounts.push({ ...f.source.Mounts[1]!, Source: '/synthetic/second-nix' });
+    f.source.Mounts.push({
+      ...f.source.Mounts[1]!,
+      Source: '/synthetic/second-nix',
+    });
     expect(() => boxedOriginal(f.source, subject, 'fixture')).toThrow();
   });
 
@@ -679,7 +757,10 @@ describe('new boxed Docker destination', () => {
   });
   it('refuses changed actual pool before create', async () => {
     const f = fixture();
-    vi.mocked(f.resources.observePool).mockResolvedValue({ ...f.row.pool!, physicalDigest: '9'.repeat(64) });
+    vi.mocked(f.resources.observePool).mockResolvedValue({
+      ...f.row.pool!,
+      physicalDigest: '9'.repeat(64),
+    });
     await expect(f.engine.createDestination(f.row, () => {})).rejects.toMatchObject({
       code: 'DOCKER_CONTINUATION_POOL_CHANGED',
     });
@@ -691,7 +772,11 @@ describe('new boxed Docker destination', () => {
     vi.mocked(f.command.run).mockImplementation(async (a, b) => {
       if (a[0] === 'image' && a[2] === target)
         return JSON.stringify([
-          { Id: target, RootFS: { Layers: ['foreign'] }, Config: { Entrypoint: null, Cmd: null, Labels: {} } },
+          {
+            Id: target,
+            RootFS: { Layers: ['foreign'] },
+            Config: { Entrypoint: null, Cmd: null, Labels: {} },
+          },
         ]);
       return base(a, b);
     });
@@ -705,7 +790,12 @@ describe('new boxed Docker destination', () => {
   });
   it('rejects zero high at the shared policy boundary and preserves null as unbounded DATA', () => {
     const f = fixture();
-    expect(DockerEmployeeResourcePolicy.safeParse({ ...f.policy, memoryHighBytes: 0 }).success).toBe(false);
+    expect(
+      DockerEmployeeResourcePolicy.safeParse({
+        ...f.policy,
+        memoryHighBytes: 0,
+      }).success
+    ).toBe(false);
     expect(DockerEmployeeResourcePolicy.parse({ ...f.policy, memoryHighBytes: null }).memoryHighBytes).toBeNull();
   });
 });
@@ -727,7 +817,12 @@ describe('Engine-owned first-launch Codex workspace observation', () => {
     const run = vi.mocked(f.command.run).getMockImplementation()!;
     vi.mocked(f.command.run).mockImplementation(async (args, input) => {
       if (args.includes(DOCKER_CODEX_WORKSPACE_PROGRAM))
-        return JSON.stringify({ realPath: '/workspace/case', dev: '7', ino: '8', hooksText: null });
+        return JSON.stringify({
+          realPath: '/workspace/case',
+          dev: '7',
+          ino: '8',
+          hooksText: null,
+        });
       return run(args, input);
     });
     return f;
@@ -759,7 +854,14 @@ describe('Engine-owned first-launch Codex workspace observation', () => {
         const run = vi.mocked(f.command.run).getMockImplementation()!;
         vi.mocked(f.command.run).mockImplementation((a, i) =>
           a.includes(DOCKER_CODEX_WORKSPACE_PROGRAM)
-            ? Promise.resolve(JSON.stringify({ realPath: '/other', dev: '7', ino: '8', hooksText: null }))
+            ? Promise.resolve(
+                JSON.stringify({
+                  realPath: '/other',
+                  dev: '7',
+                  ino: '8',
+                  hooksText: null,
+                })
+              )
             : run(a, i)
         );
       }
@@ -917,14 +1019,20 @@ describe('read-only Docker provider health', () => {
     f.setMode('absent');
     f.advance(1);
     await f.health.refresh();
-    expect(f.health.read(f.employee)).toMatchObject({ state: 'dead', reason: 'COMMAND_EXITED' });
+    expect(f.health.read(f.employee)).toMatchObject({
+      state: 'dead',
+      reason: 'COMMAND_EXITED',
+    });
   });
   it('uses twice-observed exact stopped PID0 without inventing provider or init PID proof', async () => {
     const f = await healthFixture();
     f.observed.State.Running = false;
     f.observed.State.Pid = 0;
     await f.health.refresh();
-    expect(f.health.read(f.employee)).toMatchObject({ state: 'dead', reason: 'CONTAINER_STOPPED' });
+    expect(f.health.read(f.employee)).toMatchObject({
+      state: 'dead',
+      reason: 'CONTAINER_STOPPED',
+    });
     f.observed.State.Pid = 9;
     f.advance(1);
     await f.health.refresh();
@@ -1215,7 +1323,12 @@ describe('resource revision observation boundary', () => {
       ...f.row,
       version: 3,
       purpose: 'docker-employee-plan-replacement-v3',
-      request: { ...f.row.request, sessionId: nextSid, sessionGeneration: 4, operationId: nextOperation },
+      request: {
+        ...f.row.request,
+        sessionId: nextSid,
+        sessionGeneration: 4,
+        operationId: nextOperation,
+      },
       original,
       destination: boxedOriginal(f.observed, { ...subject, sessionId: nextSid }, 'fixture', true),
       credentialId: '80000000-0000-4000-8000-000000000008',
@@ -1259,6 +1372,274 @@ describe('resource revision observation boundary', () => {
     });
     return { ...f, row, nextSid };
   }
+
+  describe('exact network membership for plan replacement', () => {
+    const first = '1'.repeat(64),
+      second = '2'.repeat(64),
+      third = '3'.repeat(64);
+    const members = (ids: readonly string[]) => ({
+      Networks: Object.fromEntries(
+        ids.map((NetworkID, index) => [
+          'lan-' + index,
+          {
+            NetworkID,
+            IPAddress: '172.28.0.' + (index + 2),
+            Aliases: ['DO_NOT_COPY_ALIAS'],
+          },
+        ])
+      ),
+    });
+    async function stoppedPublished() {
+      const f = await providerViewFixture();
+      f.observed.State = {
+        ...f.observed.State,
+        Running: false,
+        Pid: 0,
+        Status: 'exited',
+      };
+      f.observed.NetworkSettings = members([second, first]);
+      return f;
+    }
+    function select(f: Awaited<ReturnType<typeof planReplacementMetadata>>, ids = [first, second]) {
+      if (f.row.version !== 3) throw Error('v3 fixture required');
+      f.source.State.Status = 'exited';
+      f.source.HostConfig.AutoRemove = false;
+      f.source.HostConfig.NetworkMode = first;
+      f.source.NetworkSettings = members(ids);
+      f.row.original = boxedOriginal(f.source, subject, 'fixture', true);
+      f.row.planReplacement.source.binding.originalDigest = dockerContinuationDigest(f.row.original);
+      f.row.planReplacement.source.networkIds = [...ids].sort();
+      f.observed.HostConfig.NetworkMode = first;
+      f.observed.NetworkSettings = members(ids);
+      return f.row;
+    }
+    it('earns sorted unique current P networks through read-only double stopped brackets', async () => {
+      const f = await stoppedPublished();
+      vi.mocked(f.command.run).mockClear();
+      vi.mocked(f.command.create).mockClear();
+      expect(await f.engine.planReplacementNetworkIds(f.row, () => {})).toEqual([first, second]);
+      expect(f.command.create).not.toHaveBeenCalled();
+      expect(
+        vi.mocked(f.command.run).mock.calls.every(([a]) => a[0] === 'container' && ['ls', 'inspect'].includes(a[1]!))
+      ).toBe(true);
+    });
+    it.each(['empty', 'missing', 'malformed', 'duplicate', 'too-many', 'empty-id-after-stop'] as const)(
+      'refuses %s actual source network metadata without effects',
+      async (kind) => {
+        const f = await stoppedPublished();
+        vi.mocked(f.command.create).mockClear();
+        if (kind === 'empty') f.observed.NetworkSettings = { Networks: {} };
+        if (kind === 'missing') delete f.observed.NetworkSettings;
+        if (kind === 'malformed')
+          f.observed.NetworkSettings = {
+            Networks: { lan: { NetworkID: 'tag:latest' } },
+          };
+        if (kind === 'duplicate') f.observed.NetworkSettings = members([first, first]);
+        if (kind === 'too-many')
+          f.observed.NetworkSettings = members(Array.from({ length: 17 }, (_, i) => i.toString(16).padStart(64, '0')));
+        if (kind === 'empty-id-after-stop') f.observed.NetworkSettings = { Networks: { lan: { NetworkID: '' } } };
+        await expect(f.engine.planReplacementNetworkIds(f.row, () => {})).rejects.toThrow('NETWORKS_UNCONFIRMED');
+        expect(f.command.create).not.toHaveBeenCalled();
+      }
+    );
+    it('refuses a membership change between the two actual source observations', async () => {
+      const f = await stoppedPublished(),
+        original = vi.mocked(f.command.run).getMockImplementation()!;
+      let changed = false;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        const value = await original(args, input);
+        if (!changed && args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) {
+          changed = true;
+          f.observed.NetworkSettings = members([first, third]);
+        }
+        return value;
+      });
+      await expect(f.engine.planReplacementNetworkIds(f.row, () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+    });
+    it.each(['running', 'PID', 'restart', 'owner'] as const)('refuses changed %s source scope', async (kind) => {
+      const f = await stoppedPublished();
+      let current = true;
+      if (kind === 'running') f.observed.State.Running = true;
+      if (kind === 'PID') f.observed.State.Pid = 123;
+      if (kind === 'restart') {
+        f.observed.HostConfig.RestartPolicy = { Name: 'always' };
+        f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+      }
+      if (kind === 'owner') {
+        const original = vi.mocked(f.command.run).getMockImplementation()!;
+        vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+          const out = await original(a, b);
+          current = false;
+          return out;
+        });
+      }
+      await expect(
+        f.engine.planReplacementNetworkIds(f.row, () => {
+          if (!current) throw Error('owner revoked');
+        })
+      ).rejects.toThrow();
+    });
+    it('requires persisted network IDs for a new v3 CREATE while old published v3 metadata stays readable', async () => {
+      const f = await planReplacementMetadata();
+      vi.mocked(f.command.create).mockClear();
+      await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();
+      await expect(f.engine.createDestination(f.row, () => {})).rejects.toThrow('NETWORKS_REQUIRED');
+      expect(f.command.create).not.toHaveBeenCalled();
+    });
+    it('copies both current source networks by immutable ID and omits IP/alias data', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      vi.mocked(f.command.create).mockClear();
+      await f.engine.createDestination(row, () => {});
+      const body = f.created()!;
+      expect(body.NetworkingConfig).toEqual({
+        EndpointsConfig: { [first]: {}, [second]: {} },
+      });
+      expect((body.HostConfig as Record<string, unknown>).NetworkMode).toBe(first);
+      expect(JSON.stringify(body)).not.toContain('DO_NOT_COPY_ALIAS');
+      expect(JSON.stringify(body)).not.toContain('172.28.0.');
+      expect(f.command.create).toHaveBeenCalledTimes(1);
+    });
+    it('refuses changed source membership at CREATE and changed target membership at observation', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      f.source.NetworkSettings = members([first, third]);
+      vi.mocked(f.command.create).mockClear();
+      await expect(f.engine.createDestination(row, () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      expect(f.command.create).not.toHaveBeenCalled();
+      f.source.NetworkSettings = members([first, second]);
+      f.observed.NetworkSettings = members([first, third]);
+      await expect(f.engine.verifyResourceDestination(row, () => {})).rejects.toThrow('NETWORK_DESTINATION_CHANGED');
+    });
+    it.each(['destination-ready', 'start-issued'] as const)(
+      'resolves exact Created endpoint selectors through actual network metadata at %s before START',
+      async (phase) => {
+        const f = await planReplacementMetadata(),
+          row = select(f);
+        const work = { ...row, phase };
+        f.observed.State = {
+          ...f.observed.State,
+          Running: false,
+          Status: 'created',
+          Pid: 0,
+        };
+        f.observed.NetworkSettings = {
+          Networks: {
+            'declared-one': { NetworkID: '' },
+            'declared-two': { NetworkID: '' },
+          },
+        };
+        const original = vi.mocked(f.command.run).getMockImplementation()!;
+        vi.mocked(f.command.create).mockClear();
+        vi.mocked(f.command.run).mockImplementation(async (a, b) =>
+          a[0] === 'network'
+            ? JSON.stringify([
+                { Id: first, Name: 'declared-one' },
+                { Id: second, Name: 'declared-two' },
+              ])
+            : original(a, b)
+        );
+        // The existing observation API returns stopped metadata without provider,
+        // credential or resource effects. It does not claim a connected endpoint.
+        await expect(f.engine.observeDestination({ ...work, destination: undefined })).resolves.toMatchObject({
+          state: 'stopped',
+        });
+        expect(f.command.create).not.toHaveBeenCalled();
+        expect(vi.mocked(f.command.run).mock.calls.some(([a]) => a[0] === 'network' && a[1] === 'inspect')).toBe(true);
+      }
+    );
+    it('does not accept empty or foreign resolved network IDs after the target starts', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      f.observed.NetworkSettings = {
+        Networks: {
+          'declared-one': { NetworkID: '' },
+          'declared-two': { NetworkID: '' },
+        },
+      };
+      await expect(f.engine.verifyResourceDestination(row, () => {})).rejects.toThrow('NETWORKS_UNCONFIRMED');
+      expect(vi.mocked(f.command.run).mock.calls.some(([a]) => a[0] === 'network')).toBe(false);
+    });
+    it('rejects a Created name resolving to a new/foreign ID instead of inferring identity from its label', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      const work = {
+        ...row,
+        phase: 'destination-ready' as const,
+        destination: undefined,
+      };
+      f.observed.State = {
+        ...f.observed.State,
+        Running: false,
+        Status: 'created',
+        Pid: 0,
+      };
+      f.observed.NetworkSettings = {
+        Networks: {
+          'declared-one': { NetworkID: '' },
+          'declared-two': { NetworkID: '' },
+        },
+      };
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (a, b) =>
+        a[0] === 'network'
+          ? JSON.stringify([
+              { Id: first, Name: 'declared-one' },
+              { Id: third, Name: 'declared-two' },
+            ])
+          : original(a, b)
+      );
+      await expect(f.engine.observeDestination(work)).rejects.toThrow('NETWORK_DESTINATION_CHANGED');
+    });
+
+    it('rechecks source networks after slow pool observation instead of using the earlier inspect snapshot', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      vi.mocked(f.command.create).mockClear();
+      vi.mocked(f.resources.observePool).mockImplementation(async () => {
+        f.source.NetworkSettings = members([first, third]);
+        return row.pool!;
+      });
+      await expect(f.engine.createDestination(row, () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      expect(f.command.create).not.toHaveBeenCalled();
+    });
+    it('refuses a Created selector mutation across the readonly name resolution await', async () => {
+      const f = await planReplacementMetadata(),
+        row = select(f),
+        work = {
+          ...row,
+          phase: 'destination-ready' as const,
+          destination: undefined,
+        };
+      f.observed.State = {
+        ...f.observed.State,
+        Running: false,
+        Status: 'created',
+        Pid: 0,
+      };
+      f.observed.NetworkSettings = {
+        Networks: {
+          'declared-one': { NetworkID: '' },
+          'declared-two': { NetworkID: '' },
+        },
+      };
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+        if (a[0] !== 'network') return original(a, b);
+        f.observed.NetworkSettings = {
+          Networks: {
+            'declared-one': { NetworkID: '' },
+            foreign: { NetworkID: '' },
+          },
+        };
+        return JSON.stringify([
+          { Id: first, Name: 'declared-one' },
+          { Id: second, Name: 'declared-two' },
+        ]);
+      });
+      await expect(f.engine.observeDestination(work)).rejects.toThrow('NETWORK_DESTINATION_CHANGED');
+    });
+  });
   it('requires retained installation evidence before admitting a replacement provider view', async () => {
     const f = await planReplacementMetadata();
     vi.mocked(f.command.run).mockClear();

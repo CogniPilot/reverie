@@ -20,6 +20,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
   DockerEmployeeBinding,
+  DockerPlanReplacementNetworkIds,
   DockerEmployeeOriginal,
   DockerEmployeeResourcePolicy,
   DockerEmployeeWorkerImage,
@@ -65,7 +66,12 @@ const providerPane = z
     paneStartTicks: z.string().regex(/^[1-9][0-9]{0,19}$/),
     hooks: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('none') }).strict(),
-      z.object({ kind: z.literal('generation'), generation: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/) }).strict(),
+      z
+        .object({
+          kind: z.literal('generation'),
+          generation: z.string().regex(/^[A-Za-z0-9_.:-]{1,256}$/),
+        })
+        .strict(),
     ]),
   })
   .strict();
@@ -84,7 +90,10 @@ export interface DockerEmployeeProviderViewDescriptor {
     | { readonly kind: 'none'; readonly mode: string }
     | { readonly kind: 'generation'; readonly generation: string };
   readonly clientManifestDigest: string;
-  readonly planReplacement?: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }>;
+  readonly planReplacement?: Readonly<{
+    provider: 'anthropic' | 'openai';
+    projectionDigest: string;
+  }>;
 }
 /** A private observer admission. It grants no provider creation or relaunch. */
 export class DockerEmployeeProviderView {
@@ -210,6 +219,39 @@ function sourceSubject(row: DockerEmployeeContinuationRecord): DockerContinuatio
     providerSourceDigest: source.providerSourceDigest,
   };
 }
+function networkEntries(raw: DockerEmployeeInspect): Array<readonly [string, string]> {
+  try {
+    const value = z
+      .object({
+        Networks: z.record(
+          z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/),
+          z.object({ NetworkID: z.string().regex(/^(?:[a-f0-9]{64})?$/) }).passthrough()
+        ),
+      })
+      .parse(raw.NetworkSettings);
+    const entries = Object.entries(value.Networks).map(([name, endpoint]) => [name, endpoint.NetworkID] as const);
+    if (entries.length < 1 || entries.length > 16) refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+    return entries;
+  } catch {
+    return refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+  }
+}
+function networkStopped(raw: DockerEmployeeInspect | null): DockerEmployeeInspect {
+  if (
+    !raw ||
+    raw.State.Running ||
+    raw.State.Pid !== 0 ||
+    !['created', 'exited'].includes(String(raw.State.Status)) ||
+    raw.HostConfig.AutoRemove !== false ||
+    (!isDeepStrictEqual(raw.HostConfig.RestartPolicy, {
+      Name: 'no',
+      MaximumRetryCount: 0,
+    }) &&
+      !isDeepStrictEqual(raw.HostConfig.RestartPolicy, { Name: 'no' }))
+  )
+    refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+  return raw;
+}
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
@@ -248,6 +290,49 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(deployment)) throw Error('Registered deployment required');
     if (!/^sha256:[a-f0-9]{64}$/.test(workerImage.imageId) || !/^[a-f0-9]{64}$/.test(workerImage.clientManifestDigest))
       throw Error('Fixed qualified worker image required');
+  }
+  async #networkIds(raw: DockerEmployeeInspect, current: () => void, allowCreated = false): Promise<readonly string[]> {
+    current();
+    const entries = networkEntries(raw);
+    if (entries.every(([, id]) => id !== '')) {
+      try {
+        return Object.freeze(DockerPlanReplacementNetworkIds.parse(entries.map(([, id]) => id).sort()));
+      } catch {
+        return refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+      }
+    }
+    if (!allowCreated || raw.State.Running || raw.State.Status !== 'created' || raw.State.Pid !== 0)
+      refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+    // Created endpoints can contain names and empty IDs. Resolve those exact
+    // Engine selectors read-only; an empty value never supplies identity.
+    let resolved: Array<{ Id: string; Name: string }>;
+    try {
+      const text = await this.command.run(['network', 'inspect', '--', ...entries.map(([name]) => name)]);
+      current();
+      resolved = z
+        .array(
+          z.object({
+            Id: z.string().regex(/^[a-f0-9]{64}$/),
+            Name: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/),
+          })
+        )
+        .length(entries.length)
+        .max(16)
+        .parse(JSON.parse(text));
+    } catch {
+      current();
+      return refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+    }
+    const ids = entries.map(([selector, id]) => {
+      const matches = resolved.filter((network) => network.Id === selector || network.Name === selector);
+      if (matches.length !== 1 || (id !== '' && id !== matches[0]!.Id)) refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+      return matches[0]!.Id;
+    });
+    try {
+      return Object.freeze(DockerPlanReplacementNetworkIds.parse(ids.sort()));
+    } catch {
+      return refuse('DOCKER_PLAN_NETWORKS_UNCONFIRMED');
+    }
   }
   async #inspect(cid: string): Promise<DockerEmployeeInspect> {
     if (!/^[a-f0-9]{64}$/.test(cid)) refuse('DOCKER_CONTINUATION_CONTAINER_ID_INVALID');
@@ -369,7 +454,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       .passthrough()
       .safeParse(raw.HostConfig.RestartPolicy);
     if (raw.State.Pid !== 0 || !restart.success) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
-    return { original: boxedOriginal(raw, sourceSubject(row), this.deployment, true), state: 'stopped' as const };
+    return {
+      original: boxedOriginal(raw, sourceSubject(row), this.deployment, true),
+      state: 'stopped' as const,
+    };
   }
   /** Retained HOME identity only. The actor must independently retain its
    * genuine source-stop/request grant; this read cannot authorize a new helper. */
@@ -397,6 +485,34 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
   }
+  /** Read-only current stopped worker membership, separate from requester/effect
+   * authority. The caller must retain the original binding across every await. */
+  async planReplacementNetworkIds(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<readonly string[]> {
+    current();
+    const row = DockerEmployeeContinuationRecord.parse(input),
+      key = dockerContinuationDigest(row);
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
+      refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+    const check = () => {
+      current();
+      if (dockerContinuationDigest(input) !== key) refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+    };
+    const first = networkStopped(await this.#destination(row, check));
+    check();
+    const ids = await this.#networkIds(first, check, true);
+    check();
+    const last = networkStopped(await this.#destination(row, check));
+    check();
+    const afterIds = await this.#networkIds(last, check, true);
+    check();
+    if (!isDeepStrictEqual(first.State, last.State) || !isDeepStrictEqual(ids, afterIds))
+      refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+    check();
+    return Object.freeze([...ids]);
+  }
   /** Original completed installer ACK only; no guest execution or live grant. */
   async planReplacementOriginal(row: DockerEmployeeContinuationRecord, current: () => void) {
     return this.#planInstaller.original(row, current);
@@ -421,7 +537,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_UNIQUE_ORIGINAL_REQUIRED');
     const raw = await this.#inspect(cid),
       original = boxedOriginal(raw, subject, this.deployment);
-    return { original, state: raw.State.Running ? ('running' as const) : ('stopped' as const) };
+    return {
+      original,
+      state: raw.State.Running ? ('running' as const) : ('stopped' as const),
+    };
   }
   async validateCapabilities(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void> {
     const raw = await this.#inspect(original.containerId);
@@ -474,9 +593,26 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null> {
     return this.resources.observePool(row);
   }
-  #configuration(row: DockerEmployeeContinuationRecord, source: DockerEmployeeInspect): Record<string, unknown> {
+  #configuration(
+    row: DockerEmployeeContinuationRecord,
+    source: DockerEmployeeInspect,
+    existingRead = false,
+    sourceNetworks?: readonly string[]
+  ): Record<string, unknown> {
     this.#requireCapsuleMounts(source);
     if (!row.pool) refuse('DOCKER_CONTINUATION_POOL_UNCONFIRMED');
+    let networks: Record<string, Record<string, never>> | undefined;
+    if (row.version === 3) {
+      const expected = row.planReplacement.source.networkIds;
+      if (!expected) {
+        if (!existingRead || !row.destination || !['provider-issued', 'ready'].includes(row.phase))
+          refuse('DOCKER_PLAN_NETWORKS_REQUIRED');
+      } else {
+        if (!existingRead && !isDeepStrictEqual(DockerPlanReplacementNetworkIds.parse(expected), sourceNetworks))
+          refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+        networks = Object.fromEntries(expected.map((id) => [id, {}]));
+      }
+    }
     const sourceHost = source.HostConfig;
     const host: Record<string, unknown> = {};
     for (const key of [
@@ -567,26 +703,53 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'reverie.boxed.source': row.original.containerId,
         'org.reverie.worker-client.manifest': row.workerImage.clientManifestDigest,
       },
+      ...(networks ? { NetworkingConfig: { EndpointsConfig: networks } } : {}),
       HostConfig: host,
     };
   }
   async createDestination(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    if (row.version === 3 && !row.planReplacement.source.networkIds) refuse('DOCKER_PLAN_NETWORKS_REQUIRED');
     const source = await this.#source(row);
     await this.image(row.original);
     current();
     const pool = await this.resources.observePool(row);
     current();
     if (!pool || !isDeepStrictEqual(pool, row.pool)) refuse('DOCKER_CONTINUATION_POOL_CHANGED');
-    const config = this.#configuration(row, source);
+    let actualSource = source,
+      sourceNetworks: readonly string[] | undefined;
+    if (row.version === 3) {
+      actualSource = networkStopped(await this.#source(row));
+      current();
+      sourceNetworks = await this.#networkIds(actualSource, current, true);
+      current();
+      const after = networkStopped(await this.#source(row));
+      current();
+      const afterNetworks = await this.#networkIds(after, current, true);
+      current();
+      if (!isDeepStrictEqual(actualSource.State, after.State) || !isDeepStrictEqual(sourceNetworks, afterNetworks))
+        refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+    }
+    const config = this.#configuration(row, actualSource, false, sourceNetworks);
     await this.#ephemeral?.require(row);
     current();
+    if (row.version === 3) {
+      const latest = networkStopped(await this.#source(row));
+      current();
+      const ids = await this.#networkIds(latest, current, true);
+      current();
+      if (!isDeepStrictEqual(ids, row.planReplacement.source.networkIds)) refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
+    }
     await this.command.create(
       'reverie-boxed-' + dockerContinuationDigest([this.boxId, 'destination', row.request.operationId]),
       config,
       current
     );
   }
-  async #destination(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect | null> {
+  async #destination(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void = () => {}
+  ): Promise<DockerEmployeeInspect | null> {
+    current();
     const selected = await this.command.run([
       'container',
       'ls',
@@ -601,11 +764,36 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       '--format',
       '{{.ID}}',
     ]);
+    current();
     if (selected.trim() === '') return null;
     if (!/^[a-f0-9]{64}$/.test(selected.trim())) refuse('DOCKER_CONTINUATION_DESTINATION_AMBIGUOUS');
-    const raw = await this.#inspect(selected.trim()),
-      source = await this.#source(row),
-      desired = this.#configuration(row, source);
+    const raw = await this.#inspect(selected.trim());
+    current();
+    const source = await this.#source(row);
+    current();
+    const desired = this.#configuration(row, source, true);
+    if (row.version === 3 && row.planReplacement.source.networkIds) {
+      const pending = ['destination-issued', 'destination-ready', 'start-issued'].includes(row.phase);
+      const actual = await this.#networkIds(raw, current, pending);
+      current();
+      if (
+        !isDeepStrictEqual(actual, row.planReplacement.source.networkIds) ||
+        raw.HostConfig.NetworkMode !== (desired.HostConfig as Record<string, unknown>).NetworkMode
+      )
+        refuse('DOCKER_PLAN_NETWORK_DESTINATION_CHANGED');
+      if (networkEntries(raw).some(([, id]) => id === '')) {
+        const after = await this.#inspect(raw.Id);
+        current();
+        if (
+          !isDeepStrictEqual(raw.Config, after.Config) ||
+          !isDeepStrictEqual(raw.HostConfig, after.HostConfig) ||
+          !isDeepStrictEqual(raw.Mounts, after.Mounts) ||
+          !isDeepStrictEqual(raw.State, after.State) ||
+          !isDeepStrictEqual(raw.NetworkSettings, after.NetworkSettings)
+        )
+          refuse('DOCKER_PLAN_NETWORK_DESTINATION_CHANGED');
+      }
+    }
     const labels = raw.Config.Labels;
     this.#requireCapsuleMounts(raw);
     if (
@@ -705,7 +893,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const after = await this.#destination(row);
     if (!after || after.State.Running !== raw.State.Running)
       refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
-    return { original, state: raw.State.Running ? 'running' : 'stopped', provider, resources, credentialDigest };
+    return {
+      original,
+      state: raw.State.Running ? 'running' : 'stopped',
+      provider,
+      resources,
+      credentialDigest,
+    };
   }
   async start(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const raw = await this.#destination(row);
@@ -1121,6 +1315,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (providerPane.parse(JSON.parse(output)).hooks.kind !== hooks.kind)
       refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
-    return { kind: 'running', operationId: row.request.operationId, sessionId: original.sessionId };
+    return {
+      kind: 'running',
+      operationId: row.request.operationId,
+      sessionId: original.sessionId,
+    };
   }
 }
