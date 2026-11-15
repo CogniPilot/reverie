@@ -55,7 +55,8 @@ export class DockerEmployeeProviderLaunch {
   workspaceForCommand(sessionId: string, docker: SessionDocker): Readonly<DockerCodexWorkspace> | undefined {
     this.requireFor(this.#session);
     if (this.#claimed) throw Error('Original Docker provider launch already held');
-    if (this.#session.id !== sessionId || docker !== this.#session.docker)
+    // The mux snapshots launch DATA before awaits. Its equal copy is not a new owner.
+    if (this.#session.id !== sessionId || !isDeepStrictEqual(docker, this.#session.docker))
       throw Error('Original unopened Docker workspace required');
     if (this.#workspace.kind === 'held') throw Error('Original Docker workspace observation held');
     return this.#workspace.kind === 'observed' ? this.#workspace.value : undefined;

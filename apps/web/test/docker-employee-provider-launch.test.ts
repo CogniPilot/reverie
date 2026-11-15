@@ -201,6 +201,39 @@ describe('boxed original provider publication', () => {
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
     expect(current).toHaveBeenCalled();
   });
+  it.each([
+    ['daemon', (value: SessionDocker) => (value.daemonHost = 'unix:///other.sock')],
+    ['image', (value: SessionDocker) => (value.image = 'sha256:' + 'd'.repeat(64))],
+    ['container', (value: SessionDocker) => (value.containerName = 'e'.repeat(64))],
+    ['workspace', (value: SessionDocker) => (value.containerWorkdir = '/different')],
+    ['network', (value: SessionDocker) => (value.network = 'different')],
+    ['credentials', (value: SessionDocker) => (value.mountCredentials = true)],
+    ['generation', (value: SessionDocker) => (value.continuation!.sessionGeneration = 8)],
+  ] as const)('rejects changed captured Docker %s without consuming the original owner', (_field, mutate) => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    const captured = structuredClone(f.place);
+    mutate(captured);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, docker: captured, continuationLaunch: owner })).toThrow();
+    expect(
+      buildDockerLaunchCommand({ ...f.opts, docker: structuredClone(f.place), continuationLaunch: owner })
+    ).toContain('source-file -');
+    expect(() =>
+      buildDockerLaunchCommand({ ...f.opts, docker: structuredClone(f.place), continuationLaunch: owner })
+    ).toThrow('already held');
+  });
+  it('requires current private authority even for an unchanged captured Docker snapshot', () => {
+    const f = fixture();
+    let current = true;
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {
+      if (!current) throw Error('owner revoked');
+    });
+    const captured = structuredClone(f.place);
+    current = false;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, docker: captured, continuationLaunch: owner })).toThrow(
+      'owner revoked'
+    );
+  });
   it('retains the actual private first-provider owner across public mux option capture', async () => {
     const f = fixture(),
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
@@ -214,7 +247,13 @@ describe('boxed original provider publication', () => {
       )
       .mockImplementation(async (options) => {
         expect(options.dockerContinuationLaunch).toBe(owner);
-        const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: options.dockerContinuationLaunch });
+        expect(options.docker).not.toBe(f.session.docker);
+        expect(options.docker).toEqual(f.session.docker);
+        const command = buildDockerLaunchCommand({
+          ...f.opts,
+          docker: options.docker!,
+          continuationLaunch: options.dockerContinuationLaunch,
+        });
         expect(command).toContain('new-session');
         throw Error('physical transport withheld');
       });
