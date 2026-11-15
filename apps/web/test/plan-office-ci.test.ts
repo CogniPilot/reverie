@@ -27,6 +27,9 @@ const metadata = {
 };
 it('requires the explicit hosted-only command before any filesystem, build or Engine effect', () => {
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).not.toThrow();
+  expect(requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).toBe('ordinary-self');
+  expect(requireHostedPlanOffice(['--ci', '--scenario', 'self-roundtrip'], env, 'linux', 'x64')).toBe('self-roundtrip');
+  expect(() => requireHostedPlanOffice(['--ci', '--scenario', 'force'], env, 'linux', 'x64')).toThrow();
   for (const args of [[], ['--ci', '--force'], ['--contract', '/private/office']])
     expect(() => requireHostedPlanOffice(args, env, 'linux', 'x64')).toThrow();
   for (const change of [
@@ -55,6 +58,7 @@ it('selects only fresh namespaced actual Engine IDs and fixed immutable current-
   const ids = { source: sha, worker: sha, helper: sha, control: sha };
   const c = planOfficeCiContract(metadata, instance, ids);
   expect(c.acceptance).toBe('ordinary-self');
+  expect(planOfficeCiContract(metadata, instance, ids, 'self-roundtrip').acceptance).toBe('self-roundtrip');
   expect(c.bootstrap.employees[0]?.permissions).toEqual({ moveOwnPlan: true, managePlans: false });
   expect(c.sourceProviders[0]?.mode).toBe('ordinary');
   for (const change of [
@@ -65,6 +69,70 @@ it('selects only fresh namespaced actual Engine IDs and fixed immutable current-
   ])
     expect(() => planOfficeCiContract({ ...metadata, ...change }, instance, ids)).toThrow();
   expect(() => planOfficeCiContract(metadata, instance, { ...ids, worker: 'worker:latest' })).toThrow();
+});
+it('requires both separately completed opposite moves with linked new sessions to accept opt-in roundtrip', () => {
+  const root = '/private/owned/office-' + instance;
+  const first = {
+    id: '22222222-2222-4222-8222-222222222222',
+    employeeId,
+    fromAccount: 'ci-plan-a',
+    toAccount: 'ci-plan-b',
+    realCapsuleHmac: true,
+    originalOnly: true,
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    sessionGeneration: 1,
+    newSession: '44444444-4444-4444-8444-444444444444',
+  };
+  const returned = {
+    ...first,
+    id: '55555555-5555-4555-8555-555555555555',
+    fromAccount: 'ci-plan-b',
+    toAccount: 'ci-plan-a',
+    sessionId: first.newSession,
+    sessionGeneration: 2,
+    newSession: '66666666-6666-4666-8666-666666666666',
+  };
+  const summary = {
+    employeeId,
+    firstMoveId: first.id,
+    returnMoveId: returned.id,
+    firstNewSession: first.newSession,
+    returnNewSession: returned.newSession,
+    accounts: ['ci-plan-a', 'ci-plan-b', 'ci-plan-a'],
+    firstReceipt: 'first-self-move-completed',
+    returnReceipt: 'self-move-' + returned.id + '-completed',
+  };
+  const result = {
+    status: 0,
+    baselineReady: true,
+    planMovesAccepted: true,
+    acceptedScenario: 'self-roundtrip',
+    evidence: root,
+    forceAccepted: false,
+    refreshReuseAccepted: false,
+    selfRoundtripAccepted: true,
+  };
+  const accept = (r: unknown, value: { returned: unknown; summary: unknown } | undefined) =>
+    requirePlanOfficeCiAcceptance(r, first, root, employeeId, 'self-roundtrip', value);
+  expect(accept(result, { returned, summary })).toMatchObject({
+    selfRoundtripAccepted: true,
+    returnScenarioId: returned.id,
+    forceAccepted: false,
+    teamAccepted: false,
+  });
+  expect(() => accept(result, undefined)).toThrow();
+  expect(() => accept({ ...result, selfRoundtripAccepted: false }, { returned, summary })).toThrow();
+  for (const change of [
+    { id: first.id },
+    { sessionId: first.sessionId },
+    { sessionGeneration: 1 },
+    { newSession: first.sessionId },
+    { fromAccount: 'ci-plan-a' },
+    { realCapsuleHmac: false },
+  ])
+    expect(() => accept(result, { returned: { ...returned, ...change }, summary })).toThrow();
+  expect(() => accept(result, { returned, summary: { ...summary, returnMoveId: first.id } })).toThrow();
+  expect(() => requirePlanOfficeCiAcceptance(result, first, root, employeeId)).toThrow();
 });
 it('requires both the ordinary-self result and separate real HMAC/physical-completion sentinel', () => {
   const root = '/private/owned/office-' + instance;

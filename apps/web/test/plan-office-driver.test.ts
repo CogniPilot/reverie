@@ -35,8 +35,10 @@ import {
   planOfficeInternalHostPreflight,
   planOfficeSession,
   planOfficeOriginalStatus,
+  planOfficeSelfIdentityFile,
   completePlanOfficeOriginal,
 } from './helpers/plan-office-driver.js';
+import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 const sha = 'sha256:' + 'a'.repeat(64),
   sid = '11111111-1111-4111-8111-111111111111',
   eid = '22222222-2222-4222-8222-222222222222',
@@ -640,13 +642,34 @@ it('admits the first ordinary self scenario only for one nonrotating A employee 
     bootstrap: { ...raw.bootstrap, employees: [{ ...employee, permissions: { moveOwnPlan: true } }] },
   };
   expect(PlanOfficeDriverInput.parse(good).acceptance).toBe('ordinary-self');
+  expect(PlanOfficeDriverInput.parse({ ...good, acceptance: 'self-roundtrip' }).acceptance).toBe('self-roundtrip');
   for (const changes of [
     { bootstrap: raw.bootstrap },
     { bootstrap: { ...good.bootstrap, employees: [{ ...employee, permissions: { managePlans: true } }] } },
     { sourceProviders: [{ employeeId: eid, mode: 'rotate-a' }] },
     { acceptance: 'force-implicit' },
   ])
-    expect(() => PlanOfficeDriverInput.parse({ ...good, ...changes })).toThrow();
+    for (const acceptance of ['ordinary-self', 'self-roundtrip'])
+      expect(() => PlanOfficeDriverInput.parse({ ...good, acceptance, ...changes })).toThrow();
+});
+
+it('uses the current installed v3 generation credential for the return instead of the legacy source identity', () => {
+  const f = dockerPlanJournalFixture();
+  expect(planOfficeSelfIdentityFile(f.state.seed.source.record)).toBe('/home/agent/.reverie/docker-worker-identity');
+  const row = { ...f.work, destination: { ...f.work.original, containerId: 'c'.repeat(64) } };
+  const actual = planOfficeSelfIdentityFile(row);
+  expect(actual).toBe(
+    '/home/agent/.reverie/plan-moves/' +
+      row.request.operationId +
+      '/generation-' +
+      row.planReplacement.account.projectionDigest +
+      '/worker-identity-' +
+      row.destination.containerId
+  );
+  expect(
+    planOfficeSelfIdentityFile({ ...row, destination: { ...row.destination, containerId: 'd'.repeat(64) } })
+  ).not.toBe(actual);
+  expect(() => planOfficeSelfIdentityFile(f.work)).toThrow();
 });
 
 it('refuses mutable ready-only admission without touching existing fixture state or Engine', async () => {

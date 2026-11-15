@@ -1,5 +1,11 @@
-/** Owned CI office baseline only. No production admission or paid provider override. */
-import { runPlanOfficeMoveScenario } from './plan-office-move-driver.js';
+/** Owned CI office acceptance only. No production admission or paid provider override. */
+import {
+  runPlanOfficeMoveScenario,
+  runPlanOfficeSelfSequence,
+  planOfficeSelfDirection,
+  type PlanOfficeSelfCompletion,
+  type PlanOfficeSelfLeg,
+} from './plan-office-move-driver.js';
 export { runPlanOfficeMoveScenario };
 import {
   verifyPlanOfficeMovedProvider,
@@ -37,7 +43,7 @@ export const PlanOfficeDriverInput = z
   .object({
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-office-baseline-v1'),
-    acceptance: z.enum(['baseline', 'ordinary-self']).default('baseline'),
+    acceptance: z.enum(['baseline', 'ordinary-self', 'self-roundtrip']).default('baseline'),
     instance: z.string().regex(/^[a-f0-9]{32}$/),
     sourcePath: store,
     runtimePath: store,
@@ -75,7 +81,7 @@ export const PlanOfficeDriverInput = z
   .strict()
   .refine(
     (v) =>
-      (v.acceptance !== 'ordinary-self' ||
+      (v.acceptance === 'baseline' ||
         (v.bootstrap.employees.length === 1 &&
           v.bootstrap.employees[0]!.account === 'ci-plan-a' &&
           v.bootstrap.employees[0]!.permissions.moveOwnPlan === true &&
@@ -737,7 +743,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       limitation:
         input.acceptance === 'baseline'
           ? 'Fake external model; real owner/API/Engine/native/HMAC baseline only.'
-          : 'Fake external model; one ordinary self move only after actual physical verification. No paid vendor, refreshed principal or force acceptance.',
+          : 'Fake external model; selected self moves require actual physical verification. No paid vendor, refreshed principal, force, team or recovery-matrix acceptance.',
     });
     const census = driver.docker(['container', 'ls', '--all', '--no-trunc', '--format', 'json']);
     const before = census
@@ -1137,8 +1143,43 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       privateDirectory(entry.tmp as string);
     }
     let planMovesAccepted = false;
-    if (input.acceptance === 'ordinary-self') {
-      await runPlanOfficeSelfMove(input, evidence, driver, control, owner, sources[0]!.home as string);
+    let selfRoundtripAccepted = false;
+    if (input.acceptance !== 'baseline') {
+      const originalControl = driver.owned(control, 'control').State as Json;
+      const sameControl = () => {
+        const observed = driver.owned(control, 'control').State as Json;
+        assert.equal(observed.Running, true);
+        assert.equal(observed.Pid, originalControl.Pid);
+        assert.equal(observed.StartedAt, originalControl.StartedAt);
+      };
+      const completed = await runPlanOfficeSelfSequence(input.acceptance, async (leg, previous) => {
+        sameControl();
+        const result = await runPlanOfficeSelfMove(
+          input,
+          evidence,
+          driver,
+          control,
+          owner,
+          sources[0]!.home as string,
+          leg,
+          previous
+        );
+        sameControl();
+        return result;
+      });
+      if (completed.returned) {
+        evidence.save('self-roundtrip-completed', {
+          employeeId: completed.first.scenario.employeeId,
+          firstMoveId: completed.first.scenario.id,
+          returnMoveId: completed.returned.scenario.id,
+          firstNewSession: completed.first.record.newSession,
+          returnNewSession: completed.returned.record.newSession,
+          accounts: ['ci-plan-a', 'ci-plan-b', 'ci-plan-a'],
+          firstReceipt: 'first-self-move-completed',
+          returnReceipt: 'self-move-' + completed.returned.scenario.id + '-completed',
+        });
+        selfRoundtripAccepted = true;
+      }
       planMovesAccepted = true;
     }
     const after = driver
@@ -1158,6 +1199,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       evidence: evidence.root,
       baselineReady: true,
       planMovesAccepted,
+      selfRoundtripAccepted,
       acceptedScenario: input.acceptance,
       refreshReuseAccepted: false,
       forceAccepted: false,
@@ -1181,8 +1223,11 @@ async function runPlanOfficeSelfMove(
   driver: Driver,
   control: string,
   owner: Pick<Awaited<ReturnType<typeof enrollIsolatedPlanOfficeOwner>>, 'request'>,
-  home: string
+  home: string,
+  leg: PlanOfficeSelfLeg = 'first',
+  previous?: PlanOfficeSelfCompletion
 ) {
+  const direction = planOfficeSelfDirection(leg);
   const names = driver.names;
   assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
   const initialEmployee = input.bootstrap.employees[0]!;
@@ -1221,7 +1266,17 @@ async function runPlanOfficeSelfMove(
     .uuid()
     .parse(nativeThreadProfile(saved.mode ?? 'claude')?.read(saved));
   assert.equal(nativeThreadId, initialEmployee.nativeThreadId);
-  assert.equal(saved.subscriptionProfile?.id, 'ci-plan-a');
+  assert.equal(saved.subscriptionProfile?.id, direction.fromAccount);
+  if (leg === 'return') {
+    assert.ok(previous, 'Return move requires the physically completed first move');
+    assert.equal(previous.record.phase, 'completed');
+    assert.equal(row.version, 3, 'Return move must use the actual installed-generation worker');
+    assert.equal(row.employeeId, previous.scenario.employeeId);
+    assert.equal(row.request.sessionId, previous.record.newSession);
+    assert.equal(row.request.sessionGeneration, previous.scenario.sessionGeneration + 1);
+    assert.equal(row.version === 3 && row.planReplacement.moveId, previous.scenario.id);
+    assert.equal(row.version === 3 && row.planReplacement.account.id, direction.fromAccount);
+  } else assert.equal(previous, undefined);
   const scenario = {
     version: 1 as const,
     purpose: 'reverie-ci-plan-move-scenario-v1' as const,
@@ -1230,9 +1285,9 @@ async function runPlanOfficeSelfMove(
     employeeId: row.employeeId,
     sessionId: row.request.sessionId,
     sessionGeneration: row.request.sessionGeneration,
-    fromAccount: 'ci-plan-a' as const,
-    toAccount: 'ci-plan-b' as const,
+    ...direction,
   };
+  if (previous) assert.notEqual(scenario.id, previous.scenario.id);
   const sourceInspect = DockerEmployeeInspect.parse(driver.inspect(row.destination.containerId));
   const instanceId = z
     .string()
@@ -1250,16 +1305,16 @@ async function runPlanOfficeSelfMove(
     sourceRow: row,
     sourceInspect,
     home: { source: home, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
-    canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-b'),
+    canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, direction.toAccount),
   };
-  evidence.save('before-self-move', before);
+  evidence.save(leg === 'first' ? 'before-self-move' : 'before-self-move-' + scenario.id, before);
   const ownerGet = async (p: string) => {
     current();
     const result = await owner.request(p);
     current();
     return result;
   };
-  await runPlanOfficeMoveScenario(scenario, {
+  const record = await runPlanOfficeMoveScenario(scenario, {
     assertCurrent: async () => current(),
     ownerPost: async (p, body) => {
       current();
@@ -1290,15 +1345,7 @@ async function runPlanOfficeSelfMove(
         ),
         row.destination
       );
-      const identityFile =
-        row.version === 3
-          ? dockerPlanGeneration({
-              operationId: row.request.operationId,
-              containerId: row.destination!.containerId,
-              projectionDigest: row.planReplacement.account.projectionDigest,
-              provider: row.planReplacement.account.provider,
-            }).identityFile
-          : '/home/agent/.reverie/docker-worker-identity';
+      const identityFile = planOfficeSelfIdentityFile(row);
       const output = driver.docker([
         'exec',
         '--env',
@@ -1327,15 +1374,31 @@ async function runPlanOfficeSelfMove(
         record: (name, value) => evidence.save(name, value),
       }),
   });
-  evidence.save('first-self-move-completed', {
+  evidence.save(leg === 'first' ? 'first-self-move-completed' : 'self-move-' + scenario.id + '-completed', {
     id: scenario.id,
     employeeId: scenario.employeeId,
     fromAccount: scenario.fromAccount,
     toAccount: scenario.toAccount,
+    sessionId: scenario.sessionId,
+    sessionGeneration: scenario.sessionGeneration,
+    newSession: record.newSession,
     realCapsuleHmac: true,
     originalOnly: true,
   });
-  return scenario.id;
+  return { scenario, record };
+}
+
+/** The selected current row owns this credential path; no copied old token or MUX override. */
+export function planOfficeSelfIdentityFile(row: DockerEmployeeContinuationRecord) {
+  assert.ok(row.destination);
+  return row.version === 3
+    ? dockerPlanGeneration({
+        operationId: row.request.operationId,
+        containerId: row.destination.containerId,
+        projectionDigest: row.planReplacement.account.projectionDigest,
+        provider: row.planReplacement.account.provider,
+      }).identityFile
+    : '/home/agent/.reverie/docker-worker-identity';
 }
 
 /** Resume only the never-issued self scenario of an existing owned Ready fixture.
@@ -1478,9 +1541,9 @@ export async function runPlanOfficeReadySelf(contractFile: string) {
       originalRuntime: input.runtimePath,
       noSetupOrRecoveryReplay: true,
     });
-    const scenarioId = await runPlanOfficeSelfMove(input, evidence, driver, control, owner, home);
+    const completed = await runPlanOfficeSelfMove(input, evidence, driver, control, owner, home);
     const result = {
-      scenarioId,
+      scenarioId: completed.scenario.id,
       control,
       planMovesAccepted: true,
       acceptedScenario: 'ordinary-self',

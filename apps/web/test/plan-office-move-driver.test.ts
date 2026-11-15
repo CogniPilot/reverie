@@ -4,6 +4,7 @@ import {
   PlanOfficeMoveScenario,
   planOfficeMoveRecord,
   runPlanOfficeMoveScenario,
+  runPlanOfficeSelfSequence,
   type PlanOfficeMovePorts,
 } from './helpers/plan-office-move-driver.js';
 const sid = '11111111-1111-4111-8111-111111111111',
@@ -34,6 +35,99 @@ const requestRecord = (phase = 'pending') => ({
   expiresAt: 2,
   notified: true,
   ...(phase === 'completed' ? { newSession } : {}),
+});
+it('allocates the return only after first physical verification and receipt have completed', async () => {
+  const actualProtocol = fixture();
+  const events: string[] = [];
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const first = { scenario: PlanOfficeMoveScenario.parse(base), record: requestRecord('completed') };
+  const returned = {
+    scenario: PlanOfficeMoveScenario.parse({
+      ...base,
+      id: '55555555-5555-4555-8555-555555555555',
+      sessionId: newSession,
+      sessionGeneration: 3,
+      fromAccount: 'ci-plan-b',
+      toAccount: 'ci-plan-a',
+    }),
+    record: {
+      ...requestRecord('completed'),
+      id: '55555555-5555-4555-8555-555555555555',
+      sessionId: newSession,
+      newSession: '66666666-6666-4666-8666-666666666666',
+      fromAccount: 'ci-plan-b',
+      toAccount: 'ci-plan-a',
+    },
+  };
+  const move = vi.fn(async (leg, previous) => {
+    if (leg === 'first') {
+      actualProtocol.ports.verifyCompleted.mockImplementation(async () => {
+        events.push('first-physical-verification');
+        await barrier;
+      });
+      const record = await runPlanOfficeMoveScenario(actualProtocol.scenario, actualProtocol.ports);
+      events.push('first-receipt-closed');
+      return { scenario: actualProtocol.scenario, record };
+    }
+    expect(previous).toEqual(first);
+    events.push('allocate-new-return-id');
+    return returned;
+  });
+  const pending = runPlanOfficeSelfSequence('self-roundtrip', move);
+  expect(move).toHaveBeenCalledTimes(1);
+  await vi.waitFor(() => expect(events).toEqual(['first-physical-verification']));
+  release();
+  expect(await pending).toEqual({ first, returned });
+  expect(move).toHaveBeenCalledTimes(2);
+  expect(events).toEqual(['first-physical-verification', 'first-receipt-closed', 'allocate-new-return-id']);
+  const ordinary = vi.fn(async () => first);
+  expect(await runPlanOfficeSelfSequence('ordinary-self', ordinary)).toEqual({ first });
+  expect(ordinary).toHaveBeenCalledTimes(1);
+});
+it('never allocates a return after an unknown/failed first verification or a merely pending first record', async () => {
+  for (const failure of [
+    'Original request outcome unknown',
+    'Physical source closure unconfirmed',
+    'Receipt close failed',
+  ]) {
+    const move = vi.fn(async () => {
+      throw Error(failure);
+    });
+    await expect(runPlanOfficeSelfSequence('self-roundtrip', move)).rejects.toThrow(failure);
+    expect(move).toHaveBeenCalledTimes(1);
+  }
+  const pending = vi.fn(async () => ({
+    scenario: PlanOfficeMoveScenario.parse(base),
+    record: requestRecord('pending'),
+  }));
+  await expect(runPlanOfficeSelfSequence('self-roundtrip', pending)).rejects.toThrow('known physical completion');
+  expect(pending).toHaveBeenCalledTimes(1);
+});
+it('requires a new return ID, same employee and the actual next session/generation before accepting a roundtrip', async () => {
+  const first = { scenario: PlanOfficeMoveScenario.parse(base), record: requestRecord('completed') };
+  const scenario = PlanOfficeMoveScenario.parse({
+    ...base,
+    id: '55555555-5555-4555-8555-555555555555',
+    sessionId: newSession,
+    sessionGeneration: 3,
+    fromAccount: 'ci-plan-b',
+    toAccount: 'ci-plan-a',
+  });
+  for (const changes of [{ id }, { employeeId: newSession }, { sessionId: sid }, { sessionGeneration: 2 }]) {
+    const altered = { ...scenario, ...changes };
+    const move = vi.fn(async (leg) =>
+      leg === 'first'
+        ? first
+        : {
+            scenario: altered,
+            record: { ...requestRecord('completed'), ...altered, newSession: '66666666-6666-4666-8666-666666666666' },
+          }
+    );
+    await expect(runPlanOfficeSelfSequence('self-roundtrip', move)).rejects.toThrow();
+  }
 });
 const forceRecord = (phase = 'waiting') => ({
   id,

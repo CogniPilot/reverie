@@ -1,5 +1,6 @@
 /** Mandatory hosted acceptance. All model executables and credentials are synthetic;
- * the ordinary owner API, HMAC client, Docker lifecycle and native verifier are real. */
+ * the ordinary owner API, HMAC client, Docker lifecycle and native verifier are real.
+ * --ci keeps the ordinary-self gate; --ci --scenario self-roundtrip is an explicit extension. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -10,6 +11,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip';
+function requireSelection(value: string): asserts value is PlanOfficeCiSelection {
+  assert.ok(value === 'ordinary-self' || value === 'self-roundtrip');
+}
 function object(value: unknown): Json {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value));
   return value as Json;
@@ -20,12 +25,16 @@ export function requireHostedPlanOffice(
   platform = process.platform,
   arch = process.arch
 ) {
-  assert.deepEqual(args, ['--ci']);
+  const selection = args.length === 1 ? 'ordinary-self' : args[2];
+  assert.ok(selection);
+  requireSelection(selection);
+  assert.deepEqual(args, args.length === 1 ? ['--ci'] : ['--ci', '--scenario', selection]);
   assert.equal(env.GITHUB_ACTIONS, 'true');
   assert.equal(env.REVERIE_CI_RUNNER_ENVIRONMENT, 'github-hosted', 'Never use a self-hosted employee Engine');
   assert.equal(platform, 'linux');
   assert.equal(arch, 'x64');
   assert.ok(env.RUNNER_TEMP && path.isAbsolute(env.RUNNER_TEMP));
+  return selection;
 }
 export function planOfficeCiNamespace(instance: string) {
   assert.match(instance, /^[a-f0-9]{32}$/);
@@ -43,7 +52,13 @@ export function planOfficeCiImage(value: unknown, namespace: string, role: strin
   assert.ok(image.RepoTags.every((tag: unknown) => typeof tag === 'string' && tag.startsWith(namespace + '-')));
   return image.Id as string;
 }
-export function planOfficeCiContract(metadata: unknown, instance: string, ids: Record<string, string>) {
+export function planOfficeCiContract(
+  metadata: unknown,
+  instance: string,
+  ids: Record<string, string>,
+  selection: PlanOfficeCiSelection = 'ordinary-self'
+) {
+  requireSelection(selection);
   const m = object(metadata);
   assert.equal(m.version, 1);
   assert.equal(m.purpose, 'reverie-ci-plan-office-inputs-v1');
@@ -58,7 +73,7 @@ export function planOfficeCiContract(metadata: unknown, instance: string, ids: R
   return {
     version: 1,
     purpose: 'reverie-ci-plan-office-baseline-v1',
-    acceptance: 'ordinary-self',
+    acceptance: selection,
     instance,
     sourcePath: m.sourcePath,
     runtimePath: m.runtimePath,
@@ -87,13 +102,21 @@ export function planOfficeCiContract(metadata: unknown, instance: string, ids: R
   };
 }
 /** Baseline readiness or an HTTP acknowledgement can never satisfy this gate. */
-export function requirePlanOfficeCiAcceptance(result: unknown, receipt: unknown, root: string, employeeId: string) {
+export function requirePlanOfficeCiAcceptance(
+  result: unknown,
+  receipt: unknown,
+  root: string,
+  employeeId: string,
+  selection: PlanOfficeCiSelection = 'ordinary-self',
+  roundtrip?: { returned: unknown; summary: unknown }
+) {
+  requireSelection(selection);
   const r = object(result),
     proof = object(receipt);
   assert.equal(r.status, 0);
   assert.equal(r.baselineReady, true);
   assert.equal(r.planMovesAccepted, true);
-  assert.equal(r.acceptedScenario, 'ordinary-self');
+  assert.equal(r.acceptedScenario, selection);
   assert.equal(r.evidence, root);
   assert.equal(r.forceAccepted, false);
   assert.equal(r.refreshReuseAccepted, false);
@@ -103,7 +126,47 @@ export function requirePlanOfficeCiAcceptance(result: unknown, receipt: unknown,
   assert.equal(proof.toAccount, 'ci-plan-b');
   assert.equal(proof.realCapsuleHmac, true);
   assert.equal(proof.originalOnly, true);
-  return { scenarioId: proof.id, employeeId, ordinarySelfAccepted: true, forceAccepted: false, teamAccepted: false };
+  const acceptance = {
+    scenarioId: proof.id,
+    employeeId,
+    ordinarySelfAccepted: true,
+    forceAccepted: false,
+    teamAccepted: false,
+    permissionMatrixAccepted: false,
+    officeReentryAccepted: false,
+  };
+  if (selection === 'ordinary-self') {
+    assert.notEqual(r.selfRoundtripAccepted, true);
+    assert.equal(roundtrip, undefined);
+    return { ...acceptance, selfRoundtripAccepted: false };
+  }
+  assert.equal(r.selfRoundtripAccepted, true);
+  assert.ok(roundtrip);
+  const returned = object(roundtrip.returned),
+    summary = object(roundtrip.summary);
+  assert.match(String(returned.id), uuid);
+  assert.notEqual(returned.id, proof.id);
+  assert.equal(returned.employeeId, employeeId);
+  assert.equal(returned.fromAccount, 'ci-plan-b');
+  assert.equal(returned.toAccount, 'ci-plan-a');
+  assert.equal(returned.realCapsuleHmac, true);
+  assert.equal(returned.originalOnly, true);
+  for (const value of [proof.sessionId, proof.newSession, returned.sessionId, returned.newSession])
+    assert.match(String(value), uuid);
+  assert.ok(Number.isSafeInteger(proof.sessionGeneration) && Number(proof.sessionGeneration) > 0);
+  assert.equal(returned.sessionId, proof.newSession);
+  assert.equal(returned.sessionGeneration, Number(proof.sessionGeneration) + 1);
+  assert.notEqual(returned.newSession, proof.sessionId);
+  assert.notEqual(returned.newSession, returned.sessionId);
+  assert.equal(summary.employeeId, employeeId);
+  assert.equal(summary.firstMoveId, proof.id);
+  assert.equal(summary.returnMoveId, returned.id);
+  assert.equal(summary.firstNewSession, proof.newSession);
+  assert.equal(summary.returnNewSession, returned.newSession);
+  assert.deepEqual(summary.accounts, ['ci-plan-a', 'ci-plan-b', 'ci-plan-a']);
+  assert.equal(summary.firstReceipt, 'first-self-move-completed');
+  assert.equal(summary.returnReceipt, 'self-move-' + returned.id + '-completed');
+  return { ...acceptance, selfRoundtripAccepted: true, returnScenarioId: returned.id };
 }
 function save(file: string, value: unknown) {
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -115,7 +178,7 @@ function save(file: string, value: unknown) {
   }
 }
 export async function runPlanOfficeCi(args: readonly string[], env = process.env) {
-  requireHostedPlanOffice(args, env);
+  const selection = requireHostedPlanOffice(args, env);
   assert.ok(process.getuid!() > 0 && process.getgid!() > 0);
   const source = fileURLToPath(new URL('../../..', import.meta.url));
   const instance = randomBytes(16).toString('hex'),
@@ -232,7 +295,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       control
     );
     load('control', control);
-    const contract = planOfficeCiContract(metadata, instance, ids);
+    const contract = planOfficeCiContract(metadata, instance, ids, selection);
     const file = path.join(evidence, 'contract.json');
     save(file, contract);
     assert.equal(run('head-current', 'git', ['rev-parse', 'HEAD']).trim(), head);
@@ -240,18 +303,31 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
     const runtime = String(metadata.runtimePath);
     const runtimeMetadata = object(JSON.parse(fs.readFileSync(path.join(runtime, 'metadata.json'), 'utf8')));
     const stdout = run(
-      'actual-ordinary-self',
+      'actual-' + selection,
       String(runtimeMetadata.nodeExecutable),
       [path.join(runtime, 'lib/reverie/test/fixtures/plan-office-canary.mjs'), '--contract', file],
       600000
     );
     const root = path.join(evidence, 'office-' + instance);
     const proof = JSON.parse(fs.readFileSync(path.join(root, 'first-self-move-completed.json'), 'utf8'));
+    let roundtrip: { returned: unknown; summary: unknown } | undefined;
+    if (selection === 'self-roundtrip') {
+      const summary = object(JSON.parse(fs.readFileSync(path.join(root, 'self-roundtrip-completed.json'), 'utf8')));
+      assert.match(String(summary.returnMoveId), uuid);
+      roundtrip = {
+        summary,
+        returned: JSON.parse(
+          fs.readFileSync(path.join(root, 'self-move-' + summary.returnMoveId + '-completed.json'), 'utf8')
+        ),
+      };
+    }
     const acceptance = requirePlanOfficeCiAcceptance(
       JSON.parse(stdout),
       proof,
       root,
-      contract.bootstrap.employees[0]!.employeeId
+      contract.bootstrap.employees[0]!.employeeId,
+      selection,
+      roundtrip
     );
     save(path.join(published, 'result.json'), {
       status: 0,
@@ -267,6 +343,8 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       namespace,
       failedStage: lastStage,
       ordinarySelfAccepted: false,
+      selfRoundtripAccepted: false,
+      selectedScenario: selection,
     });
     throw Error('Actual ordinary self plan acceptance failed at ' + lastStage);
   }

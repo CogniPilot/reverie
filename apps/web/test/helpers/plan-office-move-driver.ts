@@ -21,7 +21,47 @@ export const PlanOfficeMoveScenario = z
   .strict()
   .refine((value) => value.fromAccount !== value.toAccount);
 export type PlanOfficeMoveScenario = z.infer<typeof PlanOfficeMoveScenario>;
+export const PlanOfficeSelfAcceptance = z.enum(['ordinary-self', 'self-roundtrip']);
+export type PlanOfficeSelfAcceptance = z.infer<typeof PlanOfficeSelfAcceptance>;
 type ApiRecord = Record<string, unknown>;
+export interface PlanOfficeSelfCompletion {
+  scenario: PlanOfficeMoveScenario;
+  /** Returned only after runPlanOfficeMoveScenario's independent physical verifier succeeds. */
+  record: ApiRecord;
+}
+export type PlanOfficeSelfLeg = 'first' | 'return';
+export function planOfficeSelfDirection(leg: PlanOfficeSelfLeg) {
+  z.enum(['first', 'return']).parse(leg);
+  return leg === 'first'
+    ? { fromAccount: 'ci-plan-a' as const, toAccount: 'ci-plan-b' as const }
+    : { fromAccount: 'ci-plan-b' as const, toAccount: 'ci-plan-a' as const };
+}
+/** The return callback (including its new-ID allocation) is unreachable until
+ * the first move has returned from its full physical verification and receipt. */
+export async function runPlanOfficeSelfSequence(
+  selection: PlanOfficeSelfAcceptance,
+  move: (leg: PlanOfficeSelfLeg, previous?: PlanOfficeSelfCompletion) => Promise<PlanOfficeSelfCompletion>
+) {
+  PlanOfficeSelfAcceptance.parse(selection);
+  const validate = (value: PlanOfficeSelfCompletion, leg: PlanOfficeSelfLeg) => {
+    const scenario = PlanOfficeMoveScenario.parse(value.scenario);
+    assert.equal(scenario.kind, 'self');
+    assert.equal(scenario.fromAccount, planOfficeSelfDirection(leg).fromAccount);
+    assert.equal(scenario.toAccount, planOfficeSelfDirection(leg).toAccount);
+    const record = planOfficeMoveRecord(value.record, scenario);
+    assert.equal(record.phase, 'completed', 'A subsequent self move requires known physical completion');
+    return { scenario, record };
+  };
+  const first = validate(await move('first'), 'first');
+  if (selection === 'ordinary-self') return { first };
+  const returned = validate(await move('return', first), 'return');
+  assert.notEqual(returned.scenario.id, first.scenario.id);
+  assert.equal(returned.scenario.employeeId, first.scenario.employeeId);
+  assert.equal(returned.scenario.sessionId, first.record.newSession);
+  assert.equal(returned.scenario.sessionGeneration, first.scenario.sessionGeneration + 1);
+  assert.notEqual(returned.record.newSession, first.scenario.sessionId);
+  return { first, returned };
+}
 export interface PlanOfficeMovePorts {
   /** Fresh owned control + genuine owner/caller context. IDs alone confer no authority. */
   assertCurrent(): Promise<void>;
