@@ -6,6 +6,8 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import Fastify from 'fastify';
 import { registerHostGuard } from '../src/web/middleware/auth.js';
+import { installResponseEnvelope } from '../src/web/response-envelope.js';
+import { Session } from '../src/session.js';
 import {
   PlanOfficeDriverInput,
   planOfficeNames,
@@ -20,6 +22,7 @@ import {
   PLAN_OFFICE_CPU_PROGRAM,
   parsePlanOfficeCpus,
   planOfficeInternalHostPreflight,
+  planOfficeSession,
 } from './helpers/plan-office-driver.js';
 const sha = 'sha256:' + 'a'.repeat(64),
   sid = '11111111-1111-4111-8111-111111111111',
@@ -279,5 +282,29 @@ it('checks the real advertised Host guard before any provider intent and trusts 
     await expect(planOfficeInternalHostPreflight('http://foreign.invalid:3000')).rejects.toThrow();
   } finally {
     await app.close();
+  }
+});
+
+it('consumes the actual response envelope around a real Session DTO without granting readiness or accepting another SID', async () => {
+  const app = Fastify(),
+    session = new Session({ id: sid, mode: 'claude', workingDir: '/synthetic/work', useMux: false });
+  installResponseEnvelope(app, '');
+  app.get('/api/sessions/:id', () => session.toState());
+  try {
+    const actual = await app.inject({ method: 'GET', url: '/api/sessions/' + sid });
+    expect(actual.statusCode).toBe(200);
+    const wire = JSON.parse(actual.body);
+    expect(wire.success).toBe(true);
+    expect(wire.data.id).toBe(sid);
+    expect(wire.id).toBeUndefined();
+    const response = () => new Response(actual.body, { status: actual.statusCode });
+    expect((await planOfficeSession(response(), sid)).id).toBe(sid);
+    await expect(planOfficeSession(response(), thread)).rejects.toThrow();
+    await expect(
+      planOfficeSession(new Response(JSON.stringify(session.toState()), { status: 200 }), sid)
+    ).rejects.toThrow();
+  } finally {
+    await app.close();
+    await session.stop(false);
   }
 });

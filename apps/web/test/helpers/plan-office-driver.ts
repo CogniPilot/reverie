@@ -539,6 +539,12 @@ async function data(response: Response) {
   if (!response.ok || value.success !== true) throw new OwnerApiRefusal(response.status, value);
   return value.data as Json;
 }
+export async function planOfficeSession(response: Response, sessionId: string) {
+  z.string().uuid().parse(sessionId);
+  const session = await data(response);
+  assert.equal(session.id, sessionId);
+  return session;
+}
 /** Effects are reachable only in the immutable composed package and for explicit qualified image IDs. */
 export async function runPlanOfficeBaseline(contractFile: string) {
   assert.equal(process.platform, 'linux');
@@ -871,10 +877,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
         await wait(500);
       }
       assert.ok(ready, 'Original recovery not confirmed Ready');
-      const sessionResponse = await owner.request('/api/sessions/' + employee.sessionId);
-      assert.ok(sessionResponse.ok);
-      const session = (await sessionResponse.json()) as Json;
-      assert.equal(session.id, employee.sessionId);
+      const session = await planOfficeSession(
+        await owner.request('/api/sessions/' + employee.sessionId),
+        employee.sessionId
+      );
       // Ready and the managed Stop/receipt barrier are separate observations; poll actual idle below.
       evidence.save('actual-session-' + employee.employeeId, session);
       let actualReports: Json[] | undefined;
@@ -911,10 +917,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
               )
           );
           const output = await data(await owner.request('/api/sessions/' + employee.sessionId + '/output'));
-          const freshResponse = await owner.request('/api/sessions/' + employee.sessionId);
-          assert.ok(freshResponse.ok);
-          const freshSession = (await freshResponse.json()) as Json;
-          assert.equal(freshSession.id, employee.sessionId);
+          const freshSession = await planOfficeSession(
+            await owner.request('/api/sessions/' + employee.sessionId),
+            employee.sessionId
+          );
           if (
             valid &&
             freshSession.providerInputHeld === false &&
