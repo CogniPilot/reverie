@@ -15,8 +15,9 @@ import { isChatRaster, localImageFiles } from './chat-image-paths.js';
  * preamble — has the same verbs from one line in its AGENTS.md.
  *
  * Invariants (each asserted in `test/cli-agent.test.ts`):
- * 1. Refuses outside a Reverie session (`REVERIE_MUX=1` + `REVERIE_API_URL`); it
- *    never guesses a URL — a server you are not part of is not yours to drive.
+ * 1. Requires a private Docker-worker credential or the legacy `REVERIE_MUX=1`
+ *    context, plus an explicit API URL and session. The server authenticates the
+ *    current worker and its grants; local credential readability grants neither.
  * 2. `send` transmits printable text plus `\r` only. ESC exists solely as
  *    `interrupt`, which never appends `\r`. A stray control byte is a dead session
  *    in the fullscreen TUIs (opencode's `Ctrl+C` is `app_exit`).
@@ -110,9 +111,6 @@ export function resolveAgentContext(
   env: NodeJS.ProcessEnv = process.env,
   envFile: () => Record<string, string> = readReverieEnvFile
 ): AgentContext {
-  if (env.REVERIE_MUX !== '1') {
-    throw new AgentGuardError('Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.');
-  }
   const apiUrl = env.REVERIE_API_URL?.trim();
   if (!apiUrl) {
     throw new AgentGuardError('REVERIE_API_URL is not set; refusing to guess a server.');
@@ -123,6 +121,9 @@ export function resolveAgentContext(
   }
   const workerIdentity = readDockerWorkerIdentity(env, selfId);
   if (workerIdentity !== undefined) return { apiUrl, selfId, workerIdentity };
+  if (env.REVERIE_MUX !== '1') {
+    throw new AgentGuardError('Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.');
+  }
   const credentials = credentialsFrom(env, envFile());
   return { apiUrl, selfId, auth: credentials.password ? credentials : undefined };
 }
