@@ -67,7 +67,7 @@ let
     }; configuration = pkgs.writeText "ci-plan-boxed-runtime.json" (builtins.toJSON runtimeConfiguration); in pkgs.dockerTools.buildLayeredImage {
       name = names.control; tag = "latest"; created = "1970-01-01T00:00:01Z";
       passthru = { inherit runtimeConfiguration; };
-      contents = [ runtime node pkgs.docker-client pkgs.bashInteractive pkgs.coreutils pkgs.util-linux pkgs.tmux ];
+      contents = [ runtime node pkgs.docker-client pkgs.bashInteractive pkgs.coreutils pkgs.util-linux pkgs.tmux pkgs.which ];
       fakeRootCommands = ''
         mkdir -p etc/reverie opt/reverie/apps bin fixture scratch tmp
         cp -r ${clientCapsule}/opt/reverie-worker-client opt/reverie-worker-client
