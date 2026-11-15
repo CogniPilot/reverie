@@ -1,4 +1,5 @@
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
+import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
 import { dockerPlanSourceRecordCurrent } from '../src/docker-plan-move-actor.js';
 /** Real captured HTTP/HMAC requester, canonical CompanyStore/PlanMoveStore and
  * private native SourceReader over controlled Docker replies. This is NOT an
@@ -39,6 +40,7 @@ import {
 } from '../src/docker-worker-identity.js';
 import {
   captureDockerPlanMoveRequester,
+  captureDockerPlanMoveOriginalRequester,
   requireDockerPlanMoveRequesterCurrent,
 } from '../src/docker-plan-move-requester.js';
 import { dockerContinuationDigest as digest } from '../src/docker-employee-continuation.js';
@@ -48,6 +50,12 @@ import {
   dockerPlanMoveHandoffDigest,
 } from '../src/docker-plan-move-data.js';
 import { dockerPlanMaterial } from '../src/docker-plan-material.js';
+import { dockerProviderRuntimeRecipeDigest } from '../src/docker-employee-source-correlation.js';
+import { DOCKER_PLAN_ACCOUNT_STATUS_PROGRAM } from '../src/docker-plan-account-status.js';
+import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
+import { StateStore } from '../src/state-store.js';
+import { Session } from '../src/session.js';
+import { PlanMoveComposerNotReady } from '../src/plan-move.js';
 import type { PlanMoveRecord, PlanMoveInput, PlanMoves, PlanMoveExecutor } from '../src/plan-move.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
@@ -559,6 +567,290 @@ async function issuedCheckpoint(
   }
   return f.journal.read();
 }
+
+/** A retained, installed target checkpoint. The shared fixture supplies only
+ * controlled syscall replies: actual Storage/Installer/Engine methods earn each
+ * new private view. Canonical Company/Session/PlanMove stores and protected HTTP
+ * original-recovery capture are real. No composer readiness is synthesized. */
+async function publishedTargetFixture(publication: 'issued' | 'published', handoff?: 'issued' | 'submitted') {
+  const native = await dockerPlanRetirementFixture(),
+    directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-target-'));
+  fs.chmodSync(directory, 0o700);
+  cleanup.push(() => fs.rmSync(directory, { recursive: true, force: true }));
+  cleanup.push(() => native.engine.close());
+  const saved = native.target.toState(),
+    source = native.state.seed.source,
+    row = native.state.work!,
+    binding = {
+      version: 1 as const,
+      operationId: row.request.operationId,
+      sessionId: row.request.sessionId,
+      sessionGeneration: row.request.sessionGeneration,
+      credentialId: row.credentialId,
+      containerId: row.destination!.containerId,
+      imageId: row.destination!.imageId,
+      originalDigest: digest(row.destination),
+      policyDigest: digest(row.policy),
+    },
+    employee = EmployeeSchema.parse({
+      id: row.employeeId,
+      name: 'Synthetic',
+      icon: 'X',
+      position: 'Engineer',
+      expertise: ['testing'],
+      createdAt: 1,
+      sessionId: saved.id,
+      sessionGeneration: row.request.sessionGeneration,
+      onVacation: false,
+      desiredRunning: true,
+      permissions: { recoverEmployees: true },
+      runtimeRecipe: expertRuntimeRecipeData(saved, { mode: 'claude', workingDir: saved.workingDir }),
+      dockerBinding: binding,
+      dockerResourcePolicy: row.policy,
+    }),
+    work = DockerEmployeeContinuationRecord.parse({
+      ...row,
+      sourceDigest: dockerEmployeeSourceDigest(employee, saved),
+      providerSourceDigest: dockerEmployeeProviderSourceDigest(employee, saved),
+    });
+  const companyStore = new CompanyStore(join(directory, 'company.json'));
+  await companyStore.init();
+  await companyStore.update((company) => {
+    company.employees = [employee];
+    company.dockerEmployeeContinuations = [work];
+  });
+  const store = new StateStore(join(directory, 'state.json'));
+  store.setSession(saved.id, saved);
+  store.saveNow();
+  cleanup.push(() => store.saveNow());
+  const sessions = new Map([[native.target.id, native.target]]),
+    ctx = {
+      sessions,
+      store,
+      mux: {},
+      getClaudeModeConfig: async () => ({ claudeMode: 'normal' }),
+    } as unknown as DockerPlanMoveComposition['ctx'],
+    company = new CompanyService(companyStore, {
+      getSession: (id: string) => sessions.get(id),
+      chatrooms: { rooms: () => [] },
+      research: {},
+    } as unknown as CompanyServiceDeps),
+    sourceStore = new CompanyDockerContinuationStore(company, (id) => store.getSession(id)),
+    moves = new PlanMoveStore(join(directory, 'moves.json')),
+    state = DockerPlanMoveJournalState.parse({
+      ...native.state,
+      seed: {
+        ...native.state.seed,
+        target: {
+          ...native.state.seed.target,
+          templateDigest: dockerProviderRuntimeRecipeDigest(employee.runtimeRecipe),
+        },
+      },
+      work,
+      paidDispatch: { ...native.state.paidDispatch!, recipeDigest: work.sourceDigest },
+      companyPublication: {
+        phase: publication,
+        digest: digest({
+          row: { ...work, phase: 'provider-issued' },
+          binding,
+          templateDigest: dockerProviderRuntimeRecipeDigest(employee.runtimeRecipe),
+        }),
+      },
+      handoff: handoff ? { phase: handoff, digest: dockerPlanMoveHandoffDigest(native.state.seed.handoff) } : undefined,
+    }),
+    record: PlanMoveRecord = { ...native.record, phase: 'checking', dockerReplacement: state };
+  const reserved = DockerPlanMoveJournalState.parse({
+    version: state.version,
+    purpose: state.purpose,
+    epoch: state.epoch,
+    seed: state.seed,
+  });
+  await moves.dockerReserve({ ...record, phase: 'waiting', dockerReplacement: reserved }, () => {});
+  const issued = DockerPlanMoveJournalState.parse({
+    ...state,
+    handoff: state.handoff ? { ...state.handoff, phase: 'issued' } : undefined,
+  });
+  await moves.dockerPublish(record.id, reserved, issued, () => {});
+  if (handoff === 'submitted') await moves.dockerPublish(record.id, issued, state, () => {});
+  const key = () => true,
+    auth = new DockerWorkerIdentityAuthentication('a0000000-0000-4000-8000-00000000000a', Buffer.alloc(32, 0x41), {
+      binding: (id) => {
+        const current = companyStore.snapshot().employees.find((e) => e.id === id),
+          b = current?.dockerBinding;
+        return current && b
+          ? {
+              employeeId: current.id,
+              owner: current.owner,
+              sessionId: current.sessionId,
+              sessionGeneration: current.sessionGeneration,
+              containerId: b.containerId,
+              credentialId: b.credentialId,
+            }
+          : undefined;
+      },
+      keyCurrent: key,
+    });
+  cleanup.push(() => auth.close());
+  const token = auth.issue(
+      {
+        employeeId: employee.id,
+        owner: employee.owner,
+        sessionId: binding.sessionId,
+        sessionGeneration: binding.sessionGeneration,
+        containerId: binding.containerId,
+        credentialId: binding.credentialId,
+      },
+      key
+    ),
+    app = Fastify();
+  cleanup.push(() => app.close());
+  await app.register(cookie);
+  registerDockerWorkerIdentity(app, auth);
+  let proof: unknown;
+  app.post('/api/capture-original', async (request) => {
+    proof = await captureDockerPlanMoveOriginalRequester(
+      request,
+      record.id,
+      moves,
+      company,
+      { authSessions: null },
+      undefined,
+      () => {}
+    );
+    return { success: true };
+  });
+  await app.ready();
+  expect(
+    (
+      await app.inject({
+        method: 'POST',
+        url: '/api/capture-original',
+        headers: {
+          [DOCKER_WORKER_IDENTITY_HEADER]: token,
+          'x-reverie-parent-session': saved.id,
+        },
+      })
+    ).statusCode
+  ).toBe(200);
+  let accountStatus: (() => Promise<void>) | undefined, liveAuthDigest: string | undefined;
+  const baseRun = vi.mocked(native.command.run).getMockImplementation()!,
+    run = vi.fn(async (args: readonly string[], input?: string) => {
+      if (args.includes(DOCKER_PLAN_ACCOUNT_STATUS_PROGRAM)) {
+        await accountStatus?.();
+        return JSON.stringify({
+          version: 1,
+          purpose: 'reverie-plan-account-status-v1',
+          provider: 'anthropic',
+          authenticated: true,
+        });
+      }
+      const text = await baseRun(args, input);
+      if (liveAuthDigest && args.includes('plan-status') && args.includes('live'))
+        return JSON.stringify({ ...JSON.parse(text), observedAuthDigest: liveAuthDigest });
+      return text;
+    });
+  vi.mocked(native.command.run).mockImplementation(run);
+  vi.spyOn(PackagedDockerEngineCommand.prototype, 'run').mockImplementation(run);
+  const create = vi.spyOn(PackagedDockerEngineCommand.prototype, 'create').mockImplementation(async () => {
+    throw Error('Unexpected recovery CREATE');
+  });
+  const plans = new PlanService({
+      reader: {
+        read: async () => {
+          throw Error('No vendor requests');
+        },
+      },
+      sessions: () => [],
+      coordinatorIds: () => [],
+      historyFile: join(directory, 'history.json'),
+      home: directory,
+    }),
+    provider = new DockerEmployeeSessionProvider(sourceStore, ctx, 'http://reverie:3000'),
+    launch = vi.spyOn(provider, 'launchPlanReplacement'),
+    revisions = new DockerResourceRevisionStore(join(directory, 'revisions')),
+    replaceSession = vi.fn(async () => {
+      throw Error('Unexpected recovery room migration');
+    }),
+    baseActor = new DockerPlanMoveActor({
+      company,
+      ctx,
+      plans,
+      moves,
+      chat: { replaceSession } as unknown as DockerPlanMoveComposition['chat'],
+      store: sourceStore,
+      engine: native.engine,
+      provider,
+      configuration: {
+        version: 1,
+        purpose: 'reverie-boxed-runtime-v1',
+        deployment: 'synthetic',
+        workerImageId: row.workerImage.imageId,
+        clientManifestDigest: row.workerImage.clientManifestDigest,
+        sourceImageIds: [source.binding.imageId],
+        helperImageId: 'sha256:' + 'f'.repeat(64),
+        apiUrl: 'http://reverie:3000',
+      },
+      boxId: '7'.repeat(64),
+      authentication: auth,
+      revisions,
+      current: () => {},
+      retain: () => {},
+    });
+  cleanup.push(() => revisions.close());
+  let losePublicationAck = false;
+  const loadJournal = async () => {
+    // Reopen the actual disk journal rather than carrying an in-memory cursor
+    // across reconstruction. Its DATA still supplies no native-view authority.
+    const reopened = new PlanMoveStore(join(directory, 'moves.json'));
+    let current = (await reopened.dockerRecord(record.id)).dockerReplacement!;
+    const journal: PlanMoveDockerJournal = {
+      moveId: record.id,
+      epoch: current.epoch,
+      publication: 'admitting',
+      read: () => structuredClone(current),
+      current: () => {
+        reopened.dockerCurrent(record.id, current.epoch, digest(current.seed));
+        requireDockerPlanMoveRequesterCurrent(proof, record, current);
+      },
+      publish: async (before, next) => {
+        const result = await reopened.dockerPublish(record.id, before, next, () =>
+          requireDockerPlanMoveRequesterCurrent(proof, record, current)
+        );
+        if (losePublicationAck) {
+          losePublicationAck = false;
+          throw Error('Synthetic publication ACK lost after durable commit');
+        }
+        current = result.dockerReplacement!;
+      },
+    };
+    return journal;
+  };
+  run.mockClear();
+  vi.mocked(native.command.create).mockClear();
+  return {
+    native,
+    record,
+    companyStore,
+    store,
+    sessions,
+    moves,
+    run,
+    create,
+    launch,
+    replaceSession,
+    loadJournal,
+    actor: () => baseActor.withRequesterAuthority(proof),
+    accountStatus: (callback: typeof accountStatus) => {
+      accountStatus = callback;
+    },
+    liveAuthDigest: (value: string) => {
+      liveAuthDigest = value;
+    },
+    losePublicationAck: () => {
+      losePublicationAck = true;
+    },
+  };
+}
 describe('captured native plan actor before paid dispatch', () => {
   it('admits the genuine HMAC force route with the observed generation and refuses a stale generation before effects', async () => {
     const f = await fixture(),
@@ -831,5 +1123,148 @@ describe('issued cursors remain data after actor reconstruction', () => {
     expect(f.command.create).not.toHaveBeenCalled();
     expect(f.nativeCreate).not.toHaveBeenCalled();
     expect(f.sessions.size).toBe(0);
+  });
+});
+
+describe('original target recovery with engine-earned native views', () => {
+  it('repairs only a retained publication ACK from the actual canonical target without relaunch or handoff', async () => {
+    const f = await publishedTargetFixture('issued'),
+      journal = await f.loadJournal(),
+      before = journal.read(),
+      company = f.companyStore.snapshot(),
+      saved = f.store.getSession(f.record.newSession!);
+    expect(f.native.target.pid).toBeNull();
+    await expect(f.actor().verify(f.record, journal)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
+    const repaired = journal.read();
+    expect(repaired).toEqual({ ...before, companyPublication: { ...before.companyPublication!, phase: 'published' } });
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(repaired);
+    expect(f.companyStore.snapshot()).toEqual(company);
+    expect(f.store.getSession(f.record.newSession!)).toEqual(saved);
+    expect(f.run.mock.calls.some(([args]) => args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))).toBe(true);
+    expect(f.run.mock.calls.some(([args]) => args.includes('plan-status') && args.includes('live'))).toBe(true);
+    const fresh = await f.loadJournal();
+    await expect(f.actor().verify(f.record, fresh)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
+    expect(fresh.read()).toEqual(repaired);
+    expect(f.launch).not.toHaveBeenCalled();
+    expect(f.replaceSession).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+    expect(f.run.mock.calls.some(([args]) => args[0] === 'container' && ['start', 'stop'].includes(args[1]!))).toBe(
+      false
+    );
+    expect(repaired.handoff).toBeUndefined();
+  });
+
+  it('reopens the original committed publication after its marker ACK is lost without replaying business work', async () => {
+    const f = await publishedTargetFixture('issued'),
+      journal = await f.loadJournal(),
+      before = journal.read(),
+      company = f.companyStore.snapshot();
+    f.losePublicationAck();
+    await expect(f.actor().verify(f.record, journal)).rejects.toThrow('ACK lost after durable commit');
+    // The caller still has the old uncertain cursor. Only reopening the real
+    // journal discovers the committed marker; no synthetic success is returned.
+    expect(journal.read()).toEqual(before);
+    const reopened = await f.loadJournal(),
+      committed = reopened.read();
+    expect(committed).toEqual({ ...before, companyPublication: { ...before.companyPublication!, phase: 'published' } });
+    await expect(f.actor().verify(f.record, reopened)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(committed);
+    expect(f.companyStore.snapshot()).toEqual(company);
+    expect(committed.handoff).toBeUndefined();
+    expect(f.launch).not.toHaveBeenCalled();
+    expect(f.replaceSession).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+    expect(f.run.mock.calls.some(([args]) => args[0] === 'container' && ['start', 'stop'].includes(args[1]!))).toBe(
+      false
+    );
+  });
+
+  it.each(['issued', 'submitted'] as const)(
+    'earns a fresh positive target fence from a %s handoff checkpoint without sending input',
+    async (handoff) => {
+      const f = await publishedTargetFixture('published', handoff),
+        journal = await f.loadJournal(),
+        before = journal.read(),
+        company = f.companyStore.snapshot(),
+        actor = f.actor(),
+        fence = await actor.verify(f.record, journal);
+      expect(() => fence()).not.toThrow();
+      if (handoff === 'issued')
+        await expect(actor.finalize(f.record, journal)).rejects.toThrow('will not be typed again');
+      else await actor.finalize(f.record, journal);
+      expect(journal.read()).toEqual(before);
+      expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+      expect(f.companyStore.snapshot()).toEqual(company);
+      expect(f.run.mock.calls.some(([args]) => args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))).toBe(true);
+      expect(f.run.mock.calls.some(([args]) => args.includes('plan-status') && args.includes('live'))).toBe(true);
+      expect(f.launch).not.toHaveBeenCalled();
+      expect(f.replaceSession).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.native.command.create).not.toHaveBeenCalled();
+      expect(f.run.mock.calls.some(([args]) => args[0] === 'container' && ['start', 'stop'].includes(args[1]!))).toBe(
+        false
+      );
+      f.sessions.set(
+        f.native.target.id,
+        new Session({ id: f.native.target.id, workingDir: '/synthetic', docker: f.native.target.docker })
+      );
+      expect(() => fence()).toThrow('target viewer changed');
+    }
+  );
+
+  it('refuses changed live canonical authentication despite the retained successful installer ACK', async () => {
+    const f = await publishedTargetFixture('published', 'submitted'),
+      journal = await f.loadJournal(),
+      before = journal.read();
+    f.liveAuthDigest('c'.repeat(64));
+    await expect(f.actor().verify(f.record, journal)).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_ACCOUNT_AUTH_CHANGED',
+    });
+    expect(journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(f.launch).not.toHaveBeenCalled();
+    expect(f.create).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a revoked recovery-only grant after awaiting native account status before repairing the ACK', async () => {
+    const f = await publishedTargetFixture('issued'),
+      journal = await f.loadJournal(),
+      before = journal.read();
+    let entered = false,
+      release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    f.accountStatus(async () => {
+      entered = true;
+      await gate;
+    });
+    const pending = f
+      .actor()
+      .verify(f.record, journal)
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      );
+    try {
+      await expect.poll(() => entered, { timeout: 2000 }).toBe(true);
+      await f.companyStore.update((company) => {
+        company.employees[0]!.permissions.recoverEmployees = false;
+      });
+      release();
+      expect(await pending).toMatchObject({ status: 403 });
+      expect(journal.read()).toEqual(before);
+      expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+      expect(f.run.mock.calls.some(([args]) => args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))).toBe(false);
+      expect(f.launch).not.toHaveBeenCalled();
+      expect(f.create).not.toHaveBeenCalled();
+      expect(f.native.command.create).not.toHaveBeenCalled();
+    } finally {
+      release();
+      await pending;
+    }
   });
 });
