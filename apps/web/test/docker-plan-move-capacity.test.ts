@@ -130,9 +130,28 @@ async function publishMaximum(
     await s.dockerPublish(record.id, state, next, () => {});
     state = next;
   }
-  return s.dockerPublish(record.id, state, maximum, () => {});
+  const issued = DockerPlanMoveJournalState.parse({ ...maximum, handoff: { ...maximum.handoff!, phase: 'issued' } });
+  await s.dockerPublish(record.id, state, issued, () => {});
+  return s.dockerPublish(record.id, issued, maximum, () => {});
 }
 describe('whole-document native settlement capacity', () => {
+  it('requires the original handoff input intent and retains uncertain input without permitting a replay', () => {
+    const f = candidate(0),
+      completed = dockerPlanMaximumStates(f.state.seed, f.state.epoch)[1]!;
+    const before = DockerPlanMoveJournalState.parse({ ...completed, handoff: undefined });
+    const issued = DockerPlanMoveJournalState.parse({
+      ...completed,
+      handoff: { ...completed.handoff!, phase: 'issued' },
+    });
+    expect(() => assertDockerPlanMoveTransition(before, completed)).toThrow('original input intent');
+    expect(() => assertDockerPlanMoveTransition(before, issued)).not.toThrow();
+    expect(() => assertDockerPlanMoveTransition(issued, completed)).not.toThrow();
+    expect(() => assertDockerPlanMoveTransition(issued, before)).toThrow('publication changed');
+    expect(() => assertDockerPlanMoveTransition(completed, issued)).toThrow('publication changed');
+    expect(() =>
+      DockerPlanMoveJournalState.parse({ ...issued, handoff: { ...issued.handoff!, digest: '0'.repeat(64) } })
+    ).toThrow();
+  });
   it('decodes constructive maxima including all32 escaped paths and duplicated source identities', async () => {
     const f = candidate(0, true),
       s = await store();

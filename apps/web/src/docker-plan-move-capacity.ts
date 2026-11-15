@@ -1,6 +1,10 @@
 /** Constructive maximum DATA for this closed native journal protocol.
  * The witness is decoded by the same owning schemas. It grants no effect credit. */
-import { DockerPlanMoveJournalState, type DockerPlanMoveSeed } from './docker-plan-move-data.js';
+import {
+  DockerPlanMoveJournalState,
+  dockerPlanMoveHandoffDigest,
+  type DockerPlanMoveSeed,
+} from './docker-plan-move-data.js';
 import { DockerEmployeePlanReplacementWorkRecord } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 const MAX = Number.MAX_SAFE_INTEGER,
@@ -43,7 +47,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
     purpose: 'reverie-ephemeral-directory-restore-v1' as const,
     operationId: target.operationId,
     employeeId: seed.source.record.employeeId,
-    sessionId: target.sessionId,
+    sessionId: source.sessionId,
     sessionGeneration: target.sessionGeneration,
     invocation: MAX,
     layout: 'operator-sessions' as const,
@@ -120,6 +124,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
         binding: seed.source.binding,
         continuationDigest: dockerContinuationDigest(seed.source.record),
         providerSourceDigest: seed.source.providerSourceDigest,
+        ephemeralSessionId: source.sessionId,
       },
       account: { id: target.accountId, provider: target.provider, projectionDigest: hex, contextDigest: hex },
     },
@@ -154,7 +159,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
     ...state,
     work: {
       ...work,
-      phase: 'provider-issued',
+      phase: 'ready',
       tasks: tasks.map((task) =>
         task.role === 'storage-holder' || task.role === 'anchor'
           ? {
@@ -179,6 +184,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
       recipeDigest: hex,
     },
     companyPublication: { phase: 'published', digest: hex },
+    handoff: { phase: 'submitted', digest: dockerPlanMoveHandoffDigest(seed.handoff) },
   };
   return [DockerPlanMoveJournalState.parse(state), DockerPlanMoveJournalState.parse(published)];
 }

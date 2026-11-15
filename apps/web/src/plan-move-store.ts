@@ -116,6 +116,7 @@ const RecordSchema = z
       (docker.sourceStop?.phase !== 'closed' ||
         !docker.paidDispatch ||
         docker.companyPublication?.phase !== 'published' ||
+        docker.handoff?.phase !== 'submitted' ||
         docker.work?.phase !== 'ready')
     )
       context.addIssue({

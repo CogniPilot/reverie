@@ -2,6 +2,7 @@ import { allowedEphemeralTransition } from './docker-ephemeral-data.js';
 /** Private PlanMoves journal DATA. None of these references mint effect authority.
  * An actor epoch fences publishers; it never changes an already-issued task. */
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 import { allowedDockerTaskTransition } from './docker-continuation-task.js';
 import { containsHandoffControls } from './text-controls.js';
 import {
@@ -152,6 +153,12 @@ export const DockerPlanMoveSourceStop = z.discriminatedUnion('phase', [
   z.object({ ...sourceStopBase, phase: z.literal('closed'), terminalStateDigest: digest }).strict(),
 ]);
 export type DockerPlanMoveSourceStop = z.infer<typeof DockerPlanMoveSourceStop>;
+/** Exact bytes submitted by the shared guarded recovery-prompt writer. */
+export function dockerPlanMoveHandoffDigest(text: string): string {
+  return createHash('sha256')
+    .update(text.replace(/[\r\n]+/g, ' ') + '\r')
+    .digest('hex');
+}
 export const DockerPlanMoveJournalState = z
   .object({
     version: z.literal(1),
@@ -178,6 +185,10 @@ export const DockerPlanMoveJournalState = z
         z.object({ phase: z.literal('published'), digest }).strict(),
       ])
       .optional(),
+    handoff: z
+      .object({ phase: z.enum(['issued', 'submitted']), digest })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine((state) => {
@@ -188,6 +199,7 @@ export const DockerPlanMoveJournalState = z
       work,
       paidDispatch: paid,
       companyPublication: publication,
+      handoff,
     } = state;
     const source = seed.source.record.destination!,
       target = seed.target;
@@ -237,6 +249,13 @@ export const DockerPlanMoveJournalState = z
       return false;
     if (work && ['provider-issued', 'ready'].includes(work.phase) && !paid) return false;
     if (publication && !paid) return false;
+    if (
+      handoff &&
+      (publication?.phase !== 'published' ||
+        work?.phase !== 'ready' ||
+        handoff.digest !== dockerPlanMoveHandoffDigest(seed.handoff))
+    )
+      return false;
     return true;
   });
 function isEqual(left: unknown, right: unknown): boolean {
@@ -293,13 +312,23 @@ export function assertDockerPlanMoveTransition(
     if (!unchanged(oldReader, reader) && !transitions[oldReader.phase].includes(reader.phase))
       throw Error('Source reader cursor changed');
   }
-  for (const field of ['paidDispatch', 'companyPublication'] as const) {
+  if (!before.handoff && next.handoff?.phase === 'submitted')
+    throw Error('Docker plan handoff requires its original input intent');
+  for (const field of ['paidDispatch', 'companyPublication', 'handoff'] as const) {
     if (!before[field]) continue;
+    if (!next[field]) throw Error('Docker plan publication changed');
     if (
       field === 'companyPublication' &&
       before.companyPublication?.phase === 'issued' &&
       next.companyPublication?.phase === 'published' &&
       before.companyPublication.digest === next.companyPublication.digest
+    )
+      continue;
+    if (
+      field === 'handoff' &&
+      before.handoff?.phase === 'issued' &&
+      next.handoff?.phase === 'submitted' &&
+      before.handoff.digest === next.handoff.digest
     )
       continue;
     if (!unchanged(before[field], next[field])) throw Error('Docker plan publication changed');
