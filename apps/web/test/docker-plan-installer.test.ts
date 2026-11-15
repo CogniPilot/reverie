@@ -133,6 +133,7 @@ async function fixture() {
       },
     ],
   });
+  if (row.version !== 3) throw Error('Expected v3 fixture');
   const command: DockerEngineCommand = {
     create: vi.fn(async () => {
       throw Error('CREATE forbidden');
@@ -295,12 +296,14 @@ async function installFixture() {
     tasks: f.row.tasks!.filter((t) => t.role !== 'identity-helper'),
   };
   f.journal.read = () => task;
-  f.journal.publish = vi.fn(async (r, before, next, current) => {
-    current();
-    expect(task).toEqual(before);
-    task = structuredClone(next);
-    return { ...r, tasks: [...r.tasks!.filter((t) => t.role !== 'identity-helper'), task] };
-  });
+  f.journal.publish = vi.fn(
+    async (...[r, before, next, current]: Parameters<DockerContinuationTaskJournal['publish']>) => {
+      current();
+      expect(task).toEqual(before);
+      task = structuredClone(next);
+      return { ...r, tasks: [...r.tasks!.filter((t) => t.role !== 'identity-helper'), task] };
+    }
+  );
   const original = vi.mocked(f.command.run).getMockImplementation()!;
   vi.mocked(f.command.create).mockImplementation(async (_name, config, current) => {
     current();
