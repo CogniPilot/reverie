@@ -5337,7 +5337,8 @@ button.ca-company-profile-trigger:focus-visible {
 .ca-expert-profile .ca-profile-management > p {
   margin: 0 0 7px;
 }
-.ca-profile-docker-recovery .ca-btn {
+.ca-profile-docker-recovery .ca-btn,
+.ca-docker-resources .ca-btn {
   min-height: 44px;
   max-width: 100%;
   white-space: normal;
@@ -5356,7 +5357,8 @@ button.ca-company-profile-trigger:focus-visible {
   cursor: pointer;
   padding: 8px 0;
 }
-.ca-profile-docker-recovery [role='alert'] {
+.ca-profile-docker-recovery [role='alert'],
+.ca-docker-resources [role='alert'] {
   color: var(--error, #f38b8b);
   overflow-wrap: anywhere;
 }
@@ -6308,4 +6310,48 @@ button.ca-company-profile-trigger:focus-visible {
 .ca-journal-sources {
   margin: 4px 0;
   padding-left: 20px;
+}
+
+.ca-docker-resources {
+  min-width: 0;
+}
+.ca-docker-resources .ca-hint {
+  font-size: 13px;
+  line-height: 1.45;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.ca-docker-resources summary,
+.ca-recovery-policy-details > summary {
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+
+.ca-docker-resource-facts {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+}
+.ca-docker-resource-facts caption {
+  text-align: left;
+  font-weight: 600;
+  padding: 8px 0;
+}
+.ca-docker-resource-facts th,
+.ca-docker-resource-facts td {
+  padding: 7px 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.24);
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.ca-docker-resource-facts th {
+  text-align: left;
+  font-weight: 500;
+  width: 54%;
+}
+.ca-docker-resource-facts td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }

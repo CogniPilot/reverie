@@ -74,9 +74,12 @@ let
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
       # Boxed recovery and bound worker transport use the same default CI gate.
       npm test -- test/docker-memory-high-canary.test.ts \
+        test/docker-resource-original-writer.test.ts \
         test/docker-contained-resource-controller.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
+        test/docker-resource-revisions.test.ts \
+        test/docker-resource-convergence.test.ts \
         test/docker-owner-stop-status.test.ts \
         test/docker-ephemeral-restoration.test.ts \
         test/docker-owner-stop-native.test.ts \
@@ -147,7 +150,7 @@ let
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/owned-process.test.ts
       npm test -- test/operator-viewer-bridge.test.ts test/operator-viewer-native.test.ts test/operator-viewer-native-io.test.ts test/operator-viewer-native-integration.test.ts
-      npm test -- test/native-hook-artifact-selection.test.ts
+      npm test -- test/native-hook-artifact-selection.test.ts test/native-hook-path-budget.test.ts
       npm test -- test/approvals-ui-held.test.ts
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts test/employee-recovery-ui.test.ts \
@@ -228,7 +231,7 @@ let
         test/pool-installation-enrollment.test.ts \
         test/pool-installation-native-client.test.ts \
         test/resource-replacement-controller.test.ts test/company-laptop-memory-ui.test.ts \
-        test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
+        test/docker-resources-ui.test.ts test/company-resource-fleet-ui.test.ts test/resource-fleet-schema.test.ts test/resource-fleet-service.test.ts \
         test/agent-plan-server.test.ts test/agent-plan-request.test.ts test/agent-plan-recovery.test.ts test/agent-plan-journal-recovery.test.ts test/cli-agent-force.test.ts test/cli-agent-viewer.test.ts test/plan-request.test.ts test/plan-request-capability.test.ts test/plan-request-routes.test.ts test/plan-credential-boundary.test.ts test/plan-request-ui.test.ts test/plan-request-prompt.test.ts \
         test/embassy-builtin.test.ts test/embassy-protocol-server.test.ts test/embassy-pairing-ui.test.ts \
         test/disk-stats.test.ts test/disk-stats-ui.test.ts test/routes/system-routes.test.ts test/shared-attachments.test.ts test/routes/file-routes.test.ts \
@@ -388,7 +391,7 @@ let
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
-        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-launch-publication.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
+        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-launch-publication.test.ts test/native-custom-model-preflight.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
         test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \

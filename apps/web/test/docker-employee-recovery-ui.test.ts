@@ -349,3 +349,21 @@ it.each([
   expect(row?.querySelector('td')?.textContent).toBe(label);
   expect(f.starts()).toHaveLength(0);
 });
+
+it('collapses already-approved resource policy into details while leaving unapproved proposal expanded', async () => {
+  const approved = await fixture();
+  const details = approved.panel().querySelector('.ca-recovery-policy-details') as HTMLDetailsElement;
+  expect(details).not.toBeNull();
+  expect(details.open).toBe(false);
+  expect(details.textContent).toContain('Employee hard RAM ceiling');
+  const s = selection();
+  s.policy = null;
+  s.canApprovePolicy = true;
+  s.allowedActions = ['approve-policy'];
+  s.proposedPolicy = policy;
+  s.proposedPolicyDigest = 'e'.repeat(64);
+  const proposal = await fixture({ selection: s });
+  expect(proposal.panel().querySelector('.ca-recovery-policy-details')).toBeNull();
+  expect(proposal.panel().querySelector('caption')?.textContent).toContain('approval required');
+  expect(proposal.starts()).toEqual([]);
+});

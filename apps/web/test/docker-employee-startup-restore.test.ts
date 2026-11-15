@@ -1,6 +1,7 @@
 /** Real startup, StateStore/CompanyStore and boxed Runtime; only Docker and PTY
  * physical I/O are controlled. No native/installed/provider acceptance. */
 import assert from 'node:assert/strict';
+import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -72,8 +73,10 @@ class PhysicalDocker implements DockerEngineCommand {
   mutations = 0;
   configured = false;
   high = false;
+  highBytes = 16 * 1024 ** 3;
   tokenDigest = '';
   absent = false;
+  providerAbsent = false;
   constructor(readonly boxId: string) {}
   observation(worker: boolean) {
     const anchor = [...this.containers].find(
@@ -106,7 +109,7 @@ class PhysicalDocker implements DockerEngineCommand {
         : null,
       resources: {
         memoryMax: this.configured ? String(48 * 1024 ** 3) : 'max',
-        memoryHigh: worker && this.high ? String(16 * 1024 ** 3) : 'max',
+        memoryHigh: worker && this.high ? String(this.highBytes) : 'max',
         swapMax: '0',
         pidsMax: this.configured ? String(worker ? 512 : 8192) : 'max',
         cpuWeight: '100',
@@ -257,6 +260,7 @@ class PhysicalDocker implements DockerEngineCommand {
           tokenDigest: this.tokenDigest,
         });
       if (args.includes('status')) return '{}';
+      if ((args.includes('presence') || args.includes('observe')) && this.providerAbsent) return 'ABSENT\n';
       if (args.includes('presence') || args.includes('observe'))
         return JSON.stringify({ ...pane, hooks: args.at(-1) === 'none' ? { kind: 'none' } : pane.hooks });
     }
@@ -271,6 +275,7 @@ class PhysicalDocker implements DockerEngineCommand {
         logs: [...this.logs],
         configured: this.configured,
         high: this.high,
+        highBytes: this.highBytes,
         tokenDigest: this.tokenDigest,
       }),
       { mode: 0o600 }
@@ -283,6 +288,7 @@ class PhysicalDocker implements DockerEngineCommand {
     for (const [id, v] of data.logs) p.logs.set(id, v);
     p.configured = data.configured;
     p.high = data.high;
+    p.highBytes = data.highBytes ?? 16 * 1024 ** 3;
     p.tokenDigest = data.tokenDigest;
     return p;
   }
@@ -437,7 +443,10 @@ async function seed(scenario: string) {
   await resources.configure(row, noop);
   row.phase = 'identity-issued';
   await engine.provisionIdentity(row, 'synthetic-test-token-not-server-authority', noop);
-  row.phase = scenario.startsWith('issued-') || scenario.startsWith('codex-') ? 'provider-issued' : 'ready';
+  row.phase =
+    scenario.startsWith('issued-') || scenario.startsWith('codex-') || scenario.startsWith('ram-')
+      ? 'provider-issued'
+      : 'ready';
   row.tasks = [...tasks.values()];
   const docker = {
     hostId: 'boxed-runtime',
@@ -514,8 +523,8 @@ async function seed(scenario: string) {
     position: 'Employee',
     expertise: ['testing'],
     createdAt: 1,
-    onVacation: false,
-    desiredRunning: scenario !== 'desired-off',
+    onVacation: scenario === 'ram-offline',
+    desiredRunning: !['desired-off', 'ram-offline'].includes(scenario),
     dockerResourcePolicy: policy,
     dockerBinding: {
       version: 1,
@@ -592,11 +601,28 @@ async function seed(scenario: string) {
     state.settings = [CompanySettingsSchema.parse({ autoWakeEnabled: false })];
     state.dockerEmployeeContinuations = staleRow ? [staleRow, row] : [row];
   });
+  if (scenario.startsWith('ram-') && scenario !== 'ram-later') {
+    const { DockerResourceRevisionStore } = await import('../src/docker-resource-revisions.js');
+    const revisions = new DockerResourceRevisionStore('/fixture/data/docker-resource-revisions');
+    await revisions.approve(
+      {
+        revision: '99999999-9999-4999-8999-999999999999',
+        owner: null,
+        scope: 'all-current-and-future',
+        memoryHighBytes: 48 * 1024 ** 3,
+      },
+      null,
+      noop
+    );
+    revisions.close();
+  }
   physical.save();
 }
 async function startup(scenario: string) {
   const physical = PhysicalDocker.load();
   physical.absent = ['absent', 'issued-absent'].includes(scenario);
+  physical.providerAbsent = scenario === 'ram-absent';
+  if (scenario.startsWith('ram-') && scenario !== 'ram-unsupported') physical.highBytes = 48 * 1024 ** 3;
   const { PackagedDockerEngineCommand } = await import('../src/docker-engine-command.js');
   const originalRun = PackagedDockerEngineCommand.prototype.run,
     originalCreate = PackagedDockerEngineCommand.prototype.create;
@@ -605,7 +631,8 @@ async function startup(scenario: string) {
   const require = createRequire(import.meta.url),
     pty = require('node-pty');
   const oldSpawn = pty.spawn;
-  let ptys = 0;
+  let ptys = 0,
+    spawnAttempts = 0;
   const writes: string[] = [];
   let failWrite = false;
   pty.spawn = (program: string, args: string[]) => {
@@ -614,6 +641,8 @@ async function startup(scenario: string) {
       '-e',
       'if (process.stdin.isTTY) process.stdin.setRawMode(true); process.stdin.pipe(process.stdout);',
     ]);
+    spawnAttempts++;
+    if (scenario === 'ram-attach-failed') throw Error('Controlled attach transport reply lost');
     ptys++;
     let exit: ((event: { exitCode: number; signal: number }) => void) | undefined;
     return {
@@ -697,25 +726,111 @@ async function startup(scenario: string) {
     const cookies = enrollment.headers['set-cookie'];
     assert(cookies);
     const cookie = (Array.isArray(cookies) ? cookies : [cookies]).map((value) => value.split(';')[0]).join('; ');
+    if (scenario === 'ram-later' || scenario === 'ram-offline') {
+      const initial = await app.inject({
+        method: 'GET',
+        url: '/api/sessions/' + sid,
+        headers: { host: 'reverie:3000', cookie },
+      });
+      assert.equal(initial.statusCode, 404);
+      if (scenario === 'ram-later') {
+        const published = await app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          headers: { host: 'reverie:3000', origin: 'http://reverie:3000', cookie },
+          payload: {
+            revision: '99999999-9999-4999-8999-999999999999',
+            expectedRevision: null,
+            scope: 'all-current-and-future',
+            memoryHighBytes: 48 * 1024 ** 3,
+          },
+        });
+        assert.equal(published.statusCode, 200);
+        assert.equal(published.json().data.enforcement, 'not-observed');
+      } else {
+        assert.equal(
+          JSON.parse(fs.readFileSync('/fixture/data/docker-resource-revisions/revisions.json', 'utf8')).attempts.length,
+          0
+        );
+        const entered = await app.inject({
+          method: 'POST',
+          url: '/api/company/employees/' + eid + '/vacation',
+          headers: { host: 'reverie:3000', origin: 'http://reverie:3000', cookie },
+          payload: { enabled: false },
+        });
+        assert.equal(entered.statusCode, 200);
+      }
+      const deadline = performance.now() + 15_000;
+      const ready = () => {
+        const session = internal.sessions.get(sid);
+        return (
+          !!session &&
+          session.pid !== null &&
+          session.dockerContinuationViewCurrent &&
+          ptys === 1 &&
+          (scenario === 'ram-offline' ||
+            internal.dockerEmployeeRuntime.restorationReports.some(
+              (report) => report.sessionId === sid && report.state === 'attached'
+            ))
+        );
+      };
+      while (!ready() && performance.now() < deadline) await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      assert(ready(), 'Approved default must converge and finish private-view publication without another Apply/BEGIN');
+    }
+    const shouldAttach =
+      ['attached', 'issued-live', 'ram-startup', 'ram-later', 'ram-offline', 'ram-unsupported'].includes(scenario) ||
+      scenario.startsWith('codex-');
+    if (scenario.startsWith('ram-')) {
+      const observation = await app.inject({
+        method: 'GET',
+        url: '/api/company/employees/' + eid + '/docker-resources',
+        headers: { host: 'reverie:3000', cookie },
+      });
+      assert.equal(observation.statusCode, 200);
+      assert.equal(
+        observation.json().data.actualMemoryHighBytes,
+        (scenario === 'ram-unsupported' ? 16 : 48) * 1024 ** 3
+      );
+      assert.equal(observation.json().data.desiredMemoryHighBytes, 48 * 1024 ** 3);
+      const ledger = JSON.parse(fs.readFileSync('/fixture/data/docker-resource-revisions/revisions.json', 'utf8'));
+      if (['ram-startup', 'ram-later', 'ram-offline', 'ram-attach-failed'].includes(scenario)) {
+        assert.equal(ledger.attempts.length, 1);
+        assert.equal(ledger.attempts[0].state, 'observed');
+        assert.equal(observation.json().data.approvalSource, 'owner-revision');
+      } else {
+        assert.equal(ledger.attempts.length, 0);
+        assert.equal(observation.json().data.approved, scenario === 'ram-unsupported');
+      }
+      const retained = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8'));
+      assert.equal(retained.dockerEmployeeContinuations[0].phase, 'provider-issued');
+      assert.equal(retained.dockerEmployeeContinuations[0].policy.memoryHighBytes, 16 * 1024 ** 3);
+      assert.equal(retained.employees[0].dockerResourcePolicy.memoryHighBytes, 16 * 1024 ** 3);
+      assert.equal(
+        retained.employees[0].dockerBinding.policyDigest,
+        dockerContinuationDigest(retained.dockerEmployeeContinuations[0].policy)
+      );
+      assert.equal(
+        physical.mutations,
+        0,
+        'Default convergence/adoption must not replay provider/destination or create a helper here'
+      );
+    }
     const response = await app.inject({
       method: 'GET',
       url: '/api/sessions/' + sid,
       headers: { host: 'reverie:3000', cookie },
     });
-    assert.equal(
-      response.statusCode,
-      ['attached', 'issued-live'].includes(scenario) || scenario.startsWith('codex-') ? 200 : 404
-    );
+    assert.equal(response.statusCode, shouldAttach || scenario === 'ram-attach-failed' ? 200 : 404);
     assert(internal.workerProviderHealth, 'Docker health must exist without a retired host worker socket');
     assert.equal(process.env.REVERIE_WORKER_SOCKET, undefined);
-    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-'))
+    if (shouldAttach)
       assert.equal(
         internal.workerProviderHealth.read(sid)?.state,
         'healthy',
         'Post-listen Docker polling must run without the retired host-worker socket'
       );
     await internal.workerProviderHealth.refresh();
-    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-')) {
+    if (shouldAttach) {
       assert.equal(internal.workerProviderHealth.read(sid)?.state, 'healthy');
       const current = await app.inject({
         method: 'GET',
@@ -756,7 +871,20 @@ async function startup(scenario: string) {
     }
     const session = internal.sessions.get(sid),
       reports = internal.dockerEmployeeRuntime.restorationReports;
-    if (scenario === 'attached' || scenario === 'issued-live' || scenario.startsWith('codex-')) {
+    if (scenario === 'ram-attach-failed') {
+      assert(session, 'An unknown attachment preserves its original candidate and dispatch fence');
+      assert.equal(
+        session.dockerContinuationViewCurrent,
+        false,
+        'Failed publication poisons its minted view even while canonical attendance/allowance stays true'
+      );
+      assert.equal(session.providerDispatchHeld, true);
+      assert.equal(session.providerInputHeld, true);
+      assert.equal(session.pid, null);
+      assert.equal(ptys, 0);
+      assert.equal(spawnAttempts, 1);
+      assert(reports.some((report) => report.sessionId === sid && report.state === 'held'));
+    } else if (shouldAttach) {
       assert(session, 'A genuine existing provider must restore a Session with empty control-local mux');
       assert.equal(session.dockerContinuationViewCurrent, true);
       assert.equal(session.providerDispatchHeld, true);
@@ -764,11 +892,12 @@ async function startup(scenario: string) {
       assert.equal(session.claudeSessionId, thread);
       assert.equal(session.claudeSessionIdPending, false);
       assert.equal(ptys, 1);
-      assert(reports.some((r) => r.sessionId === sid && r.state === 'attached'));
+      if (scenario !== 'ram-offline') assert(reports.some((r) => r.sessionId === sid && r.state === 'attached'));
     } else {
       assert.equal(session, undefined);
       assert.equal(ptys, 0);
-      if (scenario !== 'desired-off') assert(reports.some((r) => r.sessionId === sid && r.state === 'held'));
+      if (!['desired-off', 'ram-offline'].includes(scenario))
+        assert(reports.some((r) => r.sessionId === sid && r.state === 'held'));
     }
     assert.equal(writes.length, 0, 'Restoring an existing viewer must not type or replay a draft');
     if (scenario.startsWith('codex-')) {
@@ -992,6 +1121,12 @@ if (process.argv.includes('--namespace')) {
       'codex-input',
       'codex-stale',
       'codex-identity',
+      'ram-startup',
+      'ram-later',
+      'ram-offline',
+      'ram-absent',
+      'ram-unsupported',
+      'ram-attach-failed',
     ])
       it(
         scenario === 'attached' ? 'attached despite an unrelated canonical migration failure' : scenario,

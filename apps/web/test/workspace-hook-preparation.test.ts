@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import {Session, ProviderDispatchUnconfirmedError} from '../src/session.js';
+import {Session, ProviderDispatchUnconfirmedError, NativeProviderRetirementRequiredError} from '../src/session.js';
 import {spawn as spawnPty} from 'node-pty';
 import {sessionProviderLeaseCurrent} from '../src/session-provider-lease.js';
 import {prepareWorkspaceHooks, consumeWorkspaceHookPreparation, type WorkspaceHookPreparation} from '../src/workspace-hook-policy.js';
@@ -145,8 +145,9 @@ it.each(['dead','live'] as const)('worker restart uses the same strict post-disp
     reader.mockResolvedValue(`${state === 'dead'?'1':'0'} 999999990 reverie-abcdef\n`);
     if (state === 'live') {expect(await session.restartCli()).toBe(true);expect(session.providerDispatchHeld).toBe(false);}
     else {
-      await expect(session.restartCli()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
-      await expect(session.restartCli()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      const originalError = await session.restartCli().catch((error: unknown) => error);
+      expect(originalError).toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      await expect(session.restartCli()).rejects.toBe(originalError);
       expect(session.providerDispatchHeld).toBe(true);
     }
     expect(respawn).toHaveBeenCalledOnce();expect(record.pid).toBe(999_999_990);
@@ -383,11 +384,11 @@ it('issues a private epoch for a freshly prepared worker start without trusting 
     expect(resolveWaitSignals('stop', {mode:'claude',...sessionHookOptions(restored.session)}).error).toContain('unknown');
   }
 });
-it('refuses damaged native-worker restart preparation before touching the current provider epoch', async () => {
+it('requires native retirement before parsing damaged restart settings or changing the current provider epoch', async () => {
   vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic-owned-fixture/worker.sock');
   const active = await controlledMuxStart(); active.succeed(); await active.starting;
   await writeFile(join(workspace,'.claude/settings.local.json'), '{ damaged fixture settings');
-  await expect(active.session.restartCli()).rejects.toMatchObject({name:'WorkspaceHookPreparationError'});
+  await expect(active.session.restartCli()).rejects.toBeInstanceOf(NativeProviderRetirementRequiredError);
   expect(active.mux.respawnPane).not.toHaveBeenCalled();
   expect(active.session.admitHookReport(active.token)).toBe('current');
   expect(active.session.providerDispatchHeld).toBe(false);

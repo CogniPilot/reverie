@@ -12,6 +12,8 @@ let
     name = "${namePrefix}-writer";
     memoryHighOnly = true;
   };
+  console = (import ./package.nix { inherit pkgs src; }).console;
+  originalWriter = import ./docker-original-writer-canary.nix { inherit pkgs console; };
   manifest = pkgs.writeText "memory-high-native-inputs.json" (builtins.toJSON {
     version = 1;
     purpose = "reverie-ci-memory-high-images-v1";
@@ -24,4 +26,6 @@ in pkgs.linkFarm "reverie-ci-memory-high-images" [
   { name = "baseline.tar.gz"; path = baseline; }
   { name = "writer.tar.gz"; path = writer; }
   { name = "manifest.json"; path = manifest; }
+  { name = "original-writer.mjs"; path = originalWriter + "/original-writer.mjs"; }
+  { name = "original-writer.meta.json"; path = originalWriter + "/original-writer.meta.json"; }
 ]

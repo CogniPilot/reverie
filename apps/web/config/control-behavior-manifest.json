@@ -830,6 +830,139 @@
         "expect(denied.h.document.querySelector('[aria-label=\"Manage PATs\"]')).toBeNull()"
       ],
       "outcome": "The actual delete control sends no write when confirmation is declined, sends exactly the selected DELETE when confirmed, and vault management remains absent for a nonowner."
+    },
+    "docker-resources-default": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "approves only the exact default proposal using one owner UUID and expected revision",
+      "assertions": [
+        "expect(f.writes()).toHaveLength(1)",
+        "expect(f.panel().textContent).toContain('UNKNOWN_DEFAULT_REPLY')"
+      ],
+      "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
+    },
+    "docker-resources-original": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "keeps unknown application latched and refresh read-only; offers only API-authorized original reconciliation",
+      "assertions": [
+        "expect(f.writes()[0]!.body).toEqual({ revision })",
+        "expect(f.button('Apply approved soft RAM default')).toBeUndefined()",
+        "expect(f.button('Check original resource application')).toBeDefined()"
+      ],
+      "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
+    },
+    "docker-resources-pool": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "uses the exact API pool scope/currentSID/gen without requesting limits or starting an employee",
+      "assertions": [
+        "expect(body).toEqual({ sessionId: sid, sessionGeneration: 9, expectedScopeDigest: 'a'.repeat(64) })",
+        "expect(f.writes()).toHaveLength(1)"
+      ],
+      "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
+    },
+    "docker-resources-new-revision": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "keeps a new same-value approval explicit and collapsed after a closed writer",
+      "assertions": [
+        "expect(details.open).toBe(false)",
+        "expect(f.button('Approve new 48 GiB default revision')).toBeDefined()",
+        "expect(employee.button('Review resource default')).toBeDefined()"
+      ],
+      "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
+    },
+    "docker-recovery-policy-details": {
+      "test": "test/docker-employee-recovery-ui.test.ts",
+      "title": "collapses already-approved resource policy into details while leaving unapproved proposal expanded",
+      "assertions": [
+        "expect(details.open).toBe(false)",
+        "expect(proposal.panel().querySelector('.ca-recovery-policy-details')).toBeNull()"
+      ],
+      "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
+    },
+    "docker-resources-technical": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "keeps raw verification codes in collapsed technical details with an actionable primary message",
+      "assertions": [
+        "expect(f.panel().querySelector('[role=\"alert\"]')?.textContent).not.toContain('DOCKER_POOL_')",
+        "expect(details.open).toBe(false)",
+        "expect(details.textContent).toContain('DOCKER_POOL_ORIGINAL_ACK_MISSING')"
+      ],
+      "outcome": "The actual DOM keeps native codes in closed details and shows a plain refresh instruction without a resource mutation. No native completion or authority is inferred."
+    },
+    "docker-resources.continue-original": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "continues only the explicitly offered original resource attempt despite its local unknown latch",
+      "assertions": [
+        "expect(f.writes()).toHaveLength(1)",
+        "expect(f.writes().map((v) => v.path)).toEqual([base + '/docker-resources/apply', base + '/docker-resources/continue',])",
+        "expect(f.writes().map((v) => v.body)).toEqual([{ revision }, { revision }])"
+      ],
+      "outcome": "The real DOM dispatches only one explicitly offered original continuation with the retained revision. Refresh is read-only. The actual native preSTART/CAS behavior remains the separately maintained API producer tests, not inferred from this view fixture."
+    },
+    "docker-resources.abandon-original": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "retires an explicitly offered unstarted intent without claiming a stopped writer or applying limits",
+      "assertions": [
+        "expect(f.writes()).toEqual([])",
+        "await f.click('Abandon unstarted resource application')",
+        "expect(f.panel().textContent).toContain('does not prove that a container was stopped')",
+        "expect(f.button('Continue original resource application')).toBeUndefined()"
+      ],
+      "outcome": "The real DOM sends only the explicitly offered metadata retirement, retains actual16 versus desired48, and shows no stopped-writer claim. No native/container effect is inferred from this DOM scenario."
+    },
+    "docker-resources.failure-attention": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "renders actual producer convergence failures as attention without extra employee reads or false completion",
+      "assertions": [
+        "expect(f.panel().querySelector('[role=\"alert\"]')?.textContent).toContain('1 employee resource application needs attention')",
+        "expect(details.textContent).toContain(targetRow(status).code)",
+        "expect(f.calls.every((call) => ['/api/company/docker-resources', '/api/company/docker-resources/original-attempts'].includes(call.path))).toBe(true)"
+      ],
+      "outcome": "A shared actual producer DTO renders bounded attention and closed technical details; it performs no per-employee request or resource mutation."
+    },
+    "docker-resources.not-issued": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "uses the actual default prewrite refusal only after fresh authenticated status and a later explicit approval",
+      "assertions": [
+        "expect(f.writes()).toHaveLength(1)",
+        "expect(f.calls.filter((call) => call.path === '/api/company/docker-resources')).toHaveLength(2)",
+        "expect(f.button('Approve new 48 GiB default revision')).toBeDefined()"
+      ],
+      "outcome": "A producer-checked scoped not-issued DTO triggers only fresh owner status, releases only its nonce, and requires a separate later user approval. Generic failures and different nonces remain separate tested refusal cases."
+    },
+    "docker-resources.original-cursor": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "keeps actual original helper recovery accessible after the employee disappears and the current summary fails",
+      "assertions": [
+        "expect(f.originalButton('Check original helper')).toBeDefined()",
+        "await f.originalClick('Check original helper')",
+        "expect(f.originals().textContent).toContain('original execution outcome remains unknown')",
+        "await f.originalClick('Check original request status')"
+      ],
+      "outcome": "The shared actual owner-HTTP fixture remains reachable without a current employee route, sends the exact original digest CAS once, and displays only historical closed-helper metadata. It makes no current policy claim."
+    },
+    "docker-resources.original-retire": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "opens original request details and retires only the explicitly offered preSTART request",
+      "assertions": [
+        "expect(recovery.open).toBe(false)",
+        "expect(recovery.open).toBe(true)",
+        "expect(details.open).toBe(true)",
+        "await f.originalClick('Retire unstarted request')",
+        "expect(f.originalButton('Retire unstarted request')).toBeUndefined()"
+      ],
+      "outcome": "Normal disclosure controls reveal original identifiers and an explicit API-offered CAS retirement consumes the actual producer fixture. No running-container stop or current resource application is claimed."
+    },
+    "docker-resources.original-pagination": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "pages original requests only through explicit GET and retains an exact settled request",
+      "assertions": [
+        "await f.originalClick('Next original requests')",
+        "expect(f.originalButton('First original requests')).toBeDefined()",
+        "await f.originalClick('Check original request status')",
+        "await f.originalClick('First original requests')",
+        "expect(f.writes()).toEqual([])"
+      ],
+      "outcome": "Explicit page and exact-status controls perform only bounded GETs; an exact retained terminal record is shown without manufacturing current activity or native policy evidence."
     }
   },
   "mappings": [
@@ -1115,6 +1248,101 @@
       "declaration": "src/web/public/docker-employee-recovery.js::Panel.constructor::inline::summary:Recovery details",
       "scenarios": ["docker-recovery.held-visible"],
       "remaining": "Actual DOM disclosure open/close preserves one original recovery POST; desktop/mobile browser tests also exercise this control without API writes. Live Docker recovery acceptance and other failure states require separate evidence."
+    },
+    {
+      "declaration": "src/web/public/docker-employee-recovery.js::Panel.showPolicy::inline::summary:Approved resource policy details",
+      "scenarios": ["docker-recovery-policy-details"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::CompanyPanel.load::inline::button:Approve 48 GiB soft RAM default",
+      "scenarios": ["docker-resources-default", "docker-resources.not-issued"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::CompanyPanel.load::inline::button:Approve new 48 GiB default revision",
+      "scenarios": ["docker-resources-new-revision", "docker-resources.not-issued"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::CompanyPanel.load::inline::summary:Approved default details",
+      "scenarios": ["docker-resources-new-revision"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Apply approved soft RAM default",
+      "scenarios": ["docker-resources-original"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Check original resource application",
+      "scenarios": ["docker-resources-original"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Review resource default",
+      "scenarios": ["docker-resources-new-revision"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Reconcile shared pool observation",
+      "scenarios": ["docker-resources-pool"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::Panel.constructor::inline::button:Refresh Docker resources",
+      "scenarios": ["docker-resources-original"],
+      "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::Panel.technical::inline::summary:Resource verification details",
+      "scenarios": ["docker-resources-technical", "docker-resources.failure-attention"],
+      "remaining": "Only the named synthetic DOM error case. Native diagnosis, all error shapes, other consumers and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Continue original resource application",
+      "scenarios": ["docker-resources.continue-original"],
+      "remaining": "Only the named DOM transport assertions. Actual owner API/currentness/CAS/native behavior are separately tested; other UI states and whole-site coverage remain gaps."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Abandon unstarted resource application",
+      "scenarios": ["docker-resources.abandon-original"],
+      "remaining": "Only the named DOM transport assertions. Actual owner API/currentness/CAS/native behavior are separately tested; other UI states and whole-site coverage remain gaps."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::CompanyPanel.constructor::inline::summary:Original resource request recovery",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::summary:Original request identifiers",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Check original helper",
+      "scenarios": ["docker-resources.original-cursor"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Check original request status",
+      "scenarios": ["docker-resources.original-cursor"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Retire unstarted request",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:First original requests",
+      "scenarios": ["docker-resources.original-pagination"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Next original requests",
+      "scenarios": ["docker-resources.original-pagination"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
     }
   ],
   "gaps": [
@@ -1183,7 +1411,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::render::summary:Active hires · ${list.length}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::render::summary:Active hires \u00b7 ${list.length}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1375,7 +1603,7 @@
       "reason": "Detection gap: semantic-role:alert.setAttribute('role', 'button')"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.messageEl::play::button:▶ Play",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.messageEl::play::button:\u25b6 Play",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1519,7 +1747,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::renderReports::summary:${cycle.date || ''} · ${employee?.name || 'Expert'} · ${cycle.kind || 'Report'} · ${cycle.state || ''}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::renderReports::summary:${cycle.date || ''} \u00b7 ${employee?.name || 'Expert'} \u00b7 ${cycle.kind || 'Report'} \u00b7 ${cycle.state || ''}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1763,7 +1991,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPollDialog::remove::button:×",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPollDialog::remove::button:\u00d7",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1891,7 +2119,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openStartupContext::inline::summary:${section.label} · ${section.status}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openStartupContext::inline::summary:${section.label} \u00b7 ${section.status}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2619,7 +2847,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/company-ui.js::_renderCompany::inline::summary:${cycle.date} · ${data.employees.find((e) => e.id === cycle.employeeId)?.name || 'Employee'} · ${cycle.kind} · ${cycle.state}",
+      "declaration": "src/web/public/company-ui.js::_renderCompany::inline::summary:${cycle.date} \u00b7 ${data.employees.find((e) => e.id === cycle.employeeId)?.name || 'Employee'} \u00b7 ${cycle.kind} \u00b7 ${cycle.state}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2719,7 +2947,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/company-resources.js::FleetPanel.renderNative::inline::summary:Employee thresholds · ${Object.keys(selected.employeeMemoryHighMiB).length}",
+      "declaration": "src/web/public/company-resources.js::FleetPanel.renderNative::inline::summary:Employee thresholds \u00b7 ${Object.keys(selected.employeeMemoryHighMiB).length}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {

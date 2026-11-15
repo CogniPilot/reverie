@@ -1097,3 +1097,41 @@ describe('ephemeral health boundary integration', () => {
     }
   );
 });
+
+describe('resource revision observation boundary', () => {
+  it('fixed metadata verification accepts only the exact current running original', async () => {
+    const f = await providerViewFixture();
+    await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();
+    f.observed.Config.Env!.push('UNAPPROVED_CONFIGURATION=changed');
+    await expect(f.engine.verifyResourceDestination(f.row, () => {})).rejects.toThrow('DESTINATION_CHANGED');
+  });
+  it('checks canonical authority again after a real physical-port await', async () => {
+    const f = await providerViewFixture(),
+      original = f.command.run;
+    let current = true;
+    f.command.run = async (...args) => {
+      const result = await original(...args);
+      current = false;
+      return result;
+    };
+    await expect(
+      f.engine.verifyResourceDestination(f.row, () => {
+        if (!current) throw Error('revoked');
+      })
+    ).rejects.toThrow('revoked');
+  });
+  it('a matching policy DATA object or forged require method cannot mint a revision proof', () => {
+    const f = fixture();
+    let called = false;
+    f.resources.existingPolicy = () => ({
+      require() {
+        called = true;
+      },
+    });
+    const effective = { ...f.policy, memoryHighBytes: 48 * 1024 ** 3 };
+    expect(f.engine.existingResourcePolicyCurrent(f.row, f.policy)).toBe(true);
+    expect(() => f.engine.existingResourcePolicyCurrent(f.row, effective)).toThrow();
+    expect(called).toBe(false);
+    expect(f.engine.existingResourcePolicyCurrent(f.row, null)).toBe(false);
+  });
+});

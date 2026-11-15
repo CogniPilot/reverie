@@ -64,6 +64,7 @@ import {
   ActiveBashTool,
   NiceConfig,
   DEFAULT_NICE_CONFIG,
+  ApiErrorCode,
   getErrorMessage,
   isAdvisorModel,
   isEffortLevel,
@@ -520,6 +521,18 @@ export interface ClaudeMessage {
  */
 /** Why a pane was not replaced: an owner stop of this agent is not settled yet. */
 const OWNER_STOP_HELD = 'An unsettled owner stop holds this expert; its pane is not replaced until the laptop settles the stop';
+
+/** Denial only: a retained native publication is not an in-place restart permit. */
+export class NativeProviderRetirementRequiredError extends Error {
+  readonly reason = 'native-provider-retirement-required';
+  readonly statusCode = 409;
+  readonly body;
+  constructor() {
+    super('The original native provider has not been retired; in-place restart is unavailable. The session configuration is unchanged.');
+    this.name = 'NativeProviderRetirementRequiredError';
+    this.body = Object.freeze({success: false as const, errorCode: ApiErrorCode.CONFLICT, error: this.message, reason: this.reason});
+  }
+}
 
 /** A dispatched provider command may have run; no caller may replay it as a rollback. */
 export class ProviderDispatchUnconfirmedError extends Error {
@@ -1105,6 +1118,18 @@ export class Session extends EventEmitter {
     if (!this._providerEffectsAdmitted()) throw this.#providerDispatchUncertainty ?? this.#terminalInputUncertainty ??
       new Error(this.#employeeRecoveryHold?'Employee recovery requires original settlement before another provider start':
         'Initial launch protocol changed; no new provider was admitted');
+  }
+  /** Read-only denial before owner configuration or restart preparation. This
+   * never retires an intent or grants another provider dispatch. */
+  assertRestartCliPreflight(): void {
+    // Keep the original live dispatch failure, including its cause and identity.
+    // Saved history is denial data; it cannot relabel an unconfirmed effect.
+    if (this.#providerDenial?.kind === 'intrinsic') throw this.#providerDenial.error;
+    const previous = this.#lastProviderLaunch;
+    if (previous && previous.retainedDenial(this).transport === 'native-ordinary' &&
+      !previous.retiredStoppedFor(this)) throw new NativeProviderRetirementRequiredError();
+    this.#providerLaunchStore.assertProviderRestartPreflight(this);
+    this._assertProviderLaunchAdmission();
   }
   /** Deny-only preflight; callers still need current authority and final dispatch admission. */
   assertProviderLaunchAdmission(): void {
@@ -3479,6 +3504,7 @@ export class Session extends EventEmitter {
    *   the mux session is gone — see {@link reattachRemote} for that reasoning).
    */
   async restartCli(stillCurrent: () => boolean = () => true, admitted: () => boolean = stillCurrent): Promise<boolean> {
+    this.assertRestartCliPreflight();
     return this._withPaneLifecycle(() => this._doRestartCli(false, stillCurrent, false, admitted));
   }
 
@@ -3666,7 +3692,7 @@ export class Session extends EventEmitter {
 
   private async _doRestartCli(onlyIfDead = false, stillCurrent: () => boolean = () => true,
     explicitRecovery = false, dispatchAdmitted: () => boolean = stillCurrent): Promise<boolean> {
-    this._assertProviderLaunchAdmission();
+    this.assertRestartCliPreflight();
     if (!this._useMux || !this._mux || !this._muxSession) return false;
     if (ownerStopPending(this.id)) {
       console.log(`[Session ${this.id.slice(0, 8)}] restart refused: an unsettled owner stop holds this pane`);

@@ -141,12 +141,23 @@ run('actual-native', process.execPath, [
   ids[1],
   path.join(evidence, 'native'),
 ]);
+const originalReader = fs.realpathSync(path.join(out, 'original-writer.mjs'));
+assert.ok(originalReader.startsWith('/nix/store/'));
+assert.ok(fs.statSync(originalReader).isFile());
+const originalReply = run('actual-original-helper', process.execPath, [
+  originalReader,
+  ids[0],
+  ids[1],
+  path.join(evidence, 'original-helper'),
+]);
+assert.equal(originalReply.trim(), 'Original helper metadata closure accepted; no current-policy claim.');
 save('completed', {
   status: 0,
   head,
   baselineImageId: ids[0],
   writerImageId: ids[1],
   realKernelAcceptance: true,
+  originalStoppedWorkerReaderAcceptance: true,
   companyAcceptance: false,
 });
 process.stdout.write(
@@ -154,6 +165,7 @@ process.stdout.write(
     status: 0,
     evidence,
     realKernelAcceptance: true,
+    originalStoppedWorkerReaderAcceptance: true,
     companyAcceptance: false,
   }) + '\n'
 );

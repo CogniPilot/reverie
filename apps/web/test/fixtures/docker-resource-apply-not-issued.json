@@ -1,0 +1,14 @@
+{
+  "success": false,
+  "error": {
+    "code": "DOCKER_RESOURCE_REVISION_CAPACITY",
+    "action": "apply",
+    "publication": "not-issued",
+    "employeeId": "22222222-2222-4222-8222-222222222222",
+    "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+    "sessionGeneration": 9,
+    "operationId": "55555555-5555-4555-8555-555555555555",
+    "containerId": "6666666666666666666666666666666666666666666666666666666666666666",
+    "revision": "77777777-7777-4777-8777-777777777777"
+  }
+}

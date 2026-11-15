@@ -1,0 +1,130 @@
+{
+  "terminal": {
+    "pending": {
+      "items": [
+        {
+          "revision": "44444444-4444-4444-8444-444444444444",
+          "employeeId": "22222222-2222-4222-8222-222222222222",
+          "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+          "sessionGeneration": 9,
+          "operationId": "55555555-5555-4555-8555-555555555555",
+          "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+          "expectedDigest": "23cd6aabd86f00077d1e0c692dda43f2deb2828ff13f259525303402877bc5f1",
+          "helperContainerId": "4444444444444444444444444444444444444444444444444444444444444444",
+          "taskPhase": "start-issued",
+          "state": "pending",
+          "originalOutcome": "unknown",
+          "allowedActions": [
+            "reconcile"
+          ],
+          "enforcement": "not-observed"
+        }
+      ],
+      "next": null,
+      "enforcement": "not-observed"
+    },
+    "closed": {
+      "revision": "44444444-4444-4444-8444-444444444444",
+      "employeeId": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+      "sessionGeneration": 9,
+      "operationId": "55555555-5555-4555-8555-555555555555",
+      "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+      "expectedDigest": "ba4e67e437e90960b2a89dd7bea2d32478afabd43f5a1f0fdddf65447e17cb95",
+      "helperContainerId": "4444444444444444444444444444444444444444444444444444444444444444",
+      "taskPhase": "start-issued",
+      "state": "closed",
+      "originalOutcome": "unknown",
+      "allowedActions": [],
+      "enforcement": "not-observed"
+    }
+  },
+  "created": {
+    "pending": {
+      "items": [
+        {
+          "revision": "44444444-4444-4444-8444-444444444444",
+          "employeeId": "22222222-2222-4222-8222-222222222222",
+          "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+          "sessionGeneration": 9,
+          "operationId": "55555555-5555-4555-8555-555555555555",
+          "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+          "expectedDigest": "aa3201ae3cecfe13850424cc2a8d7916276e38be9054ed2892bc1af750a80def",
+          "helperContainerId": null,
+          "taskPhase": "create-issued",
+          "state": "pending",
+          "originalOutcome": "unknown",
+          "allowedActions": [
+            "reconcile",
+            "retire"
+          ],
+          "enforcement": "not-observed"
+        }
+      ],
+      "next": null,
+      "enforcement": "not-observed"
+    },
+    "retired": {
+      "revision": "44444444-4444-4444-8444-444444444444",
+      "employeeId": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+      "sessionGeneration": 9,
+      "operationId": "55555555-5555-4555-8555-555555555555",
+      "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+      "expectedDigest": "00d2fd6639c7dae55492a7cc61a9f05211acd9b2e856e6587501890f471bd359",
+      "helperContainerId": "4444444444444444444444444444444444444444444444444444444444444444",
+      "taskPhase": "create-issued",
+      "state": "retired",
+      "originalOutcome": "unknown",
+      "allowedActions": [],
+      "enforcement": "not-observed"
+    }
+  },
+  "absent": {
+    "pending": {
+      "items": [
+        {
+          "revision": "44444444-4444-4444-8444-444444444444",
+          "employeeId": "22222222-2222-4222-8222-222222222222",
+          "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+          "sessionGeneration": 9,
+          "operationId": "55555555-5555-4555-8555-555555555555",
+          "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+          "expectedDigest": "aa3201ae3cecfe13850424cc2a8d7916276e38be9054ed2892bc1af750a80def",
+          "helperContainerId": null,
+          "taskPhase": "create-issued",
+          "state": "pending",
+          "originalOutcome": "unknown",
+          "allowedActions": [
+            "reconcile",
+            "retire"
+          ],
+          "enforcement": "not-observed"
+        }
+      ],
+      "next": null,
+      "enforcement": "not-observed"
+    },
+    "retired": {
+      "revision": "44444444-4444-4444-8444-444444444444",
+      "employeeId": "22222222-2222-4222-8222-222222222222",
+      "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
+      "sessionGeneration": 9,
+      "operationId": "55555555-5555-4555-8555-555555555555",
+      "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "cursorId": "b6acf1ee2f3c7131ae291fbe37b6cc5f890a5e307e89ac666d4fda481f05d1a3",
+      "expectedDigest": "d554b16d522ee1faeb66544f7f197dba6f9a28ed6ce5784a8a35df3867323786",
+      "helperContainerId": null,
+      "taskPhase": "create-issued",
+      "state": "retired",
+      "originalOutcome": "unknown",
+      "allowedActions": [],
+      "enforcement": "not-observed"
+    }
+  }
+}

@@ -17,7 +17,7 @@ fn storage_status_is_discoverable_without_connecting_or_selecting_a_session() {
 
 #[test]
 fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
-    for mode in ["normal", "attach", "resource"] {
+    for mode in ["normal", "tracked", "attach", "resource"] {
         let tree = Tree::new();
         let mut args = vec![
             "--session-id",
@@ -27,6 +27,9 @@ fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
             "--command",
             "printf 'λ'",
         ];
+        if mode == "tracked" {
+            args.extend(["--attempt-id", SID]);
+        }
         if mode == "attach" {
             args.push("--attach-only");
         }
@@ -55,6 +58,11 @@ fn launch_attach_and_resource_frames_preserve_stdio_and_environment() {
             request["env"],
             json!({"CODEX_PROFILE":"λ", "REVERIE_HOOK_GENERATION":"private-launch-generation"})
         );
+        if mode == "tracked" {
+            assert_eq!(kind, b'J');
+            assert_eq!(request.as_object().unwrap().len(), 6);
+            assert!(request.get("attemptId").is_none());
+        }
         assert_eq!(request["cols"], 120);
         assert_eq!(request["rows"], 40);
         assert_eq!(request["cwd"], "/workspace/λ");
@@ -458,4 +466,75 @@ fn unrelated_non_utf8_environment_key_is_ignored_without_lossy_normalization() {
     assert_eq!(request["env"], json!({"LANG":"en_US.UTF-8"}));
     send(&mut broker, b'X', b"0");
     assert!(child.wait().status.success());
+}
+
+#[test]
+fn ordinary_attempt_correlation_refuses_invalid_duplicate_and_other_roles_before_connect() {
+    let tree = Tree::new();
+    let base = [
+        "--session-id",
+        SID,
+        "--cwd",
+        "/workspace",
+        "--command",
+        "fixed",
+    ];
+    for attempt in [
+        "",
+        "not-a-uuid",
+        "00000000-0000-0000-0000-000000000000",
+        "AAAAAAAA-2222-3333-4444-555555555555",
+    ] {
+        let mut args = base.to_vec();
+        args.extend(["--attempt-id", attempt]);
+        assert!(
+            !Process::spawn(&mut tree.command(&args))
+                .wait()
+                .status
+                .success()
+        );
+        tree.no_connection();
+    }
+    for role in [
+        vec!["--attach-only"],
+        vec!["--resource-ref", SID],
+        vec!["--caller-session", SID],
+    ] {
+        let mut args = base.to_vec();
+        args.extend(["--attempt-id", SID]);
+        args.extend(role);
+        assert!(
+            !Process::spawn(&mut tree.command(&args))
+                .wait()
+                .status
+                .success()
+        );
+        tree.no_connection();
+    }
+    for role in [
+        vec!["--control", "status"],
+        vec!["--goal-custody"],
+        vec!["--goal-custody-stream"],
+        vec!["--command-failure-report", "--employee-id", SID],
+    ] {
+        let mut args = vec!["--attempt-id", SID];
+        args.extend(role);
+        assert!(
+            !Process::spawn(&mut tree.command(&args))
+                .wait()
+                .status
+                .success()
+        );
+        tree.no_connection();
+    }
+    let mut duplicate = base.to_vec();
+    duplicate.extend(["--attempt-id", SID, "--attempt-id", SID]);
+    assert_eq!(
+        Process::spawn(&mut tree.command(&duplicate))
+            .wait()
+            .status
+            .code(),
+        Some(2)
+    );
+    tree.no_connection();
 }

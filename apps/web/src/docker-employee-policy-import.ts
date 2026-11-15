@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { DockerEmployeeResourcePolicy } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
-const defaultMemoryHighMiB = 24 * 1024;
+const defaultMemoryHighMiB = 48 * 1024;
 const mib = z.number().int().positive().max(1048576);
 const legacy = z
   .object({

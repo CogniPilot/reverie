@@ -6,6 +6,10 @@ import { isMultiUserMode } from './config/multiuser.js';
 /** Explicit Docker-only application composition. Config and journal are DATA;
  * only actual Engine/helper observations and current Company actions permit effects. */
 import fs from 'node:fs';
+import { dirname, join } from 'node:path';
+import { DockerResourceRevisionStore, dockerRevisedPolicy } from './docker-resource-revisions.js';
+import { DockerResourceRevisionService } from './docker-resource-revision-service.js';
+import { registerDockerResourceRevisionRoutes } from './web/routes/docker-resource-revision-routes.js';
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { CompanyService } from './company-service.js';
@@ -47,6 +51,7 @@ export const DockerRuntimeConfiguration = z
     clientManifestDigest: digest,
     sourceImageIds: z.array(sha).min(1).max(32),
     helperImageId: sha,
+    memoryHighHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
   })
   .strict();
@@ -59,6 +64,7 @@ interface Attached {
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
+  resourceRevisions: DockerResourceRevisionService;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -186,6 +192,11 @@ export class DockerEmployeeRuntime {
   #attached?: Attached;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
+  #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
+  #resourceConvergence?: ReturnType<DockerResourceRevisionService['convergeAll']>;
+  #resourceTimer?: ReturnType<typeof setInterval>;
+  #resourceTick?: Promise<void>;
+
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
     if (!attached || !this.current()) return [];
@@ -262,7 +273,11 @@ export class DockerEmployeeRuntime {
   attach(company: CompanyService, ctx: Context): void {
     if (this.#attached || !this.current()) throw Error('Boxed runtime composition is not current');
     const configuration = this.selected.value,
-      store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id));
+      revisions = new DockerResourceRevisionStore(join(dirname(company.store.file), 'docker-resource-revisions')),
+      store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id), (owner, policy) => {
+        const desired = revisions.desired(owner);
+        return desired ? dockerRevisedPolicy(policy, desired) : policy;
+      });
     const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const command = new PackagedDockerEngineCommand(),
@@ -270,16 +285,15 @@ export class DockerEmployeeRuntime {
         boxId,
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
+        memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         selectedWorkerContainerIds: () => [
           ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
         ],
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
-            'reverie-boxed-anchor-' + boxId.slice(0, 32),
-            configuration.helperImageId,
-            boxId
+            'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId, boxId
           ),
-      });
+      }, revisions);
     const engine = new DockerEmployeeEngine(
       command,
       configuration.deployment,
@@ -326,7 +340,8 @@ export class DockerEmployeeRuntime {
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     });
-    this.#attached = { company, ctx, store, engine, provider, service, pool };
+    const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
+    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions };
   }
   registerRoutes(
     app: FastifyInstance,
@@ -337,6 +352,8 @@ export class DockerEmployeeRuntime {
     const requireCurrent = () => {
       if (!this.current()) throw new DockerOwnerStopDiagnosticError('DOCKER_OWNER_STOP_RUNTIME_CHANGED');
     };
+    registerDockerResourceRevisionRoutes(app, a.resourceRevisions,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent));
     registerDockerOwnerStopRoutes(
       app,
       new DockerOwnerStopDiagnostic(a.company, requireCurrent),
@@ -411,12 +428,13 @@ export class DockerEmployeeRuntime {
     const row = a.store.record(employee.id),
       binding = employee.dockerBinding;
     if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
+    let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
       const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
-        !allowed() ||
+        publication === 'failed' || (publication === 'preparing' && !allowed()) ||
         !live ||
         live.owner !== employee.owner ||
         dockerContinuationDigest(live.dockerBinding) !== dockerContinuationDigest(binding) ||
@@ -429,6 +447,10 @@ export class DockerEmployeeRuntime {
       )
         throw Error('Boxed wake binding changed');
     };
+    try {
+    current();
+    try { await a.resourceRevisions.converge(employee.id, current); }
+    catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const seen = await a.engine.observeDestination(row);
     current();
@@ -438,9 +460,8 @@ export class DockerEmployeeRuntime {
       seen.provider.kind !== 'running' ||
       seen.provider.operationId !== binding.operationId ||
       seen.provider.sessionId !== binding.sessionId ||
-      dockerContinuationDigest(seen.resources) !== dockerContinuationDigest(row.policy)
-    )
-      return false;
+      !a.engine.existingResourcePolicyCurrent(row, seen.resources)
+    ) { publication = 'failed'; return false; }
     const actual = a.ctx.sessions.get(employee.sessionId);
     if (
       actual?.pid !== null &&
@@ -449,8 +470,7 @@ export class DockerEmployeeRuntime {
       !actual.providerInputHeld &&
       !actual.terminalInputHeld &&
       actual.docker?.containerName === binding.containerId
-    )
-      return true;
+    ) { publication = 'published'; return true; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       const saved = a.ctx.store.getSession(employee.sessionId);
       if (!saved) throw Error('Boxed existing viewer saved recipe missing');
@@ -473,21 +493,58 @@ export class DockerEmployeeRuntime {
         return true;
       });
       renewalCurrent();
+      publication = 'published';
       return true;
     }
     const view = await a.engine.captureProviderView(row, current);
     current();
     await a.provider.attach(row, binding, current, view);
     current();
+    publication = 'published';
     return true;
+    } catch (cause) {
+      publication = 'failed';
+      throw cause;
+    }
   }
   /** Restore a viewer of a current running provider, independently of auto-wake.
    * Ready or retained-issued records are only correlation: fresh physical proof is required.
-   * No branch creates a container, launches a provider, or releases a disk fence.
+   * Only a separately approved resource-helper phase may create its leaf writer.
+   * No branch creates a destination, launches a provider, or releases a paid disk fence.
    */
-  async restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+  /** Separate resource-default convergence precedes read-only provider attachment. */
+  #convergeResources(): ReturnType<DockerResourceRevisionService['convergeAll']> {
+    if (this.#resourceConvergence) return this.#resourceConvergence;
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
+    const current = () => { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); };
+    const work = a.resourceRevisions.convergeAll(current).finally(() => { this.#resourceConvergence = undefined; });
+    this.#resourceConvergence = work; return work;
+  }
+  #startResourceConvergence(): void {
+    if (this.#resourceTimer || !this.current()) return;
+    this.#resourceTimer = setInterval(() => {
+      if (this.#resourceTick || this.#restoring || !this.current()) return;
+      this.#resourceTick = this.#convergeResources().then(async (results) => {
+        if (results.some((result) => result.status === 'fulfilled' &&
+            (result.value.state === 'observed' || result.value.state === 'applied')))
+          await this.restoreExistingViews();
+      }).then(() => {}, () => {}).finally(() => { this.#resourceTick = undefined; });
+    }, 10_000);
+    this.#resourceTimer.unref();
+  }
+  restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    if (this.#restoring) return this.#restoring;
+    const work = this.#restoreExistingViews().then((reports) => {
+      this.#restoring = undefined; this.#startResourceConvergence(); return reports;
+    }, (cause: unknown) => { this.#restoring = undefined; throw cause; });
+    this.#restoring = work; return work;
+  }
+  async #restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    const a = this.#attached;
+    if (!a) throw Error('Boxed runtime is not attached');
+    try { await this.#convergeResources(); }
+    catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
     for (const employee of a.company.store.snapshot().employees) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
@@ -547,8 +604,12 @@ export class DockerEmployeeRuntime {
     return this.#restorationReports;
   }
   close(): void {
+    if (this.#resourceTimer) clearInterval(this.#resourceTimer);
+    this.#resourceTimer = undefined;
     this.authentication.close();
     const errors = [];
+    try { this.#attached?.resourceRevisions.revisions.close(); }
+    catch (error) { errors.push(error); }
     try {
       this.#attached?.engine.close();
     } catch (error) {
