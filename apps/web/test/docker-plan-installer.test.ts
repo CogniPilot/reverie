@@ -421,3 +421,45 @@ describe('same-journal contained plan install dispatch', () => {
     expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
   });
 });
+
+describe('ordinary canonical account completion', () => {
+  it('accepts only fresh installed and observed auth matching the held canonical digest', async () => {
+    const f = await fixture();
+    f.live.observedAuthDigest = f.initial.installedAuthDigest;
+    const result = await f.installer.observe(f.row, () => {}, f.initial.installedAuthDigest);
+    expect(result.live.observedAuthDigest).toBe(f.initial.installedAuthDigest);
+    expect(f.nativeRead()).toBe(true);
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.journal.publish).not.toHaveBeenCalled();
+  });
+  it('retains truthful changed-auth observations for generic readonly views without granting ordinary completion', async () => {
+    const f = await fixture();
+    const observed = await f.installer.observe(f.row, () => {});
+    expect(observed.live.observedAuthDigest).not.toBe(observed.initial.installedAuthDigest);
+    await expect(f.installer.observe(f.row, () => {}, f.initial.installedAuthDigest)).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_ACCOUNT_AUTH_CHANGED',
+    });
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.journal.publish).not.toHaveBeenCalled();
+  });
+  it('refuses an installed receipt different from the held canonical account digest', async () => {
+    const f = await fixture();
+    f.live.observedAuthDigest = f.initial.installedAuthDigest;
+    await expect(f.installer.observe(f.row, () => {}, 'a'.repeat(64))).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_ACCOUNT_AUTH_CHANGED',
+    });
+  });
+  it('refuses auth changed during the awaited actual guest read before any completion credit', async () => {
+    const f = await fixture();
+    f.live.observedAuthDigest = f.initial.installedAuthDigest;
+    f.mutateOnGuest(() => {
+      f.live.observedAuthDigest = 'f'.repeat(64);
+    });
+    await expect(f.installer.observe(f.row, () => {}, f.initial.installedAuthDigest)).rejects.toMatchObject({
+      code: 'DOCKER_PLAN_ACCOUNT_AUTH_CHANGED',
+    });
+    expect(f.nativeRead()).toBe(true);
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.journal.publish).not.toHaveBeenCalled();
+  });
+});

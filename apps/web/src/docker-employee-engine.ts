@@ -731,6 +731,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async installPlanReplacement(input:DockerEmployeePlanReplacementWorkRecord,payload:string,contextSource:string|undefined,current:()=>void):Promise<DockerPlanInitialReceipt>{
     const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-issued')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');return this.#planInstaller.provision(row,payload,contextSource,current);
   }
+  /** Ordinary completion only; generic live views keep historical and observed auth distinct. */
+  async verifyPlanReplacementCanonicalAccount(input:DockerEmployeeContinuationRecord,canonicalAuthDigest:string,current:()=>void):Promise<void>{
+    const row=DockerEmployeeContinuationRecord.parse(input);current();if(row.version!==3)refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');
+    const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    await this.#planInstaller.observe(row,current,canonicalAuthDigest);current();
+  }
   async initialPlanReplacementInstallation(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<Readonly<DockerPlanInitialReceipt>>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-ready')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');await this.#storage.verifyDestination(row);current();await this.#ephemeral?.verifyDestination(row);current();return this.#planInstaller.initialWork(row,current);}
   /** Re-read the exact completed initial install immediately before admitting
    * paid dispatch. A completed cursor cannot create or START a helper. */

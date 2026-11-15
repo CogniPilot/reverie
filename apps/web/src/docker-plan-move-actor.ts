@@ -1050,6 +1050,18 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The selected account is not authenticated', 409);
     }
   }
+  async #canonicalAccount(row: WorkRecord, journal: PlanMoveDockerJournal, current: () => void): Promise<void> {
+    journal.current();
+    const state = journal.read();
+    requireCanonicalAccountSource(state);
+    if (!state.material) throw new PlanMoveError('The installed canonical account digest is unavailable', 409);
+    await this.#d.engine.verifyPlanReplacementCanonicalAccount(publishedWork(row), state.material.authDigest, () => {
+      journal.current();
+      current();
+    });
+    journal.current();
+    current();
+  }
   #targetCurrent(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): () => void {
     const captured = journal.read().work;
     if (!captured?.destination || !['provider-issued', 'ready'].includes(captured.phase))
@@ -1163,6 +1175,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
   }
   async verify(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<() => void> {
     journal.current();
+    this.#views.delete(record.id);
     let state = journal.read();
     const row = publishedWork(state.work);
     // Complete only this already-issued ready metadata transition after a lost
@@ -1229,7 +1242,6 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     journal.current();
     current();
     view.require(session.id, session.docker);
-    this.#views.set(record.id, { view, session });
     if (row.phase === 'provider-issued') {
       const before = journal.read();
       await journal.publish(before, { ...before, work: { ...row, phase: 'ready' } });
@@ -1246,6 +1258,9 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       );
       journal.current();
     }
+    await this.#canonicalAccount(row, journal, current);
+    view.require(session.id, session.docker);
+    this.#views.set(record.id, { view, session });
     return () => {
       current();
       if (this.#d.ctx.sessions.get(session.id) !== session || !session.docker)
@@ -1263,6 +1278,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     if (!held || !held.session.docker) throw new PlanMoveError('A fresh target view is required before handoff', 409);
     const current = this.#targetCurrent(record, journal);
     current();
+    held.view.require(held.session.id, held.session.docker);
+    await this.#canonicalAccount(publishedWork(state.work), journal, current);
     held.view.require(held.session.id, held.session.docker);
     await journal.publish(state, {
       ...state,
