@@ -16,6 +16,7 @@ import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continu
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import { PlanMoveStore, dockerPlanMoveNotIssuedOf } from '../src/plan-move-store.js';
 import type { PlanMoveRecord } from '../src/plan-move.js';
+import { dockerPlanMaterial } from '../src/docker-plan-material.js';
 const cleanup: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -135,6 +136,122 @@ async function publishMaximum(
   return s.dockerPublish(record.id, issued, maximum, () => {});
 }
 describe('whole-document native settlement capacity', () => {
+  it('binds resolved metadata to the selected work atomically and never retrofits historical work', () => {
+    const f = dockerPlanJournalFixture();
+    const material = {
+      context: { source: { kind: 'none' as const }, roles: [], conversation: null },
+      authDigest: 'a'.repeat(64),
+    };
+    const selected = dockerPlanMaterial(
+      {
+        operationId: f.targetOp,
+        sessionId: f.targetSid,
+        provider: f.state.seed.target.provider,
+        accountId: f.state.seed.target.accountId,
+        context: material.context,
+      },
+      material.authDigest
+    );
+    const work = {
+      ...f.work,
+      planReplacement: {
+        ...f.work.planReplacement,
+        account: {
+          ...f.work.planReplacement.account,
+          projectionDigest: selected.projectionDigest,
+          contextDigest: selected.contextInputDigest,
+        },
+      },
+    };
+    const resolved = DockerPlanMoveJournalState.parse({ ...f.closed, work, material });
+    expect(() => assertDockerPlanMoveTransition(f.closed, resolved)).not.toThrow();
+    const historical = DockerPlanMoveJournalState.parse({ ...f.closed, work });
+    expect(() => assertDockerPlanMoveTransition(f.closed, historical)).toThrow('resolved material');
+    expect(() => assertDockerPlanMoveTransition(historical, resolved)).toThrow('Historical');
+    expect(() => assertDockerPlanMoveTransition(resolved, historical)).toThrow('material changed');
+    expect(DockerPlanMoveJournalState.safeParse({ ...f.closed, material }).success).toBe(false);
+    expect(
+      DockerPlanMoveJournalState.safeParse({ ...resolved, material: { ...material, authDigest: 'b'.repeat(64) } })
+        .success
+    ).toBe(false);
+    expect(
+      DockerPlanMoveJournalState.safeParse({
+        ...resolved,
+        material: { ...material, auth: 'credential must not enter journal' },
+      }).success
+    ).toBe(false);
+    expect(
+      DockerPlanMoveJournalState.safeParse({
+        ...resolved,
+        work: {
+          ...work,
+          planReplacement: {
+            ...work.planReplacement,
+            account: { ...work.planReplacement.account, contextDigest: 'f'.repeat(64) },
+          },
+        },
+      }).success
+    ).toBe(false);
+    const changedMaterial = { ...material, authDigest: 'b'.repeat(64) };
+    const changedSelection = dockerPlanMaterial(
+      {
+        operationId: f.targetOp,
+        sessionId: f.targetSid,
+        provider: f.state.seed.target.provider,
+        accountId: f.state.seed.target.accountId,
+        context: material.context,
+      },
+      changedMaterial.authDigest
+    );
+    const changed = DockerPlanMoveJournalState.parse({
+      ...resolved,
+      material: changedMaterial,
+      work: {
+        ...work,
+        planReplacement: {
+          ...work.planReplacement,
+          account: {
+            ...work.planReplacement.account,
+            projectionDigest: changedSelection.projectionDigest,
+          },
+        },
+      },
+    });
+    expect(() => assertDockerPlanMoveTransition(resolved, changed)).toThrow('material changed');
+  });
+  it.each(['anthropic', 'openai'] as const)('reserves maximum escaped resolved metadata for %s', (provider) => {
+    const f = dockerPlanJournalFixture();
+    f.state.seed.target.provider = provider;
+    const states = dockerPlanMaximumStates(f.state.seed, f.epoch);
+    const material = states[1]!.material!;
+    expect(material.context.source.kind).toBe('home');
+    if (material.context.source.kind !== 'home') throw Error('Expected maximum home context');
+    const paths = [material.context.source.relative, material.context.conversation!.relative];
+    for (const relative of paths) {
+      expect(relative).toHaveLength(32);
+      expect(relative.reduce((n, part) => n + Buffer.byteLength(part) + 1, 0)).toBe(4096);
+    }
+    const selected = dockerPlanMaterial(
+      {
+        operationId: f.targetOp,
+        sessionId: f.targetSid,
+        provider,
+        accountId: f.state.seed.target.accountId,
+        context: material.context,
+      },
+      material.authDigest
+    );
+    expect(states[1]!.work!.planReplacement.account.projectionDigest).toBe(selected.projectionDigest);
+    expect(states[1]!.work!.planReplacement.account.contextDigest).toBe(selected.contextInputDigest);
+    expect(Buffer.byteLength(JSON.stringify(states[1]))).toBeLessThanOrEqual(
+      dockerPlanMaximumStateBytes(f.state.seed, f.epoch)
+    );
+    const opposite = {
+      ...material,
+      context: { ...material.context, roles: [provider === 'anthropic' ? 'codex-sessions' : 'claude-projects'] },
+    };
+    expect(DockerPlanMoveJournalState.safeParse({ ...states[1], material: opposite }).success).toBe(false);
+  });
   it('requires the original handoff input intent and retains uncertain input without permitting a replay', () => {
     const f = candidate(0),
       completed = dockerPlanMaximumStates(f.state.seed, f.state.epoch)[1]!;

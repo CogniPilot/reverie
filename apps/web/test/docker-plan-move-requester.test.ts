@@ -196,6 +196,7 @@ async function fixture() {
     return DockerPlanMoveJournalState.parse({
       ...f.closed,
       work,
+      material: f.material,
       paidDispatch: {
         phase: 'issued',
         epoch: f.epoch,

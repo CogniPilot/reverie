@@ -13,6 +13,8 @@ import {
   DockerEmployeeWorkerImage,
 } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import { DockerPlanSourceContext, dockerPlanContextForProvider } from './docker-plan-source-data.js';
+import { dockerPlanMaterial } from './docker-plan-material.js';
 const uuid = z
   .string()
   .uuid()
@@ -167,6 +169,9 @@ export const DockerPlanMoveJournalState = z
     seed: DockerPlanMoveSeed,
     sourceStop: DockerPlanMoveSourceStop.optional(),
     sourceReader: DockerPlanMoveSourceReader.optional(),
+    // Resolved metadata only. Credentials and context file contents never enter
+    // the journal; these hashes do not grant installer or provider authority.
+    material: z.object({ context: DockerPlanSourceContext, authDigest: digest }).strict().optional(),
     work: DockerEmployeePlanReplacementWorkRecord.optional(),
     paidDispatch: z
       .object({
@@ -196,6 +201,7 @@ export const DockerPlanMoveJournalState = z
       seed,
       sourceStop: stop,
       sourceReader: reader,
+      material,
       work,
       paidDispatch: paid,
       companyPublication: publication,
@@ -235,6 +241,29 @@ export const DockerPlanMoveJournalState = z
         work.planReplacement.account.provider !== target.provider)
     )
       return false;
+    if (material) {
+      if (!work) return false;
+      try {
+        dockerPlanContextForProvider(material.context, target.provider);
+        const resolved = dockerPlanMaterial(
+          {
+            operationId: target.operationId,
+            sessionId: target.sessionId,
+            provider: target.provider,
+            accountId: target.accountId,
+            context: material.context,
+          },
+          material.authDigest
+        );
+        if (
+          work.planReplacement.account.projectionDigest !== resolved.projectionDigest ||
+          work.planReplacement.account.contextDigest !== resolved.contextInputDigest
+        )
+          return false;
+      } catch {
+        return false;
+      }
+    }
     if (
       paid &&
       (!work ||
@@ -274,6 +303,11 @@ export function assertDockerPlanMoveTransition(
   const unchanged = (left: unknown, right: unknown) => isEqual(left, right);
   if (before.epoch !== next.epoch || !unchanged(before.seed, next.seed))
     throw Error('Docker plan actor or immutable seed changed');
+  if (before.material && (!next.material || !unchanged(before.material, next.material)))
+    throw Error('Resolved Docker plan material changed');
+  if (before.work && !before.material && next.material)
+    throw Error('Historical Docker work cannot acquire replacement material');
+  if (!before.work && next.work && !next.material) throw Error('New Docker work requires its resolved material');
   if (before.sourceStop?.phase === 'closed') {
     if (!unchanged(before.sourceStop, next.sourceStop)) throw Error('Docker plan source closure regressed');
   } else if (before.sourceStop) {

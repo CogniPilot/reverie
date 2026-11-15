@@ -7,11 +7,39 @@ import {
 } from './docker-plan-move-data.js';
 import { DockerEmployeePlanReplacementWorkRecord } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import { dockerPlanMaterial } from './docker-plan-material.js';
+import { DockerPlanSourceContext } from './docker-plan-source-data.js';
 const MAX = Number.MAX_SAFE_INTEGER,
   hex = 'f'.repeat(64),
   decimal = '9'.repeat(20),
   escaped = '\0'.repeat(4096);
 const directory = { dev: decimal, ino: decimal, uid: MAX, gid: MAX, mode: 0o700 as const };
+/** Each relative path permits at most 4096 UTF-8 bytes including one separator
+ * per component. Quotes attain the maximum two JSON bytes per allowed byte;
+ * 32 components attain the largest array overhead. Required native filename
+ * and role bytes remain genuine schema values rather than unchecked padding. */
+function maximumContext(provider: 'anthropic' | 'openai'): DockerPlanSourceContext {
+  const nativeId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+  const prefix = provider === 'anthropic' ? 'projects' : 'sessions';
+  const filename = (provider === 'anthropic' ? '' : '-') + nativeId + '.jsonl';
+  const quotedBytes = 4096 - 32 - Buffer.byteLength(prefix) - Buffer.byteLength(filename);
+  const middle = Array.from({ length: 30 }, (_, i) =>
+    '"'.repeat(Math.floor(quotedBytes / 30) + (i < quotedBytes % 30 ? 1 : 0))
+  );
+  return DockerPlanSourceContext.parse({
+    source: {
+      kind: 'home',
+      relative: Array.from({ length: 32 }, () => '"'.repeat(127)),
+      dev: '18446744073709551615',
+      ino: '18446744073709551615',
+    },
+    roles:
+      provider === 'anthropic'
+        ? ['claude-projects', 'claude-instructions']
+        : ['codex-sessions', 'codex-history', 'codex-instructions'],
+    conversation: { nativeId, relative: [prefix, ...middle, filename], sha256: hex },
+  });
+}
 const policy = {
   memoryMaxBytes: MAX,
   memoryHighBytes: MAX,
@@ -30,6 +58,17 @@ const policy = {
 export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string): DockerPlanMoveJournalState[] {
   const source = seed.source.record.destination!,
     target = seed.target;
+  const material = { context: maximumContext(target.provider), authDigest: hex };
+  const resolved = dockerPlanMaterial(
+    {
+      operationId: target.operationId,
+      sessionId: target.sessionId,
+      provider: target.provider,
+      accountId: target.accountId,
+      context: material.context,
+    },
+    material.authDigest
+  );
   const cid = source.containerId === hex ? 'e'.repeat(64) : hex;
   const request = {
     ...seed.source.record.request,
@@ -127,7 +166,12 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
         ephemeralSessionId: source.sessionId,
         networkIds: Array.from({ length: 16 }, (_, i) => 'f'.repeat(63) + i.toString(16)),
       },
-      account: { id: target.accountId, provider: target.provider, projectionDigest: hex, contextDigest: hex },
+      account: {
+        id: target.accountId,
+        provider: target.provider,
+        projectionDigest: resolved.projectionDigest,
+        contextDigest: resolved.contextInputDigest,
+      },
     },
   });
   const state = {
@@ -155,6 +199,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
       terminalStateDigest: hex,
     },
     work,
+    material,
   };
   const published = {
     ...state,

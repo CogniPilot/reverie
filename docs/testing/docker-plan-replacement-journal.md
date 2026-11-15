@@ -100,6 +100,20 @@ private in the native actor, not in this DATA. Normal close follows durable
 target material installation; uncertain helper effects remain held and are never
 restarted from metadata.
 
+Resolved `material` metadata is committed atomically with the first target work
+record, before its native tasks. It contains only the selected context descriptor
+and credential digest; credential bytes and context file contents stay out of the
+journal and public move DTO. The shared material encoder binds both hashes to the
+exact target operation, session, provider and account. Once present, this metadata
+cannot change or disappear. Historical work without it remains readable, but
+cannot acquire it retrospectively as a recovery shortcut.
+
+This retained descriptor lets the owning native actor re-earn an already installed
+generation after the source reader has closed. It supplies no installation or
+provider credit: recovery still needs the original helper acknowledgement and
+fresh actual target observations. Capacity reservations include the maximum
+escaped context paths accepted by the same codec.
+
 ## Network membership
 
 New plan replacements persist a sorted set of 1–16 actual Docker NetworkIDs in

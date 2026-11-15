@@ -6,6 +6,7 @@ import {
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
 import { DockerPlanMoveSeed, DockerPlanMoveJournalState } from '../../src/docker-plan-move-data.js';
 import type { PlanMoveRecord } from '../../src/plan-move.js';
+import { dockerPlanMaterial } from '../../src/docker-plan-material.js';
 export function dockerPlanJournalFixture() {
   const employeeId = '10000000-0000-4000-8000-000000000001';
   const sessionId = '20000000-0000-4000-8000-000000000002';
@@ -130,6 +131,20 @@ export function dockerPlanJournalFixture() {
     },
   });
 
+  const material = {
+    context: { source: { kind: 'none' as const }, roles: [], conversation: null },
+    authDigest: 'b'.repeat(64),
+  };
+  const selected = dockerPlanMaterial(
+    {
+      operationId: targetOp,
+      sessionId: targetSid,
+      provider: seed.target.provider,
+      accountId: seed.target.accountId,
+      context: material.context,
+    },
+    material.authDigest
+  );
   const work = DockerEmployeePlanReplacementWorkRecord.parse({
     version: 3,
     purpose: 'docker-employee-plan-replacement-v3',
@@ -162,10 +177,10 @@ export function dockerPlanJournalFixture() {
       account: {
         id: seed.target.accountId,
         provider: seed.target.provider,
-        projectionDigest: 'b'.repeat(64),
-        contextDigest: 'c'.repeat(64),
+        projectionDigest: selected.projectionDigest,
+        contextDigest: selected.contextInputDigest,
       },
     },
   });
-  return { record, state, closed, epoch, targetSid, targetOp, work };
+  return { record, state, closed, epoch, targetSid, targetOp, work, material };
 }
