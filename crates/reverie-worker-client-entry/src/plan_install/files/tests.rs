@@ -185,3 +185,39 @@ fn retained_read_and_sealed_inventory_fail_on_later_inplace_or_entry_mutation() 
     assert!(files.current().is_err());
     assert!(files.close_all().is_ok());
 }
+
+#[test]
+fn actual_no_replace_rename_preserves_both_directories_when_final_already_exists() {
+    let fixture = Fixture::new();
+    let mut files = Files::new();
+    let result = (|| {
+        let root = files.root(&fixture.path, geteuid().as_raw(), true)?;
+        let pending = files.child(root, "pending", true, true)?;
+        let original = files.child(root, "final", true, true)?;
+        files.write_new(pending, "account.json", b"replacement must stay pending")?;
+        files.write_new(original, "account.json", b"original must remain intact")?;
+        let old_identity = files.identity(original)?;
+        let pending_identity = files.identity(pending)?;
+        need(
+            files
+                .publish_directory(root, "pending", "final", pending)
+                .is_err(),
+            "test-no-replace",
+        )?;
+        need(
+            files.identity(original)? == old_identity
+                && files.identity(pending)? == pending_identity,
+            "test-both-retained",
+        )?;
+        need(
+            files.read(original, "account.json", 100, true)? == b"original must remain intact",
+            "test-final-preserved",
+        )?;
+        need(
+            files.read(pending, "account.json", 100, true)? == b"replacement must stay pending",
+            "test-pending-preserved",
+        )?;
+        Ok(())
+    })();
+    assert!(join(result, files.close_all()).is_ok());
+}

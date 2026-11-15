@@ -1,6 +1,6 @@
 use super::{Failure, Result, join, need};
 use nix::{
-    fcntl::{AtFlags, OFlag, RenameFlags, open, openat, readlinkat, renameat2},
+    fcntl::{AtFlags, OFlag, open, openat, readlinkat},
     sys::stat::{FileStat, Mode, SFlag, fstat, fstatat, mkdirat},
     unistd::{close, geteuid, symlinkat},
 };
@@ -411,12 +411,12 @@ impl Files {
             "generation-component",
         )?;
         self.current()?;
-        renameat2(
+        rustix::fs::renameat_with(
             self.file(parent)?,
             pending,
             self.file(parent)?,
             final_name,
-            RenameFlags::RENAME_NOREPLACE,
+            rustix::fs::RenameFlags::NOREPLACE,
         )
         .map_err(|e| Failure::new("generation-publication", e))?;
         self.held[id].place = Place::Child(parent, final_name.into());
