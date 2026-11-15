@@ -1,3 +1,4 @@
+import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
 import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
 import {ResourceHistoricalSettlement} from './resource-native-client.js';
@@ -59,6 +60,8 @@ export interface PlanMoveInput {
 }
 
 export interface PlanMoveRecord {
+  /** PRIVATE mutable native journal; never serialize through public views. */
+  dockerReplacement?: DockerPlanMoveJournalState;
   id: string;
   owner?: string;
   employeeId: string;
@@ -208,7 +211,8 @@ export class PlanMoves {
     return this.port.save([...this.records.values()].map((record) => ({ ...record })));
   }
 
-  private view(record: PlanMoveRecord): PlanMoveRecord {
+  private view(source: PlanMoveRecord): PlanMoveRecord {
+    const {dockerReplacement: _privateDockerJournal, ...record} = source;
     // A completion journal write is provisional while final native/audit fences
     // are still pending. Readers must not turn that window into successful Apply.
     if (record.phase === 'completed' && (this.aborts.has(record.id) || this.intents.has(record.id))) {

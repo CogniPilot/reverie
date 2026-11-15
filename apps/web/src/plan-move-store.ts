@@ -1,12 +1,17 @@
+import type {DockerEmployeePlanReplacementWorkRecord} from './docker-employee-continuation-data.js';
+import { DockerPlanMoveJournalState, assertDockerPlanMoveTransition } from './docker-plan-move-data.js';
+import {dockerContinuationDigest} from './docker-employee-continuation.js';
+import {withCanonicalStateLock} from './canonical-state-lock.js';
 import fs from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, openSync, fstatSync, lstatSync, readSync, closeSync } from 'node:fs';
 import { z } from 'zod';
 import { writeCompanyStateFile } from './company-store.js';
 import type { PlanMoveRecord } from './plan-move.js';
 
 const RecordSchema = z
   .object({
+    dockerReplacement: DockerPlanMoveJournalState.optional(),
     id: z.string().min(1).max(100),
     owner: z.string().max(200).optional(),
     employeeId: z.string().min(1).max(100),
@@ -50,6 +55,20 @@ const RecordSchema = z
   })
   .strict()
   .superRefine((record, context) => {
+    const docker = record.dockerReplacement;
+    if (docker && (record.resourceIntent || record.purpose ||
+        docker.seed.moveId !== record.id || docker.seed.source.record.employeeId !== record.employeeId ||
+        docker.seed.source.record.owner !== record.owner ||
+        docker.seed.source.binding.sessionId !== record.oldSession ||
+        docker.seed.target.accountId !== record.toAccount || docker.seed.requestDigest !== record.requestDigest ||
+        record.newSession !== docker.seed.target.sessionId))
+      context.addIssue({code:'custom',message:'Docker plan journal must bind its original request and target'});
+    if (docker && record.phase === 'failed' && (docker.sourceStop || docker.work || docker.paidDispatch))
+      context.addIssue({code:'custom',message:'Issued Docker plan work retains recovery'});
+    if (docker && record.phase === 'completed' && (docker.sourceStop?.phase !== 'closed' ||
+        !docker.paidDispatch || docker.companyPublication?.phase !== 'published' || docker.work?.phase !== 'ready'))
+      context.addIssue({code:'custom',message:'Docker plan completion requires its native target and published handoff'});
+
     if (record.purpose === 'runtime-refresh'
       ? record.fromAccount !== record.toAccount || !record.runtimeDigest
       : record.runtimeDigest !== undefined)
@@ -311,9 +330,149 @@ export class PlanMoveStore {
     }
   }
 
-  save(records: PlanMoveRecord[]): Promise<void> {
+
+  /** Private read for the SAME native journal owner. No physical credit. */
+  async dockerRecord(id: string): Promise<Readonly<PlanMoveRecord>> {
+    await this.chain;
+    return this.requireDockerRecord(await this.readPrivateList(this.file, 1024 * 1024, JournalSchema), id);
+  }
+
+  /** Fixed Runtime composition only: canonical staged destinations supplement
+   * bound workers during their handoff. Every physical member remains subject to
+   * the native controller's independent CID/label/PID/cgroup checks. */
+  async stagedDockerResourceInventory(): Promise<readonly DockerEmployeePlanReplacementWorkRecord[]> {
+    await this.chain;
+    const records = await this.readPrivateList(this.file, 1024 * 1024, JournalSchema);
+    const work = records.filter(record => !['completed', 'failed'].includes(record.phase) &&
+      record.dockerReplacement?.sourceStop?.phase === 'closed' &&
+      record.dockerReplacement.work?.destination).map(record => record.dockerReplacement!.work!);
+    if (work.length > 64) throw Error('Staged Docker plan member inventory exceeds its bound');
+    return structuredClone(work);
+  }
+
+  private requireDockerRecord(records: PlanMoveRecord[], id: string): Readonly<PlanMoveRecord> {
+    const record = records.find(item => item.id === id);
+    if (!record?.dockerReplacement) throw Error('Original Docker plan move is unavailable');
+    return Object.freeze(structuredClone(record));
+  }
+
+  /** Called immediately before every native effect/publication. Old epochs and
+   * late callbacks lose authority even if another process performed takeover. */
+  dockerCurrent(id: string, epoch: string, seedDigest: string): void {
+    const fd = openSync(this.file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const before = fstatSync(fd, {bigint: true});
+      if (!before.isFile() || before.nlink !== 1n || before.size > 1024n * 1024n ||
+          (before.mode & 0o777n) !== 0o600n || (process.getuid && before.uid !== BigInt(process.getuid())))
+        throw Error('Private Docker plan move journal is unavailable');
+      const bytes = Buffer.alloc(Number(before.size) + 1);
+      let offset = 0;
+      while (offset < bytes.length) {
+        const count = readSync(fd, bytes, offset, bytes.length - offset, null);
+        if (!count) break;
+        offset += count;
+      }
+      const stamp = (value: typeof before) => [value.dev, value.ino, value.uid, value.mode,
+        value.nlink, value.size, value.mtimeNs, value.ctimeNs].map(String).join(':');
+      if (offset !== Number(before.size) || stamp(before) !== stamp(fstatSync(fd, {bigint: true})) ||
+          stamp(before) !== stamp(lstatSync(this.file, {bigint: true})))
+        throw Error('Private Docker plan move journal changed');
+      const text = new TextDecoder('utf-8', {fatal: true}).decode(bytes.subarray(0, offset));
+      const records = JournalSchema.parse(JSON.parse(text));
+      if (JSON.stringify(records) !== text) throw Error('Noncanonical Docker plan move journal');
+      const state = this.requireDockerRecord(records, id).dockerReplacement!;
+      if (state.epoch !== epoch || dockerContinuationDigest(state.seed) !== seedDigest)
+        throw Error('Original Docker plan move actor is no longer current');
+    } finally { closeSync(fd); }
+  }
+
+  private async dockerTransaction(
+    id: string, before: Readonly<DockerPlanMoveJournalState>,
+    current: () => void,
+    change: (record: PlanMoveRecord) => void
+  ): Promise<Readonly<PlanMoveRecord>> {
+    let result: Readonly<PlanMoveRecord> | undefined;
+    const write = this.chain.then(() => withCanonicalStateLock(this.file, async () => {
+      current();
+      const records = await this.readPrivateList(this.file, 1024 * 1024, JournalSchema);
+      current();
+      const record = records.find(item => item.id === id);
+      if (!record?.dockerReplacement ||
+          dockerContinuationDigest(record.dockerReplacement) !== dockerContinuationDigest(before))
+        throw Error('Original Docker plan move cursor changed');
+      change(record);
+      const data = this.encode(records);
+      await writeCompanyStateFile(this.file, data, current);
+      current(); // authority only: the old cursor deliberately changed
+      const actual = await this.readPrivateList(this.file, 1024 * 1024, JournalSchema);
+      if (JSON.stringify(actual) !== data) throw Error('Docker plan move publication is unconfirmed');
+      current();
+      result = this.requireDockerRecord(actual, id);
+    }, handle => this.inspectLock(handle)));
+    this.chain = write.catch(() => {});
+    await write;
+    return result!;
+  }
+
+  dockerPublish(id: string, before: Readonly<DockerPlanMoveJournalState>,
+    next: Readonly<DockerPlanMoveJournalState>, current: () => void): Promise<Readonly<PlanMoveRecord>> {
+    const original = DockerPlanMoveJournalState.parse(before);
+    const checked = DockerPlanMoveJournalState.parse(next);
+    assertDockerPlanMoveTransition(original, checked);
+    return this.dockerTransaction(id, original, current, record => {
+      record.dockerReplacement = checked;
+    });
+  }
+
+  /** A fresh native proof must settle EVERY prior effect before a new epoch can
+   * own pre-paid work. Neither DATA nor this CAS permits replaying an old START. */
+  dockerClaim(id: string, before: Readonly<DockerPlanMoveJournalState>, epoch: string,
+    requireNative: () => void, current: () => void): Promise<Readonly<PlanMoveRecord>> {
+    const original = DockerPlanMoveJournalState.parse(before);
+    if (original.paidDispatch || original.companyPublication || epoch === original.epoch)
+      return Promise.reject(Error('Issued Docker provider dispatch cannot be resumed'));
+    const next = DockerPlanMoveJournalState.parse({...original, epoch});
+    return this.dockerTransaction(id, original, current, record => {
+      requireNative();
+      record.dockerReplacement = next;
+    });
+  }
+
+  private async inspectLock(handle: import('node:fs/promises').FileHandle): Promise<void> {
+    const value = await handle.stat({bigint: true});
+    const named = await fs.lstat(this.file + '.lock', {bigint: true});
+    if (!value.isFile() || value.nlink !== 1n || (value.mode & 0o777n) !== 0o600n ||
+        (process.getuid && value.uid !== BigInt(process.getuid())) ||
+        value.dev !== named.dev || value.ino !== named.ino)
+      throw Error('Private Docker plan move lock is unavailable');
+  }
+
+  private encode(records: PlanMoveRecord[]): string {
     const data = JSON.stringify(JournalSchema.parse(records));
-    const write = this.chain.then(() => writeCompanyStateFile(this.file, data));
+    if (Buffer.byteLength(data) > 1024 * 1024) throw Error('Plan move journal exceeds its size bound');
+    return data;
+  }
+
+  save(records: PlanMoveRecord[]): Promise<void> {
+    const supplied = structuredClone(records);
+    this.encode(supplied); // preserve synchronous DATA rejection before enqueue
+    const write = this.chain.then(() => withCanonicalStateLock(this.file, async () => {
+      const disk = await this.readPrivateList(this.file, 1024 * 1024, JournalSchema);
+      for (const original of disk) {
+        if (!original.dockerReplacement) continue;
+        const next = supplied.find(item => item.id === original.id);
+        if (!next?.dockerReplacement ||
+            dockerContinuationDigest(original.dockerReplacement) !== dockerContinuationDigest(next.dockerReplacement))
+          throw Error('Native Docker plan cursor requires its original CAS writer');
+      }
+      for (const record of supplied) {
+        if (!record.dockerReplacement || disk.some(item => item.id === record.id)) continue;
+        const state = record.dockerReplacement;
+        if (state.sourceStop || state.work || state.paidDispatch || state.companyPublication)
+          throw Error('Docker plan native effects require a previously reserved journal');
+      }
+      await writeCompanyStateFile(this.file, this.encode(supplied));
+    }, handle => this.inspectLock(handle)));
     this.chain = write.catch(() => {});
     return write;
   }

@@ -1,6 +1,6 @@
+import {withCanonicalStateLock} from './canonical-state-lock.js';
 import fs from 'node:fs/promises';
-import { constants, readFileSync, lstatSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { readFileSync, lstatSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { CompanyStateSchema, type CompanyEmployee, type CompanyState } from './company-types.js';
@@ -435,30 +435,8 @@ export class CompanyStore {
     return result;
   }
 
-  private async locked<T>(body: () => Promise<T>): Promise<T> {
-    await fs.mkdir(dirname(this.file), { recursive: true, mode: 0o700 });
-    const handle = await fs.open(
-      `${this.file}.lock`,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW,
-      0o600
-    );
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn('flock', ['--exclusive', '--wait', '5', '--conflict-exit-code', '75', '3'], {
-          stdio: ['ignore', 'ignore', 'ignore', handle.fd],
-          env: { PATH: process.env.PATH },
-        });
-        child.once('error', reject);
-        child.once('close', (code) =>
-          code === 0
-            ? resolve()
-            : reject(new Error('Canonical company transaction lock unavailable; nothing committed'))
-        );
-      });
-      return await body();
-    } finally {
-      await handle.close();
-    }
+  private locked<T>(body:()=>Promise<T>):Promise<T>{
+    return withCanonicalStateLock(this.file,body);
   }
 
   update<T>(
