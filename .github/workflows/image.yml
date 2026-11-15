@@ -25,6 +25,33 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  memory-high-native:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+        with:
+          extra_nix_config: |
+            max-jobs = 1
+            cores = 2
+      - name: Prove real isolated memory.high-only helper effects
+        env:
+          REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-memory-high-target
+          CARGO_BUILD_JOBS: 1
+        run: nix develop --command cargo xtask verify-memory-high-helper --ci
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: memory-high-native-evidence
+          path: ${{ runner.temp }}/reverie-ci-memory-high-*
+
   image:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -475,7 +502,7 @@ jobs:
             debian:12 bash /ci/debian-install.sh
 
   publish-image:
-    needs: [image, debian-install, worker-browser]
+    needs: [image, debian-install, worker-browser, memory-high-native]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -536,7 +563,7 @@ jobs:
           printf 'Image publication verified: %s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 
   release-assets:
-    needs: [image, debian-install, worker-browser]
+    needs: [image, debian-install, worker-browser, memory-high-native]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -23,6 +23,9 @@
     "../test/fixtures/provider-launch-mux.mts",
     "../test/fixtures/employee-recovery-restart.mts",
     "../test/fixtures/boxed-webserver-startup.ts",
-    "../test/fixtures/tmux-source-native.ts"
+    "../test/fixtures/tmux-source-native.ts",
+    "../scripts/docker-memory-high-ci.mts",
+    "../test/fixtures/docker-memory-high-canary.ts",
+    "../test/docker-memory-high-canary.test.ts"
   ]
 }

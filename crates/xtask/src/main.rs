@@ -6,6 +6,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 mod ci_userns;
+mod memory_high;
 mod worker_package;
 mod worker_perf;
 
@@ -33,6 +34,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         }
         [command] if command == "verify-worker-child-package" => {
             worker_package::verify_child(&workspace_root()?)?
+        }
+        [command, rest @ ..] if command == "verify-memory-high-helper" => {
+            memory_high::verify(&workspace_root()?, rest)?;
         }
         [command] if command == "prepare-ci-userns" => ci_userns::prepare()?,
         [command] if command == "prepare-ci-perf" => worker_perf::prepare_ci()?,
@@ -73,6 +77,9 @@ fn run() -> Result<(), Box<dyn Error>> {
 }
 
 fn help() {
+    println!(
+        "cargo xtask verify-memory-high-helper --ci\n  Disposable hosted Linux runner: build namespaced static helpers and prove real high-only writes, CPU-drift refusal and scoped cleanup. No company/provider acceptance.\ncargo xtask verify-memory-high-helper --baseline-image sha256:ID --writer-image sha256:ID --evidence NEW_DIRECTORY\n  Local explicit qualified images; no image build/load or production worker selection."
+    );
     println!(
         "cargo xtask verify-worker-child-package\n  Linux: build the public runtime-selected workerChild and native candidate, then qualify their actual ELF identity and --pane-exit ABI with the Rust package test. No container or service is started."
     );
