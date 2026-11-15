@@ -6,6 +6,12 @@ import { z } from 'zod';
 import { PlanRequestId } from '../../src/plan-request-capability.js';
 import { PlanProviderFixtureContract, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
 import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
+import {
+  PlanOfficeAgentForceInput,
+  PlanOfficeAgentForceReceipt,
+  PlanOfficeAgentForceSpawn,
+  PlanOfficeAgentForceClosed,
+} from './plan-office-agent-force.js';
 const C = fs.constants,
   mode = (stat: fs.Stats) => stat.mode & 0o7777;
 const identity = (s: fs.Stats) => [s.dev, s.ino, s.uid, s.gid, mode(s)].join(':');
@@ -221,6 +227,62 @@ export class PlanProviderFixtureFiles {
       if (value.id !== id) throw Error('Permission probe ID changed');
       return value;
     });
+  }
+  forceInput(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficeAgentForceInput.parse(json(read(fixture, `plan-agent-force-input-${id}.json`)));
+      if (value.id !== id) throw Error('Force input ID changed');
+      return value;
+    });
+  }
+  writeForceHandoff(id: string, text: string) {
+    z.string().uuid().parse(id);
+    if (!text || text.length > 12000 || Buffer.byteLength(text) > 48000) throw Error('Force handoff bound');
+    this.#scope((_home, fixture) => write(fixture, `plan-force-handoff-${id}.txt`, Buffer.from(text)));
+  }
+  readForceHandoff(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const bytes = read(fixture, `plan-force-handoff-${id}.txt`),
+        text = bytes.toString('utf8');
+      if (!Buffer.from(text).equals(bytes) || text.length > 12000) throw Error('Force handoff encoding or bound');
+      return text;
+    });
+  }
+  forcePrepared(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) =>
+      PlanOfficeAgentForceReceipt.parse(json(read(fixture, `plan-agent-force-prepared-${id}.json`)))
+    );
+  }
+  forceRecord(
+    kind: z.infer<typeof PlanOfficeAgentForceReceipt>['kind'],
+    value: z.infer<typeof PlanOfficeAgentForceReceipt>
+  ) {
+    const receipt = PlanOfficeAgentForceReceipt.parse(value);
+    if (receipt.kind !== kind) throw Error('Force receipt stage changed');
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-${kind}-${receipt.id}.json`, Buffer.from(JSON.stringify(receipt) + '\n'))
+    );
+  }
+  forceChild(value: z.infer<typeof PlanOfficeAgentForceSpawn>) {
+    const proof = PlanOfficeAgentForceSpawn.parse(value),
+      text = JSON.stringify(proof);
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-spawned-${proof.id}.json`, Buffer.from(text + '\n'))
+    );
+    // This second publication is only an execution witness of the preceding
+    // proof's consuming closes; its own close is never inferred from readable bytes.
+    const closed = PlanOfficeAgentForceClosed.parse({
+      version: 1,
+      purpose: 'sdk-force-child-proof-after-close-v1',
+      id: proof.id,
+      proofDigest: digest(text),
+    });
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-child-closed-${proof.id}.json`, Buffer.from(JSON.stringify(closed) + '\n'))
+    );
   }
   allowApproval(id: string): boolean {
     z.string().uuid().parse(id);

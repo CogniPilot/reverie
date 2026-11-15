@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import {
   PLAN_OFFICE_STARTUP_PREFIX,
   PLAN_OFFICE_STARTUP_STAGES,
@@ -156,7 +157,13 @@ it('offers only closed dispatch choices and passes them as quoted data while PR/
   const input = workflow.on.workflow_dispatch.inputs.plan_office_scenario;
   expect(input.type).toBe('choice');
   expect(input.default).toBe('ordinary-self');
-  expect(input.options).toEqual(['ordinary-self', 'self-roundtrip', 'self-owner-force', 'team-plan-move']);
+  expect(input.options).toEqual([
+    'ordinary-self',
+    'self-roundtrip',
+    'self-owner-force',
+    'self-agent-force',
+    'team-plan-move',
+  ]);
   for (const choice of input.options)
     expect(requireHostedPlanOffice(['--ci', '--scenario', choice], env, 'linux', 'x64')).toBe(choice);
   const office = workflow.jobs.image.steps.find((step) => step.run?.includes('scripts/plan-office-ci.mts'))!;
@@ -622,6 +629,117 @@ it('requires both separately completed opposite moves with linked new sessions t
       physical,
     })
   ).toThrow();
+  const sdkReceipt = {
+    version: 1,
+    purpose: 'reverie-ci-sdk-agent-force-v1',
+    kind: 'prepared',
+    id: returned.id,
+    employeeId,
+    sessionId: returned.sessionId,
+    sessionGeneration: returned.sessionGeneration,
+    fromAccount: 'ci-plan-b',
+    toAccount: 'ci-plan-a',
+    namespacePid: 42,
+    nativeBirthTicks: '1234',
+    identityFileDigest: 'c'.repeat(64),
+    handoffDigest: 'd'.repeat(64),
+    inheritedMuxPresent: true,
+    childMuxAbsent: true,
+    capabilitiesCheckedAt: 1000,
+    moveOwnPlan: true,
+    managePlans: false,
+  };
+  const spawned = {
+    ...sdkReceipt,
+    kind: 'spawned',
+    child: {
+      childPid: 43,
+      parentPid: 42,
+      childBirthTicks: '1235',
+      nodeStage: '/opt/reverie-worker-client/bin/node',
+      argsDigest: 'f'.repeat(64),
+      sessionId: sdkReceipt.sessionId,
+      identityFileDigest: sdkReceipt.identityFileDigest,
+      childMuxAbsent: true,
+      requiredEnvironmentMatched: true,
+    },
+  };
+  const sdk = {
+    prepared: sdkReceipt,
+    issued: { ...sdkReceipt, kind: 'issued' },
+    spawned,
+    childClosed: {
+      version: 1,
+      purpose: 'sdk-force-child-proof-after-close-v1',
+      id: sdkReceipt.id,
+      proofDigest: createHash('sha256').update(JSON.stringify(spawned)).digest('hex'),
+    },
+    native: { panePid: 42, paneStartTicks: '1234' },
+    inheritedMinusOnlyMux: true,
+    actualCompletedForceJournal: true,
+    forceBusy: true,
+    handoffDigest: sdkReceipt.handoffDigest,
+    journalHandoffDigest: 'e'.repeat(64),
+    forceJournal: {
+      id: returned.id,
+      employeeId,
+      oldSession: returned.sessionId,
+      newSession: returned.newSession,
+      phase: 'completed',
+      sourceGeneration: returned.sessionGeneration,
+      targetGeneration: 3,
+      forceBusy: true,
+      handoffDigest: sdkReceipt.handoffDigest,
+      submittedHandoffDigest: 'e'.repeat(64),
+    },
+  };
+  const agentReturned = { ...forceReturned, ownerApiForce: false, realCapsuleHmac: true, agentForce: sdk };
+  const agentSummary = {
+    ...forceSummary,
+    returnKind: 'agent-force',
+    returnReceipt: 'agent-force-move-' + returned.id + '-completed',
+  };
+  const agentResult = {
+    ...forceResult,
+    acceptedScenario: 'self-agent-force',
+    ownerForceAccepted: false,
+    agentForceAccepted: true,
+  };
+  const acceptAgent = (proof: unknown, extra: Record<string, unknown> = {}) =>
+    requirePlanOfficeCiAcceptance(agentResult, forceFirst, root, employeeId, 'self-agent-force', {
+      returned: { ...agentReturned, agentForce: proof, ...extra },
+      summary: agentSummary,
+      physical,
+    });
+  expect(acceptAgent(sdk)).toMatchObject({
+    ordinarySelfAccepted: true,
+    forceAccepted: true,
+    agentForceAccepted: true,
+    ownerForceAccepted: false,
+    selfRoundtripAccepted: false,
+    teamAccepted: false,
+  });
+  for (const change of [
+    { inheritedMinusOnlyMux: false },
+    { actualCompletedForceJournal: false },
+    { forceBusy: false },
+    { native: { panePid: 43, paneStartTicks: '1234' } },
+    { issued: { ...sdk.issued, childMuxAbsent: false } },
+    { prepared: { ...sdkReceipt, managePlans: true } },
+    { prepared: { ...sdkReceipt, sessionGeneration: 1 } },
+    { handoffDigest: 'bad' },
+    { forceJournal: { ...sdk.forceJournal, phase: 'recovery-required' } },
+    { forceJournal: { ...sdk.forceJournal, handoffDigest: '0'.repeat(64) } },
+    { forceJournal: { ...sdk.forceJournal, targetGeneration: 2 } },
+    { spawned: undefined },
+    { childClosed: { ...sdk.childClosed, proofDigest: '0'.repeat(64) } },
+    { spawned: { ...spawned, child: { ...spawned.child, parentPid: 44 } } },
+    { spawned: { ...spawned, child: { ...spawned.child, childMuxAbsent: false } } },
+    { spawned: { ...spawned, child: { ...spawned.child, nodeStage: '/opt/reverie-worker-client/bin/reverie' } } },
+  ])
+    expect(() => acceptAgent({ ...sdk, ...change })).toThrow();
+  expect(() => acceptAgent(undefined)).toThrow();
+  expect(() => acceptAgent(sdk, { ownerApiForce: true })).toThrow();
 });
 it('requires both the ordinary-self result and separate real HMAC/physical-completion sentinel', () => {
   const root = '/private/owned/office-' + instance;

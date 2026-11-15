@@ -15,6 +15,7 @@ export const PlanProviderFixtureContract = z
     refreshAccountId: PlanRequestId.nullable(),
     pauseBeforeApproval: z.boolean(),
     approvalAllowlistOnly: z.boolean().optional(),
+    sdkForceEnabled: z.literal(true).optional(),
   })
   .strict()
   .refine(

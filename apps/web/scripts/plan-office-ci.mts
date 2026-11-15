@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 // The hosted command executes this source with Node --experimental-strip-types.
@@ -16,12 +16,18 @@ import {
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip' | 'self-owner-force' | 'team-plan-move';
+export type PlanOfficeCiSelection =
+  | 'ordinary-self'
+  | 'self-roundtrip'
+  | 'self-owner-force'
+  | 'self-agent-force'
+  | 'team-plan-move';
 function requireSelection(value: string): asserts value is PlanOfficeCiSelection {
   assert.ok(
     value === 'ordinary-self' ||
       value === 'self-roundtrip' ||
       value === 'self-owner-force' ||
+      value === 'self-agent-force' ||
       value === 'team-plan-move'
   );
 }
@@ -142,7 +148,11 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(r.acceptedScenario, selection);
   assert.equal(r.evidence, root);
   const ownerForce = selection === 'self-owner-force';
-  assert.equal(r.forceAccepted, ownerForce);
+  const agentForce = selection === 'self-agent-force';
+  const forced = ownerForce || agentForce;
+  assert.equal(r.forceAccepted, forced);
+  if (agentForce) assert.equal(r.agentForceAccepted, true);
+  else assert.notEqual(r.agentForceAccepted, true);
   if (!ownerForce) assert.notEqual(r.ownerForceAccepted, true);
   assert.equal(r.refreshReuseAccepted, false);
   assert.match(String(proof.id), uuid);
@@ -155,8 +165,8 @@ export function requirePlanOfficeCiAcceptance(
     scenarioId: proof.id,
     employeeId,
     ordinarySelfAccepted: true,
-    forceAccepted: ownerForce,
-    agentForceAccepted: false,
+    forceAccepted: forced,
+    agentForceAccepted: agentForce,
     exhaustedSourceAccepted: false,
     deadViewerAccepted: false,
     teamAccepted: false,
@@ -168,7 +178,7 @@ export function requirePlanOfficeCiAcceptance(
     assert.equal(roundtrip, undefined);
     return { ...acceptance, selfRoundtripAccepted: false };
   }
-  assert.equal(r.selfRoundtripAccepted, !ownerForce);
+  assert.equal(r.selfRoundtripAccepted, !forced);
   if (ownerForce) assert.equal(r.ownerForceAccepted, true);
   assert.ok(roundtrip);
   const returned = object(roundtrip.returned),
@@ -179,6 +189,7 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(returned.fromAccount, 'ci-plan-b');
   assert.equal(returned.toAccount, 'ci-plan-a');
   assert.equal(returned.realCapsuleHmac, !ownerForce);
+  if (agentForce) assert.equal(returned.ownerApiForce, false);
   if (ownerForce) assert.equal(returned.ownerApiForce, true);
   assert.equal(returned.originalOnly, true);
   for (const value of [proof.sessionId, proof.newSession, returned.sessionId, returned.newSession])
@@ -195,9 +206,12 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(summary.returnNewSession, returned.newSession);
   assert.deepEqual(summary.accounts, ['ci-plan-a', 'ci-plan-b', 'ci-plan-a']);
   assert.equal(summary.firstReceipt, 'first-self-move-completed');
-  assert.equal(summary.returnReceipt, (ownerForce ? 'owner-force-move-' : 'self-move-') + returned.id + '-completed');
-  if (ownerForce) {
-    assert.equal(summary.returnKind, 'owner-force');
+  assert.equal(
+    summary.returnReceipt,
+    (ownerForce ? 'owner-force-move-' : agentForce ? 'agent-force-move-' : 'self-move-') + returned.id + '-completed'
+  );
+  if (forced) {
+    assert.equal(summary.returnKind, agentForce ? 'agent-force' : 'owner-force');
     assert.equal(returned.physicalReceipt, 'physical-move-' + returned.id);
     const physical = object(roundtrip.physical);
     assert.equal(physical.sourceStopped, true);
@@ -215,10 +229,80 @@ export function requirePlanOfficeCiAcceptance(
     assert.equal(returned.nativeThreadId, proof.nativeThreadId);
     assert.equal(physical.nativeThreadId, proof.nativeThreadId);
     assert.equal(physical.actualCallbacksAndConsumingCloses, true);
+    if (agentForce) {
+      const sdk = object(returned.agentForce),
+        prepared = object(sdk.prepared),
+        issued = object(sdk.issued),
+        native = object(sdk.native);
+      assert.equal(sdk.inheritedMinusOnlyMux, true);
+      assert.equal(sdk.actualCompletedForceJournal, true);
+      assert.equal(sdk.forceBusy, true);
+      assert.match(String(sdk.handoffDigest), /^[a-f0-9]{64}$/);
+      assert.match(String(sdk.journalHandoffDigest), /^[a-f0-9]{64}$/);
+      for (const [receipt, kind] of [
+        [prepared, 'prepared'],
+        [issued, 'issued'],
+      ] as const) {
+        assert.equal(receipt.version, 1);
+        assert.equal(receipt.purpose, 'reverie-ci-sdk-agent-force-v1');
+        assert.equal(receipt.kind, kind);
+        assert.equal(receipt.id, returned.id);
+        assert.equal(receipt.employeeId, employeeId);
+        assert.equal(receipt.sessionId, returned.sessionId);
+        assert.equal(receipt.sessionGeneration, returned.sessionGeneration);
+        assert.equal(receipt.fromAccount, 'ci-plan-b');
+        assert.equal(receipt.toAccount, 'ci-plan-a');
+        assert.equal(receipt.namespacePid, native.panePid);
+        assert.equal(receipt.nativeBirthTicks, native.paneStartTicks);
+        assert.equal(receipt.childMuxAbsent, true);
+        assert.equal(typeof receipt.inheritedMuxPresent, 'boolean');
+        assert.equal(receipt.moveOwnPlan, true);
+        assert.equal(receipt.managePlans, false);
+        assert.equal(receipt.handoffDigest, sdk.handoffDigest);
+        assert.match(String(receipt.identityFileDigest), /^[a-f0-9]{64}$/);
+        assert.ok(Number.isSafeInteger(receipt.capabilitiesCheckedAt) && Number(receipt.capabilitiesCheckedAt) >= 0);
+      }
+      assert.equal(prepared.identityFileDigest, issued.identityFileDigest);
+      assert.equal(prepared.inheritedMuxPresent, issued.inheritedMuxPresent);
+      assert.ok(Number(issued.capabilitiesCheckedAt) >= Number(prepared.capabilitiesCheckedAt));
+      assert.ok(Number.isSafeInteger(native.panePid) && Number(native.panePid) > 1);
+      assert.match(String(native.paneStartTicks), /^[1-9][0-9]{0,19}$/);
+      const spawned = object(sdk.spawned),
+        { child: childValue, ...spawnScope } = spawned,
+        child = object(childValue),
+        closed = object(sdk.childClosed);
+      assert.deepEqual({ ...spawnScope, kind: 'issued' }, issued);
+      assert.equal(spawned.kind, 'spawned');
+      assert.ok(Number.isSafeInteger(child.childPid) && Number(child.childPid) > 1);
+      assert.notEqual(child.childPid, native.panePid);
+      assert.equal(child.parentPid, native.panePid);
+      assert.match(String(child.childBirthTicks), /^[1-9][0-9]{0,19}$/);
+      assert.equal(child.nodeStage, '/opt/reverie-worker-client/bin/node');
+      assert.equal(child.childMuxAbsent, true);
+      assert.equal(child.requiredEnvironmentMatched, true);
+      assert.equal(child.sessionId, returned.sessionId);
+      assert.equal(child.identityFileDigest, issued.identityFileDigest);
+      assert.match(String(child.argsDigest), /^[a-f0-9]{64}$/);
+      assert.equal(closed.version, 1);
+      assert.equal(closed.purpose, 'sdk-force-child-proof-after-close-v1');
+      assert.equal(closed.id, returned.id);
+      assert.equal(closed.proofDigest, createHash('sha256').update(JSON.stringify(spawned)).digest('hex'));
+      const journal = object(sdk.forceJournal);
+      assert.equal(journal.id, returned.id);
+      assert.equal(journal.employeeId, employeeId);
+      assert.equal(journal.oldSession, returned.sessionId);
+      assert.equal(journal.newSession, returned.newSession);
+      assert.equal(journal.phase, 'completed');
+      assert.equal(journal.forceBusy, true);
+      assert.equal(journal.sourceGeneration, returned.sessionGeneration);
+      assert.equal(journal.targetGeneration, physical.sessionGeneration);
+      assert.equal(journal.handoffDigest, sdk.handoffDigest);
+      assert.equal(journal.submittedHandoffDigest, sdk.journalHandoffDigest);
+    }
   }
   return {
     ...acceptance,
-    selfRoundtripAccepted: !ownerForce,
+    selfRoundtripAccepted: !forced,
     ownerForceAccepted: ownerForce,
     returnScenarioId: returned.id,
   };
@@ -718,10 +802,18 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       let roundtrip: { returned: unknown; summary: unknown; physical?: unknown } | undefined;
       if (selection !== 'ordinary-self') {
         const ownerForce = selection === 'self-owner-force';
+        const agentForce = selection === 'self-agent-force';
         const summary = object(
           JSON.parse(
             fs.readFileSync(
-              path.join(root, ownerForce ? 'self-owner-force-completed.json' : 'self-roundtrip-completed.json'),
+              path.join(
+                root,
+                ownerForce
+                  ? 'self-owner-force-completed.json'
+                  : agentForce
+                    ? 'self-agent-force-completed.json'
+                    : 'self-roundtrip-completed.json'
+              ),
               'utf8'
             )
           )
@@ -733,12 +825,14 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
             fs.readFileSync(
               path.join(
                 root,
-                (ownerForce ? 'owner-force-move-' : 'self-move-') + summary.returnMoveId + '-completed.json'
+                (ownerForce ? 'owner-force-move-' : agentForce ? 'agent-force-move-' : 'self-move-') +
+                  summary.returnMoveId +
+                  '-completed.json'
               ),
               'utf8'
             )
           ),
-          ...(ownerForce
+          ...(ownerForce || agentForce
             ? {
                 physical: JSON.parse(
                   fs.readFileSync(path.join(root, 'physical-move-' + summary.returnMoveId + '.json'), 'utf8')

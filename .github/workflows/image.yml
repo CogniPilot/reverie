@@ -24,6 +24,7 @@ on:
           - ordinary-self
           - self-roundtrip
           - self-owner-force
+          - self-agent-force
           - team-plan-move
 
 permissions:

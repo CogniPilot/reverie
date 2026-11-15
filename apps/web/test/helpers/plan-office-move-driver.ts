@@ -11,7 +11,7 @@ export const PlanOfficeMoveScenario = z
   .object({
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-move-scenario-v1'),
-    kind: z.enum(['owner-cooperative', 'self', 'team', 'owner-force']),
+    kind: z.enum(['owner-cooperative', 'self', 'team', 'owner-force', 'agent-force']),
     id: uuid,
     employeeId: uuid,
     sessionId: uuid,
@@ -22,7 +22,12 @@ export const PlanOfficeMoveScenario = z
   .strict()
   .refine((value) => value.fromAccount !== value.toAccount);
 export type PlanOfficeMoveScenario = z.infer<typeof PlanOfficeMoveScenario>;
-export const PlanOfficeSelfAcceptance = z.enum(['ordinary-self', 'self-roundtrip', 'self-owner-force']);
+export const PlanOfficeSelfAcceptance = z.enum([
+  'ordinary-self',
+  'self-roundtrip',
+  'self-owner-force',
+  'self-agent-force',
+]);
 export type PlanOfficeSelfAcceptance = z.infer<typeof PlanOfficeSelfAcceptance>;
 type ApiRecord = Record<string, unknown>;
 export interface PlanOfficeSelfCompletion {
@@ -82,7 +87,9 @@ export function planOfficeSelfDirection(leg: PlanOfficeSelfLeg) {
 export function planOfficeSelfLegKind(selection: PlanOfficeSelfAcceptance, leg: PlanOfficeSelfLeg) {
   PlanOfficeSelfAcceptance.parse(selection);
   planOfficeSelfDirection(leg);
-  return selection === 'self-owner-force' && leg === 'return' ? ('owner-force' as const) : ('self' as const);
+  if (leg === 'return' && selection === 'self-owner-force') return 'owner-force' as const;
+  if (leg === 'return' && selection === 'self-agent-force') return 'agent-force' as const;
+  return 'self' as const;
 }
 /** The return callback (including its new-ID allocation) is unreachable until
  * the first move has returned from its full physical verification and receipt. */
@@ -117,6 +124,8 @@ export interface PlanOfficeMovePorts {
   ownerPost(path: string, body: ApiRecord): Promise<Response>;
   /** Exact fixed capsule in the actual interactive fixture SDK context, no shell/header override. */
   capsule(args: readonly string[]): Promise<{ exitCode: number | null; signal: string | null; stdout: string }>;
+  /** One SDK input after its independent preparation/currentness barrier, never a driver-built environment. */
+  agentForce?(): Promise<void>;
   /** Durable private wx+fsync+consuming-close completion before the request. */
   record(name: string, value: unknown): void;
   pause(): Promise<void>;
@@ -145,7 +154,9 @@ const MoveRecord = z
   })
   .passthrough();
 export function planOfficeMoveRecord(value: unknown, scenario: PlanOfficeMoveScenario) {
-  const record = scenario.kind === 'owner-force' ? MoveRecord.parse(value) : PlanRequestSchema.parse(value);
+  const record = ['owner-force', 'agent-force'].includes(scenario.kind)
+    ? MoveRecord.parse(value)
+    : PlanRequestSchema.parse(value);
   assert.equal(record.id, scenario.id);
   assert.equal(record.employeeId, scenario.employeeId);
   assert.equal('oldSession' in record ? record.oldSession : record.sessionId, scenario.sessionId);
@@ -169,8 +180,10 @@ async function responseData(response: Response) {
  * reauthorize, retry or new ID is inferred from any HTTP status or absent record. */
 export async function runPlanOfficeMoveScenario(unchecked: unknown, ports: PlanOfficeMovePorts) {
   const scenario = PlanOfficeMoveScenario.parse(unchecked);
+  if (scenario.kind === 'agent-force') assert.ok(ports.agentForce, 'Actual SDK force dispatch unavailable');
   await ports.assertCurrent();
-  const path = scenario.kind === 'owner-force' ? '/api/plans/moves/force' : '/api/plans/requests';
+  const forced = ['owner-force', 'agent-force'].includes(scenario.kind);
+  const path = forced ? '/api/plans/moves/force' : '/api/plans/requests';
   const body = {
     id: scenario.id,
     employeeId: scenario.employeeId,
@@ -209,12 +222,19 @@ export async function runPlanOfficeMoveScenario(unchecked: unknown, ports: PlanO
   ];
   ports.record('request-' + scenario.id + '-intent', {
     scenario,
-    ...(scenario.kind === 'self' || scenario.kind === 'team' ? { args } : { path, body }),
+    ...(scenario.kind === 'agent-force'
+      ? { channel: 'sdk-inherited-minus-only-mux' }
+      : scenario.kind === 'self' || scenario.kind === 'team'
+        ? { args }
+        : { path, body }),
   });
   // Failure of this check is known before the callback can dispatch.
   await ports.assertCurrent();
   try {
-    if (scenario.kind === 'self' || scenario.kind === 'team') {
+    if (scenario.kind === 'agent-force') {
+      assert.ok(ports.agentForce, 'Actual SDK force dispatch unavailable');
+      await ports.agentForce();
+    } else if (scenario.kind === 'self' || scenario.kind === 'team') {
       const reply = await ports.capsule(args);
       assert.equal(reply.exitCode, 0);
       assert.equal(reply.signal, null);
@@ -238,8 +258,7 @@ export async function runPlanOfficeMoveScenario(unchecked: unknown, ports: PlanO
     });
   }
   await ports.assertCurrent();
-  const statusPath =
-    '/api/plans/' + (scenario.kind === 'owner-force' ? 'moves' : 'requests') + '/' + scenario.id + '/status';
+  const statusPath = '/api/plans/' + (forced ? 'moves' : 'requests') + '/' + scenario.id + '/status';
   for (let index = 0; index < 180; index++) {
     await ports.assertCurrent();
     let reply: Awaited<ReturnType<typeof responseData>>;

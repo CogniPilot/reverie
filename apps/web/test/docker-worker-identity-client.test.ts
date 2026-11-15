@@ -41,6 +41,128 @@ function env(path: string): NodeJS.ProcessEnv {
   };
 }
 describe('private worker callback client', () => {
+  it('parses exact force argv without mux using a genuine protected HMAC identity and raw move JSON', async () => {
+    const binding = {
+      employeeId: '22222222-2222-4222-8222-222222222222',
+      sessionId: sid,
+      sessionGeneration: 2,
+      owner: undefined,
+      containerId: 'a'.repeat(64),
+      credentialId: '44444444-4444-4444-8444-444444444444',
+    };
+    let current = true,
+      allowed = true;
+    const auth = new DockerWorkerIdentityAuthentication(
+      '11111111-1111-4111-8111-111111111111',
+      Buffer.alloc(32, 0x52),
+      { binding: () => (current ? binding : undefined), keyCurrent: () => true }
+    );
+    const identity = file(auth.issue(binding, () => true)),
+      handoff = join(dirs.at(-1)!, 'force-handoff.txt');
+    fs.writeFileSync(handoff, 'Synthetic own force; preserve source and unknown outcomes.', { mode: 0o600 });
+    const operation = '55555555-5555-4555-8555-555555555555';
+    const requests: { method?: string; url?: string; authenticated: boolean; body: unknown }[] = [];
+    const record = {
+      id: operation,
+      employeeId: binding.employeeId,
+      oldSession: sid,
+      fromAccount: 'ci-plan-b',
+      toAccount: 'ci-plan-a',
+      phase: 'waiting',
+    };
+    const server = http.createServer(async (req, res) => {
+      const caller = auth.capture(req),
+        chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.from(chunk));
+      const bytes = Buffer.concat(chunks).toString();
+      requests.push({
+        method: req.method,
+        url: req.url,
+        authenticated: !!caller,
+        body: bytes ? JSON.parse(bytes) : undefined,
+      });
+      expect(req.headers.authorization).toBeUndefined();
+      res.setHeader('Content-Type', 'application/json');
+      if (!caller) {
+        res.writeHead(401);
+        res.end(JSON.stringify({ success: false }));
+      } else if (req.url === '/api/company')
+        res.end(
+          JSON.stringify({
+            success: true,
+            data: { employees: [{ id: binding.employeeId, sessionId: sid, sessionGeneration: 2 }] },
+          })
+        );
+      else {
+        expect(req.url).toBe('/api/plans/moves/force');
+        if (!allowed) {
+          res.writeHead(403);
+          res.end(JSON.stringify({ success: false, errorCode: 'FORBIDDEN' }));
+        } else {
+          res.writeHead(202);
+          res.end(JSON.stringify({ success: true, data: record }));
+        }
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const oldExit = process.exitCode;
+    try {
+      for (const [key, value] of Object.entries({
+        ...env(identity),
+        REVERIE_API_URL: 'http://127.0.0.1:' + (server.address() as { port: number }).port,
+      }))
+        vi.stubEnv(key, value);
+      vi.stubEnv('REVERIE_MUX', undefined);
+      const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const parse = () => {
+        const program = new Command();
+        registerAgentCommands(program);
+        return program.parseAsync(
+          [
+            'agent',
+            'plan-move',
+            'force',
+            'ci-plan-a',
+            '--employee',
+            binding.employeeId,
+            '--id',
+            operation,
+            '--handoff-file',
+            handoff,
+            '--json',
+          ],
+          { from: 'user' }
+        );
+      };
+      await parse();
+      expect(process.exitCode).toBe(0);
+      expect(requests.map((r) => [r.method, r.url, r.authenticated])).toEqual([
+        ['GET', '/api/company', true],
+        ['POST', '/api/plans/moves/force', true],
+      ]);
+      expect(requests[1]!.body).toEqual({
+        id: operation,
+        employeeId: binding.employeeId,
+        sessionId: sid,
+        sessionGeneration: 2,
+        toAccount: 'ci-plan-a',
+        handoff: 'Synthetic own force; preserve source and unknown outcomes.',
+      });
+      expect(output).toHaveBeenCalledWith(JSON.stringify(record));
+      allowed = false;
+      await parse();
+      expect(process.exitCode).toBe(4);
+      current = false;
+      await parse();
+      expect(process.exitCode).toBe(4); // HTTP 401 cannot confirm the current canonical binding.
+      expect(requests.filter((r) => r.method === 'POST')).toHaveLength(2);
+      expect(requests.at(-1)?.authenticated).toBe(false);
+    } finally {
+      process.exitCode = oldExit;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
   it('keeps empty and malformed selected worker files on the strict credential path without legacy mux', () => {
     for (const path of ['', file('{"worker":true}')]) {
       const selected = env(path),

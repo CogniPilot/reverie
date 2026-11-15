@@ -166,7 +166,7 @@ it('never allocates a return after an unknown/failed first verification or a mer
     'Physical source closure unconfirmed',
     'Receipt close failed',
   ]) {
-    for (const selection of ['self-roundtrip', 'self-owner-force'] as const) {
+    for (const selection of ['self-roundtrip', 'self-owner-force', 'self-agent-force'] as const) {
       const move = vi.fn(async () => {
         throw Error(failure);
       });
@@ -298,7 +298,7 @@ function fixture(kind: PlanOfficeMoveScenario['kind'] = 'self') {
     assertCurrent: vi.fn(async () => {}),
     ownerPost: vi.fn(async (path: string, _body: Record<string, unknown>) => {
       events.push(path);
-      const force = kind === 'owner-force';
+      const force = kind === 'owner-force' || kind === 'agent-force';
       return response(
         path.endsWith('/status')
           ? force
@@ -323,6 +323,26 @@ function fixture(kind: PlanOfficeMoveScenario['kind'] = 'self') {
   } satisfies PlanOfficeMovePorts;
   return { scenario, ports, records, events };
 }
+it('dispatches only the SDK force port once and requires physical verification despite a killed acknowledgement', async () => {
+  for (const unknown of [false, true]) {
+    const f = fixture('agent-force');
+    const dispatch = vi.fn(async () => {
+      f.events.push('actual-sdk-force-once');
+      if (unknown) throw Error('Source STOP killed its CLI acknowledgement');
+    });
+    const ports = { ...f.ports, agentForce: dispatch };
+    const record = await runPlanOfficeMoveScenario(f.scenario, ports);
+    expect(record.phase).toBe('completed');
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(f.ports.capsule).not.toHaveBeenCalled();
+    expect(f.ports.ownerPost.mock.calls.map(([path]) => path)).toEqual(['/api/plans/moves/' + id + '/status']);
+    expect(f.ports.verifyCompleted).toHaveBeenCalledTimes(1);
+    expect(f.events.indexOf('actual-sdk-force-once')).toBeLessThan(
+      f.events.indexOf('/api/plans/moves/' + id + '/status')
+    );
+    if (unknown) expect(f.records.some((r) => r.name === 'request-' + id + '-unknown')).toBe(true);
+  }
+});
 it('constructs only closed synthetic scenarios and rejects flags that could inject an endpoint, viewer or native authority', () => {
   expect(PlanOfficeMoveScenario.parse(base)).toEqual(base);
   for (const changes of [

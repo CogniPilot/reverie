@@ -31,6 +31,18 @@ import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
 import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
 import type { PlanOfficeStartupCheckpoint } from './plan-office-startup-diagnostic.js';
+import {
+  PlanOfficeAgentForceInput,
+  PlanOfficeAgentForceReceipt,
+  PlanOfficeAgentForceSpawn,
+  PlanOfficeAgentForceClosed,
+  planOfficeForceDigest,
+  planOfficeForceHandoff,
+  planOfficeAgentForceArgs,
+} from './plan-office-agent-force.js';
+import { planOfficeForceChildArgs } from './plan-office-force-child.js';
+import { DockerPlanMoveJournalState, dockerPlanMoveHandoffDigest } from '../../src/docker-plan-move-data.js';
+import { PlanMoveStore } from '../../src/plan-move-store.js';
 import { boxedOriginal, DockerEmployeeInspect } from '../../src/docker-employee-engine-data.js';
 import type { SessionState } from '../../src/types.js';
 import {
@@ -48,7 +60,7 @@ export const PlanOfficeDriverInput = z
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-office-baseline-v1'),
     acceptance: z
-      .enum(['baseline', 'ordinary-self', 'self-roundtrip', 'self-owner-force', 'team-plan-move'])
+      .enum(['baseline', 'ordinary-self', 'self-roundtrip', 'self-owner-force', 'self-agent-force', 'team-plan-move'])
       .default('baseline'),
     instance: z.string().regex(/^[a-f0-9]{32}$/),
     sourcePath: store,
@@ -117,6 +129,11 @@ type Json = Record<string, unknown>;
 export function planOfficePermissionProbeInput(id: string) {
   z.string().uuid().parse(id);
   return { input: 'BOXED_PLAN_PERMISSION_PROBE_' + id + '\r', useMux: true as const };
+}
+export function planOfficeAgentForcePrompt(id: string, stage: 'PREPARE' | 'EXECUTE') {
+  z.string().uuid().parse(id);
+  z.enum(['PREPARE', 'EXECUTE']).parse(stage);
+  return { input: 'BOXED_PLAN_FORCE_' + stage + '_' + id + '\r', useMux: true as const };
 }
 /** Fake-only preparation DATA. Rotation is a negative case until principal proof exists. */
 export function planOfficeProviderMode(mode: 'ordinary' | 'exhausted' | 'rotate-a' | 'pause-approval') {
@@ -866,6 +883,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
             purpose: 'reverie-ci-plan-provider-v1',
             employeeId: employee.employeeId,
             accounts: ['ci-plan-a', 'ci-plan-b'],
+            ...(input.acceptance === 'self-agent-force' ? { sdkForceEnabled: true } : {}),
             ...(input.acceptance === 'team-plan-move' &&
             employee.employeeId === input.bootstrap.employees[1]!.employeeId
               ? { approvalAllowlistOnly: true }
@@ -1196,6 +1214,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     let planMovesAccepted = false;
     let selfRoundtripAccepted = false;
     let ownerForceAccepted = false;
+    let agentForceAccepted = false;
     let teamAccepted = false;
     const acceptance = input.acceptance;
     if (acceptance === 'team-plan-move') {
@@ -1438,20 +1457,31 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       });
       if (completed.returned) {
         const ownerForce = completed.returned.scenario.kind === 'owner-force';
-        evidence.save(ownerForce ? 'self-owner-force-completed' : 'self-roundtrip-completed', {
-          employeeId: completed.first.scenario.employeeId,
-          firstMoveId: completed.first.scenario.id,
-          returnMoveId: completed.returned.scenario.id,
-          firstNewSession: completed.first.record.newSession,
-          returnNewSession: completed.returned.record.newSession,
-          accounts: ['ci-plan-a', 'ci-plan-b', 'ci-plan-a'],
-          firstReceipt: 'first-self-move-completed',
-          returnReceipt:
-            (ownerForce ? 'owner-force-move-' : 'self-move-') + completed.returned.scenario.id + '-completed',
-          returnKind: completed.returned.scenario.kind,
-        });
-        selfRoundtripAccepted = !ownerForce;
+        const agentForce = completed.returned.scenario.kind === 'agent-force';
+        evidence.save(
+          ownerForce
+            ? 'self-owner-force-completed'
+            : agentForce
+              ? 'self-agent-force-completed'
+              : 'self-roundtrip-completed',
+          {
+            employeeId: completed.first.scenario.employeeId,
+            firstMoveId: completed.first.scenario.id,
+            returnMoveId: completed.returned.scenario.id,
+            firstNewSession: completed.first.record.newSession,
+            returnNewSession: completed.returned.record.newSession,
+            accounts: ['ci-plan-a', 'ci-plan-b', 'ci-plan-a'],
+            firstReceipt: 'first-self-move-completed',
+            returnReceipt:
+              (ownerForce ? 'owner-force-move-' : agentForce ? 'agent-force-move-' : 'self-move-') +
+              completed.returned.scenario.id +
+              '-completed',
+            returnKind: completed.returned.scenario.kind,
+          }
+        );
+        selfRoundtripAccepted = !ownerForce && !agentForce;
         ownerForceAccepted = ownerForce;
+        agentForceAccepted = agentForce;
       }
       planMovesAccepted = true;
     }
@@ -1475,10 +1505,11 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       planMovesAccepted,
       selfRoundtripAccepted,
       ownerForceAccepted,
+      agentForceAccepted,
       teamAccepted,
       acceptedScenario: input.acceptance,
       refreshReuseAccepted: false,
-      forceAccepted: ownerForceAccepted,
+      forceAccepted: ownerForceAccepted || agentForceAccepted,
       cleanup: 'Preserved only owned fixture state; no stop/prune/paid replay.',
     };
     evidence.save('completed', result);
@@ -1502,11 +1533,11 @@ async function runPlanOfficeMoveLeg(
   home: string,
   leg: PlanOfficeSelfLeg = 'first',
   previous?: PlanOfficeSelfCompletion,
-  kind: 'self' | 'owner-force' | 'team' = 'self',
+  kind: 'self' | 'owner-force' | 'agent-force' | 'team' = 'self',
   actors?: { employeeId: string; callerEmployeeId: string; forbiddenIds: readonly string[] }
 ) {
   const direction = planOfficeSelfDirection(leg);
-  if (kind === 'owner-force') assert.equal(leg, 'return');
+  if (kind === 'owner-force' || kind === 'agent-force') assert.equal(leg, 'return');
   const names = driver.names;
   assert.equal(input.bootstrap.employees.length, kind === 'team' ? 2 : 1);
   assert.equal(kind === 'team', actors !== undefined);
@@ -1623,7 +1654,14 @@ async function runPlanOfficeMoveLeg(
     home: { source: home, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
     canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, direction.toAccount),
   };
-  const moveName = kind === 'owner-force' ? 'owner-force-move-' : kind === 'team' ? 'team-move-' : 'self-move-';
+  const moveName =
+    kind === 'owner-force'
+      ? 'owner-force-move-'
+      : kind === 'agent-force'
+        ? 'agent-force-move-'
+        : kind === 'team'
+          ? 'team-move-'
+          : 'self-move-';
   evidence.save(leg === 'first' && kind !== 'team' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
   const ownerGet = async (p: string) => {
     current();
@@ -1655,15 +1693,122 @@ async function runPlanOfficeMoveLeg(
       row.destination
     );
   };
+  let sdkProof:
+    | { prepared: z.infer<typeof PlanOfficeAgentForceReceipt>; native: { panePid: number; paneStartTicks: string } }
+    | undefined;
+  const sdkForce = async () => {
+    assert.equal(kind, 'agent-force');
+    currentSource();
+    // Only the actual SDK will select its inherited identity and create the handoff.
+    const input = PlanOfficeAgentForceInput.parse({
+      version: 1,
+      purpose: 'reverie-ci-sdk-agent-force-v1',
+      id: scenario.id,
+      employeeId: scenario.employeeId,
+      sessionId: scenario.sessionId,
+      sessionGeneration: scenario.sessionGeneration,
+      fromAccount: scenario.fromAccount,
+      toAccount: scenario.toAccount,
+    });
+    const fixture = new Evidence(path.join(home, '.fixture'), true);
+    try {
+      fixture.save('plan-agent-force-input-' + input.id, input);
+    } finally {
+      fixture.close();
+    }
+    evidence.save('agent-force-prepare-' + input.id + '-intent', {
+      input,
+      context: 'actual-sdk-inherited-minus-only-mux',
+      noRetry: true,
+    });
+    await data(
+      await owner.request(
+        '/api/sessions/' + input.sessionId + '/input',
+        'POST',
+        planOfficeAgentForcePrompt(input.id, 'PREPARE')
+      )
+    );
+    const receiptFile = path.join(home, '.fixture', 'plan-agent-force-prepared-' + input.id + '.json');
+    let prepared: z.infer<typeof PlanOfficeAgentForceReceipt> | undefined;
+    for (let index = 0; index < 100; index++) {
+      currentSource();
+      if (fs.existsSync(receiptFile)) {
+        const candidate = PlanOfficeAgentForceReceipt.parse(readPrivate(receiptFile));
+        const session = await planOfficeSession(
+          await owner.request('/api/sessions/' + input.sessionId),
+          input.sessionId
+        );
+        const output = await planOfficeTerminal(await owner.request('/api/sessions/' + input.sessionId + '/terminal'));
+        if (
+          !session.isWorking &&
+          !session.providerInputHeld &&
+          session.status === 'idle' &&
+          output.includes('BCPLAN_FORCE_PREPARED_' + input.id) &&
+          output.trimEnd().endsWith('❯')
+        ) {
+          prepared = candidate;
+          break;
+        }
+      }
+      await wait(250);
+    }
+    assert.ok(prepared, 'SDK preparation outcome unknown; no execute input may follow');
+    assert.equal(prepared.kind, 'prepared');
+    assert.deepEqual(PlanOfficeAgentForceInput.strip().parse(prepared), input);
+    assert.equal(prepared.identityFileDigest, planOfficeForceDigest(planOfficeSelfIdentityFile(row)));
+    assert.equal(prepared.handoffDigest, planOfficeForceDigest(planOfficeForceHandoff(input)));
+    const age = Date.now() - prepared.capabilitiesCheckedAt;
+    assert.ok(age >= 0 && age <= 35000);
+    const reportNames = fs
+      .readdirSync(path.join(home, '.fixture'))
+      .filter((name) => name.startsWith('plan-turn-' + row.request.sessionId + '-'));
+    assert.ok(reportNames.length > 0 && reportNames.length <= 128);
+    const report = reportNames
+      .map((name) => readPrivate(path.join(home, '.fixture', name)) as Json)
+      .find((r) => r.state === 'idle' && r.requestId === null && r.sessionId === row.request.sessionId);
+    assert.ok(report);
+    const native = (
+      await verifyPlanOfficeReadyNative(
+        row,
+        nativeThreadId,
+        report as unknown as import('./boxed-plan-provider.js').PlanProviderFixtureReport,
+        { current: currentSource, metadata: async (args) => driver.docker([...args]) }
+      )
+    ).native;
+    assert.equal(prepared.namespacePid, native.panePid);
+    assert.equal(prepared.nativeBirthTicks, native.paneStartTicks);
+    const employee = snapshot().employee;
+    assert.equal(employee.sessionId, scenario.sessionId);
+    assert.equal(employee.sessionGeneration, scenario.sessionGeneration);
+    assert.equal(employee.desiredRunning, true);
+    assert.equal(employee.onVacation, false);
+    assert.equal(employee.bindingMigration, undefined);
+    assert.equal((employee.permissions as Json).moveOwnPlan, true);
+    assert.equal((employee.permissions as Json).managePlans, false);
+    sdkProof = { prepared, native };
+    evidence.save('agent-force-sdk-preflight-' + input.id, { ...sdkProof, inheritedMinusOnlyMux: true });
+    currentSource();
+    evidence.save('agent-force-execute-' + input.id + '-intent', { id: input.id, noRetry: true });
+    await data(
+      await owner.request(
+        '/api/sessions/' + input.sessionId + '/input',
+        'POST',
+        planOfficeAgentForcePrompt(input.id, 'EXECUTE')
+      )
+    );
+  };
   const record = await runPlanOfficeMoveScenario(scenario, {
     assertCurrent: async () => current(),
     ownerPost: async (p, body) => {
+      if (kind === 'agent-force')
+        assert.notEqual(p, '/api/plans/moves/force', 'An SDK force may never use owner force authority');
       if (p === '/api/plans/moves/force') currentSource();
       else current();
       const result = await owner.request(p, 'POST', body);
       current();
       return result;
     },
+    agentForce: sdkForce,
     capsule: async (args) => {
       currentSource();
       const actor = caller ?? row;
@@ -1712,6 +1857,84 @@ async function runPlanOfficeMoveLeg(
   assert.equal(target.request.sessionGeneration, scenario.sessionGeneration + 1);
   assert.equal(target.version === 3 && target.planReplacement.moveId, scenario.id);
   assert.ok(target.destination);
+  let agentForceProof: unknown;
+  if (kind === 'agent-force') {
+    assert.ok(sdkProof, 'Actual SDK preparation/native proof required');
+    const issued = PlanOfficeAgentForceReceipt.parse(
+      readPrivate(path.join(home, '.fixture', 'plan-agent-force-issued-' + scenario.id + '.json'))
+    );
+    const spawned = PlanOfficeAgentForceSpawn.parse(
+      readPrivate(path.join(home, '.fixture', 'plan-agent-force-spawned-' + scenario.id + '.json'))
+    );
+    const childClosed = PlanOfficeAgentForceClosed.parse(
+      readPrivate(path.join(home, '.fixture', 'plan-agent-force-child-closed-' + scenario.id + '.json'))
+    );
+    assert.equal(childClosed.id, scenario.id);
+    assert.equal(childClosed.proofDigest, planOfficeForceDigest(JSON.stringify(spawned)));
+    const { child, ...spawnScope } = spawned;
+    assert.deepEqual({ ...spawnScope, kind: 'issued' }, issued);
+    assert.equal(child.parentPid, sdkProof.prepared.namespacePid);
+    assert.equal(child.sessionId, scenario.sessionId);
+    assert.equal(child.identityFileDigest, issued.identityFileDigest);
+    const expectedArgs = planOfficeAgentForceArgs(PlanOfficeAgentForceInput.strip().parse(issued));
+    assert.equal(child.argsDigest, planOfficeForceDigest(JSON.stringify(planOfficeForceChildArgs(expectedArgs))));
+    assert.deepEqual(
+      { ...issued, kind: 'prepared', capabilitiesCheckedAt: sdkProof.prepared.capabilitiesCheckedAt },
+      sdkProof.prepared
+    );
+    assert.equal(issued.kind, 'issued');
+    assert.ok(issued.capabilitiesCheckedAt >= sdkProof.prepared.capabilitiesCheckedAt);
+    const actualRecord = await new PlanMoveStore(path.join(evidence.root, 'data/plan-moves.json')).dockerRecord(
+      scenario.id
+    );
+    current();
+    assert.equal(actualRecord.phase, 'completed');
+    assert.equal(actualRecord.employeeId, scenario.employeeId);
+    assert.equal(actualRecord.oldSession, scenario.sessionId);
+    assert.equal(actualRecord.newSession, record.newSession);
+    const journal = DockerPlanMoveJournalState.parse(actualRecord.dockerReplacement);
+    assert.equal(journal.seed.forceBusy, true);
+    assert.equal(journal.seed.moveId, scenario.id);
+    assert.equal(journal.seed.source.binding.sessionId, scenario.sessionId);
+    assert.equal(journal.seed.source.binding.sessionGeneration, scenario.sessionGeneration);
+    const input = PlanOfficeAgentForceInput.parse({
+      version: 1,
+      purpose: 'reverie-ci-sdk-agent-force-v1',
+      id: scenario.id,
+      employeeId: scenario.employeeId,
+      sessionId: scenario.sessionId,
+      sessionGeneration: scenario.sessionGeneration,
+      fromAccount: scenario.fromAccount,
+      toAccount: scenario.toAccount,
+    });
+    assert.equal(journal.seed.handoff, planOfficeForceHandoff(input));
+    assert.equal(journal.handoff?.phase, 'submitted');
+    assert.equal(journal.handoff?.digest, dockerPlanMoveHandoffDigest(journal.seed.handoff));
+    agentForceProof = {
+      ...sdkProof,
+      issued,
+      spawned,
+      childClosed,
+      forceBusy: true,
+      handoffDigest: issued.handoffDigest,
+      journalHandoffDigest: journal.handoff.digest,
+      actualCompletedForceJournal: true,
+      inheritedMinusOnlyMux: true,
+      forceJournal: {
+        id: actualRecord.id,
+        employeeId: actualRecord.employeeId,
+        oldSession: actualRecord.oldSession,
+        newSession: actualRecord.newSession,
+        phase: actualRecord.phase,
+        sourceGeneration: journal.seed.source.binding.sessionGeneration,
+        targetGeneration: journal.seed.target.sessionGeneration,
+        forceBusy: journal.seed.forceBusy,
+        handoffDigest: planOfficeForceDigest(journal.seed.handoff),
+        submittedHandoffDigest: journal.handoff.digest,
+      },
+    };
+    evidence.save('agent-force-sdk-checked-' + scenario.id, agentForceProof);
+  }
   evidence.save(
     leg === 'first' && kind !== 'team' ? 'first-self-move-completed' : moveName + scenario.id + '-completed',
     {
@@ -1731,6 +1954,7 @@ async function runPlanOfficeMoveLeg(
           }
         : {}),
       ownerApiForce: kind === 'owner-force',
+      ...(agentForceProof ? { agentForce: agentForceProof } : {}),
       sourceContainerId: row.destination.containerId,
       targetContainerId: target.destination.containerId,
       targetOperationId: target.request.operationId,

@@ -13,7 +13,13 @@ import {
   type PlanFixtureDiagnosticStage,
 } from '../helpers/boxed-plan-provider-files.js';
 import { WORKER_CLIENT_ENTRY } from '../../src/worker-client-manifest.js';
+import { observePlanOfficeForceChild, type PlanOfficeForceChild } from '../helpers/plan-office-force-child.js';
 import { runPlanOfficePermissionProbe } from '../helpers/plan-office-permission-probe.js';
+import {
+  planOfficeForceEnvironment,
+  preparePlanOfficeAgentForce,
+  executePlanOfficeAgentForce,
+} from '../helpers/plan-office-agent-force.js';
 
 export function planProviderLaunch(args: readonly string[], env: NodeJS.ProcessEnv) {
   if (env.HOME !== '/home/agent') throw Error('Fixed synthetic HOME required');
@@ -34,7 +40,14 @@ export function planProviderLaunch(args: readonly string[], env: NodeJS.ProcessE
   return { settings, sessionId, providerThread, hookGeneration };
 }
 /** Fixed argv transport only: no shell, provider/backend emulation, caller token or command from stdin. */
-export async function planFixtureCli(args: readonly string[], input?: string) {
+export async function planFixtureCli(
+  args: readonly string[],
+  input?: string,
+  context?: 'sdk-without-mux',
+  observed?: (child: PlanOfficeForceChild) => void
+) {
+  if (context !== undefined && context !== 'sdk-without-mux') throw Error('Fixed SDK child context refused');
+  if (observed && context !== 'sdk-without-mux') throw Error('Actual SDK child observation context refused');
   return new Promise<{
     exitCode: number | null;
     signal: string | null;
@@ -43,14 +56,20 @@ export async function planFixtureCli(args: readonly string[], input?: string) {
     stdoutSha256: string;
     stderrSha256: string;
   }>((resolve, reject) => {
-    const child = spawn(WORKER_CLIENT_ENTRY, [...args], { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+    const child = spawn(WORKER_CLIENT_ENTRY, [...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+      ...(context === 'sdk-without-mux' ? { env: planOfficeForceEnvironment(process.env) } : {}),
+    });
     const chunks: Buffer[][] = [[], []];
     let length = 0,
-      failed = false;
-    const fail = (error: Error) => {
+      failed = false,
+      closed = false;
+    let observation: Promise<void> | undefined;
+    const fail = (error: Error, kill = true) => {
       if (failed) return;
       failed = true;
-      child.kill('SIGKILL');
+      if (kill) child.kill('SIGKILL');
       reject(error);
     };
     const timer = setTimeout(() => fail(Error('Fixed fixture CLI deadline')), 20000);
@@ -61,9 +80,27 @@ export async function planFixtureCli(args: readonly string[], input?: string) {
         else chunks[index]!.push(chunk);
       });
     child.once('error', fail);
+    child.once('spawn', () => {
+      if (!observed) return;
+      observation = observePlanOfficeForceChild(child.pid!, args, process.env, () => closed)
+        .then((proof) => {
+          observed(proof);
+        })
+        .catch(() => {
+          fail(Error('Actual SDK CLI child context unconfirmed; no retry'), false);
+        });
+    });
     child.stdin.once('error', () => fail(Error('Fixed fixture CLI stdin unconfirmed')));
-    child.once('close', (exitCode, signal) => {
+    child.once('close', async (exitCode, signal) => {
+      closed = true;
       clearTimeout(timer);
+      if (observed) {
+        if (!observation) {
+          fail(Error('Actual SDK child spawn unconfirmed'), false);
+          return;
+        }
+        await observation;
+      }
       if (failed) return;
       resolve({
         exitCode,
@@ -224,6 +261,26 @@ export async function planProviderMain(args = process.argv.slice(2)) {
       serial = serial
         .then(async () => {
           if (stopped) return;
+          const force = /^BOXED_PLAN_FORCE_(PREPARE|EXECUTE)_([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(line);
+          if (force) {
+            if (contract.sdkForceEnabled !== true) throw Error('SDK force cooperation was not selected');
+            const input = files.forceInput(force[2]!);
+            if (force[1] === 'PREPARE') {
+              await preparePlanOfficeAgentForce(input, contract.employeeId, files, planFixtureCli);
+              process.stdout.write('BCPLAN_FORCE_PREPARED_' + input.id + '\n');
+              await fake.turn();
+            } else {
+              // Real prompt callback marks the SDK active; force skips idle/approval.
+              const prompt = await planFixtureCli(
+                ['worker-callback', 'hook-event', '--event', 'prompt_submitted'],
+                JSON.stringify({ session_id: launch.providerThread, source: 'synthetic-plan-provider' })
+              );
+              if (prompt.exitCode !== 0 || prompt.signal !== null || prompt.stdout !== '')
+                throw Error('Actual force prompt callback unconfirmed');
+              await executePlanOfficeAgentForce(input, contract.employeeId, files, planFixtureCli);
+            }
+            return;
+          }
           const probe = /^BOXED_PLAN_PERMISSION_PROBE_([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(line);
           if (probe) {
             const input = files.permissionProbe(probe[1]!);
