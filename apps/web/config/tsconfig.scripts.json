@@ -31,6 +31,9 @@
     "../test/docker-resource-original-writer.test.ts",
     "../test/fixtures/docker-original-writer-native.ts",
     "../test/helpers/boxed-plan-provider.ts",
-    "../test/boxed-plan-provider.test.ts"
+    "../test/boxed-plan-provider.test.ts",
+    "../test/helpers/plan-office-bootstrap.ts",
+    "../test/plan-office-bootstrap.test.ts",
+    "../test/fixtures/plan-office-bootstrap.ts"
   ]
 }

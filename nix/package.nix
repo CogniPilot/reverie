@@ -96,6 +96,7 @@ let
         test/docker-employee-startup-restore.test.ts \
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
+        test/plan-office-bootstrap.test.ts \
         test/canary-cookie-files.test.ts \
         test/canary-browser-modules.test.ts \
         test/canary-fixture-contract.test.ts \
