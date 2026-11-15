@@ -39,3 +39,30 @@ an exact original read can inspect what was actually committed.
 The opaque native actor and server requester grant remain required separately.
 These store tests use injected native checker ports to test CAS; they do not claim
 physical source closure, account projection, kernel proof or paid dispatch.
+
+## Requester and recipe currency
+
+A new choice requires the actual signed-in owner or a genuinely registered boxed
+HMAC request with the appropriate live self/team plan permission. The private
+requester proof binds its move ID, target account, source generation and force
+choice. Preview/source inspection does not grant reservation. Original-operation
+recovery reads the retained private PlanMoveStore itself and may use an explicit
+recoverEmployees grant; it cannot select a new account.
+
+The verifier issues a narrow plan-request continuation while the worker identity
+is current. It retains original issuer lifetime/key custody and immutable,
+unmixed request credentials even when this journal legitimately stops its own
+source binding. Every requester check still invokes this issuer continuation.
+It does not authenticate a new API request or grant a new worker binding.
+
+A planned target must match this journal's issued/published handoff and complete
+binding tuple. Its current canonical RuntimeRecipe must match seed.target.templateDigest.
+That digest uses the same locked stock native-thread observation projection as
+existing-provider source correlation. Only native observation fields are omitted;
+account, provider, model, workspace and configuration remain exact, and unknown
+protocols remain strict. Actual saved-state/native recipe and physical proofs
+remain the actor's separate responsibility.
+
+These grants authorize admission through final publication. They must not become
+enduring viewer/health currency after the operation finishes. A published native
+view retains its independent canonical/runtime/native checks.

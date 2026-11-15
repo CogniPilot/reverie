@@ -18,6 +18,7 @@ export interface PlanMoveDockerActor {
   current(record: Readonly<PlanMoveRecord>, state: Readonly<DockerPlanMoveJournalState>): void;
   /** Cooperative native provider idle/composer gate; a disposable viewer is not proof. */
   idle(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal, signal: AbortSignal): Promise<void>;
+  withRequesterAuthority?(proof: unknown): PlanMoveDockerActor;
   snapshot(employeeId: string, owner: string | undefined, purpose?: 'runtime-refresh'): Promise<PlanMoveSnapshot>;
   /** Reads only. The returned target identity is persisted BEFORE prepare. */
   reserve(

@@ -388,7 +388,7 @@ let
         test/pane-survivors.test.ts test/paste-image-dir-shared.test.ts test/paste-image-gc.test.ts test/path-picker-hidden.test.ts \
         test/path-picker-sort.test.ts test/path-picker-ui.test.ts test/person-row-actions.test.ts test/phone-status-ui.test.ts \
         test/pi-cli-resolver.test.ts test/pi-mode.test.ts test/plan-move-auth.test.ts test/plan-move-processes.test.ts \
-        test/plan-move-store.test.ts test/plan-move-docker-journal.test.ts test/plan-move.test.ts test/plan-request-refusal-reason.test.ts test/plan-usage-chip.test.ts \
+        test/plan-move-store.test.ts test/plan-move-docker-journal.test.ts test/docker-plan-move-requester.test.ts test/plan-move.test.ts test/plan-request-refusal-reason.test.ts test/plan-usage-chip.test.ts \
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \

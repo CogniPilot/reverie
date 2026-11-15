@@ -40,7 +40,13 @@ export class DockerWorkerRequestIdentity {
   readonly owner: string | undefined;
   readonly containerId: string;
   readonly #check: () => boolean;
-  constructor(origin: typeof issuedIdentity, binding: DockerWorkerIdentityBinding, check: () => boolean) {
+  readonly #issuerCurrent?: () => boolean;
+  constructor(
+    origin: typeof issuedIdentity,
+    binding: DockerWorkerIdentityBinding,
+    check: () => boolean,
+    issuerCurrent?: () => boolean
+  ) {
     if (origin !== issuedIdentity) throw Error('Docker worker identity unavailable');
     this.employeeId = binding.employeeId;
     this.sessionId = binding.sessionId;
@@ -48,6 +54,7 @@ export class DockerWorkerRequestIdentity {
     this.owner = binding.owner;
     this.containerId = binding.containerId;
     this.#check = check;
+    this.#issuerCurrent = issuerCurrent;
     Object.freeze(this);
   }
   current(): boolean {
@@ -56,6 +63,36 @@ export class DockerWorkerRequestIdentity {
   require(): void {
     if (!this.current()) throw Error('Docker worker identity changed');
   }
+  /** Retain issuer/request custody only. A plan journal must separately authorize
+   * its exact old binding or committed target; this never authenticates an API. */
+  planRequestContinuation(): DockerWorkerPlanRequestContinuation {
+    this.require();
+    if (!this.#issuerCurrent) throw Error('Docker plan request issuer unavailable');
+    return new DockerWorkerPlanRequestContinuation(issuedIdentity, this.#issuerCurrent);
+  }
+}
+
+Object.freeze(DockerWorkerRequestIdentity.prototype);
+export class DockerWorkerPlanRequestContinuation {
+  readonly #current: () => boolean;
+  constructor(origin: typeof issuedIdentity, current: () => boolean) {
+    if (origin !== issuedIdentity) throw Error('Docker plan request issuer unavailable');
+    this.#current = current;
+    Object.freeze(this);
+  }
+  require(): void {
+    if (!this.#current()) throw Error('Docker plan request issuer changed');
+  }
+}
+Object.freeze(DockerWorkerPlanRequestContinuation.prototype);
+export function captureDockerWorkerPlanRequestContinuation(
+  identity: DockerWorkerRequestIdentity
+): DockerWorkerPlanRequestContinuation {
+  return DockerWorkerRequestIdentity.prototype.planRequestContinuation.call(identity);
+}
+export function requireDockerWorkerPlanRequestContinuation(proof: unknown): void {
+  if (!(proof instanceof DockerWorkerPlanRequestContinuation)) throw Error('Docker plan request issuer unavailable');
+  DockerWorkerPlanRequestContinuation.prototype.require.call(proof);
 }
 
 function validBinding(value: DockerWorkerIdentityBinding): boolean {
@@ -143,30 +180,37 @@ export class DockerWorkerIdentityAuthentication {
       const parent = header(request, 'x-reverie-parent-session');
       const parentKeys = Object.keys(request.headers).filter((key) => key.toLowerCase() === 'x-reverie-parent-session');
       if (parentKeys.length > 1 || (parentKeys.length === 1 && parent !== binding.sessionId)) return undefined;
-      let revoked = false;
-      const check = () => {
-        if (revoked) return false;
+      let revoked = false,
+        issuerRevoked = false;
+      const issuerCurrent = () => {
+        if (issuerRevoked) return false;
         try {
-          const selected = this.ports.binding(binding.employeeId);
           if (
             this.#closed ||
             !this.ports.keyCurrent() ||
-            !selected ||
-            !sameBinding(binding, selected) ||
             !unmixed(request) ||
             header(request, DOCKER_WORKER_IDENTITY_HEADER) !== token ||
             header(request, 'x-reverie-parent-session') !== parent ||
             Object.keys(request.headers).filter((key) => key.toLowerCase() === 'x-reverie-parent-session').length !==
               parentKeys.length
-          ) {
-            revoked = true;
-          }
+          )
+            issuerRevoked = true;
+        } catch {
+          issuerRevoked = true;
+        }
+        return !issuerRevoked;
+      };
+      const check = () => {
+        if (revoked) return false;
+        try {
+          const selected = this.ports.binding(binding.employeeId);
+          if (!issuerCurrent() || !selected || !sameBinding(binding, selected)) revoked = true;
         } catch {
           revoked = true;
         }
         return !revoked;
       };
-      return check() ? new DockerWorkerRequestIdentity(issuedIdentity, binding, check) : undefined;
+      return check() ? new DockerWorkerRequestIdentity(issuedIdentity, binding, check, issuerCurrent) : undefined;
     } catch {
       return undefined;
     }

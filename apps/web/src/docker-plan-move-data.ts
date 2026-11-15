@@ -75,6 +75,7 @@ export const DockerPlanMoveSeed = z
             })
             .strict(),
         ]),
+        /** Stable canonical RuntimeRecipe digest from the shared stock codec. */
         templateDigest: digest,
         workerImage: DockerEmployeeWorkerImage,
       })

@@ -1,3 +1,4 @@
+import { dockerProviderRuntimeRecipeDigest } from '../../src/docker-employee-source-correlation.js';
 import {
   DockerEmployeePlanReplacementWorkRecord,
   DockerEmployeeContinuationRecord,
@@ -97,7 +98,7 @@ export function dockerPlanJournalFixture() {
       provider: 'anthropic',
       accountSnapshotDigest: '5'.repeat(64),
       accountSource: { kind: 'canonical' },
-      templateDigest: '6'.repeat(64),
+      templateDigest: dockerProviderRuntimeRecipeDigest(undefined),
       workerImage,
     },
     requestDigest: '7'.repeat(64),
