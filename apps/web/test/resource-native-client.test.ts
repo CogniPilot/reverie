@@ -585,6 +585,9 @@ it('reconciles completed restart metadata using two fresh read-only host inspect
     load: async () => [original],
     save: async (rows) => {
       saves.push(structuredClone(rows));
+      // The completed write remains provisional until the second native
+      // inspection settles; concurrent clients must still see checking.
+      expect(await moves.get(original.id)).toMatchObject({ phase: 'checking', resourcePhase: 'verifying' });
     },
   } as PlanMovePort);
   const cold = (await moves.get(original.id))!;

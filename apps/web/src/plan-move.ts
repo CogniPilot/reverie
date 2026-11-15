@@ -699,6 +699,9 @@ export class PlanMoves {
       await proof.recheck({ ...record });
       proof.assertRecord(record);
       this.locked.delete(record.employeeId);
+      // Both native reads and the durable write are acknowledged. Finish this
+      // request's provisional view before returning its completed DTO.
+      this.intents.delete(id);
       return this.view(record);
     } catch (error) {
       Object.assign(record, before, {
