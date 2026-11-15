@@ -420,6 +420,7 @@ jobs:
             TEST_RETIREMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/retirement" \
             TEST_RECOVERY_SETTLEMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/recovery-settlement" \
             TEST_ACCOUNT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/accounts" \
+            TEST_TAB_LAYOUT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/tab-layout" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \

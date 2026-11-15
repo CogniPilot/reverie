@@ -5,16 +5,17 @@
  * click that ends a drag), whether the inline group editor actually paints
  * inside the rail's nowrap/ellipsis header, and whether Escape on an open group
  * menu reaches the menu first. The shipping app.js, tab-layout-browser.js,
- * tab-rail-resize.js, api-client.js, webview-tabs.js and styles.css are loaded
- * into a page; PUT /api/tab-layout is answered by a route that records bodies.
+ * tab-rail-resize.js, api-client.js, webview-tabs.js, panels-ui.js and styles.css
+ * are loaded into a page. Closed synthetic GET/PUT responses exercise stale
+ * destinations and lost replies through the actual editor and toast.
  *
  * Port: none (page.route on a fake origin, no server).
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { chromium, type Browser, type Page } from 'playwright';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { chromium, type Browser, type Page, type Route } from 'playwright';
 
 const publicDir = resolve(import.meta.dirname, '../src/web/public');
 const read = (name: string) => readFileSync(resolve(publicDir, name), 'utf8');
@@ -35,11 +36,21 @@ const LAYOUT = {
   ],
   ungrouped: [{ kind: 'session', id: 'one' }],
 };
+type Layout = typeof LAYOUT;
+type Write = { baseVersion: number; layout: Layout };
+type Reply = (route: Route, method: string, body: Write | null) => Promise<void>;
+type LayoutWindow = Window & {
+  __app: { tabLayout: Layout; _tabLayoutEditor: { hasPending(): boolean } };
+  __activation: string | null;
+};
 
 describe('grouped rail editing in Chromium', () => {
   let browser: Browser;
   let page: Page;
   let puts: any[] = [];
+  let requests: string[] = [];
+  let errors: string[] = [];
+  let reply: Reply | null = null;
 
   beforeAll(async () => {
     browser = await chromium.launch({
@@ -50,15 +61,45 @@ describe('grouped rail editing in Chromium', () => {
         : {}),
     });
     page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
-    await page.route('**/*', (route) => route.abort());
-    await page.route('http://reverie.test/', (route) =>
-      route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' })
-    );
-    await page.route('http://reverie.test/api/tab-layout', async (route) => {
+    await page.clock.install();
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.route('**/*', async (route) => {
       const request = route.request();
-      if (request.method() !== 'PUT') return route.fulfill({ status: 404, body: '' });
-      const body = JSON.parse(request.postData() || '{}');
-      puts.push(body);
+      const url = new URL(request.url());
+      if (url.origin !== 'http://reverie.test') {
+        errors.push(`Unexpected external request: ${url.origin}`);
+        return route.abort();
+      }
+      if (url.pathname === '/' && request.method() === 'GET')
+        return route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body></body></html>' });
+      if (!url.pathname.startsWith('/api/')) return route.abort();
+      const method = request.method();
+      // app.js sends its startup breadcrumb every2s, including under the JS
+      // clock. Accept that exact telemetry endpoint without hiding real errors.
+      if (url.pathname === '/api/crash-diag' && method === 'POST') {
+        const diagnostic = JSON.parse(request.postData() || '{}') as { data?: unknown; id?: unknown };
+        if (
+          Object.keys(diagnostic).sort().join(',') !== 'data,id' ||
+          typeof diagnostic.id !== 'string' ||
+          !/^[a-z0-9]+-[a-z0-9]{1,6}$/.test(diagnostic.id) ||
+          typeof diagnostic.data !== 'string' ||
+          !/^\d{2}:\d{2}:\d{2}\.\d{3} PAGE LOAD(?:\n\d{2}:\d{2}:\d{2}\.\d{3} LONG_TASK: \d+ms)*$/.test(diagnostic.data)
+        )
+          errors.push(`Unexpected startup diagnostics: ${request.postData()}`);
+        return route.fulfill({ status: 204 });
+      }
+      if (url.pathname !== '/api/tab-layout' || !['GET', 'PUT'].includes(method)) {
+        errors.push(`Unexpected API request: ${method} ${url.pathname}`);
+        return route.abort();
+      }
+      requests.push(method);
+      const body = method === 'PUT' ? (JSON.parse(request.postData() || '{}') as Write) : null;
+      if (body) puts.push(body);
+      if (reply) return reply(route, method, body);
+      if (!body) {
+        errors.push('Unexpected layout read');
+        return route.abort();
+      }
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ success: true, data: { layout: { ...body.layout, version: body.baseVersion + 1 } } }),
@@ -90,6 +131,8 @@ describe('grouped rail editing in Chromium', () => {
     await page.addScriptTag({ content: read('tab-rail-resize.js') });
     await page.addScriptTag({ content: read('api-client.js') });
     await page.addScriptTag({ content: read('webview-tabs.js') });
+    // Render actual shipped error feedback, rather than suppressing showToast.
+    await page.addScriptTag({ content: read('panels-ui.js') });
     await page.evaluate(() => {
       const w = window as any;
       const app = Object.create(w.ReverieApp.prototype);
@@ -120,7 +163,6 @@ describe('grouped rail editing in Chromium', () => {
       app._startSidebarRichClock = () => undefined;
       app._stopSidebarRichClock = () => undefined;
       app.loadAppSettingsFromStorage = () => ({});
-      app.showToast = () => undefined;
       app.closeAllPanels = () => {
         w.__panelsClosed = true;
       };
@@ -141,11 +183,16 @@ describe('grouped rail editing in Chromium', () => {
   });
 
   afterAll(async () => browser.close());
+  afterEach(() => expect(errors).toEqual([]));
 
   beforeEach(async () => {
     puts = [];
+    requests = [];
+    errors = [];
+    reply = null;
     await page.evaluate((layout) => {
       const w = window as any;
+      document.querySelector('.toast-container')?.replaceChildren();
       document.getElementById('sessionTabs')?.remove();
       document
         .getElementById('tabRail')!
@@ -156,6 +203,8 @@ describe('grouped rail editing in Chromium', () => {
       w.__app._tabKeydownHandler = null;
       w.__app._tabLayoutEditor?.dispose();
       w.__app._tabLayoutEditor = null;
+      w.__app._tabLayoutCoordinator = null;
+      w.__app._tabLayoutReloadPending = false;
       w.__app.tabLayout = null;
       w.__app.activeSessionId = 'one';
       w.__app.activeWebviewId = null;
@@ -183,6 +232,30 @@ describe('grouped rail editing in Chromium', () => {
     await page.waitForTimeout(80);
     await page.evaluate(() => new Promise((r) => setTimeout(r, 20)));
   };
+  async function screenshot(name: string) {
+    const toast = page.locator('.toast-error.show');
+    await expect.poll(() => toast.isVisible()).toBe(true);
+    // CSS transitions use browser animation time, independently of the JS clock.
+    await expect
+      .poll(
+        async () => {
+          const bounds = await toast.boundingBox();
+          return bounds ? bounds.x + bounds.width : Infinity;
+        },
+        { timeout: 3000 }
+      )
+      .toBeLessThanOrEqual(1280);
+    const bounds = (await toast.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.y).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(1280);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(800);
+    const directory = process.env.TEST_TAB_LAYOUT_SCREENSHOT_DIR;
+    if (directory) {
+      mkdirSync(directory, { recursive: true });
+      await page.screenshot({ path: join(directory, `${name}.png`) });
+    }
+  }
 
   it('drags a row from Ungrouped onto a group header: one PUT appending it there', async () => {
     await drag('.session-tab[data-id="one"]', '[data-tab-group-header="gy"]');
@@ -369,5 +442,103 @@ describe('grouped rail editing in Chromium', () => {
     expect(await page.locator('.tab-layout-group-action-menu').count()).toBe(1);
     await page.locator('#elsewhere').click();
     expect(await page.locator('.tab-layout-group-action-menu').count()).toBe(0);
+  });
+
+  it('drops a stale pointer move whose destination disappeared without replaying the write', async () => {
+    const current = structuredClone(LAYOUT);
+    current.version = 9;
+    current.groups = [{ ...current.groups[0], name: 'Concurrent name' }];
+    current.ungrouped.push({ kind: 'session', id: 'three' });
+    reply = async (route, method) => {
+      expect(method).toBe('PUT');
+      await route.fulfill({ status: 409, json: { success: false, data: { layout: current } } });
+    };
+    await drag('.session-tab[data-id="one"]', '[data-tab-group-header="gy"]');
+    await expect
+      .poll(() => page.locator('.toast-message').textContent())
+      .toBe('Tab groups changed elsewhere; part of your edit no longer applies.');
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as LayoutWindow).__app._tabLayoutEditor.hasPending()))
+      .toBe(false);
+    expect(puts).toHaveLength(1);
+    expect(puts[0].baseVersion).toBe(4);
+    expect(puts[0].layout.groups[1].refs.map((ref: { id: string }) => ref.id)).toEqual(['three', 'one']);
+    expect(await page.locator('[data-tab-group-header="gy"]').count()).toBe(0);
+    expect(await page.locator('[data-tab-group-header="gx"] .tab-layout-group-name').textContent()).toBe(
+      'Concurrent name'
+    );
+    expect(
+      await page
+        .locator('.session-tab[data-id="one"]')
+        .evaluate((el) => el.closest('.tab-layout-group')?.getAttribute('data-tab-group-id') || null)
+    ).toBeNull();
+    expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current);
+    expect(await page.evaluate(() => (window as unknown as LayoutWindow).__activation)).toBeNull();
+    expect(await page.locator('.tab-layout-dragging, .tab-layout-drop-into').count()).toBe(0);
+    await screenshot('stale-destination-1280');
+    await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await page.clock.runFor(5000);
+    expect(await page.locator('.toast-error').count()).toBe(0);
+    expect(requests).toEqual(['PUT']);
+    expect(puts).toHaveLength(1);
+  });
+
+  it('reads a committed group rename after a lost reply without replay and saves only a later explicit edit', async () => {
+    let current = structuredClone(LAYOUT);
+    let readEntered = false;
+    let releaseRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    try {
+      reply = async (route, method, body) => {
+        if (method === 'GET') {
+          readEntered = true;
+          await readGate;
+          await route.fulfill({ json: { success: true, data: { layout: current } } });
+          return;
+        }
+        expect(body!.baseVersion).toBe(current.version);
+        current = { ...structuredClone(body!.layout), version: current.version + 1 };
+        if (puts.length === 1) await route.abort('failed');
+        else await route.fulfill({ json: { success: true, data: { layout: current } } });
+      };
+      await page.locator('[data-tab-group-header="gx"]').hover();
+      await page.locator('[data-tab-group-header="gx"] .tab-layout-group-menu').click();
+      await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click();
+      await page.locator('.tab-layout-group-rename-input').fill('Committed before lost reply');
+      await page.keyboard.press('Enter');
+      await expect.poll(() => readEntered, { timeout: 5000 }).toBe(true);
+      await expect.poll(() => page.locator('.toast-message').textContent()).toBe('Could not save tab groups.');
+      expect(current.version).toBe(5);
+      expect(current.groups[0].name).toBe('Committed before lost reply');
+      expect(await page.locator('[data-tab-group-header="gx"] .tab-layout-group-name').textContent()).toBe('Core');
+      expect(requests).toEqual(['PUT', 'GET']);
+      expect(puts).toHaveLength(1);
+      await screenshot('lost-reply-before-readback-1280');
+      await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+      releaseRead();
+      await expect
+        .poll(() => page.locator('[data-tab-group-header="gx"] .tab-layout-group-name').textContent())
+        .toBe('Committed before lost reply');
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current);
+      await page.clock.runFor(5000);
+      expect(requests).toEqual(['PUT', 'GET']);
+      expect(puts).toHaveLength(1);
+      await page.locator('[data-tab-group-header="gx"]').hover();
+      await page.locator('[data-tab-group-header="gx"] .tab-layout-group-menu').click();
+      await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click();
+      await page.locator('.tab-layout-group-rename-input').fill('Explicit next edit');
+      await page.keyboard.press('Enter');
+      await expect.poll(() => puts.length).toBe(2);
+      await expect.poll(() => page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout.version)).toBe(6);
+      expect(puts.map((body: Write) => body.baseVersion)).toEqual([4, 5]);
+      expect(current.groups[0].name).toBe('Explicit next edit');
+      expect(current.groups[1]).toEqual(LAYOUT.groups[1]);
+      expect(current.ungrouped).toEqual(LAYOUT.ungrouped);
+      expect(requests).toEqual(['PUT', 'GET', 'PUT']);
+    } finally {
+      releaseRead();
+    }
   });
 });

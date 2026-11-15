@@ -1140,6 +1140,59 @@
         "expect(await page.locator('.plans-screen').count()).toBe(0)"
       ],
       "outcome": "The existing Chromium case clicks shipped Close and observes a DELETE for the pending synthetic login without opening Plans. It proves consumer dispatch only, not authentication, server cancellation or provider effects."
+    },
+    "ui.motion.stale-destination-drop": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "drops a stale pointer move whose destination disappeared without replaying the write",
+      "assertions": [
+        "await route.fulfill({ status: 409, json: { success: false, data: { layout: current } } })",
+        "await drag('.session-tab[data-id=\"one\"]', '[data-tab-group-header=\"gy\"]')",
+        ".toBe('Tab groups changed elsewhere; part of your edit no longer applies.')",
+        ".poll(() => page.evaluate(() => (window as unknown as LayoutWindow).__app._tabLayoutEditor.hasPending()))",
+        ".toBe(false)",
+        "expect(puts).toHaveLength(1)",
+        "expect(puts[0].baseVersion).toBe(4)",
+        "expect(await page.locator('[data-tab-group-header=\"gy\"]').count()).toBe(0)",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current)",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__activation)).toBeNull()",
+        "await page.getByRole('button', { name: 'Dismiss', exact: true }).click()",
+        "await page.clock.runFor(5000)",
+        "expect(await page.locator('.toast-error').count()).toBe(0)",
+        "expect(requests).toEqual(['PUT'])",
+        "expect(puts).toHaveLength(1)"
+      ],
+      "outcome": "A real desktop Chromium pointer gesture optimistically moves a row, then a closed synthetic409 supplies a newer layout with the destination removed and an unrelated concurrent name. The shipped coordinator drops the inapplicable operation, preserves that authoritative layout, removes drag decoration, avoids row activation, reports through the actual toast, and issues no second PUT. Actual Dismiss works. Valid409 operation rebases remain supported; this scenario does not qualify real multi-user API authority or a resolved dynamic drag-control declaration."
+    },
+    "ui.motion.rename-lost-readback": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "reads a committed group rename after a lost reply without replay and saves only a later explicit edit",
+      "assertions": [
+        "await readGate",
+        "expect(body!.baseVersion).toBe(current.version)",
+        "current = { ...structuredClone(body!.layout), version: current.version + 1 }",
+        "if (puts.length === 1) await route.abort('failed')",
+        "await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click()",
+        "await page.locator('.tab-layout-group-rename-input').fill('Committed before lost reply')",
+        "await expect.poll(() => readEntered, { timeout: 5000 }).toBe(true)",
+        "await expect.poll(() => page.locator('.toast-message').textContent()).toBe('Could not save tab groups.')",
+        "expect(current.version).toBe(5)",
+        "expect(current.groups[0].name).toBe('Committed before lost reply')",
+        "expect(requests).toEqual(['PUT', 'GET'])",
+        "expect(puts).toHaveLength(1)",
+        "await page.getByRole('button', { name: 'Dismiss', exact: true }).click()",
+        "releaseRead()",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current)",
+        "await page.clock.runFor(5000)",
+        "expect(requests).toEqual(['PUT', 'GET'])",
+        "expect(puts).toHaveLength(1)",
+        "await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click()",
+        "await page.locator('.tab-layout-group-rename-input').fill('Explicit next edit')",
+        "expect(puts.map((body: Write) => body.baseVersion)).toEqual([4, 5])",
+        "expect(current.groups[1]).toEqual(LAYOUT.groups[1])",
+        "expect(current.ungrouped).toEqual(LAYOUT.ungrouped)",
+        "expect(requests).toEqual(['PUT', 'GET', 'PUT'])"
+      ],
+      "outcome": "The actual desktop Rename group menu, input, fetch API client, editor and toast handle a closed synthetic commit whose reply is aborted. A gated GET returns the exact committed version5 layout, the visible rail adopts it without replaying the original PUT, and only a later explicit menu edit writes with baseVersion5. Actual Dismiss works. This qualifies consumer readback and dispatch, not real server persistence, multi-user authorization, production effects or phone rail editing."
     }
   },
   "mappings": [
@@ -1525,13 +1578,13 @@
     },
     {
       "declaration": "src/web/public/app.js::ReverieApp.startTabGroupRename::input::input:[binding label]",
-      "scenarios": ["ui.motion.group-rename"],
-      "remaining": "Only the actual Rename group menu action and input are qualified here. Other menu actions, multi-user authority, stale/failed layout writes, reload persistence, touch movement and the unresolved dynamic group renderer remain gaps."
+      "scenarios": ["ui.motion.group-rename", "ui.motion.rename-lost-readback"],
+      "remaining": "Only the actual desktop Rename group action/input success and named lost-reply consumer readback are qualified. Other menu actions, real multi-user API authorization/persistence, other stale or failed writes, reload recovery, touch movement and the unresolved dynamic group renderer remain gaps."
     },
     {
       "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::button::button:[binding label]",
-      "scenarios": ["ui.motion.group-rename"],
-      "remaining": "Only the actual Rename group menu action and input are qualified here. Other menu actions, multi-user authority, stale/failed layout writes, reload persistence, touch movement and the unresolved dynamic group renderer remain gaps."
+      "scenarios": ["ui.motion.group-rename", "ui.motion.rename-lost-readback"],
+      "remaining": "Only the actual desktop Rename group action/input success and named lost-reply consumer readback are qualified. Other menu actions, real multi-user API authorization/persistence, other stale or failed writes, reload recovery, touch movement and the unresolved dynamic group renderer remain gaps."
     },
     {
       "declaration": "src/web/public/index.html::html::separator:tabRailResizeHandle::1",
@@ -1581,6 +1634,11 @@
         "account.consumer.stale-poll"
       ],
       "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
+      "scenarios": ["ui.motion.stale-destination-drop", "ui.motion.rename-lost-readback"],
+      "remaining": "Only actual Dismiss on the two named desktop tab-layout error toasts is qualified. Other toast call sites, action buttons, timing/accessibility states, narrow viewports and authority or backend effects remain separately unqualified."
     }
   ],
   "gaps": [
@@ -7005,10 +7063,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/people.html::external-script::people.js",
       "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: people.js"
     },
@@ -7529,7 +7583,7 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1486,
+  "gapBudget": 1485,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
