@@ -145,8 +145,9 @@ it.each(['dead','live'] as const)('worker restart uses the same strict post-disp
     reader.mockResolvedValue(`${state === 'dead'?'1':'0'} 999999990 reverie-abcdef\n`);
     if (state === 'live') {expect(await session.restartCli()).toBe(true);expect(session.providerDispatchHeld).toBe(false);}
     else {
-      await expect(session.restartCli()).rejects.toBeInstanceOf(ProviderDispatchUnconfirmedError);
-      await expect(session.restartCli()).rejects.toBeInstanceOf(NativeProviderRetirementRequiredError);
+      const originalError = await session.restartCli().catch((error: unknown) => error);
+      expect(originalError).toBeInstanceOf(ProviderDispatchUnconfirmedError);
+      await expect(session.restartCli()).rejects.toBe(originalError);
       expect(session.providerDispatchHeld).toBe(true);
     }
     expect(respawn).toHaveBeenCalledOnce();expect(record.pid).toBe(999_999_990);

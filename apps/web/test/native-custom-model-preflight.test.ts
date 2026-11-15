@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { Session, NativeProviderRetirementRequiredError } from '../src/session.js';
+import { Session, NativeProviderRetirementRequiredError, ProviderDispatchUnconfirmedError } from '../src/session.js';
 import { StateStore } from '../src/state-store.js';
 import { PROVIDER_LAUNCH_DISK_KEY } from '../src/provider-launch-publication.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
@@ -191,6 +191,19 @@ it('unconfirmed saved history denies even without a native row or worker endpoin
   );
   const nextStore = new StateStore(file);
   const next = session({ publicationStore: nextStore, providerDispatchHeld: false });
+  const before = readFileSync(file, 'utf8');
+  expect(() => next.assertRestartCliPreflight()).toThrow(ProviderDispatchUnconfirmedError);
+  expect(readFileSync(file, 'utf8')).toBe(before);
+  expect(spawn).not.toHaveBeenCalled();
+});
+it('keeps a known native row distinct from unconfirmed history after reload', async () => {
+  const original = session();
+  await acknowledge(original);
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  saved[PROVIDER_LAUNCH_DISK_KEY].kind = 'unconfirmed';
+  writeFileSync(file, JSON.stringify(saved));
+  const nextStore = new StateStore(file);
+  const next = session({ id: original.id, publicationStore: nextStore, providerDispatchHeld: false });
   const before = readFileSync(file, 'utf8');
   expect(() => next.assertRestartCliPreflight()).toThrow(NativeProviderRetirementRequiredError);
   expect(readFileSync(file, 'utf8')).toBe(before);

@@ -41,7 +41,7 @@ import { Debouncer, MAX_SESSION_TOKENS } from './utils/index.js';
 import { dataPath } from './config/instance.js';
 import { normalizeSessionOrder } from './session-order.js';
 import { validateTabLayout, type TabLayout } from './tab-layout.js';
-import { Session, NativeProviderRetirementRequiredError } from './session.js';
+import { Session, NativeProviderRetirementRequiredError, ProviderDispatchUnconfirmedError } from './session.js';
 import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
 import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
 
@@ -357,9 +357,9 @@ export class StateStore {
    * report or adapter return is accepted as native retirement authority. */
   assertProviderRestartPreflight(session: Session): void {
     if (!Session.usesProviderLaunchStore(session, this)) throw Error('Original Session state-store custody required');
-    if (this.#providerLaunchHistory !== 'observed' ||
-      this.#providerLaunchIntents[session.id]?.transport === 'native-ordinary')
+    if (this.#providerLaunchIntents[session.id]?.transport === 'native-ordinary')
       throw new NativeProviderRetirementRequiredError();
+    if (this.#providerLaunchHistory !== 'observed') throw new ProviderDispatchUnconfirmedError();
   }
   providerLaunchHeldFor(session: Session): boolean {
     if (!Session.usesProviderLaunchStore(session, this)) throw new Error('Original Session state-store custody required');
