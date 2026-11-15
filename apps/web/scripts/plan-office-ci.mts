@@ -314,19 +314,25 @@ export function readPlanOfficeCiFailureState(root: string, employeeId: string): 
   const add = (raw: unknown, kind: string) => {
     if (!raw || typeof raw !== 'object') return;
     const v = raw as Json,
-      request = v.request as Json | undefined;
+      request = v.request as Json | undefined,
+      operation =
+        v.operation && typeof v.operation === 'object' && !Array.isArray(v.operation)
+          ? (v.operation as Json)
+          : undefined;
     if (v.employeeId !== employeeId) return;
+    if (operation && Object.hasOwn(operation, 'employeeId') && operation.employeeId !== employeeId) return;
     result.push({
       kind,
-      id: v.operationId ?? v.id ?? request?.operationId,
+      id: v.operationId ?? operation?.operationId ?? v.id ?? request?.operationId,
       employeeId,
-      sessionId: v.sessionId ?? v.oldSession ?? request?.sessionId,
+      sessionId: v.sessionId ?? operation?.sessionId ?? v.oldSession ?? request?.sessionId,
       newSession: v.newSession,
-      phase: v.phase,
+      phase: operation?.phase ?? v.phase,
       movePhase: v.movePhase,
-      state: v.state,
+      state: operation?.state ?? v.state,
       httpStatus: v.httpStatus,
-      errorCode: v.errorCode ?? v.code ?? (v.startRefusal as Json | undefined)?.code,
+      errorCode:
+        operation?.code ?? operation?.errorCode ?? v.errorCode ?? v.code ?? (v.startRefusal as Json | undefined)?.code,
     });
   };
   try {
@@ -341,16 +347,14 @@ export function readPlanOfficeCiFailureState(root: string, employeeId: string): 
       .slice(-8);
     for (const name of files) {
       const value = read(name);
-      // Original status carries operationId; its employee scope is fixed by the exact filename suffix.
-      if (
-        name.startsWith('original-') &&
-        name.endsWith('-' + employeeId + '.json') &&
-        value &&
-        typeof value === 'object'
-      )
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const v = value as Json;
+      // The owned filename can supply missing scope, but must never relabel a supplied foreign employee.
+      if (Object.hasOwn(v, 'employeeId') && v.employeeId !== employeeId) continue;
+      // Original policy selections carry their public phase/state/code in operation, not at the top level.
+      if (name.startsWith('original-') && name.endsWith('-' + employeeId + '.json') && value)
         add({ ...value, employeeId }, 'recovery-status');
-      else if (name.startsWith('status-') && value && typeof value === 'object') {
-        const v = value as Json;
+      else if (name.startsWith('status-')) {
         if (typeof v.id === 'string' && uuid.test(v.id) && name.startsWith('status-' + v.id + '-'))
           add(
             { ...v, employeeId, ...(name.includes('-absent-') ? { httpStatus: 404, state: 'unknown' } : {}) },
@@ -559,7 +563,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
         ownedEmployeeId ? readPlanOfficeCiFailureState(path.join(evidence, 'office-' + instance), ownedEmployeeId) : []
       ),
     });
-    throw Error('Actual ordinary self plan acceptance failed at ' + lastStage);
+    throw Error('Actual ' + selection + ' plan acceptance failed at ' + lastStage);
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href)

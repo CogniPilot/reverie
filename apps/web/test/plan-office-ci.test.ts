@@ -114,9 +114,15 @@ it('projects only bounded owned observations/canonical phases and preserves an a
     fs.mkdirSync(path.join(root, 'data'), { mode: 0o700 });
     write('original-3-' + employeeId + '.json', {
       operationId,
-      phase: 'identity-issued',
-      state: 'held',
-      code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+      phase: 'completed',
+      operation: {
+        operationId,
+        employeeId,
+        phase: 'identity-issued',
+        state: 'held',
+        code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+        error: token,
+      },
       error: token,
     });
     write('status-' + requestId + '-absent-5.json', {
@@ -168,6 +174,38 @@ it('projects only bounded owned observations/canonical phases and preserves an a
     expect(JSON.stringify(projected)).not.toContain(token);
     expect(projected.operations.some((record) => record.phase === 'completed')).toBe(false);
     expect(readPlanOfficeCiFailureState(root, 'foreign-secret')).toEqual([]);
+  } finally {
+    fs.rmSync(root, { recursive: true });
+  }
+});
+it('rejects present foreign scope in original/status receipts rather than relabeling it with the owned filename', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-office-ci-diagnostic-scope-'));
+  const foreign = '22222222-2222-4222-8222-222222222222';
+  const foreignOperation = '33333333-3333-4333-8333-333333333333';
+  const ownRequest = '44444444-4444-4444-8444-444444444444';
+  const write = (name: string, value: unknown) =>
+    fs.writeFileSync(path.join(root, name), JSON.stringify(value), { mode: 0o600 });
+  try {
+    write('original-1-' + employeeId + '.json', {
+      employeeId: foreign,
+      operationId: foreignOperation,
+      operation: { phase: 'failed', state: 'held', code: 'CONFLICT' },
+    });
+    write('status-' + foreignOperation + '-1.json', { employeeId: foreign, id: foreignOperation, phase: 'failed' });
+    write('original-2-' + employeeId + '.json', {
+      employeeId,
+      operationId: foreignOperation,
+      operation: { employeeId: foreign, phase: 'failed', state: 'held' },
+    });
+    write('status-' + ownRequest + '-1.json', { employeeId, id: ownRequest, phase: 'executing' });
+    const report = planOfficeCiFailureDiagnostic(
+      { status: 1, signal: null },
+      readPlanOfficeCiFailureState(root, employeeId)
+    );
+    expect(report.observation).toBe('last-known-retained-data');
+    expect(report.operations).toEqual([{ kind: 'request-status', id: ownRequest, employeeId, phase: 'executing' }]);
+    expect(JSON.stringify(report)).not.toContain(foreignOperation);
+    expect(JSON.stringify(report)).not.toContain(foreign);
   } finally {
     fs.rmSync(root, { recursive: true });
   }
