@@ -90,6 +90,7 @@ let
         test/docker-employee-engine.test.ts \
         test/docker-plan-install-data.test.ts \
         test/docker-plan-installer.test.ts \
+        test/docker-plan-source.test.ts \
         test/docker-engine-command.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
