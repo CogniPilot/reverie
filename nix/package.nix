@@ -152,7 +152,8 @@ let
       # UID1; never replace the production reader or relax its custody checks.
       boxedSdkCredentialCheck() {
         npm test -- test/boxed-plan-provider-entry.test.ts \
-          test/plan-office-agent-force.test.ts
+          test/plan-office-agent-force.test.ts \
+          test/worker-viewer-docker-cli.test.ts
       }
       ${if pkgs.stdenv.isLinux then ''
         mkdir -p "$TMPDIR/boxed-sdk-check-root"/{nix,source,fixture,proc,dev,bin}

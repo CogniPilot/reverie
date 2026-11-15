@@ -52,6 +52,7 @@
     "../test/plan-office-move-verifier.test.ts",
     "../test/plan-office-move-driver.test.ts",
     "../test/plan-office-agent-force.test.ts",
+    "../test/worker-viewer-docker-cli.test.ts",
     "../test/fixtures/plan-office-canary.mts",
     "../test/plan-office-driver.test.ts",
     "../test/docker-plan-move-work.test.ts",

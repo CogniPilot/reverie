@@ -10,6 +10,7 @@ import type { RecoveryAuthority, WorkerRecoveryAuthentication } from './worker-r
 import { RECOVERY_HEADER } from './worker-recovery-auth.js';
 import { WorkerViewerEndpointCustodyError } from './worker-execution.js';
 import type { PlanViewerReconnectLease } from './plan-move.js';
+import { dockerWorkerIdentityOf, dockerWorkerIdentityPresented, type DockerWorkerRequestIdentity } from './docker-worker-identity.js';
 
 const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 export type ViewerReconnectResult = 'connected' | 'inspection-requested' | 'unavailable' | 'busy' | 'changed';
@@ -52,6 +53,23 @@ export class WorkerViewerReconnect {
       const employee = this.deps.company.registeredEmployees().find(e => e.id === authority.employeeId);
       return !!caller && this.deps.session(authority.sessionId) === caller && caller.owner === authority.owner &&
         !!employee && employee.permissions.recoverEmployees === true;
+    };
+  }
+
+  /** A verified Docker worker has its own request identity, never a synthetic
+   * native recovery assertion. The shared company action retains both bindings
+   * and rechecks its independently granted recovery permission at every await. */
+  delegatedWorker(identity: DockerWorkerRequestIdentity, employeeId: string): () => boolean {
+    identity.require();
+    const action = this.deps.company.recoveryAction(employeeId, identity.owner, identity.sessionId);
+    return () => {
+      try {
+        identity.require();
+        action.require();
+        const actor = this.deps.company.registeredEmployees().find(employee => employee.id === identity.employeeId);
+        return !!actor && actor.owner === identity.owner && actor.sessionId === identity.sessionId &&
+          actor.sessionGeneration === identity.sessionGeneration;
+      } catch { return false; }
     };
   }
 
@@ -222,7 +240,13 @@ export function registerWorkerViewerReconnect(app: FastifyInstance, controller: 
   for (const action of ['', '/status']) app.post('/api/company/employees/:id/reconnect' + action, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     let authorized: () => boolean;
-    if (req.headers['x-reverie-parent-session'] === undefined && req.headers[RECOVERY_HEADER] === undefined &&
+    if (dockerWorkerIdentityPresented(req)) {
+      try {
+        const identity = dockerWorkerIdentityOf(req);
+        if (!identity || identity.owner !== ownerFor(req)) throw Error('Docker worker identity unavailable');
+        authorized = controller.delegatedWorker(identity, (req.params as { id: string }).id);
+      } catch { return reply.code(403).send({ success: false, error: 'Authenticated worker recovery permission is required' }); }
+    } else if (req.headers['x-reverie-parent-session'] === undefined && req.headers[RECOVERY_HEADER] === undefined &&
       req.headers['x-reverie-service-token'] === undefined && verifiedOwner(req)) authorized = () => verifiedOwner(req);
     else {
       try {

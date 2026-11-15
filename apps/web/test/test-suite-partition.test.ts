@@ -189,6 +189,7 @@ describe('test suite partition', () => {
     expect(nixCheckedFiles("    checkPhase = ''\n" + namespace + '\nrunHook postCheck')).toEqual([
       'test/boxed-plan-provider-entry.test.ts',
       'test/plan-office-agent-force.test.ts',
+      'test/worker-viewer-docker-cli.test.ts',
     ]);
     expect(namespace).toContain('bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL');
     expect(namespace).toContain('--ro-bind "$TMPDIR/boxed-sdk-check-root" /');
