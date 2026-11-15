@@ -10,6 +10,7 @@ import {
   verifyPlanOfficeReadyNative,
   planOfficeCanonicalAuthDigest,
   planOfficeVerifierReadAllowed,
+  verifyPlanOfficePublicHealth,
   type PlanOfficeBeforeMove,
 } from './helpers/plan-office-move-verifier.js';
 import { planFixtureTurnBarrier, type PlanProviderFixtureReport } from './helpers/boxed-plan-provider.js';
@@ -20,6 +21,9 @@ import { boxedOriginal, type DockerEmployeeInspect } from '../src/docker-employe
 import { identityHelperConfiguration } from '../src/docker-identity-helper.js';
 import { dockerContinuationDigest as digest } from '../src/docker-employee-continuation.js';
 import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import { providerHealthBinding } from '../src/worker-provider-health.js';
+import { encodeDockerProviderPlacement } from '../src/docker-provider-health-placement.js';
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -278,13 +282,40 @@ async function fixture() {
     );
   let capture = planFixtureTurnBarrier(startup) + '\n' + planFixtureTurnBarrier(handoff) + '\n❯ ',
     nativeCalls = 0;
-  const employee = { id: row.employeeId, sessionId: f.targetSid, sessionGeneration: 2, dockerBinding: binding(row) };
+  const employee = EmployeeSchema.parse({
+    id: row.employeeId,
+    sessionId: f.targetSid,
+    sessionGeneration: 2,
+    dockerBinding: binding(row),
+    name: 'CI Health',
+    icon: '🔭',
+    position: 'CI worker',
+    expertise: ['Synthetic health acceptance'],
+    createdAt: 1,
+    desiredRunning: true,
+  });
+  const health = {
+    binding: providerHealthBinding(employee),
+    employeeId: employee.id,
+    sessionId: employee.sessionId,
+    sessionGeneration: employee.sessionGeneration,
+    state: 'healthy',
+    reason: 'LIVE_NATIVE_COMMAND',
+    observedAtEpochMs: Date.now(),
+    dockerPlacement: encodeDockerProviderPlacement(employee.dockerBinding),
+  };
+  const publicEmployee = {
+    ...employee,
+    dockerProviderPlacement: health.dockerPlacement,
+    providerHealth: { ...health },
+  };
   const session = {
     id: f.targetSid,
     providerInputHeld: false,
     isWorking: false,
     status: 'idle',
     claudeSessionId: thread,
+    providerHealth: { ...health },
   };
   const resources = {
     employeeId: row.employeeId,
@@ -316,9 +347,20 @@ async function fixture() {
       snapshot: () => ({ employee, row }),
       ownerGet: vi.fn(
         async (p: string) =>
-          new Response(JSON.stringify({ success: true, data: p.startsWith('/api/sessions/') ? session : resources }), {
-            status: 200,
-          })
+          new Response(
+            JSON.stringify({
+              success: true,
+              data:
+                p === '/api/company'
+                  ? { employees: [publicEmployee] }
+                  : p.startsWith('/api/sessions/')
+                    ? session
+                    : resources,
+            }),
+            {
+              status: 200,
+            }
+          )
       ),
       record,
     };
@@ -357,6 +399,7 @@ async function fixture() {
     rawTarget,
     closedSource,
     employee,
+    publicEmployee,
     session,
     resources,
     auth,
@@ -410,6 +453,115 @@ it('does not accept readable post-handoff receipt bytes with only the old startu
     'handoff turn consuming-close'
   );
   expect(f.ports.record).not.toHaveBeenCalled();
+});
+it('does not accept native completion while public health belongs to a stale placement', async () => {
+  const f = await fixture();
+  f.session.providerHealth.dockerPlacement = 'old-source-placement';
+  await expect(verifyPlanOfficeMovedProvider(f.before, f.completed, f.ports)).rejects.toThrow();
+  expect(f.ports.record).not.toHaveBeenCalled();
+});
+it('rechecks the actual provider incarnation and both containers after the public health wait', async () => {
+  const f = await fixture(),
+    events: string[] = [];
+  const metadata = f.ports.metadata.getMockImplementation()!;
+  f.ports.metadata.mockImplementation(async (args) => {
+    if (args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) events.push('native');
+    if (args[0] === 'container') events.push('inspect:' + args[2]);
+    return metadata(args);
+  });
+  const ownerGet = f.ports.ownerGet.getMockImplementation()!;
+  f.ports.ownerGet.mockImplementation(async (path) => {
+    events.push('get:' + path);
+    return ownerGet(path);
+  });
+  await verifyPlanOfficeMovedProvider(f.before, f.completed, f.ports);
+  const health = events.indexOf('get:/api/company');
+  expect(health).toBeGreaterThan(0);
+  expect(events.lastIndexOf('native')).toBeGreaterThan(health);
+  expect(events.lastIndexOf('inspect:' + f.rawTarget.Id)).toBeGreaterThan(health);
+  expect(events.lastIndexOf('inspect:' + f.closedSource.Id)).toBeGreaterThan(health);
+  expect(f.ports.record).toHaveBeenCalledTimes(1);
+});
+it('waits read-only for both current public health projections and never sends a recovery mutation', async () => {
+  const f = await fixture(),
+    healthy = { ...f.publicEmployee.providerHealth };
+  f.publicEmployee.providerHealth.state = 'unknown';
+  f.session.providerHealth.state = 'unknown';
+  const pause = vi.fn(async () => {
+    Object.assign(f.publicEmployee.providerHealth, healthy);
+    Object.assign(f.session.providerHealth, healthy);
+  });
+  const observed = await verifyPlanOfficePublicHealth(f.employee, f.ports, pause);
+  expect(observed.employee.state).toBe('healthy');
+  expect(observed.session.state).toBe('healthy');
+  expect(pause).toHaveBeenCalledTimes(1);
+  expect(f.ports.ownerGet.mock.calls.map(([p]) => p)).toEqual([
+    '/api/company',
+    '/api/sessions/' + f.employee.sessionId,
+    '/api/company',
+    '/api/sessions/' + f.employee.sessionId,
+  ]);
+  expect(f.ports.record).not.toHaveBeenCalled();
+  expect(f.ports.metadata).not.toHaveBeenCalled();
+});
+it('bounds missing public health without treating native readiness as an HTTP health proof', async () => {
+  const f = await fixture();
+  Reflect.deleteProperty(f.publicEmployee, 'providerHealth');
+  Reflect.deleteProperty(f.session, 'providerHealth');
+  const pause = vi.fn(async () => {});
+  await expect(verifyPlanOfficePublicHealth(f.employee, f.ports, pause)).rejects.toThrow('remained unconfirmed');
+  expect(pause).toHaveBeenCalledTimes(69);
+  expect(f.ports.ownerGet).toHaveBeenCalledTimes(140);
+  expect(f.ports.record).not.toHaveBeenCalled();
+});
+it('rejects stale health, wrong scopes, revoked reads and duplicate public bindings', async () => {
+  for (const change of [
+    { binding: 'other-permission-generation' },
+    { employeeId: uuid(99) },
+    { sessionId: uuid(99) },
+    { sessionGeneration: 1 },
+    { dockerPlacement: 'old-placement' },
+    { observedAtEpochMs: 0 },
+    { observedAtEpochMs: Date.now() + 100_000 },
+    { state: 'dead' },
+    { reason: 'VIEWER_CONNECTED' },
+  ]) {
+    const f = await fixture();
+    Object.assign(f.session.providerHealth, change);
+    await expect(verifyPlanOfficePublicHealth(f.employee, f.ports)).rejects.toThrow();
+    expect(f.ports.record).not.toHaveBeenCalled();
+  }
+  const denied = await fixture();
+  denied.ports.ownerGet.mockResolvedValue(new Response('{}', { status: 403 }));
+  await expect(verifyPlanOfficePublicHealth(denied.employee, denied.ports)).rejects.toThrow('read refused');
+  const duplicate = await fixture();
+  duplicate.ports.ownerGet.mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        success: true,
+        data: {
+          employees: [duplicate.publicEmployee, duplicate.publicEmployee],
+        },
+      })
+    )
+  );
+  await expect(verifyPlanOfficePublicHealth(duplicate.employee, duplicate.ports)).rejects.toThrow();
+});
+it('refuses a revoked observation or backward clock before reading public health', async () => {
+  const revoked = await fixture();
+  revoked.ports.current.mockImplementation(() => {
+    throw Error('revoked');
+  });
+  await expect(verifyPlanOfficePublicHealth(revoked.employee, revoked.ports)).rejects.toThrow('revoked');
+  expect(revoked.ports.ownerGet).not.toHaveBeenCalled();
+  const backwards = await fixture();
+  const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(5).mockReturnValueOnce(4);
+  try {
+    await expect(verifyPlanOfficePublicHealth(backwards.employee, backwards.ports)).rejects.toThrow();
+    expect(backwards.ports.ownerGet).not.toHaveBeenCalled();
+  } finally {
+    clock.mockRestore();
+  }
 });
 it('refuses live/restarted sources, wrong target PID birth, stale scope, owner logout or unverified resource facts', async () => {
   const live = await fixture();

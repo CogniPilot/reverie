@@ -21,6 +21,9 @@ import {
 import { planFixtureTurnBarrier, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
 import { PlanOfficeMoveScenario } from './plan-office-move-driver.js';
 import { planOfficeSession } from './plan-office-driver.js';
+import { EmployeeSchema } from '../../src/company-types.js';
+import { providerHealthBinding, PROVIDER_HEALTH_MAX_AGE_MS } from '../../src/worker-provider-health.js';
+import { encodeDockerProviderPlacement } from '../../src/docker-provider-health-placement.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/),
   uuid = z.string().uuid(),
   image = z.string().regex(/^sha256:[a-f0-9]{64}$/);
@@ -48,6 +51,94 @@ export interface PlanOfficeBeforeMove {
   readonly sourceInspect: DockerEmployeeInspect;
   readonly home: { source: string; dev: string; ino: string; user: string };
   readonly canonicalAuthDigest: string;
+}
+const publicHealth = z
+  .object({
+    binding: z.string(),
+    employeeId: uuid,
+    sessionId: uuid,
+    sessionGeneration: z.number().int().positive().safe(),
+    state: z.enum(['healthy', 'dead', 'unknown']),
+    reason: z.string(),
+    observedAtEpochMs: z.number().int().nonnegative().safe(),
+    dockerPlacement: z.string(),
+  })
+  .strict();
+/** Public readbacks must expose the same fresh native-health scope used by the
+ * roster. Native process evidence alone must not mask a broken HTTP projection.
+ * This is read-only acceptance, never authority to restart or recover a worker. */
+export async function verifyPlanOfficePublicHealth(
+  employeeValue: unknown,
+  ports: Pick<PlanOfficePhysicalPorts, 'current' | 'ownerGet'>,
+  pause = () => new Promise<void>((resolve) => setTimeout(resolve, 500))
+) {
+  const expected = EmployeeSchema.parse(employeeValue),
+    binding = providerHealthBinding(expected),
+    placement = encodeDockerProviderPlacement(expected.dockerBinding);
+  assert.equal(expected.desiredRunning, true);
+  assert.equal(expected.onVacation, false);
+  assert.equal(expected.bindingMigration, undefined);
+  assert.ok(placement);
+  const started = performance.now();
+  let previousEpoch = Date.now(),
+    previousMono = started;
+  const clock = () => {
+    const epoch = Date.now(),
+      mono = performance.now();
+    assert.ok(Number.isSafeInteger(epoch) && epoch >= previousEpoch);
+    assert.ok(Number.isFinite(mono) && mono >= previousMono);
+    assert.ok(mono - started <= 35_000, 'Public provider health observation deadline');
+    previousEpoch = epoch;
+    previousMono = mono;
+    return epoch;
+  };
+  const read = async (path: string) => {
+    ports.current();
+    const response = await ports.ownerGet(path);
+    ports.current();
+    assert.equal(response.status, 200, 'Public provider health read refused');
+    return z.object({ success: z.literal(true), data: z.unknown() }).parse(await response.json()).data;
+  };
+  for (let attempt = 0; attempt < 70; attempt++) {
+    clock();
+    const company = z
+      .object({ employees: z.array(z.object({ id: z.string(), sessionId: z.string() }).passthrough()) })
+      .parse(await read('/api/company'));
+    const rows = company.employees.filter((e) => e.id === expected.id);
+    assert.equal(rows.length, 1);
+    assert.equal(company.employees.filter((e) => e.sessionId === expected.sessionId).length, 1);
+    const employee = EmployeeSchema.extend({
+      providerHealth: publicHealth.optional(),
+      dockerProviderPlacement: z.string(),
+    })
+      .passthrough()
+      .parse(rows[0]);
+    assert.equal(providerHealthBinding(employee), binding);
+    assert.equal(employee.dockerProviderPlacement, placement);
+    const session = z
+      .object({ id: uuid, providerHealth: publicHealth.optional() })
+      .parse(await read('/api/sessions/' + expected.sessionId));
+    assert.equal(session.id, expected.sessionId);
+    ports.current();
+    const epoch = clock();
+    for (const health of [employee.providerHealth, session.providerHealth]) {
+      if (!health) continue;
+      assert.equal(health.binding, binding);
+      assert.equal(health.employeeId, expected.id);
+      assert.equal(health.sessionId, expected.sessionId);
+      assert.equal(health.sessionGeneration, expected.sessionGeneration);
+      assert.equal(health.dockerPlacement, placement);
+      assert.ok(health.observedAtEpochMs <= epoch && epoch - health.observedAtEpochMs <= PROVIDER_HEALTH_MAX_AGE_MS);
+      assert.notEqual(health.state, 'dead', 'Moved provider reported dead');
+      if (health.state === 'healthy') assert.equal(health.reason, 'LIVE_NATIVE_COMMAND');
+    }
+    if (employee.providerHealth?.state === 'healthy' && session.providerHealth?.state === 'healthy') {
+      ports.current();
+      return { employee: employee.providerHealth, session: session.providerHealth };
+    }
+    if (attempt < 69) await pause();
+  }
+  throw Error('Moved provider public health remained unconfirmed; no action was retried');
 }
 function stamp(stat: fs.Stats) {
   return [stat.dev, stat.ino, stat.uid, stat.gid, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs].join(
@@ -448,6 +539,11 @@ export async function verifyPlanOfficeMovedProvider(
         output.includes(planFixtureTurnBarrier(report))
     );
     assert.ok(handoff, 'Target handoff turn consuming-close/real callback proof unconfirmed');
+    const publicHealth = await verifyPlanOfficePublicHealth(currentSnapshot.employee, {
+      current,
+      ownerGet: ports.ownerGet,
+    });
+    current();
     const nativeAfter = pane.parse(JSON.parse(await metadata(nodeRead(row))));
     assert.deepEqual(nativeAfter, nativeBefore);
     const final = await inspect(row.destination!.containerId);
@@ -470,6 +566,7 @@ export async function verifyPlanOfficeMovedProvider(
       installerInitial: installation.initial,
       installerLive: installation.live,
       resources: resources.data,
+      publicHealth,
       handoffTurnId: handoff.turnId,
       actualCallbacksAndConsumingCloses: true,
       limitation:
