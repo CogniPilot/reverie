@@ -37,7 +37,7 @@ async function fixture(
   // Keep the shipped document structure, but bootstrap only the conversation
   // shell fixture. Every request stays inside this intercepted synthetic origin.
   const document = new JSDOM(read('index.html'));
-  document.window.document.querySelectorAll('script,link').forEach((element) => element.remove());
+  document.window.document.querySelectorAll('script,link').forEach((element: Element) => element.remove());
   const html = document.serialize();
   document.window.close();
   // Canonical application projection in the test's server realm. The kernel
@@ -993,7 +993,7 @@ const planEmployee = {
 async function planLayoutFixture(page: Page, respond: (route: Route) => Promise<void>) {
   const originalHtml = read('company-plans.html');
   const document = new JSDOM(originalHtml);
-  document.window.document.querySelectorAll('script').forEach((el) => el.remove());
+  document.window.document.querySelectorAll('script').forEach((el: Element) => el.remove());
   const html = document.serialize();
   document.window.close();
   const accounts = [
@@ -1025,6 +1025,305 @@ async function planLayoutFixture(page: Page, respond: (route: Route) => Promise<
         const dialog=document.getElementById('moveDlg');
         dialog.showModal();showPlanMoveProgress(dialog,record,${JSON.stringify(planEmployee.name)});
       };`,
+  });
+}
+
+type ForcePlanBody = { id: string; employeeId: string; sessionId: string; toAccount: string; handoff: string };
+const forceWarning = `Force ${planEmployee.name} to move now? This skips their handoff approval. The current session is stopped before the replacement starts and becomes ready. Unfinished work may be interrupted, and downtime or recovery may be required.`;
+const heldPlanMove = (id: string) => ({
+  id,
+  employeeId: planEmployee.id,
+  oldSession: planEmployee.sessionId,
+  newSession: '44444444-4444-4444-8444-444444444444',
+  toAccount: 'second',
+  phase: 'recovery-required',
+  backend: 'docker',
+  sourceCleanupVerified: true,
+  allowedActions: ['continue-original'],
+});
+async function planConsumerFixture(page: Page, respond: (route: Route, pathname: string) => Promise<void>) {
+  await planLayoutFixture(page, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/plans/moves/preview')
+      return route.fulfill({
+        json: { success: true, data: { account: 'first', mode: 'codex', sessionId: planEmployee.sessionId } },
+      });
+    if (pathname === '/api/plans/move-impact')
+      return route.fulfill({ status: 503, json: { success: false, error: 'Synthetic estimate unavailable' } });
+    if (pathname === '/api/plans/requests/recent') return route.fulfill({ json: { success: true, data: [] } });
+    if (pathname === '/api/plans/allocations')
+      return route.fulfill({ json: { success: true, data: { employees: [planEmployee], accounts: [] } } });
+    return respond(route, pathname);
+  });
+}
+async function openPlanConsumer(page: Page) {
+  await page.evaluate(
+    (id) =>
+      (window as unknown as { __openPlanMove(id: string, destination: string): Promise<void> }).__openPlanMove(
+        id,
+        'second'
+      ),
+    planEmployee.id
+  );
+  return page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+}
+async function planConsumerBounds(
+  page: Page,
+  panel: ReturnType<Page['getByRole']>,
+  width: number,
+  controls: string[],
+  screenshot: string
+) {
+  const height = width === 320 ? 640 : 900;
+  expect(await panel.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+  const bounds = await panel.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+  for (const name of controls) {
+    const control = panel.getByRole('button', { name, exact: true });
+    await control.scrollIntoViewIfNeeded();
+    const rect = await control.boundingBox();
+    expect(rect).not.toBeNull();
+    expect(rect!.height).toBeGreaterThanOrEqual(32);
+    expect(rect!.x).toBeGreaterThanOrEqual(0);
+    expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
+    expect(rect!.y).toBeGreaterThanOrEqual(0);
+    expect(rect!.y + rect!.height).toBeLessThanOrEqual(height);
+  }
+  if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+    await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, screenshot + '-' + width + '.png') });
+  }
+}
+async function planConsumerBrowser(width: number, run: (page: Page) => Promise<void>) {
+  const browser = await chromium.launch({
+    headless: true,
+    chromiumSandbox: true,
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+      : {}),
+  });
+  try {
+    const page = await browser.newPage({
+      viewport: { width, height: width === 320 ? 640 : 900 },
+      deviceScaleFactor: 1,
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await run(page);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}
+
+// Actual Chromium consumers of the shipped Plans closure, with closed synthetic
+// API replies. These assert user actions/protocol scope, not native move effects.
+for (const width of [320, 1280]) {
+  it(`declines the actual force warning without sending a force operation at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: string[] = [],
+        warnings: string[] = [];
+      await planConsumerFixture(page, async (route, pathname) => {
+        writes.push(pathname);
+        return route.fulfill({ status: 500, json: { success: false, error: 'Unexpected business request' } });
+      });
+      const panel = await openPlanConsumer(page);
+      page.once('dialog', async (dialog) => {
+        warnings.push(dialog.message());
+        await dialog.dismiss();
+      });
+      await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+      expect(warnings).toEqual([forceWarning]);
+      expect(writes).toEqual([]);
+      expect(await panel.getByRole('button', { name: 'Force move now', exact: true }).isEnabled()).toBe(true);
+      expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isEnabled()).toBe(true);
+      await planConsumerBounds(page, panel, width, ['Force move now', 'Cancel'], 'plan-force-declined');
+    });
+  });
+
+  it(`accepts the force warning as one original operation and blocks duplicate GUI submission at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: ForcePlanBody[] = [],
+        warnings: string[] = [];
+      let release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await planConsumerFixture(page, async (route, pathname) => {
+        if (pathname === '/api/plans/moves/force') {
+          expect(route.request().method()).toBe('POST');
+          writes.push(route.request().postDataJSON());
+          await pending;
+          return route.fulfill({ status: 202, json: { success: true, data: heldPlanMove(writes[0]!.id) } });
+        }
+        throw Error('Unexpected force consumer request: ' + pathname);
+      });
+      try {
+        const panel = await openPlanConsumer(page),
+          force = panel.getByRole('button', { name: 'Force move now', exact: true });
+        page.once('dialog', async (dialog) => {
+          warnings.push(dialog.message());
+          await dialog.accept();
+        });
+        await force.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(warnings).toEqual([forceWarning]);
+        expect(await force.isDisabled()).toBe(true);
+        expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isDisabled()).toBe(true);
+        await force.evaluate((button) => (button as HTMLButtonElement).click());
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toEqual({
+          id: expect.stringMatching(/^force-[a-f0-9]{32}$/),
+          employeeId: planEmployee.id,
+          sessionId: planEmployee.sessionId,
+          toAccount: 'second',
+          handoff:
+            'The owner forced this plan move without waiting for a fresh handoff. Continue as the same employee using your existing identity, workspace and memory. Inspect saved checkpoints and recent owner messages before resuming; do not repeat uncertain side effects.',
+        });
+        release();
+        await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+        expect(await panel.locator('[data-move-sessions]').textContent()).toContain(planEmployee.sessionId);
+        await planConsumerBounds(
+          page,
+          panel,
+          width,
+          ['Recover original move', 'Refresh status'],
+          'plan-force-accepted'
+        );
+        expect(writes).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
+  });
+
+  it(`retains a lost force reply and checks only the original ID without blind replay at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: ForcePlanBody[] = [],
+        reads: string[] = [];
+      await planConsumerFixture(page, async (route, pathname) => {
+        if (pathname === '/api/plans/moves/force') {
+          expect(route.request().method()).toBe('POST');
+          writes.push(route.request().postDataJSON());
+          return route.abort('failed');
+        }
+        if (writes[0] && pathname === '/api/plans/moves/' + writes[0].id + '/status') {
+          expect(route.request().method()).toBe('POST');
+          reads.push(pathname);
+          const record = heldPlanMove(writes[0].id);
+          return route.fulfill({
+            json: {
+              success: true,
+              data: reads.length === 1 ? { ...record, employeeId: '99999999-9999-4999-8999-999999999999' } : record,
+            },
+          });
+        }
+        throw Error('Unexpected lost-force consumer request: ' + pathname);
+      });
+      const panel = await openPlanConsumer(page);
+      page.once('dialog', (dialog) => dialog.accept());
+      await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+      const inspect = panel.getByRole('button', { name: 'Check original move', exact: true });
+      await inspect.waitFor();
+      expect(writes).toHaveLength(1);
+      expect(reads).toEqual([]);
+      expect(await panel.getByRole('alert').textContent()).toContain(writes[0]!.id);
+      expect(await panel.getByRole('button', { name: 'Force move now', exact: true }).isDisabled()).toBe(true);
+      expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isDisabled()).toBe(true);
+      await planConsumerBounds(page, panel, width, ['Check original move', 'Cancel'], 'plan-force-original-unknown');
+      await inspect.click();
+      await expect.poll(() => panel.getByRole('alert').textContent()).toContain('original record scope changed');
+      expect(reads).toEqual(['/api/plans/moves/' + writes[0]!.id + '/status']);
+      expect(writes).toHaveLength(1);
+      await inspect.click();
+      await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+      expect(reads).toEqual(Array(2).fill('/api/plans/moves/' + writes[0]!.id + '/status'));
+      expect(writes).toHaveLength(1);
+    });
+  });
+
+  it(`recovers only an explicitly confirmed original Docker move and rechecks its exact tuple at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const move = heldPlanMove('33333333-3333-4333-8333-333333333333');
+      const order: string[] = [],
+        writes: Array<{ path: string; body: unknown }> = [];
+      let foreign = true,
+        release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await planConsumerFixture(page, async (route, pathname) => {
+        order.push(pathname);
+        if (pathname === '/api/plans/moves/' + move.id + '/status') {
+          expect(route.request().method()).toBe('POST');
+          return route.fulfill({
+            json: {
+              success: true,
+              data: foreign ? { ...move, newSession: '99999999-9999-4999-8999-999999999999' } : move,
+            },
+          });
+        }
+        if (pathname === '/api/plans/moves/' + move.id + '/resolve') {
+          expect(route.request().method()).toBe('POST');
+          writes.push({ path: pathname, body: route.request().postDataJSON() });
+          await pending;
+          return route.fulfill({
+            status: 202,
+            json: {
+              success: true,
+              data: { ...move, phase: 'completed', allowedActions: [], sourceViewRetirement: { state: 'completed' } },
+            },
+          });
+        }
+        throw Error('Unexpected recovery consumer request: ' + pathname);
+      });
+      try {
+        await page.evaluate(
+          (record) => (window as unknown as { __showPlanMove(record: unknown): void }).__showPlanMove(record),
+          move
+        );
+        const panel = page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+        const recover = panel.getByRole('button', { name: 'Recover original move', exact: true });
+        expect(await recover.isEnabled()).toBe(true);
+        expect(writes).toEqual([]);
+        expect(order).toEqual([]);
+        await recover.click();
+        await expect.poll(() => panel.getByRole('status').textContent()).toContain('Recovery was not requested');
+        expect(writes).toEqual([]);
+        expect(order).toEqual(['/api/plans/moves/' + move.id + '/status']);
+        foreign = false;
+        await panel.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect.poll(() => recover.isEnabled()).toBe(true);
+        await planConsumerBounds(page, panel, width, ['Recover original move', 'Refresh status'], 'plan-held-recovery');
+        await recover.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(order.slice(-2)).toEqual([
+          '/api/plans/moves/' + move.id + '/status',
+          '/api/plans/moves/' + move.id + '/resolve',
+        ]);
+        expect(writes).toEqual([
+          {
+            path: '/api/plans/moves/' + move.id + '/resolve',
+            body: {
+              action: 'continue-original',
+              oldSession: move.oldSession,
+              newSession: move.newSession,
+              toAccount: move.toAccount,
+            },
+          },
+        ]);
+        expect(await recover.isDisabled()).toBe(true);
+        release();
+        await panel.waitFor({ state: 'hidden' });
+        expect(writes).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
   });
 }
 for (const width of [320, 1280])
