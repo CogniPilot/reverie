@@ -1059,6 +1059,87 @@
         "expect((await current()).position).toBe(before.position)"
       ],
       "outcome": "Four static Chromium cases cover Office/Goals at phone/desktop widths. The real owner API commits before an injected503 loses its acknowledgement. All general grant controls stay held, the error and explicit Refresh fit the viewport, a readback observes the actual committed permission without replay, and an explicit revocation is independently confirmed on disk while the profile draft stays unsaved. No provider or delegated/native action is invoked."
+    },
+    "account.consumer.start-refusal-retry": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "retries a refused account sign-in only on an explicit click at ${width}px",
+      "assertions": [
+        "status: starts === 1 ? 503 : 403",
+        "await expect.poll(() => dialog.getByRole('status').textContent()).toContain('Synthetic service unavailable')",
+        "await page.clock.runFor(6000)",
+        "expect(starts).toBe(1)",
+        "await retry.click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toContain('Synthetic sign-in forbidden')",
+        "expect(starts).toBe(2)",
+        "expect(await page.getByRole('dialog').count()).toBe(1)",
+        "expect(calls).toEqual([{ path: startPath, method: 'POST' }, { path: startPath, method: 'POST' },])"
+      ],
+      "outcome": "At320 and1280px the shipped dialog retains a synthetic503 start failure, issues no automatic retry across four timer intervals, and dispatches exactly one new POST only when Try again is clicked. A synthetic403 refusal stays visible and Close removes the dialog. This is closed API consumer behavior, not real authentication or authorization enforcement."
+    },
+    "account.consumer.failed-poll-retry": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "stops a failed account poll and exposes one explicit retry at ${width}px",
+      "assertions": [
+        "status: 503, json: { ok: false, error: 'Synthetic poll unavailable' }",
+        "await page.clock.runFor(1500)",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('The sign-in helper stopped. Try again.')",
+        "await page.clock.runFor(6000)",
+        "expect({ starts, polls }).toEqual({ starts: 1, polls: 1 })",
+        "await page.getByRole('button', { name: 'Try again', exact: true }).click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for attempt-2')",
+        "expect(starts).toBe(2)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/attempt-2', method: 'DELETE' }",
+        "expect(await page.getByRole('dialog').count()).toBe(0)"
+      ],
+      "outcome": "Phone/desktop shipped UI stops polling after a synthetic503, displays the failure without automatic restart, and sends one explicit retry. Cancel targets only the replacement attempt and usage is not refreshed. Real helper retirement, provider credentials and account-service retry admission remain separate."
+    },
+    "account.consumer.wrong-account": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "starts another account attempt only through Wrong account at ${width}px",
+      "assertions": [
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Signed in')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app.refreshed)).toBe(1)",
+        "await page.clock.runFor(6000)",
+        "expect(starts).toBe(1)",
+        "await page.getByRole('button', { name: 'Wrong account? Sign in again', exact: true }).click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for choice-2')",
+        "expect(starts).toBe(2)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/choice-2', method: 'DELETE' }",
+        "expect(await page.getByRole('dialog').count()).toBe(0)"
+      ],
+      "outcome": "At both widths a synthetic successful poll refreshes usage once and stays settled until Wrong account is clicked. That shipped button starts exactly one new attempt for the same account; Cancel targets its ID without deleting the settled first attempt. Vendor identity, credentials and actual login success are not qualified."
+    },
+    "account.consumer.stale-poll": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "ignores a delayed account poll after cancellation and replacement at ${width}px",
+      "assertions": [
+        "await gate",
+        "await expect.poll(() => entered, { timeout: 5000 }).toBe(true)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/delayed-1', method: 'DELETE' }",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for delayed-2')",
+        "release()",
+        "await expect.poll(() => page.evaluate(() => (window as unknown as AccountWindow).previousSignIn?.polling)).toBe(false)",
+        "expect(await page.getByRole('status').textContent()).toBe('Waiting for delayed-2')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app._signIn?.view.id)).toBe('delayed-2')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app.refreshed || 0)).toBe(0)",
+        "await page.getByRole('button', { name: 'Close', exact: true }).click()",
+        "{ path: '/api/plans/logins/delayed-2', method: 'DELETE' }"
+      ],
+      "outcome": "A real timer issues the closed synthetic GET and a held reply arrives after Cancel and a replacement dialog. The shipped stale-state guard prevents the old success from repainting the replacement or refreshing usage. Cancel and Close send DELETE for their exact live attempt IDs. This does not establish server cancellation or provider process retirement."
+    },
+    "account.consumer.close-cancels": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "opens and cancels a single account sign-in without a Plans screen",
+      "assertions": [
+        "await dialog.getByRole('button', { name: 'Close', exact: true }).click()",
+        "await page.waitForFunction(() => (window as unknown as AccountWindow).app._signIn === null)",
+        "expect(calls).toContainEqual({ path: '/api/plans/logins/test-login', method: 'DELETE' })",
+        "expect(await page.locator('.plans-screen').count()).toBe(0)"
+      ],
+      "outcome": "The existing Chromium case clicks shipped Close and observes a DELETE for the pending synthetic login without opening Plans. It proves consumer dispatch only, not authentication, server cancellation or provider effects."
     }
   },
   "mappings": [
@@ -1472,6 +1553,34 @@
         "office.employee-office-goals-permissions.committed-lost-readback"
       ],
       "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",
+      "scenarios": ["account.consumer.start-refusal-retry", "account.consumer.failed-poll-retry"],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::wrong::button:plans-link",
+      "scenarios": ["account.consumer.wrong-account"],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::cancel::button:plans-link",
+      "scenarios": [
+        "account.consumer.failed-poll-retry",
+        "account.consumer.wrong-account",
+        "account.consumer.stale-poll"
+      ],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::signInAccount::close::button:plans-btn",
+      "scenarios": [
+        "account.consumer.close-cancels",
+        "account.consumer.start-refusal-retry",
+        "account.consumer.stale-poll"
+      ],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
     }
   ],
   "gaps": [
@@ -6036,10 +6145,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::cancel::button:plans-link",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/account-ui.js::_renderSignIn::done::button:plans-btn plans-btn--primary",
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
@@ -6056,15 +6161,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/account-ui.js::_renderSignIn::send::button:plans-btn plans-btn--primary",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::wrong::button:plans-link",
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
@@ -6086,10 +6183,6 @@
     {
       "declaration": "src/web/public/account-ui.js::accountUiEl::node::dynamic-constructor:9332ac7d5042",
       "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
-    },
-    {
-      "declaration": "src/web/public/account-ui.js::signInAccount::close::button:plans-btn",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
       "declaration": "src/web/public/account-ui.js::signInAccount::e::dynamic-constructor:9332ac7d5042",
@@ -7436,7 +7529,7 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1490,
+  "gapBudget": 1486,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",

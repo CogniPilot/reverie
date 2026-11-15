@@ -408,6 +408,7 @@ jobs:
             TEST_RESOURCE_CONTROLS_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/resource-controls" \
             TEST_RETIREMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/retirement" \
             TEST_RECOVERY_SETTLEMENT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/recovery-settlement" \
+            TEST_ACCOUNT_SCREENSHOT_DIR="$REVERIE_BROWSER_ARTIFACTS/accounts" \
             nix develop --command node apps/web/node_modules/vitest/vitest.mjs run \
               --config apps/web/config/vitest.browser.config.ts \
               apps/web/test/company-resource-layout.browser.test.ts \
@@ -422,6 +423,7 @@ jobs:
               apps/web/test/browser-coverage-attribution.browser.test.ts \
               apps/web/test/tab-rail-resize.browser.test.ts \
               apps/web/test/tab-layout-editing.browser.test.ts \
+              apps/web/test/account-ui.browser.test.ts \
             2>&1 | tee acceptance/resource-layout.log
           # Validate actual execution/context/source evidence after every suite
           # settles. This raw report does not imply percentage or full-site coverage.
