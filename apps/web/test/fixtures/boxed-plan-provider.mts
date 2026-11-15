@@ -3,10 +3,15 @@
 import process from 'node:process';
 import { realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { z } from 'zod';
 import { BoxedPlanProviderFixture, requirePlanFixtureHooks } from '../helpers/boxed-plan-provider.js';
-import { planFixtureAccountStatus, PlanProviderFixtureFiles } from '../helpers/boxed-plan-provider-files.js';
+import {
+  planFixtureAccountStatus,
+  PlanProviderFixtureFiles,
+  type PlanFixtureDiagnosticStage,
+} from '../helpers/boxed-plan-provider-files.js';
 import { WORKER_CLIENT_ENTRY } from '../../src/worker-client-manifest.js';
 
 export function planProviderLaunch(args: readonly string[], env: NodeJS.ProcessEnv) {
@@ -29,40 +34,106 @@ export function planProviderLaunch(args: readonly string[], env: NodeJS.ProcessE
 }
 /** Fixed argv transport only: no shell, provider/backend emulation, caller token or command from stdin. */
 export async function planFixtureCli(args: readonly string[], input?: string) {
-  return new Promise<{ exitCode: number | null; signal: string | null; stdout: string; stderr: string }>(
-    (resolve, reject) => {
-      const child = spawn(WORKER_CLIENT_ENTRY, [...args], { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
-      const chunks: Buffer[][] = [[], []];
-      let length = 0,
-        failed = false;
-      const fail = (error: Error) => {
-        if (failed) return;
-        failed = true;
-        child.kill('SIGKILL');
-        reject(error);
-      };
-      const timer = setTimeout(() => fail(Error('Fixed fixture CLI deadline')), 20000);
-      for (const [index, stream] of [child.stdout, child.stderr].entries())
-        stream.on('data', (chunk: Buffer) => {
-          length += chunk.length;
-          if (length > 65536) fail(Error('Fixed fixture CLI output bound'));
-          else chunks[index]!.push(chunk);
-        });
-      child.once('error', fail);
-      child.stdin.once('error', () => fail(Error('Fixed fixture CLI stdin unconfirmed')));
-      child.once('close', (exitCode, signal) => {
-        clearTimeout(timer);
-        if (failed) return;
-        resolve({
-          exitCode,
-          signal,
-          stdout: Buffer.concat(chunks[0]!).toString('utf8'),
-          stderr: Buffer.concat(chunks[1]!).toString('utf8'),
-        });
+  return new Promise<{
+    exitCode: number | null;
+    signal: string | null;
+    stdout: string;
+    stderr: string;
+    stdoutSha256: string;
+    stderrSha256: string;
+  }>((resolve, reject) => {
+    const child = spawn(WORKER_CLIENT_ENTRY, [...args], { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+    const chunks: Buffer[][] = [[], []];
+    let length = 0,
+      failed = false;
+    const fail = (error: Error) => {
+      if (failed) return;
+      failed = true;
+      child.kill('SIGKILL');
+      reject(error);
+    };
+    const timer = setTimeout(() => fail(Error('Fixed fixture CLI deadline')), 20000);
+    for (const [index, stream] of [child.stdout, child.stderr].entries())
+      stream.on('data', (chunk: Buffer) => {
+        length += chunk.length;
+        if (length > 65536) fail(Error('Fixed fixture CLI output bound'));
+        else chunks[index]!.push(chunk);
       });
-      child.stdin.end(input ?? '');
+    child.once('error', fail);
+    child.stdin.once('error', () => fail(Error('Fixed fixture CLI stdin unconfirmed')));
+    child.once('close', (exitCode, signal) => {
+      clearTimeout(timer);
+      if (failed) return;
+      resolve({
+        exitCode,
+        signal,
+        stdout: Buffer.concat(chunks[0]!).toString('utf8'),
+        stderr: Buffer.concat(chunks[1]!).toString('utf8'),
+        stdoutSha256: createHash('sha256').update(Buffer.concat(chunks[0]!)).digest('hex'),
+        stderrSha256: createHash('sha256').update(Buffer.concat(chunks[1]!)).digest('hex'),
+      });
+    });
+    child.stdin.end(input ?? '');
+  });
+}
+export async function planFixtureStage<T>(
+  files: Pick<PlanProviderFixtureFiles, 'diagnostic'>,
+  stage: PlanFixtureDiagnosticStage,
+  run: () => T | Promise<T>
+): Promise<T> {
+  files.diagnostic(stage, 'issued');
+  let value: T;
+  try {
+    value = await run();
+  } catch (error) {
+    files.diagnostic(stage, 'failed');
+    throw error;
+  }
+  files.diagnostic(stage, 'returned');
+  return value;
+}
+function probeStage(args: readonly string[]): PlanFixtureDiagnosticStage {
+  const command = args.join(' ');
+  if (command === 'agent capabilities --json') return 'capabilities';
+  if (command === 'worker-callback hook-event --event stop') return 'hook-stop';
+  if (command === 'worker-callback hook-event --event prompt_submitted') return 'hook-prompt';
+  if (command === 'plans --json') return 'plans';
+  if (command === 'agent plan-move list --json') return 'move-list';
+  if (args[0] === 'agent' && args[1] === 'plan-move' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/.test(args[3] ?? '')) {
+    if (args.length === 5 && args[2] === 'status' && args[4] === '--json') return 'move-status';
+    if (
+      args.length === 7 &&
+      args[2] === 'approve' &&
+      args[4] === '--handoff-file' &&
+      args[5] === '/home/agent/.fixture/plan-handoff-' + args[3] + '.txt' &&
+      args[6] === '--json'
+    )
+      return 'move-approve';
+  }
+  throw Error('Fixed fixture diagnostic stage refused');
+}
+export function observedPlanFixtureCli(
+  files: Pick<PlanProviderFixtureFiles, 'diagnostic'>,
+  run = planFixtureCli
+): typeof planFixtureCli {
+  return async (args, input) => {
+    const stage = probeStage(args);
+    files.diagnostic(stage, 'issued');
+    let reply: Awaited<ReturnType<typeof planFixtureCli>>;
+    try {
+      reply = await run(args, input);
+    } catch (error) {
+      files.diagnostic(stage, 'failed');
+      throw error;
     }
-  );
+    files.diagnostic(stage, reply.exitCode === 0 && reply.signal === null ? 'returned' : 'failed', {
+      exitCode: reply.exitCode,
+      signal: reply.signal,
+      stdoutSha256: reply.stdoutSha256,
+      stderrSha256: reply.stderrSha256,
+    });
+    return reply;
+  };
 }
 export async function planProviderMain(args = process.argv.slice(2)) {
   if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) {
@@ -81,22 +152,22 @@ export async function planProviderMain(args = process.argv.slice(2)) {
     process.stdout.write(JSON.stringify(status) + '\n');
     return;
   }
-  const launch = planProviderLaunch(args, process.env),
-    files = new PlanProviderFixtureFiles('/home/agent', process.env.CLAUDE_CONFIG_DIR);
-  const contract = files.contract();
+  const files = new PlanProviderFixtureFiles('/home/agent', process.env.CLAUDE_CONFIG_DIR);
+  const launch = await planFixtureStage(files, 'launch-parse', () => planProviderLaunch(args, process.env));
+  const contract = await planFixtureStage(files, 'contract-read', () => files.contract());
   // Simulate SDK startup refresh BEFORE the measured request captures source material.
   if (
     contract.refreshAccountId !== null &&
     process.env.CLAUDE_CONFIG_DIR !== undefined &&
     process.env.CLAUDE_CONFIG_DIR !== '/home/agent/.claude'
   )
-    files.refreshAuthOnce(contract.refreshAccountId);
+    await planFixtureStage(files, 'startup-refresh', () => files.refreshAuthOnce(contract.refreshAccountId!));
   let release: { id: string; resolve: () => void } | undefined;
   const fake = new BoxedPlanProviderFixture(
     contract,
     { ...launch, namespacePid: process.pid },
     {
-      cli: planFixtureCli,
+      cli: observedPlanFixtureCli(files),
       prepareApproval: async (id, handoff) => files.prepareApproval(id, handoff),
       refreshAuthOnce: async (id) => {
         // Legacy source auth is NOT installed-generation lineage and never counts as a refresh.
@@ -126,7 +197,7 @@ export async function planProviderMain(args = process.argv.slice(2)) {
     },
     launch.settings
   );
-  await fake.start();
+  await planFixtureStage(files, 'startup-sequence', () => fake.start());
   let stopped = false;
   let buffer = '',
     serial = Promise.resolve();

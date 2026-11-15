@@ -111,6 +111,41 @@ function write(fd: number, leaf: string, bytes: Buffer): void {
   });
   fs.fsyncSync(fd);
 }
+const diagnosticHash = z.string().regex(/^[a-f0-9]{64}$/);
+export const PlanFixtureDiagnostic = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('synthetic-plan-provider-diagnostic-v1'),
+    namespacePid: z.number().int().min(2),
+    stage: z.enum([
+      'launch-parse',
+      'contract-read',
+      'startup-refresh',
+      'startup-sequence',
+      'capabilities',
+      'hook-stop',
+      'hook-prompt',
+      'plans',
+      'move-list',
+      'move-status',
+      'move-approve',
+    ]),
+    state: z.enum(['issued', 'returned', 'failed']),
+    exitCode: z.number().int().min(0).max(255).nullable(),
+    signal: z
+      .string()
+      .regex(/^SIG[A-Z0-9]{1,16}$/)
+      .nullable(),
+    stdoutSha256: diagnosticHash.nullable(),
+    stderrSha256: diagnosticHash.nullable(),
+  })
+  .strict();
+export type PlanFixtureDiagnosticStage = z.infer<typeof PlanFixtureDiagnostic>['stage'];
+export type PlanFixtureDiagnosticResult = Pick<
+  z.infer<typeof PlanFixtureDiagnostic>,
+  'exitCode' | 'signal' | 'stdoutSha256' | 'stderrSha256'
+>;
+/** Diagnostics never establish readiness, idleness, authority or callback completion. */
 export class PlanProviderFixtureFiles {
   #serial = 0;
   // Namespace PIDs may repeat across replacement containers retaining the same HOME.
@@ -147,6 +182,31 @@ export class PlanProviderFixtureFiles {
         return result;
       });
     });
+  }
+  diagnostic(
+    stage: PlanFixtureDiagnosticStage,
+    state: 'issued' | 'returned' | 'failed',
+    result?: PlanFixtureDiagnosticResult
+  ) {
+    const value = PlanFixtureDiagnostic.parse({
+      version: 1,
+      purpose: 'synthetic-plan-provider-diagnostic-v1',
+      namespacePid: process.pid,
+      stage,
+      state,
+      exitCode: null,
+      signal: null,
+      stdoutSha256: null,
+      stderrSha256: null,
+      ...result,
+    });
+    return this.#scope((_home, fixture) =>
+      write(
+        fixture,
+        `plan-diagnostic-${process.pid}-${this.#publicationId}-${this.#serial++}.json`,
+        Buffer.from(JSON.stringify(value) + '\n')
+      )
+    );
   }
   contract() {
     return this.#scope((_home, fixture) =>

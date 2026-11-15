@@ -3,7 +3,11 @@ import { afterEach, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { PlanProviderFixtureFiles, preparePlanOfficeWorkerHome } from './helpers/boxed-plan-provider-files.js';
+import {
+  PlanProviderFixtureFiles,
+  PlanFixtureDiagnostic,
+  preparePlanOfficeWorkerHome,
+} from './helpers/boxed-plan-provider-files.js';
 const roots: string[] = [];
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -226,4 +230,44 @@ it('startup SDK refresh declines the other actual synthetic account without muta
   expect(fs.readFileSync(file, 'utf8')).toBe(other);
   expect(fs.statSync(file).ino).toBe(before.ino);
   expect(fs.existsSync(path.join(f.home, '.fixture/plan-refresh-plan-a.json'))).toBe(false);
+});
+
+it('publishes distinct private stage diagnostics without authority, raw output or readiness claims', () => {
+  const f = fixture();
+  f.files.diagnostic('capabilities', 'issued');
+  f.files.diagnostic('capabilities', 'failed', {
+    exitCode: 4,
+    signal: null,
+    stdoutSha256: 'a'.repeat(64),
+    stderrSha256: 'b'.repeat(64),
+  });
+  const names = fs.readdirSync(path.join(f.home, '.fixture')).filter((name) => name.startsWith('plan-diagnostic-'));
+  expect(names).toHaveLength(2);
+  const values = names.map((name) => {
+    const file = path.join(f.home, '.fixture', name),
+      stat = fs.lstatSync(file);
+    expect(stat.mode & 0o777).toBe(0o600);
+    expect(stat.nlink).toBe(1);
+    return PlanFixtureDiagnostic.parse(JSON.parse(fs.readFileSync(file, 'utf8')));
+  });
+  expect(values.map((value) => value.state).sort()).toEqual(['failed', 'issued']);
+  for (const value of values) {
+    expect(value.namespacePid).toBe(process.pid);
+    expect(value.purpose).toBe('synthetic-plan-provider-diagnostic-v1');
+    for (const forbidden of ['stdout', 'stderr', 'token', 'isIdle', 'ready', 'identity', 'allowedActions'])
+      expect(Object.hasOwn(value, forbidden)).toBe(false);
+  }
+  expect(() => f.files.diagnostic('not-a-stage' as never, 'issued')).toThrow();
+  expect(() =>
+    f.files.diagnostic('capabilities', 'failed', {
+      exitCode: 4,
+      signal: null,
+      stdoutSha256: 'a'.repeat(64),
+      stderrSha256: 'b'.repeat(64),
+      stdout: 'secret',
+    } as never)
+  ).toThrow();
+  expect(
+    fs.readdirSync(path.join(f.home, '.fixture')).filter((name) => name.startsWith('plan-diagnostic-'))
+  ).toHaveLength(2);
 });
