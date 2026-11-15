@@ -719,6 +719,17 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     expect(f.provider.launch).toHaveBeenCalledTimes(paid);
     expect(f.record()).toEqual(row);
   });
+  it('never falls back to the legacy image allowlist when the v3 image reader is absent',async()=>{
+    const {f,row}=await replacementReadFixture();
+    f.setRecord(row);f.subject.sessionId=row.request.sessionId;f.subject.sessionGeneration=row.request.sessionGeneration;
+    Object.assign(f.engine,{observePlanReplacementSource:vi.fn(async()=>({original:row.original,state:'stopped' as const}))});
+    f.engine.image.mockClear();
+    const paid=f.provider.launch.mock.calls.length;
+    expect(await f.make().observe(eid,row.request.operationId,f.authority)).toMatchObject({
+      state:'held',code:'DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE'});
+    expect(f.engine.image).not.toHaveBeenCalled();
+    expect(f.provider.launch).toHaveBeenCalledTimes(paid);
+  });
   it('read-only genuine observation can promote provider-issued to ready, never dispatch', async () => {
     const { f, row } = await replacementReadFixture();
     f.setRecord(row);
@@ -726,8 +737,9 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     f.subject.sessionGeneration = row.request.sessionGeneration;
     Object.assign(f.engine, {
       observePlanReplacementSource: vi.fn(async () => ({ original: row.original, state: 'stopped' as const })),
+      imageForPlanReplacement: vi.fn(async () => row.workerImage),
     });
-    f.engine.image.mockImplementation(async () => row.workerImage);
+    f.engine.image.mockClear();
     f.setDestination({
       original: row.destination!,
       state: 'running',
@@ -738,6 +750,7 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     const before = f.provider.launch.mock.calls.length;
     const result = await f.make().observe(eid, row.request.operationId, f.authority);
     expect(result).toMatchObject({ phase: 'ready', state: 'ready', allowedActions: ['observe'] });
+    expect(f.engine.image).not.toHaveBeenCalled();
     expect(f.provider.launch).toHaveBeenCalledTimes(before);
   });
 });

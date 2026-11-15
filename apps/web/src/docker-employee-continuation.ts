@@ -69,6 +69,8 @@ export interface DockerContainerObservation extends DockerSourceObservation {
 }
 export interface DockerContinuationEngine {
   image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage>;
+  /** Private v3 read qualification from the actual prior boxed generation. */
+  imageForPlanReplacement?(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<DockerEmployeeWorkerImage>;
   observeSource(subject: DockerContinuationSubject, containerId?: string): Promise<DockerSourceObservation>;
   /** v3 source closure reads the retained OLD placement, not the target subject.
    * The owning Engine must validate its genuine boxed source and no-restart state. */
@@ -342,7 +344,10 @@ export class DockerEmployeeContinuation {
       !isDeepStrictEqual(DockerEmployeeOriginal.parse(observation.original), row.original)
     )
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
-    const workerImage = DockerEmployeeWorkerImage.parse(await this.engine.image(row.original));
+    if(row.version===3&&!this.engine.imageForPlanReplacement)refuse('DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE');
+    const workerImage = DockerEmployeeWorkerImage.parse(row.version===3
+      ? await this.engine.imageForPlanReplacement!(row,current)
+      : await this.engine.image(row.original));
     current();
     if (!isDeepStrictEqual(workerImage, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
   }
