@@ -30,6 +30,7 @@ import { dockerContinuationDigest } from '../../src/docker-employee-continuation
 import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
 import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
+import type { PlanOfficeStartupCheckpoint } from './plan-office-startup-diagnostic.js';
 import { boxedOriginal, DockerEmployeeInspect } from '../../src/docker-employee-engine-data.js';
 import type { SessionState } from '../../src/types.js';
 import {
@@ -730,13 +731,16 @@ export async function completePlanOfficeOriginal(
   throw Error('Original recovery not confirmed Ready; observe original operation, never begin again');
 }
 /** Effects are reachable only in the immutable composed package and for explicit qualified image IDs. */
-export async function runPlanOfficeBaseline(contractFile: string) {
+export async function runPlanOfficeBaseline(contractFile: string, entered: PlanOfficeStartupCheckpoint = () => {}) {
+  entered('driver-admission');
   assert.equal(process.platform, 'linux');
   assert.equal(process.arch, 'x64');
   assert.ok(process.getuid!() > 0 && process.getgid!() > 0);
   assert.ok(path.isAbsolute(contractFile));
   privateDirectory(path.dirname(contractFile));
+  entered('driver-contract');
   const input = PlanOfficeDriverInput.parse(readPrivate(contractFile));
+  entered('driver-runtime-package');
   assert.equal(
     fileURLToPath(import.meta.url),
     input.runtimePath + '/lib/reverie/test/helpers/plan-office-driver.js',
@@ -752,6 +756,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
   assert.ok(pinned(metadata.nodeExecutable).isFile());
   assert.equal(fs.realpathSync(process.execPath), metadata.nodeExecutable);
   assert.equal(metadata.sourcePath, input.sourcePath);
+  entered('driver-evidence-directory');
   const evidence = new Evidence(path.join(path.dirname(contractFile), 'office-' + input.instance)),
     driver = new Driver(input, evidence, metadata.dockerExecutable),
     names = driver.names;
@@ -763,6 +768,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           ? 'Fake external model; real owner/API/Engine/native/HMAC baseline only.'
           : 'Fake external model; only the explicit selected scenario is checked with actual physical verification. No paid vendor or complete permission/recovery matrix acceptance.',
     });
+    entered('driver-container-census');
     const census = driver.docker(['container', 'ls', '--all', '--no-trunc', '--format', 'json']);
     const before = census
       .trim()
@@ -774,16 +780,19 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       before.map((row) => ({ id: row.ID, image: row.Image, state: row.State, names: row.Names }))
     );
     for (const role of ['source', 'worker', 'helper', 'control'] as const) {
+      entered(`driver-image-${role}`);
       const image = input[(role + 'ImageId') as 'sourceImageId'],
         rows = JSON.parse(driver.docker(['image', 'inspect', image]));
       assert.equal(rows.length, 1);
       driver.configs.set(image, requirePlanOfficeImage(rows[0], input, role));
       driver.images.set(role, rows[0]);
     }
+    entered('driver-image-layer-prefix');
     const srcLayers = (driver.images.get('source')!.RootFS as Json).Layers as string[],
       targetLayers = (driver.images.get('worker')!.RootFS as Json).Layers as string[];
     assert.ok(srcLayers.length > 0);
     assert.deepEqual(targetLayers.slice(0, srcLayers.length), srcLayers);
+    entered('driver-fixture-directories');
     const mkdir = (...parts: string[]) => {
       const target = path.join(evidence.root, ...parts);
       fs.mkdirSync(target, { mode: 0o700 });
@@ -798,6 +807,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     fs.writeFileSync(bootstrapFile, JSON.stringify(input.bootstrap) + '\n', { flag: 'wx', mode: 0o600 });
     const controlCfg = driver.configs.get(input.controlImageId)!,
       controlNode = (controlCfg.Entrypoint as string[])[0]!;
+    entered('driver-bootstrap-seed');
     await driver.metadata(
       'seed',
       input.controlImageId,
@@ -805,9 +815,12 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       [driver.bind(evidence.root, '/fixture')]
     );
     // Both fixture networks block external provider egress; the host reaches only the mapped loopback API.
-    const front = await driver.network(names.front, true),
-      network = await driver.network(names.network, true),
+    entered('driver-network-front');
+    const front = await driver.network(names.front, true);
+    entered('driver-network-workers');
+    const network = await driver.network(names.network, true),
       sources: Json[] = [];
+    entered('driver-platform-closure-read');
     const closures = fs.readFileSync(path.join(input.platformClosure, 'store-paths'), 'utf8').trim().split('\n');
     assert.ok(closures.length > 0 && closures.length <= 4096);
     for (const item of closures) {
@@ -815,6 +828,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       pinned(item);
     }
     for (const employee of input.bootstrap.employees) {
+      entered('driver-worker-directories');
       mkdir('workers', employee.employeeId);
       const home = mkdir('workers', employee.employeeId, 'home'),
         nix = mkdir('workers', employee.employeeId, 'nix'),
@@ -822,6 +836,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       mkdir('workers', employee.employeeId, 'workspace', 'cases');
       mkdir('workers', employee.employeeId, 'workspace', 'cases', 'boxed-canary');
       const nixStore = mkdir('workers', employee.employeeId, 'nix', 'store');
+      entered('driver-worker-platform-copy');
       for (const item of closures)
         fs.cpSync(item, path.join(nixStore, path.basename(item)), {
           recursive: true,
@@ -834,6 +849,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       const scratchParts = planOfficeScratchParts(employee, layout);
       const scratch = mkdir('scratch', ...scratchParts),
         tmp = mkdir('scratch', ...scratchParts, 'tmp');
+      entered('driver-worker-home-prepare');
       const prepared = await driver.metadata(
         'prep-' + employee.employeeId,
         input.workerImageId,
@@ -869,6 +885,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       assert.equal(proof.ino, String(actual.ino));
       assert.equal(proof.uid, process.getuid!());
       const cfg = driver.configs.get(input.sourceImageId)!;
+      entered('driver-source-create');
       const source = await driver.create(names.prefix + '-source-' + employee.employeeId, {
         Image: input.sourceImageId,
         User: driver.user,
@@ -917,8 +934,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       }
       sources.push({ employee, source, home, persistent, beforePersistent, scratch, tmp });
     }
+    entered('driver-docker-socket');
     const socket = fs.lstatSync('/var/run/docker.sock');
     assert.ok(socket.isSocket());
+    entered('driver-control-create');
     const control = await driver.create(names.control, {
       Image: input.controlImageId,
       User: driver.user,
@@ -940,9 +959,11 @@ export async function runPlanOfficeBaseline(contractFile: string) {
         PortBindings: { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '0' }] },
       },
     });
+    entered('driver-control-connect');
     driver.docker(['network', 'connect', '--alias', 'reverie', network, control]);
     driver.owned(control, 'control');
     evidence.save('control-start-issued', { control });
+    entered('driver-control-start');
     driver.docker(['start', control]);
     const running = driver.owned(control, 'control');
     assert.equal((running.State as Json).Running, true);
@@ -952,6 +973,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     const port = Number(ports['3000/tcp']![0]!.HostPort);
     assert.ok(port >= 1024 && port !== 3000);
     const endpoint = 'http://127.0.0.1:' + port;
+    entered('driver-control-owner-preflight');
     let responding = false;
     for (let i = 0; i < 60; i++) {
       driver.owned(control, 'control');
@@ -968,6 +990,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     }
     assert.ok(responding, 'Ordinary control did not start');
     // Reject an incomplete fixture tool closure before consuming any provider intent.
+    entered('driver-control-tools');
     const controlTools = [
       '/bin/sh',
       '/bin/bash',
@@ -989,11 +1012,14 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     );
     assert.deepEqual(actualTools, controlTools);
     evidence.save('control-tools-qualified', { control, paths: actualTools, readOnly: true });
+    entered('driver-internal-host');
     await planOfficeInternalHostPreflight(endpoint);
     evidence.save('internal-api-host-qualified', { control, host: 'reverie:3000', readOnly: true });
+    entered('driver-owner-enrollment');
     const owner = await enrollIsolatedPlanOfficeOwner(endpoint, path.join(evidence.root, 'auth'));
     evidence.save('owner-enrolled', { ownerSessionFile: owner.ownerSessionFile, requests: owner.requests() });
     for (const entry of sources) {
+      entered('driver-original-policy');
       const employee = entry.employee as z.infer<typeof PlanOfficeBootstrap>['employees'][number],
         source = entry.source as string;
       driver.owned(control, 'control');
@@ -1052,6 +1078,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           ...(error instanceof OwnerApiRefusal ? { httpStatus: error.status, response: error.response } : {}),
         });
       }
+      entered('driver-original-recovery');
       await completePlanOfficeOriginal(
         { request: requestBody, sourceDigest: selection.sourceDigest },
         knownMutationReply,
@@ -1090,6 +1117,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           pause: () => wait(500),
         }
       );
+      entered('driver-original-sdk');
       const session = await planOfficeSession(
         await owner.request('/api/sessions/' + employee.sessionId),
         employee.sessionId
@@ -1164,6 +1192,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       privateDirectory(entry.scratch as string);
       privateDirectory(entry.tmp as string);
     }
+    entered('driver-selected-scenario');
     let planMovesAccepted = false;
     let selfRoundtripAccepted = false;
     let ownerForceAccepted = false;
@@ -1426,6 +1455,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       }
       planMovesAccepted = true;
     }
+    entered('driver-completion-census');
     const after = driver
       .docker(['container', 'ls', '--all', '--no-trunc', '--format', '{{.ID}}'])
       .trim()
@@ -1727,7 +1757,8 @@ export function planOfficeSelfIdentityFile(row: DockerEmployeeContinuationRecord
 
 /** Resume only the never-issued self scenario of an existing owned Ready fixture.
  * No setup, BEGIN, continuation, create, start, account write or new login occurs. */
-export async function runPlanOfficeReadySelf(contractFile: string) {
+export async function runPlanOfficeReadySelf(contractFile: string, entered: PlanOfficeStartupCheckpoint = () => {}) {
+  entered('ready-self-admission');
   assert.equal(process.platform, 'linux');
   privateDirectory(path.dirname(contractFile));
   const input = PlanOfficeDriverInput.parse(readPrivate(contractFile));

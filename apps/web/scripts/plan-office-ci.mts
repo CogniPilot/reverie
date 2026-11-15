@@ -7,6 +7,11 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// The hosted command executes this source with Node --experimental-strip-types.
+import {
+  readPlanOfficeStartupDiagnostic,
+  projectPlanOfficeStartupDiagnostic,
+} from '../test/helpers/plan-office-startup-diagnostic.ts';
 
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
@@ -402,7 +407,7 @@ const diagnosticKinds = new Set([
   'owner-refusal',
 ]);
 /** Explicit projection only: even a public DTO's message/error/stack can contain credentials. */
-export function planOfficeCiFailureDiagnostic(child: unknown, observations: readonly unknown[]) {
+export function planOfficeCiFailureDiagnostic(child: unknown, observations: readonly unknown[], instance?: string) {
   const c = child && typeof child === 'object' ? (child as Json) : {};
   const childStatus: Json = {};
   if (c.status === null || (Number.isInteger(c.status) && Number(c.status) >= 0 && Number(c.status) <= 255))
@@ -432,10 +437,12 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
     if (typeof v.errorCode === 'string' && diagnosticCodes.has(v.errorCode)) result.errorCode = v.errorCode;
     return Object.keys(result).length > 1 ? [result] : [];
   });
+  const startup = instance ? projectPlanOfficeStartupDiagnostic(c.startup, instance) : undefined;
   return {
     child: childStatus,
     operations,
-    observation: operations.length ? 'last-known-retained-data' : 'unavailable',
+    ...(startup ? { startup } : {}),
+    observation: operations.length ? 'last-known-retained-data' : startup ? 'last-known-entered-stage' : 'unavailable',
   };
 }
 /** Fixed files in this run's owned fixture only. Missing/partial evidence is not a reason to replay or sign in. */
@@ -576,7 +583,12 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       maxBuffer: 32 * 1024 * 1024,
       env: { ...env, DOCKER_CONFIG: dockerConfig, DOCKER_HOST: 'unix:///var/run/docker.sock' },
     });
-    lastChild = { status: result.status, signal: result.signal, errorName: result.error?.name };
+    lastChild = {
+      status: result.status,
+      signal: result.signal,
+      errorName: result.error?.name,
+      ...(label === 'actual-' + selection ? { startup: readPlanOfficeStartupDiagnostic(result.stdout, instance) } : {}),
+    };
     // Raw replies can contain synthetic passwords/tokens. They stay outside artifacts and console logs.
     save(path.join(evidence, key + '-result.json'), {
       status: result.status,
@@ -678,7 +690,13 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
     const stdout = run(
       'actual-' + selection,
       String(runtimeMetadata.nodeExecutable),
-      [path.join(runtime, 'lib/reverie/test/fixtures/plan-office-canary.mjs'), '--contract', file],
+      [
+        path.join(runtime, 'lib/reverie/test/fixtures/plan-office-canary.mjs'),
+        '--contract',
+        file,
+        '--diagnostic-instance',
+        instance,
+      ],
       600000
     );
     const root = path.join(evidence, 'office-' + instance);
@@ -758,7 +776,8 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
         lastChild,
         ownedEmployeeIds.flatMap((employeeId) =>
           readPlanOfficeCiFailureState(path.join(evidence, 'office-' + instance), employeeId)
-        )
+        ),
+        instance
       ),
     });
     throw Error('Actual ' + selection + ' plan acceptance failed at ' + lastStage);

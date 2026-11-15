@@ -3,7 +3,9 @@ import { expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
-import { transformSync } from 'esbuild';
+import os from 'node:os';
+import { buildSync, transformSync } from 'esbuild';
+import { readPlanOfficeStartupDiagnostic } from './helpers/plan-office-startup-diagnostic.js';
 import {
   planOfficeAssetSources,
   requirePlanOfficeDependencyLock,
@@ -16,6 +18,124 @@ const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-offi
 const factory = path.join(owningSource, 'nix/ci-plan-office-images.nix');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
+it('imports the actual unbundled canary graph without Driver and closes startup argument/import failures', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-canary-import-'));
+  const web = process.cwd(),
+    runtime = path.join(root, 'lib/reverie');
+  const instance = 'a'.repeat(32),
+    token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
+  try {
+    const graph = buildSync({
+      entryPoints: [...PLAN_OFFICE_TEST_ENTRIES],
+      absWorkingDir: web,
+      outdir: path.join(root, 'graph'),
+      bundle: true,
+      write: false,
+      metafile: true,
+      packages: 'external',
+      platform: 'node',
+      format: 'esm',
+      target: 'node22',
+      logLevel: 'silent',
+    });
+    fs.mkdirSync(runtime, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(runtime, 'package.json'), JSON.stringify({ type: 'module' }));
+    fs.symlinkSync(path.join(web, 'node_modules'), path.join(runtime, 'node_modules'));
+    let bytes = 0;
+    for (const file of Object.keys(graph.metafile!.inputs)) {
+      let output: string;
+      if (file.startsWith('src/') && file.endsWith('.ts')) output = 'dist/' + file.slice(4).replace(/\.ts$/, '.js');
+      else if ((PLAN_OFFICE_TEST_ENTRIES as readonly string[]).includes(file))
+        output = file.replace(/\.[cm]?ts$/, '.js');
+      else if (file === 'test/fixtures/boxed-canary-fixture-contract.mjs') output = file;
+      else throw Error('Actual driver graph contains an unshipped module');
+      const text = fs.readFileSync(path.join(web, file), 'utf8');
+      const compiled =
+        file.endsWith('.ts') || file.endsWith('.mts')
+          ? transformSync(text, { loader: 'ts', format: 'esm', target: 'node22' }).code
+          : text;
+      bytes += Buffer.byteLength(compiled);
+      expect(bytes).toBeLessThan(16 * 1024 * 1024);
+      const target = path.join(runtime, output);
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, compiled);
+    }
+    fs.symlinkSync('dist', path.join(runtime, 'src'));
+    const entry = path.join(runtime, 'test/fixtures/plan-office-canary.mjs');
+    fs.renameSync(entry.replace(/\.mjs$/, '.js'), entry);
+    let serial = 0;
+    const run = (text: string, extra: string[] = [], correlation = instance) => {
+      const parent = path.join(root, 'case-' + serial++);
+      fs.mkdirSync(parent, { mode: 0o700 });
+      const contract = path.join(parent, 'contract.json');
+      fs.writeFileSync(contract, text, { mode: 0o600 });
+      const result = spawnSync(
+        process.execPath,
+        [entry, '--contract', contract, '--check-import', ...extra, '--diagnostic-instance', correlation],
+        {
+          cwd: parent,
+          env: { HOME: parent, TMPDIR: parent, PATH: path.dirname(process.execPath), LANG: 'C.UTF-8' },
+          encoding: 'utf8',
+          timeout: 10000,
+          maxBuffer: 65536,
+        }
+      );
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
+      // Even this minimal contract cannot admit Driver. No office state is created.
+      expect(fs.existsSync(path.join(parent, 'office-' + instance))).toBe(false);
+      expect(result.stdout + result.stderr).not.toContain(token);
+      return { ...result, parent };
+    };
+    const valid = run(JSON.stringify({ instance }));
+    expect(valid.status).toBe(0);
+    expect(JSON.parse(valid.stdout)).toEqual({
+      version: 1,
+      purpose: 'reverie-ci-plan-office-import-smoke-v1',
+      instance,
+      imported: true,
+    });
+    for (const extra of [['--extra'], ['--ready-self'], ['--diagnostic-instance', instance]]) {
+      const bad = run(JSON.stringify({ instance }), extra);
+      expect(bad.status).toBe(1);
+      expect(readPlanOfficeStartupDiagnostic(bad.stdout, instance)?.stage).toBe('entry-arguments');
+      expect(fs.readdirSync(bad.parent)).toEqual(['contract.json']);
+    }
+    const mismatch = run(JSON.stringify({ instance: 'b'.repeat(32) }));
+    expect(mismatch.status).toBe(1);
+    expect(readPlanOfficeStartupDiagnostic(mismatch.stdout, instance)).toMatchObject({
+      stage: 'entry-contract',
+      errorClass: 'AssertionError',
+      errorCode: 'ERR_ASSERTION',
+    });
+    expect(fs.readdirSync(mismatch.parent)).toEqual(['contract.json']);
+    const malformed = run('{"instance":' + token);
+    expect(malformed.status).toBe(1);
+    expect(readPlanOfficeStartupDiagnostic(malformed.stdout, instance)).toMatchObject({
+      stage: 'entry-contract',
+      errorClass: 'SyntaxError',
+    });
+    const badCorrelation = run(JSON.stringify({ instance }), [], token);
+    expect(badCorrelation.status).toBe(1);
+    expect(readPlanOfficeStartupDiagnostic(badCorrelation.stdout, instance)).toBeUndefined();
+    expect(fs.readdirSync(badCorrelation.parent)).toEqual(['contract.json']);
+    const driver = path.join(runtime, 'test/helpers/plan-office-driver.js');
+    fs.renameSync(driver, driver + '.held');
+    try {
+      const missing = run(JSON.stringify({ instance }));
+      expect(missing.status).toBe(1);
+      expect(readPlanOfficeStartupDiagnostic(missing.stdout, instance)).toMatchObject({
+        stage: 'entry-driver-import',
+        errorClass: 'Error',
+        errorCode: 'ERR_MODULE_NOT_FOUND',
+      });
+    } finally {
+      fs.renameSync(driver + '.held', driver);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 function evaluate(
   overrides = '',
   expression = 'builtins.toJSON { metadata=f.metadata; worker=f.workerImage; source=f.sourceImage; helper=f.helperImage; control=f.mkControl {workerImageId="' +

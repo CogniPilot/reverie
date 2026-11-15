@@ -6,6 +6,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import {
+  PLAN_OFFICE_STARTUP_PREFIX,
+  PLAN_OFFICE_STARTUP_STAGES,
+  planOfficeStartupDiagnostic,
+  readPlanOfficeStartupDiagnostic,
+  projectPlanOfficeStartupDiagnostic,
+} from './helpers/plan-office-startup-diagnostic.js';
+import {
   requireHostedPlanOffice,
   planOfficeCiNamespace,
   planOfficeCiImage,
@@ -29,6 +36,91 @@ const metadata = {
   platformClosure: '/nix/store/' + 'e'.repeat(32) + '-closure',
   clientManifestDigest: 'f'.repeat(64),
 };
+it('projects only complete correlated startup stages/classes/codes and never hostile error content', () => {
+  const token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
+  const error = Object.assign(new Error(token), {
+    code: 'ERR_ASSERTION',
+    details: token,
+    path: token,
+    env: { TOKEN: token },
+  });
+  error.name = 'AssertionError';
+  const value = planOfficeStartupDiagnostic('driver-image-helper', instance, error);
+  const frame = PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(value) + '\n';
+  expect(readPlanOfficeStartupDiagnostic(frame, instance)).toEqual(value);
+  const publicReport = planOfficeCiFailureDiagnostic({ status: 1, signal: null, startup: value }, [], instance);
+  expect(publicReport).toMatchObject({
+    observation: 'last-known-entered-stage',
+    startup: { stage: 'driver-image-helper', errorClass: 'AssertionError', errorCode: 'ERR_ASSERTION' },
+  });
+  expect(JSON.stringify(publicReport)).not.toContain(token);
+  expect(readPlanOfficeStartupDiagnostic(token + '\n' + frame, instance)).toEqual(value);
+  expect(
+    planOfficeStartupDiagnostic('entry-driver-import', instance, { name: token, code: token, message: token })
+  ).toMatchObject({ errorClass: 'unknown', errorCode: null });
+  for (const role of ['source', 'worker', 'helper', 'control'] as const)
+    expect(PLAN_OFFICE_STARTUP_STAGES).toContain('driver-image-' + role);
+  for (const stdout of [
+    frame + frame,
+    frame.slice(0, -1),
+    frame.slice(0, -20),
+    'x'.repeat(65536) + frame,
+    PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...value, message: token }) + '\n',
+    PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...value, stage: token }) + '\n',
+    PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...value, errorClass: token }) + '\n',
+    PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...value, errorCode: token }) + '\n',
+    PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(value).replace('"version":1', '"version":1,"version":1') + '\n',
+  ])
+    expect(readPlanOfficeStartupDiagnostic(stdout, instance)).toBeUndefined();
+  expect(readPlanOfficeStartupDiagnostic(frame, 'b'.repeat(32))).toBeUndefined();
+  expect(
+    readPlanOfficeStartupDiagnostic(
+      frame + PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify({ ...value, instance: 'b'.repeat(32) }) + '\n',
+      instance
+    )
+  ).toBeUndefined();
+  expect(projectPlanOfficeStartupDiagnostic({ ...value, instance: 'b'.repeat(32) }, instance)).toBeUndefined();
+  expect(
+    planOfficeCiFailureDiagnostic({ startup: { ...value, instance: 'b'.repeat(32) } }, [], instance).observation
+  ).toBe('unavailable');
+  const hostile = {
+    get name() {
+      throw Error(token);
+    },
+    get code() {
+      throw Error(token);
+    },
+    get message() {
+      throw Error(token);
+    },
+    get stack() {
+      throw Error(token);
+    },
+  };
+  expect(planOfficeStartupDiagnostic('entry-driver-import', instance, hostile)).toMatchObject({
+    errorClass: 'unknown',
+    errorCode: null,
+  });
+  expect(
+    projectPlanOfficeStartupDiagnostic(
+      {
+        get stage() {
+          throw Error(token);
+        },
+      },
+      instance
+    )
+  ).toBeUndefined();
+  let reads = 0;
+  const changing = {
+    ...value,
+    get stage() {
+      return ++reads < 3 ? value.stage : token;
+    },
+  };
+  expect(projectPlanOfficeStartupDiagnostic(changing, instance)).toEqual(value);
+  expect(reads).toBe(1);
+});
 it('requires the explicit hosted-only command before any filesystem, build or Engine effect', () => {
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).not.toThrow();
   expect(requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).toBe('ordinary-self');

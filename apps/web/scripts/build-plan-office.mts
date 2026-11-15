@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 interface Lock {
@@ -40,6 +41,7 @@ export const PLAN_OFFICE_TEST_ENTRIES = [
   'test/fixtures/plan-office-bootstrap.ts',
   'test/helpers/plan-office-bootstrap.ts',
   'test/helpers/plan-office-driver.ts',
+  'test/helpers/plan-office-startup-diagnostic.ts',
   'test/helpers/plan-office-move-driver.ts',
   'test/helpers/plan-office-permission-probe.ts',
   'test/helpers/plan-office-move-verifier.ts',
@@ -105,12 +107,12 @@ export function buildPlanOffice(args: readonly string[]) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.cpSync(asset.source, target, { recursive: true });
   }
-  const run = (command: string, argv: readonly string[], cwd = runtime) => {
+  const run = (command: string, argv: readonly string[], cwd = runtime, cleanEnv?: NodeJS.ProcessEnv) => {
     const result = spawnSync(command, [...argv], {
       cwd,
       stdio: 'inherit',
       timeout: 120000,
-      env: { ...process.env, NODE_PATH: modules, npm_config_offline: 'true', npm_config_yes: 'false' },
+      env: cleanEnv ?? { ...process.env, NODE_PATH: modules, npm_config_offline: 'true', npm_config_yes: 'false' },
     });
     if (result.error || result.status !== 0 || result.signal) throw Error('Current-source CI build refused');
   };
@@ -175,6 +177,25 @@ export function buildPlanOffice(args: readonly string[]) {
   fs.writeFileSync(
     path.join(runtime, 'plan-office-bootstrap.mjs'),
     "import './test/fixtures/plan-office-bootstrap.js';\n"
+  );
+  // Qualify the actual unbundled canary/driver graph. --help exits before import.
+  // This minimal contract cannot admit Driver; the mode only checks inert exports.
+  const smoke = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-office-import-'));
+  const smokeContract = path.join(smoke, 'contract.json'),
+    smokeInstance = '0'.repeat(32);
+  fs.writeFileSync(smokeContract, JSON.stringify({ instance: smokeInstance }), { mode: 0o600, flag: 'wx' });
+  run(
+    node,
+    [
+      path.join(runtime, 'test/fixtures/plan-office-canary.mjs'),
+      '--contract',
+      smokeContract,
+      '--check-import',
+      '--diagnostic-instance',
+      smokeInstance,
+    ],
+    runtime,
+    { HOME: smoke, TMPDIR: smoke, PATH: path.dirname(node), LANG: 'C.UTF-8' }
   );
   fs.writeFileSync(
     path.join(output, 'metadata.json'),
