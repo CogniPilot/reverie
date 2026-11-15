@@ -636,3 +636,103 @@ describe('same-journal readonly source holder', () => {
     expect(String(error)).not.toContain('PRIVATE_SDK_SECRET');
   });
 });
+
+describe('readonly original source-holder inspection', () => {
+  it('does not create a reader when no original intent exists', async () => {
+    const f = fixture();
+    await expect(f.freshHolder().inspect(f.record, f.journal)).resolves.toBeUndefined();
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.command.run).not.toHaveBeenCalled();
+    expect(f.state().sourceReader).toBeUndefined();
+  });
+  it.each(['create-issued', 'created', 'start-issued', 'running', 'close-issued', 'closed'] as const)(
+    'earns actual original %s metadata without effect or cursor publication',
+    async (phase) => {
+      const f = fixture();
+      if (phase === 'create-issued') f.loseCreate('after');
+      if (phase === 'created')
+        f.publishHook((next) => {
+          if (next.sourceReader?.phase === 'created') throw Error('Lost created publication acknowledgement');
+        });
+      if (phase === 'start-issued') f.loseStart('after');
+      if (['create-issued', 'created', 'start-issued'].includes(phase))
+        await expect(f.holder.open(f.record, f.journal)).rejects.toThrow();
+      else await f.holder.open(f.record, f.journal);
+      f.publishHook(undefined);
+      if (phase === 'close-issued') {
+        f.loseStop();
+        await expect(f.holder.close(f.record, f.journal)).rejects.toThrow();
+      } else if (phase === 'closed') await f.holder.close(f.record, f.journal);
+      expect(f.state().sourceReader?.phase).toBe(phase);
+      const before = f.state(),
+        effects = [...f.effects],
+        reads = [...f.reads];
+      await expect(f.freshHolder().inspect(f.record, f.journal)).resolves.toBeUndefined();
+      expect(f.state()).toEqual(before);
+      expect(f.effects).toEqual(effects);
+      expect(f.reads).toEqual(reads);
+    }
+  );
+  it('holds an unknown CREATE with no actual original container rather than claiming absence closed it', async () => {
+    const f = fixture();
+    f.loseCreate('before');
+    await expect(f.holder.open(f.record, f.journal)).rejects.toThrow();
+    const before = f.state(),
+      effects = [...f.effects];
+    await expect(f.freshHolder().inspect(f.record, f.journal)).rejects.toThrow();
+    expect(f.state()).toEqual(before);
+    expect(f.effects).toEqual(effects);
+  });
+  it('holds a START intent whose actual container is still Created without dispatching it again', async () => {
+    const f = fixture();
+    f.loseStart('before');
+    await expect(f.holder.open(f.record, f.journal)).rejects.toThrow();
+    const before = f.state(),
+      effects = [...f.effects];
+    await expect(f.freshHolder().inspect(f.record, f.journal)).rejects.toThrow();
+    expect(f.state()).toEqual(before);
+    expect(f.effects).toEqual(effects);
+  });
+  it.each(['configuration', 'birth', 'source', 'revoked', 'terminal-digest'] as const)(
+    'refuses changed %s evidence without new effects',
+    async (kind) => {
+      const f = fixture();
+      await f.holder.open(f.record, f.journal);
+      if (kind === 'terminal-digest') {
+        await f.holder.close(f.record, f.journal);
+        (f.helper().State as Record<string, unknown>).ExitCode = 9;
+      }
+      if (kind === 'configuration') (f.helper().Config as Record<string, unknown>).User = '0:0';
+      if (kind === 'birth') f.ticks('5001');
+      if (kind === 'source') f.src.raw.State.Pid = 1;
+      if (kind === 'revoked') f.revoke();
+      const before = f.state(),
+        effects = [...f.effects];
+      await expect(f.freshHolder().inspect(f.record, f.journal)).rejects.toThrow();
+      expect(f.state()).toEqual(before);
+      expect(f.effects).toEqual(effects);
+    }
+  );
+  it('refuses a current cursor change across the image observation await', async () => {
+    const f = fixture();
+    await f.holder.open(f.record, f.journal);
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    let changed = false;
+    vi.mocked(f.command.run).mockImplementation(async (args) => {
+      const value = await original(args);
+      if (!changed && args[0] === 'image') {
+        changed = true;
+        const before = f.journal.read(),
+          cursor = before.sourceReader!;
+        await f.journal.publish(
+          before,
+          DockerPlanMoveJournalState.parse({ ...before, sourceReader: { ...cursor, phase: 'close-issued' } })
+        );
+      }
+      return value;
+    });
+    const effects = [...f.effects];
+    await expect(f.freshHolder().inspect(f.record, f.journal)).rejects.toThrow('CURSOR_CHANGED');
+    expect(f.effects).toEqual(effects);
+  });
+});

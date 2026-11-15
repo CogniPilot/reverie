@@ -354,6 +354,19 @@ export class DockerPlanSourceHolder {
         this.#flights.delete(record.id);
       });
   }
+  /** Re-earn only the original holder's metadata before an actor-epoch claim.
+   * No task publication, CREATE, START, STOP or private context/auth read occurs. */
+  inspect(
+    record: Readonly<PlanMoveRecord>,
+    journal: PlanMoveDockerJournal,
+    candidate?: DockerPlanSourceCandidate
+  ): Promise<void> {
+    const captured = Object.freeze(structuredClone(record));
+    const selected = candidate
+      ? Object.freeze({ snapshot: candidate.snapshot, account: structuredClone(candidate.account) })
+      : undefined;
+    return this.#flight(captured, () => this.#inspect(captured, journal, selected));
+  }
   open(
     record: Readonly<PlanMoveRecord>,
     journal: PlanMoveDockerJournal,
@@ -386,6 +399,80 @@ export class DockerPlanSourceHolder {
   close(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
     const captured = Object.freeze(structuredClone(record));
     return this.#flight(captured, () => this.#close(captured, journal));
+  }
+  async #inspect(
+    record: Readonly<PlanMoveRecord>,
+    journal: PlanMoveDockerJournal,
+    candidate?: DockerPlanSourceCandidate
+  ): Promise<void> {
+    const state = this.#state(record, journal),
+      cursor = state.sourceReader;
+    if (!cursor) return;
+    const expected = digest(cursor),
+      current = () => {
+        journal.current();
+        if (digest(journal.read().sourceReader) !== expected) refuse('DOCKER_PLAN_SOURCE_CURSOR_CHANGED');
+      };
+    const scope = await this.#configuration(record, journal, candidate);
+    current();
+    const name = 'reverie-boxed-' + digest([this.#box, 'plan-source-reader', record.id, digest(state.seed)]);
+    if (
+      cursor.name !== name ||
+      cursor.imageId !== state.seed.target.workerImage.imageId ||
+      cursor.configurationDigest !== digest(scope.config)
+    )
+      refuse();
+    let id: string;
+    if ('containerId' in cursor) id = hash.parse(cursor.containerId);
+    else {
+      const ids = z
+        .array(hash)
+        .length(1)
+        .parse(
+          (
+            await this.#native(
+              ['container', 'ls', '--all', '--quiet', '--no-trunc', '--filter', 'name=^/' + name + '$'],
+              current
+            )
+          )
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean)
+        );
+      id = ids[0]!;
+    }
+    const first = await this.#fixed(id, scope, current);
+    const observed = z.record(z.string(), z.unknown()).parse(first.State);
+    if (observed.Running === true) {
+      if (cursor.phase === 'closed' || cursor.phase === 'close-issued') refuse();
+      const init = await this.#running(id, scope, current);
+      if ('init' in cursor && !isDeepStrictEqual(init, cursor.init)) refuse();
+    } else if (observed.Status === 'created') {
+      if (
+        !['create-issued', 'created'].includes(cursor.phase) ||
+        observed.Pid !== 0 ||
+        observed.Running !== false ||
+        observed.Paused !== false ||
+        observed.Restarting !== false ||
+        observed.Dead !== false
+      )
+        refuse();
+      const last = await this.#fixed(id, scope, current);
+      if (!isDeepStrictEqual(observed, last.State)) refuse();
+    } else {
+      if (cursor.phase !== 'closed' && cursor.phase !== 'close-issued') refuse();
+      const before = terminal(first),
+        after = terminal(await this.#fixed(id, scope, current));
+      if (
+        !isDeepStrictEqual(before, after) ||
+        (cursor.phase === 'closed' && digest(after) !== cursor.terminalStateDigest)
+      )
+        refuse();
+    }
+    const home = await this.#capture(record, journal);
+    if (!isDeepStrictEqual(home, scope.home)) refuse();
+    if (candidate) DockerPlanAccountSnapshot.prototype.require.call(candidate.snapshot);
+    current();
   }
   async #open(
     record: Readonly<PlanMoveRecord>,
