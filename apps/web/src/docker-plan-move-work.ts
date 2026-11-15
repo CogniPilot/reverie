@@ -202,8 +202,13 @@ export class DockerPlanMoveWork {
       current();
       if (!read || !same(read.resources, this.row().policy))
         throw new PlanMoveError('The original resource helper is unconfirmed', 409);
+      seen = read;
       await this.phase('resources-ready');
     }
+    // A completed helper cursor is historical DATA. Resuming later work still
+    // requires fresh enforcement; an unconfirmed read never repeats configure.
+    if (!same(seen.resources, this.row().policy))
+      throw new PlanMoveError('The original resource enforcement is unconfirmed', 409);
   }
   /** Inspect/settle only original native metadata before epoch replacement. */
   async inspect(): Promise<void> {
@@ -226,8 +231,9 @@ export class DockerPlanMoveWork {
         throw new PlanMoveError('The original anchor or pool is unconfirmed', 409);
     }
     if (row.destination) {
-      await this.engine.observePlanReplacementWork(row, current);
+      const destination = await this.engine.observePlanReplacementWork(row, current);
       current();
+      if (!destination) throw new PlanMoveError('The original destination is unconfirmed', 409);
     }
     if (
       this.row().tasks?.some(

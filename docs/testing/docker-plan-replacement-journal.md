@@ -1,8 +1,11 @@
 # Docker plan replacement journal
 
-This source packet adds private DATA and store CAS. It does not install a native
-replacement actor or enable Docker plan effects. The generic Docker launch guard
-remains in place until the independently qualified native actor is integrated.
+The Docker plan coordinator uses this private journal for source retirement,
+target preparation, provider dispatch and publication. Store CAS enforces
+monotonic cursors; the native actor separately earns current authority and
+physical observations at every effect boundary. Store and injected-port tests
+do not establish native acceptance. The isolated Docker office must qualify
+actual plan moves on the exact candidate before merge or deployment.
 
 ## Activation and rollback boundary
 
