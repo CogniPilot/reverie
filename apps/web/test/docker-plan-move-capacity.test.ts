@@ -136,6 +136,33 @@ async function publishMaximum(
   return s.dockerPublish(record.id, issued, maximum, () => {});
 }
 describe('whole-document native settlement capacity', () => {
+  it('retains a bounded selected model in the immutable seed and its reserved settlement states', () => {
+    const f = dockerPlanJournalFixture();
+    const next = DockerPlanMoveJournalState.parse({
+      ...f.state,
+      seed: {
+        ...f.state.seed,
+        target: { ...f.state.seed.target, model: '"'.repeat(1024) },
+      },
+    });
+    expect(() => assertDockerPlanMoveTransition(f.state, next)).toThrow('immutable seed');
+    for (const maximum of dockerPlanMaximumStates(next.seed, next.epoch))
+      expect(maximum.seed.target.model).toBe(next.seed.target.model);
+    expect(dockerPlanMaximumStateBytes(next.seed, next.epoch)).toBeGreaterThan(
+      dockerPlanMaximumStateBytes(f.state.seed, f.epoch) + 1024
+    );
+    for (const model of ['', 'x'.repeat(1025)])
+      expect(
+        DockerPlanMoveJournalState.safeParse({
+          ...next,
+          seed: {
+            ...next.seed,
+            target: { ...next.seed.target, model },
+          },
+        }).success
+      ).toBe(false);
+    expect(f.state.seed.target).not.toHaveProperty('model');
+  });
   it('binds resolved metadata to the selected work atomically and never retrofits historical work', () => {
     const f = dockerPlanJournalFixture();
     const material = {

@@ -106,6 +106,8 @@ export const DockerPlanMoveSeed = z
         ]),
         /** Stable canonical RuntimeRecipe digest from the shared stock codec. */
         templateDigest: digest,
+        /** Resolved selected model, retained to reconstruct the same recipe. */
+        model: z.string().min(1).max(1024).optional(),
         workerImage: DockerEmployeeWorkerImage,
       })
       .strict(),
