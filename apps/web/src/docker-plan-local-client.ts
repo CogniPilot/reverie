@@ -47,7 +47,7 @@ function socketStamp(value: fs.BigIntStats): string {
   // tmux advertises attachment by setting execute bits for readable classes.
   // Only that complete signal is mutable; identity and all other mode bits stay exact.
   if (!value.isSocket() || (execute !== 0n && execute !== attachedExecute)) return refuse();
-  return [value.dev, value.ino, value.rdev, value.uid, value.mode & ~0o111n].join(':');
+  return [value.dev, value.ino, value.rdev, value.uid, value.gid, value.mode & ~0o111n].join(':');
 }
 function stable(record: MuxSession): unknown {
   return {

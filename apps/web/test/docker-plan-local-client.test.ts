@@ -344,6 +344,7 @@ describe.runIf(process.platform === 'linux')('client metadata and checked-close 
     'ino',
     'rdev',
     'uid',
+    'gid',
     'type',
     'read',
     'write',
@@ -357,7 +358,7 @@ describe.runIf(process.platform === 'linux')('client metadata and checked-close 
       const actual = Reflect.apply(original, fs, [file, options]);
       if (file !== f.socketPath) return actual;
       const changed = Object.assign(Object.create(Object.getPrototypeOf(actual)), actual);
-      if (kind === 'dev' || kind === 'ino' || kind === 'rdev' || kind === 'uid') changed[kind] += 1n;
+      if (kind === 'dev' || kind === 'ino' || kind === 'rdev' || kind === 'uid' || kind === 'gid') changed[kind] += 1n;
       else if (kind === 'type') changed.mode = (changed.mode & ~0o170000n) | 0o100000n;
       else {
         const bit = {
