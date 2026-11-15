@@ -301,14 +301,14 @@ async function exercise(root: string) {
     const sid = z
       .object({ data: z.object({ session: z.object({ id: z.string().uuid() }) }) })
       .parse(await created.json()).data.session.id;
-    let preparedSettingsSha256 = hash(await fs.readFile(join(root, 'cases/native/.claude/settings.local.json')));
+    const preparedSettingsSha256 = hash(await fs.readFile(join(root, 'cases/native/.claude/settings.local.json')));
     const started = await fetchOwned('/api/sessions/' + sid + '/interactive', 'POST');
     assert.equal(started.status, 200, 'Owner native-wrapper launch failed');
     await eventually(() => {
       requireCapture();
       return requests.length === 1;
     }, 'Actual native worker client sent no J frame');
-    let current = requests[0];
+    const current = requests[0];
     assert(
       typeof current.env.REVERIE_HOOK_GENERATION === 'string' && current.env.REVERIE_HOOK_GENERATION.length > 0,
       'Fresh worker-backed Session supplied no private generation'
@@ -448,38 +448,61 @@ async function exercise(root: string) {
       const value = await (await fetchOwned('/api/sessions/' + sid)).json();
       return z.object({ data: z.object({ status: z.string() }) }).parse(value).data.status === 'idle';
     }, 'Actual guest output did not settle the original terminal before owner restart');
-    const predecessor = current;
+    // Capturing a J frame and forwarding real guest hooks does not retire the
+    // original native provider. Restart requires genuine no-future-provider proof.
+    const settingsPath = join(root, 'cases/native/.claude/settings.local.json');
+    const beforeSettings = await fs.readFile(settingsPath);
+    const beforeRequest = Buffer.from(requestFrames.get(current)!);
+    const nativeIntent = async () =>
+      z
+        .object({
+          __providerLaunchIntentsV1: z.object({ rows: z.record(z.string(), z.unknown()) }),
+        })
+        .parse(JSON.parse(await fs.readFile(join(root, 'company/console/state.json'), 'utf8')))
+        .__providerLaunchIntentsV1.rows[sid];
+    const beforeIntent = await nativeIntent();
+    assert(beforeIntent, 'Original native launch has no canonical intent');
+    const beforeState = z
+      .object({ data: z.object({ customModel: z.unknown().optional() }) })
+      .parse(await (await fetchOwned('/api/sessions/' + sid)).json()).data;
     const restarted = await fetchOwned('/api/sessions/' + sid + '/custom-model', 'POST', { clear: true });
-    assert.equal(restarted.status, 200, 'Owner restart request failed');
+    assert.equal(restarted.status, 409, 'Unretired native restart must visibly refuse');
+    const refusal = z
+      .object({
+        success: z.literal(false),
+        errorCode: z.literal('CONFLICT'),
+        error: z.string(),
+        reason: z.literal('native-provider-retirement-required'),
+      })
+      .parse(await restarted.json());
+    assert(refusal.error.includes('configuration is unchanged'), 'Refusal lost its configuration guarantee');
+    await pause(100);
+    requireCapture();
+    assert.equal(requests.length, 1, 'Refused restart dispatched another native J');
+    assert.deepEqual(await nativeIntent(), beforeIntent, 'Refused restart replaced the original canonical intent');
+    assert.deepEqual(requestFrames.get(current), beforeRequest, 'Original native request changed');
+    assert.deepEqual(await fs.readFile(settingsPath), beforeSettings, 'Refused restart changed prepared hooks');
+    const afterState = z
+      .object({ data: z.object({ customModel: z.unknown().optional() }) })
+      .parse(await (await fetchOwned('/api/sessions/' + sid)).json()).data;
+    assert.deepEqual(afterState.customModel, beforeState.customModel, 'Refused restart changed model selection');
+    // The untouched original generation must still resolve its own actual guest
+    // consent. Positive same-SID local restart/generation replacement is covered
+    // separately by workspace-hook-preparation and provider-launch-publication.
+    await invoke('original-permission-after-refused-restart', 'permission_prompt');
+    const retainedApproval = (await inbox()).find((item) => item.sessionId === sid);
+    assert(retainedApproval?.answerState === 'current', 'Refusal invalidated original consent authority');
+    await invoke('original-stop-after-refused-restart', 'stop');
     assert(
-      z.object({ data: z.object({ restarted: z.boolean() }) }).parse(await restarted.json()).data.restarted,
-      'Original owner restart was not admitted'
+      !(await inbox()).some((item) => item.id === retainedApproval.id),
+      'Original generation lost its current hook'
     );
-    preparedSettingsSha256 = hash(await fs.readFile(join(root, 'cases/native/.claude/settings.local.json')));
-    await eventually(() => {
-      requireCapture();
-      return requests.length === 2;
-    }, 'Restarted native wrapper sent no new J');
-    current = requests[1];
-    assert(
-      current.sessionId === predecessor.sessionId &&
-        current.env.REVERIE_HOOK_GENERATION &&
-        current.env.REVERIE_HOOK_GENERATION !== predecessor.env.REVERIE_HOOK_GENERATION,
-      'Owner restart failed to replace the private provider epoch'
-    );
-    await invoke('successor-permission', 'permission_prompt');
-    const successor = (await inbox()).find((item) => item.sessionId === sid);
-    assert(successor?.answerState === 'current', 'Actual successor producer did not create current consent');
-    await invoke('predecessor-generation', 'stop', predecessor);
-    assert(
-      (await inbox()).some((item) => item.id === successor.id),
-      'The predecessor native request resolved successor consent'
-    );
-    await invoke('successor-stop', 'stop');
-    assert(
-      !(await inbox()).some((item) => item.id === successor.id),
-      'Current successor hook did not resolve successor consent'
-    );
+    cases.push({
+      name: 'unretired-native-restart',
+      status: restarted.status,
+      reason: refusal.reason,
+      nativeRequests: requests.length,
+    });
     const summary = {
       scope:
         'actual worker-backed Session/private preparation, tmux/native client/request/child/settings/Office/HTTP components; ordinary native broker admission and resource replacement remain unqualified',
@@ -491,7 +514,7 @@ async function exercise(root: string) {
       cases,
     };
     if (options.output) await fs.writeFile(options.output, JSON.stringify(summary, null, 2) + '\n', { mode: 0o600 });
-    console.log(`Native hook component acceptance passed${cases.length} guest cases; no broker admission claim.`);
+    console.log(`Native hook component acceptance passed${cases.length} checks; no broker admission claim.`);
   } finally {
     const listenerClosed = new Promise<void>((resolve, reject) =>
       listener.close((error) => (error ? reject(error) : resolve()))
