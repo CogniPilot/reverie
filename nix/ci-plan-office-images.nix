@@ -15,7 +15,7 @@ let
   } ''
     ${node}/bin/node --experimental-strip-types ${src}/apps/web/scripts/build-plan-office.mts \
       --source ${src} --modules ${dependencyConsole}/lib/reverie/node_modules \
-      --esbuild ${pkgs.esbuild}/bin/esbuild --node ${node}/bin/node --output "$out"
+      --esbuild ${pkgs.esbuild}/bin/esbuild --node ${node}/bin/node --docker ${pkgs.docker-client}/bin/docker --output "$out"
     # Import/CLI sanity only: --help never starts the server or admits Docker operations.
     HOME="$TMPDIR/ci-help-home" ${node}/bin/node "$out/lib/reverie/dist/index.js" --help > "$TMPDIR/help.txt"
     grep -q 'web' "$TMPDIR/help.txt"

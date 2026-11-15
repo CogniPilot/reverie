@@ -41,6 +41,9 @@
     "../test/fixtures/boxed-plan-provider.mts",
     "../scripts/build-plan-office.mts",
     "../test/plan-office-image-factory.test.ts",
-    "../test/fixtures/prepare-plan-office-worker.mts"
+    "../test/fixtures/prepare-plan-office-worker.mts",
+    "../test/helpers/plan-office-driver.ts",
+    "../test/fixtures/plan-office-canary.mts",
+    "../test/plan-office-driver.test.ts"
   ]
 }

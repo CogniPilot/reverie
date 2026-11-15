@@ -40,7 +40,11 @@ export function buildPlanOffice(args: readonly string[]) {
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i]!,
       value = args[i + 1];
-    if (!['--source', '--modules', '--esbuild', '--node', '--output'].includes(key) || !value || flags.has(key))
+    if (
+      !['--source', '--modules', '--esbuild', '--node', '--docker', '--output'].includes(key) ||
+      !value ||
+      flags.has(key)
+    )
       throw Error('Closed CI build inputs required');
     flags.set(key, value);
   }
@@ -56,7 +60,8 @@ export function buildPlanOffice(args: readonly string[]) {
   const source = input('--source', true),
     modules = input('--modules', true),
     esbuild = input('--esbuild', false),
-    node = input('--node', false);
+    node = input('--node', false),
+    docker = input('--docker', false);
   const output = flags.get('--output');
   if (!output || !path.isAbsolute(output) || fs.existsSync(output)) throw Error('Fresh CI output required');
   const web = path.join(source, 'apps/web'),
@@ -142,12 +147,19 @@ export function buildPlanOffice(args: readonly string[]) {
   run(esbuild, [
     path.join(web, 'test/fixtures/plan-office-bootstrap.ts'),
     path.join(web, 'test/helpers/plan-office-bootstrap.ts'),
+    path.join(web, 'test/helpers/plan-office-driver.ts'),
+    path.join(web, 'test/helpers/docker-continuation-auth-canary.ts'),
+    path.join(web, 'test/fixtures/plan-office-canary.mts'),
     '--outdir=' + path.join(runtime, 'test'),
     '--outbase=' + path.join(web, 'test'),
     '--platform=node',
     '--format=esm',
     '--target=node22',
   ]);
+  fs.copyFileSync(
+    path.join(web, 'test/fixtures/boxed-canary-fixture-contract.mjs'),
+    path.join(runtime, 'test/fixtures/boxed-canary-fixture-contract.mjs')
+  );
   fs.writeFileSync(
     path.join(runtime, 'plan-office-bootstrap.mjs'),
     "import './test/fixtures/plan-office-bootstrap.js';\n"
@@ -159,9 +171,12 @@ export function buildPlanOffice(args: readonly string[]) {
       purpose: 'reverie-ci-plan-office-build-v1',
       sourcePath: source,
       dependencyModules: modules,
+      nodeExecutable: node,
+      dockerExecutable: docker,
       controlEntry: 'lib/reverie/dist/index.js',
       bootstrapEntry: 'lib/reverie/plan-office-bootstrap.mjs',
       fakeProvider: 'opt/reverie-ci-plan-provider/bin/claude',
+      baselineDriver: 'lib/reverie/test/fixtures/plan-office-canary.mjs',
     }) + '\n'
   );
 }

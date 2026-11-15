@@ -4,7 +4,11 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { planOfficeAssetSources, requirePlanOfficeDependencyLock } from '../scripts/build-plan-office.mjs';
-const factory = path.resolve('../../nix/ci-plan-office-images.nix');
+const repositorySource = path.resolve('../..');
+const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-office-images.nix'))
+  ? repositorySource
+  : path.resolve('test/fixtures/plan-office-source');
+const factory = path.join(owningSource, 'nix/ci-plan-office-images.nix');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
 function evaluate(
@@ -18,11 +22,15 @@ function evaluate(
     '";}; }'
 ) {
   const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
-  return spawnSync('nix-instantiate', ['--eval', '--strict', '--expr', code], {
+  const result = spawnSync('nix-instantiate', ['--store', 'dummy://', '--eval', '--strict', '--expr', code], {
     encoding: 'utf8',
     timeout: 10000,
     maxBuffer: 1024 * 1024,
   });
+  expect(result.error, 'nix-instantiate must be present and finish actual evaluation').toBeUndefined();
+  expect(result.signal, result.stderr).toBeNull();
+  expect(typeof result.status, result.stderr).toBe('number');
+  return result;
 }
 it('preserves ordinary current-source control and fixed unprivileged worker image contracts in unique CI namespaces', () => {
   const r = evaluate();
@@ -59,14 +67,20 @@ it('rejects generic/invalid namespaces and malformed manifest or actual Engine I
     'imageNamespace="reverie-boxed";',
     'imageNamespace="' + ns.toUpperCase() + '";',
     'clientManifestDigest="short";',
-  ])
-    expect(evaluate(override).status).not.toBe(0);
+  ]) {
+    const result = evaluate(override);
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toMatch(/assertion .*failed/s);
+  }
   for (const tuple of [
     'workerImageId="latest";sourceImageIds=["' + good + '"];helperImageId="' + good + '";',
     'workerImageId="' + good + '";sourceImageIds=[];helperImageId="' + good + '";',
     'workerImageId="' + good + '";sourceImageIds=["tag:latest"];helperImageId="' + good + '";',
-  ])
-    expect(evaluate('', 'builtins.toJSON (f.mkControl {' + tuple + '})').status).not.toBe(0);
+  ]) {
+    const result = evaluate('', 'builtins.toJSON (f.mkControl {' + tuple + '})');
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toMatch(/assertion .*failed/s);
+  }
 });
 it('accepts only dependency versions and integrity from the same current source lock', () => {
   const source = { packages: { 'node_modules/zod': { version: '4.3.6', integrity: 'sha512-fixture' } } };
@@ -94,7 +108,7 @@ it('accepts only dependency versions and integrity from the same current source 
 });
 
 it('resolves mandatory assets against the actual monorepo layout and canonical root skill', () => {
-  const source = path.resolve('../..'),
+  const source = owningSource,
     assets = planOfficeAssetSources(source);
   expect(assets.map((asset) => [path.relative(source, asset.source), asset.destination])).toEqual([
     ['apps/web/scripts', 'scripts'],

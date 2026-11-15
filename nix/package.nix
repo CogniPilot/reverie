@@ -60,10 +60,19 @@ let
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
+      # Pure CI image construction tests need their real owning monorepo layout
+      # inside this flattened web derivation, not /build/../nix or a stub tree.
+      mkdir -p test/fixtures/plan-office-source/nix test/fixtures/plan-office-source/apps/web test/fixtures/plan-office-source/skills
+      cp ${consoleFixture "nix/ci-plan-office-images.nix"} test/fixtures/plan-office-source/nix/ci-plan-office-images.nix
+      cp ${consoleFixture "nix/docker-resource-helper-image.nix"} test/fixtures/plan-office-source/nix/docker-resource-helper-image.nix
+      cp -r ${consoleFixture "apps/web/scripts"} test/fixtures/plan-office-source/apps/web/scripts
+      cp -r ${consoleFixture "apps/web/packages"} test/fixtures/plan-office-source/apps/web/packages
+      cp -r ${consoleSkill} test/fixtures/plan-office-source/skills/reverie
+
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
@@ -100,7 +109,7 @@ let
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
         test/plan-office-bootstrap.test.ts \
-        test/boxed-plan-provider-files.test.ts test/boxed-plan-provider-entry.test.ts test/plan-office-image-factory.test.ts \
+        test/boxed-plan-provider-files.test.ts test/boxed-plan-provider-entry.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts \
         test/canary-cookie-files.test.ts \
         test/canary-browser-modules.test.ts \
         test/canary-fixture-contract.test.ts \
