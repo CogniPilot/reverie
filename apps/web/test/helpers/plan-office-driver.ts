@@ -112,6 +112,11 @@ export const PlanOfficeDriverInput = z
 
 type Input = z.infer<typeof PlanOfficeDriverInput>;
 type Json = Record<string, unknown>;
+/** Normal owner prompt: mux strips LF and submits a separate Enter only for CR. */
+export function planOfficePermissionProbeInput(id: string) {
+  z.string().uuid().parse(id);
+  return { input: 'BOXED_PLAN_PERMISSION_PROBE_' + id + '\r', useMux: true as const };
+}
 /** Fake-only preparation DATA. Rotation is a negative case until principal proof exists. */
 export function planOfficeProviderMode(mode: 'ordinary' | 'exhausted' | 'rotate-a' | 'pause-approval') {
   z.enum(['ordinary', 'exhausted', 'rotate-a', 'pause-approval']).parse(mode);
@@ -1285,10 +1290,11 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           }
           // One ordinary owner input, consumed by the existing caller SDK process.
           await data(
-            await owner.request('/api/sessions/' + callerRow.request.sessionId + '/input', 'POST', {
-              input: 'BOXED_PLAN_PERMISSION_PROBE_' + id + '\n',
-              useMux: true,
-            })
+            await owner.request(
+              '/api/sessions/' + callerRow.request.sessionId + '/input',
+              'POST',
+              planOfficePermissionProbeInput(id)
+            )
           );
           const receiptFile = path.join(callerHome, '.fixture', 'plan-permission-returned-' + id + '.json');
           let receipt: z.infer<typeof PlanOfficePermissionReceipt> | undefined;

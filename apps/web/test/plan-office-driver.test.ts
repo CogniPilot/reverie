@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import Fastify from 'fastify';
 import { registerHostGuard } from '../src/web/middleware/auth.js';
 import { installResponseEnvelope } from '../src/web/response-envelope.js';
+import { isPlainPromptInput } from '../src/web/route-helpers.js';
 import { Session } from '../src/session.js';
 import { createHash } from 'node:crypto';
 import {
@@ -36,6 +37,7 @@ import {
   planOfficeSession,
   planOfficeOriginalStatus,
   planOfficeSelfIdentityFile,
+  planOfficePermissionProbeInput,
   completePlanOfficeOriginal,
 } from './helpers/plan-office-driver.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
@@ -66,6 +68,16 @@ const raw = {
   clientManifestDigest: 'e'.repeat(64),
   bootstrap: { version: 1, purpose: 'reverie-ci-plan-office-bootstrap-v1', employees: [employee] },
 };
+it('submits the actual team probe body as a production normal owner mux prompt with separate Enter', () => {
+  const body = planOfficePermissionProbeInput(oid);
+  expect(body.useMux).toBe(true);
+  expect(isPlainPromptInput(body.input)).toBe(true);
+  expect(body.input.slice(0, -1)).toBe('BOXED_PLAN_PERMISSION_PROBE_' + oid);
+  // Production plain-prompt classification rejects LF: mux strips it without submitting Enter.
+  expect(isPlainPromptInput('BOXED_PLAN_PERMISSION_PROBE_' + oid + '\n')).toBe(false);
+  for (const invalid of [oid + '\r', oid + '\n', '../escape', 'not-a-uuid'])
+    expect(() => planOfficePermissionProbeInput(invalid)).toThrow();
+});
 it('admits only explicit same-run namespace/immutable artifact IDs and inactive bootstrap DATA', () => {
   const input = PlanOfficeDriverInput.parse(raw);
   expect(input.bootstrap.employees[0]!.nativeThreadId).toBe(thread);
