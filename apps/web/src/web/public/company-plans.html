@@ -976,7 +976,7 @@
           !!record.sourceViewRetirement &&
           record.sourceViewRetirement.state !== 'completed';
         const paint = () => {
-          status.textContent = `${record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
+          status.textContent = `${record.phase === 'recovery-required' ? 'Recovery required' : record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
           if (record.phase === 'completed' && record.sourceViewRetirement?.state === 'unconfirmed')
             status.textContent += ` · Previous terminal cleanup unconfirmed${record.sourceViewRetirement.error ? ': ' + record.sourceViewRetirement.error : ''}`;
           dialog.querySelector('[data-move-sessions]').textContent =

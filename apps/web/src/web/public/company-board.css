@@ -271,6 +271,9 @@ h2 {
   color: var(--faint);
   font-size: 12px;
 }
+#moveDlg .hint {
+  color: var(--muted);
+}
 .empty {
   color: var(--faint);
   font-size: 13px;

@@ -244,7 +244,8 @@ describe('completed plan progress dialogs', () => {
           })
         );
         progress(kind, { id: 'progress', phase: 'executing' }, h);
-        await vi.waitFor(() => expect(h.dialog.querySelector('.status')!.textContent).toContain(phase));
+        const label = kind === 'move' && phase === 'recovery-required' ? 'Recovery required' : phase;
+        await vi.waitFor(() => expect(h.dialog.querySelector('.status')!.textContent).toContain(label));
         expect(h.dialog.open).toBe(true);
         expect(h.dialog.textContent).toContain('Inspect the retained move');
         expect(h.context.setTimeout.mock.calls.filter(([, delay]) => delay === 1000 || delay === 1500)).toHaveLength(0);
@@ -1005,7 +1006,7 @@ describe('blocked move contextual recovery', () => {
     await vi.waitFor(() => expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false));
     finish(reply({ ...held, phase: 'checking' }));
     await new Promise((resolve) => setImmediate(resolve));
-    expect(h.dialog.querySelector('.status')!.textContent).toContain('recovery-required');
+    expect(h.dialog.querySelector('.status')!.textContent).toContain('Recovery required');
     expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false);
   });
 

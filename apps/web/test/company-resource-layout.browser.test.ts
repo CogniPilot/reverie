@@ -1100,6 +1100,22 @@ async function planConsumerBounds(
     await page.screenshot({ path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, screenshot + '-' + width + '.png') });
   }
 }
+function planTextContrast(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = color
+      .match(/[\d.]+/g)!
+      .slice(0, 3)
+      .map(Number)
+      .map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+    return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+  };
+  const a = luminance(foreground),
+    b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
 async function planConsumerBrowser(
   width: number,
   run: (page: Page) => Promise<void>,
@@ -1154,22 +1170,6 @@ for (const colorScheme of ['light', 'dark'] as const)
           const inspect = panel.getByRole('button', { name: 'Check original move', exact: true });
           await inspect.waitFor();
           const appearance = await panel.evaluate((element) => {
-            const contrast = (foreground: string, background: string) => {
-              const luminance = (color: string) => {
-                const channels = color
-                  .match(/[\d.]+/g)!
-                  .slice(0, 3)
-                  .map(Number)
-                  .map((value) => {
-                    const channel = value / 255;
-                    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
-                  });
-                return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
-              };
-              const a = luminance(foreground),
-                b = luminance(background);
-              return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
-            };
             const style = (selector: string) => {
               const button = element.querySelector<HTMLButtonElement>(selector)!;
               const value = getComputedStyle(button);
@@ -1180,17 +1180,14 @@ for (const colorScheme of ['light', 'dark'] as const)
                 background: value.backgroundColor,
                 cursor: value.cursor,
                 opacity: value.opacity,
-                contrast: contrast(value.color, value.backgroundColor),
               };
             };
             return {
               request: style('[type="submit"]'),
               force: style('[data-force]'),
               inspect: style('[data-inspect]'),
-              errorContrast: contrast(
-                getComputedStyle(element.querySelector('[role="alert"]')!).color,
-                getComputedStyle(element).backgroundColor
-              ),
+              errorColor: getComputedStyle(element.querySelector('[role="alert"]')!).color,
+              panelBackground: getComputedStyle(element).backgroundColor,
             };
           });
           for (const blocked of [appearance.request, appearance.force]) {
@@ -1200,13 +1197,13 @@ for (const colorScheme of ['light', 'dark'] as const)
             expect(blocked.background).not.toBe(appearance.inspect.background);
             expect(blocked.cursor).toBe('not-allowed');
             expect(blocked.opacity).toBe('1');
-            expect(blocked.contrast).toBeGreaterThanOrEqual(4.5);
+            expect(planTextContrast(blocked.color, blocked.background)).toBeGreaterThanOrEqual(4.5);
           }
           expect(appearance.inspect.disabled).toBe(false);
           expect(appearance.inspect.border).toBe('solid');
           expect(appearance.inspect.cursor).toBe('pointer');
-          expect(appearance.inspect.contrast).toBeGreaterThanOrEqual(4.5);
-          expect(appearance.errorContrast).toBeGreaterThanOrEqual(4.5);
+          expect(planTextContrast(appearance.inspect.color, appearance.inspect.background)).toBeGreaterThanOrEqual(4.5);
+          expect(planTextContrast(appearance.errorColor, appearance.panelBackground)).toBeGreaterThanOrEqual(4.5);
           await inspect.focus();
           await page.keyboard.press('Tab');
           expect(
@@ -1241,6 +1238,24 @@ for (const colorScheme of ['light', 'dark'] as const)
           await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
           expect(reads).toEqual(['/api/plans/moves/' + writes[0]!.id + '/status']);
           expect(writes).toHaveLength(1);
+          const readbackText = await panel
+            .locator('[data-move-sessions], [data-recovery-info]')
+            .evaluateAll((elements) =>
+              elements.map((element) => ({
+                text: element.textContent,
+                color: getComputedStyle(element).color,
+                background: getComputedStyle(element.closest('dialog')!).backgroundColor,
+                opacity: getComputedStyle(element).opacity,
+              }))
+            );
+          for (const value of readbackText) {
+            expect(value.text).toBeTruthy();
+            expect(value.opacity).toBe('1');
+            expect(planTextContrast(value.color, value.background)).toBeGreaterThanOrEqual(4.5);
+          }
+          expect(readbackText[0]!.text).toContain(planEmployee.sessionId);
+          expect(readbackText[0]!.text).toContain(heldPlanMove(writes[0]!.id).newSession);
+          expect(await panel.getByRole('status').textContent()).toBe('Recovery required');
           await planConsumerBounds(
             page,
             panel,
@@ -1248,6 +1263,22 @@ for (const colorScheme of ['light', 'dark'] as const)
             ['Recover original move', 'Refresh status'],
             'plan-force-readback-' + colorScheme
           );
+          if (process.env.TEST_RESOURCE_SCREENSHOT_DIR)
+            await writeFile(
+              join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-force-readback-${colorScheme}-${width}.json`),
+              JSON.stringify(
+                {
+                  colorScheme,
+                  width,
+                  text: readbackText.map((value) => ({
+                    ...value,
+                    contrast: planTextContrast(value.color, value.background),
+                  })),
+                },
+                null,
+                2
+              ) + '\n'
+            );
         },
         colorScheme
       );
