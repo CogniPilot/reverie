@@ -423,7 +423,9 @@ jobs:
 
   native-hooks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    # The cold worker-image build includes native compilation and console
+    # checks before hook acceptance starts. Keep that work inside the gate.
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:
@@ -441,6 +443,21 @@ jobs:
           mkdir -p acceptance
           df -h / /scratch
       - uses: cachix/install-nix-action@448cde739abec1eaf0646249e3d25bb8d9bc7702 # v31
+        with:
+          extra_nix_config: |
+            max-jobs = 2
+            cores = 2
+      - name: Restore and save native hook build inputs
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          save: ${{ github.ref == 'refs/heads/main' }}
+          gc-max-store-size-linux: 8G
+          primary-key: nix-hooks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-${{ github.sha }}
+          restore-prefixes-first-match: |
+            nix-hooks-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
+            nix-hooks-${{ runner.os }}-${{ runner.arch }}-
+            nix-image-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('flake.lock', '**/*.nix') }}-
+            nix-image-${{ runner.os }}-${{ runner.arch }}-
       - name: Install native hook test dependencies
         run: |
           set -euo pipefail
