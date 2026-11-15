@@ -167,7 +167,7 @@ let
       npm test -- test/workspace-hook-preparation.test.ts test/launch-reservation.test.ts
       npm test -- test/owned-process.test.ts
       npm test -- test/operator-viewer-bridge.test.ts test/operator-viewer-native.test.ts test/operator-viewer-native-io.test.ts test/operator-viewer-native-integration.test.ts
-      npm test -- test/native-hook-artifact-selection.test.ts
+      npm test -- test/native-hook-artifact-selection.test.ts test/native-hook-path-budget.test.ts
       npm test -- test/approvals-ui-held.test.ts
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts test/employee-recovery-ui.test.ts \
