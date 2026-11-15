@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { z } from 'zod';
 import { runOwnedProcess } from './lib/owned-process.js';
+import { nativeHookCaseDirectory } from './lib/native-hook-case.js';
 
 const options = parseArgs({
   options: {
@@ -321,7 +322,7 @@ async function exercise(root: string) {
     );
     const cases: unknown[] = [];
     const invoke = async (name: string, event: string, request = current, wrongSession = false) => {
-      const directory = join(root, name);
+      const directory = nativeHookCaseDirectory(root, cases.length);
       await fs.mkdir(directory, { mode: 0o700 });
       await fs.writeFile(
         join(root, 'cases/native/.native-hook-control.json'),
