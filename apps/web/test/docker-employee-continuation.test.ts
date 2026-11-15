@@ -14,7 +14,10 @@ import type {
   DockerEmployeeBinding,
   DockerEmployeePool,
 } from '../src/docker-employee-continuation-data.js';
-import { DockerEmployeePlanReplacementWorkRecord, DockerEmployeeContinuationRecord as ContinuationRecordSchema } from '../src/docker-employee-continuation-data.js';
+import {
+  DockerEmployeePlanReplacementWorkRecord,
+  DockerEmployeeContinuationRecord as ContinuationRecordSchema,
+} from '../src/docker-employee-continuation-data.js';
 const eid = '10000000-0000-4000-8000-000000000001',
   sid = '20000000-0000-4000-8000-000000000002';
 const oid = '30000000-0000-4000-8000-000000000003',
@@ -188,7 +191,9 @@ function fixture() {
     journal,
     store,
     original,
-    setRecord: (value:DockerEmployeeContinuationRecord)=>{row=structuredClone(value);},
+    setRecord: (value: DockerEmployeeContinuationRecord) => {
+      row = structuredClone(value);
+    },
     record: () => row,
     binding: () => binding,
     destination: () => destination,
@@ -719,14 +724,20 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     expect(f.provider.launch).toHaveBeenCalledTimes(paid);
     expect(f.record()).toEqual(row);
   });
-  it('never falls back to the legacy image allowlist when the v3 image reader is absent',async()=>{
-    const {f,row}=await replacementReadFixture();
-    f.setRecord(row);f.subject.sessionId=row.request.sessionId;f.subject.sessionGeneration=row.request.sessionGeneration;
-    Object.assign(f.engine,{observePlanReplacementSource:vi.fn(async()=>({original:row.original,state:'stopped' as const}))});
+  it('never falls back to the legacy image allowlist when the v3 image reader is absent', async () => {
+    const { f, row } = await replacementReadFixture();
+    f.setRecord(row);
+    f.subject.sessionId = row.request.sessionId;
+    f.subject.sessionGeneration = row.request.sessionGeneration;
+    Object.assign(f.engine, {
+      observePlanReplacementSource: vi.fn(async () => ({ original: row.original, state: 'stopped' as const })),
+    });
     f.engine.image.mockClear();
-    const paid=f.provider.launch.mock.calls.length;
-    expect(await f.make().observe(eid,row.request.operationId,f.authority)).toMatchObject({
-      state:'held',code:'DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE'});
+    const paid = f.provider.launch.mock.calls.length;
+    expect(await f.make().observe(eid, row.request.operationId, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE',
+    });
     expect(f.engine.image).not.toHaveBeenCalled();
     expect(f.provider.launch).toHaveBeenCalledTimes(paid);
   });
@@ -737,7 +748,7 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     f.subject.sessionGeneration = row.request.sessionGeneration;
     Object.assign(f.engine, {
       observePlanReplacementSource: vi.fn(async () => ({ original: row.original, state: 'stopped' as const })),
-      imageForPlanReplacement: vi.fn(async () => row.workerImage),
+      existingImage: vi.fn(async () => row.workerImage),
     });
     f.engine.image.mockClear();
     f.setDestination({

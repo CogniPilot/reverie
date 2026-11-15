@@ -177,7 +177,7 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
     boxId,
     () => mode
   );
-  return { source, row, engine, command, resources, policy, created: () => created };
+  return { source, row, engine, command, resources, policy, journal, created: () => created };
 }
 async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
   const f = fixture('7'.repeat(64), ephemeral, mode);
@@ -269,6 +269,54 @@ async function providerViewFixture(ephemeral = false, mode = 'claude') {
   return { ...f, pane, docker };
 }
 describe('Engine-owned existing Docker provider view', () => {
+  it('keeps a published image readable while selecting an independently built replacement', async () => {
+    const f = await providerViewFixture(),
+      next = 'sha256:' + '9'.repeat(64);
+    const originalRun = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, options) => {
+      if (args[0] === 'image' && args[2] === next)
+        return JSON.stringify([
+          {
+            Id: next,
+            RootFS: { Layers: ['independently-built'] },
+            Config: {
+              Entrypoint: f.source.Config.Entrypoint,
+              Cmd: null,
+              Labels: { 'org.reverie.worker-client.manifest': '5'.repeat(64) },
+            },
+          },
+        ]);
+      return originalRun(args, options);
+    });
+    const upgraded = new DockerEmployeeEngine(
+      f.command,
+      'fixture',
+      f.resources,
+      { imageId: next, clientManifestDigest: '5'.repeat(64), sourceImageIds: [image, target] },
+      f.journal,
+      helper,
+      '7'.repeat(64),
+      () => 'claude'
+    );
+    await expect(upgraded.existingImage(f.row, () => {})).resolves.toEqual(f.row.workerImage);
+    const view = await upgraded.captureProviderView(f.row, () => {});
+    requireDockerEmployeeProviderView(view, sid, f.docker);
+    expect(view.descriptor.containerId).toBe(dest);
+    await expect(upgraded.replacementTargetImage(f.row.destination!, () => {})).resolves.toEqual({
+      imageId: next,
+      sourceImageId: target,
+      clientManifestDigest: '5'.repeat(64),
+    });
+    await expect(upgraded.image(f.row.original)).rejects.toThrow('WORKER_IMAGE_CHANGED');
+    expect(f.command.create).toHaveBeenCalledTimes(1); // fixture construction only
+  });
+  it('does not accept changed published manifest metadata or use pending image rows as history', async () => {
+    const f = await providerViewFixture();
+    f.row.workerImage.clientManifestDigest = '5'.repeat(64);
+    await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow('WORKER_IMAGE_CHANGED');
+    f.row.phase = 'destination-issued';
+    await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow('READY_PROVIDER_REQUIRED');
+  });
   it('captures full native placement and two matching PID births without any provider effect', async () => {
     const f = await providerViewFixture();
     vi.mocked(f.command.run).mockClear();
@@ -1113,6 +1161,8 @@ describe('resource revision observation boundary', () => {
    * not claim native account custody, actual process closure or paid admission. */
   async function planReplacementMetadata() {
     const f = await providerViewFixture();
+    f.source.State.Pid = 0;
+    f.source.HostConfig.RestartPolicy = { Name: 'no' };
     f.source.Config.Labels = {
       'reverie.boxed.instance': 'fixture',
       'reverie.boxed.employee': eid,
@@ -1184,6 +1234,29 @@ describe('resource revision observation boundary', () => {
     });
     return { ...f, row, nextSid };
   }
+  it('requires retained installation evidence before admitting a replacement provider view', async () => {
+    const f = await planReplacementMetadata();
+    vi.mocked(f.command.run).mockClear();
+    await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow();
+    expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args.includes('credential-status'))).toBe(false);
+    expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))).toBe(
+      false
+    );
+  });
+  it('requires a stopped original with restart disabled for replacement source observation', async () => {
+    const f = await planReplacementMetadata();
+    await expect(f.engine.observePlanReplacementSource(f.row, () => {})).resolves.toMatchObject({ state: 'stopped' });
+    f.source.State.Pid = 123;
+    await expect(f.engine.observePlanReplacementSource(f.row, () => {})).rejects.toThrow('ORIGINAL_CHANGED');
+    f.source.State.Pid = 0;
+    f.source.HostConfig.RestartPolicy = { Name: 'always' };
+    await expect(f.engine.observePlanReplacementSource(f.row, () => {})).rejects.toThrow('ORIGINAL_CHANGED');
+  });
+  it('cannot obtain replacement HOME from a running destination', async () => {
+    const f = await providerViewFixture();
+    await expect(f.engine.planReplacementHome(f.row, () => {})).rejects.toThrow('HOME_CHANGED');
+    expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args[0] === 'exec')).toBe(false);
+  });
   it.each(['operation', 'generation', 'box'] as const)(
     'checks the retained %s provenance against the actual source labels',
     async (kind) => {

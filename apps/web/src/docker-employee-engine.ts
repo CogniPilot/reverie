@@ -1,11 +1,15 @@
 import { requireDockerEffectiveResourceProof } from './docker-contained-resource-controller.js';
 import { dockerPlanDestinationEnvironment } from './docker-plan-install-data.js';
+import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
 import { DockerEphemeralRestoration } from './docker-ephemeral-restoration.js';
 import { ephemeralProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
-import { DockerEmployeeCredentialInstaller } from './docker-employee-credential-installer.js';
+import {
+  DockerEmployeeCredentialInstaller,
+  type DockerCredentialHome,
+} from './docker-employee-credential-installer.js';
 /** Fixed adapter for a new boxed destination; the old laptop is read-only.
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
  */
@@ -209,6 +213,7 @@ function sourceSubject(row: DockerEmployeeContinuationRecord): DockerContinuatio
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
+  readonly #planInstaller: DockerPlanInstaller;
   readonly #ephemeral: DockerEphemeralRestoration | undefined;
   constructor(
     private readonly command: DockerEngineCommand,
@@ -227,6 +232,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       (row) => this.#storage.credentialHome(row),
       boxId
     );
+    this.#planInstaller = new DockerPlanInstaller(command, journal, (row) => this.#storage.credentialHome(row), boxId);
     const ephemeralJournal = journal as DockerContinuationTaskJournal & Partial<EphemeralJournal>;
     if (ephemeralJournal.readEphemeral && ephemeralJournal.publishEphemeral)
       this.#ephemeral = new DockerEphemeralRestoration(
@@ -285,6 +291,46 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage> {
     if (!this.workerImage.sourceImageIds.includes(original.imageId) && original.imageId !== this.workerImage.imageId)
       refuse('DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED');
+    return this.#imagePair(original, this.workerImage, true);
+  }
+  /** Select the current qualified replacement without assuming independently
+   * built images have a Docker layer ancestry relationship. */
+  async replacementTargetImage(
+    original: DockerEmployeeOriginal,
+    current: () => void
+  ): Promise<DockerEmployeeWorkerImage> {
+    current();
+    if (!this.workerImage.sourceImageIds.includes(original.imageId) && original.imageId !== this.workerImage.imageId)
+      refuse('DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED');
+    const result = await this.#imagePair(original, this.workerImage, false);
+    current();
+    return result;
+  }
+  /** Read DATA only. The owning core separately checks the exact canonical
+   * published binding, source closure and native destination/provider facts. */
+  async existingImage(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerEmployeeWorkerImage> {
+    current();
+    const row = DockerEmployeeContinuationRecord.parse(input),
+      digest = dockerContinuationDigest(row);
+    const check = () => {
+      current();
+      if (dockerContinuationDigest(input) !== digest) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+    };
+    if (!['provider-issued', 'ready'].includes(row.phase)) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    await this.#source(row);
+    check();
+    const result = await this.#imagePair(row.original, row.workerImage, false);
+    check();
+    return result;
+  }
+  async #imagePair(
+    original: DockerEmployeeOriginal,
+    selected: Pick<DockerEmployeeWorkerImage, 'imageId' | 'clientManifestDigest'>,
+    requireAncestor: boolean
+  ): Promise<DockerEmployeeWorkerImage> {
     const rows = z
       .array(
         z.object({
@@ -299,19 +345,57 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       )
       .length(1);
     const source = rows.parse(JSON.parse(await this.command.run(['image', 'inspect', original.imageId])))[0]!;
-    const target = rows.parse(JSON.parse(await this.command.run(['image', 'inspect', this.workerImage.imageId])))[0]!;
+    const target = rows.parse(JSON.parse(await this.command.run(['image', 'inspect', selected.imageId])))[0]!;
     if (
       source.Id !== original.imageId ||
-      target.Id !== this.workerImage.imageId ||
-      source.RootFS.Layers.some((layer, index) => target.RootFS.Layers[index] !== layer) ||
-      target.Config.Labels?.['org.reverie.worker-client.manifest'] !== this.workerImage.clientManifestDigest
+      target.Id !== selected.imageId ||
+      (requireAncestor && source.RootFS.Layers.some((layer, index) => target.RootFS.Layers[index] !== layer)) ||
+      target.Config.Labels?.['org.reverie.worker-client.manifest'] !== selected.clientManifestDigest
     )
       refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
     return DockerEmployeeWorkerImage.parse({
       imageId: target.Id,
       sourceImageId: source.Id,
-      clientManifestDigest: this.workerImage.clientManifestDigest,
+      clientManifestDigest: selected.clientManifestDigest,
     });
+  }
+  async observePlanReplacementSource(row: DockerEmployeeContinuationRecord, current: () => void) {
+    current();
+    if (row.version !== 3) refuse('DOCKER_PLAN_INSTALL_PROTOCOL_REQUIRED');
+    const raw = await this.#source(row);
+    current();
+    const restart = z
+      .object({ Name: z.literal('no') })
+      .passthrough()
+      .safeParse(raw.HostConfig.RestartPolicy);
+    if (raw.State.Pid !== 0 || !restart.success) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+    return { original: boxedOriginal(raw, sourceSubject(row), this.deployment, true), state: 'stopped' as const };
+  }
+  /** Retained HOME identity only. The actor must independently retain its
+   * genuine source-stop/request grant; this read cannot authorize a new helper. */
+  async planReplacementHome(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerCredentialHome> {
+    current();
+    if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
+      refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
+    const before = await this.#destination(row);
+    current();
+    if (
+      !before ||
+      before.State.Running ||
+      before.State.Pid !== 0 ||
+      !z
+        .object({ Name: z.literal('no') })
+        .passthrough()
+        .safeParse(before.HostConfig.RestartPolicy).success
+    )
+      refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
+    const home = await this.#storage.credentialHome(row);
+    current();
+    const after = await this.#destination(row);
+    current();
+    if (!after || after.State.Running || !isDeepStrictEqual(before.State, after.State))
+      refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
+    return Object.freeze({ ...home });
   }
   async observeSource(subject: DockerContinuationSubject, containerId?: string) {
     const selected = await this.command.run([
@@ -573,7 +657,18 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         '--expected-digest',
         row.workerImage.clientManifestDigest,
       ]);
-      if (['identity-issued', 'identity-ready', 'provider-issued', 'ready'].includes(row.phase)) {
+      if (row.version === 3) {
+        // Initial installation belongs to the private PlanMoves actor. Existing
+        // provider observations re-earn its retained helper and guest receipt;
+        // the old global credential file is never a replacement fallback.
+        if (['provider-issued', 'ready'].includes(row.phase)) {
+          const digest = dockerContinuationDigest(row);
+          const current = () => {
+            if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_PLAN_INSTALL_BINDING_CHANGED');
+          };
+          credentialDigest = (await this.#planInstaller.observe(row, current)).live.tokenDigest;
+        }
+      } else if (['identity-issued', 'identity-ready', 'provider-issued', 'ready'].includes(row.phase)) {
         const installed = await this.#credentials.observe(row);
         if (installed !== null) {
           const readback = parseWorkerCredentialReadback(
@@ -806,6 +901,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       await this.#ephemeral.verifyDestination(checked);
       livePreparation = true;
       requireCurrent();
+    }
+    if (checked.version === 3) {
+      await this.#planInstaller.observe(checked, requireCurrent);
+      requireCurrent();
+    }
+    if (this.#ephemeral || checked.version === 3) {
       // The added metadata await must not turn an earlier Native observation
       // into a stale live proof. Bind the same current provider again.
       const confirmed = await pane(),
@@ -891,6 +992,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     requireCurrent();
     if (!['ready', 'provider-issued'].includes(checked.phase) || !checked.destination)
       refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    if (checked.version === 3) {
+      await this.#planInstaller.observe(checked, requireCurrent);
+      requireCurrent();
+    }
     if (checked.phase === 'provider-issued') {
       // A retained dispatch fence grants no attachment. Earn every original
       // storage/credential/resource observation before the private native view.
