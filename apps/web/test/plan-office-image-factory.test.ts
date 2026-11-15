@@ -3,7 +3,12 @@ import { expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
-import { planOfficeAssetSources, requirePlanOfficeDependencyLock } from '../scripts/build-plan-office.mjs';
+import { transformSync } from 'esbuild';
+import {
+  planOfficeAssetSources,
+  requirePlanOfficeDependencyLock,
+  PLAN_OFFICE_TEST_ENTRIES,
+} from '../scripts/build-plan-office.mjs';
 const repositorySource = path.resolve('../..');
 const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-office-images.nix'))
   ? repositorySource
@@ -135,4 +140,22 @@ it('resolves mandatory assets against the actual monorepo layout and canonical r
   const skill = assets.find((asset) => asset.destination === 'skills/reverie')!;
   expect(fs.statSync(path.join(skill.source, 'SKILL.md')).isFile()).toBe(true);
   expect(fs.readFileSync(path.join(skill.source, 'SKILL.md'), 'utf8').length).toBeGreaterThan(100);
+});
+
+it('ships and compiles the actual inert scenario module beside every relative driver helper import', () => {
+  const selected = new Set<string>(PLAN_OFFICE_TEST_ENTRIES);
+  expect(selected.size).toBe(PLAN_OFFICE_TEST_ENTRIES.length);
+  expect(selected.has('test/helpers/plan-office-move-driver.ts')).toBe(true);
+  for (const entry of selected) {
+    const source = fs.readFileSync(path.resolve(entry), 'utf8');
+    const compiled = transformSync(source, { loader: 'ts', format: 'esm', platform: 'node', target: 'node22' }).code;
+    expect(compiled.length).toBeGreaterThan(0);
+    if (entry === 'test/helpers/plan-office-driver.ts') {
+      for (const match of compiled.matchAll(/(?:from\s+)["'](\.\/[^"']+\.js)["']/g))
+        expect(
+          selected.has(path.posix.join(path.posix.dirname(entry), match[1]!.replace(/\.js$/, '.ts'))),
+          match[1]
+        ).toBe(true);
+    }
+  }
 });

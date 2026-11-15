@@ -1,4 +1,5 @@
 /** Owned CI office baseline only. No production admission or paid provider override. */
+export { runPlanOfficeMoveScenario } from './plan-office-move-driver.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

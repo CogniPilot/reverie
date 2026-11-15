@@ -35,6 +35,15 @@ export function planOfficeAssetSources(source: string) {
     { source: path.join(source, 'skills/reverie'), destination: 'skills/reverie' },
   ];
 }
+/** Explicit non-bundled test module graph shipped next to the ordinary current-source control. */
+export const PLAN_OFFICE_TEST_ENTRIES = [
+  'test/fixtures/plan-office-bootstrap.ts',
+  'test/helpers/plan-office-bootstrap.ts',
+  'test/helpers/plan-office-driver.ts',
+  'test/helpers/plan-office-move-driver.ts',
+  'test/helpers/docker-continuation-auth-canary.ts',
+  'test/fixtures/plan-office-canary.mts',
+] as const;
 export function buildPlanOffice(args: readonly string[]) {
   const flags = new Map<string, string>();
   for (let i = 0; i < args.length; i += 2) {
@@ -145,11 +154,7 @@ export function buildPlanOffice(args: readonly string[]) {
   // This exact separate test-only entry seeds inactive DATA. Ordinary control startup is dist/index.js web.
   fs.symlinkSync('dist', path.join(runtime, 'src'));
   run(esbuild, [
-    path.join(web, 'test/fixtures/plan-office-bootstrap.ts'),
-    path.join(web, 'test/helpers/plan-office-bootstrap.ts'),
-    path.join(web, 'test/helpers/plan-office-driver.ts'),
-    path.join(web, 'test/helpers/docker-continuation-auth-canary.ts'),
-    path.join(web, 'test/fixtures/plan-office-canary.mts'),
+    ...PLAN_OFFICE_TEST_ENTRIES.map((entry) => path.join(web, entry)),
     '--outdir=' + path.join(runtime, 'test'),
     '--outbase=' + path.join(web, 'test'),
     '--platform=node',

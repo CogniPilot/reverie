@@ -110,7 +110,7 @@ let
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
         test/plan-office-bootstrap.test.ts \
-        test/boxed-plan-provider-files.test.ts test/boxed-plan-provider-entry.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts \
+        test/boxed-plan-provider-files.test.ts test/boxed-plan-provider-entry.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts test/plan-office-move-driver.test.ts \
         test/canary-cookie-files.test.ts \
         test/canary-browser-modules.test.ts \
         test/canary-fixture-contract.test.ts \
