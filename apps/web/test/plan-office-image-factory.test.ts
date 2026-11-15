@@ -75,6 +75,7 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   });
   expect(v.control.config.Env).toContain('REVERIE_RUNTIME_BACKEND=boxed-docker-v1');
   expect(v.control.config.Env).toContain('REVERIE_DATA_DIR=/fixture/data');
+  expect(v.control.config.Env).toContain('REVERIE_ALLOWED_HOSTS=reverie');
   expect(v.control.config.Env).not.toContainEqual(expect.stringMatching(/BROKER|WORKER_SOCKET/));
 });
 it('rejects generic/invalid namespaces and malformed manifest or actual Engine IDs before image construction', () => {

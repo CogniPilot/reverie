@@ -260,6 +260,44 @@ export function requirePlanOfficeContainer(actual: Json, expected: Json, imageLa
     assert.equal((hostMount.BindOptions as Json).Propagation, 'rprivate');
   }
 }
+/** Read only the actual advertised internal Host before consuming a provider intent. */
+export async function planOfficeInternalHostPreflight(endpoint: string): Promise<void> {
+  const url = new URL(endpoint);
+  assert.equal(url.protocol, 'http:');
+  assert.equal(url.hostname, '127.0.0.1');
+  assert.ok(Number(url.port) >= 1024);
+  assert.equal(url.pathname, '/');
+  assert.equal(url.search + url.hash + url.username + url.password, '');
+  await new Promise<void>((resolve, reject) => {
+    const call = request(
+      new URL('/api/owner/status', url),
+      { method: 'GET', headers: { host: 'reverie:3000' } },
+      (response) => {
+        let text = '';
+        response.setEncoding('utf8');
+        response.on('data', (part: string) => {
+          text += part;
+          if (Buffer.byteLength(text) > 8192) call.destroy(Error('Internal Host response bound'));
+        });
+        response.once('error', reject);
+        response.once('aborted', () => reject(Error('Internal Host response unconfirmed')));
+        response.once('end', () => {
+          try {
+            assert.equal(response.complete, true);
+            assert.equal(response.statusCode, 200, 'Advertised internal API Host refused');
+            assert.equal(JSON.parse(text).success, true);
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    call.setTimeout(5000, () => call.destroy(Error('Internal Host preflight deadline')));
+    call.once('error', reject);
+    call.end();
+  });
+}
 class Evidence {
   readonly fd: number;
   serial = 0;
@@ -754,6 +792,8 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     );
     assert.deepEqual(actualTools, controlTools);
     evidence.save('control-tools-qualified', { control, paths: actualTools, readOnly: true });
+    await planOfficeInternalHostPreflight(endpoint);
+    evidence.save('internal-api-host-qualified', { control, host: 'reverie:3000', readOnly: true });
     const owner = await enrollIsolatedPlanOfficeOwner(endpoint, path.join(evidence.root, 'auth'));
     evidence.save('owner-enrolled', { ownerSessionFile: owner.ownerSessionFile, requests: owner.requests() });
     for (const entry of sources) {

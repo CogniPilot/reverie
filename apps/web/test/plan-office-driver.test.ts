@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import Fastify from 'fastify';
+import { registerHostGuard } from '../src/web/middleware/auth.js';
 import {
   PlanOfficeDriverInput,
   planOfficeNames,
@@ -17,6 +19,7 @@ import {
   requirePlanOfficeContainer,
   PLAN_OFFICE_CPU_PROGRAM,
   parsePlanOfficeCpus,
+  planOfficeInternalHostPreflight,
 } from './helpers/plan-office-driver.js';
 const sha = 'sha256:' + 'a'.repeat(64),
   sid = '11111111-1111-4111-8111-111111111111',
@@ -256,5 +259,25 @@ it('simulates missing ephemeral leaves only after fresh inert proof and refuses 
     expect(fs.existsSync(tmp)).toBe(true);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+it('checks the real advertised Host guard before any provider intent and trusts only the explicit fixture alias', async () => {
+  const app = Fastify();
+  let allowedHosts: string[] = [];
+  registerHostGuard(app, () => ({ bindHost: '0.0.0.0', allowedHosts, tunnelHost: null }));
+  app.get('/api/owner/status', () => ({ success: true, data: { signedIn: false } }));
+  try {
+    const endpoint = await app.listen({ host: '127.0.0.1', port: 0 });
+    await expect(planOfficeInternalHostPreflight(endpoint)).rejects.toThrow('Advertised internal API Host refused');
+    allowedHosts = ['reverie'];
+    await expect(planOfficeInternalHostPreflight(endpoint)).resolves.toBeUndefined();
+    expect(
+      (await app.inject({ method: 'GET', url: '/api/owner/status', headers: { host: 'foreign.invalid:3000' } }))
+        .statusCode
+    ).toBe(403);
+    await expect(planOfficeInternalHostPreflight('http://foreign.invalid:3000')).rejects.toThrow();
+  } finally {
+    await app.close();
   }
 });

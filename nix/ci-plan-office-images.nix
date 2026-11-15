@@ -83,7 +83,7 @@ let
         Entrypoint = [ "${node}/bin/node" "${runtime}/lib/reverie/dist/index.js" ];
         Cmd = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
         WorkingDir = "/fixture";
-        Env = [ "HOME=/fixture/home" "REVERIE_DATA_DIR=/fixture/data" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" "REVERIE_OWNER_SETUP=1" "REVERIE_API_URL=http://reverie:3000" "PATH=/opt/reverie-ci-plan-provider/bin:/bin" ];
+        Env = [ "HOME=/fixture/home" "REVERIE_DATA_DIR=/fixture/data" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" "REVERIE_OWNER_SETUP=1" "REVERIE_API_URL=http://reverie:3000" "REVERIE_ALLOWED_HOSTS=reverie" "PATH=/opt/reverie-ci-plan-provider/bin:/bin" ];
         Labels = { "org.reverie.fixture" = "ci-plan-office-v1"; };
         ExposedPorts = { "3000/tcp" = {}; };
       };
