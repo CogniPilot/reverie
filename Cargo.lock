@@ -1518,13 +1518,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reverie-worker-init"
-version = "0.1.0"
-dependencies = [
- "nix",
-]
-
-[[package]]
 name = "reverie-worker-client-capsule"
 version = "0.1.0"
 dependencies = [
@@ -1543,6 +1536,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "reverie-worker-init"
+version = "0.1.0"
+dependencies = [
+ "nix",
 ]
 
 [[package]]
