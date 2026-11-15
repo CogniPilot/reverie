@@ -25,6 +25,20 @@ export type DockerResourceConvergence = {
     | 'closed-writer'
     | 'unstarted-retired';
 };
+/** Resource scope is binding and office intent, not display/progress bookkeeping.
+ * The separately captured genuine actor grant is still checked at every await. */
+function resourceTargetScope(employee: CompanyEmployee): string {
+  return dockerContinuationDigest({
+    employeeId: employee.id,
+    owner: employee.owner ?? null,
+    sessionId: employee.sessionId,
+    sessionGeneration: employee.sessionGeneration,
+    runtimeRecipe: employee.runtimeRecipe ?? null,
+    dockerBinding: employee.dockerBinding ?? null,
+    onVacation: employee.onVacation,
+    desiredRunning: employee.desiredRunning,
+  });
+}
 export class DockerResourceRevisionService {
   readonly #converging = new Map<string, Promise<DockerResourceConvergence>>();
   readonly #failures = new Map<string, { scope: string; revision: string; code: string }>();
@@ -193,8 +207,8 @@ export class DockerResourceRevisionService {
       !['provider-issued', 'ready'].includes(row.phase)
     )
       throw new CompanyError('Current bound Docker employee required', 409);
-    const employeeDigest = dockerContinuationDigest(employee),
-      rowDigest = dockerContinuationDigest(row);
+    const employeeDigest = resourceTargetScope(employee),
+      rowDigest = dockerResourceScope(row);
     const grant = this.company.recoveryAction(employeeId, owner); // actual owner target/binding currency; not a worker grant
     let revoked = false;
     const current = () => {
@@ -209,9 +223,10 @@ export class DockerResourceRevisionService {
         if (
           !live ||
           live.bindingMigration ||
-          dockerContinuationDigest(live) !== employeeDigest ||
+          resourceTargetScope(live) !== employeeDigest ||
           !actual ||
-          dockerContinuationDigest(actual) !== rowDigest ||
+          !['provider-issued', 'ready'].includes(actual.phase) ||
+          dockerResourceScope(actual) !== rowDigest ||
           !isDeepStrictEqual(live.dockerBinding, employee.dockerBinding)
         )
           throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_REVISION_CHANGED');

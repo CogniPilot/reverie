@@ -326,6 +326,8 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     companyStore,
     revisions,
     resourceRevisionService,
+    resourceEngine,
+    resources,
     resourceReads: () => resourceReads,
     beforeResourceRead: (fn: () => Promise<void>) => {
       beforeResourceRead = fn;
@@ -1449,5 +1451,101 @@ describe('default publication permission finalizer', () => {
     }
     const onDisk = JSON.parse(fs.readFileSync(join(f.revisions.directory, 'revisions.json'), 'utf8'));
     expect(onDisk.desired.at(-1).revision).toBe(payload.revision);
+  });
+});
+
+describe('resource target currency excludes unrelated progress, retaining real owner and binding authority', () => {
+  // These are controlled read ports for the service currency guard. Native kernel
+  // enforcement is separately exercised by the physical controller acceptance.
+  it.each(['wake-attempt', 'name', 'phase'] as const)(
+    'keeps a genuine owner read current across benign %s progress',
+    async (change) => {
+      const f = await fixture({ storedPolicy: true });
+      await f.bindResourceRow();
+      let entered = false;
+      const destination = vi
+        .spyOn(f.resourceEngine, 'verifyResourceDestination')
+        .mockImplementation(async (_row, current) => {
+          if (!entered) {
+            entered = true;
+            await f.companyStore.update((state) => {
+              const employee = state.employees.find((value) => value.id === target)!;
+              if (change === 'wake-attempt') employee.wakeAttempts.push(123);
+              if (change === 'name') employee.name = 'New display name';
+              if (change === 'phase') state.dockerEmployeeContinuations![0]!.phase = 'provider-issued';
+            });
+          }
+          current();
+        });
+      const read = vi.spyOn(f.resources, 'observeMemoryHigh').mockImplementation(async (_row, current) => {
+        current();
+        return {
+          actualMemoryHighBytes: policy.memoryHighBytes,
+          memoryMaxBytes: policy.memoryMaxBytes,
+          actualLimits: { ...policy, cpuQuota: 'unlimited' as const },
+          approved: true,
+          approvalSource: 'original-policy' as const,
+          approvedRevision: null,
+        };
+      });
+      try {
+        const response = await f.app.inject({
+          method: 'GET',
+          url: f.url + '/docker-resources',
+          headers: f.ownerHeaders,
+        });
+        expect(response.statusCode).toBe(200);
+        expect(response.json().data.sessionId).toBe(sid);
+        expect(read).toHaveBeenCalledOnce();
+        expect(destination).toHaveBeenCalledTimes(2);
+        expect(f.effects()).toBe(0);
+      } finally {
+        read.mockRestore();
+        destination.mockRestore();
+      }
+    }
+  );
+  it.each([
+    'logout',
+    'owner',
+    'generation',
+    'binding',
+    'recipe',
+    'vacation',
+    'stopped',
+    'operation',
+    'held-phase',
+  ] as const)('still refuses %s at the await before any resource read or write', async (change) => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const destination = vi
+      .spyOn(f.resourceEngine, 'verifyResourceDestination')
+      .mockImplementation(async (_row, current) => {
+        if (change === 'logout') f.logout();
+        else
+          await f.companyStore.update((state) => {
+            const employee = state.employees.find((value) => value.id === target)!;
+            if (change === 'owner') employee.owner = 'new-owner';
+            if (change === 'generation') employee.sessionGeneration++;
+            if (change === 'binding') employee.dockerBinding!.containerId = '7'.repeat(64);
+            if (change === 'recipe') employee.runtimeRecipe!.workingDir = '/different';
+            if (change === 'vacation') employee.onVacation = !employee.onVacation;
+            if (change === 'stopped') employee.desiredRunning = !employee.desiredRunning;
+            if (change === 'operation')
+              state.dockerEmployeeContinuations![0]!.request.operationId = '77777777-7777-4777-8777-777777777777';
+            if (change === 'held-phase') state.dockerEmployeeContinuations![0]!.phase = 'destination-issued';
+          });
+        current();
+      });
+    const read = vi.spyOn(f.resources, 'observeMemoryHigh');
+    try {
+      const response = await f.app.inject({ method: 'GET', url: f.url + '/docker-resources', headers: f.ownerHeaders });
+      expect(response.statusCode).toBe(change === 'logout' ? 403 : 409);
+      expect(read).not.toHaveBeenCalled();
+      expect(f.effects()).toBe(0);
+    } finally {
+      read.mockRestore();
+      destination.mockRestore();
+    }
   });
 });
