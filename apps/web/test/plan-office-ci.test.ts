@@ -10,6 +10,8 @@ import {
   planOfficeCiImage,
   planOfficeCiContract,
   requirePlanOfficeCiAcceptance,
+  planOfficeCiFailureDiagnostic,
+  readPlanOfficeCiFailureState,
 } from '../scripts/plan-office-ci.mjs';
 const instance = 'a'.repeat(32),
   namespace = planOfficeCiNamespace(instance);
@@ -41,6 +43,134 @@ it('requires the explicit hosted-only command before any filesystem, build or En
     expect(() => requireHostedPlanOffice(['--ci'], { ...env, ...change }, 'linux', 'x64')).toThrow();
   expect(() => requireHostedPlanOffice(['--ci'], env, 'darwin', 'x64')).toThrow();
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'arm64')).toThrow();
+});
+it('publishes useful closed child/operation diagnostics without hostile tokens, freeform errors or objects', () => {
+  const token = 'HOSTILE_TOKEN_DO_NOT_PUBLISH_abcdefghijklmnopqrstuv';
+  const id = '22222222-2222-4222-8222-222222222222';
+  const report = planOfficeCiFailureDiagnostic(
+    {
+      status: 1,
+      signal: null,
+      errorName: 'TimeoutError',
+      stdout: token,
+      stderr: token,
+      message: token,
+      stack: token,
+      env: { TOKEN: token },
+    },
+    [
+      {
+        kind: 'request-status',
+        id,
+        employeeId,
+        phase: 'executing',
+        movePhase: 'checking',
+        httpStatus: 200,
+        errorCode: 'CONFLICT',
+        error: token,
+        token,
+        nonceHash: token,
+        owner: token,
+        handoff: token,
+      },
+      { kind: 'owner-refusal', httpStatus: 403, errorCode: 'FORBIDDEN', message: token },
+      { kind: 'request-status', id: token, phase: token, errorCode: token, sessionId: token },
+      { kind: { toString: () => 'request-status', token }, id },
+    ]
+  );
+  expect(report.child).toEqual({ status: 1, signal: null, errorName: 'TimeoutError' });
+  expect(report.operations).toEqual([
+    {
+      kind: 'request-status',
+      id,
+      employeeId,
+      phase: 'executing',
+      movePhase: 'checking',
+      httpStatus: 200,
+      errorCode: 'CONFLICT',
+    },
+    { kind: 'owner-refusal', httpStatus: 403, errorCode: 'FORBIDDEN' },
+  ]);
+  expect(JSON.stringify(report)).not.toContain(token);
+  expect(
+    planOfficeCiFailureDiagnostic({ status: token, signal: { toString: () => 'SIGTERM', token }, errorName: token }, [])
+      .child
+  ).toEqual({});
+  expect(planOfficeCiFailureDiagnostic({ status: null, signal: 'SIGKILL', errorName: 'Error' }, []).child).toEqual({
+    status: null,
+    signal: 'SIGKILL',
+    errorName: 'Error',
+  });
+});
+it('projects only bounded owned observations/canonical phases and preserves an absent original status before failure', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-office-ci-diagnostic-'));
+  const token = 'PRIVATE_FAKE_PASSWORD_AND_HMAC_DO_NOT_PUBLISH';
+  const operationId = '22222222-2222-4222-8222-222222222222';
+  const requestId = '33333333-3333-4333-8333-333333333333';
+  const sessionId = '44444444-4444-4444-8444-444444444444';
+  const write = (name: string, data: unknown) =>
+    fs.writeFileSync(path.join(root, name), JSON.stringify(data), { mode: 0o600 });
+  try {
+    fs.mkdirSync(path.join(root, 'data'), { mode: 0o700 });
+    write('original-3-' + employeeId + '.json', {
+      operationId,
+      phase: 'identity-issued',
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+      error: token,
+    });
+    write('status-' + requestId + '-absent-5.json', {
+      id: requestId,
+      originalOutcome: 'unknown',
+      noRetry: true,
+      token,
+    });
+    write('data/company.json', {
+      dockerEmployeeContinuations: [
+        { employeeId, phase: 'identity-issued', request: { operationId, sessionId }, credential: token, owner: token },
+      ],
+    });
+    write('data/plan-requests.json', [
+      { id: requestId, employeeId, sessionId, phase: 'executing', movePhase: 'checking', error: token },
+    ]);
+    write('owner-api-refused.json', { status: 409, response: { errorCode: 'CONFLICT', error: token } });
+    write('request-' + requestId + '-intent.json', { credential: token, phase: 'completed' });
+    write('owner-session.json', { cookie: token, id: requestId, employeeId, phase: 'completed' });
+    fs.symlinkSync(path.join(root, 'owner-session.json'), path.join(root, 'status-' + requestId + '-9.json'));
+    write('data/plan-moves.json', [{ id: requestId, employeeId: sessionId, phase: 'completed', error: token }]);
+    const projected = planOfficeCiFailureDiagnostic(
+      { status: 1, signal: null },
+      readPlanOfficeCiFailureState(root, employeeId)
+    );
+    expect(projected.operations).toContainEqual({
+      kind: 'recovery-status',
+      id: operationId,
+      employeeId,
+      phase: 'identity-issued',
+      state: 'held',
+      errorCode: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+    });
+    expect(projected.operations).toContainEqual({
+      kind: 'request-status',
+      id: requestId,
+      employeeId,
+      state: 'unknown',
+      httpStatus: 404,
+    });
+    expect(projected.operations).toContainEqual({
+      kind: 'canonical-request',
+      id: requestId,
+      employeeId,
+      sessionId,
+      phase: 'executing',
+      movePhase: 'checking',
+    });
+    expect(JSON.stringify(projected)).not.toContain(token);
+    expect(projected.operations.some((record) => record.phase === 'completed')).toBe(false);
+    expect(readPlanOfficeCiFailureState(root, 'foreign-secret')).toEqual([]);
+  } finally {
+    fs.rmSync(root, { recursive: true });
+  }
 });
 it('selects only fresh namespaced actual Engine IDs and fixed immutable current-source inputs', () => {
   for (const invalid of ['production', '', '../office', 'A'.repeat(32), 'a'.repeat(31)])
