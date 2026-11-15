@@ -7,7 +7,7 @@ import { planOfficeAssetSources, requirePlanOfficeDependencyLock } from '../scri
 const repositorySource = path.resolve('../..');
 const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-office-images.nix'))
   ? repositorySource
-  : path.resolve('test/fixtures/plan-office-source');
+  : path.resolve('build-fixtures/plan-office-source');
 const factory = path.join(owningSource, 'nix/ci-plan-office-images.nix');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);

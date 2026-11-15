@@ -62,12 +62,13 @@ let
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
       # Pure CI image construction tests need their real owning monorepo layout
       # inside this flattened web derivation, not /build/../nix or a stub tree.
-      mkdir -p test/fixtures/plan-office-source/nix test/fixtures/plan-office-source/apps/web test/fixtures/plan-office-source/skills
-      cp ${consoleFixture "nix/ci-plan-office-images.nix"} test/fixtures/plan-office-source/nix/ci-plan-office-images.nix
-      cp ${consoleFixture "nix/docker-resource-helper-image.nix"} test/fixtures/plan-office-source/nix/docker-resource-helper-image.nix
-      cp -r ${consoleFixture "apps/web/scripts"} test/fixtures/plan-office-source/apps/web/scripts
-      cp -r ${consoleFixture "apps/web/packages"} test/fixtures/plan-office-source/apps/web/packages
-      cp -r ${consoleSkill} test/fixtures/plan-office-source/skills/reverie
+      # Copied workspace package tests are build-input DATA, outside test discovery.
+      mkdir -p build-fixtures/plan-office-source/nix build-fixtures/plan-office-source/apps/web build-fixtures/plan-office-source/skills
+      cp ${consoleFixture "nix/ci-plan-office-images.nix"} build-fixtures/plan-office-source/nix/ci-plan-office-images.nix
+      cp ${consoleFixture "nix/docker-resource-helper-image.nix"} build-fixtures/plan-office-source/nix/docker-resource-helper-image.nix
+      cp -r ${consoleFixture "apps/web/scripts"} build-fixtures/plan-office-source/apps/web/scripts
+      cp -r ${consoleFixture "apps/web/packages"} build-fixtures/plan-office-source/apps/web/packages
+      cp -r ${consoleSkill} build-fixtures/plan-office-source/skills/reverie
 
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
