@@ -86,7 +86,7 @@ export interface DockerContainedResourcesConfiguration {
   readonly memoryHighHelperImageId?: string;
   /** Canonical selected bindings AND retained destinations. These IDs are DATA;
    * Engine/current kernel observations must independently validate every one. */
-  selectedWorkerContainerIds(): readonly string[];
+  selectedWorkerContainerIds(): readonly string[] | Promise<readonly string[]>;
   /** Original issued pool helpers from the canonical operation journal, for
    * later employees sharing the same actually acknowledged pool. */
   retainedPoolConfigurationTasks?(): readonly DockerContinuationTask[];
@@ -265,7 +265,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return { id, pid: state.Pid, startTicks: ticks };
   }
   async #members(worker?: string): Promise<string[]> {
-    const ids = [...this.configuration.selectedWorkerContainerIds()];
+    const ids = [...await this.configuration.selectedWorkerContainerIds()];
     if (ids.length > 64 || new Set(ids).size !== ids.length) refuse('DOCKER_RESOURCE_MEMBERS_UNKNOWN');
     const args: string[] = [];
     for (const id of ids.sort()) {
@@ -806,6 +806,25 @@ export class DockerContainedResources implements DockerContainedResourceControll
       configuration: chosen,
     });
     return new DockerPoolReconciliationReceipt(poolObservationOrigin, record, current);
+  }
+  /** Plan permission does not authorize a shared pool writer. Adopt only the
+   * actual fixed already-running anchor and an already-enforced pool with its
+   * original terminal ACK. No CREATE/START/configure is reachable here. */
+  async prepareRetainedPool(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{
+    current();const name='reverie-boxed-anchor-'+this.configuration.boxId.slice(0,32),config=this.#configuration('anchor',name,['anchor']),base={role:'anchor'as const,name,imageId:this.configuration.helperImageId,configurationDigest:dockerContinuationDigest(config)};
+    let task=this.journal.read(row,'anchor');if(!task){await this.journal.publish(row,undefined,{...base,phase:'create-issued'},current);current();task=this.journal.read(row,'anchor');}
+    if(!task||task.name!==name||task.imageId!==base.imageId||task.configurationDigest!==base.configurationDigest)refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    if(task.phase==='create-issued'){
+      const ids=(await this.command.run(['container','ls','--all','--no-trunc','--filter','label=reverie.box.resource.name='+name,'--format','{{.ID}}'])).trim();current();const id=cid.parse(ids);await this.#fixed(id,config);current();const init=await this.#init(id);current();if(!init)refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+      await this.journal.publish(row,task,{...base,phase:'created',containerId:id},current);current();task=this.journal.read(row,'anchor');
+    }
+    if(!task||!('containerId'in task))refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    const raw=await this.#fixed(task.containerId,config);current();if((raw.State as{Running?:unknown}).Running!==true)refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    const anchor=await this.#init(task.containerId);current();if(!anchor)refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');const seen=await this.#probe(anchor);current();
+    if(!this.#matches(seen,row.policy.pool,null))refuse('DOCKER_PLAN_SHARED_POOL_POLICY_CHANGED');await this.#poolAck(row,seen);current();
+    if(task.phase==='created'||task.phase==='start-issued'){await this.journal.publish(row,task,{...base,phase:'running',containerId:task.containerId,initPid:anchor.pid,initStartTicks:seen.anchor.startTicks},current);current();}
+    else if(task.phase!=='running'||task.initPid!==anchor.pid||task.initStartTicks!==seen.anchor.startTicks)refuse('DOCKER_RESOURCE_ANCHOR_REPLACED');
+    const after=await this.#anchor(row);current();if(!after||after.id!==anchor.id||after.pid!==anchor.pid||after.startTicks!==seen.anchor.startTicks)refuse('DOCKER_RESOURCE_ANCHOR_REPLACED');
   }
   async preparePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const anchor = await this.#anchor(row, current);
@@ -1701,6 +1720,26 @@ export class DockerContainedResources implements DockerContainedResourceControll
           : final.state,
       policy: actual,
     };
+  }
+  /** Read-only native settlement of original helper cursors before a new
+   * actor epoch. No CREATE/START/write command is reachable here. */
+  async settleObservedHelpers(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{
+    current();let anchor=await this.#anchor(row);current();const task=this.journal.read(row,'anchor');
+    if(task&&['start-issued','created'].includes(task.phase)&&anchor&&'containerId'in task){
+      await this.journal.publish(row,task,{role:task.role,name:task.name,imageId:task.imageId,configurationDigest:task.configurationDigest,phase:'running',containerId:task.containerId,initPid:anchor.pid,initStartTicks:anchor.startTicks},current);current();
+    }
+    for(const role of ['pool-helper','leaf-helper']as const){
+      const original=this.journal.read(row,role);if(!original||!['start-issued','running'].includes(original.phase))continue;
+      anchor=await this.#anchor(row);current();if(!anchor)refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+      const worker=role==='leaf-helper'?await this.#worker(row):undefined;current();const seen=await this.#probe(anchor,worker);current();
+      if(role==='pool-helper')await this.#poolWritersClosed(original);current();
+      const high=role==='leaf-helper'?row.policy.memoryHighBytes:null,policy=role==='leaf-helper'?row.policy:row.policy.pool;
+      if(!('containerId'in original)||!await this.#ack(original,seen,policy,high,role==='leaf-helper'))refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');current();
+      const ack=observation.parse(JSON.parse(await this.command.run(['container','logs',original.containerId])));current();
+      if(ack.boxId!==seen.boxId||!isDeepStrictEqual(ack.parent,seen.parent)||!isDeepStrictEqual(ack.anchor,seen.anchor)||!isDeepStrictEqual(ack.worker,role==='leaf-helper'?seen.worker:null)||!this.#matches(ack,policy,high))refuse('DOCKER_RESOURCE_HELPER_RESULT_CHANGED');
+      if(!await this.#ack(original,seen,policy,high,role==='leaf-helper'))refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');current();
+      await this.journal.publish(row,original,{role:original.role,name:original.name,imageId:original.imageId,configurationDigest:original.configurationDigest,phase:'completed',containerId:original.containerId,resultDigest:dockerContinuationDigest(ack)},current);current();
+    }
   }
   async configure(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const pool = await this.observePool(row);

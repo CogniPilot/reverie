@@ -1,3 +1,7 @@
+import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
+import type{PlanService}from'./plan-accounts.js';
+import type{PlanMoveStore}from'./plan-move-store.js';
+import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
@@ -190,6 +194,7 @@ export class DockerEmployeeRuntime {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly #key: DockerRuntimeKey;
   #attached?: Attached;
+  readonly #planActors=new Set<DockerPlanMoveActor>();
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -370,6 +375,13 @@ export class DockerEmployeeRuntime {
       readLegacyDockerPolicyProposal,
       a.pool
     );
+  }
+  /** Server composition only. Inert until the API supplies its genuine captured
+   * requester; no request body selects Engine, paths, accounts or commands. */
+  planMoveActor(plans:PlanService,moves:PlanMoveStore,chat:ChatroomService):DockerPlanMoveActor|undefined{
+    const a=this.#attached;if(!a||!this.current())return;
+    const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
+    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,retain:actor=>this.#planActors.add(actor)});
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
   providerHealthObserver(changed: () => void): DockerProviderHealth {
@@ -606,8 +618,10 @@ export class DockerEmployeeRuntime {
   close(): void {
     if (this.#resourceTimer) clearInterval(this.#resourceTimer);
     this.#resourceTimer = undefined;
+    const errors:unknown[]=[];
+    for(const actor of this.#planActors){try{actor.close();}catch(error){errors.push(error);}}
+    this.#planActors.clear();
     this.authentication.close();
-    const errors = [];
     try { this.#attached?.resourceRevisions.revisions.close(); }
     catch (error) { errors.push(error); }
     try {

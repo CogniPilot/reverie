@@ -236,6 +236,15 @@ export class DockerEmployeeStorage {
       refuse('DOCKER_STORAGE_HOLDER_REPLACED');
     return { pid: state.Pid, value };
   }
+  /** Settle an already observed live holder cursor; never create or START.
+   * Monotone task publication and the owning epoch keep this exact cursor. */
+  async settleObserved(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{
+    current();const task=this.journal.read(row,'storage-holder');if(!task||!['start-issued','running'].includes(task.phase))return;
+    if(await this.observe(row)!=='ready')refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');current();
+    // prepare has no effect branch for these two retained task phases. It
+    // re-reads the same fixed holder and publishes its actual init once.
+    await this.prepare(row,current);current();
+  }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued' | 'unknown'> {
     const source = await this.source(row),
       config = this.#configuration(row, source),

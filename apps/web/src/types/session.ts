@@ -372,9 +372,13 @@ export interface DockerCase {
 export interface SessionDocker {
   /** Explicit boxed placement DATA; first launch needs a private process-local owner. */
   continuation?: {
-    operationId:string; employeeId:string; sessionGeneration:number; clientManifestDigest:string; apiUrl:string;
+    operationId: string;
+    employeeId: string;
+    sessionGeneration: number;
+    clientManifestDigest: string;
+    apiUrl: string;
     /** Fixed private account generation DATA, bound by the actual observer/launch owner. */
-    planReplacement?: { provider:'anthropic'|'openai'; projectionDigest:string };
+    planReplacement?: { provider: 'anthropic' | 'openai'; projectionDigest: string };
   };
   hostId: string;
   label: string;
@@ -822,6 +826,9 @@ export interface PromptCacheStatus {
 export type StatusLineExporter = 'injected' | 'collection-off' | 'workspace-statusline' | 'remote';
 
 export interface SessionState {
+  /** Effective Claude policy persisted only for managed plan generations. */
+  claudeMode?: ClaudeMode;
+  allowedTools?: string;
   /** Native conversation bindings by account/endpoint and harness; never credential values. */
   runtimeThreads?: Record<string, string>;
   /** Public account label; credential paths and tokens stay server-side. */

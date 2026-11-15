@@ -254,6 +254,14 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
       ? original
       : DockerEmployeeResourcePolicy.parse(this.defaultPolicy(employees[0]!.owner, original));
   }
+  /** A new explicit plan operation snapshots the already owner-approved default.
+   * Existing operation rows and their historical baseline remain unchanged. */
+  newOperationPolicy(employeeId:string):DockerEmployeeResourcePolicy{
+    const employees=this.company.store.snapshot().employees.filter(e=>e.id===employeeId),employee=employees[0];
+    if(employees.length!==1||!employee?.dockerResourcePolicy)throw new CompanyError('Approved employee resource policy required',409);
+    const original=DockerEmployeeResourcePolicy.parse(employee.dockerResourcePolicy);
+    return this.defaultPolicy?DockerEmployeeResourcePolicy.parse(this.defaultPolicy(employee.owner,original)):original;
+  }
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined {
     return this.company.store.snapshot().dockerEmployeeContinuations?.find((row) => row.employeeId === employeeId);
   }

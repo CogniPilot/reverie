@@ -1,5 +1,7 @@
 import { requireDockerEffectiveResourceProof } from './docker-contained-resource-controller.js';
 import { dockerPlanDestinationEnvironment } from './docker-plan-install-data.js';
+import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
+import type{DockerPlanInitialReceipt}from'./docker-plan-install-data.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
@@ -19,6 +21,7 @@ import type { DockerContinuationTaskJournal } from './docker-continuation-task.j
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import {
+  DockerEmployeePlanReplacementWorkRecord,
   DockerEmployeeBinding,
   DockerPlanReplacementNetworkIds,
   DockerEmployeeOriginal,
@@ -707,10 +710,37 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       HostConfig: host,
     };
   }
-  async createDestination(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+  /** The normal continuation never obtains v3 paid/work authority. */
+  async createDestination(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{if(row.version===3)refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');return this.#createDestination(row,current,false);}
+  async createPlanReplacementDestination(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='destination-issued')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');return this.#createDestination(row,current,true);}
+  async validatePlanReplacement(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{
+    const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();const source=await this.#source(row);current();this.#requireCapsuleMounts(source);
+    if(source.Config.Entrypoint?.length!==1||source.Config.Entrypoint[0]!=='/opt/reverie/perf/bin/reverie-worker-init'||(source.Config.Cmd?.length??0)!==0||source.Config.Env.filter(v=>v.startsWith('PATH=')).length!==1||source.Config.Env.some(v=>/^REVERIE_(USERNAME|PASSWORD|HOOK_SECRET|SERVICE_TOKEN|RECOVERY_[A-Z_]+)=/.test(v)))refuse('DOCKER_CONTINUATION_INERT_ORIGINAL_REQUIRED');
+    const selected=await this.replacementTargetImage(row.original,current);current();if(!isDeepStrictEqual(selected,row.workerImage))refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');await this.resources.validate(row.original,row.policy);current();
+  }
+  async settlePlanReplacementStorage(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);await this.#storage.settleObserved(row,current);current();}
+  /** Inert target observation never consults legacy global identity or claims
+   * that a provider exists. Canonical paid views remain a separate reader. */
+  async observePlanReplacementWork(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<DockerContainerObservation|null>{
+    const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();const raw=await this.#destination(row,current);current();if(!raw)return null;
+    const original=boxedOriginal(raw,rowSubject(row),this.deployment,true);if(row.destination&&!isDeepStrictEqual(original,row.destination))refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED');let resources:DockerEmployeeResourcePolicy|null=null;let provider:DockerContainerObservation['provider']={kind:'unknown'};
+    if(raw.State.Running){parseDockerPlanProtocol(await this.command.run(['exec',raw.Id,'/opt/reverie-worker-client/bin/reverie','worker-client','plan-protocol','--expected-digest',row.workerImage.clientManifestDigest]));current();await this.#storage.verifyDestination(row);current();await this.#ephemeral?.verifyDestination(row);current();if(row.tasks?.some(t=>t.role==='leaf-helper'&&t.phase==='completed')){resources=await this.resources.read(row);current();}}
+    if(raw.State.Running){provider=await this.#provider(original,row);current();}
+    const after=await this.#destination(row,current);current();if(!after||!isDeepStrictEqual(raw.State,after.State)||!isDeepStrictEqual(boxedOriginal(after,rowSubject(row),this.deployment,true),original))refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');return{original,state:raw.State.Running?'running':'stopped',provider,resources,credentialDigest:null};
+  }
+  async installPlanReplacement(input:DockerEmployeePlanReplacementWorkRecord,payload:string,contextSource:string|undefined,current:()=>void):Promise<DockerPlanInitialReceipt>{
+    const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-issued')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');return this.#planInstaller.provision(row,payload,contextSource,current);
+  }
+  async initialPlanReplacementInstallation(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<Readonly<DockerPlanInitialReceipt>>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-ready')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');await this.#storage.verifyDestination(row);current();await this.#ephemeral?.verifyDestination(row);current();return this.#planInstaller.initialWork(row,current);}
+  /** Re-read the exact completed initial install immediately before admitting
+   * paid dispatch. A completed cursor cannot create or START a helper. */
+  async observePlanReplacementInstallation(input:DockerEmployeePlanReplacementWorkRecord,payload:string,contextSource:string|undefined,current:()=>void):Promise<DockerPlanInitialReceipt>{
+    const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-ready'||row.tasks?.find(t=>t.role==='identity-helper')?.phase!=='completed')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');return this.#planInstaller.provision(row,payload,contextSource,current);
+  }
+  async #createDestination(row: DockerEmployeeContinuationRecord, current: () => void, plan:boolean): Promise<void> {
     if (row.version === 3 && !row.planReplacement.source.networkIds) refuse('DOCKER_PLAN_NETWORKS_REQUIRED');
     const source = await this.#source(row);
-    await this.image(row.original);
+    if(plan){const selected=await this.replacementTargetImage(row.original,current);current();if(!isDeepStrictEqual(selected,row.workerImage))refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');}else await this.image(row.original);
     current();
     const pool = await this.resources.observePool(row);
     current();

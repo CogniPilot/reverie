@@ -3094,6 +3094,12 @@ export class Session extends EventEmitter {
       __customModel: this.getCustomModelForPersist() } as SessionState;
     // These observations never become authority on reload. The original disk
     // intent remains the provider-effect fence, rather than an invented failed launch.
+    // A plan generation must keep its explicit permission/tool recipe across
+    // replacement and restore. Legacy v1/v2 launch fingerprints stay unchanged.
+    if (this._docker?.continuation?.planReplacement && this.mode === 'claude') {
+      snapshot.claudeMode = this._claudeMode;
+      snapshot.allowedTools = this._allowedTools;
+    }
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
     if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;

@@ -340,15 +340,25 @@ export class DockerPlanInstaller {
       Object.freeze((await this.#historical(row, check)).initial)
     );
   }
+  /** Existing completed install in an inert WorkRecord. No payload, helper
+   * CREATE or START is used to recover a closed-source-reader crash gap. */
+  async initialWork(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<Readonly<DockerPlanInitialReceipt>>{
+    return this.#checked(input,current,async(row,check)=>{
+      if(row.phase!=='identity-ready')refuse();
+      const historical=await this.#historical(row,check);check();
+      const initial=await this.#initialAck(row,historical.home,historical.helperId,historical.config,dockerContinuationDigest(historical.initial),check);check();return Object.freeze(initial);
+    },false);
+  }
   async #checked<T>(
     input: DockerEmployeeContinuationRecord,
     current: () => void,
-    read: (row: Row, check: () => void) => Promise<T>
+    read: (row: Row, check: () => void) => Promise<T>,
+    published=true
   ): Promise<T> {
     current();
     let row: Row;
     try {
-      const parsed = DockerEmployeeContinuationRecord.parse(input);
+      const parsed = published?DockerEmployeeContinuationRecord.parse(input):DockerEmployeePlanReplacementWorkRecord.parse(input);
       if (parsed.version !== 3) refuse('DOCKER_PLAN_INSTALL_PROTOCOL_REQUIRED');
       row = parsed;
     } catch (error) {

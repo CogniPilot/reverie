@@ -1,3 +1,4 @@
+import {isMultiUserMode}from'./config/multiuser.js';
 import { dockerProviderRuntimeRecipeDigest } from './docker-employee-source-correlation.js';
 import { PlanMoveStore } from './plan-move-store.js';
 /** Captured request authority for one protected boxed plan operation.
@@ -139,6 +140,9 @@ function captureRequester(
     (!identity || request.headers['x-reverie-parent-session'] !== identity.sessionId)
   )
     throw new PlanMoveError('Current boxed plan identity required', 403);
+  // Global subscription accounts have no per-member ownership model. Preserve
+  // the existing agentPlanRequestExecution refusal, including presented hints.
+  if(isMultiUserMode()&&(identity||dockerWorkerIdentityPresented(request)||request.headers['x-reverie-parent-session']!==undefined))throw new PlanMoveError('Agent plan moves require supported account ownership',403);
   const issuer = identity ? captureDockerWorkerPlanRequestContinuation(identity) : undefined;
   const employees = () => company.registeredEmployees();
   const find = (id: string) => {

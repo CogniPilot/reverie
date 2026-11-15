@@ -1,3 +1,4 @@
+import {requireDockerPlanPaidDispatch}from'./docker-plan-move-actor.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 /** Existing Session/mux application services own the provider and viewer. No
  * raw docker-exec provider bypass or alternate recipe/account writer.
@@ -86,6 +87,14 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
   launch(row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void): Promise<void> {
     if (row.version === 3) throw Error('A plan replacement requires its original paid-dispatch actor');
     return this.#install(row, binding, current, true);
+  }
+  /** Only the native actor's original journaled paid intent can enter here.
+   * Generic continuation launch remains refused for every v3 row. */
+  launchPlanReplacement(proof:unknown,row:DockerEmployeeContinuationRecord,binding:DockerEmployeeBinding,current:()=>void):Promise<void>{
+    requireDockerPlanPaidDispatch(proof,row,binding);
+    if(row.version!==3||row.phase!=='provider-issued')throw Error('Original plan replacement dispatch required');
+    const checked=()=>{current();requireDockerPlanPaidDispatch(proof,row,binding);};
+    return this.#install(row,binding,checked,true);
   }
   attach(
     row: DockerEmployeeContinuationRecord,
