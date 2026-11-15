@@ -579,7 +579,9 @@
           });
           const result = await response.json();
           if (!response.ok || !result.success) {
-            const error = new Error(result.error || 'Plan move request failed');
+            const reason =
+              typeof result.error === 'string' ? result.error : result.error?.message || result.error?.code;
+            const error = new Error(typeof reason === 'string' ? reason : 'Plan move request failed');
             error.status = response.status;
             const blocker = result.blocker;
             if (
@@ -744,6 +746,63 @@
         return true;
       }
 
+      function retainUnknownPlanOperation(dialog, employee, expected, kind, view, error) {
+        const message = dialog.querySelector('.err') || dialog.querySelector('.status');
+        message.textContent = `${error.message} · The ${kind} outcome is unconfirmed. Original ID: ${expected.id}. Check that exact record before another action; no retry was sent.`;
+        dialog.querySelectorAll('button').forEach((button) => {
+          button.disabled = true;
+        });
+        dialog.querySelector('[data-close]').disabled = false;
+        const inspect = dialog.querySelector('[data-inspect]');
+        inspect.textContent = `Check original ${kind}`;
+        inspect.disabled = false;
+        inspect.onclick = async () => {
+          if (!view.current() || inspect.disabled) return;
+          inspect.disabled = true;
+          try {
+            const family = kind === 'request' ? 'requests' : 'moves';
+            const record = await planMoveRequest(`/api/plans/${family}/${encodeURIComponent(expected.id)}/status`);
+            if (!view.current()) return;
+            if (
+              !record ||
+              Object.keys(expected).some((key) => record[key] !== expected[key]) ||
+              !(
+                kind === 'request'
+                  ? [
+                      'pending',
+                      'reauthorize-required',
+                      'executing',
+                      'completed',
+                      'failed',
+                      'recovery-required',
+                      'rejected',
+                      'cancelled',
+                      'expired',
+                    ]
+                  : [
+                      'waiting',
+                      'creating',
+                      'starting',
+                      'checking',
+                      'stopping',
+                      'completed',
+                      'failed',
+                      'recovery-required',
+                    ]
+              ).includes(record.phase)
+            )
+              throw new Error('The original record scope changed');
+            if (kind === 'request') showPlanRequestProgress(dialog, record);
+            else showPlanMoveProgress(dialog, record, employee.name);
+          } catch (failure) {
+            if (view.current())
+              message.textContent = `${failure.message} · Original ${kind} ${expected.id} remains unconfirmed. No new move was sent.`;
+          } finally {
+            if (view.current()) inspect.disabled = false;
+          }
+        };
+      }
+
       async function openPlanMove(employeeId, destination) {
         const dialog = document.getElementById('moveDlg');
         if (!dialog || dialog.open) return;
@@ -818,31 +877,33 @@
             submit.disabled = true;
             form.querySelector('[data-force]').disabled = true;
             form.querySelector('.err').textContent = '';
-            const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-              byte.toString(16).padStart(2, '0')
-            ).join('');
+            let expected;
             try {
-              const record = await planMoveRequest('/api/plans/requests', {
+              const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+                byte.toString(16).padStart(2, '0')
+              ).join('');
+              expected = Object.freeze({
                 id,
                 employeeId,
                 sessionId: preview.sessionId,
                 toAccount: form.elements.target.value,
               });
+              const record = await planMoveRequest('/api/plans/requests', expected);
               pendingPlanRequests = [record, ...pendingPlanRequests.filter((previous) => previous.id !== record.id)];
               renderPlanMembers();
               if (view.current()) showPlanRequestProgress(dialog, record);
             } catch (error) {
               if (!view.current()) return;
-              if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
-              if (!view.current()) return;
-              form.querySelector('.err').textContent = error.status
-                ? error.message
-                : 'The request outcome is unconfirmed. Inspect existing moves before another request; no retry was sent.';
-              if (error.status) {
+              if (!expected) {
+                form.querySelector('.err').textContent = 'The request could not be prepared. No request was sent.';
                 submitting = false;
                 submit.disabled = false;
                 form.querySelector('[data-force]').disabled = false;
+                return;
               }
+              if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
+              if (!view.current()) return;
+              retainUnknownPlanOperation(dialog, employee, expected, 'request', view, error);
             }
           };
         } catch (error) {
@@ -1018,12 +1079,12 @@
             feedback = '';
           } catch (error) {
             if (!current()) return;
-            // A server answer (error.status) is a definite refusal: the move was rolled back to its held state. Only a lost
-            // or unreadable response leaves the outcome unknown.
-            unconfirmed = dispatched && !error.status;
+            // HTTP errors can follow durable publication. Only the explicit exact status read
+            // can refresh this unknown outcome; a response status is not a non-dispatch receipt.
+            unconfirmed = dispatched;
             feedback = unconfirmed
               ? `${error.message} · Recovery outcome unconfirmed; refresh status without replaying.`
-              : `${dispatched ? 'Recovery refused: ' : ''}${error.message} · The move journal is retained.`;
+              : `${error.message} · Recovery was not requested; the move journal is retained.`;
           } finally {
             busy = false;
             if (current()) paint();
@@ -1138,16 +1199,28 @@
           )
         )
           return;
-        const view = planDialogView(dialog);
-        dialog.querySelectorAll('button').forEach((button) => {
-          button.disabled = true;
-        });
+        let id;
         try {
-          const id =
+          id =
             'force-' +
             Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join(
               ''
             );
+        } catch {
+          dialog.querySelector('.err').textContent = 'The forced move could not be prepared. No request was sent.';
+          return;
+        }
+        const view = planDialogView(dialog);
+        dialog.querySelectorAll('button').forEach((button) => {
+          button.disabled = true;
+        });
+        const expected = Object.freeze({
+          id,
+          employeeId: employee.id,
+          oldSession: employee.sessionId,
+          toAccount: target,
+        });
+        try {
           const record = await planMoveRequest('/api/plans/moves/force', {
             id,
             employeeId: employee.id,
@@ -1168,16 +1241,7 @@
           if (!view.current()) return;
           if (await inspectBlockedPlanMove(dialog, employee, error, view)) return;
           if (!view.current()) return;
-          dialog.querySelector('.err').textContent = error.status
-            ? error.message
-            : 'The force-move outcome is unconfirmed. Inspect existing moves; no retry was sent.';
-          dialog.querySelectorAll('[data-close], [data-inspect]').forEach((button) => {
-            button.disabled = false;
-          });
-          if (error.status)
-            dialog.querySelectorAll('button').forEach((button) => {
-              button.disabled = false;
-            });
+          retainUnknownPlanOperation(dialog, employee, expected, 'move', view, error);
         }
       }
       async function openPlanMoveHistory(employeeId) {
