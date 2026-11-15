@@ -43,7 +43,8 @@ import {
 } from '../src/docker-plan-move-requester.js';
 import { dockerContinuationDigest as digest } from '../src/docker-employee-continuation.js';
 import { DockerPlanMoveSeed, DockerPlanMoveJournalState } from '../src/docker-plan-move-data.js';
-import type { PlanMoveRecord, PlanMoveInput } from '../src/plan-move.js';
+import type { PlanMoveRecord, PlanMoveInput, PlanMoves, PlanMoveExecutor } from '../src/plan-move.js';
+import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import type { SessionState } from '../src/types.js';
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -405,6 +406,8 @@ async function fixture(running = true, retainedAccount = false) {
     run,
     retain,
     sessions,
+    auth,
+    token,
     loseStop: () => {
       loseStop = true;
     },
@@ -414,6 +417,54 @@ async function fixture(running = true, retainedAccount = false) {
   };
 }
 describe('captured native plan actor before paid dispatch', () => {
+  it('admits the genuine HMAC force route with the observed generation and refuses a stale generation before effects', async () => {
+    const f = await fixture(),
+      app = Fastify();
+    cleanup.push(() => app.close());
+    await app.register(cookie);
+    registerDockerWorkerIdentity(app, f.auth);
+    const begin = vi.fn(async () => ({ id: f.input.id, phase: 'waiting' }));
+    const executor = { snapshot: f.actor.snapshot.bind(f.actor) } as PlanMoveExecutor;
+    registerPlanMoveRoutes(
+      app,
+      { begin } as unknown as PlanMoves,
+      { authSessions: null },
+      undefined,
+      () => executor,
+      async () => 'claude'
+    );
+    const payload = {
+      id: f.input.id,
+      employeeId: f.input.employeeId,
+      sessionId: f.input.sessionId,
+      sessionGeneration: f.seed.source.binding.sessionGeneration,
+      toAccount: f.input.toAccount,
+      handoff: f.input.handoff,
+    };
+    const headers = { [DOCKER_WORKER_IDENTITY_HEADER]: f.token, 'x-reverie-parent-session': f.saved.id };
+    const admitted = await app.inject({ method: 'POST', url: '/api/plans/moves/force', headers, payload });
+    expect(admitted.statusCode).toBe(202);
+    expect(begin).toHaveBeenCalledWith(
+      { ...payload, fromAccount: 'a', forceBusy: true, targetMode: 'claude' },
+      undefined,
+      executor
+    );
+    expect(await f.actor.snapshot(f.input.employeeId, undefined)).toMatchObject({
+      backend: 'docker',
+      sessionId: f.saved.id,
+      sessionGeneration: f.seed.source.binding.sessionGeneration,
+    });
+    begin.mockClear();
+    const stale = await app.inject({
+      method: 'POST',
+      url: '/api/plans/moves/force',
+      headers,
+      payload: { ...payload, sessionGeneration: payload.sessionGeneration + 1 },
+    });
+    expect(stale.statusCode).toBe(409);
+    expect(begin).not.toHaveBeenCalled();
+    expect(f.run.mock.calls.some(([args]) => args[1] === 'stop' || args[1] === 'start')).toBe(false);
+  });
   it('qualifies a force source with no disposable controller Session, retaining no preview FD owner', async () => {
     const f = await fixture();
     expect(f.sessions.size).toBe(0);

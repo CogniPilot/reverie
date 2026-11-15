@@ -271,6 +271,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const snapshot = {
       backend: 'docker' as const,
       sessionId: selected.saved.id,
+      sessionGeneration: selected.binding.sessionGeneration,
       name: selected.saved.name ?? selected.employee.name,
       account: account.id,
       working: observed.kind === 'running' ? (session?.isWorking ?? true) : false,
