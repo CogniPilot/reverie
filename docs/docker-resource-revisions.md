@@ -33,3 +33,24 @@ The profile GUI is separately composed using these permissionchecked APIs. The c
 The existing helperImageId remains the original box/anchor/pool/probe/baseline-ACK image. An optional, independently qualified memoryHighHelperImageId selects the new high-only writer. It never participates in the box ID (which remains runtime instance ID plus deployment), never changes the runtime key, and cannot replace an old anchor or ACK image. The write image must support the fixed configure-memory-high program and advertise the deny-only v1 capability; labels are not a substitute for the operator-qualified immutable image pin.
 
 Absent/unsupported writer capability refuses a high WRITE before a writer cursor/CREATE. Existing qualified helper908 still supports read-only actual48 observation/adoption. New writer selection or revision scope changes during an awaited effect revoke that attempt; no fallback reuses old configure-high, which also writes CPU weight. The new mode must write only memory.high, assert all other original limits, and earn fresh readback. Image/native qualification remains a separate deployment admission; source tests do not claim a new image was built.
+
+## Original preSTART recovery
+
+The same canonical predicate controls default-approval advisory and publication: a pending helper or full retained history does not offer a fresh default approval. Action lists are nonauthorizing DATA; every endpoint repeats current owner, revision, binding and physical checks.
+
+| Retained state                                                         | Explicit actions                    |
+| ---------------------------------------------------------------------- | ----------------------------------- |
+| No desired policy                                                      | None                                |
+| Desired, no attempt                                                    | apply                               |
+| helper create-issued or created                                        | continue-original, abandon-original |
+| helper start-issued, running or completed                              | reconcile                           |
+| closed-writer or unstarted-retired                                     | reconcile, new-revision             |
+| observed, applied, observed-after-closure or observed-after-retirement | Read-only refresh                   |
+
+POST .../docker-resources/continue and POST .../docker-resources/abandon take {revision}. Continuation qualifies the original task and uses its canonical CAS before a first START. It never repeats CREATE or an issued START. A missing original CREATE remains unconfirmed.
+
+Abandonment is available only before any START intent. An atomic transition retains the exact original task under purpose reverie-memory-unstarted-intent-retired-v1. This canonical fence prevents a late CREATE callback from publishing created/START state. It is not proof of Docker absence or a terminal native writer: intentRetired is distinct from writerClosed. Any observed named orphan must have exact fixed configuration and created/PID0 state before retirement and before a later writer; a running or unknown orphan refuses. Late CREATE may leave an inert retained orphan; the application never starts or deletes it.
+
+Retirement preserves the original unknown CREATE outcome. Read-only reconcile can subsequently adopt fresh matching approved facts; otherwise a new explicit owner revision may issue a new helper after all prior writer/intent fences are freshly checked. No old task or historical ACK is rewritten.
+
+Default publication has a narrow not-issued error DATA response: {code, action: "approve-default", revision, publication: "not-issued"}. A private typed outcome is minted only by that request's locked prewrite validation and escapes only after checked lock close. A retained error, aggregate close failure, transport loss, auth failure after publication or publication finalizer never carries this marker. A client may release only the matching pending nonce after a fresh authenticated GET; the marker never authorizes a PUT retry or any helper START.

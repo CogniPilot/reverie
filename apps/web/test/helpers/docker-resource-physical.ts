@@ -58,6 +58,7 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
   let configured = false,
     high: number | undefined,
     lostCreate = false,
+    rejectCreate = false,
     lostStart = false,
     current = true,
     foreignMount = false,
@@ -136,6 +137,7 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
   };
   let beforeRun: ((args: readonly string[]) => void | Promise<void>) | undefined;
   let pauseLog: { entered: () => void; wait: Promise<void> } | undefined;
+  let pauseCreate: { entered: () => void; wait: Promise<void> } | undefined;
   const command: DockerEngineCommand = {
     async create(name, config, guard) {
       guard();
@@ -147,6 +149,16 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
           ? attempt.task.phase
           : tasks.get(role as DockerContinuationTaskRole)?.phase
       ).toBe('create-issued');
+      if (rejectCreate) {
+        rejectCreate = false;
+        throw Error('definite CREATE rejected');
+      }
+      if (pauseCreate) {
+        const held = pauseCreate;
+        pauseCreate = undefined;
+        held.entered();
+        await held.wait;
+      }
       configurations.push({ name, config: structuredClone(config) });
       creates.push(role);
       names.push(name);
@@ -393,6 +405,20 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
     },
     current: () => {
       if (!current) throw Error('revoked');
+    },
+    rejectNextCreate: () => {
+      rejectCreate = true;
+    },
+    pauseNextCreate: () => {
+      let enter!: () => void, release!: () => void;
+      const entered = new Promise<void>((r) => {
+        enter = r;
+      });
+      const wait = new Promise<void>((r) => {
+        release = r;
+      });
+      pauseCreate = { entered: enter, wait };
+      return { entered, release };
     },
     loseCreate: () => {
       lostCreate = true;

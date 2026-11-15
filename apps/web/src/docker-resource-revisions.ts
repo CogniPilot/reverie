@@ -88,10 +88,72 @@ export const DockerResourceClosedWriter = z
   })
   .strict();
 export type DockerResourceClosedWriter = z.infer<typeof DockerResourceClosedWriter>;
+const DockerResourceRetiredIntent = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-memory-unstarted-intent-retired-v1'),
+    authority: z.literal('canonical-prestart-cas-v1'),
+    taskDigest: digest,
+    originalOutcome: z.literal('unknown'),
+  })
+  .strict();
+
+const defaultPublicationOrigin = Symbol('actual locked default validation before publication');
+class DockerDefaultPublicationRefusal extends DockerEmployeeContinuationError {
+  readonly #revision: string;
+  constructor(origin: symbol, revision: string, code: string) {
+    if (origin !== defaultPublicationOrigin) throw Error('Actual default publication refusal required');
+    super(
+      z
+        .enum([
+          'DOCKER_RESOURCE_REVISION_CHANGED',
+          'DOCKER_RESOURCE_REVISION_CAPACITY',
+          'DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING',
+        ])
+        .parse(code)
+    );
+    this.#revision = uuid.parse(revision);
+    Object.freeze(this);
+  }
+  describe() {
+    return {
+      code: this.code,
+      action: 'approve-default' as const,
+      revision: this.#revision,
+      publication: 'not-issued' as const,
+    };
+  }
+}
+Object.freeze(DockerDefaultPublicationRefusal.prototype);
+/** DATA only. An aggregate/finalizer/transport failure cannot carry a prewrite outcome. */
+export function dockerDefaultPublicationRefusal(error: unknown) {
+  try {
+    return DockerDefaultPublicationRefusal.prototype.describe.call(error as DockerDefaultPublicationRefusal);
+  } catch {
+    return undefined;
+  }
+}
+
 export const DockerResourceAttempt = z.discriminatedUnion('state', [
   base.extend({
     state: z.literal('helper'),
     task: DockerContinuationTask.refine((task) => task.role === 'leaf-helper'),
+  }),
+  base.extend({
+    state: z.literal('unstarted-retired'),
+    task: DockerContinuationTask.refine(
+      (task) => task.role === 'leaf-helper' && ['create-issued', 'created'].includes(task.phase)
+    ),
+    retirement: DockerResourceRetiredIntent,
+  }),
+  base.extend({
+    state: z.literal('observed-after-retirement'),
+    task: DockerContinuationTask.refine(
+      (task) => task.role === 'leaf-helper' && ['create-issued', 'created'].includes(task.phase)
+    ),
+    retirement: DockerResourceRetiredIntent,
+    identity: DockerResourceLeafIdentity,
+    observationDigest: digest,
   }),
   base.extend({ state: z.literal('observed'), identity: DockerResourceLeafIdentity, observationDigest: digest }),
   base.extend({
@@ -296,6 +358,7 @@ export class DockerResourceRevisionStore {
       )
         refuse();
       for (const item of value.attempts) {
+        if ('retirement' in item && item.retirement.taskDigest !== dockerContinuationDigest(item.task)) refuse();
         if (item.state === 'closed-writer' || item.state === 'observed-after-closure') {
           if (
             !('containerId' in item.task) ||
@@ -331,6 +394,7 @@ export class DockerResourceRevisionStore {
       !attempt ||
       attempt.state === 'helper' ||
       attempt.state === 'closed-writer' ||
+      attempt.state === 'unstarted-retired' ||
       !sameKey(attempt, row, attempt.revision)
     )
       return [];
@@ -389,6 +453,7 @@ export class DockerResourceRevisionStore {
     await previous;
     let lock: number | undefined;
     let failure: { cause: unknown } | undefined;
+    let checkedDefaultRefusal: unknown;
     try {
       this.#current();
       current();
@@ -411,7 +476,12 @@ export class DockerResourceRevisionStore {
       this.#current();
       current();
       const state = this.#read();
-      change(state);
+      try {
+        change(state);
+      } catch (cause) {
+        if (cause instanceof DockerDefaultPublicationRefusal) checkedDefaultRefusal = cause;
+        throw cause;
+      }
       const data = Buffer.from(JSON.stringify(ledger.parse(state)));
       if (data.length > 2 * 1024 ** 2) refuse('DOCKER_RESOURCE_REVISION_CAPACITY');
       const temporary = join(this.#path, '.stage-' + randomUUID());
@@ -451,21 +521,50 @@ export class DockerResourceRevisionStore {
     } finally {
       release();
     }
-    if (failure) throw failure.cause;
+    if (failure) {
+      if (failure.cause instanceof DockerDefaultPublicationRefusal && failure.cause !== checkedDefaultRefusal)
+        throw new AggregateError([failure.cause], 'Resource publication outcome unconfirmed');
+      throw failure.cause;
+    }
+  }
+  #approvalCode(state: Ledger, owner: string | null): string | undefined {
+    const old = [...state.desired].reverse().find((item) => item.owner === owner);
+    if (old && state.attempts.some((item) => item.revision === old.revision && item.state === 'helper'))
+      return 'DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING';
+    if (state.desired.length >= 256 || state.attempts.length >= 4096) return 'DOCKER_RESOURCE_REVISION_CAPACITY';
+    return undefined;
+  }
+  canApprove(owner: string | undefined): boolean {
+    return this.#approvalCode(this.#read(), owner ?? null) === undefined;
+  }
+  actions(row: DockerEmployeeContinuationRecord, revision: string | undefined): string[] {
+    if (!revision || this.desired(row.owner)?.revision !== revision) return [];
+    const attempt = this.attempt(row, revision);
+    if (!attempt) return ['apply'];
+    if (attempt.state === 'helper')
+      return ['create-issued', 'created'].includes(attempt.task.phase)
+        ? ['continue-original', 'abandon-original']
+        : ['reconcile'];
+    if (attempt.state === 'closed-writer' || attempt.state === 'unstarted-retired')
+      return ['reconcile', 'new-revision'];
+    return [];
   }
   approve(desired: DockerResourceDesiredRevision, expectedRevision: string | null, current: () => void): Promise<void> {
     const checked = DockerResourceDesiredRevision.parse(desired);
     return this.#update((state) => {
       const old = [...state.desired].reverse().find((item) => item.owner === checked.owner);
-      if ((old?.revision ?? null) !== expectedRevision) refuse();
-      if (old?.revision === checked.revision) refuse();
-      if (old && state.attempts.some((item) => item.revision === old.revision && item.state === 'helper'))
-        refuse('DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING');
+      const notIssued = (code = 'DOCKER_RESOURCE_REVISION_CHANGED'): never => {
+        throw new DockerDefaultPublicationRefusal(defaultPublicationOrigin, checked.revision, code);
+      };
+      if ((old?.revision ?? null) !== expectedRevision) notIssued();
+      if (old?.revision === checked.revision) notIssued();
+      const blocked = this.#approvalCode(state, checked.owner);
+      if (blocked) notIssued(blocked);
       if (
         state.desired.some((item) => item.revision === checked.revision) ||
         state.attempts.some((item) => item.revision === checked.revision)
       )
-        refuse();
+        notIssued();
       state.desired.push(checked);
     }, current);
   }
@@ -503,6 +602,8 @@ export class DockerResourceRevisionStore {
         if (
           checked.state === 'applied' ||
           checked.state === 'closed-writer' ||
+          checked.state === 'unstarted-retired' ||
+          checked.state === 'observed-after-retirement' ||
           checked.state === 'observed-after-closure' ||
           (checked.state === 'helper' && checked.task.phase !== 'create-issued')
         )
@@ -510,6 +611,13 @@ export class DockerResourceRevisionStore {
       } else if (before.state === 'helper') {
         if (checked.state === 'helper') {
           if (!allowedDockerTaskTransition(before.task, checked.task)) refuse();
+        } else if (checked.state === 'unstarted-retired') {
+          if (
+            !['create-issued', 'created'].includes(before.task.phase) ||
+            !isDeepStrictEqual(before.task, checked.task) ||
+            checked.retirement.taskDigest !== dockerContinuationDigest(before.task)
+          )
+            refuse();
         } else if (checked.state === 'closed-writer') {
           if (
             !isDeepStrictEqual(before.task, checked.task) ||
@@ -523,6 +631,13 @@ export class DockerResourceRevisionStore {
           checked.state !== 'applied' ||
           before.task.phase !== 'completed' ||
           !isDeepStrictEqual(before.task, checked.task)
+        )
+          refuse();
+      } else if (before.state === 'unstarted-retired') {
+        if (
+          checked.state !== 'observed-after-retirement' ||
+          !isDeepStrictEqual(before.task, checked.task) ||
+          !isDeepStrictEqual(before.retirement, checked.retirement)
         )
           refuse();
       } else if (before.state === 'closed-writer') {

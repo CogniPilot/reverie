@@ -575,7 +575,7 @@ describe('terminal high-only writer closure without invented ACK or replay', () 
       state: 'closed-writer',
       originalOutcome: 'unknown',
       enforcement: 'not-observed',
-      allowedActions: ['new-revision'],
+      allowedActions: ['reconcile', 'new-revision'],
     });
     const count = f.starts.length;
     await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
@@ -720,4 +720,205 @@ it('does not report approved CPU facts when the actual native leaf weight change
   const starts = [...f.starts];
   await expect(f.controller.observeMemoryHigh(f.row(), f.current)).rejects.toThrow('OTHER_LIMIT_CHANGED');
   expect(f.starts).toEqual(starts);
+});
+
+describe('preSTART continuation and canonical intent retirement', () => {
+  it.each(['create-issued', 'created'] as const)(
+    '%s continuation uses only the original admitted task and one first START',
+    async (phase) => {
+      const f = await revisionFixture();
+      if (phase === 'create-issued') f.loseCreate();
+      else {
+        let failed = false;
+        f.beforeRun((args) => {
+          if (!failed && args[0] === 'container' && args[1] === 'inspect') {
+            const a = f.store.attempt(f.row(), f.desired.revision);
+            if (a?.state === 'helper' && a.task.phase === 'created') {
+              failed = true;
+              throw Error('lost preSTART read');
+            }
+          }
+        });
+      }
+      await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+      const attempt = f.store.attempt(f.row(), f.desired.revision)!;
+      expect(attempt.state === 'helper' && attempt.task.phase).toBe(phase);
+      const creates = f.creates.length,
+        starts = f.starts.length;
+      const result = await f.controller.continueMemoryHigh(f.row(), f.desired.revision, f.current);
+      expect(result.state).toBe('applied');
+      expect(f.creates).toHaveLength(creates);
+      expect(f.starts).toHaveLength(starts + 1);
+      await expect(f.controller.continueMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+        'CONTINUATION_NOT_ALLOWED'
+      );
+      expect(f.starts).toHaveLength(starts + 1);
+    }
+  );
+  it('definitive CREATE rejection retires the unknown cursor and admits a new explicit revision without replay', async () => {
+    const f = await revisionFixture();
+    f.rejectNextCreate();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'CREATE rejected'
+    );
+    const original = f.store.attempt(f.row(), f.desired.revision)!;
+    expect(f.store.actions(f.row(), f.desired.revision)).toEqual(['continue-original', 'abandon-original']);
+    const count = { creates: f.creates.length, starts: f.starts.length };
+    expect(await f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current)).toMatchObject({
+      state: 'unstarted-retired',
+      intentRetired: true,
+      originalOutcome: 'unknown',
+      enforcement: 'not-observed',
+    });
+    expect(f.creates).toHaveLength(count.creates);
+    expect(f.starts).toHaveLength(count.starts);
+    const retired = f.store.attempt(f.row(), f.desired.revision)!;
+    expect('task' in retired && retired.task).toEqual('task' in original && original.task);
+    const next = { ...f.desired, revision: '55555555-5555-4555-8555-555555555555' };
+    await f.store.approve(next, f.desired.revision, f.current);
+    expect((await f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).state).toBe('applied');
+    expect(f.creates).toHaveLength(count.creates + 1);
+    expect(f.starts).toHaveLength(count.starts + 1);
+  });
+  it('late original CREATE can leave an inert orphan but its callback cannot publish START after retirement', async () => {
+    const f = await revisionFixture(),
+      paused = f.pauseNextCreate();
+    const original = f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const observed = original.then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error })
+    );
+    await paused.entered;
+    const starts = [...f.starts];
+    await f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current);
+    paused.release();
+    expect((await observed).ok).toBe(false);
+    expect(f.starts).toEqual(starts);
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('unstarted-retired');
+    f.setHigh(48 * 1024 ** 3);
+    expect(await f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).toMatchObject({
+      state: 'observed',
+      intentRetired: true,
+      enforcement: 'fresh-native-readback',
+    });
+    expect(f.starts).toEqual(starts);
+    expect(await f.controller.read(f.row())).toEqual({ ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+  });
+  it('a created orphan which actually runs cannot be retired or authorize a new writer', async () => {
+    const f = await revisionFixture();
+    f.loseCreate();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    f.mutateRevisionHelper((raw) => {
+      raw.State = { Status: 'running', Running: true, Pid: 300, Paused: false, Restarting: false, Dead: false };
+    });
+    const before = f.store.attempt(f.row(), f.desired.revision)!;
+    await expect(f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    expect(f.store.attempt(f.row(), f.desired.revision)).toEqual(before);
+  });
+});
+
+describe('preSTART retirement versus an admitted continuation', () => {
+  it('retirement wins the created-task CAS and poisons a paused original START publication', async () => {
+    const f = await revisionFixture();
+    f.loseCreate();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    let enter!: () => void,
+      release!: () => void,
+      held = false;
+    const entered = new Promise<void>((r) => {
+        enter = r;
+      }),
+      wait = new Promise<void>((r) => {
+        release = r;
+      });
+    f.beforeRun(async (args) => {
+      const a = f.store.attempt(f.row(), f.desired.revision);
+      if (
+        !held &&
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        a?.state === 'helper' &&
+        a.task.phase === 'created'
+      ) {
+        held = true;
+        enter();
+        await wait;
+      }
+    });
+    const pending = f.controller.continueMemoryHigh(f.row(), f.desired.revision, f.current).then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error })
+    );
+    await entered;
+    const starts = [...f.starts];
+    expect((await f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current)).state).toBe(
+      'unstarted-retired'
+    );
+    release();
+    expect((await pending).ok).toBe(false);
+    expect(f.starts).toEqual(starts);
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('unstarted-retired');
+  });
+});
+
+describe('retired CREATE versus a new authorized revision', () => {
+  it('a new writer may finish before the old CREATE reply; the retained old orphan never starts', async () => {
+    const f = await revisionFixture(),
+      paused = f.pauseNextCreate();
+    const old = f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current).then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error })
+    );
+    await paused.entered;
+    await f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current);
+    const next = { ...f.desired, revision: '55555555-5555-4555-8555-555555555555' };
+    await f.store.approve(next, f.desired.revision, f.current);
+    expect((await f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).state).toBe('applied');
+    const starts = [...f.starts];
+    paused.release();
+    expect((await old).ok).toBe(false);
+    expect(f.starts).toEqual(starts);
+    expect((await f.controller.read(f.row()))?.memoryHighBytes).toBe(48 * 1024 ** 3);
+    expect(f.store.history(f.row())[0]!.attempt.state).toBe('unstarted-retired');
+  });
+});
+
+describe('unstarted retirement publication finalizer', () => {
+  it('a lost retirement finalizer fences the paused CREATE callback and a fresh reader can adopt independently', async () => {
+    const f = await revisionFixture(),
+      paused = f.pauseNextCreate();
+    const old = f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current).then(
+      () => ({ ok: true }),
+      (error) => ({ ok: false, error })
+    );
+    await paused.entered;
+    const starts = [...f.starts],
+      renameNative = fs.renameSync,
+      syncNative = fs.fsyncSync;
+    let renamed = false;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      renameNative(...args);
+      renamed = true;
+    });
+    const sync = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+      syncNative(fd);
+      if (renamed) throw Error('lost retirement finalizer');
+    });
+    await expect(f.controller.abandonMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'retirement finalizer'
+    );
+    rename.mockRestore();
+    sync.mockRestore();
+    paused.release();
+    expect((await old).ok).toBe(false);
+    expect(f.starts).toEqual(starts);
+    const fresh = new DockerResourceRevisionStore(f.store.directory);
+    revisionCleanups.push(() => fresh.close());
+    expect(fresh.attempt(f.row(), f.desired.revision)?.state).toBe('unstarted-retired');
+    f.setHigh(48 * 1024 ** 3);
+    const result = await f.withRevisions(fresh).reconcileMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result).toMatchObject({ state: 'observed', intentRetired: true, originalOutcome: 'unknown' });
+    expect(result).not.toHaveProperty('writerClosed');
+    expect(f.starts).toEqual(starts);
+  });
 });

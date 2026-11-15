@@ -22,7 +22,8 @@ export type DockerResourceConvergence = {
     | 'settled-history'
     | 'observed'
     | 'applied'
-    | 'closed-writer';
+    | 'closed-writer'
+    | 'unstarted-retired';
 };
 export class DockerResourceRevisionService {
   readonly #converging = new Map<string, Promise<DockerResourceConvergence>>();
@@ -73,28 +74,26 @@ export class DockerResourceRevisionService {
         sessionGeneration: employee.sessionGeneration,
         desiredMemoryHighBytes: desired?.memoryHighBytes ?? null,
         state:
-          attempt?.state === 'observed-after-closure'
+          attempt?.state === 'observed-after-closure' || attempt?.state === 'observed-after-retirement'
             ? 'observed'
             : (attempt?.state ?? (row ? 'not-observed' : 'offline-or-unbound')),
         ...(attempt && 'closure' in attempt
           ? { writerClosed: true as const, originalOutcome: 'unknown' as const }
           : {}),
-        allowedActions:
-          !desired || !row
-            ? []
-            : attempt?.state === 'helper'
-              ? ['reconcile']
-              : attempt?.state === 'closed-writer'
-                ? ['new-revision']
-                : attempt
-                  ? []
-                  : ['apply'],
+        ...(attempt && 'retirement' in attempt
+          ? { intentRetired: true as const, originalOutcome: 'unknown' as const }
+          : {}),
+        allowedActions: row ? this.revisions.actions(row, desired?.revision) : [],
         // Prior successful observations are history; status itself performs no kernel probe.
         enforcement: 'not-observed' as const,
       };
     });
     current();
-    return { desired: desired ?? null, employees: results, allowedActions: ['approve-default'] };
+    return {
+      desired: desired ?? null,
+      employees: results,
+      allowedActions: this.revisions.canApprove(owner) ? ['approve-default'] : [],
+    };
   }
   /** Durable owner approval, not a caller/title permission. No HTTP endpoint invokes this with worker authority. */
   converge(employeeId: string, runtimeCurrent: () => void): Promise<DockerResourceConvergence> {
@@ -243,15 +242,7 @@ export class DockerResourceRevisionService {
       desiredMemoryHighBytes: desired?.memoryHighBytes ?? null,
       revision: desired?.revision ?? null,
       ...actual,
-      allowedActions: !desired
-        ? []
-        : this.revisions.attempt(row, desired.revision)?.state === 'helper'
-          ? ['reconcile']
-          : this.revisions.attempt(row, desired.revision)?.state === 'closed-writer'
-            ? ['new-revision']
-            : actual.approved && actual.actualMemoryHighBytes === desired.memoryHighBytes
-              ? []
-              : ['apply'],
+      allowedActions: this.revisions.actions(row, desired?.revision),
       enforcement: 'fresh-native-readback' as const,
     };
   }
@@ -273,7 +264,22 @@ export class DockerResourceRevisionService {
       ...result,
     };
   }
+  async continueOriginal(employeeId: string, owner: string | undefined, revision: string, authority: () => void) {
+    return this.#apply(employeeId, owner, revision, authority, 'continue');
+  }
+  async abandonOriginal(employeeId: string, owner: string | undefined, revision: string, authority: () => void) {
+    return this.#apply(employeeId, owner, revision, authority, 'abandon');
+  }
   async apply(employeeId: string, owner: string | undefined, revision: string, authority: () => void) {
+    return this.#apply(employeeId, owner, revision, authority, 'apply');
+  }
+  async #apply(
+    employeeId: string,
+    owner: string | undefined,
+    revision: string,
+    authority: () => void,
+    kind: 'apply' | 'continue' | 'abandon'
+  ) {
     const { employee, row, current } = this.#capture(employeeId, owner, authority);
     const desired = this.revisions.desired(owner);
     if (!desired || desired.revision !== revision)
@@ -281,7 +287,12 @@ export class DockerResourceRevisionService {
     dockerRevisedPolicy(row.policy, desired);
     await this.engine.verifyResourceDestination(row, current);
     current();
-    const result = await this.resources.reviseMemoryHigh(row, revision, current);
+    const result =
+      kind === 'continue'
+        ? await this.resources.continueMemoryHigh(row, revision, current)
+        : kind === 'abandon'
+          ? await this.resources.abandonMemoryHigh(row, revision, current)
+          : await this.resources.reviseMemoryHigh(row, revision, current);
     current();
     await this.engine.verifyResourceDestination(row, current);
     current();
@@ -293,7 +304,8 @@ export class DockerResourceRevisionService {
       containerId: row.destination!.containerId,
       revision,
       ...result,
-      enforcement: 'fresh-native-readback' as const,
+      ...(kind === 'abandon' ? {} : { enforcement: 'fresh-native-readback' as const }),
+      allowedActions: this.revisions.actions(row, revision),
     };
   }
 }

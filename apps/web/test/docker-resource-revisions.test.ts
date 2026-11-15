@@ -4,7 +4,11 @@ import { execFileSync, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { buildSync } from 'esbuild';
-import { DockerResourceRevisionStore, dockerRevisedPolicy } from '../src/docker-resource-revisions.js';
+import {
+  DockerResourceRevisionStore,
+  dockerRevisedPolicy,
+  dockerDefaultPublicationRefusal,
+} from '../src/docker-resource-revisions.js';
 const first = '11111111-1111-4111-8111-111111111111',
   second = '22222222-2222-4222-8222-222222222222';
 const desired = {
@@ -203,5 +207,99 @@ describe('actual child-process death and concurrent publication', () => {
     cleanups.push(() => fresh.close());
     expect([first, second]).toContain(fresh.desired(undefined)?.revision);
     expect(fs.statSync(join(path, 'revisions.json')).nlink).toBe(1);
+  });
+});
+
+describe('default approval advisory shares canonical publication refusal', () => {
+  it('full retained desired history disables approval and refuses before any replacement', async () => {
+    const f = fixture();
+    const history = Array.from({ length: 256 }, (_, i) => ({
+      ...desired,
+      revision: '00000000-0000-4000-8000-' + i.toString(16).padStart(12, '0'),
+    }));
+    const path = join(f.path, 'revisions.json');
+    fs.writeFileSync(
+      path,
+      JSON.stringify({ version: 1, purpose: 'reverie-docker-resource-revisions-v1', desired: history, attempts: [] }),
+      { mode: 0o600 }
+    );
+    const before = fs.readFileSync(path);
+    expect(f.store.canApprove(undefined)).toBe(false);
+    await expect(f.store.approve({ ...desired, revision: second }, history.at(-1)!.revision, () => {})).rejects.toThrow(
+      'CAPACITY'
+    );
+    expect(fs.readFileSync(path)).toEqual(before);
+  });
+});
+
+describe('default refusal is scoped to its own locked validation', () => {
+  it('wire DATA cannot mint a not-issued outcome and a retained genuine error cannot describe a later publication', async () => {
+    const f = fixture();
+    await f.store.approve(desired, null, () => {});
+    let retained: unknown;
+    try {
+      await f.store.approve({ ...desired, revision: second }, null, () => {});
+    } catch (error) {
+      retained = error;
+    }
+    const wire = dockerDefaultPublicationRefusal(retained);
+    expect(wire).toMatchObject({ revision: second, publication: 'not-issued', action: 'approve-default' });
+    expect(dockerDefaultPublicationRefusal(wire)).toBeUndefined();
+    const native = fs.renameSync;
+    let renamed = false;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      native(...args);
+      renamed = true;
+    });
+    let failed: unknown;
+    try {
+      await f.store.approve({ ...desired, revision: second }, first, () => {
+        if (renamed) throw retained;
+      });
+    } catch (error) {
+      failed = error;
+    } finally {
+      rename.mockRestore();
+    }
+    expect(failed).toBeInstanceOf(AggregateError);
+    expect(dockerDefaultPublicationRefusal(failed)).toBeUndefined();
+    const actual = JSON.parse(fs.readFileSync(join(f.path, 'revisions.json'), 'utf8'));
+    expect(actual.desired.at(-1).revision).toBe(second);
+  });
+});
+
+describe('consuming close cannot replay an earlier default refusal', () => {
+  it('a genuine retained prewrite error thrown after a successful publication is unknown', async () => {
+    const f = fixture();
+    await f.store.approve(desired, null, () => {});
+    let retained: unknown;
+    try {
+      await f.store.approve({ ...desired, revision: second }, null, () => {});
+    } catch (error) {
+      retained = error;
+    }
+    const native = fs.closeSync;
+    const close = vi.spyOn(fs, 'closeSync').mockImplementation((fd) => {
+      let own = false;
+      try {
+        own = fs.readlinkSync('/proc/self/fd/' + fd) === join(f.path, 'writer.lock');
+      } catch {
+        /* Unrelated descriptor. */
+      }
+      native(fd);
+      if (own) throw retained;
+    });
+    let error: unknown;
+    try {
+      await f.store.approve({ ...desired, revision: second }, first, () => {});
+    } catch (cause) {
+      error = cause;
+    } finally {
+      close.mockRestore();
+    }
+    expect(error).toBeInstanceOf(AggregateError);
+    expect(dockerDefaultPublicationRefusal(error)).toBeUndefined();
+    const actual = JSON.parse(fs.readFileSync(join(f.path, 'revisions.json'), 'utf8'));
+    expect(actual.desired.at(-1).revision).toBe(second);
   });
 });
