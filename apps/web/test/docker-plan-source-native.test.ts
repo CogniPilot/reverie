@@ -85,7 +85,7 @@ function run(
     options.historical ?? '',
   ];
   return spawnSync(
-    options.protected === false ? process.execPath : '/run/current-system/sw/bin/setpriv',
+    options.protected === false ? process.execPath : 'setpriv',
     options.protected === false ? args : ['--no-new-privs', process.execPath, ...args],
     {
       encoding: 'utf8',
@@ -164,10 +164,18 @@ function generation(f: ReturnType<typeof fixture>) {
   };
 }
 describe.runIf(process.platform === 'linux' && process.getuid!() > 0)('fixed source metadata protocol', () => {
-  it('checks genuine no-new-privileges before returning HOME custody', () => {
+  it('checks genuine protection and refuses projected NoNewPrivs=0 under inherited sandbox protection', () => {
     const f = fixture(),
       good = run(f, { mode: 'home' }),
-      bad = run(f, { mode: 'home', protected: false });
+      // NoNewPrivs cannot be unset when inherited from the Nix sandbox. The
+      // positive child above uses the actual kernel flag; only this negative
+      // read projects zero so the refusal is exercised on either host.
+      bad = run(f, {
+        mode: 'home',
+        protected: false,
+        prefix:
+          "const faultFs=require('node:fs'),actualStatusRead=faultFs.readFileSync;faultFs.readFileSync=(p,...args)=>{const v=actualStatusRead(p,...args);return p==='/proc/self/status'?v.replace(/^NoNewPrivs:\\s+[01]$/m,'NoNewPrivs:\\t0'):v;};",
+      });
     expect(good.status, good.stderr).toBe(0);
     expect(JSON.parse(good.stdout)).toMatchObject({
       purpose: 'reverie-plan-source-home-v1',
