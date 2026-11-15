@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import {
   requireHostedPlanOffice,
   planOfficeCiNamespace,
@@ -46,6 +47,38 @@ it('requires the explicit hosted-only command before any filesystem, build or En
     expect(() => requireHostedPlanOffice(['--ci'], { ...env, ...change }, 'linux', 'x64')).toThrow();
   expect(() => requireHostedPlanOffice(['--ci'], env, 'darwin', 'x64')).toThrow();
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'arm64')).toThrow();
+});
+it('offers only closed dispatch choices and passes them as quoted data while PR/main stays ordinary-self', () => {
+  const repositoryWorkflow = path.resolve('../../.github/workflows/image.yml');
+  const workflowFile = fs.existsSync(repositoryWorkflow)
+    ? repositoryWorkflow
+    : path.resolve('test/fixtures/control-coverage/image.yml');
+  const yaml = createRequire(import.meta.url)('js-yaml') as { load(text: string): unknown };
+  const workflow = yaml.load(fs.readFileSync(workflowFile, 'utf8')) as {
+    on: {
+      workflow_dispatch: { inputs: { plan_office_scenario: { type: string; default: string; options: string[] } } };
+    };
+    jobs: { image: { steps: Array<{ run?: string; env?: Record<string, string> }> } };
+  };
+  const input = workflow.on.workflow_dispatch.inputs.plan_office_scenario;
+  expect(input.type).toBe('choice');
+  expect(input.default).toBe('ordinary-self');
+  expect(input.options).toEqual(['ordinary-self', 'self-roundtrip', 'self-owner-force']);
+  for (const choice of input.options)
+    expect(requireHostedPlanOffice(['--ci', '--scenario', choice], env, 'linux', 'x64')).toBe(choice);
+  const office = workflow.jobs.image.steps.find((step) => step.run?.includes('scripts/plan-office-ci.mts'))!;
+  expect(office.env?.PLAN_OFFICE_SCENARIO).toBe(
+    "${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'ordinary-self' }}"
+  );
+  expect(office.run).toContain('--ci --scenario "$PLAN_OFFICE_SCENARIO"');
+  expect(office.run).not.toContain('${{');
+  for (const hostile of [
+    '$(touch /tmp/forbidden)',
+    'ordinary-self; echo leaked',
+    'self-owner-force\n--force',
+    '--help',
+  ])
+    expect(() => requireHostedPlanOffice(['--ci', '--scenario', hostile], env, 'linux', 'x64')).toThrow();
 });
 it('publishes useful closed child/operation diagnostics without hostile tokens, freeform errors or objects', () => {
   const token = 'HOSTILE_TOKEN_DO_NOT_PUBLISH_abcdefghijklmnopqrstuv';

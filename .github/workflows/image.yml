@@ -14,6 +14,16 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      plan_office_scenario:
+        description: Synthetic Docker office scenario to qualify
+        required: true
+        type: choice
+        default: ordinary-self
+        options:
+          - ordinary-self
+          - self-roundtrip
+          - self-owner-force
 
 permissions:
   contents: read
@@ -144,18 +154,19 @@ jobs:
           # old outputs and the multi-GB image tar instead of caching it twice.
           rm "$HOME/scratch/reverie/build/docker-image"
 
-      - name: Prove an actual ordinary employee self plan move in a fresh Docker office
+      - name: Prove the selected plan move scenario in a fresh Docker office
         timeout-minutes: 60
         env:
           REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
-        run: nix develop --command node --experimental-strip-types apps/web/scripts/plan-office-ci.mts --ci
+          PLAN_OFFICE_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'ordinary-self' }}
+        run: nix develop --command node --experimental-strip-types apps/web/scripts/plan-office-ci.mts --ci --scenario "$PLAN_OFFICE_SCENARIO"
 
       # Only closed acceptance summaries are artifacts. Private synthetic owner
       # credentials, HMAC keys, raw replies and one-attempt latches stay in RUNNER_TEMP.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: plan-office-ordinary-self-acceptance
+          name: plan-office-acceptance
           path: acceptance/plan-office/
           if-no-files-found: error
 
