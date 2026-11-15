@@ -732,6 +732,28 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       await wait(500);
     }
     assert.ok(responding, 'Ordinary control did not start');
+    // Reject an incomplete fixture tool closure before consuming any provider intent.
+    const controlTools = [
+      '/bin/sh',
+      '/bin/bash',
+      '/bin/tmux',
+      '/bin/which',
+      '/bin/grep',
+      '/bin/sed',
+      '/bin/awk',
+      '/bin/find',
+      '/bin/ps',
+      '/bin/docker',
+    ];
+    const toolProgram =
+      "const f=require('node:fs'),p=" +
+      JSON.stringify(controlTools) +
+      ";for(const x of p){f.accessSync(x,f.constants.X_OK);if(!f.statSync(x).isFile())throw Error('Fixture executable missing');}process.stdout.write(JSON.stringify(p));";
+    const actualTools = JSON.parse(
+      driver.docker(['exec', control, controlNode, '--input-type=commonjs', '-e', toolProgram])
+    );
+    assert.deepEqual(actualTools, controlTools);
+    evidence.save('control-tools-qualified', { control, paths: actualTools, readOnly: true });
     const owner = await enrollIsolatedPlanOfficeOwner(endpoint, path.join(evidence.root, 'auth'));
     evidence.save('owner-enrolled', { ownerSessionFile: owner.ownerSessionFile, requests: owner.requests() });
     for (const entry of sources) {

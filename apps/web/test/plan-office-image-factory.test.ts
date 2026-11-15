@@ -21,7 +21,7 @@ function evaluate(
     good +
     '";}; }'
 ) {
-  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
+  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";procps="/fake/procps";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
   const result = spawnSync('nix-instantiate', ['--store', 'dummy://', '--eval', '--strict', '--expr', code], {
     encoding: 'utf8',
     timeout: 10000,
@@ -44,7 +44,9 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   expect(v.worker.config.Env).toContain('TERMINFO=/opt/reverie-worker-tools/share/terminfo');
   expect(v.worker.fakeRootCommands).toContain('cp /helper/bin/reverie-docker-resources');
   expect(v.control.config.Cmd).toEqual(['web', '--host', '0.0.0.0', '--port', '3000']);
-  expect(v.control.contents).toEqual(expect.arrayContaining(['/fake/tmux', '/fake/which']));
+  expect(v.control.contents).toEqual(
+    expect.arrayContaining(['/fake/platform', '/fake/tmux', '/fake/which', '/fake/procps'])
+  );
   expect(v.control.config.Entrypoint).toEqual([
     '/fake/node/bin/node',
     '/fake/reverie-ci-plan-office-runtime/lib/reverie/dist/index.js',
