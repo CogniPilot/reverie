@@ -4,6 +4,8 @@ import * as asyncFs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inspect } from 'node:util';
+import { spawnSync } from 'node:child_process';
+import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
 import { StateStore, StatePublicationUnconfirmedError } from '../src/state-store.js';
 import { createInitialRalphSessionState } from '../src/types.js';
 import type { CronJob } from '../src/types/cron.js';
@@ -21,6 +23,7 @@ const real = await vi.importActual<typeof import('node:fs')>('node:fs');
 const realAsync = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
 const owned: StateStore[] = [];
 const sentinelFds: number[] = [];
+const retirementFixtures: Awaited<ReturnType<typeof dockerPlanRetirementFixture>>[] = [];
 beforeEach(() => {
   vi.mocked(fs.renameSync).mockImplementation(real.renameSync);
   vi.mocked(fs.fsyncSync).mockImplementation(real.fsyncSync);
@@ -38,6 +41,7 @@ afterEach(async () => {
   vi.mocked(fs.unlinkSync).mockImplementation(real.unlinkSync);
   vi.mocked(asyncFs.unlink).mockImplementation(realAsync.unlink);
   for (const store of owned.splice(0)) if (!store.statePublicationHeld) await store.saveNowAsync();
+  for (const f of retirementFixtures.splice(0)) { await f.old.stop(false); await f.target.stop(false); f.engine.close(); }
   for (const fd of sentinelFds.splice(0)) real.closeSync(fd);
   vi.useRealTimers();
 });
@@ -348,4 +352,125 @@ it('retains the original publication error and still notifies when its first dia
   } finally {
     logger.mockRestore();
   }
+});
+
+/** These proofs are earned by the real source reader, storage/installer observers
+ * and Engine through controlled Docker replies. No private constructor is mocked. */
+async function retirementBoundary() {
+  const f = await dockerPlanRetirementFixture();
+  retirementFixtures.push(f);
+  const file = join(fs.mkdtempSync(join(tmpdir(), 'retirement-publication-')), 'state.json'),
+    store = new StateStore(file);
+  owned.push(store);
+  const source = {
+    id: f.old.id, pid: null, status: 'idle' as const, currentTaskId: null,
+    createdAt: 1, lastActivityAt: 2, workingDir: '/synthetic', mode: 'claude' as const,
+    docker: f.docker(true), claudeSessionChain: ['historical-thread'], lastSubmitAt: 123,
+    pinned: true, name: 'Original conversation',
+  };
+  const target = { ...source, id: f.target.id, docker: f.docker(),
+    claudeSessionChain: ['target-thread'], name: 'Current target' };
+  store.setSession(source.id, source); store.setSession(target.id, target);
+  await store.saveNowAsync();
+  vi.mocked(fs.renameSync).mockClear();
+  vi.mocked(fs.closeSync).mockClear();
+  vi.mocked(f.command.create).mockClear();
+  vi.mocked(f.command.run).mockClear();
+  return { ...f, file, store, source, targetState: target };
+}
+it('acknowledges a genuinely stopped source and exited local transport without changing target or saved history', async () => {
+  const f = await retirementBoundary();
+  const child = spawnSync(process.execPath, ['-e', ''], { env: {}, stdio: 'ignore' });
+  expect(child.status).toBe(0);
+  expect(fs.existsSync('/proc/' + child.pid)).toBe(false);
+  (f.old as unknown as { _pid: number | null })._pid = child.pid;
+  expect(f.old.canRetireDockerPlanSourceView(f.proof)).toBe(true);
+  f.old.retireDockerPlanSourceView(f.proof);
+  await f.store.commitDockerPlanSourceRetirement(f.proof, f.old, false, () => {});
+  expect(f.store.getSession(f.old.id)?.nativePlanRetiredBy).toBeUndefined();
+  await f.store.commitDockerPlanSourceRetirement(f.proof, f.old, true, () => {});
+  expect(f.store.statePublicationHeld).toBe(false);
+  const restored = new StateStore(f.file); owned.push(restored);
+  expect(restored.getSession(f.old.id)).toEqual({ ...f.source,
+    status: 'stopped', pid: null, providerDispatchHeld: true, terminalInputHeld: true,
+    nativePlanRetiredBy: f.record.id });
+  expect(restored.getSession(f.target.id)).toEqual(f.targetState);
+  expect(f.old.pid).toBeNull();
+  expect(f.old.providerDispatchHeld).toBe(true);
+  expect(f.old.terminalInputHeld).toBe(true);
+  expect(f.command.create).not.toHaveBeenCalled();
+  expect(f.command.run).not.toHaveBeenCalled();
+});
+it('refuses saved Docker tuple replacement before the first retirement write', async () => {
+  const f = await retirementBoundary();
+  const changed = { ...f.source, docker: { ...f.source.docker, containerName: 'c'.repeat(64) } };
+  f.store.setSession(f.old.id, changed); await f.store.saveNowAsync();
+  vi.mocked(fs.renameSync).mockClear();
+  const before = fs.readFileSync(f.file, 'utf8');
+  await expect(f.store.commitDockerPlanSourceRetirement(f.proof, f.old, true, () => {}))
+    .rejects.toThrow('saved source view changed');
+  expect(fs.renameSync).not.toHaveBeenCalled();
+  expect(fs.readFileSync(f.file, 'utf8')).toBe(before);
+  expect(f.store.getSession(f.old.id)?.nativePlanRetiredBy).toBeUndefined();
+  expect(f.store.getSession(f.target.id)).toEqual(f.targetState);
+});
+it.each(['lifecycle', 'mux-write'] as const)('refuses source retirement during a genuine local %s boundary', async (kind) => {
+  const f = await retirementBoundary();
+  const local = f.old as unknown as {
+    _withPaneLifecycle<T>(operation: () => Promise<T>): Promise<T>;
+    _beginMuxWrite(): number; _endMuxWrite(id: number): void;
+  };
+  let release: () => void = () => {};
+  let pending: Promise<void> | undefined;
+  if (kind === 'lifecycle') pending = local._withPaneLifecycle(() => new Promise<void>(resolve => { release = resolve; }));
+  else {
+    const id = local._beginMuxWrite();
+    release = () => local._endMuxWrite(id);
+  }
+  try {
+    expect(f.old.canRetireDockerPlanSourceView(f.proof)).toBe(false);
+    expect(() => f.old.retireDockerPlanSourceView(f.proof)).toThrow('has not exited');
+    expect(f.old.providerDispatchHeld).toBe(false);
+    expect(fs.renameSync).not.toHaveBeenCalled();
+    expect(f.store.getSession(f.old.id)).toEqual(f.source);
+    expect(f.store.getSession(f.target.id)).toEqual(f.targetState);
+  } finally { release(); await pending; }
+  expect(f.old.canRetireDockerPlanSourceView(f.proof)).toBe(true);
+});
+it.each(['rename-reply', 'directory-close'] as const)(
+  'retains completed target and an unknown final retirement %s acknowledgement without claiming a marker', async (fault) => {
+    const f = await retirementBoundary();
+    f.old.retireDockerPlanSourceView(f.proof);
+    await f.store.commitDockerPlanSourceRetirement(f.proof, f.old, false, () => {});
+    vi.mocked(fs.closeSync).mockClear();
+    if (fault === 'rename-reply') vi.mocked(fs.renameSync).mockImplementationOnce((from, to) => {
+      real.renameSync(from, to); throw Error('synthetic lost retirement rename reply');
+    });
+    else {
+      let calls = 0;
+      vi.mocked(fs.closeSync).mockImplementation(fd => {
+        real.closeSync(fd);
+        if (++calls === 2) throw Error('synthetic lost retirement directory close reply');
+      });
+    }
+    await expect(f.store.commitDockerPlanSourceRetirement(f.proof, f.old, true, () => {}))
+      .rejects.toBeInstanceOf(StatePublicationUnconfirmedError);
+    expect(f.store.statePublicationHeld).toBe(true);
+    expect(f.store.getSession(f.old.id)?.nativePlanRetiredBy).toBeUndefined();
+    expect(f.store.getSession(f.target.id)).toEqual(f.targetState);
+    const published = JSON.parse(fs.readFileSync(f.file, 'utf8'));
+    expect(published.sessions[f.target.id]).toEqual(f.targetState);
+    expect(published.sessions[f.old.id].nativePlanRetiredBy).toBe(f.record.id);
+    await expect(f.store.commitDockerPlanSourceRetirement(f.proof, f.old, true, () => {}))
+      .rejects.toBeInstanceOf(StatePublicationUnconfirmedError);
+    expect(f.record.phase).toBe('completed');
+  }
+);
+it('refuses a changed current target view before touching the saved original', async () => {
+  const f = await retirementBoundary();
+  f.target.docker!.containerName = 'c'.repeat(64);
+  await expect(f.store.commitDockerPlanSourceRetirement(f.proof, f.old, true, () => {})).rejects.toThrow();
+  expect(fs.renameSync).not.toHaveBeenCalled();
+  expect(f.store.getSession(f.old.id)).toEqual(f.source);
+  expect(f.store.getSession(f.target.id)).toEqual(f.targetState);
 });
