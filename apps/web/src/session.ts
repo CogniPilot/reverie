@@ -1127,10 +1127,13 @@ export class Session extends EventEmitter {
   /** Read-only denial before owner configuration or restart preparation. This
    * never retires an intent or grants another provider dispatch. */
   assertRestartCliPreflight(): void {
-    this.#providerLaunchStore.assertProviderRestartPreflight(this);
+    // Keep the original live dispatch failure, including its cause and identity.
+    // Saved history is denial data; it cannot relabel an unconfirmed effect.
+    if (this.#providerDenial?.kind === 'intrinsic') throw this.#providerDenial.error;
     const previous = this.#lastProviderLaunch;
     if (previous && previous.retainedDenial(this).transport === 'native-ordinary' &&
       !previous.retiredStoppedFor(this)) throw new NativeProviderRetirementRequiredError();
+    this.#providerLaunchStore.assertProviderRestartPreflight(this);
     this._assertProviderLaunchAdmission();
   }
   /** Deny-only preflight; callers still need current authority and final dispatch admission. */
