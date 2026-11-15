@@ -264,7 +264,7 @@ describe('same-journal Docker actor publication', () => {
       store = new PlanMoveStore(join(dir, 'moves.json'));
     await store.save([f.record]);
     await store.dockerPublish(f.record.id, f.state, f.closed, () => {});
-    const staged = DockerPlanMoveJournalState.parse({ ...f.closed, work: f.work });
+    const staged = DockerPlanMoveJournalState.parse({ ...f.closed, material: f.material, work: f.work });
     await store.dockerPublish(f.record.id, f.closed, staged, () => {});
     const task = {
       role: 'storage-holder',
@@ -390,7 +390,7 @@ describe('same-journal Docker actor publication', () => {
         imageId: f.work.workerImage.imageId,
       },
     };
-    const stage = DockerPlanMoveJournalState.parse({ ...f.closed, work });
+    const stage = DockerPlanMoveJournalState.parse({ ...f.closed, material: f.material, work });
     await store.dockerPublish(f.record.id, f.closed, stage, () => {});
     expect(await new PlanMoveStore(store.file).stagedDockerResourceInventory()).toEqual([stage.work]);
     await writeFile(store.file, '{unconfirmed', { mode: 0o600 });
