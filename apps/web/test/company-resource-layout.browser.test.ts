@@ -902,6 +902,14 @@ for (const width of [320, 1280])
         expect(button.height).toBeGreaterThanOrEqual(44);
         expect(button.overflow).toBe(false);
       }
+      // Trial clicks prove both actions can be scrolled clear of the fixed footer,
+      // without dispatching a resource update in this layout-only acceptance.
+      await panel
+        .getByRole('button', { name: 'Continue original resource application', exact: true })
+        .click({ trial: true });
+      await panel
+        .getByRole('button', { name: 'Abandon unstarted resource application', exact: true })
+        .click({ trial: true });
       if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
         await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({
