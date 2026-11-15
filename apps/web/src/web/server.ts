@@ -5251,6 +5251,8 @@ export class WebServer extends EventEmitter {
     this.cleaningUp.add(scope.oldSession);
     try {
       if (original) {
+        await original.detachDockerPlanSourceClient(proof);
+        current();
         const deadline = performance.now() + 2000;
         while (!original.canRetireDockerPlanSourceView(proof)) {
           current();

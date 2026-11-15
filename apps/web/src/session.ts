@@ -1,3 +1,4 @@
+import { DockerPlanLocalClient } from './docker-plan-local-client.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import type { DockerEmployeeProviderRecipe } from './docker-employee-provider-recipe.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
@@ -571,6 +572,7 @@ export class Session extends EventEmitter {
   private readonly _submittedPromptTracker = new SubmittedPromptTracker();
   private _acceptsPrompts: boolean;
   private ptyProcess: pty.IPty | null = null;
+  #dockerPlanLocalClient?: DockerPlanLocalClient;
   private _pid: number | null = null;
   private _status: SessionStatus = 'idle';
   private _currentTaskId: string | null = null;
@@ -1925,6 +1927,31 @@ export class Session extends EventEmitter {
       throw Error('The old viewer process state is unconfirmed');
     }
   }
+  /** Detach only this website's captured local attach client, never its pane. */
+  async detachDockerPlanSourceClient(proof: unknown): Promise<void> {
+    requireDockerPlanSourceRetirement(proof, this);
+    const captured = this.#dockerPlanLocalClient,
+      pty = this.ptyProcess,
+      mux = this._mux,
+      record = this._muxSession;
+    if (!captured && this.canRetireDockerPlanSourceView(proof)) return;
+    const current = () => {
+      requireDockerPlanSourceRetirement(proof, this);
+      if (this.paneLifecycleInFlight || this._muxWritesInFlight > 0 ||
+        captured !== this.#dockerPlanLocalClient || mux !== this._mux || record !== this._muxSession ||
+        (this.ptyProcess !== pty && this.ptyProcess !== null) || (!this.ptyProcess && this._pid !== null))
+        throw Error('The original local source transport changed');
+      if (!record || record.sessionId !== this.id || record.owner !== this.owner ||
+        !isDeepStrictEqual(record.docker, this._docker))
+        throw Error('The original local source placement changed');
+      this.canRetireDockerPlanSourceView(proof);
+    };
+    current();
+    if (!captured || !mux || !record) throw Error('The original local source client was not captured');
+    await captured.detach(pty, mux, record, current);
+    current();
+    if (!this.canRetireDockerPlanSourceView(proof)) throw Error('The original local source client has not exited');
+  }
   /** Denial and local metadata only: no signal, mux command or native stop. */
   retireDockerPlanSourceView(proof: unknown): void {
     if (!this.canRetireDockerPlanSourceView(proof)) throw Error('The previous Docker viewer has not exited');
@@ -1933,6 +1960,7 @@ export class Session extends EventEmitter {
     this.holdUnconfirmedInput(new Error('The original Docker plan source is retired'));
     this._isStopped = true;
     this._clearAllTimers();
+    this.#dockerPlanLocalClient = undefined;
     this.ptyProcess = null;
     this._pid = null;
     this._muxSession = null;
@@ -3439,6 +3467,17 @@ export class Session extends EventEmitter {
           env: buildMuxAttachEnv(cliExportsTruecolor(this.mode)),
         })
       );
+      this.#dockerPlanLocalClient = undefined;
+      if (this._docker?.continuation && !IS_TEST_MODE) {
+        try {
+          if (this._muxSession?.sessionId !== this.id || this._muxSession.owner !== this.owner ||
+            !isDeepStrictEqual(this._muxSession.docker, this._docker))
+            throw Error('The local attach placement changed');
+          this.#dockerPlanLocalClient = DockerPlanLocalClient.capture(this.ptyProcess, mux, this._muxSession!);
+        } catch {
+          // Unknown capture never authorizes late PID adoption or a signal.
+        }
+      }
       this._notePtySpawnGeometry(ptyCols, ptyRows);
     } catch (spawnErr) {
       console.error(`[Session] Failed to spawn PTY for ${spawnErrLabel}:`, spawnErr);
