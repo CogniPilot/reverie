@@ -52,14 +52,19 @@ export async function requireOfficeReady(page: Page) {
         `Office startup failed: ${JSON.stringify({ pageErrors: probe.errors, assetFailures: probe.assets })}`
       );
     const opened = await page.evaluate(() => {
-      const stream = (window as Window & { app?: { eventSource?: EventSource } }).app?.eventSource;
-      return stream?.readyState === EventSource.OPEN && new URL(stream.url).pathname === '/api/events';
+      const office = window as Window & { app?: { eventSource?: EventSource }; reverieChat?: { built?: boolean } };
+      const stream = office.app?.eventSource;
+      return (
+        office.reverieChat?.built === true &&
+        stream?.readyState === EventSource.OPEN &&
+        new URL(stream.url).pathname === '/api/events'
+      );
     });
     if (opened && probe.initOrigins.includes(new URL(page.url()).origin)) return;
     await page.waitForTimeout(25);
   }
   throw new Error(
-    `Office startup did not open its real event stream and receive the empty-session init frame within 5 s: ${JSON.stringify(probe)}`
+    `Office startup did not build its chat shell, open its real event stream and receive the empty-session init frame within 5 s: ${JSON.stringify(probe)}`
   );
 }
 
@@ -113,7 +118,6 @@ export async function signedIn(
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await page.waitForURL((url) => url.origin === origin && url.pathname === '/', { waitUntil: 'domcontentloaded' });
   await requireOfficeReady(page);
-  await page.waitForFunction(() => !!(window as Window & { reverieChat?: { built?: boolean } }).reverieChat?.built);
 }
 
 export async function json<T = CompanyView>(page: Page, path: string, method = 'GET', body?: unknown): Promise<T> {
@@ -146,7 +150,6 @@ export async function claimOwner(
   await page.getByRole('button', { name: 'Create account', exact: true }).click();
   await page.waitForURL((url) => url.origin === origin && url.pathname === '/', { waitUntil: 'domcontentloaded' });
   await requireOfficeReady(page);
-  await page.waitForFunction(() => !!(window as Window & { reverieChat?: { built?: boolean } }).reverieChat?.built);
   const prompt = page.getByRole('dialog', { name: 'Your name', exact: true });
   await prompt.waitFor();
   await inspect('display-name');
