@@ -24,8 +24,7 @@ impl Fixture {
     }
     fn open(&self) -> ImageCache {
         ImageCache::open(&self.state, &self.cache)
-            .ok()
-            .expect("owned cache")
+            .unwrap_or_else(|error| panic!("owned cache refused: {}", error.error.code()))
     }
 }
 impl Drop for Fixture {

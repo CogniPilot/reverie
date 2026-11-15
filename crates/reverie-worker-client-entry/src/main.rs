@@ -4,6 +4,8 @@ use std::{ffi::OsString, os::unix::process::CommandExt, process::Command};
 mod install;
 #[cfg(target_os = "linux")]
 mod plan_install;
+#[cfg(target_os = "linux")]
+mod plan_protocol;
 const NODE: &str = "/opt/reverie-worker-client/bin/node";
 const SCRIPT: &str = "/opt/reverie-worker-client/bin/reverie.mjs";
 const KEYS: &[&str] = &[
@@ -62,6 +64,16 @@ fn command(
 }
 fn main() -> std::process::ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    #[cfg(target_os = "linux")]
+    if let Some(result) = plan_protocol::arguments(&args) {
+        return match result.and_then(plan_protocol::run) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("worker plan protocol unavailable: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(target_os = "linux")]
     if let Some(result) = plan_install::arguments(&args) {
         return match result.and_then(plan_install::run) {

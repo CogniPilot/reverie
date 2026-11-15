@@ -71,6 +71,18 @@ fn actual_account_and_identity_generation_preserves_original_files() {
     let value = payload();
     let projection = Material::from_payload(&value).digest().unwrap();
     let receipt = install(&fixture.path, fixture.home, &value, &projection, ATTEMPT).unwrap();
+    let encoded = serde_json::to_value(&receipt).unwrap();
+    let actual = encoded
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let described = crate::plan_protocol::RECEIPT_FIELDS
+        .iter()
+        .copied()
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(actual, described);
     let generation = fixture.generation(&projection);
     assert_eq!(fs::read(&old).unwrap(), b"original account A");
     assert_eq!(
