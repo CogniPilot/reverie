@@ -397,6 +397,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
   }
+  /** Original completed installer ACK only; no guest execution or live grant. */
+  async planReplacementOriginal(row: DockerEmployeeContinuationRecord, current: () => void) {
+    return this.#planInstaller.original(row, current);
+  }
   async observeSource(subject: DockerContinuationSubject, containerId?: string) {
     const selected = await this.command.run([
       'container',

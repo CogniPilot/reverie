@@ -328,6 +328,23 @@ export class DockerPlanInstaller {
     input: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
+    return this.#checked(input, current, (row, check) => this.#observe(row, check));
+  }
+  /** Historical installer DATA only. The prior provider may be stopped, so
+   * this deliberately earns no fresh guest/account/provider observation. */
+  async original(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<Readonly<DockerPlanInitialReceipt>> {
+    return this.#checked(input, current, async (row, check) =>
+      Object.freeze((await this.#historical(row, check)).initial)
+    );
+  }
+  async #checked<T>(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void,
+    read: (row: Row, check: () => void) => Promise<T>
+  ): Promise<T> {
     current();
     let row: Row;
     try {
@@ -351,16 +368,13 @@ export class DockerPlanInstaller {
       }
     };
     try {
-      return await this.#observe(row, check);
+      return await read(row, check);
     } catch (error) {
       if (error instanceof z.ZodError || error instanceof SyntaxError) refuse();
       throw error;
     }
   }
-  async #observe(
-    row: Row,
-    current: () => void
-  ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
+  async #historical(row: Row, current: () => void) {
     if (!row.destination) refuse();
     const task = this.#journal.read(row, 'identity-helper');
     if (
@@ -392,9 +406,17 @@ export class DockerPlanInstaller {
     if (!isDeepStrictEqual(before.State, after.State) || !isDeepStrictEqual(await this.#home(row), home))
       refuse('DOCKER_PLAN_INSTALL_ORIGINAL_CHANGED');
     current();
+    return { initial, home, helperId: task.containerId, config, state: after.State };
+  }
+  async #observe(
+    row: Row,
+    current: () => void
+  ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
+    const { initial, home, helperId, config, state } = await this.#historical(row, current);
+    current();
     const body = await this.#command.run([
       'exec',
-      row.destination.containerId,
+      row.destination!.containerId,
       '/opt/reverie-worker-client/bin/reverie',
       'worker-client',
       'plan-status',
@@ -405,7 +427,7 @@ export class DockerPlanInstaller {
       '--operation',
       row.request.operationId,
       '--container-id',
-      row.destination.containerId,
+      row.destination!.containerId,
       '--read-mode',
       'live',
       '--home-dev',
@@ -419,9 +441,9 @@ export class DockerPlanInstaller {
     this.#correlate(row, home, live);
     for (const field of ['installedAuthDigest', 'tokenDigest', 'contextDigest', 'configDev', 'configIno'] as const)
       if (live[field] !== initial[field]) refuse('DOCKER_PLAN_INSTALL_GUEST_CHANGED');
-    const final = await this.#fixed(row, home, task.containerId, config, current);
+    const final = await this.#fixed(row, home, helperId, config, current);
     terminal.parse(final.State);
-    if (!isDeepStrictEqual(final.State, after.State) || !isDeepStrictEqual(await this.#home(row), home))
+    if (!isDeepStrictEqual(final.State, state) || !isDeepStrictEqual(await this.#home(row), home))
       refuse('DOCKER_PLAN_INSTALL_ORIGINAL_CHANGED');
     current();
     return Object.freeze({ initial: Object.freeze(initial), live: Object.freeze(live) });

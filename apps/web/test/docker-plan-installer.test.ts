@@ -208,6 +208,29 @@ async function fixture() {
   };
 }
 describe('real contained plan installer observation', () => {
+  it('reads the historical completed ACK without executing a stopped guest or earning live evidence', async () => {
+    const f = await fixture();
+    const result = await f.installer.original(f.row, () => {});
+    expect(result).toEqual(f.initial);
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(f.nativeRead()).toBe(false);
+    expect(vi.mocked(f.command.run).mock.calls.every(([args]) => args[0] !== 'exec' && args[1] !== 'start')).toBe(true);
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(f.journal.publish).not.toHaveBeenCalled();
+  });
+  it.each(['ack', 'terminal', 'home'] as const)(
+    'rejects changed historical %s evidence without guest execution',
+    async (change) => {
+      const f = await fixture();
+      if (change === 'ack') f.initial.tokenDigest = hex('0');
+      if (change === 'terminal') (f.raw.State as Record<string, unknown>).ExitCode = 1;
+      if (change === 'home') f.home.ino = '99';
+      await expect(f.installer.original(f.row, () => {})).rejects.toMatchObject({
+        code: expect.stringMatching(/^DOCKER_/),
+      });
+      expect(f.nativeRead()).toBe(false);
+    }
+  );
   it('joins original terminal ACK to fresh guest read while distinguishing initial and refreshed observations', async () => {
     const f = await fixture();
     const result = await f.installer.observe(f.row, () => {});
