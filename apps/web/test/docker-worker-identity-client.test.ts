@@ -41,6 +41,15 @@ function env(path: string): NodeJS.ProcessEnv {
   };
 }
 describe('private worker callback client', () => {
+  it('keeps empty and malformed selected worker files on the strict credential path without legacy mux', () => {
+    for (const path of ['', file('{"worker":true}')]) {
+      const selected = env(path),
+        envFile = vi.fn(() => ({ REVERIE_PASSWORD: 'synthetic-human-fallback' }));
+      delete selected.REVERIE_MUX;
+      expect(() => resolveAgentContext(selected, envFile)).toThrow(/credential/);
+      expect(envFile).not.toHaveBeenCalled();
+    }
+  });
   it('uses the protected worker credential without a legacy mux flag or human credential fallback', () => {
     const selected = env(file());
     delete selected.REVERIE_MUX;

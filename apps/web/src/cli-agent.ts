@@ -98,6 +98,8 @@ export class AgentGuardError extends Error {}
 
 /** Exit codes shared by every verb; a shell agent can branch on them. */
 export const EXIT = AGENT_EXIT;
+const MANAGED_SESSION_REFUSAL =
+  'Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.';
 
 /**
  * Resolve the context from the environment, or throw `AgentGuardError`.
@@ -111,6 +113,9 @@ export function resolveAgentContext(
   env: NodeJS.ProcessEnv = process.env,
   envFile: () => Record<string, string> = readReverieEnvFile
 ): AgentContext {
+  if (env.REVERIE_MUX !== '1' && env.REVERIE_WORKER_IDENTITY_FILE === undefined) {
+    throw new AgentGuardError(MANAGED_SESSION_REFUSAL);
+  }
   const apiUrl = env.REVERIE_API_URL?.trim();
   if (!apiUrl) {
     throw new AgentGuardError('REVERIE_API_URL is not set; refusing to guess a server.');
@@ -122,7 +127,7 @@ export function resolveAgentContext(
   const workerIdentity = readDockerWorkerIdentity(env, selfId);
   if (workerIdentity !== undefined) return { apiUrl, selfId, workerIdentity };
   if (env.REVERIE_MUX !== '1') {
-    throw new AgentGuardError('Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.');
+    throw new AgentGuardError(MANAGED_SESSION_REFUSAL);
   }
   const credentials = credentialsFrom(env, envFile());
   return { apiUrl, selfId, auth: credentials.password ? credentials : undefined };

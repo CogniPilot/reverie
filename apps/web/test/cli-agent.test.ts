@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Command } from 'commander';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   AgentGuardError,
   EXIT,
@@ -100,6 +100,17 @@ describe('resolveAgentContext (guard)', () => {
     expect(() => resolveAgentContext({}, () => ({}))).toThrow(AgentGuardError);
     expect(() => resolveAgentContext({ ...inside, REVERIE_MUX: '0' }, () => ({}))).toThrow(/REVERIE_MUX/);
   });
+
+  it.each([{}, { REVERIE_SESSION_ID: SELF }, { REVERIE_API_URL: inside.REVERIE_API_URL }])(
+    'preserves the unmanaged-session refusal before missing context fields: %j',
+    (env) => {
+      const envFile = vi.fn(() => ({}));
+      expect(() => resolveAgentContext(env, envFile)).toThrow(
+        'Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.'
+      );
+      expect(envFile).not.toHaveBeenCalled();
+    }
+  );
 
   it('never guesses an API URL', () => {
     expect(() => resolveAgentContext({ ...inside, REVERIE_API_URL: '' }, () => ({}))).toThrow(/refusing to guess/);
