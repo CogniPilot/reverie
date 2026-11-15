@@ -993,7 +993,9 @@ const planEmployee = {
 async function planLayoutFixture(page: Page, respond: (route: Route) => Promise<void>) {
   const originalHtml = read('company-plans.html');
   const document = new JSDOM(originalHtml);
-  document.window.document.querySelectorAll('script').forEach((el: Element) => el.remove());
+  document.window.document
+    .querySelectorAll('script:not(#company-plans-bootstrap)')
+    .forEach((el: Element) => el.remove());
   const html = document.serialize();
   document.window.close();
   const accounts = [
@@ -1098,7 +1100,11 @@ async function planConsumerBounds(
     await page.screenshot({ path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, screenshot + '-' + width + '.png') });
   }
 }
-async function planConsumerBrowser(width: number, run: (page: Page) => Promise<void>) {
+async function planConsumerBrowser(
+  width: number,
+  run: (page: Page) => Promise<void>,
+  colorScheme: 'light' | 'dark' = 'light'
+) {
   const browser = await chromium.launch({
     headless: true,
     chromiumSandbox: true,
@@ -1110,6 +1116,7 @@ async function planConsumerBrowser(width: number, run: (page: Page) => Promise<v
     const page = await browser.newPage({
       viewport: { width, height: width === 320 ? 640 : 900 },
       deviceScaleFactor: 1,
+      colorScheme,
     });
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
@@ -1119,6 +1126,132 @@ async function planConsumerBrowser(width: number, run: (page: Page) => Promise<v
     await browser.close();
   }
 }
+
+for (const colorScheme of ['light', 'dark'] as const)
+  for (const width of [320, 1280])
+    it(`distinguishes blocked force mutations from original-status inspection in ${colorScheme} at ${width}px`, async () => {
+      await planConsumerBrowser(
+        width,
+        async (page) => {
+          const writes: ForcePlanBody[] = [],
+            reads: string[] = [];
+          await planConsumerFixture(page, async (route, pathname) => {
+            expect(route.request().method()).toBe('POST');
+            if (pathname === '/api/plans/moves/force') {
+              writes.push(route.request().postDataJSON());
+              return route.abort('failed');
+            }
+            if (writes[0] && pathname === '/api/plans/moves/' + writes[0].id + '/status') {
+              reads.push(pathname);
+              return route.fulfill({ json: { success: true, data: heldPlanMove(writes[0].id) } });
+            }
+            throw Error('Unexpected themed force consumer request: ' + pathname);
+          });
+          const panel = await openPlanConsumer(page);
+          expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme);
+          page.once('dialog', (dialog) => dialog.accept());
+          await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+          const inspect = panel.getByRole('button', { name: 'Check original move', exact: true });
+          await inspect.waitFor();
+          const appearance = await panel.evaluate((element) => {
+            const contrast = (foreground: string, background: string) => {
+              const luminance = (color: string) => {
+                const channels = color
+                  .match(/[\d.]+/g)!
+                  .slice(0, 3)
+                  .map(Number)
+                  .map((value) => {
+                    const channel = value / 255;
+                    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+                  });
+                return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+              };
+              const a = luminance(foreground),
+                b = luminance(background);
+              return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+            };
+            const style = (selector: string) => {
+              const button = element.querySelector<HTMLButtonElement>(selector)!;
+              const value = getComputedStyle(button);
+              return {
+                disabled: button.disabled,
+                border: value.borderTopStyle,
+                color: value.color,
+                background: value.backgroundColor,
+                cursor: value.cursor,
+                opacity: value.opacity,
+                contrast: contrast(value.color, value.backgroundColor),
+              };
+            };
+            return {
+              request: style('[type="submit"]'),
+              force: style('[data-force]'),
+              inspect: style('[data-inspect]'),
+              errorContrast: contrast(
+                getComputedStyle(element.querySelector('[role="alert"]')!).color,
+                getComputedStyle(element).backgroundColor
+              ),
+            };
+          });
+          for (const blocked of [appearance.request, appearance.force]) {
+            expect(blocked.disabled).toBe(true);
+            expect(blocked.border).toBe('dashed');
+            expect(blocked.color).not.toBe(appearance.inspect.color);
+            expect(blocked.background).not.toBe(appearance.inspect.background);
+            expect(blocked.cursor).toBe('not-allowed');
+            expect(blocked.opacity).toBe('1');
+            expect(blocked.contrast).toBeGreaterThanOrEqual(4.5);
+          }
+          expect(appearance.inspect.disabled).toBe(false);
+          expect(appearance.inspect.border).toBe('solid');
+          expect(appearance.inspect.cursor).toBe('pointer');
+          expect(appearance.inspect.contrast).toBeGreaterThanOrEqual(4.5);
+          expect(appearance.errorContrast).toBeGreaterThanOrEqual(4.5);
+          await inspect.focus();
+          await page.keyboard.press('Tab');
+          expect(
+            await panel
+              .getByRole('button', { name: 'Cancel', exact: true })
+              .evaluate((el) => el === document.activeElement)
+          ).toBe(true);
+          await page.keyboard.press('Shift+Tab');
+          expect(
+            await inspect.evaluate(
+              (el) =>
+                el.matches(':focus-visible') &&
+                getComputedStyle(el).outlineStyle !== 'none' &&
+                parseFloat(getComputedStyle(el).outlineWidth) >= 1
+            )
+          ).toBe(true);
+          await planConsumerBounds(
+            page,
+            panel,
+            width,
+            ['Check original move', 'Cancel'],
+            'plan-force-disabled-' + colorScheme
+          );
+          if (process.env.TEST_RESOURCE_SCREENSHOT_DIR)
+            await writeFile(
+              join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-force-disabled-${colorScheme}-${width}.json`),
+              JSON.stringify({ colorScheme, width, appearance }, null, 2) + '\n'
+            );
+          expect(writes).toHaveLength(1);
+          expect(reads).toEqual([]);
+          await page.keyboard.press('Enter');
+          await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+          expect(reads).toEqual(['/api/plans/moves/' + writes[0]!.id + '/status']);
+          expect(writes).toHaveLength(1);
+          await planConsumerBounds(
+            page,
+            panel,
+            width,
+            ['Recover original move', 'Refresh status'],
+            'plan-force-readback-' + colorScheme
+          );
+        },
+        colorScheme
+      );
+    });
 
 // Actual Chromium consumers of the shipped Plans closure, with closed synthetic
 // API replies. These assert user actions/protocol scope, not native move effects.

@@ -179,6 +179,14 @@ h2 {
 .btn:hover {
   border-color: var(--accent);
 }
+#moveDlg .btn:disabled {
+  border-color: var(--line);
+  border-style: dashed;
+  background: var(--panel2);
+  color: var(--muted);
+  cursor: not-allowed;
+  opacity: 1;
+}
 .btn.on {
   background: var(--accent-soft);
   border-color: var(--accent);
