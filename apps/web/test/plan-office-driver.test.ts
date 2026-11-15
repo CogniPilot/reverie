@@ -1,5 +1,5 @@
 /** Driver admission/tuple policy tests only. No Docker/API calls or fake paid authority. */
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -8,6 +8,14 @@ import Fastify from 'fastify';
 import { registerHostGuard } from '../src/web/middleware/auth.js';
 import { installResponseEnvelope } from '../src/web/response-envelope.js';
 import { Session } from '../src/session.js';
+import { createHash } from 'node:crypto';
+import {
+  DockerEmployeeContinuation,
+  dockerContinuationDigest,
+  type DockerContainerObservation,
+  type DockerContinuationStore,
+} from '../src/docker-employee-continuation.js';
+import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import {
   PlanOfficeDriverInput,
   planOfficeNames,
@@ -23,6 +31,8 @@ import {
   parsePlanOfficeCpus,
   planOfficeInternalHostPreflight,
   planOfficeSession,
+  planOfficeOriginalStatus,
+  completePlanOfficeOriginal,
 } from './helpers/plan-office-driver.js';
 const sha = 'sha256:' + 'a'.repeat(64),
   sid = '11111111-1111-4111-8111-111111111111',
@@ -306,5 +316,291 @@ it('consumes the actual response envelope around a real Session DTO without gran
   } finally {
     await app.close();
     await session.stop(false);
+  }
+});
+
+const recoveryRequest = {
+  operationId: oid,
+  sessionId: sid,
+  sessionGeneration: 1,
+  containerId: 'b'.repeat(64),
+  imageId: sha,
+  expectedDestinationImageId: sha,
+  expectedPolicyDigest: 'c'.repeat(64),
+  enterOffice: true,
+};
+const originalSelection = (phase = 'resources-ready', state = 'pending', allowedActions = ['observe', 'continue']) => ({
+  operationId: oid,
+  sessionId: sid,
+  sessionGeneration: 1,
+  containerId: recoveryRequest.containerId,
+  imageId: sha,
+  destinationImageId: sha,
+  sourceDigest: 'd'.repeat(64),
+  operation: { operationId: oid, phase, state, allowedActions },
+});
+function recoveryPorts(observations: unknown[]) {
+  const records: { name: string; value: unknown }[] = [];
+  let index = 0;
+  return {
+    records,
+    observe: vi.fn(async () => {
+      const value = observations[Math.min(index++, observations.length - 1)];
+      if (value instanceof Error) throw value;
+      return value;
+    }),
+    continueOriginal: vi.fn(
+      async (_body: { request: typeof recoveryRequest }, _phase: string) =>
+        originalSelection('resources-ready').operation
+    ),
+    record(name: string, value: unknown) {
+      records.push({ name, value });
+    },
+    pause: vi.fn(async () => {}),
+  };
+}
+const expectedRecovery = { request: recoveryRequest, sourceDigest: 'd'.repeat(64) };
+it('retains the same original through bounded read timeouts and journals one advertised continuation before sending only its request', async () => {
+  const ports = recoveryPorts([
+    new DOMException('Read timed out', 'TimeoutError'),
+    originalSelection(),
+    originalSelection('ready', 'ready', ['observe']),
+  ]);
+  ports.continueOriginal.mockImplementation(async (body, phase) => {
+    expect(phase).toBe('resources-ready');
+    expect(body).toEqual({ request: recoveryRequest });
+    expect(ports.records.at(-1)?.name).toBe('continue-resources-ready-intent');
+    return originalSelection().operation;
+  });
+  expect((await completePlanOfficeOriginal(expectedRecovery, true, ports)).state).toBe('ready');
+  expect(ports.continueOriginal).toHaveBeenCalledTimes(1);
+  expect(ports.records[0]?.name).toBe('read-timeout-0');
+  expect(ports.records.find((r) => r.name.endsWith('-intent'))?.value).toEqual({
+    operationId: oid,
+    phase: 'resources-ready',
+    body: { request: recoveryRequest },
+    noPolicyApproval: true,
+  });
+});
+it('never repeats a continuation phase and bounds all original observation attempts', async () => {
+  const ports = recoveryPorts([originalSelection()]);
+  await expect(completePlanOfficeOriginal(expectedRecovery, true, ports)).rejects.toThrow('not confirmed Ready');
+  expect(ports.observe).toHaveBeenCalledTimes(180);
+  expect(ports.continueOriginal).toHaveBeenCalledTimes(1);
+});
+it('keeps unknown first or continuation mutation outcomes observation-only even when a later phase advertises continue', async () => {
+  const observations = [
+    originalSelection(),
+    originalSelection('identity-ready'),
+    originalSelection('ready', 'ready', ['observe']),
+  ];
+  const first = recoveryPorts(observations);
+  await completePlanOfficeOriginal(expectedRecovery, false, first);
+  expect(first.continueOriginal).not.toHaveBeenCalled();
+  const later = recoveryPorts(observations);
+  later.continueOriginal.mockRejectedValue(new DOMException('Mutation outcome unknown', 'TimeoutError'));
+  await completePlanOfficeOriginal(expectedRecovery, true, later);
+  expect(later.continueOriginal).toHaveBeenCalledTimes(1);
+  expect(later.records.some((r) => r.name === 'continue-resources-ready-unknown')).toBe(true);
+});
+it('does not infer continuation from issued phases, historical held status or missing server permission', async () => {
+  for (const observation of [
+    originalSelection('provider-issued'),
+    originalSelection('start-issued'),
+    originalSelection('resources-issued'),
+    originalSelection('resources-ready', 'pending', ['observe']),
+    {
+      ...originalSelection('resources-ready', 'held'),
+      operation: { ...originalSelection().operation, state: 'held', code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED' },
+    },
+  ]) {
+    const ports = recoveryPorts([observation, originalSelection('ready', 'ready', ['observe'])]);
+    await completePlanOfficeOriginal(expectedRecovery, true, ports);
+    expect(ports.continueOriginal).not.toHaveBeenCalled();
+  }
+  const held = recoveryPorts([
+    {
+      ...originalSelection(),
+      operation: { ...originalSelection().operation, state: 'held', code: 'DOCKER_CONTINUATION_FOREIGN_PROVIDER' },
+    },
+  ]);
+  await expect(completePlanOfficeOriginal(expectedRecovery, true, held)).rejects.toThrow('Original recovery held');
+  expect(held.continueOriginal).not.toHaveBeenCalled();
+});
+it('refuses changed original scope, malformed phases, foreign operations and auth errors before continuation', async () => {
+  for (const [key, value] of Object.entries({
+    sessionId: thread,
+    sessionGeneration: 2,
+    containerId: 'f'.repeat(64),
+    imageId: 'sha256:' + 'f'.repeat(64),
+    destinationImageId: 'sha256:' + 'f'.repeat(64),
+    sourceDigest: 'f'.repeat(64),
+  })) {
+    const ports = recoveryPorts([{ ...originalSelection(), [key]: value }]);
+    await expect(completePlanOfficeOriginal(expectedRecovery, true, ports)).rejects.toThrow(
+      'Original recovery scope changed'
+    );
+    expect(ports.continueOriginal).not.toHaveBeenCalled();
+  }
+  for (const value of [
+    { ...originalSelection(), operationId: thread },
+    { ...originalSelection(), operation: { ...originalSelection().operation, operationId: thread } },
+    originalSelection('future-unreviewed'),
+    new Error('Owner authorization changed'),
+  ]) {
+    const ports = recoveryPorts([value]);
+    await expect(completePlanOfficeOriginal(expectedRecovery, true, ports)).rejects.toThrow();
+    expect(ports.continueOriginal).not.toHaveBeenCalled();
+    expect(ports.observe).toHaveBeenCalledTimes(1);
+  }
+});
+it('does not dispatch a continuation when its durable intent cannot be published', async () => {
+  const ports = recoveryPorts([originalSelection()]);
+  const record = ports.record;
+  ports.record = (name, value) => {
+    if (name.endsWith('-intent')) throw Error('Intent close unknown');
+    record(name, value);
+  };
+  await expect(completePlanOfficeOriginal(expectedRecovery, true, ports)).rejects.toThrow('Intent close unknown');
+  expect(ports.continueOriginal).not.toHaveBeenCalled();
+});
+it('consumes actual domain selection and enveloped results after completed native resources without replaying create, start or configure', async () => {
+  const policy = ciPlanPolicy([0]),
+    sourceDigest = 'd'.repeat(64);
+  const original = {
+    containerId: recoveryRequest.containerId,
+    imageId: sha,
+    deployment: 'synthetic',
+    employeeId: eid,
+    sessionId: sid,
+    home: {
+      type: 'bind' as const,
+      source: '/synthetic-owned-home',
+      destination: '/home/agent' as const,
+      readWrite: true as const,
+    },
+    mountDigest: 'a'.repeat(64),
+    storageDigest: 'b'.repeat(64),
+    configurationDigest: 'c'.repeat(64),
+  };
+  const destinationOriginal = { ...original, containerId: 'e'.repeat(64), configurationDigest: 'e'.repeat(64) };
+  const pool = {
+    containerId: 'f'.repeat(64),
+    cgroupParent: '/synthetic-pool',
+    policyDigest: dockerContinuationDigest(policy.pool),
+    physicalDigest: 'f'.repeat(64),
+  };
+  const request = { ...recoveryRequest, expectedPolicyDigest: dockerContinuationDigest(policy) };
+  let row = DockerEmployeeContinuationRecord.parse({
+    version: 2,
+    purpose: 'docker-employee-continuation-v2',
+    employeeId: eid,
+    owner: 'synthetic-owner',
+    request,
+    sourceDigest,
+    providerSourceDigest: sourceDigest,
+    original,
+    workerImage: { imageId: sha, sourceImageId: sha, clientManifestDigest: 'a'.repeat(64) },
+    credentialId: thread,
+    policy,
+    pool,
+    destination: destinationOriginal,
+    phase: 'resources-ready',
+  });
+  const subject = {
+    employeeId: eid,
+    sessionId: sid,
+    sessionGeneration: 1,
+    owner: 'synthetic-owner',
+    sourceDigest,
+    providerSourceDigest: sourceDigest,
+    onVacation: false,
+    desiredRunning: true,
+  };
+  const authority = { owner: subject.owner, require() {}, requireOffice() {} };
+  let destination: DockerContainerObservation = {
+    original: destinationOriginal,
+    state: 'running',
+    resources: policy,
+    provider: { kind: 'absent' },
+    credentialDigest: null,
+  };
+  const store: DockerContinuationStore = {
+    subject: () => subject,
+    existingSubject: () => subject,
+    policy: () => policy,
+    record: () => row,
+    async replace(before, next, current) {
+      current();
+      expect(row).toEqual(before);
+      row = structuredClone(next);
+    },
+    async bind(_row, _binding, current) {
+      current();
+    },
+    async enterOffice() {
+      throw Error('Office entry replay');
+    },
+  };
+  const replay = vi.fn(async () => {
+    throw Error('Paid/native original replay');
+  });
+  const service = new DockerEmployeeContinuation(
+    store,
+    {
+      image: async () => row.workerImage,
+      observeSource: async () => ({ original, state: 'stopped' }),
+      validateCapabilities: replay,
+      preparePool: replay,
+      observePool: async () => pool,
+      createDestination: replay,
+      observeDestination: async () => structuredClone(destination),
+      start: replay,
+      configureResources: replay,
+      async provisionIdentity(_row, token, current) {
+        current();
+        destination = { ...destination, credentialDigest: createHash('sha256').update(token).digest('hex') };
+      },
+    },
+    {
+      async launch(_row, _binding, current) {
+        current();
+        destination = { ...destination, provider: { kind: 'running', operationId: oid, sessionId: sid } };
+      },
+    },
+    { issue: () => 'synthetic-test-token' }
+  );
+  const app = Fastify();
+  installResponseEnvelope(app, '');
+  app.get('/api/policy', () => service.selection(eid, authority));
+  app.post('/api/continue', async (req) => {
+    expect(req.body).toEqual({ request });
+    return service.begin(eid, request, authority);
+  });
+  const records: string[] = [];
+  try {
+    await completePlanOfficeOriginal({ request, sourceDigest }, true, {
+      async observe() {
+        const r = await app.inject({ method: 'GET', url: '/api/policy' });
+        return planOfficeOriginalStatus(new Response(r.body, { status: r.statusCode }), oid);
+      },
+      async continueOriginal(body) {
+        const r = await app.inject({ method: 'POST', url: '/api/continue', payload: body });
+        expect(r.statusCode).toBe(200);
+        return r.json().data;
+      },
+      record: (name) => {
+        records.push(name);
+      },
+      pause: async () => {},
+    });
+    expect(row.phase).toBe('ready');
+    expect(replay).not.toHaveBeenCalled();
+    expect(records.filter((name) => name.endsWith('-intent'))).toEqual(['continue-resources-ready-intent']);
+    const actual = await app.inject({ method: 'GET', url: '/api/policy' });
+    expect(actual.json().data.operation.allowedActions).toEqual(['observe']);
+    await expect(planOfficeOriginalStatus(new Response(actual.body), thread)).rejects.toThrow();
+  } finally {
+    await app.close();
   }
 });

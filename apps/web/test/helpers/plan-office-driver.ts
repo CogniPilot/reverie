@@ -11,7 +11,11 @@ import { z } from 'zod';
 import { PlanOfficeBootstrap } from './plan-office-bootstrap.js';
 import { enrollIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
-import { DockerEmployeeResourcePolicy } from '../../src/docker-employee-continuation-data.js';
+import {
+  DockerEmployeeResourcePolicy,
+  DockerEmployeeContinuationRequest,
+  DockerEmployeeContinuationPhase,
+} from '../../src/docker-employee-continuation-data.js';
 const id = z.string().regex(/^sha256:[a-f0-9]{64}$/),
   hash = z.string().regex(/^[a-f0-9]{64}$/),
   cid = z.string().regex(/^[a-f0-9]{64}$/);
@@ -148,7 +152,7 @@ export function requireSameOperation(value: unknown, operationId: string) {
   return z
     .object({
       operationId: z.literal(operationId),
-      phase: z.string(),
+      phase: DockerEmployeeContinuationPhase,
       state: z.enum(['ready', 'pending', 'held']),
       allowedActions: z.array(z.enum(['observe', 'continue'])),
     })
@@ -525,7 +529,7 @@ class Driver {
     };
   }
 }
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 class OwnerApiRefusal extends Error {
   constructor(
     readonly status: number,
@@ -544,6 +548,97 @@ export async function planOfficeSession(response: Response, sessionId: string) {
   const session = await data(response);
   assert.equal(session.id, sessionId);
   return session;
+}
+export async function planOfficeOriginalStatus(response: Response, operationId: string) {
+  const selection = await data(response);
+  assert.equal(selection.operationId, operationId);
+  requireSameOperation(selection.operation, operationId);
+  return selection;
+}
+/** Thin fixture recovery client. Only a fresh product-native observation can
+ * offer continuation. An unknown mutation switches this invocation to observation
+ * only; no HTTP status, historical phase or local filesystem implies permission. */
+export async function completePlanOfficeOriginal(
+  expected: { request: z.infer<typeof DockerEmployeeContinuationRequest>; sourceDigest: string },
+  knownMutationReply: boolean,
+  ports: {
+    observe(): Promise<unknown>;
+    continueOriginal(
+      body: { request: z.infer<typeof DockerEmployeeContinuationRequest> },
+      phase: string
+    ): Promise<unknown>;
+    record(name: string, value: unknown): void;
+    pause(): Promise<void>;
+  }
+) {
+  const original = Object.freeze(DockerEmployeeContinuationRequest.parse(expected.request));
+  hash.parse(expected.sourceDigest);
+  const attempted = new Set<string>();
+  const continuable = new Set([
+    'staged',
+    'office-ready',
+    'pool-ready',
+    'destination-ready',
+    'container-running',
+    'resources-ready',
+    'identity-ready',
+  ]);
+  for (let index = 0; index < 180; index++) {
+    let seen: Json;
+    try {
+      seen = z.record(z.string(), z.unknown()).parse(await ports.observe());
+    } catch (error) {
+      if (!(error instanceof Error) || !['TimeoutError', 'AbortError'].includes(error.name)) throw error;
+      ports.record('read-timeout-' + index, { operationId: original.operationId, readOnly: true });
+      await ports.pause();
+      continue;
+    }
+    assert.equal(seen.operationId, original.operationId);
+    const operation = requireSameOperation(seen.operation, original.operationId);
+    ports.record('original-' + index, operation);
+    if (operation.state === 'ready') return operation;
+    if (
+      knownMutationReply &&
+      operation.state === 'pending' &&
+      operation.allowedActions.includes('continue') &&
+      continuable.has(operation.phase) &&
+      !attempted.has(operation.phase)
+    ) {
+      for (const [key, value] of Object.entries({
+        sessionId: original.sessionId,
+        sessionGeneration: original.sessionGeneration,
+        containerId: original.containerId,
+        imageId: original.imageId,
+        destinationImageId: original.expectedDestinationImageId,
+        sourceDigest: expected.sourceDigest,
+      }))
+        assert.deepEqual(seen[key], value, 'Original recovery scope changed: ' + key);
+      const body = { request: structuredClone(original) };
+      // Checked durable publication must complete before the sole request for this phase.
+      ports.record('continue-' + operation.phase + '-intent', {
+        operationId: original.operationId,
+        phase: operation.phase,
+        body,
+        noPolicyApproval: true,
+      });
+      attempted.add(operation.phase);
+      try {
+        const result = requireSameOperation(await ports.continueOriginal(body, operation.phase), original.operationId);
+        ports.record('continue-' + operation.phase + '-returned', result);
+      } catch (error) {
+        knownMutationReply = false;
+        ports.record('continue-' + operation.phase + '-unknown', {
+          operationId: original.operationId,
+          errorType: error instanceof Error ? error.name : 'unknown',
+          noRetry: true,
+        });
+      }
+    } else if (operation.state === 'held' && operation.code !== 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED') {
+      throw Error('Original recovery held; inspect saved operation, never begin again');
+    }
+    await ports.pause();
+  }
+  throw Error('Original recovery not confirmed Ready; observe original operation, never begin again');
 }
 /** Effects are reachable only in the immutable composed package and for explicit qualified image IDs. */
 export async function runPlanOfficeBaseline(contractFile: string) {
@@ -836,6 +931,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           policy,
         },
       });
+      let knownMutationReply = true;
       try {
         requireSameOperation(
           await data(
@@ -852,6 +948,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           operationId
         );
       } catch (error) {
+        knownMutationReply = false;
         evidence.save('begin-unconfirmed-' + employee.employeeId, {
           operationId,
           errorType: error instanceof Error ? error.name : 'unknown',
@@ -859,24 +956,44 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           ...(error instanceof OwnerApiRefusal ? { httpStatus: error.status, response: error.response } : {}),
         });
       }
-      let ready = false;
-      for (let i = 0; i < 180; i++) {
-        driver.owned(control, 'control');
-        const seen = await data(
-          await owner.request('/api/company/employees/' + employee.employeeId + '/docker-policy')
-        );
-        assert.equal(seen.operationId, operationId);
-        const operation = requireSameOperation(seen.operation, operationId);
-        evidence.save('original-' + employee.employeeId + '-' + i, operation);
-        if (operation.state === 'ready') {
-          ready = true;
-          break;
+      await completePlanOfficeOriginal(
+        { request: requestBody, sourceDigest: selection.sourceDigest },
+        knownMutationReply,
+        {
+          async observe() {
+            driver.owned(control, 'control');
+            const value = await planOfficeOriginalStatus(
+              await owner.request('/api/company/employees/' + employee.employeeId + '/docker-policy'),
+              operationId
+            );
+            driver.owned(control, 'control');
+            return value;
+          },
+          async continueOriginal(body, phase) {
+            driver.owned(control, 'control');
+            const canonical = readPrivate(path.join(evidence.root, 'data', 'company.json')) as Json;
+            const row = (canonical.dockerEmployeeContinuations as Json[]).find(
+              (row) => row.employeeId === employee.employeeId
+            );
+            assert.ok(row);
+            assert.equal(row.phase, phase);
+            assert.deepEqual(row.request, requestBody);
+            const value = await data(
+              await owner.request(
+                '/api/company/employees/' + employee.employeeId + '/docker-continuation',
+                'POST',
+                body
+              )
+            );
+            driver.owned(control, 'control');
+            return value;
+          },
+          record(name, value) {
+            evidence.save(name + '-' + employee.employeeId, value);
+          },
+          pause: () => wait(500),
         }
-        if (operation.state === 'held')
-          throw Error('Original recovery held; inspect saved operation, never begin again');
-        await wait(500);
-      }
-      assert.ok(ready, 'Original recovery not confirmed Ready');
+      );
       const session = await planOfficeSession(
         await owner.request('/api/sessions/' + employee.sessionId),
         employee.sessionId
