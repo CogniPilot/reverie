@@ -31,6 +31,7 @@ async function fixture(
     boxedRecovery?: 'approval' | 'held';
     dockerResources?: boolean;
     resourceActions?: string[];
+    originalRequests?: boolean;
   } = {}
 ) {
   // Keep the shipped document structure, but bootstrap only the conversation
@@ -105,6 +106,7 @@ async function fixture(
             sessionGeneration:employee.sessionGeneration,containerId:source.containerId,imageId:source.imageId,
             expectedDestinationImageId:source.destinationImageId,expectedPolicyDigest:'e'.repeat(64),enterOffice:true}}:{})});
       }
+      if(path==='/api/company/docker-resources/original-attempts')return ok(${JSON.stringify(options.originalRequests ? JSON.parse(readFileSync(new URL('./fixtures/docker-resource-original-attempts.json', import.meta.url), 'utf8')).created.pending : { items: [], next: null, enforcement: 'not-observed' })});
       if(path==='/api/company/docker-resources')return ok({allowedActions:['approve-default'],desired:{revision:'33333333-3333-4333-8333-333333333333',scope:'all-current-and-future',memoryHighBytes:48*1024**3},employees:[{employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'not-observed',enforcement:'not-observed'}]});
       if(path==='/api/company/employees/'+employee.id+'/docker-resources')return ok({employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,revision:'33333333-3333-4333-8333-333333333333',actualMemoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,actualLimits:{memoryHighBytes:16*1024**3,memoryMaxBytes:64*1024**3,swapMaxBytes:0,pidsMax:512,cpuWeight:100,allowedCpus:Array.from({length:32},(_,index)=>index),cpuQuota:'unlimited'},approved:true,approvalSource:'original-policy',approvedRevision:null,enforcement:'fresh-native-readback',allowedActions:${JSON.stringify(options.resourceActions ?? ['apply'])}});
       if(path==='/api/company/employees/'+employee.id+'/docker-pool/status')return ok({sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration,state:'held',code:'DOCKER_POOL_ORIGINAL_ACK_MISSING',allowedActions:[]});
@@ -806,7 +808,12 @@ for (const width of [320, 1280])
         .getByText('Owner-approved soft RAM default: 48 GiB for current and future employees.', { exact: true })
         .waitFor();
       expect(await company.textContent()).toContain('not fresh enforcement');
-      expect(await company.locator('details').evaluate((el) => (el as HTMLDetailsElement).open)).toBe(false);
+      expect(
+        await company
+          .locator('details')
+          .filter({ hasText: 'Approved default details' })
+          .evaluate((el) => (el as HTMLDetailsElement).open)
+      ).toBe(false);
       await company.scrollIntoViewIfNeeded();
       expect(await company.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
       if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
@@ -914,6 +921,59 @@ for (const width of [320, 1280])
         await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({
           path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `docker-resource-original-${width}.png`),
+        });
+      }
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  });
+
+for (const width of [320, 1280])
+  it(`keeps former-binding resource recovery readable at ${width}px`, async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1 });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await fixture(page, { boxedRecovery: 'held', dockerResources: true, originalRequests: true });
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompanySettings());
+      const settings = page.getByRole('dialog', { name: 'Company settings', exact: true });
+      await settings.getByText('Original resource request recovery', { exact: true }).click();
+      const panel = settings.getByRole('region', { name: 'Original resource requests', exact: true });
+      const retire = panel.getByRole('button', { name: 'Retire unstarted request', exact: true });
+      await retire.waitFor();
+      expect(await panel.textContent()).toContain('Original execution outcome is unknown');
+      expect(await panel.textContent()).not.toContain('River');
+      await panel.getByText('Original request identifiers', { exact: true }).click();
+      const geometry = await panel.evaluate((el) => ({
+        ratio: window.devicePixelRatio,
+        width: el.clientWidth,
+        scroll: el.scrollWidth,
+        buttons: [...el.querySelectorAll('button')].map((b) => ({
+          height: b.getBoundingClientRect().height,
+          overflow: b.scrollWidth > b.clientWidth + 1,
+        })),
+      }));
+      expect(geometry.ratio).toBe(1);
+      expect(geometry.scroll).toBeLessThanOrEqual(geometry.width + 1);
+      for (const button of geometry.buttons) {
+        expect(button.height).toBeGreaterThanOrEqual(44);
+        expect(button.overflow).toBe(false);
+      }
+      await panel.getByRole('button', { name: 'Check original helper', exact: true }).click({ trial: true });
+      await retire.click({ trial: true });
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `docker-resource-former-binding-${width}.png`),
         });
       }
       expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual([]);

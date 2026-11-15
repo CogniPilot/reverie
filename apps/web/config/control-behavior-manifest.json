@@ -915,7 +915,7 @@
       "assertions": [
         "expect(f.panel().querySelector('[role=\"alert\"]')?.textContent).toContain('1 employee resource application needs attention')",
         "expect(details.textContent).toContain(targetRow(status).code)",
-        "expect(f.calls.every((call) => call.path === '/api/company/docker-resources')).toBe(true)"
+        "expect(f.calls.every((call) => ['/api/company/docker-resources', '/api/company/docker-resources/original-attempts'].includes(call.path))).toBe(true)"
       ],
       "outcome": "A shared actual producer DTO renders bounded attention and closed technical details; it performs no per-employee request or resource mutation."
     },
@@ -928,6 +928,41 @@
         "expect(f.button('Approve new 48 GiB default revision')).toBeDefined()"
       ],
       "outcome": "A producer-checked scoped not-issued DTO triggers only fresh owner status, releases only its nonce, and requires a separate later user approval. Generic failures and different nonces remain separate tested refusal cases."
+    },
+    "docker-resources.original-cursor": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "keeps actual original helper recovery accessible after the employee disappears and the current summary fails",
+      "assertions": [
+        "expect(f.originalButton('Check original helper')).toBeDefined()",
+        "await f.originalClick('Check original helper')",
+        "expect(f.originals().textContent).toContain('original execution outcome remains unknown')",
+        "await f.originalClick('Check original request status')"
+      ],
+      "outcome": "The shared actual owner-HTTP fixture remains reachable without a current employee route, sends the exact original digest CAS once, and displays only historical closed-helper metadata. It makes no current policy claim."
+    },
+    "docker-resources.original-retire": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "opens original request details and retires only the explicitly offered preSTART request",
+      "assertions": [
+        "expect(recovery.open).toBe(false)",
+        "expect(recovery.open).toBe(true)",
+        "expect(details.open).toBe(true)",
+        "await f.originalClick('Retire unstarted request')",
+        "expect(f.originalButton('Retire unstarted request')).toBeUndefined()"
+      ],
+      "outcome": "Normal disclosure controls reveal original identifiers and an explicit API-offered CAS retirement consumes the actual producer fixture. No running-container stop or current resource application is claimed."
+    },
+    "docker-resources.original-pagination": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "pages original requests only through explicit GET and retains an exact settled request",
+      "assertions": [
+        "await f.originalClick('Next original requests')",
+        "expect(f.originalButton('First original requests')).toBeDefined()",
+        "await f.originalClick('Check original request status')",
+        "await f.originalClick('First original requests')",
+        "expect(f.writes()).toEqual([])"
+      ],
+      "outcome": "Explicit page and exact-status controls perform only bounded GETs; an exact retained terminal record is shown without manufacturing current activity or native policy evidence."
     }
   },
   "mappings": [
@@ -1273,6 +1308,41 @@
       "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Abandon unstarted resource application",
       "scenarios": ["docker-resources.abandon-original"],
       "remaining": "Only the named DOM transport assertions. Actual owner API/currentness/CAS/native behavior are separately tested; other UI states and whole-site coverage remain gaps."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::CompanyPanel.constructor::inline::summary:Original resource request recovery",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::summary:Original request identifiers",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Check original helper",
+      "scenarios": ["docker-resources.original-cursor"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Check original request status",
+      "scenarios": ["docker-resources.original-cursor"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Retire unstarted request",
+      "scenarios": ["docker-resources.original-retire"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:First original requests",
+      "scenarios": ["docker-resources.original-pagination"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Next original requests",
+      "scenarios": ["docker-resources.original-pagination"],
+      "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
     }
   ],
   "gaps": [

@@ -17,6 +17,9 @@ afterEach(() => {
 async function fixture(
   options: {
     view?: 'company' | 'employee';
+    originalReply?: (path: string, request?: { method?: string; body?: unknown }) => unknown | Promise<unknown>;
+    missingEmployee?: boolean;
+    rootFailure?: { status: number; error: unknown };
     approved?: boolean;
     owner?: boolean;
     action?: string[];
@@ -45,7 +48,12 @@ async function fixture(
     boardPermissionSources: {},
   };
   const profileBase = '/api/company/employees/' + employee.id;
-  const company = { canManage: true, boxedRuntime: true, settings: { ownerName: 'Owner' }, employees: [employee] };
+  const company = {
+    canManage: true,
+    boxedRuntime: true,
+    settings: { ownerName: 'Owner' },
+    employees: options.missingEmployee ? [] : [employee],
+  };
   const h = await createHarness({ company });
   handles.push(h);
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
@@ -58,7 +66,7 @@ async function fixture(
     readApproved = true;
   let operationId = options.resourceScope?.operationId ?? '55555555-5555-4555-8555-555555555555',
     containerId = options.resourceScope?.containerId ?? '6'.repeat(64);
-  let rootFailure: { status: number; error: unknown } | null = null;
+  let rootFailure: { status: number; error: unknown } | null = options.rootFailure ?? null;
   const initialDesired = summary?.desired as { revision: string } | null | undefined;
   let closed = options.writerClosed === true,
     retired = options.intentRetired === true;
@@ -76,6 +84,10 @@ async function fixture(
     ) {
       const method = request?.method ?? 'GET';
       calls.push({ path, method, body: structuredClone(request?.body) });
+      if (path.startsWith('/api/company/docker-resources/original-attempts'))
+        return options.originalReply
+          ? options.originalReply(path, request)
+          : { ok: true, data: { items: [], next: null, enforcement: 'not-observed' } };
       if (method !== 'GET' && options.reply) return options.reply(path, request?.body);
       if (path === '/api/company/docker-resources' && rootFailure) return { ok: false, ...rootFailure };
       if (path === '/api/company/docker-resources' && summary) return { ok: true, data: structuredClone(summary) };
@@ -154,7 +166,16 @@ async function fixture(
     button(name)!.click();
     await h.flush();
   };
+  const originals = () => h.document.querySelector('[aria-label="Original resource requests"]') as HTMLElement;
+  const originalButton = (name: string) =>
+    [...(originals()?.querySelectorAll('button') ?? [])].find((button) => button.textContent === name);
   return {
+    originals,
+    originalButton,
+    originalClick: async (name: string) => {
+      originalButton(name)!.click();
+      await h.flush();
+    },
     h,
     company,
     employee,
@@ -735,7 +756,11 @@ it('renders actual producer convergence failures as attention without extra empl
   const details = f.panel().querySelector('.ca-docker-resource-details') as HTMLDetailsElement;
   expect(details.open).toBe(false);
   expect(details.textContent).toContain(targetRow(status).code);
-  expect(f.calls.every((call) => call.path === '/api/company/docker-resources')).toBe(true);
+  expect(
+    f.calls.every((call) =>
+      ['/api/company/docker-resources', '/api/company/docker-resources/original-attempts'].includes(call.path)
+    )
+  ).toBe(true);
   expect(f.writes()).toEqual([]);
 });
 it('uses the actual default prewrite refusal only after fresh authenticated status and a later explicit approval', async () => {
@@ -839,7 +864,7 @@ it('does not let an old not-issued reply release a newer pending default nonce',
   };
   registry.ReverieDockerResources.mount(f.h.shell, secondDialog, secondDialog);
   await f.h.flush();
-  const panels = [...f.h.document.querySelectorAll('.ca-docker-resources')];
+  const panels = [...f.h.document.querySelectorAll('[aria-label="Docker employee resource defaults"]')];
   expect(panels).toHaveLength(2);
   const newer = '99999999-9999-4999-8999-999999999999';
   nonces(f.h, [defaultNotIssued.error.revision, newer]);
@@ -1002,7 +1027,10 @@ it('shows the actual global capacity reason without inventing cleanup or another
   );
   expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
   expect(f.writes()).toEqual([]);
-  expect([...f.panel().querySelectorAll('button')].map((v) => v.textContent)).toEqual(['Refresh resources']);
+  expect([...f.panel().querySelectorAll('button')].map((v) => v.textContent)).toEqual([
+    'Refresh resources',
+    'Refresh original requests',
+  ]);
 });
 
 it('does not use an older capacity refusal to release a newer pending apply for the same full scope', async () => {
@@ -1018,7 +1046,7 @@ it('does not use an older capacity refusal to release a newer pending apply for 
   };
   registry.ReverieDockerResources.mountEmployee(f.h.shell, second, second, f.employee);
   await f.h.flush();
-  const panels = [...f.h.document.querySelectorAll('.ca-docker-resources')];
+  const panels = [...f.h.document.querySelectorAll('[aria-label^="Docker resources for "]')];
   expect(panels).toHaveLength(2);
   (panels[0]!.querySelector('[aria-label="Apply approved soft RAM default"]') as HTMLButtonElement).click();
   await f.h.flush();
@@ -1034,4 +1062,278 @@ it('does not use an older capacity refusal to release a newer pending apply for 
   expect(panels[1]!.querySelector('[aria-label="Apply approved soft RAM default"]')).toBeNull();
   expect(panels[1]!.textContent).toContain('original resource application has an unknown outcome');
   expect(f.writes()).toHaveLength(2);
+});
+
+// The backend owner HTTP suite deep-equals this same committed fixture.
+const originalAttempts = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-original-attempts.json', import.meta.url), 'utf8')
+);
+const originalsRoot = '/api/company/docker-resources/original-attempts';
+const originalData = (value: unknown) => ({ ok: true, data: structuredClone(value) });
+const originalRow = () => structuredClone(originalAttempts.terminal.pending.items[0]);
+const currentUnavailable = { status: 404, error: { code: 'NOT_FOUND' } };
+it('keeps actual original helper recovery accessible after the employee disappears and the current summary fails', async () => {
+  const row = originalRow();
+  const f = await fixture({
+    view: 'company',
+    missingEmployee: true,
+    rootFailure: currentUnavailable,
+    originalReply: (path, request) => {
+      if (path === originalsRoot) return originalData(originalAttempts.terminal.pending);
+      expect(path).toBe(`${originalsRoot}/${row.cursorId}` + (request?.method === 'POST' ? '/reconcile' : ''));
+      return originalData(originalAttempts.terminal.closed);
+    },
+  });
+  expect(f.panel().textContent).toContain('Resource status could not be confirmed');
+  expect(f.originals()).not.toBeNull();
+  expect(f.originals().textContent).toContain('Original execution outcome is unknown');
+  expect(f.originals().textContent).not.toContain('River');
+  expect(f.originals().querySelector('details')!.textContent).toContain(row.sessionId);
+  expect(f.originalButton('Check original helper')).toBeDefined();
+  expect(f.originalButton('Retire unstarted request')).toBeUndefined();
+  await f.originalClick('Check original helper');
+  expect(f.writes()).toEqual([
+    {
+      path: `${originalsRoot}/${row.cursorId}/reconcile`,
+      method: 'POST',
+      body: { expectedDigest: row.expectedDigest },
+    },
+  ]);
+  expect(f.originals().textContent).toContain('original execution outcome remains unknown');
+  expect(f.originalButton('Check original helper')).toBeUndefined();
+  await f.originalClick('Check original request status');
+  expect(f.calls.some((call) => call.path === `${originalsRoot}/${row.cursorId}` && call.method === 'GET')).toBe(true);
+  expect(f.calls.some((call) => call.path.startsWith(base + '/'))).toBe(false);
+});
+for (const kind of ['created', 'absent'] as const)
+  it(`retires the actual ${kind} original request through explicit CAS without current employee lookup`, async () => {
+    const record = originalAttempts[kind],
+      row = record.pending.items[0];
+    const f = await fixture({
+      view: 'company',
+      binding: { employeeId: row.employeeId, sessionId: sid, sessionGeneration: 10 },
+      originalReply: (path, request) => {
+        if (path === originalsRoot) return originalData(record.pending);
+        expect(path).toBe(`${originalsRoot}/${row.cursorId}/retire`);
+        expect(request?.body).toEqual({ expectedDigest: row.expectedDigest });
+        return originalData(record.retired);
+      },
+    });
+    expect(f.originalButton('Retire unstarted request')).toBeDefined();
+    await f.originalClick('Retire unstarted request');
+    expect(f.writes()).toHaveLength(1);
+    expect(f.originals().textContent).toContain('cannot start');
+    expect(f.originals().textContent).toContain('does not confirm that a running container was stopped');
+    expect(f.originalButton('Retire unstarted request')).toBeUndefined();
+    expect(f.originalButton('Check original helper')).toBeUndefined();
+    expect(f.calls.some((call) => /\/employees\//.test(call.path))).toBe(false);
+  });
+it('keeps a lost original reply unknown across collection disappearance until explicit exact GET', async () => {
+  const row = originalRow();
+  let listed = true,
+    exactFails = true;
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path, request) => {
+      if (path === originalsRoot)
+        return originalData(
+          listed ? originalAttempts.terminal.pending : { items: [], next: null, enforcement: 'not-observed' }
+        );
+      if (request?.method === 'POST') {
+        listed = false;
+        throw Error('Connection lost');
+      }
+      return exactFails
+        ? { ok: false, status: 409, error: { code: 'DOCKER_RESOURCE_REVISION_CHANGED' } }
+        : originalData(originalAttempts.terminal.closed);
+    },
+  });
+  await f.originalClick('Check original helper');
+  expect(f.originals().textContent).toContain('reply is unconfirmed');
+  expect(f.originalButton('Check original helper')).toBeUndefined();
+  await f.originalClick('Refresh original requests');
+  expect(f.originals().textContent).toContain('reply is unconfirmed');
+  await f.originalClick('Check original request status');
+  expect(f.originals().textContent).toContain('reply is unconfirmed');
+  exactFails = false;
+  await f.originalClick('Check original request status');
+  expect(f.originals().textContent).not.toContain('reply is unconfirmed');
+  expect(f.originals().textContent).toContain('original helper is closed');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.calls.filter((call) => call.path === `${originalsRoot}/${row.cursorId}`)).toHaveLength(2);
+});
+it('uses a fresh exact GET digest for an explicitly offered metadata retry after a CAS denial', async () => {
+  const row = originalRow(),
+    refreshed = { ...row, expectedDigest: 'f'.repeat(64) };
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path, request) => {
+      if (path === originalsRoot) return originalData(originalAttempts.terminal.pending);
+      if (request?.method === 'POST')
+        return { ok: false, status: 409, error: { code: 'DOCKER_RESOURCE_REVISION_CHANGED' } };
+      return originalData(refreshed);
+    },
+  });
+  await f.originalClick('Check original helper');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.originalButton('Check original helper')).toBeUndefined();
+  await f.originalClick('Check original request status');
+  expect(f.originalButton('Check original helper')).toBeDefined();
+  expect(f.writes()).toHaveLength(1);
+  await f.originalClick('Check original helper');
+  expect(f.writes()[1]!.body).toEqual({ expectedDigest: refreshed.expectedDigest });
+});
+it('removes original actions on owner logout before dispatch or after the original response', async () => {
+  let afterReply: (() => void) | null = null;
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path) => {
+      if (path === originalsRoot) return originalData(originalAttempts.terminal.pending);
+      afterReply?.();
+      return originalData(originalAttempts.terminal.closed);
+    },
+  });
+  f.setOwner(false);
+  await f.originalClick('Check original helper');
+  expect(f.writes()).toEqual([]);
+  expect(f.originalButton('Check original helper')).toBeUndefined();
+  expect(f.originals().textContent).not.toContain(originalRow().sessionId);
+  f.setOwner(true);
+  await f.originalClick('Refresh original requests');
+  afterReply = () => f.setOwner(false);
+  await f.originalClick('Check original helper');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.originalButton('Check original helper')).toBeUndefined();
+  expect(f.originals().textContent).not.toContain(originalRow().sessionId);
+});
+it('rejects changed immutable scope on exact GET and never substitutes the current binding', async () => {
+  for (const field of [
+    'cursorId',
+    'employeeId',
+    'sessionId',
+    'sessionGeneration',
+    'operationId',
+    'containerId',
+    'revision',
+  ]) {
+    const row = originalRow(),
+      changed = {
+        ...row,
+        [field]:
+          field === 'sessionGeneration' ? 10 : ['cursorId', 'containerId'].includes(field) ? 'f'.repeat(64) : revision,
+      };
+    const f = await fixture({
+      view: 'company',
+      originalReply: (path, request) => {
+        if (path === originalsRoot) return originalData(originalAttempts.terminal.pending);
+        if (request?.method === 'POST') return originalData({ ...changed, state: 'closed', allowedActions: [] });
+        return originalData(changed);
+      },
+    });
+    await f.originalClick('Check original helper');
+    await f.originalClick('Check original request status');
+    expect(f.originals().textContent).toContain('original request scope changed');
+    expect(f.originals().textContent).toContain('reply is unconfirmed');
+    expect(f.originalButton('Check original helper')).toBeUndefined();
+    expect(f.writes()).toHaveLength(1);
+  }
+});
+it('rejects malformed original inventory or unsafe actions without sending a mutation', async () => {
+  const row = originalRow(),
+    list = originalAttempts.terminal.pending;
+  for (const malformed of [
+    { ...list, items: [{ ...row, allowedActions: ['retire'] }] },
+    { ...list, items: [{ ...row, allowedActions: ['reconcile', 'apply'] }] },
+    { ...list, items: [{ ...row, state: 'closed', allowedActions: ['reconcile'] }] },
+    { ...list, items: [{ ...row, sessionGeneration: 0 }] },
+    { ...list, items: [{ ...row, helperContainerId: 'short' }] },
+    { ...list, items: [{ ...row, enforcement: 'fresh-native-readback' }] },
+    { ...list, items: [{ ...row, name: 'Invented current owner' }] },
+    { ...list, items: [row, row] },
+    { ...list, items: Array.from({ length: 65 }, () => row) },
+    { ...list, next: '../bad' },
+  ]) {
+    const f = await fixture({ view: 'company', originalReply: () => originalData(malformed) });
+    expect(f.originals().textContent).toContain('could not be verified');
+    expect(f.originalButton('Check original helper')).toBeUndefined();
+    expect(f.originalButton('Retire unstarted request')).toBeUndefined();
+    expect(f.writes()).toEqual([]);
+  }
+});
+it('pages original requests only through explicit GET and retains an exact settled request', async () => {
+  const first = originalRow(),
+    second = { ...first, cursorId: 'e'.repeat(64) };
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path) => {
+      if (path === originalsRoot)
+        return originalData({ items: [first], next: first.cursorId, enforcement: 'not-observed' });
+      if (path === `${originalsRoot}?after=${first.cursorId}`)
+        return originalData({ items: [second], next: null, enforcement: 'not-observed' });
+      return originalData({ ...originalAttempts.terminal.closed, cursorId: second.cursorId });
+    },
+  });
+  expect(f.calls.filter((call) => call.path.startsWith(originalsRoot))).toHaveLength(1);
+  await f.originalClick('Next original requests');
+  expect(f.originals().querySelector('details')!.textContent).toContain(second.cursorId);
+  expect(f.originalButton('First original requests')).toBeDefined();
+  await f.originalClick('Check original request status');
+  expect(f.originals().textContent).toContain('original helper is closed');
+  await f.originalClick('First original requests');
+  expect(f.originals().querySelector('details')!.textContent).toContain(first.cursorId);
+  expect(f.writes()).toEqual([]);
+});
+
+it('opens original request details and retires only the explicitly offered preSTART request', async () => {
+  const record = originalAttempts.created,
+    row = record.pending.items[0];
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path) => originalData(path === originalsRoot ? record.pending : record.retired),
+  });
+  const recovery = f.originals().parentElement as HTMLDetailsElement;
+  expect(recovery.open).toBe(false);
+  (recovery.querySelector(':scope > summary') as HTMLElement).click();
+  expect(recovery.open).toBe(true);
+  const details = f.originals().querySelector('details')!;
+  expect(details.open).toBe(false);
+  details.querySelector('summary')!.click();
+  expect(details.open).toBe(true);
+  expect(details.textContent).toContain(row.containerId);
+  expect(f.writes()).toEqual([]);
+  await f.originalClick('Retire unstarted request');
+  expect(f.writes()).toEqual([
+    { path: `${originalsRoot}/${row.cursorId}/retire`, method: 'POST', body: { expectedDigest: row.expectedDigest } },
+  ]);
+  expect(f.originals().textContent).toContain('does not confirm that a running container was stopped');
+  expect(f.originalButton('Retire unstarted request')).toBeUndefined();
+});
+
+it('does not retain another owner view after genuine inventory denial and a later empty inventory', async () => {
+  let denied = false,
+    empty = false;
+  const f = await fixture({
+    view: 'company',
+    originalReply: (path, request) => {
+      if (path === originalsRoot)
+        return denied
+          ? { ok: false, status: 403, error: { code: 'FORBIDDEN' } }
+          : originalData(
+              empty ? { items: [], next: null, enforcement: 'not-observed' } : originalAttempts.terminal.pending
+            );
+      if (request?.method === 'POST') throw Error('Lost original reply');
+      return originalData(originalAttempts.terminal.closed);
+    },
+  });
+  await f.originalClick('Check original helper');
+  expect(f.originals().textContent).toContain('reply is unconfirmed');
+  denied = true;
+  await f.originalClick('Refresh original requests');
+  expect(f.originals().textContent).not.toContain(originalRow().sessionId);
+  denied = false;
+  empty = true;
+  await f.originalClick('Refresh original requests');
+  expect(f.originals().textContent).toContain('No pending original resource requests');
+  expect(f.originals().textContent).not.toContain(originalRow().sessionId);
+  expect(f.writes()).toHaveLength(1);
 });

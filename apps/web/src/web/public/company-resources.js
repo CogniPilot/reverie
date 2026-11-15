@@ -2370,10 +2370,288 @@
       if (refreshed) await this.load();
     }
   }
+  const ORIGINAL = `${ROOT}/original-attempts`;
+  const originalKeys = [
+    'allowedActions',
+    'containerId',
+    'cursorId',
+    'employeeId',
+    'enforcement',
+    'expectedDigest',
+    'helperContainerId',
+    'operationId',
+    'originalOutcome',
+    'revision',
+    'sessionGeneration',
+    'sessionId',
+    'state',
+    'taskPhase',
+  ];
+  const originalTuple = ['cursorId', ...scopeKeys];
+  const sameOriginal = (a, b) => originalTuple.every((key) => a[key] === b[key]);
+  const originalRequest = (v) => {
+    if (
+      !v ||
+      Object.keys(v).sort().join() !== originalKeys.join() ||
+      !resourceScope(v) ||
+      !digest(v.cursorId) ||
+      !digest(v.expectedDigest) ||
+      (v.helperContainerId !== null && !digest(v.helperContainerId)) ||
+      !['create-issued', 'created', 'start-issued', 'running', 'completed'].includes(v.taskPhase) ||
+      !['pending', 'closed', 'retired', 'acknowledged'].includes(v.state) ||
+      !['unknown', 'acknowledged'].includes(v.originalOutcome) ||
+      v.enforcement !== 'not-observed' ||
+      !Array.isArray(v.allowedActions) ||
+      new Set(v.allowedActions).size !== v.allowedActions.length
+    )
+      return false;
+    if (v.state !== 'pending')
+      return (
+        v.allowedActions.length === 0 && v.originalOutcome === (v.state === 'acknowledged' ? 'acknowledged' : 'unknown')
+      );
+    const expected = ['create-issued', 'created'].includes(v.taskPhase) ? ['reconcile', 'retire'] : ['reconcile'];
+    return (
+      v.originalOutcome === 'unknown' &&
+      expected.length === v.allowedActions.length &&
+      expected.every((action) => v.allowedActions.includes(action))
+    );
+  };
+  const originalCollection = (v) =>
+    v &&
+    Object.keys(v).sort().join() === 'enforcement,items,next' &&
+    v.enforcement === 'not-observed' &&
+    (v.next === null || digest(v.next)) &&
+    Array.isArray(v.items) &&
+    v.items.length <= 64 &&
+    v.items.every((row) => originalRequest(row) && row.state === 'pending') &&
+    new Set(v.items.map((row) => row.cursorId)).size === v.items.length;
+  // Local transport uncertainty is separate from the server's historical outcome.
+  // Collection disappearance never settles it; only an explicit exact GET can refresh it.
+  class OriginalRequestsPanel extends Panel {
+    constructor(shell, container, dialog) {
+      super(shell, container, dialog, 'Original resource requests');
+      this.records = new Map();
+      this.pendingRequests = new Map();
+      this.after = null;
+      this.next = null;
+      this.refresh.textContent = 'Refresh original requests';
+      void this.load();
+    }
+    async api(path, request) {
+      try {
+        return await super.api(path, request);
+      } catch (failure) {
+        if (failure instanceof ApiFailure && failure.status === 403) {
+          this.records.clear();
+          this.pendingRequests.clear();
+        }
+        throw failure;
+      }
+    }
+    async owner() {
+      try {
+        await super.owner();
+      } catch (failure) {
+        this.records.clear();
+        this.pendingRequests.clear();
+        throw failure;
+      }
+    }
+    load(after = this.after) {
+      return this.run(async (sequence) => {
+        await this.owner();
+        const result = await this.api(ORIGINAL + (after ? `?after=${after}` : ''));
+        await this.owner();
+        if (!this.live(sequence)) return;
+        if (!originalCollection(result) || (after && result.next === after))
+          throw Error('Original resource requests could not be verified. No action was sent.');
+        this.after = after;
+        this.next = result.next;
+        const records = new Map(result.items.map((row) => [row.cursorId, Object.freeze(row)]));
+        for (const [cursor, entry] of this.pendingRequests) {
+          if (records.has(cursor) && !sameOriginal(records.get(cursor), entry.row))
+            throw Error('The original request scope changed. No action was sent.');
+          if (!records.has(cursor)) records.set(cursor, entry.row);
+        }
+        this.records = records;
+        this.render();
+      });
+    }
+    render() {
+      this.content.replaceChildren(
+        this.note(
+          'These are original resource requests, including former employee bindings. They do not verify current running limits. No employee is started or restarted here.'
+        )
+      );
+      this.controls.replaceChildren();
+      this.status.textContent = this.records.size
+        ? `${this.records.size} original resource request${this.records.size === 1 ? '' : 's'} on this page`
+        : 'No pending original resource requests on this page';
+      let ordinal = 0;
+      for (const row of this.records.values()) {
+        const card = this.shell.el('section', 'ca-docker-resource-details');
+        card.setAttribute('aria-label', `Original resource request ${++ordinal}`);
+        card.append(this.shell.el('h4', '', 'Original resource request'));
+        const stateText = {
+          pending: 'Original execution outcome is unknown.',
+          closed: 'The original helper is closed. Its original execution outcome remains unknown.',
+          retired:
+            'The unstarted request is retired and cannot start. This does not confirm that a running container was stopped.',
+          acknowledged:
+            'The original helper acknowledged its request. This historical record does not verify current running limits.',
+        };
+        card.append(this.note(stateText[row.state]));
+        const phases = {
+          'create-issued': 'helper creation recorded',
+          created: 'helper created',
+          'start-issued': 'helper start recorded',
+          running: 'helper reported running',
+          completed: 'helper completed',
+        };
+        card.append(
+          this.note(
+            `Recorded progress: ${phases[row.taskPhase]}. This is request history, not a current activity check.`
+          )
+        );
+        const details = this.shell.el('details');
+        details.append(this.shell.el('summary', '', 'Original request identifiers'));
+        for (const [label, value] of [
+          ['Employee', row.employeeId],
+          ['Session', row.sessionId],
+          ['Generation', row.sessionGeneration],
+          ['Operation', row.operationId],
+          ['Worker container', row.containerId],
+          ['Revision', row.revision],
+          ['Helper container', row.helperContainerId ?? 'not recorded'],
+          ['Cursor', row.cursorId],
+          ['Record digest', row.expectedDigest],
+        ])
+          details.append(this.note(`${label}: ${value}`));
+        card.append(details);
+        const controls = this.shell.el('div', 'ca-profile-actions');
+        controls.append(
+          this.shell.button('ca-btn', 'Check original request status', () => this.check(row), {
+            text: 'Check original request status',
+          })
+        );
+        if (this.pendingRequests.has(row.cursorId))
+          card.append(
+            this.note(
+              'The last check or retirement reply is unconfirmed. Check this exact original request before another action; it is not repeated automatically.'
+            )
+          );
+        else {
+          if (row.allowedActions.includes('reconcile'))
+            controls.append(
+              this.shell.button('ca-btn', 'Check original helper', () => this.change(row, 'reconcile'), {
+                text: 'Check original helper',
+              })
+            );
+          if (row.allowedActions.includes('retire')) {
+            card.append(
+              this.note(
+                'Retiring an unstarted request prevents that request from starting. It does not stop a running container or apply limits.'
+              )
+            );
+            controls.append(
+              this.shell.button('ca-btn', 'Retire unstarted request', () => this.change(row, 'retire'), {
+                text: 'Retire unstarted request',
+              })
+            );
+          }
+        }
+        card.append(controls);
+        this.content.append(card);
+      }
+      if (this.after)
+        this.controls.append(
+          this.shell.button('ca-btn', 'First original requests', () => this.load(null), {
+            text: 'First original requests',
+          })
+        );
+      if (this.next)
+        this.controls.append(
+          this.shell.button('ca-btn', 'Next original requests', () => this.load(this.next), {
+            text: 'Next original requests',
+          })
+        );
+    }
+    check(row) {
+      return this.run(async (sequence) => {
+        const prior = this.pendingRequests.get(row.cursorId);
+        let visible = false;
+        try {
+          await this.owner();
+          visible = true;
+          const result = await this.api(`${ORIGINAL}/${row.cursorId}`);
+          visible = false;
+          await this.owner();
+          visible = true;
+          if (!this.live(sequence)) return;
+          if (!originalRequest(result) || !sameOriginal(row, result))
+            throw Error('The original request scope changed. No action was sent.');
+          this.records.set(row.cursorId, Object.freeze(result));
+          if (prior && this.pendingRequests.get(row.cursorId) === prior) this.pendingRequests.delete(row.cursorId);
+        } catch (failure) {
+          if (failure instanceof ApiFailure && failure.status === 403) {
+            visible = false;
+            this.records.clear();
+            this.pendingRequests.clear();
+          }
+          throw failure;
+        } finally {
+          if (this.live(sequence) && visible) this.render();
+        }
+      });
+    }
+    change(row, action) {
+      return this.run(async (sequence) => {
+        let entry,
+          visible = false;
+        try {
+          await this.owner();
+          visible = true;
+          if (
+            !row.allowedActions.includes(action) ||
+            this.pendingRequests.has(row.cursorId) ||
+            this.records.get(row.cursorId) !== row
+          )
+            throw Error('Refresh the exact original request before another action.');
+          entry = { row };
+          this.pendingRequests.set(row.cursorId, entry);
+          const result = await this.api(`${ORIGINAL}/${row.cursorId}/${action}`, {
+            method: 'POST',
+            body: { expectedDigest: row.expectedDigest },
+          });
+          visible = false;
+          await this.owner();
+          visible = true;
+          if (!this.live(sequence)) return;
+          if (!originalRequest(result) || !sameOriginal(row, result))
+            throw Error('Original request outcome is unconfirmed. Check its status.');
+          this.records.set(row.cursorId, Object.freeze(result));
+          if (this.pendingRequests.get(row.cursorId) === entry) this.pendingRequests.delete(row.cursorId);
+        } catch (failure) {
+          if (failure instanceof ApiFailure && failure.status === 403) {
+            visible = false;
+            this.records.clear();
+            this.pendingRequests.clear();
+          }
+          throw failure;
+        } finally {
+          if (this.live(sequence) && visible) this.render();
+        }
+      });
+    }
+  }
   class CompanyPanel extends Panel {
     constructor(shell, container, dialog) {
       super(shell, container, dialog, 'Docker employee resource defaults');
       this.host.prepend(shell.el('h3', '', 'Employee resources'));
+      const recovery = shell.el('details', 'ca-docker-resource-details');
+      recovery.append(shell.el('summary', '', 'Original resource request recovery'));
+      this.host.append(recovery);
+      new OriginalRequestsPanel(shell, recovery, dialog);
       void this.load();
     }
     load() {
