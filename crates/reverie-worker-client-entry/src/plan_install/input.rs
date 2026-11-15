@@ -157,6 +157,10 @@ fn identity(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
 }
 impl Context {
+    pub(super) fn digest(&self) -> Result<String> {
+        let value = serde_json::to_value(self).map_err(|e| Failure::new("context-json", e))?;
+        Ok(digest(canonical(&value)?.as_bytes()))
+    }
     fn validate(&self, provider: Provider) -> Result<()> {
         need(
             self.roles.len() <= 5

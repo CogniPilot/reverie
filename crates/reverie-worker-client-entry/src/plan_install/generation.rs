@@ -1,7 +1,7 @@
 use super::args::Home;
 use super::context::{self, ContextReadback};
 use super::files::Files;
-use super::input::{self, Material, Payload};
+use super::input::{self, Material, Payload, Provider};
 use super::{Failure, Result, join, need};
 use nix::unistd::geteuid;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,9 @@ pub(super) struct Receipt {
     session_id: String,
     container_id: String,
     projection_digest: String,
+    account_id: String,
+    provider: Provider,
+    context_input_digest: String,
     read_mode: &'static str,
     installed_auth_digest: String,
     observed_auth_digest: String,
@@ -266,6 +269,9 @@ fn verify(
         session_id: material.session_id.clone(),
         container_id: container.into(),
         projection_digest: projection.into(),
+        account_id: material.account_id.clone(),
+        provider: material.provider,
+        context_input_digest: material.context.digest()?,
         read_mode: if initial { "initial" } else { "live" },
         installed_auth_digest: material.auth_digest.clone(),
         observed_auth_digest,

@@ -507,3 +507,58 @@ fn live_owned_instruction_rotation_is_observation_not_initial_context_proof() {
     );
     assert_eq!(live.purpose, "reverie-plan-live-observation-v1");
 }
+
+#[test]
+fn initial_receipt_binds_selected_account_and_input_context_separately_from_inodes() {
+    let fixture = Fixture::new();
+    let value = with_history(&fixture);
+    let projection = Material::from_payload(&value).digest().unwrap();
+    let installed = install(&fixture.path, fixture.home, &value, &projection, ATTEMPT).unwrap();
+    assert_eq!(installed.account_id, value.account_id);
+    assert_eq!(installed.provider, value.provider);
+    assert_eq!(
+        installed.context_input_digest,
+        value.context.digest().unwrap()
+    );
+    assert_ne!(installed.context_input_digest, installed.context_digest);
+    let fields = serde_json::to_value(&installed).unwrap();
+    let mut keys = fields
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    let mut expected = vec![
+        "version",
+        "purpose",
+        "operationId",
+        "sessionId",
+        "containerId",
+        "projectionDigest",
+        "accountId",
+        "provider",
+        "contextInputDigest",
+        "readMode",
+        "installedAuthDigest",
+        "observedAuthDigest",
+        "tokenDigest",
+        "contextDigest",
+        "observedContextDigest",
+        "homeDev",
+        "homeIno",
+        "configDev",
+        "configIno",
+    ];
+    expected.sort_unstable();
+    assert_eq!(keys, expected);
+    let none = Context {
+        source: Source::None,
+        roles: vec![],
+        conversation: None,
+    };
+    assert_eq!(
+        none.digest().unwrap(),
+        input::digest(br#"{"conversation":null,"roles":[],"source":{"kind":"none"}}"#)
+    );
+}
