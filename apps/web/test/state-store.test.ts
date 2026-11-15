@@ -15,6 +15,12 @@ import type { AppState, SessionState, TaskState, RalphSessionState } from '../sr
 
 // We need to import without mocking to test the actual implementation
 import { StateStore, getStore } from '../src/state-store.js';
+import { Session } from '../src/session.js';
+import {
+  dockerPlanSourceRetirementMatches,
+  dockerPlanSourceViewRetired,
+  type DockerPlanSourceRetirementScope,
+} from '../src/docker-plan-source-retirement.js';
 
 describe('StateStore', () => {
   const testDir = join(tmpdir(), 'reverie-test-' + Date.now());
@@ -50,6 +56,103 @@ describe('StateStore', () => {
   });
 
   describe('constructor', () => {
+    it('refuses DTO source retirement before touching saved state or local runtime', async () => {
+      const store = new StateStore(testFilePath);
+      const saved = createMockSessionState('source');
+      store.setSession(saved.id, saved);
+      store.flush();
+      const before = readFileSync(testFilePath, 'utf8');
+      const session = new Session({ id: saved.id, workingDir: testDir, publicationStore: store });
+      for (const proof of [{}, { oldSession: saved.id, phase: 'completed' }]) {
+        expect(() => session.canRetireDockerPlanSourceView(proof)).toThrow('proof required');
+        expect(() => session.retireDockerPlanSourceView(proof)).toThrow('proof required');
+        await expect(store.commitDockerPlanSourceRetirement(proof, session, true, () => {})).rejects.toThrow(
+          'proof required'
+        );
+        expect(readFileSync(testFilePath, 'utf8')).toBe(before);
+        expect(store.getSession(saved.id)).toEqual(saved);
+      }
+      await session.stop(false);
+    });
+
+    it('matches every original Docker placement field before saved-view retirement', () => {
+      const scope: DockerPlanSourceRetirementScope = {
+        moveId: 'move',
+        employeeId: 'employee',
+        owner: 'owner',
+        oldSession: 'old',
+        newSession: 'new',
+        source: {
+          sessionGeneration: 2,
+          operationId: 'operation',
+          containerId: 'container',
+          imageId: 'image',
+          clientManifestDigest: 'manifest',
+          planReplacement: { provider: 'anthropic', projectionDigest: 'projection' },
+        },
+        target: { sessionGeneration: 3, operationId: 'next', containerId: 'next-container', imageId: 'next-image' },
+      };
+      const docker: NonNullable<SessionState['docker']> = {
+        hostId: 'boxed-runtime',
+        engine: 'docker',
+        containerName: 'container',
+        image: 'image',
+        label: 'old',
+        hostWorkspacePath: '/workspace',
+        containerWorkdir: '/work',
+        network: 'bridge',
+        mountCredentials: false,
+        hooksEnabled: true,
+        resumeOnStart: true,
+        continuation: {
+          operationId: 'operation',
+          employeeId: 'employee',
+          sessionGeneration: 2,
+          clientManifestDigest: 'manifest',
+          apiUrl: 'http://reverie:3000',
+          planReplacement: { provider: 'anthropic', projectionDigest: 'projection' },
+        },
+      };
+      expect(dockerPlanSourceRetirementMatches(docker, scope)).toBe(true);
+      for (const patch of [
+        { hostId: 'other' },
+        { engine: 'podman' as const },
+        { containerName: 'other' },
+        { image: 'other' },
+      ])
+        expect(dockerPlanSourceRetirementMatches({ ...docker, ...patch }, scope)).toBe(false);
+      for (const patch of [
+        { operationId: 'other' },
+        { employeeId: 'other' },
+        { sessionGeneration: 3 },
+        { clientManifestDigest: 'other' },
+        { planReplacement: undefined },
+        { planReplacement: { provider: 'anthropic' as const, projectionDigest: 'other' } },
+      ])
+        expect(
+          dockerPlanSourceRetirementMatches({ ...docker, continuation: { ...docker.continuation!, ...patch } }, scope)
+        ).toBe(false);
+      const retired = {
+        ...createMockSessionState('old'),
+        docker,
+        status: 'stopped' as const,
+        pid: null,
+        providerDispatchHeld: true,
+        terminalInputHeld: true,
+        nativePlanRetiredBy: 'move',
+      };
+      expect(dockerPlanSourceViewRetired(retired)).toBe(true);
+      for (const patch of [
+        { status: 'idle' as const },
+        { pid: 42 },
+        { providerDispatchHeld: false },
+        { terminalInputHeld: false },
+        { nativePlanRetiredBy: undefined },
+        { docker: undefined },
+      ])
+        expect(dockerPlanSourceViewRetired({ ...retired, ...patch })).toBe(false);
+    });
+
     it('should create initial state when no file exists', () => {
       const store = new StateStore(testFilePath);
 
@@ -213,6 +316,25 @@ describe('StateStore', () => {
       expect(store.getSession('pinned')).not.toBeNull();
       expect(store.getSession('unrequested')).not.toBeNull();
     });
+    it('retains retired source history and acknowledgement across automatic stale cleanup and reload', () => {
+      const store = new StateStore(testFilePath);
+      const saved = {
+        ...createMockSessionState('retired'),
+        nativePlanRetiredBy: 'original-move',
+        claudeSessionChain: ['old-thread'],
+        lastSubmitAt: 123,
+        providerDispatchHeld: true,
+        terminalInputHeld: true,
+        status: 'stopped' as const,
+        pid: null,
+      };
+      store.setSession(saved.id, saved);
+      store.flush();
+      expect(store.cleanupStaleSessions(new Set()).count).toBe(0);
+      expect(store.cleanupSessionsByIds(new Set([saved.id])).count).toBe(0);
+      store.flush();
+      expect(new StateStore(testFilePath).getSession(saved.id)).toEqual(saved);
+    });
   });
 
   describe('task operations', () => {
@@ -306,8 +428,11 @@ describe('StateStore', () => {
       const after = new StateStore(testFilePath);
       expect(after.getConfig().maxConcurrentSessions).toBe(5);
       expect(after.getSessions()).toEqual({});
-      expect(JSON.parse(readFileSync(testFilePath,'utf8')).__providerLaunchIntentsV1)
-        .toEqual({version:1,kind:'observed',rows:{}});
+      expect(JSON.parse(readFileSync(testFilePath, 'utf8')).__providerLaunchIntentsV1).toEqual({
+        version: 1,
+        kind: 'observed',
+        rows: {},
+      });
     });
 
     it('should reset state to initial values', () => {
@@ -522,8 +647,10 @@ describe('StateStore', () => {
       const persisted = JSON.parse(readFileSync(testFilePath, 'utf-8'));
       const fullStringify = JSON.parse(JSON.stringify(store.getState()));
 
-      expect(persisted).toEqual({ ...fullStringify,
-        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} } });
+      expect(persisted).toEqual({
+        ...fullStringify,
+        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} },
+      });
       expect(Object.hasOwn(store.getState(), '__providerLaunchIntentsV1')).toBe(false);
     });
 
@@ -579,8 +706,10 @@ describe('StateStore', () => {
 
       // Verify round-trip: state in memory matches what's on disk
       const fullStringify = JSON.parse(JSON.stringify(store.getState()));
-      expect(persisted).toEqual({ ...fullStringify,
-        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} } });
+      expect(persisted).toEqual({
+        ...fullStringify,
+        __providerLaunchIntentsV1: { version: 1, kind: 'observed', rows: {} },
+      });
       expect(Object.hasOwn(store.getState(), '__providerLaunchIntentsV1')).toBe(false);
     });
 

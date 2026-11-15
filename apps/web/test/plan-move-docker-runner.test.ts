@@ -147,6 +147,80 @@ async function fixture(forceBusy = false) {
   };
 }
 describe('native plan coordinator with recording actor and actual protected journal', () => {
+  it('retires the source view only after checked completion, and retries failed cleanup without rewriting or replaying the move', async () => {
+    const f = await fixture();
+    let fail = true;
+    f.actor.retireSource = vi.fn(async (record, journal) => {
+      expect(record.phase).toBe('completed');
+      expect(journal.publication).toBe('published');
+      expect((await f.store.dockerRecord(record.id)).phase).toBe('completed');
+      journal.current();
+      if (fail) throw Error('previous terminal still attached');
+    });
+    await f.moves.begin(f.input, f.owner);
+    expect(await f.settled()).toMatchObject({
+      phase: 'completed',
+      sourceViewRetirement: {
+        state: 'unconfirmed',
+        error: 'previous terminal still attached',
+      },
+      allowedActions: ['continue-original'],
+    });
+    expect(f.view().publication).toBe('published');
+    expect(() => f.view().current()).not.toThrow();
+    const durable = await f.store.dockerRecord(f.input.id);
+    fail = false;
+    await f.moves.continueDocker(
+      f.input.id,
+      { oldSession: f.input.sessionId, newSession: durable.newSession!, toAccount: f.input.toAccount },
+      f.owner,
+      f.port
+    );
+    expect(await f.settled()).toMatchObject({
+      phase: 'completed',
+      sourceViewRetirement: { state: 'completed' },
+      allowedActions: [],
+    });
+    expect(f.actor.retireSource).toHaveBeenCalledTimes(2);
+    expect(f.actor.stopSource).toHaveBeenCalledTimes(1);
+    expect(f.actor.start).toHaveBeenCalledTimes(1);
+    expect(f.actor.finalize).toHaveBeenCalledTimes(1);
+    expect(await f.store.dockerRecord(f.input.id)).toEqual(durable);
+  });
+  it('exposes missing retirement acknowledgement after restart and keeps completed target status when readonly reinspection fails', async () => {
+    const f = await fixture();
+    await f.moves.begin(f.input, f.owner);
+    await f.settled();
+    const durable = await f.store.dockerRecord(f.input.id);
+    const restarted = new PlanMoves({ ...f.port, sourceViewRetirementComplete: () => false });
+    expect(await restarted.get(f.input.id, f.owner)).toMatchObject({
+      phase: 'completed',
+      sourceViewRetirement: { state: 'pending' },
+      allowedActions: ['continue-original'],
+    });
+    vi.mocked(f.actor.inspectForContinuation).mockRejectedValueOnce(Error('target inspection unavailable'));
+    await restarted.continueDocker(
+      f.input.id,
+      { oldSession: f.input.sessionId, newSession: durable.newSession!, toAccount: f.input.toAccount },
+      f.owner,
+      f.port
+    );
+    for (let i = 0; i < 100; i++) {
+      const result = await restarted.get(f.input.id, f.owner);
+      if (result?.phase === 'completed') {
+        expect(result.sourceViewRetirement).toMatchObject({
+          state: 'unconfirmed',
+          error: 'target inspection unavailable',
+        });
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (i === 99) throw Error('cleanup inspection did not settle');
+    }
+    expect(f.actor.start).toHaveBeenCalledTimes(1);
+    expect(f.actor.finalize).toHaveBeenCalledTimes(1);
+    expect(await f.store.dockerRecord(f.input.id)).toEqual(durable);
+  });
   it('polls only a positively pending composer without repeating a provider dispatch or handoff', async () => {
     const f = await fixture();
     vi.mocked(f.actor.verify).mockRejectedValueOnce(new PlanMoveComposerNotReady());

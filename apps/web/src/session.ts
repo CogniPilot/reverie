@@ -1,6 +1,8 @@
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import type { DockerEmployeeProviderRecipe } from './docker-employee-provider-recipe.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
+import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
+import { readFileSync } from 'node:fs';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
@@ -1892,6 +1894,50 @@ export class Session extends EventEmitter {
     this.#workspaceHookEvidence = hooks.kind === 'none' || getCli(this.mode)?.capabilities.hooks === 'none'
       ? { configuration: 'opted-out' }
       : { configuration: 'prepared', generation: hooks.generation };
+  }
+  /** Readiness of the old local viewer only. The native proof independently
+   * verifies its stopped worker and the employee's current running target. */
+  canRetireDockerPlanSourceView(proof: unknown): boolean {
+    const scope = requireDockerPlanSourceRetirement(proof, this);
+    if (
+      scope.oldSession !== this.id ||
+      scope.owner !== this.owner ||
+      this._remote ||
+      !dockerPlanSourceRetirementMatches(this._docker, scope)
+    )
+      throw Error('The original Docker source viewer changed');
+    if (this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
+    // A PID or wrapper never authorizes a signal. If its process is still
+    // present, wait for normal exit; even a reused PID is never touched here.
+    const pid = this.ptyProcess?.pid ?? this._pid;
+    if (!this.ptyProcess && pid === null) return true;
+    if (process.platform !== 'linux') throw Error('The old viewer process namespace is unavailable');
+    const self = readFileSync('/proc/self/stat', 'utf8');
+    if (Number(self.match(/^(\d+) \(/)?.[1]) !== process.pid)
+      throw Error('The old viewer process namespace is unconfirmed');
+    if (pid === null || !Number.isSafeInteger(pid) || pid <= 0)
+      throw Error('The old viewer process identity is unavailable');
+    try {
+      readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw Error('The old viewer process state is unconfirmed');
+    }
+  }
+  /** Denial and local metadata only: no signal, mux command or native stop. */
+  retireDockerPlanSourceView(proof: unknown): void {
+    if (!this.canRetireDockerPlanSourceView(proof)) throw Error('The previous Docker viewer has not exited');
+    requireDockerPlanSourceRetirement(proof, this);
+    this._holdUnconfirmedProvider(new Error('The original Docker plan source is retired'));
+    this.holdUnconfirmedInput(new Error('The original Docker plan source is retired'));
+    this._isStopped = true;
+    this._clearAllTimers();
+    this.ptyProcess = null;
+    this._pid = null;
+    this._muxSession = null;
+    this.#dockerContinuationView = undefined;
+    this._dockerContinuationLaunch = undefined;
   }
   /** Renew only the proof of this same running provider; no transport or launch is replaced. */
   renewDockerContinuationView(view: DockerEmployeeProviderView, admitted: () => boolean): void {

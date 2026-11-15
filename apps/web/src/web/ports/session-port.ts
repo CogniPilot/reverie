@@ -1,4 +1,4 @@
-import type {TerminalInputService} from '../terminal-input-service.js';
+import type { TerminalInputService } from '../terminal-input-service.js';
 /**
  * @fileoverview Session port — capabilities for session lifecycle management.
  * Route modules that manage sessions depend on this port.
@@ -19,8 +19,12 @@ export interface SessionPort {
    */
   addSession(session: Session, placement?: SessionPlacementHint, admitted?: () => boolean): Promise<TabLayout>;
   /** Expected candidate is process-local identity, never a wire cleanup grant. */
-  cleanupSession(sessionId: string, killMux?: boolean, reason?: string,
-    expected?: {session: Session; owner: string | undefined}): Promise<void>;
+  cleanupSession(
+    sessionId: string,
+    killMux?: boolean,
+    reason?: string,
+    expected?: { session: Session; owner: string | undefined }
+  ): Promise<void>;
   setupSessionListeners(session: Session): Promise<void>;
   persistSessionState(session: Session): void;
   persistSessionStateNow(session: Session): void;
@@ -59,5 +63,8 @@ export interface SessionPort {
    * token totals, the Ralph state and the workspace's own files untouched.
    */
   discardPartiallyBuiltSession(sessionId: string): Promise<void>;
+  /** Genuine native stopped-source/current-target proof only. Retires an
+   * already exited viewer, preserving saved history and the running target. */
+  retireDockerPlanSource?(proof: unknown): Promise<void>;
   getSessionStateWithRespawn(session: Session): unknown;
 }

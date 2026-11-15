@@ -78,6 +78,8 @@ export interface PlanMoveRecord {
   /** Public view DATA only. Never persisted as effect authority. */
   backend?: 'docker';
   allowedActions?: readonly 'continue-original'[];
+  /** Public diagnostic only; never stored as native effect credit. */
+  sourceViewRetirement?: PlanMoveSourceViewRetirement;
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
@@ -103,6 +105,10 @@ export interface PlanMoveRecord {
   resourceOwnerScope?: string;
   resourcePhase?: PlanMoveResourcePhase;
 }
+export interface PlanMoveSourceViewRetirement {
+  state: 'pending' | 'completed' | 'unconfirmed';
+  error?: string;
+}
 
 export interface PlanMoveSnapshot {
   backend?: 'docker';
@@ -119,6 +125,8 @@ export interface PlanMoveSnapshot {
 export interface PlanMovePort {
   dockerReplacement?: PlanMoveDockerActor;
   dockerJournal?: PlanMoveDockerJournalStore;
+  /** Checked local metadata acknowledgement, never native effect authority. */
+  sourceViewRetirementComplete?(record: Readonly<PlanMoveRecord>): boolean;
   /** Server-private boxed actor consumes the genuine cooperation proof and must
    * retain current permissions through its journal-scoped planned transition. */
   withDecisionAuthority?(proof: unknown): PlanMoveExecutor;
@@ -202,6 +210,7 @@ export class PlanMoves {
   private locked = new Set<string>();
   private intents = new Set<string>();
   private aborts = new Map<string, AbortController>();
+  private sourceRetirements = new Map<string, PlanMoveSourceViewRetirement>();
   /** Actual original move owner only. This is a denial lease, never permission
    * to stop/start, complete a held move, or reconstruct a native owner. */
   async employeeRecoveryGuard(
@@ -250,16 +259,34 @@ export class PlanMoves {
     return this.port.save([...this.records.values()].map((record) => ({ ...record })));
   }
 
+  private sourceRetirement(source: PlanMoveRecord): PlanMoveSourceViewRetirement | undefined {
+    if (!source.dockerReplacement || source.phase !== 'completed') return undefined;
+    const observed = this.sourceRetirements.get(source.id);
+    if (observed) return { ...observed };
+    if (!this.port.sourceViewRetirementComplete) return undefined;
+    try {
+      return { state: this.port.sourceViewRetirementComplete(source) ? 'completed' : 'pending' };
+    } catch {
+      return { state: 'unconfirmed', error: 'Previous terminal cleanup status is unavailable' };
+    }
+  }
+
   private view(source: PlanMoveRecord): PlanMoveRecord {
     const {
       dockerReplacement: _privateDockerJournal,
       dockerSettlementBudget: _privateSettlementBudget,
       ...record
     } = source;
+    delete record.sourceViewRetirement;
     if (source.dockerReplacement) {
       record.backend = 'docker';
+      const retirement = this.sourceRetirement(source);
+      if (retirement) record.sourceViewRetirement = retirement;
       record.allowedActions =
-        record.phase === 'recovery-required' && !this.aborts.has(record.id) && !this.intents.has(record.id)
+        (record.phase === 'recovery-required' ||
+          (record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed')) &&
+        !this.aborts.has(record.id) &&
+        !this.intents.has(record.id)
           ? ['continue-original']
           : [];
     }
@@ -963,9 +990,12 @@ export class PlanMoves {
     await this.init();
     const record = this.records.get(id);
     if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    const retirement = this.sourceRetirement(record);
+    const completedRetirement =
+      record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed';
     if (
       !record.dockerReplacement ||
-      record.phase !== 'recovery-required' ||
+      (record.phase !== 'recovery-required' && !completedRetirement) ||
       !this.port.dockerJournal ||
       !executor.dockerReplacement
     )
@@ -989,7 +1019,11 @@ export class PlanMoves {
         !actual.dockerReplacement
       )
         throw new PlanMoveError('The original Docker journal changed');
-      Object.assign(record, structuredClone(actual), { phase: 'recovery-required' });
+      if (completedRetirement && actual.phase !== 'completed')
+        throw new PlanMoveError('Completed Docker history changed');
+      Object.assign(record, structuredClone(actual), {
+        phase: completedRetirement ? 'completed' : 'recovery-required',
+      });
       void this.runDocker(
         record,
         executor,
@@ -1006,10 +1040,11 @@ export class PlanMoves {
     mode: 'new' | 'continue' | 'adopt' | 'reconcile' = 'new'
   ): Promise<void> {
     const abort = new AbortController();
+    const completedBefore = record.phase === 'completed';
     this.aborts.set(record.id, abort);
     try {
       if (!this.port.dockerJournal) throw new PlanMoveError('The private Docker journal is unavailable', 503);
-      await runDockerPlanMove(
+      const retirement = await runDockerPlanMove(
         record,
         executor,
         this.port.dockerJournal,
@@ -1025,9 +1060,17 @@ export class PlanMoves {
         },
         mode
       );
+      if (retirement) this.sourceRetirements.set(record.id, retirement);
     } catch (error) {
-      record.phase = 'recovery-required';
-      record.error = error instanceof Error ? error.message : 'Docker move unavailable';
+      if (completedBefore && mode === 'reconcile')
+        this.sourceRetirements.set(record.id, {
+          state: 'unconfirmed',
+          error: (error instanceof Error ? error.message : 'Previous terminal cleanup unavailable').slice(0, 4000),
+        });
+      else {
+        record.phase = 'recovery-required';
+        record.error = error instanceof Error ? error.message : 'Docker move unavailable';
+      }
     } finally {
       if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
       if (record.phase === 'completed' || record.phase === 'failed') this.locked.delete(record.employeeId);

@@ -2,6 +2,7 @@
  * constructs this private proof; real source/target native brands are required. */
 import { isDeepStrictEqual } from 'node:util';
 import type { Session } from './session.js';
+import type { SessionDocker, SessionState } from './types/session.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { PlanMoveError } from './plan-move.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
@@ -22,6 +23,40 @@ export interface DockerPlanSourceRetirementScope {
     planReplacement?: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }>;
   }>;
   readonly target: Readonly<{ sessionGeneration: number; operationId: string; containerId: string; imageId: string }>;
+}
+/** Tuple comparison only. This does not grant retirement or runtime authority. */
+export function dockerPlanSourceRetirementMatches(
+  docker: SessionDocker | undefined,
+  scope: Readonly<DockerPlanSourceRetirementScope>
+): boolean {
+  return (
+    !!docker?.continuation &&
+    docker.hostId === 'boxed-runtime' &&
+    docker.engine === 'docker' &&
+    docker.containerName === scope.source.containerId &&
+    docker.image === scope.source.imageId &&
+    docker.continuation.operationId === scope.source.operationId &&
+    docker.continuation.employeeId === scope.employeeId &&
+    docker.continuation.sessionGeneration === scope.source.sessionGeneration &&
+    docker.continuation.clientManifestDigest === scope.source.clientManifestDigest &&
+    isDeepStrictEqual(docker.continuation.planReplacement, scope.source.planReplacement)
+  );
+}
+/** Persisted denial only: a retired source must never be restored as a viewer.
+ * This marker never proves a worker stopped or authorizes another operation. */
+export function dockerPlanSourceViewRetired(saved: Readonly<SessionState> | null | undefined): boolean {
+  return (
+    !!saved &&
+    typeof saved.nativePlanRetiredBy === 'string' &&
+    saved.nativePlanRetiredBy.length > 0 &&
+    saved.status === 'stopped' &&
+    saved.pid === null &&
+    saved.providerDispatchHeld === true &&
+    saved.terminalInputHeld === true &&
+    saved.docker?.hostId === 'boxed-runtime' &&
+    saved.docker.engine === 'docker' &&
+    !!saved.docker.continuation
+  );
 }
 const origin = Symbol('native closed source and current published target');
 class NativeSourceRetirement {

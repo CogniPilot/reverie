@@ -166,6 +166,26 @@ it('refuses mismatched or destination-less journals without a recovery effect', 
     expect(f.calls).toHaveLength(1);
   }
 });
+it('cleans an API-approved completed Docker source only through the exact original continuation', async () => {
+  const completed = { ...record, phase: 'completed', backend: 'docker', allowedActions: ['continue-original'] };
+  const f = fixture([ok(completed), ok(completed)]);
+  expect(await agentMoveJournal(f.deps, { employeeId: EID, id: 'move-1', action: 'resolve' })).toBe(EXIT.ok);
+  expect(f.calls[1]).toEqual({
+    method: 'POST',
+    path: '/api/plans/moves/move-1/resolve',
+    body: { employeeId: EID, action: 'continue-original', oldSession: SID, newSession: DEST, toAccount: 'account-1' },
+  });
+  for (const data of [
+    { ...completed, allowedActions: [] },
+    { ...completed, backend: 'legacy' },
+  ]) {
+    const denied = fixture([ok(data)]);
+    expect(await agentMoveJournal(denied.deps, { employeeId: EID, id: 'move-1', action: 'resolve' })).toBe(
+      EXIT.refused
+    );
+    expect(denied.calls).toHaveLength(1);
+  }
+});
 
 it('does not repeat an uncertain adoption or cancellation', async () => {
   for (const action of ['resolve', 'cancel'] as const) {

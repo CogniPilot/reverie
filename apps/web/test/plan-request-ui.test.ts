@@ -399,6 +399,82 @@ describe('plan move create and preview dialog ownership', () => {
 
 describe('held plan move recovery navigation', () => {
   const reply = (data: unknown) => ({ ok: true, status: 200, json: async () => ({ success: true, data }) });
+  it('keeps a running completed move visible when previous terminal cleanup needs an explicit original retry', async () => {
+    const h = harness();
+    const move = {
+      id: 'finished',
+      employeeId: 'alex',
+      name: 'Alex',
+      phase: 'completed',
+      oldSession: 'old',
+      newSession: 'new',
+      toAccount: 'second',
+      backend: 'docker',
+      sourceViewRetirement: { state: 'unconfirmed', error: 'Previous terminal still attached' },
+      allowedActions: ['continue-original'],
+    };
+    h.fetch.mockImplementation(async (path: string) =>
+      reply(
+        path.endsWith('/resolve') ? { ...move, sourceViewRetirement: { state: 'completed' }, allowedActions: [] } : move
+      )
+    );
+    h.dialog.showModal();
+    h.methods.showPlanMoveProgress(h.dialog, move, 'Alex');
+    expect(h.dialog.open).toBe(true);
+    expect(h.dialog.querySelector('.status')?.textContent).toContain('Previous terminal cleanup unconfirmed');
+    const recover = h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
+    expect(recover.hidden).toBe(false);
+    expect(recover.disabled).toBe(false);
+    expect(recover.textContent).toBe('Clean up previous terminal');
+    recover.click();
+    await vi.waitFor(() => expect(h.dialog.open).toBe(false));
+    const sent = h.fetch.mock.calls.filter(([path]) => path.endsWith('/resolve'));
+    expect(sent).toHaveLength(1);
+    expect(JSON.parse(sent[0]![1]!.body)).toMatchObject({
+      action: 'continue-original',
+      oldSession: 'old',
+      newSession: 'new',
+    });
+    expect(h.fetch.mock.calls.some(([path]) => path.endsWith('/force') || path.endsWith('/cancel'))).toBe(false);
+  });
+  it('requires fresh exact status and an explicit retry after losing a completed terminal cleanup reply', async () => {
+    const h = harness();
+    const move = {
+      id: 'finished-cleanup',
+      employeeId: 'alex',
+      name: 'Alex',
+      phase: 'completed',
+      oldSession: 'old',
+      newSession: 'new',
+      toAccount: 'second',
+      backend: 'docker',
+      sourceViewRetirement: { state: 'unconfirmed', error: 'Previous terminal cleanup unconfirmed' },
+      allowedActions: ['continue-original'],
+    };
+    let posts = 0;
+    h.fetch.mockImplementation(async (path: string) => {
+      if (path.endsWith('/resolve')) {
+        if (++posts === 1) throw Error('Cleanup reply lost');
+        return reply({ ...move, sourceViewRetirement: { state: 'completed' }, allowedActions: [] });
+      }
+      return reply(move);
+    });
+    h.dialog.showModal();
+    h.methods.showPlanMoveProgress(h.dialog, move, 'Alex');
+    const recover = h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
+    recover.click();
+    await vi.waitFor(() => expect(h.dialog.querySelector('.status')?.textContent).toContain('Cleanup reply lost'));
+    await vi.waitFor(() => expect(recover.disabled).toBe(true));
+    expect(posts).toBe(1);
+    h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();
+    await vi.waitFor(() => expect(recover.disabled).toBe(false));
+    expect(h.dialog.open).toBe(true);
+    expect(posts).toBe(1);
+    recover.click();
+    await vi.waitFor(() => expect(h.dialog.open).toBe(false));
+    expect(posts).toBe(2);
+    expect(h.fetch.mock.calls.some(([path]) => path.endsWith('/force') || path.endsWith('/cancel'))).toBe(false);
+  });
   it('offers only API-approved original Docker recovery and checks current status before sending one exact action', async () => {
     const h = harness(),
       move = {

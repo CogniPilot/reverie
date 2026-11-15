@@ -18,6 +18,7 @@ const thread = '44444444-4444-4444-8444-444444444444';
 const staleEid = '66666666-6666-4666-8666-666666666666';
 const staleSid = '77777777-7777-4777-8777-777777777777';
 const staleOperation = '88888888-8888-4888-8888-888888888888';
+const retiredSid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const sourceId = '1'.repeat(64),
   destinationId = '2'.repeat(64);
 const target = 'sha256:' + 'a'.repeat(64),
@@ -490,6 +491,18 @@ async function seed(scenario: string) {
     claudeSessionChain: [thread],
   } as import('../src/types.js').SessionState;
   writer.setSession(sid, data);
+  if (scenario === 'attached') {
+    writer.setSession(retiredSid, {
+      ...structuredClone(data),
+      id: retiredSid,
+      pinned: false,
+      status: 'stopped',
+      pid: null,
+      providerDispatchHeld: true,
+      terminalInputHeld: true,
+      nativePlanRetiredBy: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+  }
 
   const original = new Session({ ...data, publicationStore: writer });
   const publication = writer.stageProviderLaunch(original, {
@@ -697,6 +710,28 @@ async function startup(scenario: string) {
   }
   const { WebServer } = await import('../src/web/server.js');
   const server = new WebServer(0, false, false, '0.0.0.0');
+  if (scenario === 'attached') {
+    // Physical enumeration can retain a dead remain-on-exit pane. It must not
+    // resurrect an acknowledged old view or erase its saved conversation.
+    const mux = (server as unknown as { mux: import('../src/mux-interface.js').TerminalMultiplexer }).mux;
+    const reconcile = mux.reconcileSessions.bind(mux),
+      sessions = mux.getSessions.bind(mux);
+    mux.reconcileSessions = async () => {
+      const result = await reconcile();
+      return { ...result, alive: [...result.alive, retiredSid] };
+    };
+    mux.getSessions = () => [
+      ...sessions(),
+      {
+        sessionId: retiredSid,
+        muxName: 'synthetic-retired',
+        workingDir: '/fixture/work',
+        mode: 'claude',
+        name: 'Retired source',
+        createdAt: 1,
+      } as import('../src/mux-interface.js').MuxSession,
+    ];
+  }
   try {
     await server.start();
     const internal = server as unknown as {
@@ -1053,6 +1088,11 @@ async function startup(scenario: string) {
       }
     }
     if (scenario === 'attached') {
+      assert.equal(internal.sessions.has(retiredSid), false, 'Dead retired pane must not restore an allocation');
+      const retired = internal.store.getSession(retiredSid);
+      assert(retired, 'Retired history must survive canonical startup stale cleanup');
+      assert.equal(retired.nativePlanRetiredBy, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+      assert.deepEqual(retired.claudeSessionChain, [thread]);
       assert.deepEqual(migrations.slice(0, 2), [staleEid, eid], 'Bad identity must be encountered before healthy one');
       assert.equal(legacyBatchCalls, 0, 'Startup must contain migration failures per employee');
       assert.equal(internal.sessions.has(staleSid), false);

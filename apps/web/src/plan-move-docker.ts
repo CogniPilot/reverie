@@ -62,6 +62,9 @@ export interface PlanMoveDockerActor {
   start(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void>;
   verify(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<() => void>;
   finalize(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void>;
+  /** After the checked completion ACK only. Retires an already exited source
+   * viewer; never stops a native worker or revokes the shared issuer. */
+  retireSource?(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void>;
   /** Only read actual original effects. The result must carry a private native
    * origin, exact state/epoch and freshness; JSON/phase enums are not proof. */
   inspectForContinuation(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<unknown>;

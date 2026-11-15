@@ -358,6 +358,7 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import { dockerPlanSourceRetirementSubject, dockerPlanSourceViewRetired, requireDockerPlanSourceRetirement } from '../docker-plan-source-retirement.js';
 import {
   captureDockerPlanMoveRequester,
   captureDockerPlanMoveOriginalRequester,
@@ -1052,6 +1053,7 @@ export class WebServer extends EventEmitter {
       persistSessionStateNow: this._persistSessionStateNow.bind(this),
       reapplyPersistedSessionState: this.reapplyPersistedSessionState.bind(this),
       discardPartiallyBuiltSession: this.discardPartiallyBuiltSession.bind(this),
+      retireDockerPlanSource: this.retireDockerPlanSource.bind(this),
       getSessionStateWithRespawn: this.getSessionStateWithRespawn.bind(this),
       // EventPort
       broadcast: this.broadcast.bind(this),
@@ -2486,6 +2488,23 @@ export class WebServer extends EventEmitter {
       save: (records) => planMoveStore.save(records),
       recoveryPending: (record) => planMoveStore.recoveryPending(record),
       recoveryConfirmed: (record) => planMoveStore.recoveryConfirmed(record),
+      ...(dockerRuntime
+        ? {
+            sourceViewRetirementComplete: (record: Readonly<import('../plan-move.js').PlanMoveRecord>) => {
+              const saved = this.store.getSession(record.oldSession);
+              return (
+                !this.store.statePublicationHeld &&
+                !this.sessions.has(record.oldSession) &&
+                saved?.owner === record.owner &&
+                saved?.nativePlanRetiredBy === record.id &&
+                saved.pid === null &&
+                saved.status === 'stopped' &&
+                saved.providerDispatchHeld === true &&
+                saved.terminalInputHeld === true
+              );
+            },
+          }
+        : {}),
       dockerJournal: {
         reserve: (...args) => planMoveStore.dockerReserve(...args),
         readCurrent: (...args) => planMoveStore.dockerReadCurrent(...args),
@@ -5160,7 +5179,7 @@ export class WebServer extends EventEmitter {
   }
 
   /** Synchronous inverse of original observer registration, after its stop is confirmed. */
-  private discardPartialSessionObservers(session: Session): void {
+  private discardPartialSessionObservers(session: Session, preserveHistoricalRuntime = false): void {
     const sessionId = session.id;
     // --- the inverse of setupSessionListeners(), in reverse order ---
     // Listeners first: while they are attached, one of them can still reach a
@@ -5187,7 +5206,7 @@ export class WebServer extends EventEmitter {
     // alone on purpose (that is one of the things separating this from
     // cleanupSession); this only clears the in-memory tracker the failed
     // construction built, which the retry reuses the id of.
-    session.ralphTracker.fullReset();
+    if (!preserveHistoricalRuntime) session.ralphTracker.fullReset();
 
     // --- what anything else may have attached to this id in the meantime ---
     // A rebuild can fail AFTER startInteractive() resolved, and a restored
@@ -5211,8 +5230,64 @@ export class WebServer extends EventEmitter {
     // The per-session custom-model config dir carries the endpoint's API key, and
     // `before-spawn` may already have written it. Nothing else would ever remove
     // it: the stale sweep only touches state.json. A retry rewrites it.
-    removeConfigDir(customModelConfigDir(sessionId));
+    if (!preserveHistoricalRuntime) removeConfigDir(customModelConfigDir(sessionId));
     session.removeAllListeners();
+  }
+
+  /** Retire only a proven stopped source's exited local view. The native target
+   * is already published; no worker, mux, shared key or stored history is stopped. */
+  private async retireDockerPlanSource(proof: unknown): Promise<void> {
+    const subject = dockerPlanSourceRetirementSubject(proof);
+    const original = this.sessions.get(subject.oldSession);
+    const scope = requireDockerPlanSourceRetirement(proof, original);
+    if (this.cleaningUp.has(scope.oldSession)) throw Error('Previous terminal cleanup is already in progress');
+    let removed = original === undefined;
+    const current = () => {
+      requireDockerPlanSourceRetirement(proof, original);
+      if (removed ? this.sessions.has(scope.oldSession) : this.sessions.get(scope.oldSession) !== original)
+        throw Error('The original source viewer slot changed');
+    };
+    current();
+    this.cleaningUp.add(scope.oldSession);
+    try {
+      if (original) {
+        const deadline = performance.now() + 2000;
+        while (!original.canRetireDockerPlanSourceView(proof)) {
+          current();
+          if (performance.now() >= deadline)
+            throw Error('The previous terminal has not exited; the employee remains running');
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        current();
+        original.retireDockerPlanSourceView(proof);
+        original.markClosing(true);
+      }
+      await this.store.commitDockerPlanSourceRetirement(proof, original, false, current);
+      current();
+      await this.tabLayouts.runFailedSessionRollback(
+        { id: scope.oldSession, owner: scope.owner },
+        async () => {
+          current();
+          if (original) {
+            this.buildSessionListenerDeps().cleanupRespawnOnExit(scope.oldSession);
+            const pending = this.pendingRespawnStarts.get(scope.oldSession);
+            if (pending) clearTimeout(pending);
+            this.pendingRespawnStarts.delete(scope.oldSession);
+            this.discardPartialSessionObservers(original, true);
+            current();
+            this.sessions.delete(scope.oldSession);
+            removed = true;
+          }
+        },
+        current
+      );
+      current();
+      await this.store.commitDockerPlanSourceRetirement(proof, original, true, current);
+      current();
+      this.broadcast(SseEvent.SessionDeleted, { id: scope.oldSession });
+    } finally {
+      this.cleaningUp.delete(scope.oldSession);
+    }
   }
 
   private async restoreMuxSessions(): Promise<boolean> {
@@ -5252,6 +5327,9 @@ export class WebServer extends EventEmitter {
           if (!this.sessions.has(muxSession.sessionId)) {
             // Restore session settings from state.json (single source of truth)
             const savedState = this.store.getSession(muxSession.sessionId);
+            // A remain-on-exit pane can survive a completed plan move. Its
+            // acknowledged retired view remains history, never a live session.
+            if (dockerPlanSourceViewRetired(savedState)) continue;
 
             // Determine the correct session name (priority: savedState > muxSession > muxName)
             // This ensures renamed sessions keep their name after server restart

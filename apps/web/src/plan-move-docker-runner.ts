@@ -11,6 +11,7 @@ import {
   type PlanMoveInput,
   type PlanMoveRecord,
   type PlanMoveExecutor,
+  type PlanMoveSourceViewRetirement,
 } from './plan-move.js';
 function frozen<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object') {
@@ -71,12 +72,13 @@ export async function runDockerPlanMove(
   store: PlanMoveDockerJournalStore,
   flight: DockerPlanMoveFlight,
   mode: 'new' | 'continue' | 'adopt' | 'reconcile' = 'new'
-): Promise<void> {
+): Promise<PlanMoveSourceViewRetirement | undefined> {
   const actor = executor.dockerReplacement;
   if (!actor || !record.dockerReplacement) throw new PlanMoveError('The original Docker actor is unavailable', 503);
   let cursor = DockerPlanMoveJournalState.parse(record.dockerReplacement);
   const seedDigest = dockerContinuationDigest(cursor.seed);
   let publication: PlanMoveDockerJournal['publication'] = 'admitting';
+  const completedBefore = record.phase === 'completed';
   const stable = () => {
     if (publication === 'failed') throw new PlanMoveError('The Docker move requires original recovery');
     flight.current();
@@ -159,6 +161,24 @@ export async function runDockerPlanMove(
       }
     }
   };
+  const retireSource = async (): Promise<PlanMoveSourceViewRetirement | undefined> => {
+    if (!actor.retireSource) return undefined;
+    try {
+      if (publication !== 'published' || record.phase !== 'completed')
+        throw new PlanMoveError('Source view retirement requires confirmed move completion');
+      journal.current();
+      await actor.retireSource(record, journal);
+      journal.current();
+      return { state: 'completed' };
+    } catch (error) {
+      // Completion is already durable and the target remains published. Local
+      // viewer cleanup never rolls back that success or fences the target API.
+      return {
+        state: 'unconfirmed',
+        error: (error instanceof Error ? error.message : 'Previous terminal cleanup unavailable').slice(0, 4000),
+      };
+    }
+  };
   try {
     if (mode !== 'new') {
       // A new HTTP request earns an actual original native proof before the
@@ -185,7 +205,7 @@ export async function runDockerPlanMove(
       delete record.error;
       publication = 'published';
       stable();
-      return;
+      return retireSource();
     }
     journal.current();
     if (mode !== 'adopt') {
@@ -217,8 +237,16 @@ export async function runDockerPlanMove(
     journal.current();
     fence();
     await phase('completed');
+    return retireSource();
   } catch (error) {
     publication = 'failed';
+    if (mode === 'reconcile' && completedBefore) {
+      record.phase = 'completed';
+      return {
+        state: 'unconfirmed',
+        error: (error instanceof Error ? error.message : 'Previous terminal cleanup unavailable').slice(0, 4000),
+      };
+    }
     const cancelledBeforeEffects =
       flight.signal.aborted &&
       record.phase === 'waiting' &&
@@ -245,5 +273,6 @@ export async function runDockerPlanMove(
     } catch {
       /* the original disk outcome is uncertain; keep the in-memory hold */
     }
+    return undefined;
   }
 }

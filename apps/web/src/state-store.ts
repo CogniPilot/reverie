@@ -42,6 +42,7 @@ import { dataPath } from './config/instance.js';
 import { normalizeSessionOrder } from './session-order.js';
 import { validateTabLayout, type TabLayout } from './tab-layout.js';
 import { Session } from './session.js';
+import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
 import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
 
@@ -714,6 +715,53 @@ export class StateStore {
       )
     );
   }
+  /** Same strict main writer as other acknowledgements. Preserve all history;
+   * only deny the stopped old runtime and acknowledge its local view cleanup. */
+  async commitDockerPlanSourceRetirement(
+    proof: unknown,
+    original: Session | undefined,
+    complete: boolean,
+    current: () => void
+  ): Promise<void> {
+    return this.serializeWrite(() => {
+      const scope = requireDockerPlanSourceRetirement(proof, original);
+      const validate = () => {
+        requireDockerPlanSourceRetirement(proof, original);
+        current();
+        const saved = this.state.sessions[scope.oldSession];
+        if (
+          !saved ||
+          saved.id !== scope.oldSession ||
+          saved.owner !== scope.owner ||
+          !dockerPlanSourceRetirementMatches(saved.docker, scope) ||
+          (saved.nativePlanRetiredBy !== undefined && saved.nativePlanRetiredBy !== scope.moveId)
+        )
+          throw Error('The original saved source view changed');
+      };
+      this.acknowledgeMainState(
+        () => {
+          validate();
+          this.state.sessions[scope.oldSession] = {
+            ...this.state.sessions[scope.oldSession]!,
+            status: 'stopped',
+            pid: null,
+            providerDispatchHeld: true,
+            terminalInputHeld: true,
+            ...(complete ? { nativePlanRetiredBy: scope.moveId } : {}),
+          };
+          this.dirtySessions.add(scope.oldSession);
+        },
+        validate,
+        (before) => {
+          const saved = (JSON.parse(before) as AppState).sessions[scope.oldSession];
+          if (saved) this.state.sessions[scope.oldSession] = saved;
+          else delete this.state.sessions[scope.oldSession];
+          this.dirtySessions.add(scope.oldSession);
+        },
+        'config'
+      );
+    });
+  }
   /** Sole strict acknowledged writer, under the existing main-state queue. */
   private acknowledgeMainState(
     mutate: () => void,
@@ -1227,7 +1275,9 @@ export class StateStore {
 
     for (const sessionId of sessionIds) {
       const session = this.state.sessions[sessionId];
-      if (!session || session.pinned === true) continue; // COD-142: pinned records persist even with no live session
+      // Retired plan sources retain their history and cleanup acknowledgement.
+      // Even a malformed marker is never grounds for automatic data deletion.
+      if (!session || session.pinned === true || session.nativePlanRetiredBy !== undefined) continue;
       cleaned.push({ id: sessionId, name: session.name, owner: session.owner });
       delete this.state.sessions[sessionId];
       this.cachedSessionJsons.delete(sessionId);

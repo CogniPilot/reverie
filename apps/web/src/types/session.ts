@@ -1050,6 +1050,8 @@ export interface SessionState {
   providerInputHeld?: boolean;
   /** Deny-only input uncertainty, distinct from provider launch or viewer health. */
   terminalInputHeld?: boolean;
+  /** Local-view cleanup acknowledgement only; never provider authority. */
+  nativePlanRetiredBy?: string;
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';

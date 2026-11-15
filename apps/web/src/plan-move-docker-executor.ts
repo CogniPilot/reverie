@@ -54,6 +54,14 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
     start: (record, journal) => actor(record).start(record, journal),
     verify: (record, journal) => actor(record).verify(record, journal),
     finalize: (record, journal) => actor(record).finalize(record, journal),
+    ...(base.retireSource
+      ? {
+          retireSource: (
+            record: Readonly<PlanMoveRecord>,
+            journal: Parameters<NonNullable<PlanMoveDockerActor['retireSource']>>[1]
+          ) => actor(record).retireSource!(record, journal),
+        }
+      : {}),
     inspectForContinuation: async (record, journal) => {
       if (!actors.has(record.id)) {
         if (!runtime.dockerOriginalRequester)
