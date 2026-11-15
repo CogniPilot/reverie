@@ -399,6 +399,53 @@ describe('plan move create and preview dialog ownership', () => {
 
 describe('held plan move recovery navigation', () => {
   const reply = (data: unknown) => ({ ok: true, status: 200, json: async () => ({ success: true, data }) });
+  it.each(['completed', 'unconfirmed'])(
+    'keeps completed moves open until pending cleanup is observed as %s',
+    async (state) => {
+      const h = harness();
+      const move = {
+        id: 'finishing',
+        employeeId: 'alex',
+        name: 'Alex',
+        phase: 'completed',
+        oldSession: 'old',
+        newSession: 'new',
+        toAccount: 'second',
+        backend: 'docker',
+        sourceViewRetirement: { state: 'pending' },
+        allowedActions: [],
+      };
+      let finish!: (data: unknown) => void;
+      h.fetch.mockImplementation(async (path: string) => {
+        if (path.endsWith('/status'))
+          return reply(
+            await new Promise((resolve) => {
+              finish = resolve;
+            })
+          );
+        return reply({ employees: [], accounts: [] });
+      });
+      h.dialog.showModal();
+      h.methods.showPlanMoveProgress(h.dialog, move, 'Alex');
+      expect(h.dialog.open).toBe(true);
+      expect(h.dialog.querySelector('[data-recovery-info]')?.textContent).toContain('Checking cleanup');
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+      finish({
+        ...move,
+        sourceViewRetirement: { state, ...(state === 'unconfirmed' ? { error: 'Still attached' } : {}) },
+        allowedActions: state === 'unconfirmed' ? ['continue-original'] : [],
+      });
+      await vi.waitFor(() => {
+        if (state === 'completed') expect(h.dialog.open).toBe(false);
+        else {
+          expect(h.dialog.open).toBe(true);
+          expect(h.dialog.querySelector('.status')?.textContent).toContain('Still attached');
+          expect(h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!.disabled).toBe(false);
+        }
+      });
+      expect(h.fetch.mock.calls.every(([path]) => !path.endsWith('/resolve') && !path.endsWith('/force'))).toBe(true);
+    }
+  );
   it('keeps a running completed move visible when previous terminal cleanup needs an explicit original retry', async () => {
     const h = harness();
     const move = {
