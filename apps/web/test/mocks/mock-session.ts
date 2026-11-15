@@ -474,6 +474,7 @@ export class MockSession extends EventEmitter {
 
   /** Stub for runPrompt */
   assertProviderLaunchAdmission = vi.fn(() => {});
+  assertRestartCliPreflight = vi.fn(() => {});
   runPrompt = vi.fn(async () => {});
 
   /** Stub for startInteractive */

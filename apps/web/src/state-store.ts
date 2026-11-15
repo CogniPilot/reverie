@@ -41,7 +41,7 @@ import { Debouncer, MAX_SESSION_TOKENS } from './utils/index.js';
 import { dataPath } from './config/instance.js';
 import { normalizeSessionOrder } from './session-order.js';
 import { validateTabLayout, type TabLayout } from './tab-layout.js';
-import { Session } from './session.js';
+import { Session, NativeProviderRetirementRequiredError } from './session.js';
 import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
 import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
@@ -353,6 +353,14 @@ export class StateStore {
     return row && row.owner === (session.owner ?? null) && row.mode === session.mode
       ? Object.freeze({ attemptId: row.attemptId, transport: row.transport })
       : undefined;
+  }
+  /** Existing rows/history only deny an in-place restart. No absence, idle
+   * report or adapter return is accepted as native retirement authority. */
+  assertProviderRestartPreflight(session: Session): void {
+    if (!Session.usesProviderLaunchStore(session, this)) throw Error('Original Session state-store custody required');
+    if (this.#providerLaunchHistory !== 'observed' ||
+      this.#providerLaunchIntents[session.id]?.transport === 'native-ordinary')
+      throw new NativeProviderRetirementRequiredError();
   }
   providerLaunchHeldFor(session: Session): boolean {
     if (!Session.usesProviderLaunchStore(session, this)) throw new Error('Original Session state-store custody required');

@@ -1810,6 +1810,7 @@ export function registerSessionRoutes(
     const { id } = req.params as { id: string };
     const body = parseBody(CustomModelSelectionSchema, req.body, 'Invalid request body');
     const session = findSessionOrFail(ctx, id, req);
+    if (!session.remote && !session.docker) session.assertRestartCliPreflight();
     if (session.providerDispatchHeld) throw new ProviderDispatchUnconfirmedError();
     if (session.terminalInputHeld) throw new TerminalInputUnconfirmedError();
 
@@ -1913,6 +1914,7 @@ export function registerSessionRoutes(
     // fails its pattern rather than quoting it, which would silently launch the CLI on its
     // own default provider again, so refuse an id the pattern cannot carry up front.
     const modelSpec = entry.launch.params.model;
+    session.assertRestartCliPreflight();
     const applied = applyCustomModelInjection(
       entry,
       endpoint,
