@@ -127,6 +127,10 @@ fn v2_reader_refuses_unknown_version_extra_fields_and_invalid_soft_ceiling() {
 
 #[test]
 fn real_locked_profile_stage_emits_v2_and_preserves_explicit_sid_null_over_eid_high() {
+    // A sibling fork can retain the staged flock's open-file description.
+    crate::test_process::owning_case!(
+        real_locked_profile_stage_emits_v2_and_preserves_explicit_sid_null_over_eid_high
+    );
     let setup = crate::reservation_gate::tests::observation_cases::Setup::new();
     let eid = ProfileEmployeeId::parse(setup.oracle["employee"]["id"].as_str().unwrap()).unwrap();
     let name = "control/profiles/profiles.json";

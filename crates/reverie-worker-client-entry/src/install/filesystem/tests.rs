@@ -199,6 +199,29 @@ fn post_link_sync_fault_remains_held_and_never_replays_publication() {
 #[test]
 fn first_refusal_and_actual_close_unknown_are_retained_and_descriptor_number_is_never_closed_twice()
 {
+    // File descriptor numbers belong to the whole process. A sibling test can
+    // take the released number before this test reopens it, so exercise reuse
+    // in a fresh process with only this test selected.
+    const ISOLATED: &str = "REVERIE_TEST_CREDENTIAL_FD_ISOLATED";
+    if std::env::var_os(ISOLATED).is_none() {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "install::filesystem::tests::first_refusal_and_actual_close_unknown_are_retained_and_descriptor_number_is_never_closed_twice",
+                "--test-threads=1",
+                "--nocapture",
+            ])
+            .env(ISOLATED, "1")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .contains("1 passed")
+        );
+        return;
+    }
     let tree = Tree::new();
     let mut owner = tree.owner();
     owner.capture(tree.identity()).unwrap();

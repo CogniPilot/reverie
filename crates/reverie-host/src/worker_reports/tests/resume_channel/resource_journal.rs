@@ -57,6 +57,13 @@ fn journal_pin_busy_original_socket_is_nonblocking_and_never_closes_it() {
 }
 #[test]
 fn journal_pin_rejects_buffered_peer_fin_without_consuming_open_or_closed_input() {
+    // A concurrent fork may briefly retain a CLOEXEC peer endpoint until exec.
+    // Keep the immediate FIN assertion independent of sibling process tests.
+    if crate::test_process::isolate_case(
+        "worker_reports::tests::resume_channel::resource_journal::journal_pin_rejects_buffered_peer_fin_without_consuming_open_or_closed_input",
+    ) {
+        return;
+    }
     let fixture = Fixture::new();
     for half_close in [true, false] {
         let service = Arc::new(fixture.service());

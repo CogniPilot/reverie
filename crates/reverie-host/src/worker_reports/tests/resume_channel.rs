@@ -56,6 +56,12 @@ fn channel_with_payload(
 }
 #[test]
 fn channel_keeps_actual_record_and_kernel_peer_across_fragmented_frames() {
+    // Immediate EOF requires sole endpoint ownership, including across forks.
+    if crate::test_process::isolate_case(
+        "worker_reports::tests::resume_channel::channel_keeps_actual_record_and_kernel_peer_across_fragmented_frames",
+    ) {
+        return;
+    }
     let fixture = Fixture::new();
     let service = Arc::new(fixture.service());
     let (mut client, mut channel) = channel(&fixture, &service);
