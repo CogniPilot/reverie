@@ -32,6 +32,9 @@ export default defineConfig({
     exclude: selection.exclude,
     setupFiles: ['./test/setup.ts'],
     fileParallelism: false,
+    // Cold application imports plus sandboxed Chromium startup exceed Vitest's
+    // 10 s default on shared runners; keep setup bounded like each browser case.
+    hookTimeout: 30000,
     testTimeout: 60000,
     teardownTimeout: 60000,
   },
