@@ -1,4 +1,5 @@
 import { DockerEphemeralRestoration } from '../src/docker-ephemeral-restoration.js';
+import { dockerPlanDestinationEnvironment } from '../src/docker-plan-install-data.js';
 import type { EphemeralJournal } from '../src/docker-ephemeral-data.js';
 import * as cliRegistry from '../src/config/cli-registry/registry.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from '../src/docker-employee-codex-workspace.js';
@@ -401,6 +402,15 @@ describe('Engine-owned existing Docker provider view', () => {
       requireDockerEmployeeProviderView(view, sid, {
         ...f.docker,
         continuation: { ...f.docker.continuation!, sessionGeneration: 4 },
+      })
+    ).toThrow();
+    expect(() =>
+      requireDockerEmployeeProviderView(view, sid, {
+        ...f.docker,
+        continuation: {
+          ...f.docker.continuation!,
+          planReplacement: { provider: 'anthropic', projectionDigest: '8'.repeat(64) },
+        },
       })
     ).toThrow();
     current = false;
@@ -1107,6 +1117,9 @@ describe('resource revision observation boundary', () => {
       'reverie.boxed.instance': 'fixture',
       'reverie.boxed.employee': eid,
       'reverie.boxed.session': sid,
+      'reverie.boxed.operation': oid,
+      'reverie.boxed.generation': '3',
+      'reverie.boxed.box': '7'.repeat(64),
     };
     const original = boxedOriginal(f.source, subject, 'fixture', true),
       nextSid = '60000000-0000-4000-8000-000000000006',
@@ -1116,6 +1129,13 @@ describe('resource revision observation boundary', () => {
       'reverie.boxed.operation': nextOperation,
       'reverie.boxed.generation': '4',
     });
+    f.observed.Config.Env = [
+      ...dockerPlanDestinationEnvironment(f.observed.Config.Env, {
+        operationId: nextOperation,
+        provider: 'anthropic',
+        projectionDigest: '8'.repeat(64),
+      }),
+    ];
     const row = DockerEmployeeContinuationRecord.parse({
       ...f.row,
       version: 3,
@@ -1164,6 +1184,28 @@ describe('resource revision observation boundary', () => {
     });
     return { ...f, row, nextSid };
   }
+  it.each(['operation', 'generation', 'box'] as const)(
+    'checks the retained %s provenance against the actual source labels',
+    async (kind) => {
+      const f = await planReplacementMetadata();
+      if (f.row.version !== 3) throw Error('Replacement fixture required');
+      if (kind === 'operation')
+        f.row.planReplacement.source.binding.operationId = '90000000-0000-4000-8000-000000000009';
+      if (kind === 'generation') {
+        f.row.planReplacement.source.binding.sessionGeneration = 2;
+        f.row.request.sessionGeneration = 3;
+        f.observed.Config.Labels!['reverie.boxed.generation'] = '3';
+        f.row.destination = boxedOriginal(f.observed, { ...subject, sessionId: f.nextSid }, 'fixture', true);
+      }
+      if (kind === 'box') {
+        f.source.Config.Labels!['reverie.boxed.box'] = '6'.repeat(64);
+        f.row.original = boxedOriginal(f.source, subject, 'fixture', true);
+        f.row.planReplacement.source.binding.originalDigest = dockerContinuationDigest(f.row.original);
+      }
+      const checked = DockerEmployeeContinuationRecord.parse(f.row);
+      await expect(f.engine.verifyResourceDestination(checked, () => {})).rejects.toThrow('ORIGINAL_CHANGED');
+    }
+  );
   it('reads old and target metadata under their exact distinct session identities without an effect', async () => {
     const f = await planReplacementMetadata();
     vi.mocked(f.command.run).mockClear();

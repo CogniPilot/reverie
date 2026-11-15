@@ -44,9 +44,9 @@ function docker(): SessionDocker {
     },
   };
 }
-function fixture() {
+function fixture(mode: 'claude' | 'codex' = 'claude') {
   const place = docker(),
-    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode: 'claude', docker: place });
+    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode, docker: place });
   sessions.push(session);
   const binding = {
     version: 1 as const,
@@ -60,7 +60,7 @@ function fixture() {
     policyDigest: digest,
   };
   const opts = {
-    mode: 'claude' as const,
+    mode,
     docker: place,
     sessionId: sid,
     createContext: {} as never,
@@ -71,6 +71,64 @@ function fixture() {
   return { place, session, binding, opts };
 }
 describe('boxed original provider publication', () => {
+  it.each([
+    ['anthropic', 'claude', 'CLAUDE_CONFIG_DIR'],
+    ['openai', 'codex', 'CODEX_HOME'],
+  ] as const)(
+    'routes %s through the fixed target generation without inheriting account secrets',
+    (provider, mode, configKey) => {
+      const f = fixture(mode),
+        projectionDigest = '8'.repeat(64);
+      f.place.continuation!.planReplacement = { provider, projectionDigest };
+      const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+      const command = buildDockerLaunchCommand({
+        ...f.opts,
+        continuationLaunch: owner,
+        execEnv: {
+          ANTHROPIC_API_KEY: 'synthetic-wrong-key',
+          OPENAI_BASE_URL: 'https://wrong.invalid',
+          CLAUDE_CONFIG_DIR: '/old-source-home',
+          CODEX_HOME: '/old-source-home',
+          REVERIE_WORKER_IDENTITY_FILE: '/old-source-token',
+          REVERIE_HOOK_GENERATION: 'fresh-managed-epoch',
+          WORKSPACE_TOOL: 'keep',
+        },
+        execEnvNames: [
+          'ANTHROPIC_AUTH_TOKEN',
+          'OPENAI_API_KEY',
+          'CLAUDE_CONFIG_DIR',
+          'CODEX_HOME',
+          'REVERIE_HOOK_GENERATION',
+          'WORKSPACE_TOOL',
+        ],
+      });
+      const root = '/home/agent/.reverie/plan-moves/' + oid + '/generation-' + projectionDigest;
+      expect(command).toContain(configKey + '=' + root + (provider === 'anthropic' ? '/claude' : '/codex'));
+      expect(command).toContain('REVERIE_WORKER_IDENTITY_FILE=' + root + '/worker-identity-' + cid);
+      expect(command).toContain('REVERIE_HOOK_GENERATION=fresh-managed-epoch');
+      expect(command).toContain('WORKSPACE_TOOL=keep');
+      for (const forbidden of [
+        'synthetic-wrong-key',
+        'wrong.invalid',
+        '/old-source-home',
+        '/old-source-token',
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'OPENAI_API_KEY',
+      ])
+        expect(command).not.toContain(forbidden);
+      expect(command).not.toContain('REVERIE_WORKER_IDENTITY_FILE=/home/agent/.reverie/docker-worker-identity');
+    }
+  );
+  it('refuses changing the account generation after capturing the real Session launch owner', () => {
+    const f = fixture();
+    f.place.continuation!.planReplacement = { provider: 'anthropic', projectionDigest: '8'.repeat(64) };
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    f.place.continuation!.planReplacement.projectionDigest = '9'.repeat(64);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'Original Docker Session changed'
+    );
+  });
   it.each([
     'CLAUDE_CODE_X;CONTROL_SENTINEL',
     'CLAUDE_CODE_X\nCONTROL_SENTINEL',

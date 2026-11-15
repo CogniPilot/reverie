@@ -1,4 +1,5 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from './docker-employee-codex-workspace.js';
+import { dockerPlanDestinationEnvironment, dockerPlanGeneration } from './docker-plan-install-data.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
@@ -1560,6 +1561,24 @@ export function buildDockerLaunchCommand(opts: DockerLaunchOptions): string {
   return [imageCheck, ensure, memoryCheck, start, execCmd].filter(Boolean).join(' ; ');
 }
 
+/** Environment selection is DATA only; the caller still needs the original
+ * private view or one-attempt launch owner before creating any command. */
+function replacementExecutionEnvironment(opts: DockerLaunchOptions) {
+  const placement = opts.docker.continuation!, plan = placement.planReplacement;
+  if (!plan) return { env: opts.execEnv, names: opts.execEnvNames, identityFile: '/home/agent/.reverie/docker-worker-identity' };
+  const selector = { operationId: placement.operationId, provider: plan.provider, projectionDigest: plan.projectionDigest };
+  const paths = dockerPlanGeneration({ ...selector, containerId: opts.docker.containerName });
+  const env = Object.fromEntries(dockerPlanDestinationEnvironment(
+    Object.entries(opts.execEnv).map(([key,value]) => key+'='+value), selector
+  ).map(entry => { const at=entry.indexOf('='); return [entry.slice(0,at),entry.slice(at+1)]; }));
+  const names = new Set(dockerPlanDestinationEnvironment(opts.execEnvNames.map(key => key+'='),selector)
+    .map(entry => entry.slice(0,entry.indexOf('='))));
+  // This value comes from the current Session's reserved managed hook epoch,
+  // unlike source image account/identity environment removed above.
+  if (opts.continuationLaunch && opts.execEnv.REVERIE_HOOK_GENERATION !== undefined)
+    env.REVERIE_HOOK_GENERATION = opts.execEnv.REVERIE_HOOK_GENERATION;
+  return { env, names: opts.execEnvNames.filter(key => names.has(key) || key === 'REVERIE_HOOK_GENERATION'), identityFile: paths.identityFile };
+}
 /** First provider is private one-attempt authority; normal restores only attach. */
 function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string {
  const {docker,sessionId}=opts,placement=docker.continuation!;
@@ -1568,11 +1587,12 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  if(opts.continuationLaunch && opts.continuationView) throw Error('One original Docker transport owner required');
  if(!opts.continuationLaunch && !opts.continuationView) throw Error('Original boxed provider view required');
  if(opts.continuationView) DockerEmployeeProviderView.prototype.require.call(opts.continuationView,sessionId,docker);
+ const selectedEnvironment=replacementExecutionEnvironment(opts);
  const base=buildDockerBaseArgs(docker).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
- const env={...opts.execEnv,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
-   REVERIE_WORKER_IDENTITY_FILE:'/home/agent/.reverie/docker-worker-identity',REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
+ const env={...selectedEnvironment.env,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
+   REVERIE_WORKER_IDENTITY_FILE:selectedEnvironment.identityFile,REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',shellescape(key+'='+value)]);
- flags.push(...opts.execEnvNames.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',shellescape(key)]));
+ flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',shellescape(key)]));
  let inner:string;
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');

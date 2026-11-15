@@ -1,4 +1,5 @@
 import type { DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
+import { isDeepStrictEqual } from 'node:util';
 /** Private one-attempt builder authority over one actual Session. Persisted
  * Docker metadata can attach a viewer, never initiate a first provider.
  */
@@ -10,6 +11,7 @@ export class DockerEmployeeProviderLaunch {
   readonly #session: Session;
   readonly #binding: DockerEmployeeBinding;
   readonly #current: () => void;
+  readonly #planReplacement: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }> | undefined;
   #claimed = false;
   #workspace: { kind: 'unobserved' } | { kind: 'held' } | { kind: 'observed'; value: Readonly<DockerCodexWorkspace> } =
     { kind: 'unobserved' };
@@ -25,12 +27,18 @@ export class DockerEmployeeProviderLaunch {
     this.#session = session;
     this.#binding = Object.freeze(structuredClone(binding));
     this.#current = current;
+    const plan = session.docker?.continuation?.planReplacement;
+    this.#planReplacement = plan ? Object.freeze({ ...plan }) : undefined;
     this.#workspaceReader = workspaceReader;
     Object.freeze(this);
   }
   requireFor(session: Session): void {
     this.#current();
-    if (this.#session !== session) throw Error('Original Docker Session changed');
+    if (
+      this.#session !== session ||
+      !isDeepStrictEqual(session.docker?.continuation?.planReplacement, this.#planReplacement)
+    )
+      throw Error('Original Docker Session changed');
   }
   async prepareCodexWorkspace(session: Session): Promise<Readonly<DockerCodexWorkspace>> {
     this.requireFor(session);

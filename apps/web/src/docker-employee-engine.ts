@@ -1,4 +1,5 @@
 import { requireDockerEffectiveResourceProof } from './docker-contained-resource-controller.js';
+import { dockerPlanDestinationEnvironment } from './docker-plan-install-data.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
@@ -79,6 +80,7 @@ export interface DockerEmployeeProviderViewDescriptor {
     | { readonly kind: 'none'; readonly mode: string }
     | { readonly kind: 'generation'; readonly generation: string };
   readonly clientManifestDigest: string;
+  readonly planReplacement?: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }>;
 }
 /** A private observer admission. It grants no provider creation or relaunch. */
 export class DockerEmployeeProviderView {
@@ -86,7 +88,11 @@ export class DockerEmployeeProviderView {
   readonly #current: () => void;
   constructor(origin: symbol, descriptor: DockerEmployeeProviderViewDescriptor, current: () => void) {
     if (origin !== providerViewOrigin) throw Error('Original Engine provider view required');
-    this.#descriptor = Object.freeze({ ...descriptor, hooks: Object.freeze({ ...descriptor.hooks }) });
+    this.#descriptor = Object.freeze({
+      ...descriptor,
+      hooks: Object.freeze({ ...descriptor.hooks }),
+      ...(descriptor.planReplacement ? { planReplacement: Object.freeze({ ...descriptor.planReplacement }) } : {}),
+    });
     this.#current = current;
     Object.freeze(this);
   }
@@ -108,6 +114,7 @@ export class DockerEmployeeProviderView {
       docker.continuation.sessionGeneration !== value.sessionGeneration ||
       docker.continuation.employeeId !== value.employeeId ||
       docker.continuation.clientManifestDigest !== value.clientManifestDigest ||
+      !isDeepStrictEqual(docker.continuation.planReplacement, value.planReplacement) ||
       docker.extraExecArgs !== undefined ||
       docker.extraCreateArgs !== undefined ||
       docker.commands !== undefined
@@ -164,6 +171,9 @@ export class DockerEmployeeProviderHealthProof {
           employeeId: this.employeeId,
           sessionGeneration: b.sessionGeneration,
           clientManifestDigest: this.#view!.descriptor.clientManifestDigest,
+          ...(this.#view!.descriptor.planReplacement
+            ? { planReplacement: this.#view!.descriptor.planReplacement }
+            : {}),
         },
       } as SessionDocker);
     }
@@ -248,6 +258,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const raw = await this.#inspect(row.original.containerId);
     if (
       raw.State.Running ||
+      (row.version === 3 &&
+        (raw.Config.Labels?.['reverie.boxed.operation'] !== row.planReplacement.source.binding.operationId ||
+          raw.Config.Labels?.['reverie.boxed.generation'] !==
+            String(row.planReplacement.source.binding.sessionGeneration) ||
+          raw.Config.Labels?.['reverie.boxed.box'] !== this.boxId)) ||
       !isDeepStrictEqual(boxedOriginal(raw, sourceSubject(row), this.deployment, row.version === 3), row.original)
     )
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
@@ -444,7 +459,14 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       User: source.Config.User,
       Entrypoint: ['/opt/reverie/perf/bin/reverie-worker-init'],
       Cmd: [],
-      Env: environment,
+      Env:
+        row.version === 3
+          ? dockerPlanDestinationEnvironment(environment, {
+              operationId: row.request.operationId,
+              provider: row.planReplacement.account.provider,
+              projectionDigest: row.planReplacement.account.projectionDigest,
+            })
+          : environment,
       WorkingDir: source.Config.WorkingDir ?? '/',
       Hostname: source.Config.Hostname,
       Labels: {
@@ -805,6 +827,14 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         sessionId: b.sessionId,
         sessionGeneration: b.sessionGeneration,
         clientManifestDigest: checked.workerImage.clientManifestDigest,
+        ...(checked.version === 3
+          ? {
+              planReplacement: {
+                provider: checked.planReplacement.account.provider,
+                projectionDigest: checked.planReplacement.account.projectionDigest,
+              },
+            }
+          : {}),
       },
       requireCurrent
     );
@@ -932,6 +962,14 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         sessionId: checked.request.sessionId,
         sessionGeneration: checked.request.sessionGeneration,
         clientManifestDigest: checked.workerImage.clientManifestDigest,
+        ...(checked.version === 3
+          ? {
+              planReplacement: {
+                provider: checked.planReplacement.account.provider,
+                projectionDigest: checked.planReplacement.account.projectionDigest,
+              },
+            }
+          : {}),
       },
       requireCurrent
     );

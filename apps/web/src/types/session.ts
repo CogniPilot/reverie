@@ -371,7 +371,11 @@ export interface DockerCase {
  */
 export interface SessionDocker {
   /** Explicit boxed placement DATA; first launch needs a private process-local owner. */
-  continuation?: {operationId:string;employeeId:string;sessionGeneration:number;clientManifestDigest:string;apiUrl:string};
+  continuation?: {
+    operationId:string; employeeId:string; sessionGeneration:number; clientManifestDigest:string; apiUrl:string;
+    /** Fixed private account generation DATA, bound by the actual observer/launch owner. */
+    planReplacement?: { provider:'anthropic'|'openai'; projectionDigest:string };
+  };
   hostId: string;
   label: string;
   engine: DockerEngine;

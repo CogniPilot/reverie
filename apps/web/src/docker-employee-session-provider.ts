@@ -63,6 +63,14 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
         sessionGeneration: binding.sessionGeneration,
         clientManifestDigest: row.workerImage.clientManifestDigest,
         apiUrl: this.apiUrl,
+        ...(row.version === 3
+          ? {
+              planReplacement: {
+                provider: row.planReplacement.account.provider,
+                projectionDigest: row.planReplacement.account.projectionDigest,
+              },
+            }
+          : {}),
       },
     };
   }
