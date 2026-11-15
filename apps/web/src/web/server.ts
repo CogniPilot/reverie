@@ -2522,6 +2522,11 @@ export class WebServer extends EventEmitter {
       providerHealthy: employee => this.workerProviderHealth?.read(employee)?.state === 'healthy',
       diagnosticViewer: () => !!process.env.REVERIE_WORKER_VIEWER_SOCKET,
       diagnosticMoveGuard: (id, owner) => planMoves.viewerInspectionGuard(id, owner),
+      ...(dockerRuntime ? {
+        dockerReconnect: (employee: import('../company-types.js').CompanyEmployee, admitted: () => boolean,
+          revalidate?: () => Promise<boolean>) => dockerRuntime.reconnectViewer(employee.id,
+          {sessionId: employee.sessionId, sessionGeneration: employee.sessionGeneration}, employee.owner, admitted, revalidate),
+      } : {}),
       moveGuard: id => {
         const employee = this.companyService.registeredEmployees().find(row => row.id === id);
         return planMoves.viewerReconnectGuard(id, employee ? { owner: employee.owner, sessionId: employee.sessionId,

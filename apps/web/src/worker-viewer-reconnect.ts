@@ -33,6 +33,9 @@ export interface ViewerReconnectDeps {
   /** Trusted dedicated attach-only endpoint; never selected by automatic repair. */
   diagnosticViewer?(): boolean;
   diagnosticMoveGuard?(employeeId: string, owner?: string): Promise<PlanViewerReconnectLease>;
+  /** Only the privately composed boxed Runtime may observe and attach a Docker viewer. */
+  dockerReconnect?(employee: CompanyEmployee, admitted: () => boolean,
+    revalidateMove?: () => Promise<boolean>): Promise<'connected' | 'unconfirmed' | 'unavailable'>;
   pause(id: string): () => void;
   publish(session: Session): void;
   now?(): number;
@@ -152,6 +155,7 @@ export class WorkerViewerReconnect {
       (automatic && session.viewerInspectionRequested) ||
       (session.runtimeHealth !== 'disconnected' && (automatic || !session.viewerInputHeld)))
       return 'unavailable';
+    if (session.docker && (automatic || !d.dockerReconnect)) return 'unavailable';
     const manualDiagnostic = !automatic && d.diagnosticViewer?.() === true && !!d.diagnosticMoveGuard;
     let diagnostic = !d.providerHealthy(original);
     if (diagnostic && !manualDiagnostic) return 'unavailable';
@@ -196,7 +200,11 @@ export class WorkerViewerReconnect {
       claim = d.company.prepareWake(employeeId, original.sessionId);
       if (!claim || !current()) return outcome('lifecycle-in-progress', 'busy');
       release = d.pause(original.sessionId);
-      if (!await session.reconnectWorkerViewer(current, moveCurrent!.revalidate?.bind(moveCurrent), diagnostic)) return outcome(!authorized() ? 'authority-changed' :
+      const revalidate = moveCurrent!.revalidate?.bind(moveCurrent);
+      const repaired = session.docker
+        ? !diagnostic && await d.dockerReconnect!(original, current, revalidate) === 'connected'
+        : await session.reconnectWorkerViewer(current, revalidate, diagnostic);
+      if (!repaired) return outcome(!authorized() ? 'authority-changed' :
         session.workerViewerReconnectBlocker ?? 'readiness-unconfirmed', current() ? 'unavailable' : 'changed');
       if (!current()) return outcome('binding-or-authority-changed', 'changed');
       d.publish(session);

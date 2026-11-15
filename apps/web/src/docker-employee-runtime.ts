@@ -433,6 +433,61 @@ export class DockerEmployeeRuntime {
       },
     });
   }
+  /** Read-only native observation plus one attach-only website client repair.
+   * No resource convergence, provider installation or generic wake is admitted. */
+  async reconnectViewer(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
+    owner: string | undefined, admitted: () => boolean, revalidateMove?: () => Promise<boolean>
+  ): Promise<'connected' | 'unconfirmed' | 'unavailable'> {
+    const a = this.#attached;
+    if (!a || !this.current()) return 'unavailable';
+    const employee = a.company.registeredEmployees().find(value => value.id === employeeId && value.owner === owner);
+    const row = employee && a.store.record(employee.id), binding = employee?.dockerBinding;
+    const session = employee && a.ctx.sessions.get(employee.sessionId);
+    if (!employee || !row || !binding || !session || !session.docker?.continuation ||
+      employee.sessionId !== expected.sessionId || employee.sessionGeneration !== expected.sessionGeneration ||
+      !['ready', 'provider-issued'].includes(row.phase)) return 'unavailable';
+    const rowDigest = dockerContinuationDigest(row), bindingDigest = dockerContinuationDigest(binding);
+    const saved = a.ctx.store.getSession(employee.sessionId);
+    if (!saved) return 'unavailable';
+    const source = row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
+    const end = performance.now() + 25_000;
+    let revoked = false;
+    const current = () => {
+      if (revoked) throw Error('Original Docker viewer repair changed');
+      const live = a.company.registeredEmployees().find(value => value.id === employeeId);
+      const subject = a.store.existingSubject(employeeId, row);
+      if (!admitted() || !this.current() || a.company.store.publicationUnconfirmed || performance.now() >= end ||
+        !live || !subject || live.owner !== owner || subject.owner !== owner || live.onVacation ||
+        live.desiredRunning !== true || live.bindingMigration || live.sessionId !== expected.sessionId ||
+        live.sessionGeneration !== expected.sessionGeneration || subject.sessionId !== expected.sessionId ||
+        subject.sessionGeneration !== expected.sessionGeneration || a.ctx.sessions.get(expected.sessionId) !== session ||
+        session.owner !== owner || dockerContinuationDigest(live.dockerBinding) !== bindingDigest ||
+        dockerContinuationDigest(a.store.record(employeeId)) !== rowDigest ||
+        dockerEmployeeProviderSourceDigest(live, { ...saved, ...session.providerRecipeState() }) !== source) {
+        revoked = true;
+        throw Error('Original Docker viewer repair changed');
+      }
+    };
+    const allowed = () => { try { current(); return true; } catch { return false; } };
+    const capture = async () => {
+      current();
+      if (revalidateMove && !await revalidateMove()) throw Error('Original Docker viewer move hold changed');
+      current();
+      const seen = await a.engine.observeDestination(row);
+      current();
+      if (!seen || seen.state !== 'running' || seen.provider.kind !== 'running' ||
+        seen.provider.operationId !== binding.operationId || seen.provider.sessionId !== binding.sessionId ||
+        !a.engine.existingResourcePolicyCurrent(row, seen.resources)) throw Error('Original Docker provider is unconfirmed');
+      const view = await a.engine.captureProviderView(row, current);
+      current();
+      return view;
+    };
+    try {
+      const view = await capture();
+      return await Session.prototype.reconnectDockerContinuationView.call(session, view, allowed, capture)
+        && allowed() ? 'connected' : 'unconfirmed';
+    } catch { return 'unconfirmed'; }
+  }
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {

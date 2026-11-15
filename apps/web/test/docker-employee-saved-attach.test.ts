@@ -929,6 +929,24 @@ describe('in-place Docker existing-view renewal', () => {
       InfraPort);
     return { ...f, employee, companyFile, sessions, runtime, captured, attach };
   }
+  it('repairs a naturally exited actual Docker Session viewer whose old private view was revoked', async () => {
+    const f = await runtimeFixture();
+    f.attach.mockRestore(); // Exercise the actual existing Session/provider binding boundary.
+    expect(f.session.docker?.continuation).toBeDefined();
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    const before = { ptys: native.ptys.length, writes: [...native.writes], intent: f.before.intent };
+    native.exits.at(-1)!({ exitCode: 1, signal: 0 }); // Actual public PTY exit callback, no Session field mutation.
+    expect(f.session.pid).toBeNull();
+    const pane = f.mux.getSession(sid)!;
+    vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+    const creates = vi.mocked(f.command.create).mock.calls.length, configures = vi.mocked(f.resources.configure).mock.calls.length;
+    await expect(f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)).resolves.toBe('connected');
+    expect(native.ptys).toHaveLength(before.ptys + 1);
+    expect(native.writes).toEqual(before.writes);
+    expect(vi.mocked(f.command.create).mock.calls.length).toBe(creates);
+    expect(vi.mocked(f.resources.configure).mock.calls.length).toBe(configures);
+    expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(before.intent);
+  });
   it('actual Runtime.wake renews a revoked same-provider view after caller lease completion without another attach', async () => {
     const f = await runtimeFixture();
     let allowed = true;

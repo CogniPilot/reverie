@@ -989,6 +989,7 @@ export class Session extends EventEmitter {
   // Prepared but unused is distinct from the provider that may still be running.
   #pendingProviderLaunch?: ProviderLaunchPublication;
   #dockerContinuationView?: DockerEmployeeProviderView;
+  #dockerViewerRepair?: { client: pty.IPty; pane: MuxSession; descriptor: DockerEmployeeProviderView['descriptor'] };
 
   static retainProviderLaunchPublication(subject: Session, store: StateStore, publication: ProviderLaunchPublication): void {
     if (!Session.usesProviderLaunchStore(subject, store) || !store.ownsProviderLaunchStaging(subject, publication) || !publication.owns(subject))
@@ -1545,7 +1546,7 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
-    this._viewerInputHeld = this._workerBacked && config.viewerInputHeld === true;
+    this._viewerInputHeld = (this._workerBacked || !!config.docker?.continuation) && config.viewerInputHeld === true;
     this._workerResourceLaunch = config.workerResourceLaunch;
     if (config.providerDispatchHeld === true) this._holdUnconfirmedProvider();
     if (config.terminalInputHeld === true) this.#terminalInputUncertainty = new TerminalInputUnconfirmedError();
@@ -3605,7 +3606,73 @@ export class Session extends EventEmitter {
 
   /** An attach-only viewer is available only for a local isolated worker pane. */
   get workerViewerReconnect(): boolean {
-    return this._workerBacked && !this._isStopped && this.paneExitApplies && !!this._mux?.readPaneLiveness;
+    const boxed = !!this._docker?.continuation && this._docker.owned === false && !!this._muxSession;
+    return (boxed || (this._workerBacked && this.paneExitApplies)) && !this._isStopped && !!this._mux?.readPaneLiveness;
+  }
+
+  /** Replace only a naturally exited website client of this exact provider.
+   * The private Engine view owns native placement/incarnation; no launch owner,
+   * provider receipt, composer content or unknown-input history is retired. */
+  async reconnectDockerContinuationView(view: DockerEmployeeProviderView, admitted: () => boolean,
+    fresh: () => Promise<DockerEmployeeProviderView>): Promise<boolean> {
+    const docker = this._docker, mux = this._mux, pane = this._muxSession;
+    if (!docker?.continuation || docker.owned !== false || !mux?.readPaneLiveness || !pane ||
+      this._remote || this._workerBacked || this._isStopped || this._closing || this.paneLifecycleInFlight ||
+      this._muxWritesInFlight > 0 || (!this.ptyProcess && this._pid !== null)) return false;
+    const pending = this.#dockerViewerRepair;
+    if (!pending && (!this._viewerClientLost || this.ptyProcess !== null || this._pid !== null)) return false;
+    if (this.ptyProcess && (!pending || pending.client !== this.ptyProcess || pending.pane !== pane)) return false;
+    const recipe = this._providerLaunchConfiguration(), placement = structuredClone(docker), paneName = pane.muxName;
+    const oldView = this.#dockerContinuationView, launch = this._dockerContinuationLaunch;
+    const descriptor = view.descriptor;
+    if ((oldView && !isDeepStrictEqual(oldView.descriptor, descriptor)) ||
+      (pending && !isDeepStrictEqual(pending.descriptor, descriptor))) return false;
+    const current = () => admitted() && !this._isStopped && !this._closing && this._muxWritesInFlight === 0 &&
+      this._docker === docker && isDeepStrictEqual(docker, placement) && this._mux === mux &&
+      this._muxSession === pane && mux.getSession(this.id) === pane && pane.sessionId === this.id && pane.muxName === paneName &&
+      pane.owner === this.owner && isDeepStrictEqual(pane.docker, docker) &&
+      this._dockerContinuationLaunch === launch && isDeepStrictEqual(this._providerLaunchConfiguration(), recipe);
+    const requireView = (selected: DockerEmployeeProviderView) => {
+      if (!current() || selected.descriptor.mode !== this.mode || !isDeepStrictEqual(descriptor, selected.descriptor))
+        throw Error('Original Docker viewer binding changed');
+      DockerEmployeeProviderView.prototype.require.call(selected, this.id, docker);
+      if (!current()) throw Error('Original Docker viewer binding changed');
+    };
+    requireView(view);
+    return this._withPaneLifecycle(async () => {
+      this._viewerInputHeld = true;
+      this._submitVerifier?.cancel(); // Unknown Enter is retained, never repeated.
+      const before = await mux.readPaneLiveness!(paneName);
+      requireView(view);
+      let panePid = before.state === 'live' ? before.pid : undefined;
+      if (before.state === 'dead' && !pending) {
+        const options = this._buildRespawnPaneOptions();
+        panePid = await mux.respawnPane({ ...options, dockerContinuationLaunch: undefined,
+          dockerContinuationView: view, onlyIfDead: true, stillCurrent: current, admitted: current }) ?? undefined;
+        requireView(view);
+      }
+      if (!panePid || !current()) return false;
+      if (!this.ptyProcess) {
+        this._attachExistingMuxClient('Docker existing viewer reconnect');
+        this._bindInteractivePty(false);
+        if (!this.ptyProcess) return false;
+        this.#dockerViewerRepair = { client: this.ptyProcess, pane, descriptor };
+      }
+      const client = this.ptyProcess;
+      const after = await mux.readPaneLiveness!(pane.muxName);
+      requireView(view);
+      if (after.state !== 'live' || after.pid !== panePid || this.ptyProcess !== client || this._pid !== client.pid) return false;
+      const confirmed = await fresh();
+      requireView(confirmed);
+      const final = await mux.readPaneLiveness!(pane.muxName);
+      requireView(confirmed);
+      if (final.state !== 'live' || final.pid !== panePid || this.ptyProcess !== client || this._pid !== client.pid) return false;
+      this.#dockerContinuationView = confirmed;
+      this.#dockerViewerRepair = undefined;
+      this._viewerClientLost = false;
+      this._viewerInputHeld = false;
+      return true;
+    });
   }
 
   /** Repair only the disposable viewer. Never run provider setup, hooks or normal J. */
@@ -3716,6 +3783,7 @@ export class Session extends EventEmitter {
 
   async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>, diagnostic = false): Promise<boolean> {
     const diagnosticEnd = performance.now() + 10_000;
+    if (this._docker) return false; // Only the private boxed adapter consumes Engine-origin views.
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
     return this._withPaneLifecycle(async () => {
@@ -4688,7 +4756,7 @@ export class Session extends EventEmitter {
 
     client.onExit(({ exitCode }) => {
       if (this.ptyProcess !== client) return;
-      if (this._workerBacked && this._muxSession && !this._isStopped) this._viewerClientLost = true;
+      if ((this._workerBacked || this._docker?.continuation) && this._muxSession && !this._isStopped) this._viewerClientLost = true;
       console.log('[Session] Interactive PTY exited with code:', exitCode);
       // COD-118: record the exit in the circuit breaker BEFORE status bookkeeping.
       // A clean (0) exit resets the counter; rapid non-zero repeats trip it.
