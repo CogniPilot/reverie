@@ -124,7 +124,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     const saved = this.saved(employee.sessionId);
     if (!saved) return;
     const matches =
-      row.version === 2
+      row.version !== 1
         ? row.providerSourceDigest === subject.providerSourceDigest
         : legacyDockerProviderSourceMatches(employee, saved, row.sourceDigest);
     return matches ? subject : undefined;
@@ -262,6 +262,12 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     next: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<void> {
+    if(before?.version===3||next.version===3){
+      if(!before||before.version!==3||next.version!==3||
+        (!isDeepStrictEqual(before,next)&&!(before.phase==='provider-issued'&&next.phase==='ready'&&
+          isDeepStrictEqual({...before,phase:'ready'},next))))
+        throw new CompanyError('Plan replacement effects belong to their original move journal',409);
+    }
     await this.company.store.update((state) => {
       current();
       const rows = (state.dockerEmployeeContinuations ??= []),
@@ -339,6 +345,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     next: DockerContinuationTask,
     current: () => void
   ): Promise<DockerEmployeeContinuationRecord> {
+    if(row.version===3)throw new CompanyError('Plan replacement tasks are immutable read projections',409);
     const checked = DockerContinuationTask.parse(next);
     if (!allowedDockerTaskTransition(before, checked))
       throw new CompanyError('Invalid original Docker task transition', 409);
@@ -373,6 +380,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     next: EphemeralRestoration,
     current: () => void
   ): Promise<void> {
+    if(row.version===3)throw new CompanyError('Plan replacement effects belong to their original move journal',409);
     const checked = EphemeralRestoration.parse(next);
     if (!allowedEphemeralTransition(before, checked)) throw new CompanyError('Invalid ephemeral transition', 409);
     await this.company.store.update((state) => {

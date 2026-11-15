@@ -1,3 +1,4 @@
+import {captureDockerPlanRequestDecision} from '../docker-plan-request-decision.js';
 import { legacyThreadBinding } from '../legacy-thread-binding.js';
 import {TerminalInputService} from './terminal-input-service.js';
 import {WorkerProviderHealth,viewerHealth} from '../worker-provider-health.js';
@@ -2630,7 +2631,9 @@ export class WebServer extends EventEmitter {
       if (caller.kind !== 'agent' || !caller.session || request.headers['x-reverie-parent-session'] !== caller.session) return undefined;
       const current = this.sessions.get(caller.session);
       return current ? { sessionId: caller.session, owner: current.owner } : undefined;
-    });
+    }, (request,id)=>captureDockerPlanRequestDecision(request,id,this.companyService,planRequests,planRequestCapabilities,()=>{
+      if(!dockerRuntime?.current())throw new PlanMoveError('The boxed runtime changed',403);
+    }));
 
     registerWsRoutes(this.app, ctx, () => this.getHostPolicy());
   }

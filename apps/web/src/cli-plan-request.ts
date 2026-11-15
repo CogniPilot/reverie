@@ -65,7 +65,7 @@ export async function agentPlanRequest(
   capabilities?: PlanRequestCapabilities
 ): Promise<number> {
   // The fixed-identity office proxy keeps the private credential outside the laptop.
-  const office = capabilities === undefined && process.env.REVERIE_WORKER === '1';
+  const office = capabilities === undefined && (typeof deps.ctx.workerIdentity === 'string' || process.env.REVERIE_WORKER === '1');
   let nonce: string | undefined, handoff: string | undefined;
   try {
     PlanRequestId.parse(input.id);

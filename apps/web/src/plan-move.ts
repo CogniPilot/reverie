@@ -93,6 +93,9 @@ export interface PlanMoveSnapshot {
 }
 
 export interface PlanMovePort {
+  /** Server-private boxed actor consumes the genuine cooperation proof and must
+   * retain current permissions through its journal-scoped planned transition. */
+  withDecisionAuthority?(proof:unknown):PlanMoveExecutor;
   load(): Promise<PlanMoveRecord[]>;
   save(records: PlanMoveRecord[]): Promise<void>;
   snapshot(employeeId: string, owner?: string, purpose?: 'runtime-refresh'): Promise<PlanMoveSnapshot>;

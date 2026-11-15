@@ -415,13 +415,26 @@ export class PlanMoveRequests {
     nonce: string,
     decision: 'approve' | 'reject',
     handoff = '',
-    actorOwner?: string
+    actorOwner?: string,
+    decisionCurrent?: () => void,
+    decisionProof?: unknown
   ): Promise<PlanRequestView> {
     return this.serial(async () => {
+      let admissionRevoked = false;
+      const currentDecision = () => {
+        try {
+          decisionCurrent?.();
+        } catch (error) {
+          admissionRevoked = true;
+          throw error;
+        }
+      };
+      currentDecision();
       const record = this.records.get(id);
       if (!record || record.sessionId !== sessionId || record.owner !== actorOwner)
         throw new PlanMoveError('Unknown approval request', 403);
       await this.current(record);
+      currentDecision();
       const expected = record.nonceHash;
       if (
         record.phase !== 'pending' ||
@@ -438,13 +451,24 @@ export class PlanMoveRequests {
       if (decision === 'reject') {
         record.phase = 'rejected';
         await this.revoke(record);
+        currentDecision();
         await this.save();
+        currentDecision();
         await this.audit(record, 'plan_request_rejected');
+        currentDecision();
         return view(record);
+      }
+      let executor = execution.executor;
+      if (decisionProof !== undefined) {
+        if (!executor.withDecisionAuthority)
+          throw new PlanMoveError('The protected boxed plan actor is unavailable', 503);
+        executor = executor.withDecisionAuthority(decisionProof);
+        currentDecision();
       }
       if (!handoff.trim() || handoff.length > 12000 || containsHandoffControls(handoff))
         throw new PlanMoveError('Provide a work-safe handoff of 1–12000 characters');
-      const snapshot = await execution.executor.snapshot(record.employeeId, record.owner, record.purpose);
+      const snapshot = await executor.snapshot(record.employeeId, record.owner, record.purpose);
+      currentDecision();
       if (
         snapshot.sessionId !== record.sessionId ||
         snapshot.account !== record.fromAccount ||
@@ -454,15 +478,20 @@ export class PlanMoveRequests {
       )
         throw new PlanMoveError('The expert’s runtime changed; ask the owner for a new request');
       const target = await this.port.validateTarget(snapshot, record.toAccount, record.owner);
+      currentDecision();
       if (record.targetMode && record.targetMode !== target?.mode)
         throw new PlanMoveError('The destination harness changed; ask the owner for a new request');
       await this.current(record);
+      currentDecision();
       if (record.phase !== 'pending') throw new PlanMoveError('Approval expired or authorization ended', 403);
       record.phase = 'executing';
-      await this.revoke(record);
-      await this.save();
       try {
+        await this.revoke(record);
+        currentDecision();
+        await this.save();
+        currentDecision();
         await this.audit(record, 'plan_request_approved');
+        currentDecision();
         const move = await this.port.moves.begin(
           {
             id: record.id,
@@ -477,7 +506,7 @@ export class PlanMoveRequests {
             ...(record.purpose ? { purpose: record.purpose, runtimeDigest: record.runtimeDigest } : {}),
           },
           record.owner,
-          execution.executor
+          executor
         );
         record.movePhase = move.phase;
         record.newSession = move.newSession;
@@ -488,8 +517,12 @@ export class PlanMoveRequests {
         // stays generic for them and goes to the log, so the reason is never lost.
         const reason = error instanceof PlanMoveError ? ` ${error.message.replace(/[.\s]+$/, '')}.` : '';
         record.error = `The approved move could not start.${reason} Inspect the current session before requesting again.`;
-        console.warn(`[plans] approved move ${record.id} could not start:`, error instanceof Error ? error.message : error);
+        console.warn(
+          `[plans] approved move ${record.id} could not start:`,
+          error instanceof Error ? error.message : error
+        );
         await this.save();
+        if (admissionRevoked) throw error;
       }
       return view(record);
     });
