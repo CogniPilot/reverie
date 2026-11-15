@@ -27,6 +27,7 @@ import {
   dockerResourceAttemptKey,
   dockerRevisedPolicy,
   DockerResourceLeafIdentity,
+  DockerResourceClosedWriter,
   type DockerResourceDesiredRevision,
   type DockerResourceAttempt,
 } from './docker-resource-revisions.js';
@@ -174,6 +175,7 @@ export class DockerEffectiveResourceProof {
         dockerResourceScope(row) !== this.#scope ||
         !isDeepStrictEqual(policy, this.#policy) ||
         this.#attempt.state === 'helper' ||
+        this.#attempt.state === 'closed-writer' ||
         !isDeepStrictEqual(this.#store.revision(row.owner, this.#revision.revision), this.#revision) ||
         !isDeepStrictEqual(this.#store.attempt(row, this.#revision.revision), this.#attempt) ||
         !this.#store.approved(row).some(({ attempt }) => isDeepStrictEqual(attempt, this.#attempt))
@@ -975,6 +977,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
   async #highOnlyImage(current: () => void): Promise<string> {
     const selected = this.configuration.memoryHighHelperImageId;
     if (!selected) refuse('DOCKER_RESOURCE_MEMORY_HIGH_WRITE_UNSUPPORTED');
+    await this.#qualifiedHighImage(selected, current);
+    return selected;
+  }
+  async #qualifiedHighImage(selected: string, current: () => void): Promise<void> {
+    if (!/^sha256:[a-f0-9]{64}$/.test(selected)) refuse();
     current();
     const raw = z
       .array(
@@ -1000,7 +1007,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
       raw.Config.Labels['org.reverie.resource.memory-high-only'] !== 'v1'
     )
       refuse('DOCKER_RESOURCE_MEMORY_HIGH_WRITE_UNSUPPORTED');
-    return selected;
   }
   /** Both historical ACK and fresh actual kernel facts. The ACK is never reported as current limits. */
   async #live(row: DockerEmployeeContinuationRecord, current: () => void = () => {}): Promise<Observation | null> {
@@ -1034,6 +1040,221 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!desired || (revision !== undefined && desired.revision !== revision)) refuse();
     return desired;
   }
+  /** Canonical issued-image history is read authority only; it never selects a new writer.
+   * Double terminal/config observations bracket a fresh same-leaf kernel observation. */
+  async #closedWriter(
+    row: DockerEmployeeContinuationRecord,
+    desired: DockerResourceDesiredRevision,
+    task: DockerContinuationTask,
+    seen: Observation,
+    current: () => void
+  ): Promise<{ closure: DockerResourceClosedWriter; seen: Observation }> {
+    current();
+    if (
+      task.role !== 'leaf-helper' ||
+      !('containerId' in task) ||
+      !['start-issued', 'running', 'completed'].includes(task.phase) ||
+      !seen.worker
+    )
+      refuse('DOCKER_RESOURCE_REVISION_WRITER_UNCONFIRMED');
+    const name =
+      'reverie-boxed-leaf-helper-' +
+      dockerContinuationDigest([this.configuration.boxId, 'leaf-helper', row.request.operationId, desired.revision]);
+    if (task.name !== name) refuse();
+    await this.#qualifiedHighImage(task.imageId, current);
+    current();
+    const raw = await this.#inspect(task.containerId);
+    current();
+    const args = z.object({ Cmd: z.array(z.string()).min(1).max(512) }).parse(raw.Config).Cmd;
+    const plain: string[] = [],
+      members = new Set<string>();
+    for (let index = 0; index < args.length; index++) {
+      if (args[index] !== '--member') {
+        plain.push(args[index]!);
+        continue;
+      }
+      const value = args[++index];
+      if (
+        !value ||
+        !/^[a-f0-9]{64}:[1-9][0-9]{0,9}:[1-9][0-9]{0,19}$/.test(value) ||
+        members.size >= 64 ||
+        members.has(value.split(':')[0]!)
+      )
+        refuse();
+      members.add(value.split(':')[0]!);
+    }
+    const policy = dockerRevisedPolicy(row.policy, desired);
+    const expected = [
+      'configure-memory-high',
+      '--box-id',
+      this.configuration.boxId,
+      '--anchor-id',
+      seen.anchor.id,
+      '--anchor-pid',
+      String(seen.anchor.pid),
+      '--anchor-start',
+      seen.anchor.startTicks,
+      '--worker-id',
+      seen.worker.id,
+      '--worker-pid',
+      String(seen.worker.pid),
+      '--worker-start',
+      seen.worker.startTicks,
+      '--leaf-dev',
+      seen.worker.dev,
+      '--leaf-ino',
+      seen.worker.ino,
+      '--memory-max',
+      String(policy.memoryMaxBytes),
+      '--swap-max',
+      String(policy.swapMaxBytes),
+      '--pids-max',
+      String(policy.pidsMax),
+      '--memory-high',
+      String(policy.memoryHighBytes),
+      '--cpu-weight',
+      String(policy.cpuWeight),
+      '--cpuset-cpus',
+      canonicalCpus(policy.allowedCpus),
+    ];
+    if (!isDeepStrictEqual(plain, expected)) refuse('DOCKER_RESOURCE_REVISION_WRITER_CHANGED');
+    const config = this.#configuration(
+      'leaf-helper',
+      name,
+      args,
+      { path: seen.worker.path, target: '/run/reverie-worker-cgroup' },
+      task.imageId
+    );
+    if (dockerContinuationDigest(config) !== task.configurationDigest) refuse();
+    const terminal = (value: Record<string, unknown>) => {
+      const state = z
+        .object({
+          Status: z.literal('exited'),
+          Running: z.literal(false),
+          Pid: z.literal(0),
+          Paused: z.literal(false),
+          Restarting: z.literal(false),
+          Dead: z.literal(false),
+          ExitCode: z.number().int().min(0).max(255),
+        })
+        .parse(value.State);
+      return { digest: dockerContinuationDigest(value.State), exitCode: state.ExitCode };
+    };
+    const first = terminal(await this.#fixed(task.containerId, config));
+    current();
+    const latest = await this.#refresh(seen, current);
+    const second = terminal(await this.#fixed(task.containerId, config));
+    current();
+    if (!isDeepStrictEqual(first, second)) refuse('DOCKER_RESOURCE_REVISION_WRITER_CHANGED');
+    this.#fresh(latest);
+    return {
+      seen: latest,
+      closure: DockerResourceClosedWriter.parse({
+        version: 1,
+        purpose: 'reverie-memory-writer-closed-v1',
+        authority: 'canonical-issued-high-only-image-v1',
+        containerId: task.containerId,
+        imageId: task.imageId,
+        configurationDigest: task.configurationDigest,
+        terminalStateDigest: second.digest,
+        exitCode: second.exitCode,
+        identity: this.#identity(latest),
+        originalOutcome: 'unknown',
+      }),
+    };
+  }
+  async #closedHistory(
+    row: DockerEmployeeContinuationRecord,
+    seen: Observation,
+    current: () => void,
+    exceptRevision?: string
+  ): Promise<Observation> {
+    for (const { desired, attempt } of this.revisions?.history(row) ?? []) {
+      if (attempt.revision === exceptRevision) continue;
+      if (attempt.state === 'helper') refuse('DOCKER_RESOURCE_REVISION_ORIGINAL_ATTEMPT_PENDING');
+      if (!('task' in attempt)) continue;
+      const closed = await this.#closedWriter(row, desired, attempt.task, seen, current);
+      seen = closed.seen;
+      if ('closure' in attempt && !isDeepStrictEqual(closed.closure, attempt.closure)) refuse();
+    }
+    return seen;
+  }
+  /** Only metadata is published. A past unconfirmed START is never called again or marked acknowledged. */
+  async reconcileMemoryHigh(row: DockerEmployeeContinuationRecord, revision: string, current: () => void) {
+    this.#beginRead(row);
+    if (!this.revisions || !['provider-issued', 'ready'].includes(row.phase)) refuse();
+    const desired = this.#desired(row, revision),
+      policy = dockerRevisedPolicy(row.policy, desired);
+    const stable = () => {
+      current();
+      if (!isDeepStrictEqual(this.#desired(row, revision), desired)) refuse();
+    };
+    stable();
+    let attempt = this.revisions.attempt(row, revision);
+    if (!attempt || !('task' in attempt)) refuse('DOCKER_RESOURCE_REVISION_WRITER_UNCONFIRMED');
+    let seen = await this.#live(row, stable);
+    if (!seen) refuse();
+    const closed = await this.#closedWriter(row, desired, attempt.task, seen, stable);
+    seen = closed.seen;
+    if (attempt.state === 'helper') {
+      const next: DockerResourceAttempt = {
+        ...dockerResourceAttemptKey(row, revision),
+        state: 'closed-writer',
+        task: attempt.task,
+        closure: closed.closure,
+      };
+      await this.revisions.publish(row, desired, attempt, next, stable);
+      stable();
+      attempt = this.revisions.attempt(row, revision)!;
+    } else if ('closure' in attempt) {
+      if (!isDeepStrictEqual(closed.closure, attempt.closure)) refuse();
+    } else refuse('DOCKER_RESOURCE_REVISION_ALREADY_ACKNOWLEDGED');
+    seen = await this.#closedHistory(row, seen, stable);
+    const actual = seen.resources.memoryHigh === 'max' ? null : Number(seen.resources.memoryHigh);
+    if (actual !== null && (!Number.isSafeInteger(actual) || actual < 0)) refuse();
+    if (attempt.state === 'closed-writer' && this.#matches(seen, policy, policy.memoryHighBytes)) {
+      await this.revisions.publish(
+        row,
+        desired,
+        attempt,
+        {
+          ...dockerResourceAttemptKey(row, revision),
+          state: 'observed-after-closure',
+          task: attempt.task,
+          closure: attempt.closure,
+          identity: this.#identity(seen),
+          observationDigest: dockerContinuationDigest(seen),
+        },
+        stable
+      );
+      stable();
+      attempt = this.revisions.attempt(row, revision)!;
+    }
+    this.#fresh(seen);
+    stable();
+    const common = {
+      writerClosed: true as const,
+      originalOutcome: 'unknown' as const,
+      actualMemoryHighBytes: actual,
+      desiredMemoryHighBytes: desired.memoryHighBytes,
+    };
+    if (attempt.state === 'observed-after-closure') {
+      if (!this.#matches(seen, policy, policy.memoryHighBytes)) refuse();
+      return {
+        ...common,
+        state: 'observed' as const,
+        policy,
+        enforcement: 'fresh-native-readback' as const,
+        allowedActions: [],
+      };
+    }
+    return {
+      ...common,
+      state: 'closed-writer' as const,
+      enforcement: 'not-observed' as const,
+      allowedActions: ['new-revision'],
+    };
+  }
   #approved(
     row: DockerEmployeeContinuationRecord,
     seen: Observation
@@ -1049,6 +1270,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       const policy = dockerRevisedPolicy(row.policy, desired);
       if (
         attempt.state === 'helper' ||
+        attempt.state === 'closed-writer' ||
         !this.#matches(seen, policy, policy.memoryHighBytes) ||
         !isDeepStrictEqual(attempt.identity, this.#identity(seen))
       )
@@ -1107,6 +1329,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (this.#matches(seen, row.policy, row.policy.memoryHighBytes)) return structuredClone(row.policy);
     const candidate = this.#approved(row, seen);
     if (!candidate) return null;
+    seen = await this.#closedHistory(row, seen, () => {});
     if (
       candidate.attempt.state === 'applied' &&
       !(await this.#ack(
@@ -1115,7 +1338,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         candidate.policy,
         candidate.policy.memoryHighBytes,
         true,
-        this.configuration.memoryHighHelperImageId
+        candidate.attempt.task.imageId
       ))
     )
       refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
@@ -1143,6 +1366,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!seen || !dockerOtherResourceLimitsMatch(seen.resources, row.policy))
       refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
     const candidate = this.#approved(row, seen);
+    if (candidate) seen = await this.#closedHistory(row, seen, current);
     if (
       candidate?.attempt.state === 'applied' &&
       !(await this.#ack(
@@ -1151,7 +1375,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         candidate.policy,
         candidate.policy.memoryHighBytes,
         true,
-        this.configuration.memoryHighHelperImageId
+        candidate.attempt.task.imageId
       ))
     )
       refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
@@ -1206,11 +1430,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
       this.revisions!.requireSettled(row, revision);
     };
     requireCurrent();
-    const seen = await this.#live(row, requireCurrent);
+    let seen = await this.#live(row, requireCurrent);
     requireCurrent();
     if (!seen?.worker || !dockerOtherResourceLimitsMatch(seen.resources, row.policy))
       refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
+    seen = await this.#closedHistory(row, seen, requireCurrent, revision);
+    if (!seen.worker) refuse();
     let attempt = this.revisions.attempt(row, revision);
+    if (attempt?.state === 'closed-writer') refuse('DOCKER_RESOURCE_REVISION_NEW_REVISION_REQUIRED');
     if (!attempt && this.#matches(seen, policy, policy.memoryHighBytes)) {
       await this.revisions.publish(
         row,
@@ -1324,9 +1551,15 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const actual = await this.read(row);
     requireCurrent();
     const final = this.revisions.attempt(row, revision);
-    if (!actual || !isDeepStrictEqual(actual, policy) || !final || final.state === 'helper')
+    if (
+      !actual ||
+      !isDeepStrictEqual(actual, policy) ||
+      !final ||
+      final.state === 'helper' ||
+      final.state === 'closed-writer'
+    )
       refuse('DOCKER_RESOURCE_REVISION_READBACK');
-    return { state: final.state, policy: actual };
+    return { state: final.state === 'observed-after-closure' ? 'observed' : final.state, policy: actual };
   }
   async configure(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const pool = await this.observePool(row);

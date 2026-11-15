@@ -300,6 +300,15 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
   const controller = new DockerContainedResources(command, journal, configuration, revisions);
   return {
     controller,
+    withRevisions: (next: DockerResourceRevisionStore) =>
+      new DockerContainedResources(command, journal, configuration, next),
+    mutateRevisionHelper: (change: (raw: Record<string, unknown>) => void) => {
+      const selected = [...containers.values()]
+        .reverse()
+        .find((raw) => (raw.Config as { Cmd?: string[] }).Cmd?.[0] === 'configure-memory-high');
+      if (!selected) throw Error('No revision helper');
+      change(selected);
+    },
     configurations,
     changeWritePin: (image: string | undefined) => {
       configuration.memoryHighHelperImageId = image;

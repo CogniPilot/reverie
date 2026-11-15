@@ -1,8 +1,13 @@
 /** Actual HTTP authentication and canonical CompanyStore; engine ports are inert,
  * synthetic observations. No Docker socket, provider, or live data is used. */
+import fs from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
-import { DockerResourceRevisionStore, dockerRevisedPolicy } from '../src/docker-resource-revisions.js';
+import {
+  DockerResourceRevisionStore,
+  dockerRevisedPolicy,
+  dockerResourceAttemptKey,
+} from '../src/docker-resource-revisions.js';
 import { DockerEmployeeEngine } from '../src/docker-employee-engine.js';
 import { DockerContainedResources } from '../src/docker-contained-resource-controller.js';
 import { DockerResourceRevisionService } from '../src/docker-resource-revision-service.js';
@@ -856,6 +861,7 @@ describe('owner-only Docker live resource revision HTTP', () => {
       for (const request of [
         { method: 'PUT' as const, url: '/api/company/docker-resources/default', payload: desired },
         { method: 'POST' as const, url: f.url + '/docker-resources/apply', payload: { revision } },
+        { method: 'POST' as const, url: f.url + '/docker-resources/reconcile', payload: { revision } },
       ]) {
         const response = await f.app.inject({ ...request, headers: f.headersFor(caller) });
         expect(response.statusCode).toBe(403);
@@ -943,52 +949,53 @@ describe('owner-only Docker live resource revision HTTP', () => {
 });
 
 describe('resource revision currentness across real Company/Engine async reads', () => {
-  it.each(['owner', 'generation', 'binding', 'recipe'] as const)(
-    '%s swap during Engine read refuses before helper publication',
-    async (change) => {
-      const f = await fixture({ storedPolicy: true });
-      await f.bindResourceRow();
-      const desired = {
-        revision: '99999999-9999-4999-8999-999999999999',
-        expectedRevision: null,
-        scope: 'all-current-and-future',
-        memoryHighBytes: 48 * 1024 ** 3,
-      };
-      expect(
-        (
-          await f.app.inject({
-            method: 'PUT',
-            url: '/api/company/docker-resources/default',
-            headers: f.ownerHeaders,
-            payload: desired,
-          })
-        ).statusCode
-      ).toBe(200);
-      let changed = false;
-      f.beforeResourceRead(async () => {
-        if (changed) return;
-        changed = true;
-        await f.companyStore.update((state) => {
-          const employee = state.employees.find((value) => value.id === target)!;
-          if (change === 'owner') employee.owner = 'changed-owner';
-          if (change === 'generation') employee.sessionGeneration++;
-          if (change === 'binding') employee.dockerBinding!.containerId = '7'.repeat(64);
-          if (change === 'recipe') employee.runtimeRecipe!.workingDir = '/changed-workspace';
-        });
+  it.each(
+    (['owner', 'generation', 'binding', 'recipe'] as const).flatMap((change) =>
+      (['apply', 'reconcile'] as const).map((path) => ({ change, path }))
+    )
+  )('$change swap during $path Engine read refuses before helper publication', async ({ change, path }) => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const desired = {
+      revision: '99999999-9999-4999-8999-999999999999',
+      expectedRevision: null,
+      scope: 'all-current-and-future',
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    expect(
+      (
+        await f.app.inject({
+          method: 'PUT',
+          url: '/api/company/docker-resources/default',
+          headers: f.ownerHeaders,
+          payload: desired,
+        })
+      ).statusCode
+    ).toBe(200);
+    let changed = false;
+    f.beforeResourceRead(async () => {
+      if (changed) return;
+      changed = true;
+      await f.companyStore.update((state) => {
+        const employee = state.employees.find((value) => value.id === target)!;
+        if (change === 'owner') employee.owner = 'changed-owner';
+        if (change === 'generation') employee.sessionGeneration++;
+        if (change === 'binding') employee.dockerBinding!.containerId = '7'.repeat(64);
+        if (change === 'recipe') employee.runtimeRecipe!.workingDir = '/changed-workspace';
       });
-      const row = f.store.record(target)!;
-      const response = await f.app.inject({
-        method: 'POST',
-        url: f.url + '/docker-resources/apply',
-        headers: f.ownerHeaders,
-        payload: { revision: desired.revision },
-      });
-      expect(response.statusCode).toBe(409);
-      expect(f.effects()).toBe(0);
-      expect(f.resourceReads()).toBe(1);
-      expect(f.revisions.attempt(row, desired.revision)).toBeUndefined();
-    }
-  );
+    });
+    const row = f.store.record(target)!;
+    const response = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-resources/' + path,
+      headers: f.ownerHeaders,
+      payload: { revision: desired.revision },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(f.effects()).toBe(0);
+    expect(f.resourceReads()).toBe(1);
+    expect(f.revisions.attempt(row, desired.revision)).toBeUndefined();
+  });
 });
 
 describe('new-operation approved resource default snapshot', () => {
@@ -1049,5 +1056,105 @@ describe('new-operation approved resource default snapshot', () => {
     expect(f.store.record(target)).toEqual(row);
     expect(f.store.policy(target).memoryHighBytes).toBe(16 * 1024 ** 3);
     expect(f.effects()).toBe(0);
+  });
+});
+
+describe('canonical closed-writer status projection', () => {
+  it('projects the actual private revision ledger through owner HTTP to the shared GUI contract', async () => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const revision = '77777777-7777-4777-8777-777777777777';
+    const desired = {
+      revision,
+      owner: null,
+      scope: 'all-current-and-future' as const,
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    await f.revisions.approve(desired, null, () => {});
+    const row = f.store.resourceInventory().find((value) => value.employeeId === target)!;
+    const task = {
+      role: 'leaf-helper' as const,
+      name: 'reverie-boxed-synthetic-closed-writer',
+      imageId: 'sha256:' + '9'.repeat(64),
+      configurationDigest: 'a'.repeat(64),
+      phase: 'create-issued' as const,
+    };
+    const base = dockerResourceAttemptKey(row, revision);
+    await f.revisions.publish(row, desired, undefined, { ...base, state: 'helper', task }, () => {});
+    const created = { ...task, phase: 'created' as const, containerId: 'b'.repeat(64) };
+    await f.revisions.publish(
+      row,
+      desired,
+      { ...base, state: 'helper', task },
+      { ...base, state: 'helper', task: created },
+      () => {}
+    );
+    const issued = { ...created, phase: 'start-issued' as const };
+    await f.revisions.publish(
+      row,
+      desired,
+      { ...base, state: 'helper', task: created },
+      { ...base, state: 'helper', task: issued },
+      () => {}
+    );
+    const identity = {
+      boxId: '7'.repeat(64),
+      parent: { path: '/synthetic-pool', dev: '1', ino: '2' },
+      anchor: { id: 'a'.repeat(64), pid: 100, startTicks: '10', path: '/synthetic-pool/anchor', dev: '1', ino: '3' },
+      worker: {
+        id: row.destination!.containerId,
+        pid: 200,
+        startTicks: '20',
+        path: '/synthetic-pool/worker',
+        dev: '1',
+        ino: '4',
+      },
+    };
+    await f.revisions.publish(
+      row,
+      desired,
+      { ...base, state: 'helper', task: issued },
+      {
+        ...base,
+        state: 'closed-writer',
+        task: issued,
+        closure: {
+          version: 1,
+          purpose: 'reverie-memory-writer-closed-v1',
+          authority: 'canonical-issued-high-only-image-v1',
+          containerId: issued.containerId,
+          imageId: issued.imageId,
+          configurationDigest: issued.configurationDigest,
+          terminalStateDigest: 'c'.repeat(64),
+          exitCode: 1,
+          identity,
+          originalOutcome: 'unknown',
+        },
+      },
+      () => {}
+    );
+    const before = f.effects(),
+      reads = f.resourceReads();
+    const response = await f.app.inject({
+      method: 'GET',
+      url: '/api/company/docker-resources',
+      headers: f.ownerHeaders,
+    });
+    expect(response.statusCode).toBe(200);
+    const actual = response.json().data;
+    expect(actual).toEqual(
+      JSON.parse(
+        fs.readFileSync(new URL('./fixtures/docker-resource-closed-writer-status.json', import.meta.url), 'utf8')
+      )
+    );
+    expect(actual.employees.find((value: { employeeId: string }) => value.employeeId === target)).toMatchObject({
+      state: 'closed-writer',
+      writerClosed: true,
+      originalOutcome: 'unknown',
+      allowedActions: ['new-revision'],
+      enforcement: 'not-observed',
+    });
+    expect(f.effects()).toBe(before);
+    expect(f.resourceReads()).toBe(reads);
   });
 });

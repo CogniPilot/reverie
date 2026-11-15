@@ -73,6 +73,21 @@ const base = z
     containerId: digest,
   })
   .strict();
+export const DockerResourceClosedWriter = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-memory-writer-closed-v1'),
+    authority: z.literal('canonical-issued-high-only-image-v1'),
+    containerId: digest,
+    imageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    configurationDigest: digest,
+    terminalStateDigest: digest,
+    exitCode: z.number().int().min(0).max(255),
+    identity: DockerResourceLeafIdentity,
+    originalOutcome: z.literal('unknown'),
+  })
+  .strict();
+export type DockerResourceClosedWriter = z.infer<typeof DockerResourceClosedWriter>;
 export const DockerResourceAttempt = z.discriminatedUnion('state', [
   base.extend({
     state: z.literal('helper'),
@@ -84,6 +99,22 @@ export const DockerResourceAttempt = z.discriminatedUnion('state', [
     identity: DockerResourceLeafIdentity,
     observationDigest: digest,
     task: DockerContinuationTask.refine((task) => task.phase === 'completed' && task.role === 'leaf-helper'),
+  }),
+  base.extend({
+    state: z.literal('closed-writer'),
+    task: DockerContinuationTask.refine(
+      (task) => task.role === 'leaf-helper' && ['start-issued', 'running', 'completed'].includes(task.phase)
+    ),
+    closure: DockerResourceClosedWriter,
+  }),
+  base.extend({
+    state: z.literal('observed-after-closure'),
+    task: DockerContinuationTask.refine(
+      (task) => task.role === 'leaf-helper' && ['start-issued', 'running', 'completed'].includes(task.phase)
+    ),
+    closure: DockerResourceClosedWriter,
+    identity: DockerResourceLeafIdentity,
+    observationDigest: digest,
   }),
 ]);
 export type DockerResourceAttempt = z.infer<typeof DockerResourceAttempt>;
@@ -264,6 +295,19 @@ export class DockerResourceRevisionStore {
           value.attempts.length
       )
         refuse();
+      for (const item of value.attempts) {
+        if (item.state === 'closed-writer' || item.state === 'observed-after-closure') {
+          if (
+            !('containerId' in item.task) ||
+            item.task.containerId !== item.closure.containerId ||
+            item.task.imageId !== item.closure.imageId ||
+            item.task.configurationDigest !== item.closure.configurationDigest
+          )
+            refuse();
+          if (item.state === 'observed-after-closure' && !isDeepStrictEqual(item.identity, item.closure.identity))
+            refuse();
+        }
+      }
       this.#current();
       return value;
     } finally {
@@ -283,12 +327,34 @@ export class DockerResourceRevisionStore {
   ): Array<{ desired: DockerResourceDesiredRevision; attempt: DockerResourceAttempt }> {
     const state = this.#read();
     const attempt = [...state.attempts].reverse().find((item) => item.containerId === row.destination?.containerId);
-    if (!attempt || attempt.state === 'helper' || !sameKey(attempt, row, attempt.revision)) return [];
+    if (
+      !attempt ||
+      attempt.state === 'helper' ||
+      attempt.state === 'closed-writer' ||
+      !sameKey(attempt, row, attempt.revision)
+    )
+      return [];
     const desired = state.desired.find(
       (item) => item.revision === attempt.revision && item.owner === (row.owner ?? null)
     );
     if (!desired) refuse();
     return [structuredClone({ desired, attempt })];
+  }
+  history(row: DockerEmployeeContinuationRecord): Array<{
+    desired: DockerResourceDesiredRevision;
+    attempt: DockerResourceAttempt;
+  }> {
+    const state = this.#read();
+    return state.attempts
+      .filter((item) => item.containerId === row.destination?.containerId)
+      .map((attempt) => {
+        if (!sameKey(attempt, row, attempt.revision)) refuse();
+        const desired = state.desired.find(
+          (item) => item.revision === attempt.revision && item.owner === (row.owner ?? null)
+        );
+        if (!desired) refuse();
+        return structuredClone({ desired, attempt });
+      });
   }
   attempt(row: DockerEmployeeContinuationRecord, revision: string): DockerResourceAttempt | undefined {
     const all = this.#read().attempts.filter(
@@ -434,15 +500,37 @@ export class DockerResourceRevisionStore {
       )
         refuse();
       if (!before) {
-        if (checked.state === 'applied' || (checked.state === 'helper' && checked.task.phase !== 'create-issued'))
+        if (
+          checked.state === 'applied' ||
+          checked.state === 'closed-writer' ||
+          checked.state === 'observed-after-closure' ||
+          (checked.state === 'helper' && checked.task.phase !== 'create-issued')
+        )
           refuse();
       } else if (before.state === 'helper') {
         if (checked.state === 'helper') {
           if (!allowedDockerTaskTransition(before.task, checked.task)) refuse();
+        } else if (checked.state === 'closed-writer') {
+          if (
+            !isDeepStrictEqual(before.task, checked.task) ||
+            !('containerId' in before.task) ||
+            checked.closure.containerId !== before.task.containerId ||
+            checked.closure.imageId !== before.task.imageId ||
+            checked.closure.configurationDigest !== before.task.configurationDigest
+          )
+            refuse();
         } else if (
           checked.state !== 'applied' ||
           before.task.phase !== 'completed' ||
           !isDeepStrictEqual(before.task, checked.task)
+        )
+          refuse();
+      } else if (before.state === 'closed-writer') {
+        if (
+          checked.state !== 'observed-after-closure' ||
+          !isDeepStrictEqual(before.task, checked.task) ||
+          !isDeepStrictEqual(before.closure, checked.closure) ||
+          !isDeepStrictEqual(checked.identity, before.closure.identity)
         )
           refuse();
       } else refuse();

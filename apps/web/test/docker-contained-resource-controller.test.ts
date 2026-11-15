@@ -528,3 +528,175 @@ describe('effective policy proof clock denial', () => {
     expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
   });
 });
+
+describe('terminal high-only writer closure without invented ACK or replay', () => {
+  it('lost START and ACK may close independently and adopt actual48; original cursor remains unknown', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('lost start');
+    const original = f.store.attempt(f.row(), f.desired.revision)!;
+    f.corruptLatestLog();
+    const effects = { creates: [...f.creates], starts: [...f.starts] };
+    f.changeWritePin(undefined); // Retained canonical issued image is read authority, not a new write selection.
+    const result = await f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result).toMatchObject({
+      state: 'observed',
+      writerClosed: true,
+      originalOutcome: 'unknown',
+      actualMemoryHighBytes: 48 * 1024 ** 3,
+      enforcement: 'fresh-native-readback',
+      allowedActions: [],
+    });
+    const after = f.store.attempt(f.row(), f.desired.revision)!;
+    expect(after.state).toBe('observed-after-closure');
+    expect('task' in after && after.task).toEqual('task' in original && original.task);
+    expect('task' in after && after.task.phase).toBe('start-issued');
+    expect(await f.controller.read(f.row())).toEqual({ ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+    expect({ creates: f.creates, starts: f.starts }).toEqual(effects);
+  });
+  it('known nonzero terminal leaves old outcome unknown and permits only a new explicit revision/writer', async () => {
+    const f = await revisionFixture();
+    f.failHelper('leaf-helper');
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'HELPER_FAILED'
+    );
+    f.setHigh(16 * 1024 ** 3);
+    const original = f.store.attempt(f.row(), f.desired.revision)!;
+    expect(await f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).toMatchObject({
+      state: 'closed-writer',
+      originalOutcome: 'unknown',
+      enforcement: 'not-observed',
+      allowedActions: ['new-revision'],
+    });
+    const count = f.starts.length;
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'NEW_REVISION_REQUIRED'
+    );
+    expect(f.starts).toHaveLength(count);
+    const next = { ...f.desired, revision: '55555555-5555-4555-8555-555555555555' };
+    await f.store.approve(next, f.desired.revision, f.current);
+    f.failHelper('');
+    expect((await f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).state).toBe('applied');
+    expect(f.starts).toHaveLength(count + 1);
+    const previous = f.store.history(f.row())[0]!.attempt;
+    expect(previous.state).toBe('closed-writer');
+    expect('task' in previous && previous.task).toEqual('task' in original && original.task);
+  });
+  it.each([
+    'running',
+    'created',
+    'restarting',
+    'wrong-image',
+    'wrong-config',
+    'foreign-mount',
+    'wrong-command',
+    'changed-pid',
+  ] as const)('%s cannot earn NoFutureWriter or another START', async (kind) => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    const before = f.store.attempt(f.row(), f.desired.revision),
+      starts = [...f.starts],
+      creates = [...f.creates];
+    f.mutateRevisionHelper((raw) => {
+      const state = raw.State as Record<string, unknown>,
+        host = raw.HostConfig as Record<string, unknown>;
+      if (kind === 'running') {
+        state.Status = 'running';
+        state.Running = true;
+        state.Pid = 300;
+      }
+      if (kind === 'created') state.Status = 'created';
+      if (kind === 'restarting') state.Restarting = true;
+      if (kind === 'wrong-image') raw.Image = 'sha256:' + '9'.repeat(64);
+      if (kind === 'wrong-config') host.RestartPolicy = { Name: 'always', MaximumRetryCount: 0 };
+      if (kind === 'foreign-mount')
+        (raw.Mounts as unknown[]).push({ Type: 'bind', Source: '/foreign', Destination: '/foreign', RW: true });
+      if (kind === 'wrong-command') (raw.Config as { Cmd: string[] }).Cmd.push('--unapproved');
+      if (kind === 'changed-pid') state.Pid = 99;
+    });
+    await expect(f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    expect(f.store.attempt(f.row(), f.desired.revision)).toEqual(before);
+    expect(f.starts).toEqual(starts);
+    expect(f.creates).toEqual(creates);
+  });
+  it('closed old writer is freshly checked again before a new revision can dispatch', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    f.setHigh(16 * 1024 ** 3);
+    await f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current);
+    const next = { ...f.desired, revision: '55555555-5555-4555-8555-555555555555' };
+    await f.store.approve(next, f.desired.revision, f.current);
+    f.mutateRevisionHelper((raw) => {
+      (raw.State as Record<string, unknown>).Running = true;
+    });
+    const before = [...f.starts];
+    await expect(f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).rejects.toThrow();
+    expect(f.starts).toEqual(before);
+    expect(f.store.attempt(f.row(), next.revision)).toBeUndefined();
+  });
+});
+
+describe('closed-writer finalization and currentness', () => {
+  it('lost durable closure finalizer retains full closed state; fresh reader independently adopts without START replay', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    const starts = [...f.starts],
+      nativeRename = fs.renameSync,
+      nativeSync = fs.fsyncSync;
+    let renamed = false;
+    const rename = vi.spyOn(fs, 'renameSync').mockImplementation((...args) => {
+      nativeRename(...args);
+      renamed = true;
+    });
+    const sync = vi.spyOn(fs, 'fsyncSync').mockImplementation((fd) => {
+      nativeSync(fd);
+      if (renamed) throw Error('lost closure finalize');
+    });
+    await expect(f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow(
+      'lost closure'
+    );
+    rename.mockRestore();
+    sync.mockRestore();
+    expect(() => f.store.attempt(f.row(), f.desired.revision)).toThrow('PUBLICATION_UNCONFIRMED');
+    const fresh = new DockerResourceRevisionStore(f.store.directory);
+    revisionCleanups.push(() => fresh.close());
+    expect(fresh.attempt(f.row(), f.desired.revision)?.state).toBe('closed-writer');
+    expect((await f.withRevisions(fresh).reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).state).toBe(
+      'observed'
+    );
+    expect(f.starts).toEqual(starts);
+  });
+  it('a helper which changes from exited to running across the native probe cannot close', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    let checks = 0;
+    f.beforeRun((args) => {
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        const attempt = f.store.attempt(f.row(), f.desired.revision)!;
+        if (
+          'task' in attempt &&
+          'containerId' in attempt.task &&
+          args[2] === attempt.task.containerId &&
+          ++checks === 3
+        )
+          f.mutateRevisionHelper((raw) => {
+            (raw.State as Record<string, unknown>).Running = true;
+          });
+      }
+    });
+    await expect(f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('helper');
+  });
+  it('revoked actor during retained image validation cannot publish closure', async () => {
+    const f = await revisionFixture();
+    f.loseStart();
+    await expect(f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow();
+    f.beforeNextImage(f.revoke);
+    await expect(f.controller.reconcileMemoryHigh(f.row(), f.desired.revision, f.current)).rejects.toThrow('revoked');
+    expect(f.store.attempt(f.row(), f.desired.revision)?.state).toBe('helper');
+  });
+});

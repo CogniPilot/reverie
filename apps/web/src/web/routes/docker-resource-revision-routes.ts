@@ -80,6 +80,14 @@ export function registerDockerResourceRevisionRoutes(
       return service.observe(employeeId, grant.owner, grant.require);
     })
   );
+  app.post('/api/company/employees/:id/docker-resources/reconcile', async (req, reply) =>
+    run(reply, async () => {
+      const grant = authority(req),
+        employeeId = uuid.parse((req.params as { id: string }).id);
+      const body = z.object({ revision: uuid }).strict().parse(req.body);
+      return service.reconcile(employeeId, grant.owner, body.revision, grant.require);
+    })
+  );
   app.post('/api/company/employees/:id/docker-resources/apply', async (req, reply) =>
     run(reply, async () => {
       const grant = authority(req),
