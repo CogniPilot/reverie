@@ -25,12 +25,15 @@ async function fixture(
     readFailure?: string;
     summary?: Record<string, unknown>;
     actualLimits?: Record<string, unknown>;
+    binding?: { employeeId: string; sessionId: string; sessionGeneration: number };
+    writerClosed?: boolean;
+    intentRetired?: boolean;
   } = {}
 ) {
   const employee = {
-    id: eid,
-    sessionId: sid,
-    sessionGeneration: 9,
+    id: options.binding?.employeeId ?? eid,
+    sessionId: options.binding?.sessionId ?? sid,
+    sessionGeneration: options.binding?.sessionGeneration ?? 9,
     name: 'River',
     position: 'Engineer',
     permissions: EmployeePermissionsSchema.parse({}),
@@ -39,6 +42,7 @@ async function fixture(
     effectiveBoardPermissions: {},
     boardPermissionSources: {},
   };
+  const profileBase = '/api/company/employees/' + employee.id;
   const company = { canManage: true, boxedRuntime: true, settings: { ownerName: 'Owner' }, employees: [employee] };
   const h = await createHarness({ company });
   handles.push(h);
@@ -47,7 +51,12 @@ async function fixture(
     owner = options.owner !== false;
   let actual = 16 * 1024 ** 3,
     allowed = options.action ?? ['apply'];
-  let currentRevision = revision,
+  let summary = options.summary;
+  let rootFailure: { status: number; error: unknown } | null = null;
+  const initialDesired = summary?.desired as { revision: string } | null | undefined;
+  let closed = options.writerClosed === true,
+    retired = options.intentRetired === true;
+  let currentRevision = initialDesired?.revision ?? revision,
     defaultHigh = high;
   const original = h.app._chatApi.bind(h.app);
   h.app._chatApi = async (path: string, request?: { method?: string; body?: unknown }) => {
@@ -56,14 +65,14 @@ async function fixture(
       return { ok: true, data: { self: owner ? 'owner' : 'agent', canSetOwn: owner } };
     if (
       path.startsWith('/api/company/docker-resources') ||
-      path.startsWith(base + '/docker-resources') ||
-      path.startsWith(base + '/docker-pool')
+      path.startsWith(profileBase + '/docker-resources') ||
+      path.startsWith(profileBase + '/docker-pool')
     ) {
       const method = request?.method ?? 'GET';
       calls.push({ path, method, body: structuredClone(request?.body) });
       if (method !== 'GET' && options.reply) return options.reply(path, request?.body);
-      if (path === '/api/company/docker-resources' && options.summary)
-        return { ok: true, data: structuredClone(options.summary) };
+      if (path === '/api/company/docker-resources' && rootFailure) return { ok: false, ...rootFailure };
+      if (path === '/api/company/docker-resources' && summary) return { ok: true, data: structuredClone(summary) };
       if (path === '/api/company/docker-resources')
         return {
           ok: true,
@@ -74,9 +83,9 @@ async function fixture(
               : null,
             employees: [
               {
-                employeeId: eid,
-                sessionId: sid,
-                sessionGeneration: 9,
+                employeeId: employee.id,
+                sessionId: employee.sessionId,
+                sessionGeneration: employee.sessionGeneration,
                 state: 'not-observed',
                 allowedActions: allowed,
                 enforcement: 'not-observed',
@@ -84,15 +93,15 @@ async function fixture(
             ],
           },
         };
-      if (path === base + '/docker-resources' && options.readFailure)
+      if (path === profileBase + '/docker-resources' && options.readFailure)
         return { ok: false, error: { code: options.readFailure } };
-      if (path === base + '/docker-resources')
+      if (path === profileBase + '/docker-resources')
         return {
           ok: true,
           data: {
-            employeeId: eid,
-            sessionId: sid,
-            sessionGeneration: options.malformed ? 8 : 9,
+            employeeId: employee.id,
+            sessionId: employee.sessionId,
+            sessionGeneration: options.malformed ? employee.sessionGeneration - 1 : employee.sessionGeneration,
             revision: approved ? currentRevision : null,
             desiredMemoryHighBytes: approved ? high : null,
             actualMemoryHighBytes: actual,
@@ -101,16 +110,19 @@ async function fixture(
             approved: true,
             approvalSource: 'original-policy',
             approvedRevision: null,
+            writerClosed: closed || undefined,
+            intentRetired: retired || undefined,
+            originalOutcome: closed || retired ? 'unknown' : undefined,
             enforcement: 'fresh-native-readback',
             allowedActions: allowed,
           },
         };
-      if (path === base + '/docker-pool/status')
+      if (path === profileBase + '/docker-pool/status')
         return {
           ok: true,
           data: {
-            sessionId: sid,
-            sessionGeneration: 9,
+            sessionId: employee.sessionId,
+            sessionGeneration: employee.sessionGeneration,
             state: 'reconciliation-required',
             allowedActions: ['reconcile-pool'],
             scopeDigest: 'a'.repeat(64),
@@ -144,6 +156,18 @@ async function fixture(
     writes,
     calls,
     click,
+    setRootFailure: (v: { status: number; error: unknown } | null) => {
+      rootFailure = v;
+    },
+    setSummary: (v: Record<string, unknown>) => {
+      summary = v;
+    },
+    setClosed: (v: boolean) => {
+      closed = v;
+    },
+    setRetired: (v: boolean) => {
+      retired = v;
+    },
     setOwner: (v: boolean) => {
       owner = v;
     },
@@ -279,7 +303,7 @@ it('keeps a new same-value approval explicit and collapsed after a closed writer
   expect(details.open).toBe(false);
   expect(f.button('Approve new 48 GiB default revision')).toBeDefined();
   expect(f.writes()).toEqual([]);
-  const employee = await fixture({ action: ['new-revision'] });
+  const employee = await fixture({ action: ['reconcile', 'new-revision'], writerClosed: true });
   expect(employee.panel().textContent).toContain('original writer is closed');
   expect(employee.button('Apply approved soft RAM default')).toBeUndefined();
   expect(employee.button('Review resource default')).toBeDefined();
@@ -321,7 +345,8 @@ it('keeps closed-writer proof distinct from historical success and unobserved de
   const f = await fixture({
     action: ['reconcile'],
     reply: async () => {
-      f.setAllowed(['new-revision']);
+      f.setAllowed(['reconcile', 'new-revision']);
+      f.setClosed(true);
       return {
         ok: true,
         data: {
@@ -522,3 +547,303 @@ it.each([{ cpuWeight: 0 }, { allowedCpus: [1, 1] }, { memoryHighBytes: 0 }, { cp
     expect(f.writes()).toEqual([]);
   }
 );
+type PhaseRow = {
+  employeeId: string;
+  sessionId: string;
+  sessionGeneration: number;
+  state: string;
+  allowedActions: string[];
+  writerClosed?: boolean;
+  intentRetired?: boolean;
+  originalOutcome?: string;
+  code?: string;
+};
+type PhaseStatus = Record<string, unknown> & {
+  desired: null | { revision: string; scope: string; memoryHighBytes: number };
+  employees: PhaseRow[];
+  allowedActions: string[];
+};
+const phaseStatuses = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-phase-statuses.json', import.meta.url), 'utf8')
+) as Record<string, PhaseStatus>;
+const defaultNotIssued = JSON.parse(
+  readFileSync(new URL('./fixtures/docker-resource-default-not-issued.json', import.meta.url), 'utf8')
+) as { success: false; error: { code: string; action: string; revision: string; publication: string } };
+const actionLabels: Record<string, string> = {
+  apply: 'Apply approved soft RAM default',
+  'continue-original': 'Continue original resource application',
+  'abandon-original': 'Abandon unstarted resource application',
+  reconcile: 'Check original resource application',
+  'new-revision': 'Review resource default',
+};
+const targetRow = (status: PhaseStatus) =>
+  status.employees.find((row) => row.employeeId === '22222222-2222-4222-8222-222222222222')!;
+const nonces = (h: Awaited<ReturnType<typeof createHarness>>, values: string[]) =>
+  Object.defineProperty(h.window.crypto, 'randomUUID', {
+    configurable: true,
+    value: () => {
+      const next = values.shift();
+      if (!next) throw Error('Unexpected additional nonce');
+      return next;
+    },
+  });
+it('offers only actual producer actions across the complete resource phase matrix', async () => {
+  expect(Object.keys(phaseStatuses).sort()).toEqual(
+    [
+      'applied',
+      'closed-writer',
+      'completed',
+      'create-issued',
+      'created',
+      'failure-before-intent',
+      'no-desired',
+      'none',
+      'observed',
+      'observed-after-closure',
+      'observed-after-retirement',
+      'running',
+      'start-issued',
+      'unstarted-retired',
+    ].sort()
+  );
+  for (const status of Object.values(phaseStatuses)) {
+    const target = targetRow(status);
+    const f = await fixture({
+      summary: status,
+      binding: target,
+      action: target.allowedActions,
+      readFailure: 'RESOURCE_READBACK_UNCONFIRMED',
+    });
+    for (const [action, label] of Object.entries(actionLabels))
+      expect(f.button(label) !== undefined).toBe(target.allowedActions.includes(action));
+    expect(f.writes()).toEqual([]);
+    const company = await fixture({ view: 'company', summary: status });
+    expect(
+      company.button(status.desired ? 'Approve new 48 GiB default revision' : 'Approve 48 GiB soft RAM default') !==
+        undefined
+    ).toBe(status.allowedActions.includes('approve-default'));
+    expect(company.writes()).toEqual([]);
+  }
+});
+it('continues only the explicitly offered original resource attempt despite its local unknown latch', async () => {
+  const f = await fixture({
+    reply: async () => ({ ok: false, status: 503, error: { code: 'ORIGINAL_OUTCOME_UNKNOWN' } }),
+  });
+  await f.click('Apply approved soft RAM default');
+  expect(f.writes()).toHaveLength(1);
+  f.setAllowed(['continue-original', 'abandon-original']);
+  await f.click('Refresh resources');
+  expect(f.button('Apply approved soft RAM default')).toBeUndefined();
+  const button = f.button('Continue original resource application')!;
+  button.click();
+  button.click();
+  await f.h.flush();
+  expect(f.writes().map((v) => v.path)).toEqual([
+    base + '/docker-resources/apply',
+    base + '/docker-resources/continue',
+  ]);
+  expect(f.writes().map((v) => v.body)).toEqual([{ revision }, { revision }]);
+  await f.click('Refresh resources');
+  expect(f.writes()).toHaveLength(2);
+});
+it('retires an explicitly offered unstarted intent without claiming a stopped writer or applying limits', async () => {
+  const f = await fixture({
+    action: ['continue-original', 'abandon-original'],
+    reply: async (path) => {
+      expect(path).toBe(base + '/docker-resources/abandon');
+      f.setAllowed(['reconcile', 'new-revision']);
+      f.setRetired(true);
+      return {
+        ok: true,
+        data: {
+          employeeId: eid,
+          sessionId: sid,
+          sessionGeneration: 9,
+          revision,
+          state: 'unstarted-retired',
+          intentRetired: true,
+          originalOutcome: 'unknown',
+          enforcement: 'not-observed',
+          allowedActions: ['reconcile', 'new-revision'],
+        },
+      };
+    },
+  });
+  expect(f.writes()).toEqual([]);
+  await f.click('Abandon unstarted resource application');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.panel().textContent).toContain('does not prove that a container was stopped');
+  expect(f.panel().textContent).toContain('Actual soft RAM: 16 GiB');
+  expect(f.button('Continue original resource application')).toBeUndefined();
+  expect(f.button('Check original resource application')).toBeDefined();
+  expect(f.button('Review resource default')).toBeDefined();
+});
+it('never shows original continuation or abandonment for an issued helper', async () => {
+  const f = await fixture({ action: ['reconcile'] });
+  expect(f.button('Continue original resource application')).toBeUndefined();
+  expect(f.button('Abandon unstarted resource application')).toBeUndefined();
+  expect(f.button('Check original resource application')).toBeDefined();
+  expect(f.writes()).toEqual([]);
+});
+it('rejects a retired-intent reply that falsely claims terminal writer closure', async () => {
+  const f = await fixture({
+    action: ['continue-original', 'abandon-original'],
+    reply: async () => ({
+      ok: true,
+      data: {
+        employeeId: eid,
+        sessionId: sid,
+        sessionGeneration: 9,
+        revision,
+        state: 'unstarted-retired',
+        intentRetired: true,
+        writerClosed: true,
+        originalOutcome: 'unknown',
+        enforcement: 'not-observed',
+        allowedActions: ['reconcile', 'new-revision'],
+      },
+    }),
+  });
+  await f.click('Abandon unstarted resource application');
+  expect(f.panel().textContent).toContain('original resource outcome remains unconfirmed');
+  expect(f.writes()).toHaveLength(1);
+});
+it('renders actual producer convergence failures as attention without extra employee reads or false completion', async () => {
+  const status = phaseStatuses['failure-before-intent']!;
+  const f = await fixture({ view: 'company', summary: status });
+  expect(f.panel().querySelector('[role="alert"]')?.textContent).toContain(
+    '1 employee resource application needs attention'
+  );
+  expect(f.panel().querySelector('[role="alert"]')?.textContent).not.toContain('DOCKER_');
+  const details = f.panel().querySelector('.ca-docker-resource-details') as HTMLDetailsElement;
+  expect(details.open).toBe(false);
+  expect(details.textContent).toContain(targetRow(status).code);
+  expect(f.calls.every((call) => call.path === '/api/company/docker-resources')).toBe(true);
+  expect(f.writes()).toEqual([]);
+});
+it('uses the actual default prewrite refusal only after fresh authenticated status and a later explicit approval', async () => {
+  const f = await fixture({
+    view: 'company',
+    summary: phaseStatuses.none,
+    reply: async (_path, body) => {
+      const input = body as { revision: string };
+      if (input.revision === defaultNotIssued.error.revision) {
+        f.setSummary(phaseStatuses.created!);
+        return { ok: false, status: 409, error: structuredClone(defaultNotIssued.error) };
+      }
+      return { ok: false, status: 503, error: { code: 'NEW_REPLY_UNKNOWN' } };
+    },
+  });
+  const next = '99999999-9999-4999-8999-999999999999';
+  nonces(f.h, [defaultNotIssued.error.revision, next]);
+  await f.click('Approve new 48 GiB default revision');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.panel().textContent).toContain('previous default approval was not issued');
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  expect(f.calls.filter((call) => call.path === '/api/company/docker-resources')).toHaveLength(2);
+  f.setSummary(phaseStatuses['unstarted-retired']!);
+  await f.click('Refresh resources');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Approve new 48 GiB default revision')).toBeDefined();
+  await f.click('Approve new 48 GiB default revision');
+  expect(f.writes().map((v) => v.body)).toEqual([
+    {
+      revision: defaultNotIssued.error.revision,
+      expectedRevision: phaseStatuses.none!.desired!.revision,
+      scope: 'all-current-and-future',
+      memoryHighBytes: high,
+    },
+    {
+      revision: next,
+      expectedRevision: phaseStatuses['unstarted-retired']!.desired!.revision,
+      scope: 'all-current-and-future',
+      memoryHighBytes: high,
+    },
+  ]);
+});
+it('retains a valid not-issued receipt until a fresh authenticated status read succeeds', async () => {
+  const f = await fixture({
+    view: 'company',
+    summary: phaseStatuses.none,
+    reply: async () => {
+      f.setRootFailure({ status: 401, error: 'Sign in again' });
+      return { ok: false, status: 409, error: structuredClone(defaultNotIssued.error) };
+    },
+  });
+  nonces(f.h, [defaultNotIssued.error.revision]);
+  await f.click('Approve new 48 GiB default revision');
+  expect(f.writes()).toHaveLength(1);
+  expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+  f.setRootFailure(null);
+  await f.click('Refresh resources');
+  expect(f.button('Approve new 48 GiB default revision')).toBeDefined();
+  expect(f.writes()).toHaveLength(1);
+});
+it('never treats a generic denial wrong nonce or wrong action as the scoped not-issued receipt', async () => {
+  const variants = [
+    { status: 409, error: { code: defaultNotIssued.error.code } },
+    { status: 403, error: defaultNotIssued.error },
+    { status: 409, error: { ...defaultNotIssued.error, revision: '99999999-9999-4999-8999-999999999999' } },
+    { status: 409, error: { ...defaultNotIssued.error, action: 'apply' } },
+    { status: 409, error: { ...defaultNotIssued.error, extra: true } },
+  ];
+  for (const variant of variants) {
+    const f = await fixture({
+      view: 'company',
+      summary: phaseStatuses.none,
+      reply: async () => ({ ok: false, ...structuredClone(variant) }),
+    });
+    nonces(f.h, [defaultNotIssued.error.revision]);
+    await f.click('Approve new 48 GiB default revision');
+    expect(f.writes()).toHaveLength(1);
+    expect(f.calls.filter((v) => v.path === '/api/company/docker-resources')).toHaveLength(1);
+    await f.click('Refresh resources');
+    expect(f.button('Approve new 48 GiB default revision')).toBeUndefined();
+    expect(f.writes()).toHaveLength(1);
+  }
+});
+it('does not let an old not-issued reply release a newer pending default nonce', async () => {
+  const replies: Array<{ body: unknown; resolve: (v: unknown) => void }> = [];
+  const f = await fixture({
+    view: 'company',
+    summary: phaseStatuses.none,
+    reply: async (_path, body) =>
+      new Promise((resolve) => {
+        replies.push({ body, resolve });
+      }),
+  });
+  // Mount a second real component to model an older view with a delayed reply.
+  // The shell intentionally opens only one settings dialog; no decision owner is mocked here.
+  const secondDialog = f.h.document.createElement('dialog') as HTMLDialogElement;
+  f.h.document.body.append(secondDialog);
+  secondDialog.showModal();
+  const registry = f.h.window as unknown as {
+    ReverieDockerResources: { mount(shell: unknown, container: HTMLElement, dialog: HTMLDialogElement): unknown };
+  };
+  registry.ReverieDockerResources.mount(f.h.shell, secondDialog, secondDialog);
+  await f.h.flush();
+  const panels = [...f.h.document.querySelectorAll('.ca-docker-resources')];
+  expect(panels).toHaveLength(2);
+  const newer = '99999999-9999-4999-8999-999999999999';
+  nonces(f.h, [defaultNotIssued.error.revision, newer]);
+  (panels[0]!.querySelector('[aria-label="Approve new 48 GiB default revision"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  (panels[1]!.querySelector('[aria-label="Approve new 48 GiB default revision"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(replies).toHaveLength(2);
+  replies[0]!.resolve({ ok: false, status: 409, error: structuredClone(defaultNotIssued.error) });
+  await f.h.flush();
+  replies[1]!.resolve({ ok: false, status: 503, error: { code: 'NEWER_OUTCOME_UNKNOWN' } });
+  await f.h.flush();
+  (panels[1]!.querySelector('[aria-label="Refresh Docker resources"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(panels[1]!.querySelector('[aria-label="Approve new 48 GiB default revision"]')).toBeNull();
+  expect(f.writes()).toHaveLength(2);
+  const confirmed = structuredClone(phaseStatuses.none!);
+  confirmed.desired!.revision = newer;
+  f.setSummary(confirmed);
+  (panels[1]!.querySelector('[aria-label="Refresh Docker resources"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(panels[1]!.querySelector('[aria-label="Approve new 48 GiB default revision"]')).not.toBeNull();
+  expect(f.writes()).toHaveLength(2);
+});

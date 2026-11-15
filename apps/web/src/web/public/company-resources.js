@@ -1809,8 +1809,66 @@
     v === null || (v && uuid(v.revision) && v.scope === 'all-current-and-future' && bytes(v.memoryHighBytes));
   const actions = (v) =>
     Array.isArray(v) &&
-    v.every((a) => ['apply', 'reconcile', 'new-revision'].includes(a)) &&
+    v.every((a) => ['apply', 'continue-original', 'abandon-original', 'reconcile', 'new-revision'].includes(a)) &&
     new Set(v).size === v.length;
+  const closedWriter = (v) => v?.writerClosed === true && v.intentRetired !== true && v.originalOutcome === 'unknown';
+  const retiredIntent = (v) => v?.intentRetired === true && v.writerClosed !== true && v.originalOutcome === 'unknown';
+  const recoveryActions = (v, legacy = false) =>
+    actions(v) &&
+    ((v.length === 2 && v.includes('reconcile') && v.includes('new-revision')) ||
+      (legacy && v.length === 1 && v[0] === 'new-revision'));
+  const code = (v) => typeof v === 'string' && /^[A-Z][A-Z0-9_]{2,127}$/.test(v);
+  const companyStatus = (v) =>
+    desired(v?.desired) &&
+    Array.isArray(v.employees) &&
+    v.employees.length <= 256 &&
+    v.employees.every(
+      (r) =>
+        uuid(r.employeeId) &&
+        uuid(r.sessionId) &&
+        Number.isSafeInteger(r.sessionGeneration) &&
+        r.sessionGeneration > 0 &&
+        [
+          'helper',
+          'closed-writer',
+          'unstarted-retired',
+          'observed',
+          'applied',
+          'not-observed',
+          'offline-or-unbound',
+        ].includes(r.state) &&
+        r.enforcement === 'not-observed' &&
+        (r.code === undefined || code(r.code)) &&
+        (r.writerClosed !== true || closedWriter(r)) &&
+        (r.intentRetired !== true || retiredIntent(r)) &&
+        (r.state !== 'closed-writer' || (closedWriter(r) && recoveryActions(r.allowedActions, true))) &&
+        (r.state !== 'unstarted-retired' || (retiredIntent(r) && recoveryActions(r.allowedActions)))
+    );
+  class ApiFailure extends Error {
+    constructor(status, detail) {
+      super(errorText(detail));
+      this.status = status;
+      this.detail =
+        detail && typeof detail === 'object'
+          ? Object.freeze(Array.isArray(detail) ? [...detail] : { ...detail })
+          : detail;
+    }
+    defaultNotIssued(revision) {
+      const d = this.detail;
+      return (
+        this.status === 409 &&
+        d &&
+        typeof d === 'object' &&
+        !Array.isArray(d) &&
+        Object.keys(d).sort().join(',') === 'action,code,publication,revision' &&
+        code(d.code) &&
+        d.action === 'approve-default' &&
+        d.publication === 'not-issued' &&
+        uuid(revision) &&
+        d.revision === revision
+      );
+    }
+  }
   const digest = (v) => typeof v === 'string' && /^[a-f0-9]{64}$/.test(v);
   const pending = new Map();
   const errorText = (failure) =>
@@ -1871,7 +1929,7 @@
     }
     async api(path, request) {
       const r = await this.shell.app._chatApi(path, request);
-      if (!r.ok) throw Error(errorText(r.error));
+      if (!r.ok) throw new ApiFailure(r.status, r.error);
       return r.data;
     }
     async owner() {
@@ -1936,7 +1994,9 @@
         this.content.replaceChildren();
         this.snapshot = {
           revision: overview.desired?.revision,
-          allowed: actions(row.allowedActions) ? row.allowedActions.filter((a) => a !== 'apply') : [],
+          allowed: actions(row.allowedActions) ? row.allowedActions : [],
+          retired: retiredIntent(row),
+          closed: closedWriter(row),
         };
         this.content.append(
           this.note(
@@ -1981,6 +2041,8 @@
           this.snapshot = {
             revision: overview.desired?.revision,
             allowed: actions(r.allowedActions) ? r.allowedActions : [],
+            retired: retiredIntent(r) || retiredIntent(row),
+            closed: closedWriter(r) || closedWriter(row),
           };
         } else {
           this.status.textContent = 'Running limits unconfirmed';
@@ -1994,6 +2056,30 @@
           );
         if (this.snapshot?.revision) {
           const r = this.snapshot.revision;
+          if (this.snapshot.allowed.includes('continue-original'))
+            this.controls.append(
+              this.shell.button(
+                'ca-btn',
+                'Continue original resource application',
+                () => this.change('continue-original', r),
+                { text: 'Continue original resource application' }
+              )
+            );
+          if (this.snapshot.allowed.includes('abandon-original'))
+            this.controls.append(
+              this.shell.button(
+                'ca-btn',
+                'Abandon unstarted resource application',
+                () => this.change('abandon-original', r),
+                { text: 'Abandon unstarted resource application' }
+              )
+            );
+          if (this.snapshot.allowed.includes('continue-original') || this.snapshot.allowed.includes('abandon-original'))
+            this.content.append(
+              this.note(
+                'Continuing may apply the already-approved soft RAM default. Abandoning retires its unstarted application intent; it does not stop a container or change running limits.'
+              )
+            );
           if (this.snapshot.allowed.includes('reconcile'))
             this.controls.append(
               this.shell.button('ca-btn', 'Check original resource application', () => this.change('reconcile', r), {
@@ -2010,7 +2096,11 @@
         if (this.snapshot?.allowed.includes('new-revision')) {
           this.content.append(
             this.note(
-              'The original writer is closed. Review and approve a new default revision before another application. The original helper is never restarted.'
+              this.snapshot.retired
+                ? 'The unstarted application intent is retired. This does not prove that a container was stopped. Review and approve a new default revision before another application.'
+                : this.snapshot.closed
+                  ? 'The original writer is closed. Review and approve a new default revision before another application. The original helper is never restarted.'
+                  : 'Review and approve a new default revision before another resource application.'
             )
           );
           this.controls.append(
@@ -2131,7 +2221,8 @@
           throw Error('Resource action changed. Refresh this profile.');
         const key = this.requestKey(revision);
         pending.set(key, { revision });
-        const result = await this.api(`${this.path}/docker-resources/${action}`, {
+        const route = action === 'continue-original' ? 'continue' : action === 'abandon-original' ? 'abandon' : action;
+        const result = await this.api(`${this.path}/docker-resources/${route}`, {
           method: 'POST',
           body: { revision },
         });
@@ -2141,17 +2232,24 @@
           !this.matches(result) ||
           result.employeeId !== this.binding.id ||
           result.revision !== revision ||
-          (action === 'apply'
+          (action === 'apply' || action === 'continue-original'
             ? !['observed', 'applied'].includes(result.state) || result.enforcement !== 'fresh-native-readback'
-            : result.writerClosed !== true ||
-              result.originalOutcome !== 'unknown' ||
-              (result.state === 'observed'
-                ? result.enforcement !== 'fresh-native-readback'
-                : result.state !== 'closed-writer' ||
-                  result.enforcement !== 'not-observed' ||
-                  !Array.isArray(result.allowedActions) ||
-                  result.allowedActions.length !== 1 ||
-                  result.allowedActions[0] !== 'new-revision'))
+            : action === 'abandon-original'
+              ? !retiredIntent(result) ||
+                result.state !== 'unstarted-retired' ||
+                result.enforcement !== 'not-observed' ||
+                !recoveryActions(result.allowedActions) ||
+                Object.hasOwn(result, 'policy')
+              : (!closedWriter(result) && !retiredIntent(result)) ||
+                (result.state === 'observed'
+                  ? result.enforcement !== 'fresh-native-readback'
+                  : result.enforcement !== 'not-observed' ||
+                    Object.hasOwn(result, 'policy') ||
+                    (result.state === 'closed-writer'
+                      ? !closedWriter(result) || !recoveryActions(result.allowedActions, true)
+                      : result.state !== 'unstarted-retired' ||
+                        !retiredIntent(result) ||
+                        !recoveryActions(result.allowedActions))))
         )
           throw Error('The original resource outcome remains unconfirmed.');
         pending.delete(key);
@@ -2194,44 +2292,24 @@
         const r = await this.api(ROOT);
         await this.owner();
         if (!this.live(sequence)) return;
-        if (
-          !desired(r?.desired) ||
-          !Array.isArray(r.employees) ||
-          r.employees.length > 256 ||
-          r.employees.some(
-            (v) =>
-              !uuid(v.employeeId) ||
-              !uuid(v.sessionId) ||
-              !Number.isSafeInteger(v.sessionGeneration) ||
-              v.sessionGeneration < 1 ||
-              !['helper', 'closed-writer', 'observed', 'applied', 'not-observed', 'offline-or-unbound'].includes(
-                v.state
-              ) ||
-              v.enforcement !== 'not-observed' ||
-              (v.state === 'closed-writer' &&
-                (v.writerClosed !== true ||
-                  v.originalOutcome !== 'unknown' ||
-                  !actions(v.allowedActions) ||
-                  v.allowedActions.length !== 1 ||
-                  v.allowedActions[0] !== 'new-revision'))
-          )
-        )
-          throw Error('Company resource summary could not be verified.');
+        if (!companyStatus(r)) throw Error('Company resource summary could not be verified.');
         const original = pending.get('default');
         if (
           original &&
-          r.desired?.revision === original.revision &&
-          r.desired.memoryHighBytes === original.memoryHighBytes &&
-          r.desired.scope === original.scope
+          ((r.desired?.revision === original.revision &&
+            r.desired.memoryHighBytes === original.memoryHighBytes &&
+            r.desired.scope === original.scope) ||
+            (original.notIssued instanceof ApiFailure && original.notIssued.defaultNotIssued(original.revision)))
         )
           pending.delete('default'); // Fresh canonical correlation, not a replay or historical execution ACK.
         this.snapshot = r.desired;
         this.canApprove =
           Array.isArray(r.allowedActions) && r.allowedActions.length === 1 && r.allowedActions[0] === 'approve-default';
         const unknown = r.employees.filter(
-          (v) => ['helper', 'closed-writer'].includes(v.state) || v.originalOutcome === 'unknown'
+          (v) => ['helper', 'closed-writer', 'unstarted-retired'].includes(v.state) || v.originalOutcome === 'unknown'
         ).length;
-        const closed = r.employees.filter((v) => v.writerClosed === true && v.originalOutcome === 'unknown').length;
+        const closed = r.employees.filter(closedWriter).length;
+        const retired = r.employees.filter(retiredIntent).length;
         this.status.textContent = `${r.employees.length} employee${r.employees.length === 1 ? '' : 's'} · history: ${r.employees.filter((v) => ['applied', 'observed'].includes(v.state)).length} recorded limit observations, ${unknown} unknown original outcome${unknown === 1 ? '' : 's'}`;
         this.content.replaceChildren(
           this.note(
@@ -2249,6 +2327,17 @@
               `${closed} original resource writer${closed === 1 ? ' is' : 's are'} closed. The original execution outcome remains unknown; this does not confirm that the requested limits were applied.`
             )
           );
+        if (retired)
+          this.content.append(
+            this.note(
+              `${retired} unstarted resource application intent${retired === 1 ? ' is' : 's are'} retired. This fences that intent's future START; it is not proof that a container or writer was stopped.`
+            )
+          );
+        const failures = r.employees.filter((v) => v.code !== undefined);
+        if (failures.length) {
+          this.error.textContent = `${failures.length} employee resource application${failures.length === 1 ? ' needs' : 's need'} attention. Open the employee profile to check the original attempt or apply an offered change; completion is not confirmed.`;
+          this.technical(failures.map((v) => `${v.employeeId}: ${v.code}`).join('\n'));
+        }
         if (pending.has('default'))
           this.content.append(
             this.note(
@@ -2284,17 +2373,29 @@
       });
     }
     async approve() {
-      let refreshed = false;
+      let refreshed = false,
+        notIssuedFailure = null;
       await this.run(async (sequence) => {
         await this.owner();
         if (!this.canApprove) throw Error('Default approval is unavailable. Refresh company resources.');
         const revision = nonce(),
           expectedRevision = this.snapshot?.revision ?? null;
         pending.set('default', { revision, scope: 'all-current-and-future', memoryHighBytes: HIGH });
-        const result = await this.api(`${ROOT}/default`, {
-          method: 'PUT',
-          body: { revision, expectedRevision, scope: 'all-current-and-future', memoryHighBytes: HIGH },
-        });
+        let result;
+        try {
+          result = await this.api(`${ROOT}/default`, {
+            method: 'PUT',
+            body: { revision, expectedRevision, scope: 'all-current-and-future', memoryHighBytes: HIGH },
+          });
+        } catch (failure) {
+          const original = pending.get('default');
+          if (failure instanceof ApiFailure && failure.defaultNotIssued(revision) && original?.revision === revision) {
+            pending.set('default', { ...original, notIssued: failure });
+            notIssuedFailure = failure;
+            return;
+          }
+          throw failure;
+        }
         await this.owner();
         if (!this.live(sequence)) return;
         if (
@@ -2304,10 +2405,14 @@
           result.enforcement !== 'not-observed'
         )
           throw Error('Default approval outcome is unconfirmed.');
-        pending.delete('default');
+        if (pending.get('default')?.revision === revision) pending.delete('default');
         refreshed = true;
       });
-      if (refreshed) await this.load();
+      if ((refreshed || notIssuedFailure) && this.live()) await this.load();
+      if (notIssuedFailure && this.live()) {
+        this.error.textContent += `${this.error.textContent ? ' ' : ''}The previous default approval was not issued. Review current status before approving again.`;
+        this.technical(notIssuedFailure.message);
+      }
     }
   }
   window.ReverieDockerResources = {

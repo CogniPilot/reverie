@@ -24,6 +24,7 @@
       "writerClosed": true,
       "originalOutcome": "unknown",
       "allowedActions": [
+        "reconcile",
         "new-revision"
       ],
       "enforcement": "not-observed"

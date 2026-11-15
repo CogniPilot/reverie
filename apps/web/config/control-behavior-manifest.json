@@ -887,6 +887,47 @@
         "expect(details.textContent).toContain('DOCKER_POOL_ORIGINAL_ACK_MISSING')"
       ],
       "outcome": "The actual DOM keeps native codes in closed details and shows a plain refresh instruction without a resource mutation. No native completion or authority is inferred."
+    },
+    "docker-resources.continue-original": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "continues only the explicitly offered original resource attempt despite its local unknown latch",
+      "assertions": [
+        "expect(f.writes()).toHaveLength(1)",
+        "expect(f.writes().map((v) => v.path)).toEqual([base + '/docker-resources/apply', base + '/docker-resources/continue',])",
+        "expect(f.writes().map((v) => v.body)).toEqual([{ revision }, { revision }])"
+      ],
+      "outcome": "The real DOM dispatches only one explicitly offered original continuation with the retained revision. Refresh is read-only. The actual native preSTART/CAS behavior remains the separately maintained API producer tests, not inferred from this view fixture."
+    },
+    "docker-resources.abandon-original": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "retires an explicitly offered unstarted intent without claiming a stopped writer or applying limits",
+      "assertions": [
+        "expect(f.writes()).toEqual([])",
+        "await f.click('Abandon unstarted resource application')",
+        "expect(f.panel().textContent).toContain('does not prove that a container was stopped')",
+        "expect(f.button('Continue original resource application')).toBeUndefined()"
+      ],
+      "outcome": "The real DOM sends only the explicitly offered metadata retirement, retains actual16 versus desired48, and shows no stopped-writer claim. No native/container effect is inferred from this DOM scenario."
+    },
+    "docker-resources.failure-attention": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "renders actual producer convergence failures as attention without extra employee reads or false completion",
+      "assertions": [
+        "expect(f.panel().querySelector('[role=\"alert\"]')?.textContent).toContain('1 employee resource application needs attention')",
+        "expect(details.textContent).toContain(targetRow(status).code)",
+        "expect(f.calls.every((call) => call.path === '/api/company/docker-resources')).toBe(true)"
+      ],
+      "outcome": "A shared actual producer DTO renders bounded attention and closed technical details; it performs no per-employee request or resource mutation."
+    },
+    "docker-resources.not-issued": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "uses the actual default prewrite refusal only after fresh authenticated status and a later explicit approval",
+      "assertions": [
+        "expect(f.writes()).toHaveLength(1)",
+        "expect(f.calls.filter((call) => call.path === '/api/company/docker-resources')).toHaveLength(2)",
+        "expect(f.button('Approve new 48 GiB default revision')).toBeDefined()"
+      ],
+      "outcome": "A producer-checked scoped not-issued DTO triggers only fresh owner status, releases only its nonce, and requires a separate later user approval. Generic failures and different nonces remain separate tested refusal cases."
     }
   },
   "mappings": [
@@ -1180,12 +1221,12 @@
     },
     {
       "declaration": "src/web/public/company-resources.js::CompanyPanel.load::inline::button:Approve 48 GiB soft RAM default",
-      "scenarios": ["docker-resources-default"],
+      "scenarios": ["docker-resources-default", "docker-resources.not-issued"],
       "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
     },
     {
       "declaration": "src/web/public/company-resources.js::CompanyPanel.load::inline::button:Approve new 48 GiB default revision",
-      "scenarios": ["docker-resources-new-revision"],
+      "scenarios": ["docker-resources-new-revision", "docker-resources.not-issued"],
       "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
     },
     {
@@ -1220,8 +1261,18 @@
     },
     {
       "declaration": "src/web/public/company-resources.js::Panel.technical::inline::summary:Resource verification details",
-      "scenarios": ["docker-resources-technical"],
+      "scenarios": ["docker-resources-technical", "docker-resources.failure-attention"],
       "remaining": "Only the named synthetic DOM error case. Native diagnosis, all error shapes, other consumers and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Continue original resource application",
+      "scenarios": ["docker-resources.continue-original"],
+      "remaining": "Only the named DOM transport assertions. Actual owner API/currentness/CAS/native behavior are separately tested; other UI states and whole-site coverage remain gaps."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Abandon unstarted resource application",
+      "scenarios": ["docker-resources.abandon-original"],
+      "remaining": "Only the named DOM transport assertions. Actual owner API/currentness/CAS/native behavior are separately tested; other UI states and whole-site coverage remain gaps."
     }
   ],
   "gaps": [
