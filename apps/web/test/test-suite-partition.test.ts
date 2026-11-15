@@ -179,6 +179,34 @@ describe('test suite partition', () => {
     expect(checked).toContain('test/cli-agent-credentials.test.ts');
   });
 
+  it('runs real SDK credential cases in an owned nonroot namespace before publishing positive authority', () => {
+    const source = nixPackageSource(resolve(ROOT, 'test'));
+    const start = source.indexOf('      boxedSdkCredentialCheck() {');
+    const end = source.indexOf('      ${lib.optionalString', start);
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const namespace = source.slice(start, end);
+    expect(nixCheckedFiles("    checkPhase = ''\n" + namespace + '\nrunHook postCheck')).toEqual([
+      'test/boxed-plan-provider-entry.test.ts',
+      'test/plan-office-agent-force.test.ts',
+    ]);
+    expect(namespace).toContain('bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL');
+    expect(namespace).toContain('--ro-bind "$TMPDIR/boxed-sdk-check-root" /');
+    expect(namespace).toContain('--bind "$TMPDIR/boxed-sdk-check-fixture" /fixture');
+    const invocation = namespace.indexOf('            boxedSdkCredentialCheck');
+    for (const assertion of [
+      'test "$(id -u)" = 1',
+      'test "$(id -g)" = 1',
+      'test "$(stat -c %u /)" = 1',
+      'test "$(stat -c %a /)" = 700',
+      'test "$(stat -c %u /fixture)" = 1',
+      'test "$(stat -c %a /fixture)" = 700',
+    ]) {
+      expect(namespace.indexOf(assertion)).toBeGreaterThan(-1);
+      expect(namespace.indexOf(assertion)).toBeLessThan(invocation);
+    }
+  });
+
   it('registers only files an npm test command in the console checkPhase runs', () => {
     const phase = (body: string) =>
       `    checkPhase = ''\n      runHook preCheck\n${body}\n      runHook postCheck\n    '';\n`;

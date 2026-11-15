@@ -110,7 +110,7 @@ let
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
         test/plan-office-bootstrap.test.ts \
-        test/boxed-plan-provider-files.test.ts test/boxed-plan-provider-entry.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts test/plan-office-move-driver.test.ts test/plan-office-agent-force.test.ts test/plan-office-move-verifier.test.ts test/plan-office-ci.test.ts \
+        test/boxed-plan-provider-files.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts test/plan-office-move-driver.test.ts test/plan-office-move-verifier.test.ts test/plan-office-ci.test.ts \
         test/canary-cookie-files.test.ts \
         test/canary-browser-modules.test.ts \
         test/canary-fixture-contract.test.ts \
@@ -146,6 +146,35 @@ let
           '
       '' else ''
         boxedCredentialCheck
+      ''}
+      # SDK fixtures require a genuine nonroot identity as well as trusted
+      # credential ancestors. Map only this disposable owned root/fixture to
+      # UID1; never replace the production reader or relax its custody checks.
+      boxedSdkCredentialCheck() {
+        npm test -- test/boxed-plan-provider-entry.test.ts \
+          test/plan-office-agent-force.test.ts
+      }
+      ${if pkgs.stdenv.isLinux then ''
+        mkdir -p "$TMPDIR/boxed-sdk-check-root"/{nix,source,fixture,proc,dev,bin}
+        mkdir -p "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
+        chmod 700 "$TMPDIR/boxed-sdk-check-root" "$TMPDIR/boxed-sdk-check-fixture" "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
+        export -f boxedSdkCredentialCheck
+        ${pkgs.bubblewrap}/bin/bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL \
+          --ro-bind "$TMPDIR/boxed-sdk-check-root" / --ro-bind /nix /nix \
+          --ro-bind ${pkgs.bash}/bin /bin --bind "$PWD" /source \
+          --bind "$TMPDIR/boxed-sdk-check-fixture" /fixture --proc /proc --dev /dev \
+          --chdir /source --setenv HOME /fixture/home --setenv TMPDIR /fixture/tmp \
+          ${pkgs.bash}/bin/bash -euc '
+            test "$(id -u)" = 1
+            test "$(id -g)" = 1
+            test "$(stat -c %u /)" = 1
+            test "$(stat -c %a /)" = 700
+            test "$(stat -c %u /fixture)" = 1
+            test "$(stat -c %a /fixture)" = 700
+            boxedSdkCredentialCheck
+          '
+      '' else ''
+        boxedSdkCredentialCheck
       ''}
       ${lib.optionalString pkgs.stdenv.isLinux ''
         # Actual tmux stdin IPC (cold/literal/40KiB) and listener startup must

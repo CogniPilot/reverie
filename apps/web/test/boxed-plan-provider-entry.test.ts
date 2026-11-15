@@ -4,6 +4,18 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 /** Ordinary managed argv validation only. Importing the external fake never launches it. */
 import { expect, it, vi } from 'vitest';
+// Only the negative custody case models an unmapped Nix root. Positive cases
+// retain actual ancestor/FD metadata, including inside the UID1 build namespace.
+const sandboxRoot = vi.hoisted(() => ({ uid: undefined as number | undefined }));
+vi.mock('node:fs', async (original) => {
+  const actual = await original<typeof import('node:fs')>();
+  const { hostRootMetadata } = await import('./helpers/host-root-metadata.js');
+  const lstatSync = ((file, options) => {
+    const entry = actual.lstatSync(file, options as never);
+    return sandboxRoot.uid === undefined ? entry : hostRootMetadata(file, entry, { uid: sandboxRoot.uid });
+  }) as typeof actual.lstatSync;
+  return { ...actual, default: { ...actual, lstatSync }, lstatSync };
+});
 import {
   planProviderIsMain,
   planProviderLaunch,
@@ -56,7 +68,7 @@ it('observes real HMAC route grant/revocation status without creating work or pu
   fs.writeFileSync(credential, token + '\n', { mode: 0o600 });
   const actualEnv = {
     HOME: '/home/agent',
-    REVERIE_API_URL: '',
+    REVERIE_API_URL: 'http://127.0.0.1:1', // Never contacted by the custody refusal case.
     REVERIE_SESSION_ID: sid,
     REVERIE_WORKER_IDENTITY_FILE: credential,
     REVERIE_PASSWORD: 'HOSTILE_HUMAN_PASSWORD',
@@ -126,6 +138,20 @@ it('observes real HMAC route grant/revocation status without creating work or pu
     toAccount: 'ci-plan-b',
   };
   try {
+    sandboxRoot.uid = 65534;
+    try {
+      await expect(
+        runPlanOfficePermissionProbe(
+          { ...base, id: '00000000-0000-4000-8000-000000000009', scope: 'team-request' },
+          eid,
+          record,
+          actualEnv
+        )
+      ).rejects.toThrow('Docker worker credential directory refused');
+      expect(records).toEqual([]); // Refused before any intent or HTTP dispatch.
+    } finally {
+      sandboxRoot.uid = undefined;
+    }
     await app.listen({ host: '127.0.0.1', port: 0 });
     actualEnv.REVERIE_API_URL = 'http://127.0.0.1:' + (app.server.address() as { port: number }).port;
     for (const [index, granted] of [false, true, false].entries()) {
