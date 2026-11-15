@@ -1,3 +1,4 @@
+import { identityHelperConfiguration, inspectIdentityHelper } from './docker-identity-helper.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
 /** One original contained installer. File bytes cannot replace a failed helper
  * close ACK. No shell command, general exec route or arbitrary destination. */
@@ -8,8 +9,7 @@ import { DockerEmployeeContinuationError, dockerContinuationDigest } from './doc
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerContinuationTask, DockerContinuationTaskJournal } from './docker-continuation-task.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
-const cid = z.string().regex(/^[a-f0-9]{64}$/),
-  decimal = z.string().regex(/^(0|[1-9][0-9]{0,19})$/);
+const cid = z.string().regex(/^[a-f0-9]{64}$/);
 export interface DockerCredentialHome {
   readonly source: string;
   readonly user: string;
@@ -28,134 +28,11 @@ export class DockerEmployeeCredentialInstaller {
   ) {
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
   }
-  async #config(row: DockerEmployeeContinuationRecord, home: DockerCredentialHome): Promise<Record<string, unknown>> {
-    const image = z
-      .array(
-        z.object({
-          Id: z.literal(row.workerImage.imageId),
-          Config: z.object({
-            Env: z.array(z.string().max(16384)).max(256).nullable(),
-            Volumes: z.record(z.string(), z.unknown()).nullable().optional(),
-          }),
-        })
-      )
-      .length(1)
-      .parse(JSON.parse(await this.command.run(['image', 'inspect', row.workerImage.imageId])))[0]!;
-    if (image.Config.Volumes && Object.keys(image.Config.Volumes).length)
-      refuse('DOCKER_IDENTITY_IMAGE_IMPLICIT_STORAGE_UNSUPPORTED');
-    const inherited = image.Config.Env ?? [],
-      keys = inherited.map((value) => value.split('=')[0]);
-    if (keys.some((key) => !key) || new Set(keys).size !== keys.length) refuse('DOCKER_IDENTITY_IMAGE_ENV_UNKNOWN');
-    const fixed = [
-      'HOME=/home/agent',
-      'REVERIE_SESSION_ID=' + row.request.sessionId,
-      'REVERIE_WORKER_IDENTITY_FILE=/home/agent/.reverie/docker-worker-identity',
-    ];
-    const environment = [
-      ...inherited.map((value) => fixed.find((item) => item.split('=')[0] === value.split('=')[0]) ?? value),
-      ...fixed.filter((value) => !keys.includes(value.split('=')[0])),
-    ];
-    decimal.parse(home.dev);
-    decimal.parse(home.ino);
-    return {
-      Image: row.workerImage.imageId,
-      User: home.user,
-      Entrypoint: ['/opt/reverie-worker-client/bin/reverie'],
-      Cmd: [
-        'worker-client',
-        'credential-install',
-        '--expected-digest',
-        row.workerImage.clientManifestDigest,
-        '--home-dev',
-        home.dev,
-        '--home-ino',
-        home.ino,
-      ],
-      Env: environment,
-      OpenStdin: true,
-      StdinOnce: true,
-      AttachStdin: true,
-      AttachStdout: true,
-      AttachStderr: true,
-      Tty: false,
-      Labels: {
-        'reverie.box.identity.operation': row.request.operationId,
-        'reverie.box.identity.box': this.boxId,
-        'reverie.box.identity.employee': row.employeeId,
-      },
-      HostConfig: {
-        Privileged: false,
-        ReadonlyRootfs: true,
-        CapDrop: ['ALL'],
-        SecurityOpt: ['no-new-privileges'],
-        NetworkMode: 'none',
-        RestartPolicy: { Name: 'no' },
-        Memory: 256 * 1024 * 1024,
-        MemorySwap: 256 * 1024 * 1024,
-        PidsLimit: 32,
-        Mounts: [
-          {
-            Type: 'bind',
-            Source: home.source,
-            Target: '/home/agent',
-            ReadOnly: false,
-            BindOptions: { Propagation: 'rprivate' },
-          },
-        ],
-      },
-    };
+  #config(row: DockerEmployeeContinuationRecord, home: DockerCredentialHome): Promise<Record<string, unknown>> {
+    return identityHelperConfiguration(this.command, row, home, this.boxId);
   }
-  async #fixed(id: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
-    cid.parse(id);
-    const raw = z
-      .array(z.record(z.string(), z.unknown()))
-      .length(1)
-      .parse(JSON.parse(await this.command.run(['container', 'inspect', id])))[0]!;
-    if (raw.Id !== id || raw.Image !== config.Image) refuse('DOCKER_IDENTITY_HELPER_CHANGED');
-    const actual = z.record(z.string(), z.unknown()).parse(raw.Config),
-      host = z.record(z.string(), z.unknown()).parse(raw.HostConfig),
-      wanted = config.HostConfig as Record<string, unknown>;
-    for (const key of ['User', 'Entrypoint', 'Cmd', 'Env', 'OpenStdin', 'StdinOnce', 'Tty'])
-      if (!isDeepStrictEqual(actual[key], config[key])) refuse('DOCKER_IDENTITY_HELPER_CHANGED');
-    const labels = z.record(z.string(), z.string()).parse(actual.Labels);
-    for (const [key, value] of Object.entries(config.Labels as Record<string, string>))
-      if (labels[key] !== value) refuse('DOCKER_IDENTITY_HELPER_CHANGED');
-    for (const key of [
-      'Privileged',
-      'ReadonlyRootfs',
-      'CapDrop',
-      'SecurityOpt',
-      'NetworkMode',
-      'Memory',
-      'MemorySwap',
-      'PidsLimit',
-    ])
-      if (!isDeepStrictEqual(host[key], wanted[key])) refuse('DOCKER_IDENTITY_HELPER_SECURITY_CHANGED');
-    for (const key of ['CapAdd', 'Devices', 'DeviceRequests', 'VolumesFrom'])
-      if (host[key] !== null && host[key] !== undefined && !isDeepStrictEqual(host[key], []))
-        refuse('DOCKER_IDENTITY_HELPER_SECURITY_CHANGED');
-    if (
-      host.PidMode === 'host' ||
-      host.IpcMode === 'host' ||
-      host.AutoRemove === true ||
-      (!isDeepStrictEqual(host.RestartPolicy, { Name: 'no', MaximumRetryCount: 0 }) &&
-        !isDeepStrictEqual(host.RestartPolicy, { Name: 'no' }))
-    )
-      refuse('DOCKER_IDENTITY_HELPER_SECURITY_CHANGED');
-    const mounts = z
-      .array(
-        z.object({
-          Type: z.literal('bind'),
-          Source: z.string(),
-          Destination: z.literal('/home/agent'),
-          RW: z.literal(true),
-        })
-      )
-      .length(1)
-      .parse(raw.Mounts);
-    if (mounts[0]!.Source !== (wanted.Mounts as Array<{ Source: string }>)[0]!.Source)
-      refuse('DOCKER_IDENTITY_HELPER_HOME_CHANGED');
-    return raw;
+  #fixed(id: string, config: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return inspectIdentityHelper(this.command, id, config);
   }
   #task(row: DockerEmployeeContinuationRecord, config: Record<string, unknown>): DockerContinuationTask | undefined {
     const task = this.journal.read(row, 'identity-helper');
