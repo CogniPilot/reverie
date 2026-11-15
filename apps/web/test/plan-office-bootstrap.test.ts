@@ -9,7 +9,10 @@ import { OwnerAuthService } from '../src/owner-auth/service.js';
 import { registerOwnerRoutes } from '../src/owner-auth/routes.js';
 import { OWNER_COOKIE } from '../src/owner-auth/policy.js';
 import { PlanOfficeBootstrap, seedPlanOffice } from './helpers/plan-office-bootstrap.js';
-import { enrollIsolatedPlanOfficeOwner } from './helpers/docker-continuation-auth-canary.js';
+import {
+  enrollIsolatedPlanOfficeOwner,
+  resumeIsolatedPlanOfficeOwner,
+} from './helpers/docker-continuation-auth-canary.js';
 
 const contract = {
   version: 1,
@@ -75,6 +78,12 @@ describe('isolated plan-office bootstrap boundaries', () => {
         '/api/owner/status',
         '/api/fixture/owner',
       ]);
+      const resumed = await resumeIsolatedPlanOfficeOwner(endpoint, directory);
+      expect(resumed.requests().map((r) => r.path)).toEqual(['/api/owner/status']);
+      expect((await resumed.request('/api/fixture/owner')).status).toBe(200);
+      await expect(resumed.request('//foreign.invalid/api/fixture/owner')).rejects.toThrow('Only this disposable');
+      await resumed.request('/api/owner/logout', 'POST', {});
+      await expect(resumeIsolatedPlanOfficeOwner(endpoint, directory)).rejects.toThrow('Current actual owner login');
       await expect(enrollIsolatedPlanOfficeOwner(endpoint, directory)).rejects.toThrow('not pristine');
     } finally {
       await app.close();

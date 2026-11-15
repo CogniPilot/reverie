@@ -3,7 +3,8 @@ import process from 'node:process';
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-if (process.argv.length !== 4 || process.argv[2] !== '--contract' || !process.argv[3])
+const readySelf = process.argv.length === 5 && process.argv[4] === '--ready-self';
+if ((!readySelf && process.argv.length !== 4) || process.argv[2] !== '--contract' || !process.argv[3])
   throw Error('Use --contract <private reviewed fixture JSON>');
 assert.ok(process.getuid!() > 0 && process.getgid!() > 0);
 const file = path.resolve(process.argv[3]),
@@ -30,7 +31,7 @@ try {
 } finally {
   fs.closeSync(fd);
 }
-const home = path.join(parent, 'driver-home-' + instance);
+const home = path.join(parent, (readySelf ? 'ready-self-home-' : 'driver-home-') + instance);
 fs.mkdirSync(home, { mode: 0o700 });
 fs.mkdirSync(path.join(home, 'data'), { mode: 0o700 });
 fs.mkdirSync(path.join(home, 'tmp'), { mode: 0o700 });
@@ -40,5 +41,7 @@ for (const key of Object.keys(process.env))
 process.env.HOME = home;
 process.env.REVERIE_DATA_DIR = path.join(home, 'data');
 process.env.TMPDIR = path.join(home, 'tmp');
-const { runPlanOfficeBaseline } = await import('../helpers/plan-office-driver.js');
-process.stdout.write(JSON.stringify(await runPlanOfficeBaseline(file)) + '\n');
+const { runPlanOfficeBaseline, runPlanOfficeReadySelf } = await import('../helpers/plan-office-driver.js');
+process.stdout.write(
+  JSON.stringify(await (readySelf ? runPlanOfficeReadySelf(file) : runPlanOfficeBaseline(file))) + '\n'
+);

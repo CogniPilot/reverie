@@ -1,7 +1,11 @@
 /** Owned CI office baseline only. No production admission or paid provider override. */
 import { runPlanOfficeMoveScenario } from './plan-office-move-driver.js';
 export { runPlanOfficeMoveScenario };
-import { verifyPlanOfficeMovedProvider, planOfficeCanonicalAuthDigest } from './plan-office-move-verifier.js';
+import {
+  verifyPlanOfficeMovedProvider,
+  planOfficeCanonicalAuthDigest,
+  verifyPlanOfficeReadyNative,
+} from './plan-office-move-verifier.js';
 export { verifyPlanOfficeMovedProvider, planOfficeCanonicalAuthDigest };
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -13,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PlanOfficeBootstrap } from './plan-office-bootstrap.js';
-import { enrollIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
+import { enrollIsolatedPlanOfficeOwner, resumeIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
 import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
@@ -347,8 +351,19 @@ export async function planOfficeInternalHostPreflight(endpoint: string): Promise
 class Evidence {
   readonly fd: number;
   serial = 0;
-  constructor(readonly root: string) {
-    fs.mkdirSync(root, { mode: 0o700 });
+  constructor(
+    readonly root: string,
+    existing = false
+  ) {
+    if (!existing) fs.mkdirSync(root, { mode: 0o700 });
+    else
+      this.serial = Math.max(
+        0,
+        ...fs
+          .readdirSync(root)
+          .filter((n) => /^\d+-(?:intent|result)\.json$/.test(n))
+          .map((n) => Number(n.split('-')[0]))
+      );
     privateDirectory(root);
     this.fd = fs.openSync(root, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW);
   }
@@ -590,6 +605,14 @@ export async function planOfficeSession(response: Response, sessionId: string) {
   const session = await data(response);
   assert.equal(session.id, sessionId);
   return session;
+}
+/** Terminal bytes are distinct from parsed assistant transcript output. */
+export async function planOfficeTerminal(response: Response) {
+  const value = await data(response);
+  return z
+    .object({ terminalBuffer: z.string().max(4 * 1024 ** 2) })
+    .passthrough()
+    .parse(value).terminalBuffer;
 }
 export async function planOfficeOriginalStatus(response: Response, operationId: string) {
   const selection = await data(response);
@@ -1077,7 +1100,9 @@ export async function runPlanOfficeBaseline(contractFile: string) {
                   probe.exitCode === 0
               )
           );
-          const output = await data(await owner.request('/api/sessions/' + employee.sessionId + '/output'));
+          const output = await planOfficeTerminal(
+            await owner.request('/api/sessions/' + employee.sessionId + '/terminal')
+          );
           const freshSession = await planOfficeSession(
             await owner.request('/api/sessions/' + employee.sessionId),
             employee.sessionId
@@ -1087,8 +1112,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
             freshSession.providerInputHeld === false &&
             freshSession.isWorking === false &&
             freshSession.status === 'idle' &&
-            typeof output.textOutput === 'string' &&
-            output.textOutput.includes(barrier)
+            output.includes(barrier)
           ) {
             actualReports = current;
             break;
@@ -1113,158 +1137,7 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     }
     let planMovesAccepted = false;
     if (input.acceptance === 'ordinary-self') {
-      assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
-      const initialEmployee = input.bootstrap.employees[0]!,
-        entry = sources[0]!;
-      assert.equal(initialEmployee.account, 'ci-plan-a');
-      assert.equal(
-        input.sourceProviders.find((item) => item.employeeId === initialEmployee.employeeId)?.mode ?? 'ordinary',
-        'ordinary'
-      );
-      const controlEpoch = driver.owned(control, 'control').State as Json;
-      const current = () => {
-        evidence.current();
-        const actual = driver.owned(control, 'control').State as Json;
-        assert.equal(actual.Running, true);
-        assert.equal(actual.Pid, controlEpoch.Pid);
-        assert.equal(actual.StartedAt, controlEpoch.StartedAt);
-      };
-      const snapshot = () => {
-        const company = readPrivate(path.join(evidence.root, 'data/company.json')) as Json;
-        const employee = (company.employees as Json[]).find((value) => value.id === initialEmployee.employeeId);
-        const row = (company.dockerEmployeeContinuations as Json[]).find(
-          (value) => value.employeeId === initialEmployee.employeeId
-        );
-        assert.ok(employee && row);
-        return { employee, row };
-      };
-      current();
-      const captured = snapshot(),
-        row = DockerEmployeeContinuationRecord.parse(captured.row);
-      assert.ok(row.destination);
-      assert.equal(row.phase, 'ready');
-      const state = readPrivate(path.join(evidence.root, 'data/state.json')) as Json;
-      const saved = (state.sessions as Record<string, SessionState>)[row.request.sessionId];
-      assert.ok(saved);
-      const nativeThreadId = z
-        .string()
-        .uuid()
-        .parse(nativeThreadProfile(saved.mode ?? 'claude')?.read(saved));
-      assert.equal(nativeThreadId, initialEmployee.nativeThreadId);
-      assert.equal(saved.subscriptionProfile?.id, 'ci-plan-a');
-      const scenario = {
-        version: 1 as const,
-        purpose: 'reverie-ci-plan-move-scenario-v1' as const,
-        kind: 'self' as const,
-        id: randomUUID(),
-        employeeId: row.employeeId,
-        sessionId: row.request.sessionId,
-        sessionGeneration: row.request.sessionGeneration,
-        fromAccount: 'ci-plan-a' as const,
-        toAccount: 'ci-plan-b' as const,
-      };
-      const sourceInspect = DockerEmployeeInspect.parse(driver.inspect(row.destination.containerId));
-      const instanceId = z
-        .string()
-        .uuid()
-        .parse((readPrivate(path.join(evidence.root, 'data/docker-runtime/worker-identity.json')) as Json).instanceId);
-      const homeStat = fs.lstatSync(entry.home as string);
-      const before = {
-        scenario,
-        namespace: names.prefix,
-        fixtureRoot: evidence.root,
-        workerImageId: input.workerImageId,
-        clientManifestDigest: input.clientManifestDigest,
-        boxId: dockerContinuationDigest({ instanceId, deployment: names.prefix }),
-        nativeThreadId,
-        sourceRow: row,
-        sourceInspect,
-        home: { source: entry.home as string, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
-        canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-b'),
-      };
-      evidence.save('before-self-move', before);
-      const ownerGet = async (p: string) => {
-        current();
-        const result = await owner.request(p);
-        current();
-        return result;
-      };
-      await runPlanOfficeMoveScenario(scenario, {
-        assertCurrent: async () => current(),
-        ownerPost: async (p, body) => {
-          current();
-          const result = await owner.request(p, 'POST', body);
-          current();
-          return result;
-        },
-        capsule: async (args) => {
-          current();
-          const actual = DockerEmployeeContinuationRecord.parse(snapshot().row);
-          assert.deepEqual(actual, row);
-          const raw = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
-          assert.deepEqual(
-            boxedOriginal(
-              raw,
-              {
-                employeeId: row.employeeId,
-                sessionId: row.request.sessionId,
-                sessionGeneration: row.request.sessionGeneration,
-                owner: row.owner,
-                sourceDigest: row.sourceDigest,
-                providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
-                onVacation: false,
-                desiredRunning: true,
-              },
-              names.prefix,
-              true
-            ),
-            row.destination
-          );
-          const identityFile =
-            row.version === 3
-              ? dockerPlanGeneration({
-                  operationId: row.request.operationId,
-                  containerId: row.destination!.containerId,
-                  projectionDigest: row.planReplacement.account.projectionDigest,
-                  provider: row.planReplacement.account.provider,
-                }).identityFile
-              : '/home/agent/.reverie/docker-worker-identity';
-          const output = driver.docker([
-            'exec',
-            '--env',
-            'HOME=/home/agent',
-            '--env',
-            'REVERIE_API_URL=http://reverie:3000',
-            '--env',
-            'REVERIE_SESSION_ID=' + row.request.sessionId,
-            '--env',
-            'REVERIE_WORKER_IDENTITY_FILE=' + identityFile,
-            row.destination!.containerId,
-            '/opt/reverie-worker-client/bin/reverie',
-            ...args,
-          ]);
-          current();
-          return { exitCode: 0, signal: null, stdout: output };
-        },
-        record: (name, value) => evidence.save(name, value),
-        pause: () => wait(500),
-        verifyCompleted: async (_scenario, record) =>
-          verifyPlanOfficeMovedProvider(before, record, {
-            current,
-            snapshot,
-            ownerGet,
-            metadata: async (args) => driver.docker([...args]),
-            record: (name, value) => evidence.save(name, value),
-          }),
-      });
-      evidence.save('first-self-move-completed', {
-        id: scenario.id,
-        employeeId: scenario.employeeId,
-        fromAccount: scenario.fromAccount,
-        toAccount: scenario.toAccount,
-        realCapsuleHmac: true,
-        originalOnly: true,
-      });
+      await runPlanOfficeSelfMove(input, evidence, driver, control, owner, sources[0]!.home as string);
       planMovesAccepted = true;
     }
     const after = driver
@@ -1298,4 +1171,353 @@ export async function runPlanOfficeBaseline(contractFile: string) {
   } finally {
     evidence.close();
   }
+}
+
+/** Shared one-shot self request, always fenced by the exclusive before-self record. */
+async function runPlanOfficeSelfMove(
+  input: Input,
+  evidence: Evidence,
+  driver: Driver,
+  control: string,
+  owner: Pick<Awaited<ReturnType<typeof enrollIsolatedPlanOfficeOwner>>, 'request'>,
+  home: string
+) {
+  const names = driver.names;
+  assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
+  const initialEmployee = input.bootstrap.employees[0]!;
+  assert.equal(initialEmployee.account, 'ci-plan-a');
+  assert.equal(
+    input.sourceProviders.find((item) => item.employeeId === initialEmployee.employeeId)?.mode ?? 'ordinary',
+    'ordinary'
+  );
+  const controlEpoch = driver.owned(control, 'control').State as Json;
+  const current = () => {
+    evidence.current();
+    const actual = driver.owned(control, 'control').State as Json;
+    assert.equal(actual.Running, true);
+    assert.equal(actual.Pid, controlEpoch.Pid);
+    assert.equal(actual.StartedAt, controlEpoch.StartedAt);
+  };
+  const snapshot = () => {
+    const company = readPrivate(path.join(evidence.root, 'data/company.json')) as Json;
+    const employee = (company.employees as Json[]).find((value) => value.id === initialEmployee.employeeId);
+    const row = (company.dockerEmployeeContinuations as Json[]).find(
+      (value) => value.employeeId === initialEmployee.employeeId
+    );
+    assert.ok(employee && row);
+    return { employee, row };
+  };
+  current();
+  const captured = snapshot(),
+    row = DockerEmployeeContinuationRecord.parse(captured.row);
+  assert.ok(row.destination);
+  assert.equal(row.phase, 'ready');
+  const state = readPrivate(path.join(evidence.root, 'data/state.json')) as Json;
+  const saved = (state.sessions as Record<string, SessionState>)[row.request.sessionId];
+  assert.ok(saved);
+  const nativeThreadId = z
+    .string()
+    .uuid()
+    .parse(nativeThreadProfile(saved.mode ?? 'claude')?.read(saved));
+  assert.equal(nativeThreadId, initialEmployee.nativeThreadId);
+  assert.equal(saved.subscriptionProfile?.id, 'ci-plan-a');
+  const scenario = {
+    version: 1 as const,
+    purpose: 'reverie-ci-plan-move-scenario-v1' as const,
+    kind: 'self' as const,
+    id: randomUUID(),
+    employeeId: row.employeeId,
+    sessionId: row.request.sessionId,
+    sessionGeneration: row.request.sessionGeneration,
+    fromAccount: 'ci-plan-a' as const,
+    toAccount: 'ci-plan-b' as const,
+  };
+  const sourceInspect = DockerEmployeeInspect.parse(driver.inspect(row.destination.containerId));
+  const instanceId = z
+    .string()
+    .uuid()
+    .parse((readPrivate(path.join(evidence.root, 'data/docker-runtime/worker-identity.json')) as Json).instanceId);
+  const homeStat = fs.lstatSync(home);
+  const before = {
+    scenario,
+    namespace: names.prefix,
+    fixtureRoot: evidence.root,
+    workerImageId: input.workerImageId,
+    clientManifestDigest: input.clientManifestDigest,
+    boxId: dockerContinuationDigest({ instanceId, deployment: names.prefix }),
+    nativeThreadId,
+    sourceRow: row,
+    sourceInspect,
+    home: { source: home, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
+    canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-b'),
+  };
+  evidence.save('before-self-move', before);
+  const ownerGet = async (p: string) => {
+    current();
+    const result = await owner.request(p);
+    current();
+    return result;
+  };
+  await runPlanOfficeMoveScenario(scenario, {
+    assertCurrent: async () => current(),
+    ownerPost: async (p, body) => {
+      current();
+      const result = await owner.request(p, 'POST', body);
+      current();
+      return result;
+    },
+    capsule: async (args) => {
+      current();
+      const actual = DockerEmployeeContinuationRecord.parse(snapshot().row);
+      assert.deepEqual(actual, row);
+      const raw = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
+      assert.deepEqual(
+        boxedOriginal(
+          raw,
+          {
+            employeeId: row.employeeId,
+            sessionId: row.request.sessionId,
+            sessionGeneration: row.request.sessionGeneration,
+            owner: row.owner,
+            sourceDigest: row.sourceDigest,
+            providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
+            onVacation: false,
+            desiredRunning: true,
+          },
+          names.prefix,
+          true
+        ),
+        row.destination
+      );
+      const identityFile =
+        row.version === 3
+          ? dockerPlanGeneration({
+              operationId: row.request.operationId,
+              containerId: row.destination!.containerId,
+              projectionDigest: row.planReplacement.account.projectionDigest,
+              provider: row.planReplacement.account.provider,
+            }).identityFile
+          : '/home/agent/.reverie/docker-worker-identity';
+      const output = driver.docker([
+        'exec',
+        '--env',
+        'HOME=/home/agent',
+        '--env',
+        'REVERIE_API_URL=http://reverie:3000',
+        '--env',
+        'REVERIE_SESSION_ID=' + row.request.sessionId,
+        '--env',
+        'REVERIE_WORKER_IDENTITY_FILE=' + identityFile,
+        row.destination!.containerId,
+        '/opt/reverie-worker-client/bin/reverie',
+        ...args,
+      ]);
+      current();
+      return { exitCode: 0, signal: null, stdout: output };
+    },
+    record: (name, value) => evidence.save(name, value),
+    pause: () => wait(500),
+    verifyCompleted: async (_scenario, record) =>
+      verifyPlanOfficeMovedProvider(before, record, {
+        current,
+        snapshot,
+        ownerGet,
+        metadata: async (args) => driver.docker([...args]),
+        record: (name, value) => evidence.save(name, value),
+      }),
+  });
+  evidence.save('first-self-move-completed', {
+    id: scenario.id,
+    employeeId: scenario.employeeId,
+    fromAccount: scenario.fromAccount,
+    toAccount: scenario.toAccount,
+    realCapsuleHmac: true,
+    originalOnly: true,
+  });
+  return scenario.id;
+}
+
+/** Resume only the never-issued self scenario of an existing owned Ready fixture.
+ * No setup, BEGIN, continuation, create, start, account write or new login occurs. */
+export async function runPlanOfficeReadySelf(contractFile: string) {
+  assert.equal(process.platform, 'linux');
+  privateDirectory(path.dirname(contractFile));
+  const input = PlanOfficeDriverInput.parse(readPrivate(contractFile));
+  assert.equal(input.acceptance, 'ordinary-self');
+  const actualModule = fileURLToPath(import.meta.url),
+    suffix = '/lib/reverie/test/helpers/plan-office-driver.js';
+  assert.ok(actualModule.startsWith('/nix/store/') && actualModule.endsWith(suffix));
+  const runnerRuntime = actualModule.slice(0, -suffix.length);
+  pinned(runnerRuntime);
+  pinned(input.runtimePath);
+  pinned(input.sourcePath);
+  const runnerMetadata = readJsonPinned(path.join(runnerRuntime, 'metadata.json'));
+  assert.equal(runnerMetadata.purpose, 'reverie-ci-plan-office-build-v1');
+  assert.equal(fs.realpathSync(process.execPath), runnerMetadata.nodeExecutable);
+  pinned(runnerMetadata.sourcePath as string);
+  const originalMetadata = readJsonPinned(path.join(input.runtimePath, 'metadata.json'));
+  assert.equal(originalMetadata.sourcePath, input.sourcePath);
+  assert.equal(originalMetadata.nodeExecutable, runnerMetadata.nodeExecutable);
+  assert.equal(originalMetadata.dockerExecutable, runnerMetadata.dockerExecutable);
+  const root = path.join(path.dirname(contractFile), 'office-' + input.instance);
+  privateDirectory(root);
+  assert.equal(
+    fs.existsSync(path.join(root, 'before-self-move.json')),
+    false,
+    'Original self scenario already reserved; observe its ID only'
+  );
+  const evidence = new Evidence(root, true),
+    driver = new Driver(input, evidence, originalMetadata.dockerExecutable as string);
+  try {
+    const { limitation, ...recordedPlan } = readPrivate(path.join(root, 'plan.json')) as Json;
+    assert.equal(typeof limitation, 'string');
+    const plan = PlanOfficeDriverInput.parse(recordedPlan);
+    assert.deepEqual(plan, input);
+    for (const role of ['source', 'worker', 'helper', 'control'] as const) {
+      const image = input[(role + 'ImageId') as 'sourceImageId'];
+      const rows = JSON.parse(driver.docker(['image', 'inspect', image]));
+      assert.equal(rows.length, 1);
+      driver.configs.set(image, requirePlanOfficeImage(rows[0], input, role));
+    }
+    const saved = readPrivate(path.join(root, 'created-' + driver.names.control + '.json')) as Json;
+    const control = cid.parse(saved.id);
+    driver.createdConfigurations.set(control, saved.configuration as Json);
+    const actual = driver.owned(control, 'control'),
+      state = actual.State as Json;
+    assert.equal(state.Running, true);
+    const originalBirth = planOfficeControlBirth(z.number().int().positive().parse(state.Pid));
+    assert.equal((actual.HostConfig as Json).AutoRemove, false);
+    const ports = (actual.NetworkSettings as Json).Ports as Record<string, { HostIp: string; HostPort: string }[]>;
+    assert.equal(ports['3000/tcp']!.length, 1);
+    assert.equal(ports['3000/tcp']![0]!.HostIp, '127.0.0.1');
+    const endpoint = 'http://127.0.0.1:' + ports['3000/tcp']![0]!.HostPort;
+    const owner = await resumeIsolatedPlanOfficeOwner(endpoint, path.join(root, 'auth'));
+    const employee = input.bootstrap.employees[0]!;
+    const current = () => {
+      const fresh = driver.owned(control, 'control').State as Json;
+      assert.equal(fresh.Running, true);
+      assert.equal(fresh.Pid, state.Pid);
+      assert.equal(fresh.StartedAt, state.StartedAt);
+      assert.equal(planOfficeControlBirth(z.number().int().positive().parse(fresh.Pid)), originalBirth);
+    };
+    current();
+    const begin = readPrivate(path.join(root, 'begin-' + employee.employeeId + '.json')) as Json;
+    const operationId = z
+      .string()
+      .uuid()
+      .parse((begin.request as Json).operationId);
+    const selection = await planOfficeOriginalStatus(
+      await owner.request('/api/company/employees/' + employee.employeeId + '/docker-policy'),
+      operationId
+    );
+    assert.equal((selection.operation as Json).phase, 'ready');
+    const session = await planOfficeSession(
+      await owner.request('/api/sessions/' + employee.sessionId),
+      employee.sessionId
+    );
+    assert.equal(session.isWorking, false);
+    assert.equal(session.status, 'idle');
+    assert.equal(session.providerInputHeld, false);
+    const terminal = await planOfficeTerminal(await owner.request('/api/sessions/' + employee.sessionId + '/terminal'));
+    const home = path.join(root, 'workers', employee.employeeId, 'home');
+    privateDirectory(home);
+    const reports = fs
+      .readdirSync(path.join(home, '.fixture'))
+      .filter((n) => /^plan-turn-[A-Za-z0-9-]+\.json$/.test(n))
+      .map((n) => readPrivate(path.join(home, '.fixture', n)) as Json);
+    const report = reports.find(
+      (r) =>
+        r.sessionId === employee.sessionId &&
+        r.providerThread === employee.nativeThreadId &&
+        r.state === 'idle' &&
+        r.requestId === null &&
+        Array.isArray(r.probes) &&
+        r.probes.some(
+          (p) =>
+            (p as Json).exitCode === 0 &&
+            JSON.stringify((p as Json).args) === JSON.stringify(['agent', 'capabilities', '--json'])
+        ) &&
+        r.probes.some(
+          (p) =>
+            (p as Json).exitCode === 0 &&
+            JSON.stringify((p as Json).args) === JSON.stringify(['worker-callback', 'hook-event', '--event', 'stop'])
+        )
+    );
+    assert.ok(report, 'Original actual startup receipt absent');
+    const barrier =
+      'BCPLAN_' +
+      createHash('sha256')
+        .update(employee.sessionId + '\0' + '\0idle')
+        .digest('hex');
+    assert.ok(terminal.includes(barrier), 'Original consuming-close terminal barrier absent');
+    const canonical = readPrivate(path.join(root, 'data/company.json')) as Json;
+    const row = DockerEmployeeContinuationRecord.parse(
+      (canonical.dockerEmployeeContinuations as Json[]).find((r) => r.employeeId === employee.employeeId)
+    );
+    assert.equal(row.phase, 'ready');
+    assert.deepEqual(row.request, begin.request);
+    assert.equal(row.request.sessionId, employee.sessionId);
+    const native = await verifyPlanOfficeReadyNative(
+      row,
+      employee.nativeThreadId,
+      report as unknown as import('./boxed-plan-provider.js').PlanProviderFixtureReport,
+      { current, metadata: async (args) => driver.docker([...args]) }
+    );
+    const ownerStatus = await data(await owner.request('/api/owner/status'));
+    assert.equal(ownerStatus.signedIn, true);
+    assert.equal(ownerStatus.policy, 'enforce');
+    current();
+    evidence.save('ready-self-native', native);
+    evidence.save('ready-self-resume-intent', {
+      operationId,
+      control,
+      actualStartupReceipt: report,
+      observedSession: session,
+      currentRuntime: runnerRuntime,
+      originalRuntime: input.runtimePath,
+      noSetupOrRecoveryReplay: true,
+    });
+    const scenarioId = await runPlanOfficeSelfMove(input, evidence, driver, control, owner, home);
+    const result = {
+      scenarioId,
+      control,
+      planMovesAccepted: true,
+      acceptedScenario: 'ordinary-self',
+      forceAccepted: false,
+      refreshReuseAccepted: false,
+      resumedAlreadyReady: true,
+    };
+    evidence.save('ready-self-completed', result);
+    return result;
+  } finally {
+    evidence.close();
+  }
+}
+function readJsonPinned(file: string): Json {
+  pinned(file);
+  return JSON.parse(fs.readFileSync(file, 'utf8')) as Json;
+}
+
+/** Own fixture controller birth only, from actual Engine PID in verified procfs. */
+export function planOfficeControlBirth(pid: number) {
+  z.number().int().positive().parse(pid);
+  const fd = fs.openSync(
+    '/proc/' + pid + '/stat',
+    fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK
+  );
+  let value: string;
+  try {
+    assert.equal(fs.statfsSync('/proc/self/fd/' + fd).type, 0x9fa0);
+    const b = Buffer.alloc(4097),
+      n = fs.readSync(fd, b, 0, b.length, 0);
+    assert.ok(n > 0 && n < 4097);
+    const text = b.subarray(0, n).toString('utf8');
+    assert.ok(Buffer.from(text).equals(b.subarray(0, n)));
+    assert.equal(Number(text.slice(0, text.indexOf(' '))), pid);
+    value = text.slice(text.lastIndexOf(')') + 2).split(' ')[19]!;
+    assert.match(value, /^[1-9][0-9]*$/);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return value;
 }

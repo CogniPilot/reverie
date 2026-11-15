@@ -26,6 +26,8 @@ import {
   requireSameOperation,
   requireOriginalPolicy,
   runPlanOfficeBaseline,
+  runPlanOfficeReadySelf,
+  planOfficeControlBirth,
   requirePlanOfficeImage,
   requirePlanOfficeContainer,
   PLAN_OFFICE_CPU_PROGRAM,
@@ -645,4 +647,30 @@ it('admits the first ordinary self scenario only for one nonrotating A employee 
     { acceptance: 'force-implicit' },
   ])
     expect(() => PlanOfficeDriverInput.parse({ ...good, ...changes })).toThrow();
+});
+
+it('refuses mutable ready-only admission without touching existing fixture state or Engine', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-ready-refuse-'));
+  fs.chmodSync(root, 0o700);
+  try {
+    const file = path.join(root, 'contract.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        ...raw,
+        acceptance: 'ordinary-self',
+        bootstrap: { ...raw.bootstrap, employees: [{ ...employee, permissions: { moveOwnPlan: true } }] },
+      }),
+      { mode: 0o600 }
+    );
+    await expect(runPlanOfficeReadySelf(file)).rejects.toThrow();
+    expect(fs.readdirSync(root)).toEqual(['contract.json']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+it('reads actual procfs controller birth and refuses nonpositive PID selectors', () => {
+  expect(planOfficeControlBirth(process.pid)).toMatch(/^[1-9][0-9]*$/);
+  expect(planOfficeControlBirth(process.pid)).toBe(planOfficeControlBirth(process.pid));
+  for (const pid of [0, -1, NaN, Infinity]) expect(() => planOfficeControlBirth(pid)).toThrow();
 });

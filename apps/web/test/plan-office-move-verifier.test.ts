@@ -7,6 +7,7 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import {
   verifyPlanOfficeMovedProvider,
+  verifyPlanOfficeReadyNative,
   planOfficeCanonicalAuthDigest,
   planOfficeVerifierReadAllowed,
   type PlanOfficeBeforeMove,
@@ -459,4 +460,41 @@ it('does not admit any arbitrary Docker command or altered fixed read vector', (
     ['container', 'inspect', hex('b'), hex('c')],
   ])
     expect(planOfficeVerifierReadAllowed(args, allowed)).toBe(false);
+});
+
+it('earns startup native incarnation plus exact checked-close barrier using only fixed read argv', async () => {
+  const f = await fixture();
+  const value = await verifyPlanOfficeReadyNative(f.row, f.before.nativeThreadId, f.startup, f.ports);
+  expect(value.native).toEqual(f.native);
+  expect(
+    f.ports.metadata.mock.calls.every(
+      ([args]) => !args.includes('start') && !args.includes('create') && !args.includes('stop')
+    )
+  ).toBe(true);
+});
+it('refuses startup receipt/native identity mismatches, missing close barrier and revocation', async () => {
+  for (const changed of ['pid', 'thread', 'generation', 'barrier', 'birth', 'revoked']) {
+    const f = await fixture(),
+      report = structuredClone(f.startup);
+    if (changed === 'pid') report.namespacePid++;
+    if (changed === 'thread') report.providerThread = uuid(99);
+    if (changed === 'generation') report.hookGenerationSha256 = hex('f');
+    if (changed === 'barrier') f.setCapture('❯ ');
+    if (changed === 'birth') {
+      const original = f.ports.metadata.getMockImplementation()!;
+      let n = 0;
+      f.ports.metadata.mockImplementation(async (args) => {
+        if (args.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && ++n === 2)
+          return JSON.stringify({ ...f.native, paneStartTicks: '9999' });
+        return original(args);
+      });
+    }
+    if (changed === 'revoked')
+      f.ports.current
+        .mockImplementationOnce(() => {})
+        .mockImplementationOnce(() => {
+          throw Error('revoked');
+        });
+    await expect(verifyPlanOfficeReadyNative(f.row, f.before.nativeThreadId, report, f.ports)).rejects.toThrow();
+  }
 });

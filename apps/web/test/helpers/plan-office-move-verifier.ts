@@ -156,7 +156,7 @@ const pane = z
     hooks: z.object({ kind: z.literal('generation'), generation: z.string().min(1).max(256) }).strict(),
   })
   .strict();
-function nodeRead(row: Row) {
+function nodeRead(row: DockerEmployeeContinuationRecord) {
   return [
     'exec',
     ...DOCKER_PROVIDER_VIEW_ENV,
@@ -479,4 +479,57 @@ export async function verifyPlanOfficeMovedProvider(
     fs.closeSync(root.fd);
   }
   ports.record('physical-move-' + scenario.id, result);
+}
+
+/** Actual native source observation and joined terminal barrier; this grants no product authority. */
+export async function verifyPlanOfficeReadyNative(
+  rowValue: unknown,
+  nativeThreadId: string,
+  report: PlanProviderFixtureReport,
+  ports: Pick<PlanOfficePhysicalPorts, 'current' | 'metadata'>
+) {
+  const row = DockerEmployeeContinuationRecord.parse(rowValue);
+  uuid.parse(nativeThreadId);
+  assert.equal(row.phase, 'ready');
+  assert.ok(row.destination);
+  ports.current();
+  const before = pane.parse(JSON.parse(await ports.metadata(nodeRead(row))));
+  ports.current();
+  const output = await ports.metadata([
+    'exec',
+    ...DOCKER_PROVIDER_VIEW_ENV,
+    row.destination.containerId,
+    DOCKER_PROVIDER_VIEW_TMUX,
+    '-N',
+    '-f',
+    '/dev/null',
+    '-L',
+    'reverie-docker',
+    'capture-pane',
+    '-p',
+    '-J',
+    '-S',
+    '-',
+    '-t',
+    before.paneId,
+  ]);
+  ports.current();
+  const after = pane.parse(JSON.parse(await ports.metadata(nodeRead(row))));
+  ports.current();
+  assert.deepEqual(after, before, 'Actual provider incarnation changed');
+  assert.equal(report.employeeId, row.employeeId);
+  assert.equal(report.sessionId, row.request.sessionId);
+  assert.equal(report.providerThread, nativeThreadId);
+  assert.equal(report.namespacePid, before.panePid);
+  assert.equal(report.hookGenerationSha256, createHash('sha256').update(before.hooks.generation).digest('hex'));
+  assert.equal(report.state, 'idle');
+  assert.equal(report.requestId, null);
+  for (const args of [
+    ['agent', 'capabilities', '--json'],
+    ['worker-callback', 'hook-event', '--event', 'stop'],
+  ])
+    assert.ok(report.probes.some((p) => p.exitCode === 0 && isDeepStrictEqual(p.args, args)));
+  assert.ok(output.includes(planFixtureTurnBarrier(report)), 'Original checked-close turn barrier absent');
+  assert.ok(output.trimEnd().endsWith('❯'), 'Original empty native composer absent');
+  return { native: before, outputSha256: createHash('sha256').update(output).digest('hex') };
 }
