@@ -156,6 +156,10 @@ export function buildPlanOffice(args: readonly string[]) {
     '--format=esm',
     '--target=node22',
   ]);
+  fs.renameSync(
+    path.join(runtime, 'test/fixtures/plan-office-canary.js'),
+    path.join(runtime, 'test/fixtures/plan-office-canary.mjs')
+  );
   fs.copyFileSync(
     path.join(web, 'test/fixtures/boxed-canary-fixture-contract.mjs'),
     path.join(runtime, 'test/fixtures/boxed-canary-fixture-contract.mjs')
