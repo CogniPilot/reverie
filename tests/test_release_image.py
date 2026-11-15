@@ -139,7 +139,16 @@ p.write_text(json.dumps(s))
         assets=workflow.split('\n  release-assets:',1)[1]
         self.assertIn('Image publication verified:',publisher)
         for consumer in (publisher, assets):
-            self.assertIn('needs: [image, debian-install, worker-browser, memory-high-native]',consumer)
+            self.assertIn('needs: [image, debian-install, worker-browser, memory-high-native, native-hooks]',consumer)
+        browser=workflow.split('\n  worker-browser:',1)[1].split('\n  native-hooks:',1)[0]
+        hooks=workflow.split('\n  native-hooks:',1)[1].split('\n  debian-install:',1)[0]
+        self.assertNotIn('scripts/test-native-worker-hooks.ts',browser)
+        self.assertIn('scripts/test-native-worker-hooks.ts',hooks)
+        self.assertIn('scripts/select-native-hook-host-test.ts',hooks)
+        self.assertIn('--no-run --message-format=json',hooks)
+        self.assertIn('npm ci --prefix apps/web --ignore-scripts',hooks)
+        self.assertIn('scripts/fix-node-pty.mjs',hooks)
+        self.assertIn('name: native-hook-acceptance',hooks)
         self.assertNotIn('needs: [publish-image',assets)
         self.assertIn('see publish-image separately for GHCR status',assets)
 
