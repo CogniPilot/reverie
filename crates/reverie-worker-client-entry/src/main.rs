@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 use std::{ffi::OsString, os::unix::process::CommandExt, process::Command};
 mod install;
+#[cfg(target_os = "linux")]
+mod plan_install;
 const NODE: &str = "/opt/reverie-worker-client/bin/node";
 const SCRIPT: &str = "/opt/reverie-worker-client/bin/reverie.mjs";
 const KEYS: &[&str] = &[
@@ -60,6 +62,16 @@ fn command(
 }
 fn main() -> std::process::ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    #[cfg(target_os = "linux")]
+    if let Some(result) = plan_install::arguments(&args) {
+        return match result.and_then(plan_install::run) {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("worker plan generation refused or unconfirmed: {error}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     if let Some(result) = install::arguments(&args) {
         return match result.and_then(install::run) {
             Ok(()) => std::process::ExitCode::SUCCESS,
