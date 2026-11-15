@@ -643,13 +643,14 @@ it('admits the first ordinary self scenario only for one nonrotating A employee 
   };
   expect(PlanOfficeDriverInput.parse(good).acceptance).toBe('ordinary-self');
   expect(PlanOfficeDriverInput.parse({ ...good, acceptance: 'self-roundtrip' }).acceptance).toBe('self-roundtrip');
+  expect(PlanOfficeDriverInput.parse({ ...good, acceptance: 'self-owner-force' }).acceptance).toBe('self-owner-force');
   for (const changes of [
     { bootstrap: raw.bootstrap },
     { bootstrap: { ...good.bootstrap, employees: [{ ...employee, permissions: { managePlans: true } }] } },
     { sourceProviders: [{ employeeId: eid, mode: 'rotate-a' }] },
     { acceptance: 'force-implicit' },
   ])
-    for (const acceptance of ['ordinary-self', 'self-roundtrip'])
+    for (const acceptance of ['ordinary-self', 'self-roundtrip', 'self-owner-force'])
       expect(() => PlanOfficeDriverInput.parse({ ...good, acceptance, ...changes })).toThrow();
 });
 

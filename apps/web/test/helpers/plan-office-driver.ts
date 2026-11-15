@@ -3,6 +3,7 @@ import {
   runPlanOfficeMoveScenario,
   runPlanOfficeSelfSequence,
   planOfficeSelfDirection,
+  planOfficeSelfLegKind,
   type PlanOfficeSelfCompletion,
   type PlanOfficeSelfLeg,
 } from './plan-office-move-driver.js';
@@ -43,7 +44,7 @@ export const PlanOfficeDriverInput = z
   .object({
     version: z.literal(1),
     purpose: z.literal('reverie-ci-plan-office-baseline-v1'),
-    acceptance: z.enum(['baseline', 'ordinary-self', 'self-roundtrip']).default('baseline'),
+    acceptance: z.enum(['baseline', 'ordinary-self', 'self-roundtrip', 'self-owner-force']).default('baseline'),
     instance: z.string().regex(/^[a-f0-9]{32}$/),
     sourcePath: store,
     runtimePath: store,
@@ -1144,7 +1145,9 @@ export async function runPlanOfficeBaseline(contractFile: string) {
     }
     let planMovesAccepted = false;
     let selfRoundtripAccepted = false;
-    if (input.acceptance !== 'baseline') {
+    let ownerForceAccepted = false;
+    const acceptance = input.acceptance;
+    if (acceptance !== 'baseline') {
       const originalControl = driver.owned(control, 'control').State as Json;
       const sameControl = () => {
         const observed = driver.owned(control, 'control').State as Json;
@@ -1152,9 +1155,9 @@ export async function runPlanOfficeBaseline(contractFile: string) {
         assert.equal(observed.Pid, originalControl.Pid);
         assert.equal(observed.StartedAt, originalControl.StartedAt);
       };
-      const completed = await runPlanOfficeSelfSequence(input.acceptance, async (leg, previous) => {
+      const completed = await runPlanOfficeSelfSequence(acceptance, async (leg, previous) => {
         sameControl();
-        const result = await runPlanOfficeSelfMove(
+        const result = await runPlanOfficeMoveLeg(
           input,
           evidence,
           driver,
@@ -1162,13 +1165,15 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           owner,
           sources[0]!.home as string,
           leg,
-          previous
+          previous,
+          planOfficeSelfLegKind(acceptance, leg)
         );
         sameControl();
         return result;
       });
       if (completed.returned) {
-        evidence.save('self-roundtrip-completed', {
+        const ownerForce = completed.returned.scenario.kind === 'owner-force';
+        evidence.save(ownerForce ? 'self-owner-force-completed' : 'self-roundtrip-completed', {
           employeeId: completed.first.scenario.employeeId,
           firstMoveId: completed.first.scenario.id,
           returnMoveId: completed.returned.scenario.id,
@@ -1176,9 +1181,12 @@ export async function runPlanOfficeBaseline(contractFile: string) {
           returnNewSession: completed.returned.record.newSession,
           accounts: ['ci-plan-a', 'ci-plan-b', 'ci-plan-a'],
           firstReceipt: 'first-self-move-completed',
-          returnReceipt: 'self-move-' + completed.returned.scenario.id + '-completed',
+          returnReceipt:
+            (ownerForce ? 'owner-force-move-' : 'self-move-') + completed.returned.scenario.id + '-completed',
+          returnKind: completed.returned.scenario.kind,
         });
-        selfRoundtripAccepted = true;
+        selfRoundtripAccepted = !ownerForce;
+        ownerForceAccepted = ownerForce;
       }
       planMovesAccepted = true;
     }
@@ -1200,9 +1208,10 @@ export async function runPlanOfficeBaseline(contractFile: string) {
       baselineReady: true,
       planMovesAccepted,
       selfRoundtripAccepted,
+      ownerForceAccepted,
       acceptedScenario: input.acceptance,
       refreshReuseAccepted: false,
-      forceAccepted: false,
+      forceAccepted: ownerForceAccepted,
       cleanup: 'Preserved only owned fixture state; no stop/prune/paid replay.',
     };
     evidence.save('completed', result);
@@ -1216,8 +1225,8 @@ export async function runPlanOfficeBaseline(contractFile: string) {
   }
 }
 
-/** Shared one-shot self request, always fenced by the exclusive before-self record. */
-async function runPlanOfficeSelfMove(
+/** Shared one-shot move adapter; the first self latch and per-operation return latches never replay. */
+async function runPlanOfficeMoveLeg(
   input: Input,
   evidence: Evidence,
   driver: Driver,
@@ -1225,9 +1234,11 @@ async function runPlanOfficeSelfMove(
   owner: Pick<Awaited<ReturnType<typeof enrollIsolatedPlanOfficeOwner>>, 'request'>,
   home: string,
   leg: PlanOfficeSelfLeg = 'first',
-  previous?: PlanOfficeSelfCompletion
+  previous?: PlanOfficeSelfCompletion,
+  kind: 'self' | 'owner-force' = 'self'
 ) {
   const direction = planOfficeSelfDirection(leg);
+  if (kind === 'owner-force') assert.equal(leg, 'return');
   const names = driver.names;
   assert.equal(input.bootstrap.employees.length, 1, 'First self scenario owns one fresh employee');
   const initialEmployee = input.bootstrap.employees[0]!;
@@ -1280,7 +1291,7 @@ async function runPlanOfficeSelfMove(
   const scenario = {
     version: 1 as const,
     purpose: 'reverie-ci-plan-move-scenario-v1' as const,
-    kind: 'self' as const,
+    kind,
     id: randomUUID(),
     employeeId: row.employeeId,
     sessionId: row.request.sessionId,
@@ -1307,44 +1318,49 @@ async function runPlanOfficeSelfMove(
     home: { source: home, dev: String(homeStat.dev), ino: String(homeStat.ino), user: driver.user },
     canonicalAuthDigest: planOfficeCanonicalAuthDigest(evidence.root, direction.toAccount),
   };
-  evidence.save(leg === 'first' ? 'before-self-move' : 'before-self-move-' + scenario.id, before);
+  const moveName = kind === 'owner-force' ? 'owner-force-move-' : 'self-move-';
+  evidence.save(leg === 'first' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
   const ownerGet = async (p: string) => {
     current();
     const result = await owner.request(p);
     current();
     return result;
   };
+  const currentSource = () => {
+    current();
+    const actual = DockerEmployeeContinuationRecord.parse(snapshot().row);
+    assert.deepEqual(actual, row);
+    const raw = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
+    assert.deepEqual(
+      boxedOriginal(
+        raw,
+        {
+          employeeId: row.employeeId,
+          sessionId: row.request.sessionId,
+          sessionGeneration: row.request.sessionGeneration,
+          owner: row.owner,
+          sourceDigest: row.sourceDigest,
+          providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
+          onVacation: false,
+          desiredRunning: true,
+        },
+        names.prefix,
+        true
+      ),
+      row.destination
+    );
+  };
   const record = await runPlanOfficeMoveScenario(scenario, {
     assertCurrent: async () => current(),
     ownerPost: async (p, body) => {
-      current();
+      if (p === '/api/plans/moves/force') currentSource();
+      else current();
       const result = await owner.request(p, 'POST', body);
       current();
       return result;
     },
     capsule: async (args) => {
-      current();
-      const actual = DockerEmployeeContinuationRecord.parse(snapshot().row);
-      assert.deepEqual(actual, row);
-      const raw = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
-      assert.deepEqual(
-        boxedOriginal(
-          raw,
-          {
-            employeeId: row.employeeId,
-            sessionId: row.request.sessionId,
-            sessionGeneration: row.request.sessionGeneration,
-            owner: row.owner,
-            sourceDigest: row.sourceDigest,
-            providerSourceDigest: row.version === 1 ? row.sourceDigest : row.providerSourceDigest,
-            onVacation: false,
-            desiredRunning: true,
-          },
-          names.prefix,
-          true
-        ),
-        row.destination
-      );
+      currentSource();
       const identityFile = planOfficeSelfIdentityFile(row);
       const output = driver.docker([
         'exec',
@@ -1374,7 +1390,14 @@ async function runPlanOfficeSelfMove(
         record: (name, value) => evidence.save(name, value),
       }),
   });
-  evidence.save(leg === 'first' ? 'first-self-move-completed' : 'self-move-' + scenario.id + '-completed', {
+  const target = DockerEmployeeContinuationRecord.parse(snapshot().row);
+  assert.equal(target.version, 3);
+  assert.equal(target.phase, 'ready');
+  assert.equal(target.request.sessionId, record.newSession);
+  assert.equal(target.request.sessionGeneration, scenario.sessionGeneration + 1);
+  assert.equal(target.version === 3 && target.planReplacement.moveId, scenario.id);
+  assert.ok(target.destination);
+  evidence.save(leg === 'first' ? 'first-self-move-completed' : moveName + scenario.id + '-completed', {
     id: scenario.id,
     employeeId: scenario.employeeId,
     fromAccount: scenario.fromAccount,
@@ -1382,7 +1405,13 @@ async function runPlanOfficeSelfMove(
     sessionId: scenario.sessionId,
     sessionGeneration: scenario.sessionGeneration,
     newSession: record.newSession,
-    realCapsuleHmac: true,
+    realCapsuleHmac: kind === 'self',
+    ownerApiForce: kind === 'owner-force',
+    sourceContainerId: row.destination.containerId,
+    targetContainerId: target.destination.containerId,
+    targetOperationId: target.request.operationId,
+    nativeThreadId,
+    physicalReceipt: 'physical-move-' + scenario.id,
     originalOnly: true,
   });
   return { scenario, record };
@@ -1541,7 +1570,7 @@ export async function runPlanOfficeReadySelf(contractFile: string) {
       originalRuntime: input.runtimePath,
       noSetupOrRecoveryReplay: true,
     });
-    const completed = await runPlanOfficeSelfMove(input, evidence, driver, control, owner, home);
+    const completed = await runPlanOfficeMoveLeg(input, evidence, driver, control, owner, home);
     const result = {
       scenarioId: completed.scenario.id,
       control,

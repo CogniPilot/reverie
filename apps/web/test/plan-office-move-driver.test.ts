@@ -93,11 +93,13 @@ it('never allocates a return after an unknown/failed first verification or a mer
     'Physical source closure unconfirmed',
     'Receipt close failed',
   ]) {
-    const move = vi.fn(async () => {
-      throw Error(failure);
-    });
-    await expect(runPlanOfficeSelfSequence('self-roundtrip', move)).rejects.toThrow(failure);
-    expect(move).toHaveBeenCalledTimes(1);
+    for (const selection of ['self-roundtrip', 'self-owner-force'] as const) {
+      const move = vi.fn(async () => {
+        throw Error(failure);
+      });
+      await expect(runPlanOfficeSelfSequence(selection, move)).rejects.toThrow(failure);
+      expect(move).toHaveBeenCalledTimes(1);
+    }
   }
   const pending = vi.fn(async () => ({
     scenario: PlanOfficeMoveScenario.parse(base),
@@ -128,6 +130,78 @@ it('requires a new return ID, same employee and the actual next session/generati
     );
     await expect(runPlanOfficeSelfSequence('self-roundtrip', move)).rejects.toThrow();
   }
+});
+it('starts explicit owner force on the known completed self destination only, through its existing API and generation', async () => {
+  const first = fixture(),
+    forced = fixture('owner-force');
+  const events: string[] = [];
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  first.ports.verifyCompleted.mockImplementation(async () => {
+    events.push('first-physical');
+    await barrier;
+  });
+  const forceId = '55555555-5555-4555-8555-555555555555';
+  const move = vi.fn(async (leg, previous) => {
+    if (leg === 'first') {
+      const record = await runPlanOfficeMoveScenario(first.scenario, first.ports);
+      events.push('first-receipt-closed');
+      return { scenario: first.scenario, record };
+    }
+    events.push('allocate-forced-id');
+    const scenario = PlanOfficeMoveScenario.parse({
+      ...base,
+      kind: 'owner-force',
+      id: forceId,
+      sessionId: previous!.record.newSession,
+      sessionGeneration: previous!.scenario.sessionGeneration + 1,
+      fromAccount: 'ci-plan-b',
+      toAccount: 'ci-plan-a',
+    });
+    forced.ports.ownerPost.mockImplementation(async (path) =>
+      response(
+        {
+          id: forceId,
+          employeeId: eid,
+          oldSession: newSession,
+          newSession: '66666666-6666-4666-8666-666666666666',
+          fromAccount: 'ci-plan-b',
+          toAccount: 'ci-plan-a',
+          phase: path.endsWith('/status') ? 'completed' : 'waiting',
+        },
+        path.endsWith('/status') ? 200 : 202
+      )
+    );
+    const record = await runPlanOfficeMoveScenario(scenario, forced.ports);
+    return { scenario, record };
+  });
+  const pending = runPlanOfficeSelfSequence('self-owner-force', move);
+  await vi.waitFor(() => expect(events).toEqual(['first-physical']));
+  expect(forced.ports.ownerPost).not.toHaveBeenCalled();
+  release();
+  const completed = await pending;
+  expect(events).toEqual(['first-physical', 'first-receipt-closed', 'allocate-forced-id']);
+  expect(completed.returned?.scenario.kind).toBe('owner-force');
+  expect(forced.ports.capsule).not.toHaveBeenCalled();
+  expect(forced.ports.ownerPost.mock.calls[0]).toEqual([
+    '/api/plans/moves/force',
+    {
+      id: forceId,
+      employeeId: eid,
+      sessionId: newSession,
+      sessionGeneration: 3,
+      toAccount: 'ci-plan-a',
+      handoff: expect.stringContaining('generation 3, account ci-plan-b to ci-plan-a'),
+    },
+  ]);
+  expect(forced.ports.ownerPost.mock.calls[0]?.[1]?.handoff).toContain(newSession);
+  expect(forced.ports.ownerPost.mock.calls[0]?.[1]?.handoff).toContain(
+    'source home, workspace, conversation/thread, memories'
+  );
+  expect(forced.ports.ownerPost.mock.calls[1]).toEqual(['/api/plans/moves/' + forceId + '/status', {}]);
+  expect(forced.ports.verifyCompleted).toHaveBeenCalledTimes(1);
 });
 const forceRecord = (phase = 'waiting') => ({
   id,

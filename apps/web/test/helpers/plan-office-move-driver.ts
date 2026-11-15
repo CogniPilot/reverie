@@ -21,7 +21,7 @@ export const PlanOfficeMoveScenario = z
   .strict()
   .refine((value) => value.fromAccount !== value.toAccount);
 export type PlanOfficeMoveScenario = z.infer<typeof PlanOfficeMoveScenario>;
-export const PlanOfficeSelfAcceptance = z.enum(['ordinary-self', 'self-roundtrip']);
+export const PlanOfficeSelfAcceptance = z.enum(['ordinary-self', 'self-roundtrip', 'self-owner-force']);
 export type PlanOfficeSelfAcceptance = z.infer<typeof PlanOfficeSelfAcceptance>;
 type ApiRecord = Record<string, unknown>;
 export interface PlanOfficeSelfCompletion {
@@ -36,6 +36,11 @@ export function planOfficeSelfDirection(leg: PlanOfficeSelfLeg) {
     ? { fromAccount: 'ci-plan-a' as const, toAccount: 'ci-plan-b' as const }
     : { fromAccount: 'ci-plan-b' as const, toAccount: 'ci-plan-a' as const };
 }
+export function planOfficeSelfLegKind(selection: PlanOfficeSelfAcceptance, leg: PlanOfficeSelfLeg) {
+  PlanOfficeSelfAcceptance.parse(selection);
+  planOfficeSelfDirection(leg);
+  return selection === 'self-owner-force' && leg === 'return' ? ('owner-force' as const) : ('self' as const);
+}
 /** The return callback (including its new-ID allocation) is unreachable until
  * the first move has returned from its full physical verification and receipt. */
 export async function runPlanOfficeSelfSequence(
@@ -45,7 +50,7 @@ export async function runPlanOfficeSelfSequence(
   PlanOfficeSelfAcceptance.parse(selection);
   const validate = (value: PlanOfficeSelfCompletion, leg: PlanOfficeSelfLeg) => {
     const scenario = PlanOfficeMoveScenario.parse(value.scenario);
-    assert.equal(scenario.kind, 'self');
+    assert.equal(scenario.kind, planOfficeSelfLegKind(selection, leg));
     assert.equal(scenario.fromAccount, planOfficeSelfDirection(leg).fromAccount);
     assert.equal(scenario.toAccount, planOfficeSelfDirection(leg).toAccount);
     const record = planOfficeMoveRecord(value.record, scenario);
@@ -134,7 +139,18 @@ export async function runPlanOfficeMoveScenario(unchecked: unknown, ports: PlanO
           handoff:
             'Synthetic isolated CI move ' +
             scenario.id +
-            '. Preserve the original work and unknown outcomes; no paid model work.',
+            ' for employee ' +
+            scenario.employeeId +
+            ', current source session ' +
+            scenario.sessionId +
+            ', generation ' +
+            scenario.sessionGeneration +
+            ', account ' +
+            scenario.fromAccount +
+            ' to ' +
+            scenario.toAccount +
+            '. Preserve the source home, workspace, conversation/thread, memories ' +
+            'and unknown outcomes. This is the nonpaid synthetic fixture; no paid model work was performed.',
         }
       : {}),
   };

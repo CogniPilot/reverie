@@ -31,6 +31,9 @@ it('requires the explicit hosted-only command before any filesystem, build or En
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).not.toThrow();
   expect(requireHostedPlanOffice(['--ci'], env, 'linux', 'x64')).toBe('ordinary-self');
   expect(requireHostedPlanOffice(['--ci', '--scenario', 'self-roundtrip'], env, 'linux', 'x64')).toBe('self-roundtrip');
+  expect(requireHostedPlanOffice(['--ci', '--scenario', 'self-owner-force'], env, 'linux', 'x64')).toBe(
+    'self-owner-force'
+  );
   expect(() => requireHostedPlanOffice(['--ci', '--scenario', 'force'], env, 'linux', 'x64')).toThrow();
   for (const args of [[], ['--ci', '--force'], ['--contract', '/private/office']])
     expect(() => requireHostedPlanOffice(args, env, 'linux', 'x64')).toThrow();
@@ -227,6 +230,7 @@ it('selects only fresh namespaced actual Engine IDs and fixed immutable current-
   const c = planOfficeCiContract(metadata, instance, ids);
   expect(c.acceptance).toBe('ordinary-self');
   expect(planOfficeCiContract(metadata, instance, ids, 'self-roundtrip').acceptance).toBe('self-roundtrip');
+  expect(planOfficeCiContract(metadata, instance, ids, 'self-owner-force').acceptance).toBe('self-owner-force');
   expect(c.bootstrap.employees[0]?.permissions).toEqual({ moveOwnPlan: true, managePlans: false });
   expect(c.sourceProviders[0]?.mode).toBe('ordinary');
   for (const change of [
@@ -301,6 +305,72 @@ it('requires both separately completed opposite moves with linked new sessions t
     expect(() => accept(result, { returned: { ...returned, ...change }, summary })).toThrow();
   expect(() => accept(result, { returned, summary: { ...summary, returnMoveId: first.id } })).toThrow();
   expect(() => requirePlanOfficeCiAcceptance(result, first, root, employeeId)).toThrow();
+  const nativeThreadId = '77777777-7777-4777-8777-777777777777';
+  const forceFirst = { ...first, nativeThreadId, targetContainerId: 'a'.repeat(64) };
+  const forceReturned = {
+    ...returned,
+    realCapsuleHmac: false,
+    ownerApiForce: true,
+    nativeThreadId,
+    sourceContainerId: 'a'.repeat(64),
+    targetContainerId: 'b'.repeat(64),
+    targetOperationId: '88888888-8888-4888-8888-888888888888',
+    physicalReceipt: 'physical-move-' + returned.id,
+  };
+  const forceSummary = {
+    ...summary,
+    returnKind: 'owner-force',
+    returnReceipt: 'owner-force-move-' + returned.id + '-completed',
+  };
+  const forceResult = {
+    ...result,
+    acceptedScenario: 'self-owner-force',
+    forceAccepted: true,
+    ownerForceAccepted: true,
+    selfRoundtripAccepted: false,
+  };
+  const physical = {
+    sourceStopped: true,
+    sourceId: forceReturned.sourceContainerId,
+    targetId: 'b'.repeat(64),
+    sessionId: returned.newSession,
+    sessionGeneration: 3,
+    nativeThreadId,
+    operationId: forceReturned.targetOperationId,
+    actualCallbacksAndConsumingCloses: true,
+  };
+  const acceptForce = (value: unknown) =>
+    requirePlanOfficeCiAcceptance(forceResult, forceFirst, root, employeeId, 'self-owner-force', {
+      returned: forceReturned,
+      summary: forceSummary,
+      physical: value,
+    });
+  expect(acceptForce(physical)).toMatchObject({
+    ownerForceAccepted: true,
+    forceAccepted: true,
+    selfRoundtripAccepted: false,
+    agentForceAccepted: false,
+    exhaustedSourceAccepted: false,
+    deadViewerAccepted: false,
+    teamAccepted: false,
+  });
+  for (const change of [
+    { sourceStopped: false },
+    { targetId: physical.sourceId },
+    { sessionGeneration: 2 },
+    { nativeThreadId: employeeId },
+    { operationId: employeeId },
+    { actualCallbacksAndConsumingCloses: false },
+  ])
+    expect(() => acceptForce({ ...physical, ...change })).toThrow();
+  expect(() => acceptForce(undefined)).toThrow();
+  expect(() =>
+    requirePlanOfficeCiAcceptance(forceResult, forceFirst, root, employeeId, 'self-owner-force', {
+      returned: { ...forceReturned, realCapsuleHmac: true },
+      summary: forceSummary,
+      physical,
+    })
+  ).toThrow();
 });
 it('requires both the ordinary-self result and separate real HMAC/physical-completion sentinel', () => {
   const root = '/private/owned/office-' + instance;
@@ -333,6 +403,7 @@ it('requires both the ordinary-self result and separate real HMAC/physical-compl
     { acceptedScenario: 'baseline' },
     { evidence: '/foreign/office' },
     { forceAccepted: true },
+    { ownerForceAccepted: true },
   ])
     expect(() => requirePlanOfficeCiAcceptance({ ...result, ...change }, proof, root, employeeId)).toThrow();
   for (const change of [

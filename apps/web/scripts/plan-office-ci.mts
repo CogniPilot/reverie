@@ -1,6 +1,6 @@
 /** Mandatory hosted acceptance. All model executables and credentials are synthetic;
  * the ordinary owner API, HMAC client, Docker lifecycle and native verifier are real.
- * --ci keeps the ordinary-self gate; --ci --scenario self-roundtrip is an explicit extension. */
+ * --ci keeps the ordinary-self gate; self-roundtrip and self-owner-force are explicit scenario extensions. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -11,9 +11,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip';
+export type PlanOfficeCiSelection = 'ordinary-self' | 'self-roundtrip' | 'self-owner-force';
 function requireSelection(value: string): asserts value is PlanOfficeCiSelection {
-  assert.ok(value === 'ordinary-self' || value === 'self-roundtrip');
+  assert.ok(value === 'ordinary-self' || value === 'self-roundtrip' || value === 'self-owner-force');
 }
 function object(value: unknown): Json {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value));
@@ -108,7 +108,7 @@ export function requirePlanOfficeCiAcceptance(
   root: string,
   employeeId: string,
   selection: PlanOfficeCiSelection = 'ordinary-self',
-  roundtrip?: { returned: unknown; summary: unknown }
+  roundtrip?: { returned: unknown; summary: unknown; physical?: unknown }
 ) {
   requireSelection(selection);
   const r = object(result),
@@ -118,7 +118,9 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(r.planMovesAccepted, true);
   assert.equal(r.acceptedScenario, selection);
   assert.equal(r.evidence, root);
-  assert.equal(r.forceAccepted, false);
+  const ownerForce = selection === 'self-owner-force';
+  assert.equal(r.forceAccepted, ownerForce);
+  if (!ownerForce) assert.notEqual(r.ownerForceAccepted, true);
   assert.equal(r.refreshReuseAccepted, false);
   assert.match(String(proof.id), uuid);
   assert.equal(proof.employeeId, employeeId);
@@ -130,7 +132,10 @@ export function requirePlanOfficeCiAcceptance(
     scenarioId: proof.id,
     employeeId,
     ordinarySelfAccepted: true,
-    forceAccepted: false,
+    forceAccepted: ownerForce,
+    agentForceAccepted: false,
+    exhaustedSourceAccepted: false,
+    deadViewerAccepted: false,
     teamAccepted: false,
     permissionMatrixAccepted: false,
     officeReentryAccepted: false,
@@ -140,7 +145,8 @@ export function requirePlanOfficeCiAcceptance(
     assert.equal(roundtrip, undefined);
     return { ...acceptance, selfRoundtripAccepted: false };
   }
-  assert.equal(r.selfRoundtripAccepted, true);
+  assert.equal(r.selfRoundtripAccepted, !ownerForce);
+  if (ownerForce) assert.equal(r.ownerForceAccepted, true);
   assert.ok(roundtrip);
   const returned = object(roundtrip.returned),
     summary = object(roundtrip.summary);
@@ -149,7 +155,8 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(returned.employeeId, employeeId);
   assert.equal(returned.fromAccount, 'ci-plan-b');
   assert.equal(returned.toAccount, 'ci-plan-a');
-  assert.equal(returned.realCapsuleHmac, true);
+  assert.equal(returned.realCapsuleHmac, !ownerForce);
+  if (ownerForce) assert.equal(returned.ownerApiForce, true);
   assert.equal(returned.originalOnly, true);
   for (const value of [proof.sessionId, proof.newSession, returned.sessionId, returned.newSession])
     assert.match(String(value), uuid);
@@ -165,8 +172,33 @@ export function requirePlanOfficeCiAcceptance(
   assert.equal(summary.returnNewSession, returned.newSession);
   assert.deepEqual(summary.accounts, ['ci-plan-a', 'ci-plan-b', 'ci-plan-a']);
   assert.equal(summary.firstReceipt, 'first-self-move-completed');
-  assert.equal(summary.returnReceipt, 'self-move-' + returned.id + '-completed');
-  return { ...acceptance, selfRoundtripAccepted: true, returnScenarioId: returned.id };
+  assert.equal(summary.returnReceipt, (ownerForce ? 'owner-force-move-' : 'self-move-') + returned.id + '-completed');
+  if (ownerForce) {
+    assert.equal(summary.returnKind, 'owner-force');
+    assert.equal(returned.physicalReceipt, 'physical-move-' + returned.id);
+    const physical = object(roundtrip.physical);
+    assert.equal(physical.sourceStopped, true);
+    for (const id of [physical.sourceId, physical.targetId]) assert.match(String(id), /^[a-f0-9]{64}$/);
+    assert.equal(physical.sourceId, returned.sourceContainerId);
+    assert.match(String(proof.targetContainerId), /^[a-f0-9]{64}$/);
+    assert.equal(physical.sourceId, proof.targetContainerId);
+    assert.equal(physical.targetId, returned.targetContainerId);
+    assert.notEqual(physical.targetId, physical.sourceId);
+    assert.match(String(returned.targetOperationId), uuid);
+    assert.equal(physical.operationId, returned.targetOperationId);
+    assert.equal(physical.sessionId, returned.newSession);
+    assert.equal(physical.sessionGeneration, Number(returned.sessionGeneration) + 1);
+    assert.match(String(proof.nativeThreadId), uuid);
+    assert.equal(returned.nativeThreadId, proof.nativeThreadId);
+    assert.equal(physical.nativeThreadId, proof.nativeThreadId);
+    assert.equal(physical.actualCallbacksAndConsumingCloses, true);
+  }
+  return {
+    ...acceptance,
+    selfRoundtripAccepted: !ownerForce,
+    ownerForceAccepted: ownerForce,
+    returnScenarioId: returned.id,
+  };
 }
 function save(file: string, value: unknown) {
   const fd = fs.openSync(file, 'wx', 0o600);
@@ -523,15 +555,36 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
     );
     const root = path.join(evidence, 'office-' + instance);
     const proof = JSON.parse(fs.readFileSync(path.join(root, 'first-self-move-completed.json'), 'utf8'));
-    let roundtrip: { returned: unknown; summary: unknown } | undefined;
-    if (selection === 'self-roundtrip') {
-      const summary = object(JSON.parse(fs.readFileSync(path.join(root, 'self-roundtrip-completed.json'), 'utf8')));
+    let roundtrip: { returned: unknown; summary: unknown; physical?: unknown } | undefined;
+    if (selection !== 'ordinary-self') {
+      const ownerForce = selection === 'self-owner-force';
+      const summary = object(
+        JSON.parse(
+          fs.readFileSync(
+            path.join(root, ownerForce ? 'self-owner-force-completed.json' : 'self-roundtrip-completed.json'),
+            'utf8'
+          )
+        )
+      );
       assert.match(String(summary.returnMoveId), uuid);
       roundtrip = {
         summary,
         returned: JSON.parse(
-          fs.readFileSync(path.join(root, 'self-move-' + summary.returnMoveId + '-completed.json'), 'utf8')
+          fs.readFileSync(
+            path.join(
+              root,
+              (ownerForce ? 'owner-force-move-' : 'self-move-') + summary.returnMoveId + '-completed.json'
+            ),
+            'utf8'
+          )
         ),
+        ...(ownerForce
+          ? {
+              physical: JSON.parse(
+                fs.readFileSync(path.join(root, 'physical-move-' + summary.returnMoveId + '.json'), 'utf8')
+              ),
+            }
+          : {}),
       };
     }
     const acceptance = requirePlanOfficeCiAcceptance(
