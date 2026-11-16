@@ -146,8 +146,7 @@ impl Fixture {
         let root = Path::new("/tmp/deployment");
         fs::create_dir_all(root.join("data")).unwrap();
         fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
-        let config =
-            json!({"version":1,"containerName":"fixture","port":health.port(),"websiteRuntime":"default"});
+        let config = json!({"version":1,"containerName":"fixture","port":health.port(),"websiteRuntime":"default"});
         installation::exclusive_json(&root.join("deployment.json"), &config).unwrap();
         let service = DeploymentService::capture(root).unwrap();
         let mut source = source(health.port());

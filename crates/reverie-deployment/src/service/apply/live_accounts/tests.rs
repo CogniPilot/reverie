@@ -1,6 +1,7 @@
 //! Actual service/transport, controlled observations only; no real Docker.
 use super::*;
 use crate::service::rollback::network_tests::fixture::{self, Fixture};
+mod cgroup_observer;
 
 fn namespace(test: &str, scenario: fn()) {
     crate::test_namespace::run(

@@ -33,13 +33,18 @@ impl MountDevice {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MountRow {
     id: UnsignedInteger,
+    parent: Option<UnsignedInteger>,
     device: MountDevice,
     root: Option<PosixPath>,
     point: PosixPath,
+    filesystem: Vec<u32>,
 }
 impl MountRow {
     pub fn id(&self) -> &UnsignedInteger {
         &self.id
+    }
+    pub fn parent_id(&self) -> Option<&UnsignedInteger> {
+        self.parent.as_ref()
     }
     pub fn device(&self) -> &MountDevice {
         &self.device
@@ -49,6 +54,13 @@ impl MountRow {
     }
     pub fn point(&self) -> &PosixPath {
         &self.point
+    }
+    /// Kernel DATA only; callers still prove actual FD/device/process custody.
+    pub fn filesystem_is(&self, name: &str) -> bool {
+        self.filesystem
+            .iter()
+            .copied()
+            .eq(name.chars().map(u32::from))
     }
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -93,9 +105,11 @@ impl MountTable {
             };
             rows.push(MountRow {
                 id,
+                parent: integer(fields[1]).ok(),
                 device,
                 root,
                 point: decode_path(fields[4])?,
+                filesystem: fields[split + 1].to_vec(),
             });
         }
         Ok(Self { rows })

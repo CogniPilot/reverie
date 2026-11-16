@@ -10,10 +10,10 @@ use reverie_core::posix_path::PosixPath;
 use std::os::fd::AsRawFd;
 const UNSUPPORTED: &str = "DEPLOYMENT_LIVE_ACCOUNT_HOST_MOUNT_UNSUPPORTED";
 
-#[derive(PartialEq, Eq)]
-struct Location {
-    device: MountDevice,
-    path: PosixPath,
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct Location {
+    pub(super) device: MountDevice,
+    pub(super) path: PosixPath,
 }
 pub(super) struct Backing {
     paths: [PathBuf; 2],
@@ -106,6 +106,47 @@ fn selection(paths: &[PathBuf; 2], files: &[File]) -> Result<(PathBuf, [Location
     Ok((namespace, locations))
 }
 impl Backing {
+    pub(super) fn cgroup2_origin(&self) -> Result<Location> {
+        use nix::sys::statfs::{
+            self, BTRFS_SUPER_MAGIC, CGROUP2_SUPER_MAGIC, EXT4_SUPER_MAGIC, NFS_SUPER_MAGIC,
+            OVERLAYFS_SUPER_MAGIC, TMPFS_MAGIC, XFS_SUPER_MAGIC,
+        };
+        self.verify()?;
+        let source =
+            statfs::fstatfs(&self.files[0]).map_err(|_| DeploymentError::new(UNSUPPORTED))?;
+        let console =
+            statfs::fstatfs(&self.files[1]).map_err(|_| DeploymentError::new(UNSUPPORTED))?;
+        require(
+            source.filesystem_type() == CGROUP2_SUPER_MAGIC
+                && [
+                    EXT4_SUPER_MAGIC,
+                    BTRFS_SUPER_MAGIC,
+                    XFS_SUPER_MAGIC,
+                    TMPFS_MAGIC,
+                    OVERLAYFS_SUPER_MAGIC,
+                    NFS_SUPER_MAGIC,
+                ]
+                .contains(&console.filesystem_type())
+                && self.locations[0].device != self.locations[1].device,
+            UNSUPPORTED,
+        )?;
+        let raw = text(Path::new("/proc/self/mountinfo"), MAX_MOUNT_BYTES)?;
+        let table = MountTable::parse(&raw.chars().map(u32::from).collect::<Vec<_>>())
+            .map_err(|_| DeploymentError::new(UNSUPPORTED))?;
+        let console = path(&self.paths[1])?;
+        require(
+            !table
+                .rows()
+                .iter()
+                .any(|row| row.point() != &console && row.point().is_relative_to(&console)),
+            UNSUPPORTED,
+        )?;
+        require(
+            fs::read_link("/proc/self/ns/mnt")? == self.namespace,
+            UNSUPPORTED,
+        )?;
+        Ok(self.locations[0].clone())
+    }
     pub(super) fn capture(source: &Path, console: &Path) -> Result<Self> {
         let paths = [source.canonicalize()?, console.canonicalize()?];
         let mut files = Vec::new();

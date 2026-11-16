@@ -10,6 +10,7 @@ use std::{
     path::Component,
 };
 mod backing;
+mod cgroup;
 mod inside;
 use inside::Inside;
 
@@ -49,9 +50,11 @@ fn namespace(pid: u64) -> Result<String> {
     Ok(value.into())
 }
 fn current(expected: &Writer) -> Result<()> {
+    let MountObservation::NamespaceFd { namespace: seen } = &expected.mount_observation else {
+        return Err(DeploymentError::new(PROCESS));
+    };
     require(
-        birth(expected.pid)? == expected.process_birth
-            && namespace(expected.pid)? == expected.mount_namespace,
+        birth(expected.pid)? == expected.process_birth && namespace(expected.pid)? == *seen,
         PROCESS,
     )
 }
@@ -123,7 +126,13 @@ pub(super) fn observe_writer(engine: &Engine, row: &Value, console: &Path) -> Re
         .as_u64()
         .filter(|pid| *pid > 0)
         .ok_or_else(|| DeploymentError::new(INVALID))?;
-    let expected = writer(row, &observed, console, birth(pid)?, namespace(pid)?)?;
+    if cgroup::eligible(&observed)? {
+        return cgroup::observe(engine, row, &observed, console, pid);
+    }
+    let observation = MountObservation::NamespaceFd {
+        namespace: namespace(pid)?,
+    };
+    let expected = writer(row, &observed, console, birth(pid)?, observation.clone())?;
     let mounts = observed["Mounts"]
         .as_array()
         .ok_or_else(|| DeploymentError::new(INVALID))?;
@@ -136,7 +145,15 @@ pub(super) fn observe_writer(engine: &Engine, row: &Value, console: &Path) -> Re
         verify_bind(source, console, &expected, destination, || {
             let current = engine.container(id)?;
             require(
-                writer(row, &current, console, birth(pid)?, namespace(pid)?)? == expected,
+                writer(
+                    row,
+                    &current,
+                    console,
+                    birth(pid)?,
+                    MountObservation::NamespaceFd {
+                        namespace: namespace(pid)?,
+                    },
+                )? == expected,
                 "DEPLOYMENT_LIVE_ACCOUNT_WRITERS_CHANGED",
             )
         })?;

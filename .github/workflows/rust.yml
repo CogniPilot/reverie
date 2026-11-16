@@ -39,6 +39,14 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
           TMPDIR: ${{ runner.temp }}
         run: nix develop --command cargo xtask verify
+      - name: Qualify real cgroup2 writer observation outside the Nix build sandbox
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          nix develop --command cargo test --locked -p reverie-deployment --lib -- --ignored service::apply::live_accounts::tests::cgroup_observer | tee "$RUNNER_TEMP/reverie-cgroup2-observer-tests.log"
+          grep -F 'test result: ok. 3 passed; 0 failed;' "$RUNNER_TEMP/reverie-cgroup2-observer-tests.log"
       - name: Qualify selected native worker executable and manifest
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target

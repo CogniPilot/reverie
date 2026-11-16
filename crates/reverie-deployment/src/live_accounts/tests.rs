@@ -6,7 +6,15 @@ use std::{
 // These unit projections are DATA only. The actual Inventory capture additionally
 // requires the separate real proc-root/Engine joins exercised by service tests.
 fn writer(row: &Value, observed: &Value, console: &Path) -> Result<Writer> {
-    super::writer(row, observed, console, "123".into(), "mnt:[123]".into())
+    super::writer(
+        row,
+        observed,
+        console,
+        "123".into(),
+        MountObservation::NamespaceFd {
+            namespace: "mnt:[123]".into(),
+        },
+    )
 }
 
 struct Fixture(PathBuf);

@@ -65,8 +65,15 @@ struct Writer {
     pid: u64,
     started: String,
     process_birth: String,
-    mount_namespace: String,
+    mount_observation: MountObservation,
     accounts: Vec<Account>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum MountObservation {
+    NamespaceFd { namespace: String },
+    Cgroup2KernelTable { table_sha256: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -155,7 +162,7 @@ fn writer(
     observed: &Value,
     console: &Path,
     process_birth: String,
-    mount_namespace: String,
+    mount_observation: MountObservation,
 ) -> Result<Writer> {
     let id = model::cid(model::string(row, "Id")?)?;
     let image = model::image_id(model::string(row, "ImageID")?)?;
@@ -186,7 +193,7 @@ fn writer(
         pid,
         started: started.into(),
         process_birth,
-        mount_namespace,
+        mount_observation,
         accounts,
     })
 }
@@ -270,7 +277,7 @@ impl Inventory {
                     && !writer.process_birth.is_empty()
                     && writer.process_birth.len() <= 20
                     && writer.process_birth.bytes().all(|b| b.is_ascii_digit())
-                    && process::valid_namespace(&writer.mount_namespace)
+                    && matches!(&writer.mount_observation, MountObservation::NamespaceFd { namespace } if process::valid_namespace(namespace))
                     && !writer.accounts.is_empty(),
                 INVALID,
             )?;

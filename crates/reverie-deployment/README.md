@@ -102,9 +102,9 @@ immutable images, process incarnations and mounts. Only canonical direct
 metadata, aliases and other overlapping writers refuse. Prepare, website STOP,
 candidate START and readiness publication recheck that inventory. Employees
 receive no stop, start, pause, input, mount or network changes.
-Every observed other active host-writable bind or volume is first matched to
-its actual mounted inode through an anchored process-root descriptor and a
-directory walk that refuses symlinks. A changed source pathname cannot make a
+Every observed other active host-writable ordinary-data bind or volume is first
+matched to its actual mounted inode through an anchored process-root descriptor
+and a directory walk that refuses symlinks. A changed source pathname cannot make a
 retained console bind appear disjoint. Unprovable bindings refuse. This finite
 Docker observation also maps held FD mount IDs through the existing kernel
 mount-table parser to compare physical backing paths. Current aliases of the
@@ -112,6 +112,18 @@ console, its ancestors or metadata are not disjoint. Nested host mounts under a
 writable directory refuse with `DEPLOYMENT_LIVE_ACCOUNT_HOST_MOUNT_UNSUPPORTED`.
 This does not certify absence of independent host-process, open-descriptor or
 hardlink writers, and never certifies a consistent backup.
+
+Root-owned helpers whose writable mounts are exclusively real cgroup2 directories
+may instead earn a separate virtual-filesystem observation. Held source FDs must
+actually belong to cgroup2 and have a different filesystem from the ordinary
+console. The target's real kernel mount table must match each exact destination,
+device and backing root, a visible mount-parent chain and no nested overlay. Process birth, the complete
+Engine identity and the exact target mount table are rechecked around the reads.
+Missing or contradictory evidence refuses. No process-root permission check is
+waived for ordinary data, no cgroup is written, and a cgroup-looking pathname or
+root user label cannot select this proof. The three host-cgroup tests run as an
+explicit mandatory Rust CI step outside Nix build sandboxes; selection asserts
+all three pass and never silently skips an unavailable prerequisite.
 
 Apply first retains an ordinary full console copy while the website and account
 writers may be active. This copy is **unverified**; no consistent backup or
