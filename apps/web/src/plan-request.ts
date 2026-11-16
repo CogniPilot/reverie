@@ -248,7 +248,7 @@ export class PlanMoveRequests {
         await this.current(existing);
         return view(existing);
       }
-      await this.port.moves.assertAvailable?.(input.employeeId, owner);
+      await this.port.moves.assertAvailable?.(input.employeeId, owner, execution.executor);
       if (!execution.authorized()) throw new PlanMoveError('The plan permission or binding changed', 403);
       for (const record of this.records.values())
         if (record.owner === owner && record.employeeId === input.employeeId) {

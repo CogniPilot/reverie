@@ -17,7 +17,7 @@ export interface PlanMoveDockerJournal {
 export interface PlanMoveDockerJournalStore {
   /** Append only the new reservation under the actual whole-file lock. Active
    * native rows are read there, never overwritten by a stale caller snapshot. */
-  reserve(record: Readonly<PlanMoveRecord>, current: () => void): Promise<Readonly<PlanMoveRecord>>;
+  reserve(record: Readonly<PlanMoveRecord>, current: () => void, disjoint?: unknown): Promise<Readonly<PlanMoveRecord>>;
   phase(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
@@ -43,6 +43,12 @@ export interface PlanMoveDockerJournalStore {
   ): Promise<Readonly<PlanMoveRecord>>;
 }
 export interface PlanMoveDockerActor {
+  /** Read-only native admission; opaque private proof, never JSON authority. */
+  admitDisjointGeneration?(
+    employeeId: string,
+    owner: string | undefined,
+    rows: readonly Readonly<PlanMoveRecord>[]
+  ): Promise<unknown>;
   /** Genuine captured requester/runtime grant, including only this journal's exact planned self transition. */
   current(record: Readonly<PlanMoveRecord>, state: Readonly<DockerPlanMoveJournalState>): void;
   /** Cooperative native provider idle/composer gate; a disposable viewer is not proof. */

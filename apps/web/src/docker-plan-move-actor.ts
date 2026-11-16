@@ -1,4 +1,5 @@
 import { captureDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
+import { captureDockerPlanDisjointGeneration } from './docker-plan-disjoint-generation.js';
 import { dockerPlanAccountStatusArguments, DockerPlanAccountStatus } from './docker-plan-account-status.js';
 /** The one PlanMoves native actor. Request DATA cannot construct its captured
  * requester, native source observation or provider-dispatch admission. */
@@ -253,6 +254,16 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     current();
     if (!account) throw new PlanMoveError('The original selected account is unavailable', 409);
     return account;
+  }
+  async admitDisjointGeneration(
+    employeeId: string,
+    owner: string | undefined,
+    rows: readonly Readonly<PlanMoveRecord>[]
+  ): Promise<unknown> {
+    const selected = this.#selection(employeeId, owner),
+      current = this.#sourceCurrent(selected);
+    const native = await this.#source.capture(selected.row, selected.binding, current, true);
+    return captureDockerPlanDisjointGeneration(this.#requester, native, selected.row, selected.binding, rows, current);
   }
   async snapshot(
     employeeId: string,

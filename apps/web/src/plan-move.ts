@@ -1,5 +1,7 @@
 import type { PlanMoveDockerActor, PlanMoveDockerJournalStore } from './plan-move-docker.js';
 import { dockerPlanMoveNotIssuedOf } from './plan-move-store.js';
+import { requireDockerPlanDisjointGeneration } from './docker-plan-disjoint-generation.js';
+import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
@@ -209,6 +211,8 @@ export class PlanMoves {
   private records = new Map<string, PlanMoveRecord>();
   private locked = new Set<string>();
   private intents = new Set<string>();
+  private preparing = new Map<string, string>();
+  private coldLegacy = new Map<string, { raw: PlanMoveRecord; loaded: string }>();
   private aborts = new Map<string, AbortController>();
   private sourceRetirements = new Map<string, PlanMoveSourceViewRetirement>();
   /** Actual original move owner only. This is a denial lease, never permission
@@ -249,6 +253,7 @@ export class PlanMoves {
             : 'The server restarted during this move; inspect both sessions before retrying';
           this.locked.add(record.employeeId);
         }
+        this.coldLegacy.set(record.id, { raw: structuredClone(saved), loaded: dockerContinuationDigest(record) });
         this.records.set(record.id, record);
       }
     })();
@@ -469,9 +474,52 @@ export class PlanMoves {
   }
 
   /** Discovery never releases a journal hold or grants recovery authority. */
-  async assertAvailable(employeeId: string, owner?: string): Promise<void> {
+  async assertAvailable(employeeId: string, owner?: string, executor: PlanMoveExecutor = this.port): Promise<void> {
     await this.init();
-    this.assertUnlocked(employeeId, owner);
+    await this.disjointAdmission(employeeId, owner, executor);
+  }
+
+  private coldRows(employeeId: string, owner: string | undefined, ownId?: string): PlanMoveRecord[] {
+    if (
+      (this.preparing.has(employeeId) && this.preparing.get(employeeId) !== ownId) ||
+      [...this.aborts.keys()].some((id) => this.records.get(id)?.employeeId === employeeId)
+    )
+      this.assertUnlocked(employeeId, owner);
+    const rows = [...this.records.values()].filter(
+      (row) => row.employeeId === employeeId && row.id !== ownId && !['completed', 'failed'].includes(row.phase)
+    );
+    if (
+      !rows.length ||
+      rows.some(
+        (row) =>
+          !this.coldLegacy.has(row.id) ||
+          this.intents.has(row.id) ||
+          this.coldLegacy.get(row.id)!.loaded !== dockerContinuationDigest(row)
+      )
+    )
+      this.assertUnlocked(employeeId, owner);
+    return rows.map((row) => structuredClone(this.coldLegacy.get(row.id)!.raw));
+  }
+  private async disjointAdmission(
+    employeeId: string,
+    owner: string | undefined,
+    executor: PlanMoveExecutor,
+    ownId?: string
+  ): Promise<unknown> {
+    if (!this.locked.has(employeeId)) return undefined;
+    const rows = this.coldRows(employeeId, owner, ownId);
+    if (!executor.dockerReplacement?.admitDisjointGeneration) this.assertUnlocked(employeeId, owner);
+    const proof = await executor.dockerReplacement!.admitDisjointGeneration!(employeeId, owner, rows);
+    requireDockerPlanDisjointGeneration(proof, this.coldRows(employeeId, owner, ownId), employeeId, owner);
+    return proof;
+  }
+  private releaseLock(employeeId: string): void {
+    if (
+      ![...this.records.values()].some(
+        (row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)
+      )
+    )
+      this.locked.delete(employeeId);
   }
 
   private assertUnlocked(employeeId: string, owner?: string): void {
@@ -584,8 +632,12 @@ export class PlanMoves {
       return this.view(existing);
     }
     if (this.intents.has(input.id)) throw new PlanMoveError('That move identifier is already being prepared');
-    this.assertUnlocked(input.employeeId, owner);
+    let disjoint = await this.disjointAdmission(input.employeeId, owner, executor);
+    if (!disjoint) this.assertUnlocked(input.employeeId, owner);
+    if (disjoint)
+      requireDockerPlanDisjointGeneration(disjoint, this.coldRows(input.employeeId, owner), input.employeeId, owner);
     this.locked.add(input.employeeId);
+    this.preparing.set(input.employeeId, input.id);
     this.intents.add(input.id);
     try {
       const snapshot = await executor.snapshot(input.employeeId, owner, input.purpose);
@@ -639,10 +691,26 @@ export class PlanMoves {
         ...(input.resourceOwnerScope === undefined ? {} : { resourceOwnerScope: input.resourceOwnerScope }),
       };
       if (snapshot.backend === 'docker') await reserveDockerPlanMove(record, input, executor, this.port.dockerJournal);
+      if (disjoint) {
+        if (!record.dockerReplacement)
+          throw new PlanMoveError('Current native generation admission requires Docker', 409);
+        disjoint = await this.disjointAdmission(input.employeeId, owner, executor, input.id);
+      }
       this.records.set(record.id, record);
       if (record.dockerReplacement) {
-        const saved = await this.port.dockerJournal!.reserve(record, () =>
-          executor.dockerReplacement!.current(record, record.dockerReplacement!)
+        const saved = await this.port.dockerJournal!.reserve(
+          record,
+          () => {
+            executor.dockerReplacement!.current(record, record.dockerReplacement!);
+            if (disjoint)
+              requireDockerPlanDisjointGeneration(
+                disjoint,
+                this.coldRows(input.employeeId, owner, input.id),
+                input.employeeId,
+                owner
+              );
+          },
+          disjoint
         );
         Object.assign(record, structuredClone(saved));
       } else await this.save();
@@ -676,11 +744,12 @@ export class PlanMoves {
         }
       } else {
         this.records.delete(input.id);
-        this.locked.delete(input.employeeId);
+        this.releaseLock(input.employeeId);
       }
       throw error;
     } finally {
       this.intents.delete(input.id);
+      if (this.preparing.get(input.employeeId) === input.id) this.preparing.delete(input.employeeId);
     }
   }
 
@@ -725,7 +794,7 @@ export class PlanMoves {
       await this.save();
       await proof.recheck({ ...record });
       proof.assertRecord(record);
-      this.locked.delete(record.employeeId);
+      this.releaseLock(record.employeeId);
       // Both native reads and the durable write are acknowledged. Finish this
       // request's provisional view before returning its completed DTO.
       this.intents.delete(id);
@@ -813,7 +882,7 @@ export class PlanMoves {
           (row) => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)
         )
       )
-        this.locked.delete(record.employeeId);
+        this.releaseLock(record.employeeId);
       // All final settlement acknowledgements succeeded. End this request's
       // provisional view before rendering the completed, private-data-free DTO.
       this.intents.delete(id);
@@ -978,7 +1047,7 @@ export class PlanMoves {
       }
     } finally {
       this.aborts.delete(record.id);
-      if (['completed', 'failed'].includes(record.phase)) this.locked.delete(record.employeeId);
+      if (['completed', 'failed'].includes(record.phase)) this.releaseLock(record.employeeId);
     }
   }
   async continueDocker(
@@ -1073,7 +1142,7 @@ export class PlanMoves {
       }
     } finally {
       if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
-      if (record.phase === 'completed' || record.phase === 'failed') this.locked.delete(record.employeeId);
+      if (record.phase === 'completed' || record.phase === 'failed') this.releaseLock(record.employeeId);
     }
   }
 }

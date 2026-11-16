@@ -55,8 +55,11 @@ import { DOCKER_PLAN_ACCOUNT_STATUS_PROGRAM } from '../src/docker-plan-account-s
 import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
 import { StateStore } from '../src/state-store.js';
 import { Session } from '../src/session.js';
-import { PlanMoveComposerNotReady } from '../src/plan-move.js';
-import type { PlanMoveRecord, PlanMoveInput, PlanMoves, PlanMoveExecutor } from '../src/plan-move.js';
+import { PlanMoves, PlanMoveComposerNotReady } from '../src/plan-move.js';
+import type { PlanMoveRecord, PlanMoveInput, PlanMoveExecutor, PlanMovePort } from '../src/plan-move.js';
+import { PlanMoveRequests } from '../src/plan-request.js';
+import { requireDockerPlanDisjointGeneration } from '../src/docker-plan-disjoint-generation.js';
+import { dockerPlanMaximumStates } from '../src/docker-plan-move-capacity.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import type { SessionState } from '../src/types.js';
@@ -407,6 +410,7 @@ async function fixture(running = true, retainedAccount = false) {
   };
   return {
     ...f,
+    directory,
     actor,
     baseActor,
     record,
@@ -1267,4 +1271,219 @@ describe('original target recovery with engine-earned native views', () => {
       await pending;
     }
   });
+});
+
+async function disjointFixture() {
+  const f = await fixture(),
+    store = new PlanMoveStore(join(f.directory, 'disjoint.json'));
+  const old: PlanMoveRecord = {
+    id: 'historical-legacy',
+    employeeId: f.input.employeeId,
+    name: 'Synthetic',
+    oldSession: '10000000-0000-4000-8000-000000000011',
+    newSession: '10000000-0000-4000-8000-000000000012',
+    fromAccount: 'a',
+    toAccount: 'b',
+    phase: 'recovery-required',
+    at: 1,
+    error: 'Original remains unknown',
+    sourceStopRequested: true,
+    sourceCleanupVerified: true,
+  };
+  await store.save([old]);
+  const actor = f.actor,
+    unexpected = async () => {
+      throw Error('legacy effect forbidden');
+    };
+  const port: PlanMovePort = {
+    load: () => store.load(),
+    save: (records) => store.save(records),
+    dockerReplacement: {
+      admitDisjointGeneration: actor.admitDisjointGeneration!.bind(actor),
+      snapshot: actor.snapshot.bind(actor),
+      reserve: actor.reserve.bind(actor),
+      current: actor.current.bind(actor),
+      idle: actor.idle.bind(actor),
+      prepare: async () => {
+        throw Error('admitted preparation boundary');
+      },
+      stopSource: actor.stopSource.bind(actor),
+      start: actor.start.bind(actor),
+      verify: actor.verify.bind(actor),
+      finalize: actor.finalize.bind(actor),
+      inspectForContinuation: actor.inspectForContinuation.bind(actor),
+      requireContinuation: actor.requireContinuation.bind(actor),
+    },
+    dockerJournal: {
+      reserve: (...args) => store.dockerReserve(...args),
+      record: (id) => store.dockerRecord(id),
+      current: (...args) => store.dockerCurrent(...args),
+      readCurrent: (...args) => store.dockerReadCurrent(...args),
+      phase: (...args) => store.dockerPhase(...args),
+      publish: (...args) => store.dockerPublish(...args),
+      claim: (...args) => store.dockerClaim(...args),
+    },
+    snapshot: actor.snapshot.bind(actor),
+    idle: unexpected,
+    create: unexpected,
+    start: unexpected,
+    ready: unexpected,
+    beforeStop: unexpected,
+    binding: () => f.input.sessionId,
+    exists: () => true,
+    rebind: unexpected,
+    stop: unexpected,
+    audit: async () => {},
+  };
+  return { f, store, old, port, moves: new PlanMoves({ ...port, dockerReplacement: f.baseActor }) };
+}
+describe('cold legacy disjoint native admission', () => {
+  it('retains aggregate old hold after a recording new native completion and after pre-reservation refusal', async () => {
+    const { f, old, store, port, moves } = await disjointFixture();
+    await expect(moves.begin({ ...f.input, toAccount: 'a' }, undefined, port)).rejects.toThrow('already on that plan');
+    expect((await moves.employeeRecoveryGuard(f.input.employeeId, undefined, 'effect'))()).toBe(false);
+    const actor = port.dockerReplacement!;
+    actor.prepare = async () => {};
+    actor.stopSource = async (_record, journal) => {
+      const before = journal.read(),
+        maximum = dockerPlanMaximumStates(before.seed, before.epoch)[1]!;
+      await journal.publish(before, { ...before, sourceStop: maximum.sourceStop });
+    };
+    actor.start = async (_record, journal) => {
+      const before = journal.read(),
+        maximum = dockerPlanMaximumStates(before.seed, before.epoch)[1]!;
+      await journal.publish(before, {
+        ...maximum,
+        sourceStop: before.sourceStop,
+        sourceReader: undefined,
+        companyPublication: undefined,
+        handoff: undefined,
+      });
+    };
+    actor.verify = async (_record, journal) => () => journal.current();
+    actor.finalize = async (_record, journal) => {
+      let before = journal.read();
+      await journal.publish(before, { ...before, companyPublication: { phase: 'issued', digest: 'a'.repeat(64) } });
+      before = journal.read();
+      await journal.publish(before, { ...before, companyPublication: { phase: 'published', digest: 'a'.repeat(64) } });
+      before = journal.read();
+      await journal.publish(before, {
+        ...before,
+        handoff: { phase: 'issued', digest: dockerPlanMoveHandoffDigest(before.seed.handoff) },
+      });
+      before = journal.read();
+      await journal.publish(before, { ...before, handoff: { ...before.handoff!, phase: 'submitted' } });
+    };
+    await moves.begin(f.input, undefined, port);
+    await vi.waitFor(async () => expect((await moves.get(f.input.id))?.phase).toBe('completed'), { timeout: 10000 });
+    expect((await store.load()).find((row) => row.id === old.id)).toEqual(old);
+    expect((await moves.employeeRecoveryGuard(f.input.employeeId, undefined, 'effect'))()).toBe(false);
+    await expect(
+      moves.assertAvailable(f.input.employeeId, undefined, { ...port, dockerReplacement: undefined })
+    ).rejects.toThrow('inspect its existing move');
+  });
+  it('allows only one preparing flight and rejects revoked native admission', async () => {
+    const { f, port, moves } = await disjointFixture();
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const admit = port.dockerReplacement!.admitDisjointGeneration!;
+    let first = true;
+    port.dockerReplacement!.admitDisjointGeneration = async (...args) => {
+      const proof = await admit(...args);
+      if (first) {
+        first = false;
+        entered();
+        await gate;
+      }
+      return proof;
+    };
+    const pending = moves.begin(f.input, undefined, port);
+    await seen;
+    // A second actual reservation wins while the first read is paused. The
+    // first must recheck the now-active original flight, never append twice.
+    await moves.begin(f.input, undefined, port);
+    release();
+    await expect(pending).rejects.toThrow();
+    f.keyLost();
+    await expect(moves.assertAvailable(f.input.employeeId, undefined, port)).rejects.toThrow();
+  });
+  it('admits real Requests discovery and locked native reservation, preserving old history and aggregate hold', async () => {
+    const { f, old, store, port, moves } = await disjointFixture();
+    const requests = new PlanMoveRequests({
+      load: async () => [],
+      save: async () => {},
+      moves,
+      binding: () => f.input.sessionId,
+      validateTarget: async () => ({ mode: 'claude' }),
+      capability: { write: async () => '/owned-test-request', remove: async () => {} },
+      notify: async () => {},
+      audit: async () => {},
+    });
+    expect(
+      (
+        await requests.create(
+          { id: 'disjoint-request', employeeId: f.input.employeeId, sessionId: f.input.sessionId, toAccount: 'b' },
+          undefined,
+          { executor: port, authorized: () => true }
+        )
+      ).phase
+    ).toBe('pending');
+    const move = await moves.begin(f.input, undefined, port);
+    expect(move.backend).toBe('docker');
+    expect((await store.load()).find((row) => row.id === old.id)).toEqual(old);
+    expect((await store.load()).some((row) => row.id === move.id && row.dockerReplacement)).toBe(true);
+    expect((await moves.employeeRecoveryGuard(f.input.employeeId, undefined, 'effect'))()).toBe(false);
+    await expect(
+      moves.assertAvailable(f.input.employeeId, undefined, { ...port, dockerReplacement: undefined })
+    ).rejects.toThrow('inspect its existing move');
+  });
+  it('refuses forged proof, historical disk changes, and changed canonical native binding', async () => {
+    const { f, old, store, port, moves } = await disjointFixture();
+    const proof = await f.actor.admitDisjointGeneration!(f.input.employeeId, undefined, [old]);
+    expect(() => requireDockerPlanDisjointGeneration({}, [old], f.input.employeeId, undefined)).toThrow();
+    expect(() =>
+      requireDockerPlanDisjointGeneration(
+        Object.create(Object.getPrototypeOf(proof)),
+        [old],
+        f.input.employeeId,
+        undefined
+      )
+    ).toThrow();
+    const changed = { ...old, error: 'Historical observation changed' };
+    await store.save([changed]);
+    await expect(store.dockerReserve(f.record, () => {}, proof)).rejects.toThrow();
+    expect(await store.load()).toEqual([changed]);
+    await f.companyStore.update((state) => {
+      state.employees[0]!.desiredRunning = false;
+    });
+    await expect(moves.assertAvailable(f.input.employeeId, undefined, port)).rejects.toThrow();
+  });
+  it.each(['same-source', 'same-target', 'not-closed', 'resource', 'native', 'other-owner'] as const)(
+    'preserves default hold for %s',
+    async (kind) => {
+      const { f, old, store, port } = await disjointFixture(),
+        row = { ...old };
+      if (kind === 'same-source') row.oldSession = f.input.sessionId;
+      if (kind === 'same-target') row.newSession = f.input.sessionId;
+      if (kind === 'not-closed') row.sourceCleanupVerified = false;
+      if (kind === 'other-owner') row.owner = 'foreign';
+      if (kind === 'native') row.dockerReplacement = f.record.dockerReplacement;
+      if (kind === 'resource')
+        row.resourceIntent = {
+          operationId: '20000000-0000-4000-8000-000000000001',
+          reservationId: '20000000-0000-4000-8000-000000000002',
+          profileVersion: '1',
+          profileDigest: 'a'.repeat(64),
+          previewDigest: 'b'.repeat(64),
+        };
+      const moves = new PlanMoves({ ...port, load: async () => [row] });
+      await expect(moves.assertAvailable(f.input.employeeId, undefined, port)).rejects.toThrow();
+      expect(await store.load()).toEqual([old]);
+    }
+  );
 });

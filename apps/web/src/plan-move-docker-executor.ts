@@ -25,6 +25,20 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
     return value;
   };
   return Object.freeze({
+    admitDisjointGeneration: async (employeeId, requestedOwner, rows) => {
+      if (requestedOwner !== owner || !base.admitDisjointGeneration)
+        throw new PlanMoveError('Current native generation admission is unavailable', 409);
+      const employee = runtime.company.view(owner).employees.find((e) => e.id === employeeId);
+      if (!employee) throw new PlanMoveError('Unknown current employee', 404);
+      const selectedActor = capture({
+        employeeId,
+        sessionId: employee.sessionId,
+        sessionGeneration: employee.sessionGeneration,
+      });
+      if (!selectedActor.admitDisjointGeneration)
+        throw new PlanMoveError('Current native generation admission is unavailable', 409);
+      return selectedActor.admitDisjointGeneration(employeeId, owner, rows);
+    },
     snapshot: async (employeeId, requestedOwner, purpose) => {
       if (requestedOwner !== owner) throw new PlanMoveError('Docker plan owner changed', 403);
       const employee = runtime.company.view(owner).employees.find((e) => e.id === employeeId);

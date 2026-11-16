@@ -1,4 +1,5 @@
 import { dockerPlanMaximumRecord } from './docker-plan-move-capacity.js';
+import { requireDockerPlanDisjointGeneration } from './docker-plan-disjoint-generation.js';
 import type { DockerEmployeePlanReplacementWorkRecord } from './docker-employee-continuation-data.js';
 import { DockerPlanMoveJournalState, assertDockerPlanMoveTransition } from './docker-plan-move-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
@@ -539,7 +540,11 @@ export class PlanMoveStore {
   }
 
   /** Private read for the SAME native journal owner. No physical credit. */
-  async dockerReserve(input: Readonly<PlanMoveRecord>, current: () => void): Promise<Readonly<PlanMoveRecord>> {
+  async dockerReserve(
+    input: Readonly<PlanMoveRecord>,
+    current: () => void,
+    disjoint?: unknown
+  ): Promise<Readonly<PlanMoveRecord>> {
     const record = structuredClone(input),
       state = record.dockerReplacement;
     if (
@@ -563,14 +568,20 @@ export class PlanMoveStore {
           current();
           const disk = await this.readPrivateList(this.file, 8 * 1024 * 1024, JournalSchema);
           current();
-          if (
-            disk.some(
-              (row) =>
-                row.id === record.id ||
-                (row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase))
-            )
-          )
+          if (disk.some((row) => row.id === record.id))
             throw Error('The employee already has an original plan reservation');
+          const held = disk.some(
+            (row) => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)
+          );
+          const requireAdmission = () => {
+            current();
+            if (held)
+              requireDockerPlanDisjointGeneration(disjoint, disk, record.employeeId, record.owner).requireReservation(
+                record,
+                disk
+              );
+          };
+          requireAdmission();
           if (disk.length >= 100) {
             const error = new SettlementCapacityLimit();
             capacity = error;
@@ -583,9 +594,9 @@ export class PlanMoveStore {
             if (error instanceof SettlementCapacityLimit) capacity = error;
             throw error;
           }
-          current();
+          requireAdmission();
           await writeCompanyStateFile(this.file, data);
-          current();
+          requireAdmission();
           result = Object.freeze(structuredClone(record));
         },
         (handle) => this.inspectLock(handle)
