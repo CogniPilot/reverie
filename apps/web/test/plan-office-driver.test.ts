@@ -39,7 +39,9 @@ import {
   planOfficeSelfIdentityFile,
   planOfficePermissionProbeInput,
   completePlanOfficeOriginal,
+  requirePlanOfficeControlClient,
 } from './helpers/plan-office-driver.js';
+import { DockerPlanInitialReceipt } from '../src/docker-plan-install-data.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 const sha = 'sha256:' + 'a'.repeat(64),
   sid = '11111111-1111-4111-8111-111111111111',
@@ -68,6 +70,91 @@ const raw = {
   clientManifestDigest: 'e'.repeat(64),
   bootstrap: { version: 1, purpose: 'reverie-ci-plan-office-bootstrap-v1', employees: [employee] },
 };
+it('brackets the actual website native19-field plan protocol with fixed protected capsule status calls', () => {
+  const control = 'a'.repeat(64),
+    manifest = 'b'.repeat(64);
+  const readback = {
+    version: 1,
+    purpose: 'reverie-worker-client-readback-v1',
+    manifestDigest: manifest,
+    entrySha256: 'c'.repeat(64),
+    filesChecked: 12,
+    nodeMajor: 22,
+    ownerUid: 0,
+  };
+  const protocol = {
+    version: 1,
+    purpose: 'reverie-plan-protocol-v1',
+    protocol: 1,
+    receiptFields: Object.keys(DockerPlanInitialReceipt.shape),
+  };
+  const execute = vi.fn((args: string[]) => JSON.stringify(args[4] === 'plan-protocol' ? protocol : readback));
+  expect(requirePlanOfficeControlClient(control, manifest, execute)).toEqual({
+    ...readback,
+    protocol: 1,
+    readOnly: true,
+  });
+  expect(execute.mock.calls.map(([args]) => args)).toEqual(
+    ['status', 'plan-protocol', 'status'].map((role) => [
+      'exec',
+      control,
+      '/opt/reverie-worker-client/bin/reverie',
+      'worker-client',
+      role,
+      '--expected-digest',
+      manifest,
+    ])
+  );
+});
+it.each([
+  'wrong-manifest',
+  'nonroot',
+  'unknown-field',
+  'old-protocol',
+  'missing-field',
+  'changed-entry',
+  'missing-readback',
+] as const)('refuses %s website capsule/protocol DATA before any provider intent', (kind) => {
+  const manifest = 'b'.repeat(64);
+  const readback = {
+    version: 1,
+    purpose: 'reverie-worker-client-readback-v1',
+    manifestDigest: manifest,
+    entrySha256: 'c'.repeat(64),
+    filesChecked: 12,
+    nodeMajor: 22,
+    ownerUid: 0,
+  };
+  const protocol = {
+    version: 1,
+    purpose: 'reverie-plan-protocol-v1',
+    protocol: 1,
+    receiptFields: Object.keys(DockerPlanInitialReceipt.shape),
+  };
+  if (kind === 'wrong-manifest') readback.manifestDigest = 'd'.repeat(64);
+  if (kind === 'nonroot') readback.ownerUid = 1000;
+  if (kind === 'unknown-field') Object.assign(protocol, { capable: true });
+  if (kind === 'old-protocol') protocol.protocol = 0;
+  if (kind === 'missing-field') protocol.receiptFields.pop();
+  let statuses = 0;
+  expect(() =>
+    requirePlanOfficeControlClient('a'.repeat(64), manifest, (args) => {
+      if (args[4] === 'plan-protocol') return JSON.stringify(protocol);
+      if (kind === 'missing-readback') return '';
+      if (++statuses === 2 && kind === 'changed-entry') readback.entrySha256 = 'd'.repeat(64);
+      return JSON.stringify(readback);
+    })
+  ).toThrow();
+});
+it('refuses invalid website/digest selectors before a fixed qualification command', () => {
+  const execute = vi.fn();
+  for (const [control, manifest] of [
+    ['name', 'b'.repeat(64)],
+    ['a'.repeat(64), '../manifest'],
+  ])
+    expect(() => requirePlanOfficeControlClient(control!, manifest!, execute)).toThrow();
+  expect(execute).not.toHaveBeenCalled();
+});
 it('submits the actual team probe body as a production normal owner mux prompt with separate Enter', () => {
   const body = planOfficePermissionProbeInput(oid);
   expect(body.useMux).toBe(true);

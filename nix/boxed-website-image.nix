@@ -1,8 +1,10 @@
 # Packaging data only. Runtime identity, authority and Engine observations are
 # independently checked by DockerEmployeeRuntime. No live instance is read.
-{ pkgs, baseImage, baseConfig, runtimeConfiguration }:
+{ pkgs, baseImage, baseConfig, runtimeConfiguration, clientCapsule, name ? "reverie-boxed" }:
 let
   cfg = runtimeConfiguration;
+  clientRoot = "${clientCapsule}/opt/reverie-worker-client";
+  clientManifestDigest = builtins.hashFile "sha256" "${clientRoot}/manifest.json";
   required = [ "version" "purpose" "deployment" "workerImageId" "clientManifestDigest"
     "sourceImageIds" "helperImageId" "apiUrl" ];
   optional = [ "memoryHighHelperImageId" ];
@@ -50,24 +52,33 @@ let
   configuration = pkgs.writeText "reverie-boxed-runtime.json" (builtins.toJSON cfg);
 in
 assert valid;
+assert cfg.clientManifestDigest == clientManifestDigest;
 assert builtins.isAttrs baseConfig && builtins.isList (baseConfig.Entrypoint or null)
   && baseConfig.Entrypoint != [] && builtins.all builtins.isString baseConfig.Entrypoint
   && builtins.isList env && builtins.all builtins.isString env
   && (backend == [] || backend == [ "${prefix}boxed-docker-v1" ]);
 pkgs.dockerTools.buildLayeredImage {
-  name = "reverie-boxed";
+  inherit name;
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
   maxLayers = 125;
   fromImage = baseImage;
-  passthru = { reverieConfig = config; runtimeConfiguration = cfg; };
+  passthru = { reverieConfig = config; runtimeConfiguration = cfg; inherit clientManifestDigest; };
   extraCommands = ''
-    mkdir -p etc/reverie
+    mkdir -p etc/reverie opt/reverie-worker-client
+    cp -r ${clientRoot}/. opt/reverie-worker-client/
+    # OCI opacity hides every lower-layer capsule file, including unlisted old
+    # files. The new regular files and this marker belong to the same layer.
+    touch opt/reverie-worker-client/.wh..wh..opq
+    chmod -R a-w opt/reverie-worker-client
     cp ${configuration} etc/reverie/boxed-runtime.json
     chmod 0444 etc/reverie/boxed-runtime.json
   '';
   fakeRootCommands = ''
     chown 0:0 etc/reverie etc/reverie/boxed-runtime.json
+    chown -R 0:0 opt/reverie-worker-client
+    chown 0:0 opt
+    chmod 0755 opt
     chmod 0755 etc/reverie
     chmod 0444 etc/reverie/boxed-runtime.json
   '';

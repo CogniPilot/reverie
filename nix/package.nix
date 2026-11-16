@@ -67,6 +67,9 @@ let
       # Copied workspace package tests are build-input DATA, outside test discovery.
       mkdir -p build-fixtures/plan-office-source/nix build-fixtures/plan-office-source/apps/web build-fixtures/plan-office-source/skills
       cp ${consoleFixture "nix/ci-plan-office-images.nix"} build-fixtures/plan-office-source/nix/ci-plan-office-images.nix
+      cp ${consoleFixture "nix/boxed-website-image.nix"} build-fixtures/plan-office-source/nix/boxed-website-image.nix
+      mkdir -p build-fixtures/plan-office-source/tests/fixtures
+      cp -r ${consoleFixture "tests/fixtures/boxed_client_capsule"} build-fixtures/plan-office-source/tests/fixtures/boxed_client_capsule
       cp ${consoleFixture "nix/docker-viewer-executables.nix"} build-fixtures/plan-office-source/nix/docker-viewer-executables.nix
       cp ${consoleFixture "nix/docker-resource-helper-image.nix"} build-fixtures/plan-office-source/nix/docker-resource-helper-image.nix
       cp -r ${consoleFixture "apps/web/scripts"} build-fixtures/plan-office-source/apps/web/scripts

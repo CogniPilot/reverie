@@ -147,6 +147,11 @@
         import ./nix/boxed-website-image.nix {
           pkgs = pkgsFor system;
           inherit baseImage baseConfig runtimeConfiguration;
+          clientCapsule = import ./nix/worker-client-capsule.nix {
+            pkgs = pkgsFor system;
+            src = source;
+            console = self.packages.${system}.console;
+          };
         };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
         baseConfig ? baseImage.reverieConfig }:

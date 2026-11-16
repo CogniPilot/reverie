@@ -65,6 +65,8 @@ import {
 import { planOfficeForceChildArgs } from './plan-office-force-child.js';
 import { DockerPlanMoveJournalState, dockerPlanMoveHandoffDigest } from '../../src/docker-plan-move-data.js';
 import { PlanMoveStore } from '../../src/plan-move-store.js';
+import { WORKER_CLIENT_ENTRY, parseWorkerClientReadback } from '../../src/worker-client-manifest.js';
+import { parseDockerPlanProtocol } from '../../src/docker-plan-protocol.js';
 import { boxedOriginal, DockerEmployeeInspect } from '../../src/docker-employee-engine-data.js';
 import type { SessionState } from '../../src/types.js';
 import {
@@ -147,6 +149,30 @@ export const PlanOfficeDriverInput = z
 
 type Input = z.infer<typeof PlanOfficeDriverInput>;
 type Json = Record<string, unknown>;
+/** Read-only actual image qualification before owner enrollment/provider intent.
+ * Unit reply DATA never substitutes for the fixed CLI calls on the owned image. */
+export function requirePlanOfficeControlClient(
+  control: string,
+  manifestDigest: string,
+  execute: (args: string[]) => string
+) {
+  cid.parse(control);
+  hash.parse(manifestDigest);
+  const command = (role: 'status' | 'plan-protocol') => [
+    'exec',
+    control,
+    WORKER_CLIENT_ENTRY,
+    'worker-client',
+    role,
+    '--expected-digest',
+    manifestDigest,
+  ];
+  const before = parseWorkerClientReadback(execute(command('status')), manifestDigest);
+  parseDockerPlanProtocol(execute(command('plan-protocol')));
+  const after = parseWorkerClientReadback(execute(command('status')), manifestDigest);
+  assert.deepEqual(after, before, 'Actual website capsule changed during protocol qualification');
+  return { ...after, protocol: 1 as const, readOnly: true as const };
+}
 /** Normal owner prompt: mux strips LF and submits a separate Enter only for CR. */
 export function planOfficePermissionProbeInput(id: string) {
   z.string().uuid().parse(id);
@@ -1052,6 +1078,10 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     );
     assert.deepEqual(actualTools, controlTools);
     evidence.save('control-tools-qualified', { control, paths: actualTools, readOnly: true });
+    driver.owned(control, 'control');
+    const client = requirePlanOfficeControlClient(control, input.clientManifestDigest, (args) => driver.docker(args));
+    driver.owned(control, 'control');
+    evidence.save('control-client-qualified', { control, ...client });
     entered('driver-internal-host');
     await planOfficeInternalHostPreflight(endpoint);
     evidence.save('internal-api-host-qualified', { control, host: 'reverie:3000', readOnly: true });

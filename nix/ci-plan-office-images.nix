@@ -67,29 +67,32 @@ let
       version = 1; purpose = "reverie-boxed-runtime-v1"; deployment = imageNamespace;
       inherit workerImageId sourceImageIds helperImageId clientManifestDigest;
       apiUrl = "http://reverie:3000";
-    }; configuration = pkgs.writeText "ci-plan-boxed-runtime.json" (builtins.toJSON runtimeConfiguration); in pkgs.dockerTools.buildLayeredImage {
-      name = names.control; tag = "latest"; created = "1970-01-01T00:00:01Z";
-      passthru = { inherit runtimeConfiguration; };
+    };
+    controlConfig = {
+      User = "1000:100";
+      Entrypoint = [ "${node}/bin/node" "${runtime}/lib/reverie/dist/index.js" ];
+      Cmd = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
+      WorkingDir = "/fixture";
+      Env = [ "HOME=/fixture/home" "REVERIE_DATA_DIR=/fixture/data" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" "REVERIE_OWNER_SETUP=1" "REVERIE_API_URL=http://reverie:3000" "REVERIE_ALLOWED_HOSTS=reverie" "PATH=/opt/reverie-ci-plan-provider/bin:/bin" ];
+      Labels = { "org.reverie.fixture" = "ci-plan-office-v1"; "org.reverie.fixture.namespace" = imageNamespace; };
+      ExposedPorts = { "3000/tcp" = {}; };
+    };
+    controlBase = pkgs.dockerTools.buildLayeredImage {
+      name = names.control + "-base"; tag = "latest"; created = "1970-01-01T00:00:01Z";
       contents = [ runtime node pkgs.docker-client pkgs.bashInteractive pkgs.coreutils pkgs.util-linux
         pkgs.tmux pkgs.which pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.findutils pkgs.procps ];
       fakeRootCommands = ''
-        mkdir -p etc/reverie opt/reverie/apps bin fixture scratch tmp
-        cp -r ${clientCapsule}/opt/reverie-worker-client opt/reverie-worker-client
-        chmod -R a-w opt/reverie-worker-client
-        cp ${configuration} etc/reverie/boxed-runtime.json
-        chmod 0444 etc/reverie/boxed-runtime.json
+        mkdir -p opt/reverie/apps bin fixture scratch tmp
         ln -s ${runtime}/lib/reverie opt/reverie/console
         ln -s ${runtime}/lib/reverie opt/reverie/apps/web
       '';
-      config = {
-        User = "1000:100";
-        Entrypoint = [ "${node}/bin/node" "${runtime}/lib/reverie/dist/index.js" ];
-        Cmd = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
-        WorkingDir = "/fixture";
-        Env = [ "HOME=/fixture/home" "REVERIE_DATA_DIR=/fixture/data" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" "REVERIE_OWNER_SETUP=1" "REVERIE_API_URL=http://reverie:3000" "REVERIE_ALLOWED_HOSTS=reverie" "PATH=/opt/reverie-ci-plan-provider/bin:/bin" ];
-        Labels = { "org.reverie.fixture" = "ci-plan-office-v1"; "org.reverie.fixture.namespace" = imageNamespace; };
-        ExposedPorts = { "3000/tcp" = {}; };
-      };
+      config = controlConfig;
+    };
+    in import ./boxed-website-image.nix {
+      inherit pkgs runtimeConfiguration clientCapsule;
+      name = names.control;
+      baseImage = controlBase;
+      baseConfig = controlConfig;
     };
 in assert validNamespace && validDigest; {
   inherit runtime platform platformClosure helperImage mkControl;

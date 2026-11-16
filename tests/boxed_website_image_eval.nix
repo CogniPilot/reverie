@@ -1,10 +1,13 @@
 # Pure packaging construction/refusal checks. No derivations, Engine or instance.
 let
   id = builtins.concatStringsSep "" (builtins.genList (_: "a") 64);
+  # Metadata-only immutable fixture. It earns no executable/native authority.
+  clientCapsule = builtins.path { path = ./fixtures/boxed_client_capsule; name = "reverie-metadata-only-client-capsule"; };
+  clientManifestDigest = builtins.hashFile "sha256" "${clientCapsule}/opt/reverie-worker-client/manifest.json";
   cfg = {
     version = 1; purpose = "reverie-boxed-runtime-v1"; deployment = "test-office";
     workerImageId = "sha256:${id}"; helperImageId = "sha256:${id}";
-    clientManifestDigest = id; sourceImageIds = [ "sha256:${id}" ];
+    inherit clientManifestDigest; sourceImageIds = [ "sha256:${id}" ];
     apiUrl = "http://reverie:3000";
   };
   baseConfig = {
@@ -20,12 +23,19 @@ let
     };
     baseImage = "/nix/store/controlled-base";
     baseConfig = selectedConfig;
-    inherit runtimeConfiguration;
+    inherit runtimeConfiguration clientCapsule;
   };
   image = make cfg baseConfig;
   accepts = value: selected: (builtins.tryEval (builtins.deepSeq (make value selected) true)).success;
   checks = {
     configurationPreserved = image.passthru.runtimeConfiguration == cfg;
+    actualManifestSelected = image.passthru.clientManifestDigest == clientManifestDigest;
+    mismatchedManifestRefused = !(accepts (cfg // { clientManifestDigest = id; }) baseConfig);
+    capsuleIsCopiedAsRealFiles = builtins.match ".*cp -r CAPSULE/opt/reverie-worker-client/\\. opt/reverie-worker-client/.*"
+      (builtins.replaceStrings [ "${clientCapsule}" ] [ "CAPSULE" ] image.extraCommands) != null;
+    lowerCapsuleChildrenHidden = builtins.match ".*touch opt/reverie-worker-client/\\.wh\\.\\.wh\\.\\.opq.*" image.extraCommands != null;
+    capsuleReadOnly = builtins.match ".*chmod -R a-w opt/reverie-worker-client.*" image.extraCommands != null;
+    capsuleOwnedByRoot = builtins.match ".*chown -R 0:0 opt/reverie-worker-client.*" image.fakeRootCommands != null;
     immutableBasePreserved = image.fromImage == "/nix/store/controlled-base";
     commandAndUserPreserved = image.config == baseConfig // {
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];

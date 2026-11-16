@@ -66,18 +66,31 @@ to preview, stop, retain and replace the existing container with the GPU image.
 `baseConfig`. This supports a GPU-only rollout of an accepted application image
 without implicitly upgrading the website or migrating company data.
 
-An existing Docker employee office also needs its accepted immutable
+An existing Docker employee office also needs its immutable
 `/etc/reverie/boxed-runtime.json`. Package that configuration with
 `lib.mkBoxedWebsiteImage { system = "x86_64-linux"; baseImage = gpuImage;
-runtimeConfiguration = acceptedConfiguration; }`, where `gpuImage` is the
+runtimeConfiguration = pairedConfiguration; }`, where `gpuImage` is the
 result of `lib.mkContainerGpuImage`. The factory preserves the image command,
 user, GPU runtime and configuration values, adds a root-owned read-only
-configuration file, and selects the Docker backend. It does not read or edit a
+configuration file and the current source's protected worker API client capsule,
+and selects the Docker backend. It refuses a configuration whose
+`clientManifestDigest` differs from that actual capsule's manifest. It does not read or edit a
 running instance. The build-time URL subset accepts HTTP(S) DNS/IPv4 endpoints
 with an optional port/path and excludes credentials, query strings and fragments.
-Preserve the accepted worker, helper and source image IDs and client manifest
-digest when updating only the website; a website update does not qualify or
-replace existing employee clients.
+Select a future `workerImageId` built with that same current capsule and its exact
+manifest digest before constructing the website. This is an explicit new default
+target selection, not a rewrite of existing employee bindings. Keep the accepted
+global helper image, existing source image IDs and other configuration values;
+include the retained worker image among allowed source IDs for future moves.
+Existing Ready employees retain their own worker image and manifest bindings. A
+website update does not replace their immutable clients, repair their old CLI
+behavior, or qualify them for a future plan transfer.
+
+The capsule files are copied as root-owned read-only regular files. An
+[OCI opaque directory marker](https://github.com/opencontainers/image-spec/blob/v1.1.1/layer.md#opaque-whiteout)
+hides all lower-layer capsule children, so upgrading a base with an older capsule
+cannot retain unlisted stale files. Image construction is not physical runtime or
+old-worker compatibility acceptance.
 
 After verifying the container's local-model endpoint and fresh GPU readings,
 retire any legacy host `reverie-local-model`, GPU telemetry and source-updater

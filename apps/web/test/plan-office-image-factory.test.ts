@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { buildSync, transformSync } from 'esbuild';
 import { readPlanOfficeStartupDiagnostic } from './helpers/plan-office-startup-diagnostic.js';
 import {
@@ -18,6 +19,11 @@ const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-offi
   ? repositorySource
   : path.resolve('build-fixtures/plan-office-source');
 const factory = path.join(owningSource, 'nix/ci-plan-office-images.nix');
+// Real metadata-only files. No fake executable or native qualification is minted.
+const clientFixture = path.join(owningSource, 'tests/fixtures/boxed_client_capsule');
+const fixtureManifestDigest = createHash('sha256')
+  .update(fs.readFileSync(path.join(clientFixture, 'opt/reverie-worker-client/manifest.json')))
+  .digest('hex');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
 it('closes viewer executable metadata over the packaged wrapper and actual leaf ABI', () => {
@@ -270,7 +276,7 @@ function evaluate(
     good +
     '";}; }'
 ) {
-  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: if name == "reverie-helper-image-identity" then "/fake/identity-" + builtins.hashString "sha256" text else "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";procps="/fake/procps";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
+  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: if name == "reverie-helper-image-identity" then "/fake/identity-" + builtins.hashString "sha256" text else "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";procps="/fake/procps";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule=${JSON.stringify(clientFixture)};clientManifestDigest="${fixtureManifestDigest}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
   const result = spawnSync('nix-instantiate', ['--store', 'dummy://', '--eval', '--strict', '--expr', code], {
     encoding: 'utf8',
     timeout: 10000,
@@ -293,7 +299,7 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   expect(v.worker.config.Env).toContain('TERMINFO=/opt/reverie-worker-tools/share/terminfo');
   expect(v.worker.fakeRootCommands).toContain('cp /helper/bin/reverie-docker-resources');
   expect(v.control.config.Cmd).toEqual(['web', '--host', '0.0.0.0', '--port', '3000']);
-  expect(v.control.contents).toEqual(
+  expect(v.control.fromImage.contents).toEqual(
     expect.arrayContaining([
       '/fake/bash',
       '/fake/core',
@@ -307,7 +313,16 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
       '/fake/procps',
     ])
   );
-  expect(v.control.contents).not.toContain('/fake/platform'); // Its /etc symlink cannot host the protected config.
+  expect(v.control.fromImage.contents).not.toContain('/fake/platform'); // Its /etc symlink cannot host the protected config.
+  expect(v.control.fromImage.config).toEqual(v.control.config);
+  expect(v.control.fromImage.fakeRootCommands).not.toContain('reverie-worker-client');
+  expect(v.control.extraCommands).toContain(
+    `cp -r ${clientFixture}/opt/reverie-worker-client/. opt/reverie-worker-client/`
+  );
+  expect(v.control.extraCommands).toContain('touch opt/reverie-worker-client/.wh..wh..opq');
+  expect(v.control.extraCommands).toContain('chmod -R a-w opt/reverie-worker-client');
+  expect(v.control.fakeRootCommands).toContain('chown -R 0:0 opt/reverie-worker-client');
+  expect(v.control.passthru.clientManifestDigest).toBe(fixtureManifestDigest);
   expect(v.control.config.Entrypoint).toEqual([
     '/fake/node/bin/node',
     '/fake/reverie-ci-plan-office-runtime/lib/reverie/dist/index.js',
@@ -319,7 +334,7 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
     workerImageId: good,
     sourceImageIds: [good],
     helperImageId: good,
-    clientManifestDigest: 'c'.repeat(64),
+    clientManifestDigest: fixtureManifestDigest,
     apiUrl: 'http://reverie:3000',
   });
   expect(v.control.config.Env).toContain('REVERIE_RUNTIME_BACKEND=boxed-docker-v1');
@@ -382,6 +397,17 @@ it('rejects generic/invalid namespaces and malformed manifest or actual Engine I
     expect(result.stderr).toMatch(/assertion .*failed/s);
   }
 });
+it.each(['missing', 'mismatched'] as const)(
+  'refuses a %s actual client manifest before constructing a control overlay',
+  (kind) => {
+    const result = evaluate(
+      kind === 'missing'
+        ? 'clientCapsule="/no-such-reverie-test-capsule";'
+        : 'clientManifestDigest="' + 'c'.repeat(64) + '";'
+    );
+    expect(result.status, result.stderr).not.toBe(0);
+  }
+);
 it('accepts only dependency versions and integrity from the same current source lock', () => {
   const source = { packages: { 'node_modules/zod': { version: '4.3.6', integrity: 'sha512-fixture' } } };
   expect(() => requirePlanOfficeDependencyLock(source, source)).not.toThrow();
