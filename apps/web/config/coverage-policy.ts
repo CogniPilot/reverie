@@ -34,6 +34,9 @@ export const webCoverage = {
     'src/docker-plan-local-client.ts': { statements: 85, branches: 80, functions: 95, lines: 90 },
     'src/docker-plan-move-data.ts': { statements: 90, branches: 90, functions: 95, lines: 90 },
     'src/docker-plan-source-retirement.ts': { statements: 80, branches: 85, functions: 85, lines: 85 },
+    // Original viewer process/socket authority must retain its own fault coverage.
+    'src/docker-viewer-pane.ts': { statements: 90, branches: 90, functions: 100, lines: 95 },
+    'src/docker-viewer-process.ts': { statements: 85, branches: 80, functions: 90, lines: 90 },
   },
 };
 
