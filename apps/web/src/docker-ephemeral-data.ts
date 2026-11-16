@@ -257,6 +257,24 @@ export function ephemeralContinuationProjection(
     throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
   return projection;
 }
+/** Projection only after independent complete published-destination checks.
+ * Original/effect projections remain strict. */
+export function ephemeralPublishedProjection(
+  source: DockerEmployeeInspect,
+  row: DockerEmployeeContinuationRecord
+): EphemeralProjection | undefined {
+  if (row.version !== 3 || source.Id === row.original.containerId) return ephemeralContinuationProjection(source, row);
+  if (row.phase !== 'ready' || !row.destination)
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  const projection = ephemeralRetainedProjection(source, row.destination);
+  if (
+    projection &&
+    projection.layout !== 'employees' &&
+    projection.identity !== (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+  )
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  return projection;
+}
 export function ephemeralDirectorySessionId(row: DockerEmployeeContinuationRecord): string {
   return row.version === 3
     ? (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)

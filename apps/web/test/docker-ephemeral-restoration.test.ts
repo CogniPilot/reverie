@@ -25,6 +25,7 @@ import {
   ephemeralProjection,
   ephemeralRetainedProjection,
   ephemeralContinuationProjection,
+  ephemeralPublishedProjection,
   allowedEphemeralTransition,
   type EphemeralJournal,
   type EphemeralAttempt,
@@ -650,16 +651,26 @@ function adapter(f: ReturnType<typeof fixture>) {
     command,
     saved,
     journal,
-    restart(nativeImage = image) {
+    restart(nativeImage = image, publishedRead = false) {
       service.close();
       service = new Constructor(
         command,
         journal,
         '7'.repeat(64),
         nativeImage,
-        async () => source(f),
+        async () => {
+          if (publishedRead) throw Error('Controlled retired original absence');
+          return source(f);
+        },
         async () => target,
-        async () => []
+        async () => [],
+        async () => {
+          if (publishedRead) {
+            if (!target) throw Error('Missing target');
+            return target;
+          }
+          return source(f);
+        }
       );
       owners.push(service);
     },
@@ -718,6 +729,38 @@ describe.runIf(process.platform === 'linux' && process.getuid!() > 0)('canonical
       expect(() => ephemeralRetainedProjection({ ...source(f), Id: 'f'.repeat(64) }, r.original)).toThrow(
         'ORIGINAL_CHANGED'
       );
+    }
+  );
+  it.each(['employees', 'operator-recovery', 'operator-sessions'] as const)(
+    're-earns published v3 %s leaf custody after original removal without preparation',
+    async (layout) => {
+      const f = fixture(layout),
+        a = adapter(f),
+        r = replacementRow(f, oid);
+      await a.service.prepare(r, a.current);
+      a.runningTarget();
+      const published = DockerEmployeePlanReplacementWorkRecord.parse({
+        ...r,
+        phase: 'ready',
+        destination: { ...r.original, containerId: 'd'.repeat(64), sessionId: r.request.sessionId },
+        ephemeralRestoration: a.cursor,
+      });
+      const target = { ...source(f), Id: published.destination!.containerId };
+      expect(ephemeralPublishedProjection(target, published)).toEqual(f.projection);
+      const wrong = structuredClone(published);
+      wrong.planReplacement.source.ephemeralSessionId = '90000000-0000-4000-8000-000000000009';
+      if (layout !== 'employees') expect(() => ephemeralPublishedProjection(target, wrong)).toThrow('ORIGINAL_CHANGED');
+      const replaced = structuredClone(target);
+      replaced.Mounts[0]!.RW = false;
+      expect(() => ephemeralPublishedProjection(replaced, published)).toThrow('ORIGINAL_CHANGED');
+      a.restart(image, true);
+      vi.mocked(a.command.create).mockClear();
+      vi.mocked(a.command.run).mockClear();
+      expect(await a.service.observe(published)).toBe('ready');
+      await a.service.verifyDestination(published);
+      expect(a.command.create).not.toHaveBeenCalled();
+      expect(vi.mocked(a.command.run).mock.calls.every(([args]) => args[0] === 'exec')).toBe(true);
+      await expect(a.service.prepare(published, a.current)).rejects.toThrow('Controlled retired original absence');
     }
   );
   it('reads a published old-image projection after an upgrade without issuing metadata effects', async () => {

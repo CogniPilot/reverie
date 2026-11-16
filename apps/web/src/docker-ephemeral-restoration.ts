@@ -12,6 +12,7 @@ import {
   EphemeralDirectory,
   EphemeralRequest,
   ephemeralContinuationProjection,
+  ephemeralPublishedProjection,
   ephemeralDirectorySessionId,
   type EphemeralAttempt,
   type EphemeralJournal,
@@ -313,7 +314,7 @@ export class DockerEphemeralRestoration {
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued'> {
     const source = await this.readSource(row),
-      projection = ephemeralContinuationProjection(source, row);
+      projection = ephemeralPublishedProjection(source, row);
     if (!projection) return 'ready';
     this.#readImage(row);
     const previous = this.#owners.get(row.request.operationId);
@@ -594,7 +595,7 @@ export class DockerEphemeralRestoration {
   }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
     const source = await this.readSource(row);
-    if (!ephemeralContinuationProjection(source, row)) return;
+    if (!ephemeralPublishedProjection(source, row)) return;
     this.#readImage(row);
     if (!this.#owners.has(row.request.operationId)) await this.observe(row);
     const owner = this.#owners.get(row.request.operationId);

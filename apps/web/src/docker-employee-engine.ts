@@ -7,7 +7,7 @@ import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
 import type { CompanyEmployee } from './company-types.js';
 import { DockerEphemeralRestoration } from './docker-ephemeral-restoration.js';
-import { ephemeralContinuationProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
+import { ephemeralContinuationProjection, ephemeralPublishedProjection, type EphemeralJournal } from './docker-ephemeral-data.js';
 import {
   DockerEmployeeCredentialInstaller,
   type DockerCredentialHome,
@@ -285,7 +285,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     private readonly boxId: string,
     private readonly providerMode: (row: DockerEmployeeContinuationRecord) => string = () => 'claude',
     /** Existing original credential verification only; never used by installation or launch. */
-    private readonly verifyExistingCredential?: (row: DockerEmployeeContinuationRecord, digest: string) => boolean
+    private readonly verifyExistingCredential?: (row: DockerEmployeeContinuationRecord, digest: string) => boolean,
+    /** Denial-only canonical READY currency, composed only by the main runtime. */
+    private readonly requirePublishedV3Read?: (row: DockerEmployeeContinuationRecord) => void
   ) {
     this.#storage = new DockerEmployeeStorage(
       command,
@@ -302,7 +304,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       boxId,
       (row) => this.#storage.observedCredentialHome(row)
     );
-    this.#planInstaller = new DockerPlanInstaller(command, journal, (row) => this.#storage.credentialHome(row), boxId);
+    this.#planInstaller = new DockerPlanInstaller(
+      command,
+      journal,
+      (row) => this.#storage.credentialHome(row),
+      boxId,
+      (row) => this.#storage.observedCredentialHome(row)
+    );
     const ephemeralJournal = journal as DockerContinuationTaskJournal & Partial<EphemeralJournal>;
     if (ephemeralJournal.readEphemeral && ephemeralJournal.publishEphemeral)
       this.#ephemeral = new DockerEphemeralRestoration(
@@ -388,20 +396,40 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
     return raw;
   }
+  #publishedRead(row: DockerEmployeeContinuationRecord): boolean {
+    if (row.version !== 3) return ['provider-issued', 'ready'].includes(row.phase);
+    if (row.phase !== 'ready' || !this.requirePublishedV3Read) return false;
+    this.requirePublishedV3Read(row);
+    return true;
+  }
+  #readCurrent(row: DockerEmployeeContinuationRecord, current: () => void): () => void {
+    return () => {
+      current();
+      this.#publishedRead(row);
+    };
+  }
+  async #observePlanInstaller(row: DockerEmployeeContinuationRecord, current: () => void, auth?: string) {
+    const check = this.#readCurrent(row, current);
+    return this.#publishedRead(row)
+      ? this.#planInstaller.observePublished(row, check, auth)
+      : this.#planInstaller.observe(row, current, auth);
+  }
   /** Published fingerprints qualify reads only; effect paths retain #source. */
   async #publishedDestination(
     row: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<DockerEmployeeInspect> {
     current();
-    if (row.version === 3 || !row.destination || !['provider-issued', 'ready'].includes(row.phase))
-      refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    if (!this.#publishedRead(row) || !row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
     const raw = await this.#inspect(row.destination.containerId);
     current();
-    const epoch = z.object({
-      Pid: z.number().int().min(0).max(2147483647),
-      StartedAt: z.string().datetime(),
-    }).safeParse(raw.State);
+    this.#publishedRead(row);
+    const epoch = z
+      .object({
+        Pid: z.number().int().min(0).max(2147483647),
+        StartedAt: z.string().datetime(),
+      })
+      .safeParse(raw.State);
     if (!epoch.success || (raw.State.Running ? epoch.data.Pid === 0 : epoch.data.Pid !== 0))
       refuse('DOCKER_CONTINUATION_DESTINATION_STATE_UNKNOWN');
     this.#requireCapsuleMounts(raw);
@@ -417,9 +445,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     return raw;
   }
   async #readSource(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
-    return row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase)
-      ? this.#publishedDestination(row, () => {})
-      : this.#source(row);
+    return this.#publishedRead(row) ? this.#publishedDestination(row, () => {}) : this.#source(row);
   }
   #requireCapsuleMounts(raw: DockerEmployeeInspect): void {
     if (Number(raw.Config.User.split(':')[0]) === 0) refuse('DOCKER_CONTINUATION_UNPRIVILEGED_WORKER_REQUIRED');
@@ -455,9 +481,18 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   /** Read DATA only. The owning core separately checks the exact canonical
    * published binding, source closure and native destination/provider facts. */
-  async existingImage(
+  async existingImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
+    return this.#existingImage(input, current, true);
+  }
+  /** Historical source DATA only. The SourceReader separately owns the exact
+   * stopped source/requester proof; this cannot mint a provider view or launch. */
+  async existingPlanSourceImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
+    return this.#existingImage(input, current, false);
+  }
+  async #existingImage(
     input: DockerEmployeeContinuationRecord,
-    current: () => void
+    current: () => void,
+    publishedV3Read: boolean
   ): Promise<DockerEmployeeWorkerImage> {
     current();
     const row = DockerEmployeeContinuationRecord.parse(input),
@@ -467,7 +502,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (dockerContinuationDigest(input) !== digest) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
     };
     if (!['provider-issued', 'ready'].includes(row.phase)) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    if (row.version !== 3) {
+    if ((row.version !== 3 || publishedV3Read) && this.#publishedRead(row)) {
       const before = await this.#publishedDestination(row, check);
       const images = z
         .array(
@@ -657,7 +692,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<'ready' | 'unissued' | 'unknown' | 'ephemeral-unissued'> {
     const storage = await this.#storage.observe(row);
     if (storage !== 'ready') return storage;
-    if (!this.#ephemeral && ephemeralContinuationProjection(await this.#readSource(row), row))
+    if (!this.#ephemeral && ephemeralPublishedProjection(await this.#readSource(row), row))
       refuse('DOCKER_EPHEMERAL_JOURNAL_REQUIRED');
     return (await this.#ephemeral?.observe(row)) === 'unissued' ? 'ephemeral-unissued' : 'ready';
   }
@@ -812,8 +847,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   /** Ordinary completion only; generic live views keep historical and observed auth distinct. */
   async verifyPlanReplacementCanonicalAccount(input:DockerEmployeeContinuationRecord,canonicalAuthDigest:string,current:()=>void):Promise<void>{
     const row=DockerEmployeeContinuationRecord.parse(input);current();if(row.version!==3)refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');
-    const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
-    await this.#planInstaller.observe(row,current,canonicalAuthDigest);current();
+    const raw=await this.#destination(row,current,true);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    await this.#observePlanInstaller(row,current,canonicalAuthDigest);current();
   }
   async initialPlanReplacementInstallation(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<Readonly<DockerPlanInitialReceipt>>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);current();if(row.phase!=='identity-ready')refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');const raw=await this.#destination(row,current);current();if(!raw?.State.Running)refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');await this.#storage.verifyDestination(row);current();await this.#ephemeral?.verifyDestination(row);current();return this.#planInstaller.initialWork(row,current);}
   /** Re-read the exact completed initial install immediately before admitting
@@ -865,7 +900,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     publishedRead = false
   ): Promise<DockerEmployeeInspect | null> {
     current();
-    if (publishedRead && row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase))
+    if (publishedRead && this.#publishedRead(row))
       return this.#publishedDestination(row, current);
     const selected = await this.command.run([
       'container',
@@ -976,7 +1011,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           const current = () => {
             if (dockerContinuationDigest(row) !== digest) refuse('DOCKER_PLAN_INSTALL_BINDING_CHANGED');
           };
-          credentialDigest = (await this.#planInstaller.observe(row, current)).live.tokenDigest;
+          credentialDigest = (await this.#observePlanInstaller(row, current)).live.tokenDigest;
         }
       } else if (['identity-issued', 'identity-ready', 'provider-issued', 'ready'].includes(row.phase)) {
         const retainedRead =
@@ -1132,6 +1167,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       try {
         current();
+        this.#publishedRead(checked);
         if (livePreparation) this.assertPreparationCurrent(checked);
         if (dockerContinuationDigest(row) !== digest || !isDeepStrictEqual(this.providerHooks(checked), hooks))
           refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
@@ -1234,7 +1270,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       requireCurrent();
     }
     if (checked.version === 3) {
-      await this.#planInstaller.observe(checked, requireCurrent);
+      await this.#observePlanInstaller(checked, requireCurrent);
       requireCurrent();
     }
     if (this.#ephemeral || checked.version === 3) {
@@ -1312,6 +1348,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (revoked) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       try {
         current();
+        this.#publishedRead(checked);
         this.assertPreparationCurrent(checked);
         if (dockerContinuationDigest(row) !== digest || !isDeepStrictEqual(this.providerHooks(checked), hooks))
           refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
@@ -1324,7 +1361,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!['ready', 'provider-issued'].includes(checked.phase) || !checked.destination)
       refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
     if (checked.version === 3) {
-      await this.#planInstaller.observe(checked, requireCurrent);
+      await this.#observePlanInstaller(checked, requireCurrent);
       requireCurrent();
     }
     if (checked.phase === 'provider-issued') {

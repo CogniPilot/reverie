@@ -5,6 +5,12 @@ import fs from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, expect, it, vi } from 'vitest';
+import { CompanyStore } from '../src/company-store.js';
+import { CompanyService } from '../src/company-service.js';
+import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } from '../src/docker-employee-store.js';
+import { RuntimeRecipeSchema } from '../src/expert-runtime-recipe.js';
+import { EmployeeSchema } from '../src/company-types.js';
+import type { SessionState } from '../src/types.js';
 import { Session } from '../src/session.js';
 import { StateStore } from '../src/state-store.js';
 import { TmuxManager, buildDockerLaunchCommand } from '../src/tmux-manager.js';
@@ -119,14 +125,88 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function paidFixture(originalDead = true) {
+async function paidFixture(originalDead = true, canonicalReady = false) {
   const custody = installRecordedDockerViewer();
   custody.recordCapture();
   custody.recordLocalClients();
-  const native = await dockerPlanRetirementFixture(),
-    directory = fs.mkdtempSync(join(tmpdir(), 'paid-v3-view-'));
+  const directory = fs.mkdtempSync(join(tmpdir(), 'paid-v3-view-'));
   fs.chmodSync(directory, 0o700);
   cleanup.push(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const companyFile = new CompanyStore(join(directory, 'company.json'));
+  let canonicalSaved: SessionState | undefined;
+  const canonicalCompany = new CompanyService(companyFile, {
+    getSession: () => undefined,
+    chatrooms: { rooms: () => [], room: () => undefined, addMember: vi.fn(), setStatus: vi.fn() },
+    research: { start: vi.fn(), inspect: vi.fn(), stop: vi.fn() },
+  });
+  const canonical = new CompanyDockerContinuationStore(canonicalCompany, () => canonicalSaved);
+  const native = await dockerPlanRetirementFixture(
+    canonicalReady
+      ? {
+          canonicalRead: async (row) => {
+            await companyFile.init();
+            const employee = EmployeeSchema.parse({
+              id: row.employeeId,
+              owner: row.owner,
+              sessionId: row.request.sessionId,
+              sessionGeneration: row.request.sessionGeneration,
+              name: 'Synthetic',
+              icon: 'S',
+              position: 'Employee',
+              expertise: ['testing'],
+              createdAt: 1,
+              onVacation: false,
+              desiredRunning: true,
+            });
+            canonicalSaved = {
+              id: row.request.sessionId,
+              owner: row.owner,
+              mode: 'claude',
+              workingDir: '/workspace',
+              claudeMode: 'normal',
+              allowedTools: 'Read',
+              pid: null,
+              status: 'idle',
+              currentTaskId: null,
+              createdAt: 1,
+              lastActivityAt: 1,
+            };
+            return {
+              providerSourceDigest: dockerEmployeeProviderSourceDigest(employee, canonicalSaved),
+              publish: async (ready) => {
+                await companyFile.update((state) => {
+                  state.employees = [
+                    {
+                      ...employee,
+                      dockerBinding: {
+                        version: 1,
+                        operationId: ready.request.operationId,
+                        credentialId: ready.credentialId,
+                        sessionId: ready.request.sessionId,
+                        sessionGeneration: ready.request.sessionGeneration,
+                        containerId: ready.destination!.containerId,
+                        imageId: ready.destination!.imageId,
+                        originalDigest: digest(ready.destination),
+                        policyDigest: digest(ready.policy),
+                      },
+                    },
+                  ];
+                  state.dockerEmployeeContinuations = [ready];
+                });
+              },
+              requireCurrent: (ready) => {
+                if (
+                  ready.version !== 3 ||
+                  ready.phase !== 'ready' ||
+                  !canonical.existingSubject(ready.employeeId, ready)
+                )
+                  throw Error('Actual canonical published target changed');
+              },
+            };
+          },
+        }
+      : undefined
+  );
   const path = join(directory, 'state.json'),
     store = new StateStore(path),
     mux = new TmuxManager(),
@@ -148,6 +228,7 @@ async function paidFixture(originalDead = true) {
     mux.destroy();
     store.flush();
     native.engine.close();
+    if (native.strictEngine !== native.engine) native.strictEngine.close();
   });
   const binding = {
     version: 1 as const,
@@ -271,6 +352,9 @@ async function paidFixture(originalDead = true) {
     };
   return {
     native,
+    canonicalCompany,
+    companyFile,
+    canonical,
     custody,
     session,
     mux,
@@ -309,7 +393,7 @@ it('repairs a paid v3 outer viewer with fresh engine/installer proof and no new 
 it.each(['retained', 'deleted'] as const)(
   'keeps the published v3 target readable after retired-source cleanup: %s original',
   async (sourceState) => {
-    const f = await paidFixture();
+    const f = await paidFixture(true, true);
     const row = f.native.state.work!;
     expect(row.version).toBe(3);
     expect(row.phase).toBe('ready');
@@ -318,9 +402,10 @@ it.each(['retained', 'deleted'] as const)(
     // Earn the real current target view and retire only the old Session view
     // before changing the controlled read-only Engine observation port.
     await f.capture();
-    f.native.old.retireDockerPlanSourceView(f.native.proof);
+    await f.native.retireSourceView();
     expect(f.native.old.providerDispatchHeld).toBe(true);
     expect(f.native.old.terminalInputHeld).toBe(true);
+    const installed = await f.native.engine.planReplacementOriginal(row, () => {});
     if (sourceState === 'deleted') {
       const run = vi.mocked(f.native.command.run).getMockImplementation()!;
       vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
@@ -329,6 +414,16 @@ it.each(['retained', 'deleted'] as const)(
         return run(args, input);
       });
     }
+    await expect(f.native.engine.existingImage(row, () => {})).resolves.toEqual(row.workerImage);
+    await expect(f.native.engine.observeStorage(row)).resolves.toBe('ready');
+    await expect(
+      f.native.engine.verifyPlanReplacementCanonicalAccount(row, installed.installedAuthDigest, () => {})
+    ).resolves.toBeUndefined();
+    const observed = await f.native.engine.observeDestination(row);
+    expect(observed?.provider.kind).toBe('running');
+    const binding = f.companyFile.snapshot().employees[0]!.dockerBinding!;
+    const health = await f.native.engine.captureProviderHealth(row, binding, () => {});
+    expect(health.require(f.companyFile.snapshot().employees[0]!)).toBe('live');
     const result = await f
       .capture()
       .then((view) => f.session.reconnectDockerContinuationView(view, () => true, f.capture))
@@ -340,6 +435,166 @@ it.each(['retained', 'deleted'] as const)(
     expect(result.failure).toBeUndefined();
     expect(result.connected).toBe(true);
     expect(f.session.dockerContinuationViewCurrent).toBe(true);
+  }
+);
+
+function refuseRetiredOriginal(f: Awaited<ReturnType<typeof paidFixture>>) {
+  const row = f.native.state.work!;
+  const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+  vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+    if (args[0] === 'container' && args[1] === 'inspect' && args[2] === row.original.containerId)
+      throw Error('Controlled retired original absence');
+    return run(args, input);
+  });
+}
+
+it('keeps work, installation, START and resource effects source-strict after publication', async () => {
+  const f = await paidFixture(true, true),
+    row = f.native.state.work!;
+  refuseRetiredOriginal(f);
+  await expect(f.capture()).resolves.toBeDefined();
+  await expect(f.native.strictEngine.captureProviderView(row, () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  await expect(f.native.strictEngine.existingImage(row, () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  await expect(f.native.engine.prepareStorage(row, () => {})).rejects.toThrow('Controlled retired original absence');
+  await expect(f.native.engine.configureResources(row, () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  await expect(f.native.engine.start(row, () => {})).rejects.toThrow('Controlled retired original absence');
+  await expect(f.native.engine.provisionIdentity(row, 'unissued', () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  await expect(f.native.engine.captureProviderView({ ...row, phase: 'provider-issued' }, () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  f.unchanged();
+});
+
+it.each(['owner', 'generation', 'binding', 'recipe', 'record'] as const)(
+  'refuses a deleted-source read after actual canonical %s drift',
+  async (drift) => {
+    const f = await paidFixture(true, true),
+      row = f.native.state.work!;
+    const view = await f.capture();
+    refuseRetiredOriginal(f);
+    await f.companyFile.update((state) => {
+      const employee = state.employees[0]!;
+      if (drift === 'owner') employee.owner = 'different-owner';
+      if (drift === 'generation') employee.sessionGeneration++;
+      if (drift === 'binding') employee.dockerBinding!.containerId = 'f'.repeat(64);
+      if (drift === 'recipe')
+        employee.runtimeRecipe = RuntimeRecipeSchema.parse({ mode: 'claude', workingDir: '/different', configs: {} });
+      if (drift === 'record') state.dockerEmployeeContinuations![0]!.sourceDigest = 'f'.repeat(64);
+    });
+    await expect(f.capture()).rejects.toThrow('Actual canonical published target changed');
+    expect(() => view.require(row.request.sessionId, f.session.docker!)).toThrow();
+    f.unchanged();
+  }
+);
+
+it('keeps stopped historical image DATA separate from current published provider currency', async () => {
+  const f = await paidFixture(true, true),
+    row = f.native.state.work!;
+  await f.companyFile.update((state) => {
+    state.employees[0]!.sessionGeneration++;
+  });
+  await expect(f.native.engine.existingPlanSourceImage(row, () => {})).resolves.toEqual(row.workerImage);
+  await expect(f.native.engine.existingImage(row, () => {})).rejects.toThrow(
+    'Actual canonical published target changed'
+  );
+  await expect(f.capture()).rejects.toThrow('Actual canonical published target changed');
+  await expect(
+    f.native.engine.existingPlanSourceImage(row, () => {
+      throw Error('Original requester revoked');
+    })
+  ).rejects.toThrow('Original requester revoked');
+  refuseRetiredOriginal(f);
+  await expect(f.native.engine.existingPlanSourceImage(row, () => {})).rejects.toThrow(
+    'Controlled retired original absence'
+  );
+  f.unchanged();
+});
+
+it('rechecks actual canonical selection after a completed installer read await', async () => {
+  const f = await paidFixture(true, true),
+    row = f.native.state.work!;
+  refuseRetiredOriginal(f);
+  const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+  let changed = false;
+  vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+    const result = await run(args, input);
+    if (!changed && args[0] === 'exec' && args.includes('plan-status')) {
+      changed = true;
+      await f.companyFile.update((state) => {
+        state.employees[0]!.sessionGeneration++;
+      });
+    }
+    return result;
+  });
+  await expect(f.capture()).rejects.toThrow('Actual canonical published target changed');
+  expect(changed).toBe(true);
+  expect(f.companyFile.snapshot().employees[0]!.sessionGeneration).toBe(row.request.sessionGeneration + 1);
+  f.unchanged();
+});
+
+it.each(['Pid', 'StartedAt', 'Config', 'Mounts'] as const)(
+  'refuses native published %s drift between real provider observations',
+  async (field) => {
+    const f = await paidFixture(true, true),
+      row = f.native.state.work!;
+    refuseRetiredOriginal(f);
+    const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+    let observed = false;
+    vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+      const result = await run(args, input);
+      if (args[0] === 'exec' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) observed = true;
+      if (observed && args[0] === 'container' && args[1] === 'inspect' && args[2] === row.destination!.containerId) {
+        const rows = JSON.parse(result);
+        if (field === 'Pid') rows[0].State.Pid++;
+        if (field === 'StartedAt') rows[0].State.StartedAt = '2026-11-16T00:01:00.000000000Z';
+        if (field === 'Config') rows[0].Config.Env.push('UNSELECTED=1');
+        if (field === 'Mounts') rows[0].Mounts[0].RW = !rows[0].Mounts[0].RW;
+        return JSON.stringify(rows);
+      }
+      return result;
+    });
+    await expect(f.capture()).rejects.toThrow();
+    expect(observed).toBe(true);
+    f.unchanged();
+  }
+);
+
+it.each(['Pid', 'StartedAt', 'installer'] as const)(
+  'keeps missing native %s proof held without recreating it',
+  async (field) => {
+    const f = await paidFixture(true, true),
+      row = f.native.state.work!;
+    refuseRetiredOriginal(f);
+    const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+    const task = row.tasks!.find((task) => task.role === 'identity-helper')!;
+    if (task.phase !== 'completed') throw Error('Expected genuine completed installer');
+    const installer = task.containerId;
+    vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+      if (field === 'installer' && args[0] === 'container' && args[1] === 'inspect' && args[2] === installer)
+        throw Error('Controlled missing completed installer');
+      const result = await run(args, input);
+      if (
+        field !== 'installer' &&
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === row.destination!.containerId
+      ) {
+        const rows = JSON.parse(result);
+        delete rows[0].State[field];
+        return JSON.stringify(rows);
+      }
+      return result;
+    });
+    await expect(f.capture()).rejects.toThrow();
+    f.unchanged();
   }
 );
 

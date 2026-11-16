@@ -39,16 +39,19 @@ export class DockerPlanInstaller {
   readonly #journal: DockerContinuationTaskJournal;
   readonly #home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>;
   readonly #box: string;
+  readonly #readHome: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>;
   constructor(
     command: DockerEngineCommand,
     journal: DockerContinuationTaskJournal,
     home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>,
-    boxId: string
+    boxId: string,
+    readHome: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome> = home
   ) {
     hash.parse(boxId);
     this.#command = command;
     this.#journal = journal;
     this.#home = home;
+    this.#readHome = readHome;
     this.#box = boxId;
     Object.freeze(this);
   }
@@ -329,10 +332,22 @@ export class DockerPlanInstaller {
     current: () => void,
     canonicalAuthDigest?: string
   ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
+    return this.#observeChecked(input, current, this.#home, canonicalAuthDigest);
+  }
+  /** Completed receipt and current guest reads only; never provision. */
+  async observePublished(input: DockerEmployeeContinuationRecord, current: () => void, canonicalAuthDigest?: string) {
+    return this.#observeChecked(input, current, this.#readHome, canonicalAuthDigest);
+  }
+  async #observeChecked(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void,
+    home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>,
+    canonicalAuthDigest?: string
+  ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
     if (canonicalAuthDigest !== undefined && !hash.safeParse(canonicalAuthDigest).success)
       refuse('DOCKER_PLAN_ACCOUNT_AUTH_UNCONFIRMED');
     return this.#checked(input, current, async (row, check) => {
-      const observed = await this.#observe(row, check);
+      const observed = await this.#observe(row, check, home);
       check();
       if (
         canonicalAuthDigest !== undefined &&
@@ -417,7 +432,11 @@ export class DockerPlanInstaller {
       throw error;
     }
   }
-  async #historical(row: Row, current: () => void) {
+  async #historical(
+    row: Row,
+    current: () => void,
+    readHome: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome> = this.#home
+  ) {
     if (!row.destination) refuse();
     const task = this.#journal.read(row, 'identity-helper');
     if (
@@ -428,7 +447,7 @@ export class DockerPlanInstaller {
         'reverie-boxed-identity-' + dockerContinuationDigest([this.#box, 'identity-helper', row.request.operationId])
     )
       refuse();
-    const home = await this.#home(row);
+    const home = await readHome(row);
     current();
     this.#correlateHome(row, home);
     const selected = await this.#inspect(task.containerId);
@@ -446,16 +465,17 @@ export class DockerPlanInstaller {
     if (task.resultDigest !== dockerContinuationDigest(initial)) refuse('DOCKER_PLAN_INSTALL_ACK_CHANGED');
     const after = await this.#fixed(row, home, task.containerId, config, current);
     terminal.parse(after.State);
-    if (!isDeepStrictEqual(before.State, after.State) || !isDeepStrictEqual(await this.#home(row), home))
+    if (!isDeepStrictEqual(before.State, after.State) || !isDeepStrictEqual(await readHome(row), home))
       refuse('DOCKER_PLAN_INSTALL_ORIGINAL_CHANGED');
     current();
     return { initial, home, helperId: task.containerId, config, state: after.State };
   }
   async #observe(
     row: Row,
-    current: () => void
+    current: () => void,
+    readHome: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>
   ): Promise<Readonly<{ initial: DockerPlanInitialReceipt; live: DockerPlanLiveReceipt }>> {
-    const { initial, home, helperId, config, state } = await this.#historical(row, current);
+    const { initial, home, helperId, config, state } = await this.#historical(row, current, readHome);
     current();
     const body = await this.#command.run([
       'exec',
@@ -486,7 +506,7 @@ export class DockerPlanInstaller {
       if (live[field] !== initial[field]) refuse('DOCKER_PLAN_INSTALL_GUEST_CHANGED');
     const final = await this.#fixed(row, home, helperId, config, current);
     terminal.parse(final.State);
-    if (!isDeepStrictEqual(final.State, state) || !isDeepStrictEqual(await this.#home(row), home))
+    if (!isDeepStrictEqual(final.State, state) || !isDeepStrictEqual(await readHome(row), home))
       refuse('DOCKER_PLAN_INSTALL_ORIGINAL_CHANGED');
     current();
     return Object.freeze({ initial: Object.freeze(initial), live: Object.freeze(live) });

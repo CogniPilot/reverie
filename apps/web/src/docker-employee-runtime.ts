@@ -333,6 +333,15 @@ export class DockerEmployeeRuntime {
           containerId: row.destination!.containerId,
           credentialId: row.credentialId,
         }, digest, current);
+      },
+      (row) => {
+        if (
+          !this.current() ||
+          row.version !== 3 ||
+          row.phase !== 'ready' ||
+          !store.existingSubject(row.employeeId, row)
+        )
+          throw Error('Canonical published plan replacement changed');
       }
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl, (row, workingDir, current) =>

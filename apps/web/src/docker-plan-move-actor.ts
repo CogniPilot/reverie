@@ -155,7 +155,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       deps.configuration.apiUrl,
       (row, current) => deps.engine.captureProviderView(row, current),
       async (row, current) => {
-        await deps.engine.existingImage(row, current);
+        await deps.engine.existingPlanSourceImage(row, current);
         current();
       }
     );

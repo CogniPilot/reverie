@@ -18,7 +18,15 @@ import { DockerPlanSourceReader } from '../../src/docker-plan-source.js';
 import { dockerPlanSourceFixture } from './docker-plan-source-fixture.js';
 import { dockerPlanJournalFixture } from './docker-plan-move-fixture.js';
 const hex = (s: string) => s.repeat(64);
-export async function dockerPlanRetirementFixture() {
+export async function dockerPlanRetirementFixture(options?: {
+  canonicalRead(row: DockerEmployeePlanReplacementWorkRecord): Promise<{
+    providerSourceDigest: string;
+    publish(row: DockerEmployeePlanReplacementWorkRecord): Promise<void>;
+    requireCurrent(
+      row: import('../../src/docker-employee-continuation-data.js').DockerEmployeeContinuationRecord
+    ): void;
+  }>;
+}) {
   const src = dockerPlanSourceFixture(false),
     f = dockerPlanJournalFixture(),
     box = hex('7'),
@@ -93,6 +101,13 @@ export async function dockerPlanRetirementFixture() {
       },
     },
   });
+  row = DockerEmployeePlanReplacementWorkRecord.parse(JSON.parse(JSON.stringify(row)));
+  const canonical = await options?.canonicalRead(row);
+  if (canonical)
+    row = DockerEmployeePlanReplacementWorkRecord.parse({
+      ...row,
+      providerSourceDigest: canonical.providerSourceDigest,
+    });
   const containers = new Map<string, DockerEmployeeInspect | Record<string, unknown>>([[legacy.Id, legacy]]);
   const storage = {
     version: 1,
@@ -207,6 +222,9 @@ export async function dockerPlanRetirementFixture() {
         return storageId;
       }
       if (args[0] === 'logs') return JSON.stringify(args[1] === storageId ? storage : initial) + '\n';
+      if (args[0] === 'exec' && args.includes('probe-storage'))
+        return JSON.stringify({ ...storage, holderStartTicks: null });
+      if (args[0] === 'exec' && args.includes('status')) return '{}';
       if (args[0] === 'exec' && args.includes('storage-status')) return JSON.stringify(storage);
       if (args[0] === 'exec' && args.includes('plan-status'))
         return JSON.stringify(args.includes('initial') ? initial : live) + '\n';
@@ -247,19 +265,28 @@ export async function dockerPlanRetirementFixture() {
       throw Error('No resource mutation');
     }),
   };
-  const engine = new DockerEmployeeEngine(
-    command,
-    'synthetic',
-    resources,
-    {
-      imageId: src.raw.Image,
-      clientManifestDigest: src.row.workerImage.clientManifestDigest,
-      sourceImageIds: [src.raw.Image],
-    },
-    journal,
-    helperImage,
-    box
-  );
+  const makeEngine = (
+    requireCurrent?: (
+      row: import('../../src/docker-employee-continuation-data.js').DockerEmployeeContinuationRecord
+    ) => void
+  ) =>
+    new DockerEmployeeEngine(
+      command,
+      'synthetic',
+      resources,
+      {
+        imageId: src.raw.Image,
+        clientManifestDigest: src.row.workerImage.clientManifestDigest,
+        sourceImageIds: [src.raw.Image],
+      },
+      journal,
+      helperImage,
+      box,
+      undefined,
+      undefined,
+      requireCurrent
+    );
+  const engine = makeEngine();
   await engine.prepareStorage(row, () => {});
   row = DockerEmployeePlanReplacementWorkRecord.parse({ ...row, phase: 'destination-issued' });
   await engine.createPlanReplacementDestination(row, () => {});
@@ -336,7 +363,9 @@ export async function dockerPlanRetirementFixture() {
     }
   );
   const sourceProof = await sourceReader.capture(src.row, src.binding, () => {}, true);
-  const view = await engine.captureProviderView(row, () => {});
+  await canonical?.publish(row);
+  const readerEngine = canonical ? makeEngine(canonical.requireCurrent) : engine;
+  const view = await readerEngine.captureProviderView(row, () => {});
   const docker = (source = false): SessionDocker => ({
     hostId: 'boxed-runtime',
     engine: 'docker',
@@ -414,5 +443,30 @@ export async function dockerPlanRetirementFixture() {
     dockerReplacement: state,
   };
   const proof = captureDockerPlanSourceRetirement(record, state, sourceProof, view, old, target, () => {});
-  return { proof, old, target, record, state, command, src, engine, docker };
+  return {
+    proof,
+    old,
+    target,
+    record,
+    state,
+    command,
+    src,
+    engine: readerEngine,
+    strictEngine: engine,
+    docker,
+    async retireSourceView() {
+      const freshSource = await sourceReader.capture(src.row, src.binding, () => {}, true);
+      const freshView = await readerEngine.captureProviderView(row, () => {});
+      const freshRetirement = captureDockerPlanSourceRetirement(
+        record,
+        state,
+        freshSource,
+        freshView,
+        old,
+        target,
+        () => {}
+      );
+      old.retireDockerPlanSourceView(freshRetirement);
+    },
+  };
 }
