@@ -344,6 +344,14 @@ export class DockerEmployeeContinuation {
     current: () => void
   ): Promise<void> {
     current();
+    // Published v1/v2 reads qualify the immutable current destination. The
+    // historical source is correlation, not a required surviving container.
+    if (row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase) && this.engine.existingImage) {
+      const image = DockerEmployeeWorkerImage.parse(await this.engine.existingImage(row, current));
+      current();
+      if (!isDeepStrictEqual(image, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+      return;
+    }
     if (row.version === 3 && !this.engine.observePlanReplacementSource)
       refuse('DOCKER_PLAN_REPLACEMENT_OBSERVER_UNAVAILABLE');
     const observation =
@@ -406,6 +414,29 @@ export class DockerEmployeeContinuation {
   }
   async selection(employeeId: string, authority: DockerContinuationAuthority) {
     authority.require();
+    const retained = this.store.record(employeeId);
+    if (retained && retained.version !== 3 && ['provider-issued', 'ready'].includes(retained.phase)) {
+      const subject = this.store.existingSubject(employeeId, retained);
+      if (!subject || subject.owner !== authority.owner || retained.owner !== authority.owner)
+        refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
+      const current = () => this.#requireExisting(subject, retained, authority, retained.policy);
+      current();
+      const operation = await this.observe(employeeId, retained.request.operationId, authority);
+      current();
+      return {
+        destinationImageId: retained.workerImage.imageId,
+        sessionId: subject.sessionId,
+        sessionGeneration: subject.sessionGeneration,
+        sourceDigest: subject.sourceDigest,
+        containerId: retained.original.containerId,
+        imageId: retained.original.imageId,
+        // Historical ORIGINAL state was not observed by this provider read.
+        state: 'unknown' as const,
+        operationId: retained.request.operationId,
+        originalRequest: retained.request,
+        operation,
+      };
+    }
     const subject = this.store.subject(employeeId);
     if (!subject || subject.owner !== authority.owner) refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
     const seen = await this.engine.observeSource(subject);

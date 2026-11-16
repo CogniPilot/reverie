@@ -38,7 +38,8 @@ export class DockerEmployeeStorage {
     private readonly journal: DockerContinuationTaskJournal,
     private readonly helperImageId: string,
     private readonly source: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect>,
-    private readonly boxId: string
+    private readonly boxId: string,
+    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source
   ) {
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^sha256:[a-f0-9]{64}$/.test(helperImageId)) throw Error('Fixed qualified storage helper required');
@@ -238,15 +239,19 @@ export class DockerEmployeeStorage {
   }
   /** Settle an already observed live holder cursor; never create or START.
    * Monotone task publication and the owning epoch keep this exact cursor. */
-  async settleObserved(row:DockerEmployeeContinuationRecord,current:()=>void):Promise<void>{
-    current();const task=this.journal.read(row,'storage-holder');if(!task||!['start-issued','running'].includes(task.phase))return;
-    if(await this.observe(row)!=='ready')refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');current();
+  async settleObserved(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    current();
+    const task = this.journal.read(row, 'storage-holder');
+    if (!task || !['start-issued', 'running'].includes(task.phase)) return;
+    if ((await this.observe(row)) !== 'ready') refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
+    current();
     // prepare has no effect branch for these two retained task phases. It
     // re-reads the same fixed holder and publishes its actual init once.
-    await this.prepare(row,current);current();
+    await this.prepare(row, current);
+    current();
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued' | 'unknown'> {
-    const source = await this.source(row),
+    const source = await this.readSource(row),
       config = this.#configuration(row, source),
       task = this.journal.read(row, 'storage-holder');
     if (!task) return 'unissued';
@@ -279,8 +284,13 @@ export class DockerEmployeeStorage {
     return held ? 'ready' : 'unknown';
   }
   async credentialHome(row: DockerEmployeeContinuationRecord) {
-    const source = await this.source(row),
-      held = await this.#held(row, this.#configuration(row, source));
+    return this.#home(row, await this.source(row));
+  }
+  async observedCredentialHome(row: DockerEmployeeContinuationRecord) {
+    return this.#home(row, await this.readSource(row));
+  }
+  async #home(row: DockerEmployeeContinuationRecord, source: DockerEmployeeInspect) {
+    const held = await this.#held(row, this.#configuration(row, source));
     if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
     return {
       source: source.Mounts.find((m) => m.Destination === '/home/agent')!.Source,
@@ -290,14 +300,14 @@ export class DockerEmployeeStorage {
     };
   }
   async protectedDirectories(row: DockerEmployeeContinuationRecord) {
-    const source = await this.source(row),
+    const source = await this.readSource(row),
       held = await this.#held(row, this.#configuration(row, source));
     if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
     return [held.value.home, held.value.nix].map(({ dev, ino }) => ({ dev, ino }));
   }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
     if (!row.destination) refuse('DOCKER_STORAGE_DESTINATION_UNKNOWN');
-    const source = await this.source(row),
+    const source = await this.readSource(row),
       held = await this.#held(row, this.#configuration(row, source));
     if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
     const seen = storage.parse(

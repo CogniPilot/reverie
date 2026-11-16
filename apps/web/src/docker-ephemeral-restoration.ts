@@ -41,7 +41,8 @@ export class DockerEphemeralRestoration {
     private readonly target: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect | null>,
     private readonly forbidden: (
       row: DockerEmployeeContinuationRecord
-    ) => Promise<readonly { dev: string; ino: string }[]>
+    ) => Promise<readonly { dev: string; ino: string }[]>,
+    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source
   ) {
     if (!/^sha256:[a-f0-9]{64}$/.test(nativeImageId)) throw Error('Protected native image required');
   }
@@ -311,7 +312,7 @@ export class DockerEphemeralRestoration {
     if (!after?.State.Running || after.Id !== raw.Id) fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued'> {
-    const source = await this.source(row),
+    const source = await this.readSource(row),
       projection = ephemeralContinuationProjection(source, row);
     if (!projection) return 'ready';
     this.#readImage(row);
@@ -330,7 +331,7 @@ export class DockerEphemeralRestoration {
       owner.assertCurrent();
       owner.captureLeaves(projection, forbidden);
       await this.#readDestination(row, owner);
-      await this.source(row);
+      await this.readSource(row);
       owner.assertCurrent();
       this.#owners.set(row.request.operationId, owner);
       return 'ready';
@@ -592,7 +593,7 @@ export class DockerEphemeralRestoration {
     owner.assertCurrent();
   }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
-    const source = await this.source(row);
+    const source = await this.readSource(row);
     if (!ephemeralContinuationProjection(source, row)) return;
     this.#readImage(row);
     if (!this.#owners.has(row.request.operationId)) await this.observe(row);

@@ -281,6 +281,8 @@ async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
 async function providerViewFixture(ephemeral = false, mode = 'claude') {
   const f = await dockerEncodedDestination(ephemeral, mode);
   f.observed.State.Running = true;
+  f.observed.State.Pid = 123;
+  f.observed.State.StartedAt = '2026-11-16T10:00:00.000000000Z';
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
   f.row.phase = 'ready';
   const pane = {
@@ -406,6 +408,142 @@ describe('Engine-owned existing Docker provider view', () => {
     f.row.phase = 'destination-issued';
     await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow('READY_PROVIDER_REQUIRED');
   });
+  it.each([1, 2] as const)('reads published v%s without the historical container or image', async (version) => {
+    const f = await providerViewFixture();
+    const row = DockerEmployeeContinuationRecord.parse({
+      ...f.row,
+      version,
+      purpose: 'docker-employee-continuation-v' + version,
+      ...(version === 2 ? { providerSourceDigest: subject.providerSourceDigest } : {}),
+    });
+    const before = structuredClone(row);
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      if ((args[0] === 'container' && args[1] === 'ls') || args[2] === cid || args[2] === image)
+        throw Error('Historical source/discovery unavailable');
+      return original(args, input);
+    });
+    vi.mocked(f.command.run).mockClear();
+    await expect(f.engine.existingImage(row, () => {})).resolves.toEqual(row.workerImage);
+    const view = await f.engine.captureProviderView(row, () => {});
+    requireDockerEmployeeProviderView(view, sid, f.docker);
+    expect(view.descriptor.containerId).toBe(dest);
+    expect(row).toEqual(before);
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+    expect(
+      vi.mocked(f.command.run).mock.calls.every(([args]) => args[0] !== 'container' || args[1] === 'inspect')
+    ).toBe(true);
+    // Published read qualification cannot authorize the existing effect paths.
+    for (const effect of [
+      () => f.engine.start(row, () => {}),
+      () => f.engine.configureResources(row, () => {}),
+      () => f.engine.provisionIdentity(row, 'synthetic-token', () => {}),
+      () => f.engine.prepareStorage(row, () => {}),
+    ])
+      await expect(effect()).rejects.toThrow('Historical source/discovery unavailable');
+    expect(f.resources.configure).not.toHaveBeenCalled();
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
+  it.each(['Config', 'HostConfig', 'Mounts', 'CID', 'generation', 'operation', 'box', 'image'] as const)(
+    'denies published %s drift with the historical source unavailable',
+    async (change) => {
+      const f = await providerViewFixture();
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        if (args[2] === cid || args[2] === image) throw Error('Historical source unavailable');
+        return original(args, input);
+      });
+      if (change === 'Config') f.observed.Config.WorkingDir = '/foreign';
+      if (change === 'HostConfig') f.observed.HostConfig.NetworkMode = 'host';
+      if (change === 'Mounts') f.observed.Mounts[0]!.Source = '/foreign';
+      if (change === 'CID') f.observed.Id = 'f'.repeat(64);
+      if (change === 'generation') f.observed.Config.Labels!['reverie.boxed.generation'] = '4';
+      if (change === 'operation')
+        f.observed.Config.Labels!['reverie.boxed.operation'] = '40000000-0000-4000-8000-000000000004';
+      if (change === 'box') f.observed.Config.Labels!['reverie.boxed.box'] = 'f'.repeat(64);
+      if (change === 'image') f.observed.Image = image;
+      await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow();
+      await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow();
+      expect(f.command.create).toHaveBeenCalledTimes(1);
+      expect(f.resources.configure).not.toHaveBeenCalled();
+    }
+  );
+  it('rechecks revocation and destination metadata after the published image await', async () => {
+    const f = await providerViewFixture();
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    let current = true;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const result = await original(args, input);
+      if (args[0] === 'image') current = false;
+      return result;
+    });
+    await expect(
+      f.engine.existingImage(f.row, () => {
+        if (!current) throw Error('revoked');
+      })
+    ).rejects.toThrow('revoked');
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const result = await original(args, input);
+      if (args[0] === 'image') f.observed.Config.WorkingDir = '/changed-during-await';
+      return result;
+    });
+    await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow('DESTINATION_CHANGED');
+  });
+  it.each(['Pid', 'StartedAt'] as const)(
+    'denies a changed host %s between native provider observations',
+    async (field) => {
+      const f = await providerViewFixture();
+      f.observed.State.Pid = 123;
+      f.observed.State.StartedAt = '2026-11-16T10:00:00.000000000Z';
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        const result = await original(args, input);
+        if (args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))
+          f.observed.State[field] = field === 'Pid' ? 124 : '2026-11-16T10:01:00.000000000Z';
+        return result;
+      });
+      await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow('PROVIDER_VIEW_CHANGED');
+    }
+  );
+  it('allows HEALTHCHECK history progress within the same observed host incarnation', async () => {
+    const f = await providerViewFixture();
+    f.observed.State.Pid = 123;
+    f.observed.State.StartedAt = '2026-11-16T10:00:00.000000000Z';
+    f.observed.State.Health = { Status: 'healthy', FailingStreak: 0, Log: [] };
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const result = await original(args, input);
+      if (args.includes(DOCKER_PROVIDER_VIEW_PROGRAM))
+        f.observed.State.Health = { Status: 'healthy', FailingStreak: 0, Log: [{ Output: 'new read-only history' }] };
+      return result;
+    });
+    const view = await f.engine.captureProviderView(f.row, () => {});
+    requireDockerEmployeeProviderView(view, sid, f.docker);
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    'missing-pid',
+    'zero-running-pid',
+    'negative-pid',
+    'fractional-pid',
+    'oversized-pid',
+    'string-pid',
+    'missing-start',
+    'invalid-start',
+  ] as const)('refuses a published destination with %s', async (field) => {
+    const f = await providerViewFixture();
+    if (field === 'missing-pid') delete f.observed.State.Pid;
+    if (field === 'zero-running-pid') f.observed.State.Pid = 0;
+    if (field === 'negative-pid') f.observed.State.Pid = -1;
+    if (field === 'fractional-pid') f.observed.State.Pid = 1.5;
+    if (field === 'oversized-pid') f.observed.State.Pid = 2147483648;
+    if (field === 'string-pid') f.observed.State.Pid = '123';
+    if (field === 'missing-start') delete f.observed.State.StartedAt;
+    if (field === 'invalid-start') f.observed.State.StartedAt = 'not-a-native-epoch';
+    await expect(f.engine.existingImage(f.row, () => {})).rejects.toThrow('DESTINATION_STATE_UNKNOWN');
+    await expect(f.engine.captureProviderView(f.row, () => {})).rejects.toThrow('DESTINATION_STATE_UNKNOWN');
+    expect(f.command.create).toHaveBeenCalledTimes(1);
+  });
   it('captures full native placement and two matching PID births without any provider effect', async () => {
     const f = await providerViewFixture();
     vi.mocked(f.command.run).mockClear();
@@ -511,7 +649,10 @@ describe('Engine-owned existing Docker provider view', () => {
     'refuses changed %s observations before granting a view',
     async (kind) => {
       const f = await providerViewFixture();
-      if (kind === 'stopped') f.observed.State.Running = false;
+      if (kind === 'stopped') {
+        f.observed.State.Running = false;
+        f.observed.State.Pid = 0;
+      }
       if (kind === 'phase') f.row.phase = 'provider-issued';
       if (['pid', 'birth', 'generation'].includes(kind)) {
         const original = vi.mocked(f.command.run).getMockImplementation()!;
@@ -1484,14 +1625,26 @@ describe('resource revision observation boundary', () => {
       const f = await planReplacementMetadata();
       vi.mocked(f.command.create).mockClear();
       await expect(f.engine.verifyResourceDestination(f.row, () => {})).resolves.toBeUndefined();
-      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...f.row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORKS_REQUIRED');
+      await expect(
+        f.engine.createPlanReplacementDestination(
+          DockerEmployeePlanReplacementWorkRecord.parse({
+            ...f.row,
+            phase: 'destination-issued',
+            destination: undefined,
+          }),
+          () => {}
+        )
+      ).rejects.toThrow('NETWORKS_REQUIRED');
       expect(f.command.create).not.toHaveBeenCalled();
     });
     it('copies both current source networks by immutable ID and omits IP/alias data', async () => {
       const f = await planReplacementMetadata(),
         row = select(f);
       vi.mocked(f.command.create).mockClear();
-      await f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {});
+      await f.engine.createPlanReplacementDestination(
+        DockerEmployeePlanReplacementWorkRecord.parse({ ...row, phase: 'destination-issued', destination: undefined }),
+        () => {}
+      );
       const body = f.created()!;
       expect(body.NetworkingConfig).toEqual({
         EndpointsConfig: { [first]: {}, [second]: {} },
@@ -1506,7 +1659,16 @@ describe('resource revision observation boundary', () => {
         row = select(f);
       f.source.NetworkSettings = members([first, third]);
       vi.mocked(f.command.create).mockClear();
-      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      await expect(
+        f.engine.createPlanReplacementDestination(
+          DockerEmployeePlanReplacementWorkRecord.parse({
+            ...row,
+            phase: 'destination-issued',
+            destination: undefined,
+          }),
+          () => {}
+        )
+      ).rejects.toThrow('NETWORK_SOURCE_CHANGED');
       expect(f.command.create).not.toHaveBeenCalled();
       f.source.NetworkSettings = members([first, second]);
       f.observed.NetworkSettings = members([first, third]);
@@ -1601,7 +1763,16 @@ describe('resource revision observation boundary', () => {
         f.source.NetworkSettings = members([first, third]);
         return row.pool!;
       });
-      await expect(f.engine.createPlanReplacementDestination(DockerEmployeePlanReplacementWorkRecord.parse({...row,phase:'destination-issued',destination:undefined}), () => {})).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+      await expect(
+        f.engine.createPlanReplacementDestination(
+          DockerEmployeePlanReplacementWorkRecord.parse({
+            ...row,
+            phase: 'destination-issued',
+            destination: undefined,
+          }),
+          () => {}
+        )
+      ).rejects.toThrow('NETWORK_SOURCE_CHANGED');
       expect(f.command.create).not.toHaveBeenCalled();
     });
     it('refuses a Created selector mutation across the readonly name resolution await', async () => {

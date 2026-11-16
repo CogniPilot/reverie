@@ -357,6 +357,8 @@ async function savedFixture(
 ) {
   const f = await dockerEncodedDestination();
   f.observed.State.Running = true;
+  f.observed.State.Pid = 123;
+  f.observed.State.StartedAt = '2026-11-16T10:00:00.000000000Z';
   f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
   f.row.phase = 'ready';
   let current = true;
@@ -712,7 +714,10 @@ describe('actual saved Docker Session private attachment', () => {
     'refuses %s actual observer replies before any attachment',
     async (kind) => {
       const f = await savedFixture();
-      if (kind === 'stopped') f.observed.State.Running = false;
+      if (kind === 'stopped') {
+        f.observed.State.Running = false;
+        f.observed.State.Pid = 0;
+      }
       if (kind === 'changed-generation') f.row.request.sessionGeneration++;
       const run = vi.mocked(f.command.run).getMockImplementation()!;
       let nativeReads = 0;

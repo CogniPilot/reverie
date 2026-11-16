@@ -24,7 +24,8 @@ export class DockerEmployeeCredentialInstaller {
     private readonly command: DockerEngineCommand,
     private readonly journal: DockerContinuationTaskJournal,
     private readonly home: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome>,
-    private readonly boxId: string
+    private readonly boxId: string,
+    private readonly readHome: (row: DockerEmployeeContinuationRecord) => Promise<DockerCredentialHome> = home
   ) {
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
   }
@@ -128,7 +129,7 @@ export class DockerEmployeeCredentialInstaller {
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<string | null> {
     if (!this.journal.read(row, 'identity-helper')) return null;
-    const home = await this.home(row),
+    const home = await this.readHome(row),
       config = await this.#config(row, home),
       task = this.#task(row, config);
     if (!task || task.phase === 'create-issued' || task.phase === 'created') return null;
@@ -165,7 +166,7 @@ export class DockerEmployeeCredentialInstaller {
     if (task.phase === 'completed' && task.resultDigest !== dockerContinuationDigest(ack))
       refuse('DOCKER_IDENTITY_INSTALL_ACK_CHANGED');
     const after = await this.#fixed(task.containerId, config);
-    if (!isDeepStrictEqual(after.State, raw.State) || !isDeepStrictEqual(await this.home(row), home))
+    if (!isDeepStrictEqual(after.State, raw.State) || !isDeepStrictEqual(await this.readHome(row), home))
       refuse('DOCKER_IDENTITY_ORIGINAL_CHANGED');
     return ack.tokenDigest;
   }
