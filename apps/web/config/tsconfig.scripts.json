@@ -57,6 +57,8 @@
     "../test/docker-plan-local-client.test.ts",
     "../test/docker-paid-viewer-reconnect.test.ts",
     "../test/docker-employee-provider-launch.test.ts",
+    "../test/managed-codex-trust.test.ts",
+    "../test/session-model-recovery.test.ts",
     "../test/docker-employee-saved-attach.test.ts",
     "../test/fixtures/plan-office-canary.mts",
     "../test/plan-office-driver.test.ts",
