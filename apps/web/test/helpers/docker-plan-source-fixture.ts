@@ -28,6 +28,7 @@ export function dockerPlanSourceFixture(running = true) {
     State: {
       Running: running,
       Pid: running ? 100 : 0,
+      StartedAt: '2026-11-16T00:00:00.000000000Z',
       Status: running ? 'running' : 'exited',
       Paused: false,
       Restarting: false,
@@ -45,6 +46,7 @@ export function dockerPlanSourceFixture(running = true) {
         'reverie.boxed.session': uuid(2),
         'reverie.boxed.box': box,
         'reverie.boxed.operation': uuid(3),
+        'reverie.boxed.source': hex('c'),
         'reverie.boxed.generation': '1',
         'org.reverie.worker-client.manifest': hex('b'),
       },

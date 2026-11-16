@@ -154,6 +154,7 @@ export async function dockerPlanRetirementFixture() {
         Running: running,
         Status: running ? 'running' : 'created',
         Pid: running ? 222 : 0,
+        StartedAt: running ? '2026-11-16T00:00:00.000000000Z' : '0001-01-01T00:00:00Z',
         Paused: false,
         Restarting: false,
         Dead: false,
@@ -196,7 +197,13 @@ export async function dockerPlanRetirementFixture() {
       }
       if (args[0] === 'container' && args[1] === 'start' && args[2] === storageId) {
         const raw = containers.get(storageId)! as { State: Record<string, unknown> };
-        raw.State = { ...raw.State, Running: true, Status: 'running', Pid: 111 };
+        raw.State = {
+          ...raw.State,
+          Running: true,
+          Status: 'running',
+          Pid: 111,
+          StartedAt: '2026-11-16T00:00:01.000000000Z',
+        };
         return storageId;
       }
       if (args[0] === 'logs') return JSON.stringify(args[1] === storageId ? storage : initial) + '\n';
@@ -257,7 +264,13 @@ export async function dockerPlanRetirementFixture() {
   row = DockerEmployeePlanReplacementWorkRecord.parse({ ...row, phase: 'destination-issued' });
   await engine.createPlanReplacementDestination(row, () => {});
   const targetRaw = DockerEmployeeInspect.parse(containers.get(targetId));
-  targetRaw.State = { ...targetRaw.State, Running: true, Status: 'running', Pid: 222 };
+  targetRaw.State = {
+    ...targetRaw.State,
+    Running: true,
+    Status: 'running',
+    Pid: 222,
+    StartedAt: '2026-11-16T00:00:02.000000000Z',
+  };
   containers.set(targetId, targetRaw);
   row = DockerEmployeePlanReplacementWorkRecord.parse({
     ...row,
