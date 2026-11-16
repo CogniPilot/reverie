@@ -206,6 +206,62 @@ it('retains only the last reported Nix error alongside independently valid Node 
   expect(JSON.stringify(result)).not.toContain(token);
   expect(readPlanOfficeBuildDiagnostic(first + frame + frame + last, instance)).toBeUndefined();
 });
+it('retains the first reported builder failure when a later parent dependency failure hides it', () => {
+  const token = 'HOSTILE_AUTH_TOKEN';
+  const record = (name: string, reason: string) =>
+    nixRecord({
+      action: 'msg',
+      level: 0,
+      msg: token,
+      raw_msg: "Cannot build '/nix/store/" + 'c'.repeat(32) + '-' + name + ".drv'.\nReason: " + reason + '\n' + token,
+    });
+  const failed = record('reverie-worker-client-capsule-producer-0.1.0', 'builder failed with exit code 1.');
+  const later = record('reverie-ci-plan-office-runtime', 'builder failed with exit code 2.');
+  const parent = record('reverie-ci-plan-office-inputs', '2 dependencies failed.');
+  const result = readPlanOfficeBuildDiagnostic(failed + later + parent, instance)!;
+  expect(result.nix).toMatchObject({ category: 'dependency-failure', reports: 'multiple' });
+  expect(result.firstBuilder).toMatchObject({
+    observation: 'first-reported-builder-failure',
+    category: 'builder-failure',
+    component: 'client-capsule-producer',
+  });
+  expect(planOfficeCiFailureDiagnostic({ build: result }, [], instance).fixtureBuild).toEqual(result);
+  expect(JSON.stringify(result)).not.toMatch(/HOSTILE_AUTH_TOKEN|\/nix\/store|\.drv|exit code/);
+  expect(readPlanOfficeBuildDiagnostic(failed, instance)?.firstBuilder).toBeUndefined();
+  for (const firstBuilder of [
+    { ...result.firstBuilder, message: token },
+    { ...result.firstBuilder, category: 'dependency-failure' },
+    { ...result.firstBuilder, observation: 'last-reported-nix-error' },
+    { ...result.firstBuilder, instance: 'b'.repeat(32) },
+    { ...result.firstBuilder, component: token },
+  ])
+    expect(projectPlanOfficeBuildDiagnostic({ ...result, firstBuilder }, instance)).toBeUndefined();
+  expect(projectPlanOfficeBuildDiagnostic({ firstBuilder: result.firstBuilder }, instance)).toBeUndefined();
+  expect(projectPlanOfficeBuildDiagnostic({ nix: result.firstBuilder }, instance)).toBeUndefined();
+});
+it.each([
+  ['reverie-worker-client-bundle', 'client-bundle'],
+  ['reverie-worker-client-capsule', 'client-capsule'],
+  ['reverie-worker-client-notices', 'client-notices'],
+  ['reverie-worker-client-capsule-producer-0.1.0', 'client-capsule-producer'],
+  ['reverie-worker-tools-capsule', 'tools-capsule'],
+  ['reverie-worker-tools-capsule-producer-0.1.0', 'tools-capsule-producer'],
+  ['reverie-perf-guest-capsule', 'guest-capsule'],
+  ['reverie-perf-capsule-producer-0.1.0', 'guest-capsule-producer'],
+  ['reverie-docker-resources-0.1.0', 'resource-helper'],
+  ['reverie-ci-plan-worker-platform', 'worker-platform'],
+  ['reverie-worker-client-capsule-HOSTILE_AUTH_TOKEN', 'other-derivation'],
+  ['__proto__', 'other-derivation'],
+])('classifies only the exact owned build component %s', (name, component) => {
+  const raw = nixRecord({
+    action: 'msg',
+    level: 0,
+    msg: "Cannot build '/nix/store/" + 'c'.repeat(32) + '-' + name + ".drv'.\nReason: builder failed with exit code 1.",
+  });
+  const result = readPlanOfficeBuildDiagnostic(raw, instance);
+  expect(result?.nix?.component).toBe(component);
+  expect(JSON.stringify(result)).not.toMatch(/HOSTILE_AUTH_TOKEN|\/nix\/store|\.drv/);
+});
 it.each(['fixture-image', 'other-derivation'] as const)(
   'projects the fixed %s component without retaining a derivation name',
   (component) => {

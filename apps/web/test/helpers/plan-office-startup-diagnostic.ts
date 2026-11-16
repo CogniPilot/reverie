@@ -165,7 +165,22 @@ export function readPlanOfficeStartupDiagnostic(stdout: unknown, instance: strin
 }
 
 const nixCategories = ['builder-failure', 'dependency-failure', 'evaluation-error', 'nix-error'] as const;
-const nixComponents = ['fixture-runtime', 'fixture-image', 'other-derivation', 'unavailable'] as const;
+const nixComponents = [
+  'fixture-runtime',
+  'fixture-image',
+  'client-bundle',
+  'client-capsule',
+  'client-capsule-producer',
+  'client-notices',
+  'guest-capsule',
+  'guest-capsule-producer',
+  'tools-capsule',
+  'tools-capsule-producer',
+  'resource-helper',
+  'worker-platform',
+  'other-derivation',
+  'unavailable',
+] as const;
 const nixSources = [
   'ci-plan-office-images',
   'package',
@@ -200,7 +215,7 @@ export function projectPlanOfficeNixDiagnostic(value: unknown, instance: string)
     if (
       v.version !== 1 ||
       v.purpose !== 'reverie-ci-plan-office-nix-diagnostic-v1' ||
-      v.observation !== 'last-reported-nix-error' ||
+      !['last-reported-nix-error', 'first-reported-builder-failure'].includes(v.observation as string) ||
       v.instance !== instance ||
       typeof v.category !== 'string' ||
       !(nixCategories as readonly string[]).includes(v.category) ||
@@ -214,7 +229,7 @@ export function projectPlanOfficeNixDiagnostic(value: unknown, instance: string)
     return {
       version: 1 as const,
       purpose: 'reverie-ci-plan-office-nix-diagnostic-v1' as const,
-      observation: 'last-reported-nix-error' as const,
+      observation: v.observation as 'last-reported-nix-error' | 'first-reported-builder-failure',
       instance,
       category: v.category as (typeof nixCategories)[number],
       component: v.component as (typeof nixComponents)[number],
@@ -247,6 +262,18 @@ function nixError(record: Record<string, unknown>, instance: string, reports: 'o
     Number.isSafeInteger(record.line) &&
     Number(record.line) > 0;
   const name = derivation && /^\/nix\/store\/[a-z0-9]{32}-([^/]+)\.drv$/.exec(derivation)?.[1];
+  const owned: Record<string, (typeof nixComponents)[number]> = {
+    'reverie-worker-client-bundle': 'client-bundle',
+    'reverie-worker-client-capsule': 'client-capsule',
+    'reverie-worker-client-capsule-producer-0.1.0': 'client-capsule-producer',
+    'reverie-worker-client-notices': 'client-notices',
+    'reverie-perf-guest-capsule': 'guest-capsule',
+    'reverie-perf-capsule-producer-0.1.0': 'guest-capsule-producer',
+    'reverie-worker-tools-capsule': 'tools-capsule',
+    'reverie-worker-tools-capsule-producer-0.1.0': 'tools-capsule-producer',
+    'reverie-docker-resources-0.1.0': 'resource-helper',
+    'reverie-ci-plan-worker-platform': 'worker-platform',
+  };
   const component =
     name === 'reverie-ci-plan-office-runtime'
       ? 'fixture-runtime'
@@ -254,7 +281,9 @@ function nixError(record: Record<string, unknown>, instance: string, reports: 'o
           /^docker-image-reverie-ci-plan-office-[a-f0-9]{32}-(?:source|worker|helper|control)(?:\.tar\.gz)?$/.test(name)
         ? 'fixture-image'
         : name
-          ? 'other-derivation'
+          ? Object.hasOwn(owned, name)
+            ? owned[name]!
+            : 'other-derivation'
           : 'unavailable';
   const file = located ? (record.file as string) : '';
   const source = file.endsWith('/nix/ci-plan-office-images.nix')
@@ -293,28 +322,43 @@ export function projectPlanOfficeBuildDiagnostic(value: unknown, instance?: stri
     const keys = Reflect.ownKeys(value);
     if (
       keys.length === 0 ||
-      keys.some((key) => typeof key !== 'string' || !['builder', 'importSmoke', 'nix'].includes(key))
+      keys.some((key) => typeof key !== 'string' || !['builder', 'importSmoke', 'nix', 'firstBuilder'].includes(key))
     )
       return undefined;
     const b = property(value, 'builder'),
       i = property(value, 'importSmoke'),
-      n = property(value, 'nix');
+      n = property(value, 'nix'),
+      first = property(value, 'firstBuilder');
     const builder = !keys.includes('builder') ? undefined : projectPlanOfficeStartupDiagnostic(b, '0'.repeat(32));
     const importSmoke = !keys.includes('importSmoke')
       ? undefined
       : projectPlanOfficeStartupDiagnostic(i, '0'.repeat(32));
     const nix =
       !keys.includes('nix') || instance === undefined ? undefined : projectPlanOfficeNixDiagnostic(n, instance);
+    const firstBuilder =
+      !keys.includes('firstBuilder') || instance === undefined
+        ? undefined
+        : projectPlanOfficeNixDiagnostic(first, instance);
     if (
       (keys.includes('builder') &&
         (!builder || !(PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(builder.stage))) ||
       (keys.includes('importSmoke') &&
         (!builder || !importSmoke || (PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(importSmoke.stage))) ||
-      (keys.includes('nix') && !nix) ||
+      (keys.includes('nix') && (!nix || nix.observation !== 'last-reported-nix-error')) ||
+      (keys.includes('firstBuilder') &&
+        (!nix ||
+          !firstBuilder ||
+          firstBuilder.category !== 'builder-failure' ||
+          firstBuilder.observation !== 'first-reported-builder-failure')) ||
       (!builder && !nix)
     )
       return undefined;
-    return { ...(builder ? { builder } : {}), ...(importSmoke ? { importSmoke } : {}), ...(nix ? { nix } : {}) };
+    return {
+      ...(builder ? { builder } : {}),
+      ...(importSmoke ? { importSmoke } : {}),
+      ...(nix ? { nix } : {}),
+      ...(firstBuilder ? { firstBuilder } : {}),
+    };
   } catch {
     return undefined;
   }
@@ -327,6 +371,7 @@ export function readPlanOfficeBuildDiagnostic(stderr: unknown, instance?: string
     return undefined;
   const frames = [];
   let nix: ReturnType<typeof projectPlanOfficeNixDiagnostic>,
+    firstBuilder: ReturnType<typeof projectPlanOfficeNixDiagnostic>,
     reports: 'one' | 'multiple' = 'one';
   for (const line of stderr.split('\n')) {
     if (!line.startsWith('@nix ') || Buffer.byteLength(line) > 256 * 1024) continue;
@@ -336,6 +381,7 @@ export function readPlanOfficeBuildDiagnostic(stderr: unknown, instance?: string
       if (instance) {
         const reported = nixError(record, instance, reports);
         if (reported) {
+          if (!firstBuilder && reported.category === 'builder-failure') firstBuilder = reported;
           nix = reported;
           reports = 'multiple';
         }
@@ -361,6 +407,14 @@ export function readPlanOfficeBuildDiagnostic(stderr: unknown, instance?: string
       ...(builders.length ? { builder: builders[0] } : {}),
       ...(builders.length && imports.length ? { importSmoke: imports[0] } : {}),
       ...(nix ? { nix } : {}),
+      ...(firstBuilder && nix !== firstBuilder
+        ? {
+            firstBuilder: {
+              ...firstBuilder,
+              observation: 'first-reported-builder-failure',
+            },
+          }
+        : {}),
     },
     instance
   );
