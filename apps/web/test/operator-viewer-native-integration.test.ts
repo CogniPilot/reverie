@@ -23,9 +23,10 @@ async function until(test: () => boolean, milliseconds = 8000): Promise<void> {
   const end = performance.now() + milliseconds;
   while (!test()) {if (performance.now() >= end) throw new Error('Bounded synthetic native bridge timed out'); await delay(10);}
 }
-function fixture(supported = true, startupDelay = 0, handshake: 'valid' | 'foreign' | 'missing' = 'valid') {
+function fixture(supported = true, startupDelay = 0, handshake: 'valid' | 'foreign' | 'missing' = 'valid', holdRelease = false) {
   const root = mkdtempSync(join(tmpdir(), 'native-pipe-')); chmodSync(root, 0o700);
   const state = join(root, 'state.json'), received = join(root, 'received'), effects = join(root, 'effects'), probes = join(root, 'probes');
+  const releaseGate = join(root, 'release-allowed');
   writeFileSync(join(root, 'package.json'), '{"type":"commonjs"}');
   writeFileSync(state, JSON.stringify({supported, pane: '$0|123|%0|101|0', clients: [], released: false}));
   for (const file of [received, effects, probes]) writeFileSync(file, '');
@@ -72,7 +73,14 @@ if(a[0]==='inspect'&&a[1]===${JSON.stringify(target.containerId)}){
   fs.appendFileSync(effects,'status\\n');
   if(read().nonce!==nonce)process.exit(94);console.log(read().clients.length?'PENDING':'CLOSED '+nonce+' 1234 '+words);
  }else if(action==='release'){
-  if(read().nonce!==nonce||read().clients.length)process.exit(93);fs.appendFileSync(effects,'release\\n');save({...read(),released:true});console.log('RELEASED '+nonce+' 1234 '+words);
+  if(read().nonce!==nonce||read().clients.length)process.exit(93);fs.appendFileSync(effects,'release\\n');
+  let finished=false;const finish=()=>{if(finished)return;finished=true;save({...read(),released:true});console.log('RELEASED '+nonce+' 1234 '+words);};
+  if(${holdRelease}){
+   const gate=${JSON.stringify(releaseGate)};
+   const timer=setTimeout(()=>process.exit(91),8000);
+   const watcher=fs.watch(${JSON.stringify(root)},()=>{if(fs.existsSync(gate)){watcher.close();clearTimeout(timer);finish();}});
+   if(fs.existsSync(gate)){watcher.close();clearTimeout(timer);finish();}
+  }else finish();
  }else process.exit(92);
 }else{console.error('Unexpected synthetic Docker operation');process.exit(99);}
 `, {mode: 0o700});
@@ -83,12 +91,15 @@ if(a[0]==='inspect'&&a[1]===${JSON.stringify(target.containerId)}){
     cwd: fileURLToPath(new URL('..', import.meta.url)), stdio: ['ignore', 'pipe', 'pipe'],
     env: {...process.env, REVERIE_OPERATOR_DOCKER_HOST: 'unix:///fixture/docker.sock', PATH: `${root}:${process.env.PATH}`},
   });
-  let ready = false, diagnostic = '';
-  child.stdout.on('data', bytes => {if (String(bytes).includes('Operator attachment ready')) ready = true;});
+  let output = '', diagnostic = '';
+  child.stdout.on('data', bytes => {output += String(bytes);});
   child.stderr.on('data', bytes => {diagnostic += String(bytes);});
   let peer: Socket | undefined;
   return {root, state, effects, probes, received, child, socket,
-    ready: () => ready, diagnostic: () => diagnostic,
+    ready: () => output.includes('Operator attachment ready'),
+    closed: () => output.includes('Operator attachment closed with native proof'),
+    allowRelease: () => writeFileSync(releaseGate, ''),
+    diagnostic: () => diagnostic,
     async connect() {
       peer = createConnection(socket);
       peer.on('error', () => {});
@@ -96,6 +107,7 @@ if(a[0]==='inspect'&&a[1]===${JSON.stringify(target.containerId)}){
       return peer;
     },
     async close() {
+      writeFileSync(releaseGate, '');
       peer?.destroy();
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
       let settled = false;
@@ -145,7 +157,7 @@ it('uses the actual native bridge CLI with ordered sealed I/R batches, UTF8, and
     writeFileSync(changed, JSON.stringify({...state, pane: '$0|123|%0|202|0'}));
     const {renameSync} = await import('node:fs'); renameSync(changed, f.state);
     await until(() => refused);
-    await until(() => readFileSync(f.effects, 'utf8').includes('release\n'));
+    await until(() => f.closed());
     expect(readFileSync(f.received).equals(Buffer.from(text))).toBe(true);
     expect(readFileSync(f.effects, 'utf8').split('close\n').length - 1).toBe(1);
     expect(readFileSync(f.effects, 'utf8').split('release\n').length - 1).toBe(1);
@@ -192,7 +204,7 @@ it('refuses unsupported fixed roles before socket publication or native attachme
 }, 15000);
 
 it.each(['peer-disconnect', 'service-stop'])('joins original delayed startup before the sole CLOSE after %s', async reason => {
-  const f = fixture(true, 700);
+  const f = fixture(true, 700, 'valid', true);
   await withFixture(f, async () => {
     await until(() => f.ready());
     const peer = await f.connect();
@@ -204,6 +216,12 @@ it.each(['peer-disconnect', 'service-stop'])('joins original delayed startup bef
     expect(readFileSync(f.effects, 'utf8')).not.toContain('attach\n');
     if (reason === 'peer-disconnect') peer.destroy(); else f.child.kill('SIGTERM');
     await until(() => readFileSync(f.effects, 'utf8').includes('release\n'));
+    // Dispatch is deliberately held before its state commit and RELEASED reply.
+    // The bridge must join that reply and its original local child's exit.
+    expect(f.closed()).toBe(false);
+    expect(JSON.parse(readFileSync(f.state, 'utf8')).released).toBe(false);
+    f.allowRelease();
+    await until(() => f.closed());
     const effects = readFileSync(f.effects, 'utf8').trim().split('\n');
     expect(effects.filter(x => x === 'attach')).toHaveLength(1);
     expect(effects.filter(x => x === 'close-attempt')).toHaveLength(1);
