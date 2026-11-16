@@ -765,3 +765,41 @@ describe('explicit cross-SID plan replacement read DATA', () => {
     expect(f.provider.launch).toHaveBeenCalledTimes(before);
   });
 });
+
+describe('published original resource revision consumption', () => {
+  // Service routing only. The companion controller/real Engine case earns the
+  // actual private native proof; this test does not manufacture native credit.
+  it('asks the fixed Engine predicate only for a published original and preserves its immutable policy', async () => {
+    const f = fixture();
+    await f.service.begin(eid, f.request, f.authority);
+    const original = structuredClone(f.record()!);
+    const actual = { ...f.policy, memoryHighBytes: 48 * 1024 ** 3 };
+    f.setDestination({ ...f.destination()!, resources: actual });
+    f.engine.observeDestination.mockImplementation(async () => f.destination());
+    const current = vi.fn((_row, value) => value === actual);
+    Object.assign(f.engine, { existingResourcePolicyCurrent: current });
+    const effects = { starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length };
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ state: 'ready' });
+    expect(current).toHaveBeenCalledWith(expect.objectContaining({ phase: 'ready' }), actual);
+    expect(f.record()).toEqual(original);
+    expect({ starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length }).toEqual(
+      effects
+    );
+    current.mockReturnValue(false);
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED',
+    });
+    f.setRecord({ ...original, phase: 'resources-issued' });
+    current.mockReturnValue(true);
+    current.mockClear();
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED',
+    });
+    expect(current).not.toHaveBeenCalled();
+    expect({ starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length }).toEqual(
+      effects
+    );
+  });
+});

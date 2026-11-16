@@ -5,6 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanyStore } from '../src/company-store.js';
+import { DockerEmployeeEngine } from '../src/docker-employee-engine.js';
 import { retainedDockerPoolTasks } from '../src/docker-shared-pool-lineage.js';
 import { DockerEmployeeContinuationRecord as ContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import type { DockerContinuationTaskRole } from '../src/docker-continuation-task.js';
@@ -720,8 +721,8 @@ describe('late leaf writer exclusion', () => {
     expect(f.starts).toHaveLength(4);
     f.completeLateLeaf();
     expect(await f.controller.read(f.row())).toBeNull();
-    await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
-    const oldProof = f.controller.existingPolicy(f.row(), { ...policy, memoryHighBytes: 48 * 1024 ** 3 });
+    const repaired = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const oldProof = f.controller.existingPolicy(f.row(), repaired.policy);
     await f.store.approve(next, f.desired.revision, f.current);
     expect((await f.controller.reviseMemoryHigh(f.row(), next.revision, f.current)).policy.memoryHighBytes).toBe(
       32 * 1024 ** 3
@@ -1286,5 +1287,62 @@ describe('capacity-limited read-only adoption', () => {
     expect(result.state).toBe('observed');
     expect(f.creates).toEqual(before.creates);
     expect(f.starts).toEqual(before.starts);
+  });
+});
+
+describe('read-owned effective resource proofs', () => {
+  it('retains an unchanged original read across profile and concurrent native reads without new effects', async () => {
+    const f = await revisionFixture();
+    await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const effects = { creates: [...f.creates], starts: [...f.starts], tasks: structuredClone([...f.tasks]) };
+    const actual = (await f.controller.read(f.row()))!;
+    const proof = f.controller.existingPolicy(f.row(), actual);
+    const engine = new DockerEmployeeEngine(
+      f.command,
+      deployment,
+      f.controller,
+      {
+        imageId: f.row().workerImage.imageId,
+        clientManifestDigest: 'a'.repeat(64),
+        sourceImageIds: [f.row().workerImage.imageId],
+      },
+      f.journal,
+      helper,
+      'b'.repeat(64)
+    );
+    expect(engine.existingResourcePolicyCurrent(f.row(), actual)).toBe(true);
+    await f.controller.observeMemoryHigh(f.row(), f.current);
+    expect(() => requireDockerEffectiveResourceProof(proof, f.row(), actual)).not.toThrow();
+    expect(engine.existingResourcePolicyCurrent(f.row(), actual)).toBe(true);
+    const paused = f.pauseRevisionAck();
+    const pending = f.controller.read(f.row());
+    await paused.entered;
+    expect(engine.existingResourcePolicyCurrent(f.row(), actual)).toBe(true);
+    paused.release();
+    const second = (await pending)!;
+    expect(second).toEqual(actual);
+    expect(second).not.toBe(actual);
+    expect(engine.existingResourcePolicyCurrent(f.row(), actual)).toBe(true);
+    expect(engine.existingResourcePolicyCurrent(f.row(), second)).toBe(true);
+    expect(() => engine.existingResourcePolicyCurrent(f.row(), structuredClone(actual))).toThrow('PROOF_REQUIRED');
+    expect({ creates: [...f.creates], starts: [...f.starts], tasks: structuredClone([...f.tasks]) }).toEqual(effects);
+    engine.close();
+  });
+  it('keeps the five-second proof deadline despite unchanged reads and rejects later native identity drift', async () => {
+    const f = await revisionFixture();
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    const proof = f.controller.existingPolicy(f.row(), result.policy);
+    const now = performance.now();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(now + 5001);
+    try {
+      expect(() => requireDockerEffectiveResourceProof(proof, f.row(), result.policy)).toThrow('PROOF_CHANGED');
+    } finally {
+      clock.mockRestore();
+    }
+    const read = (await f.controller.read(f.row()))!;
+    const fresh = f.controller.existingPolicy(f.row(), read);
+    f.driftEpoch();
+    await expect(f.controller.observeMemoryHigh(f.row(), f.current)).rejects.toThrow();
+    expect(() => requireDockerEffectiveResourceProof(fresh, f.row(), read)).toThrow('PROOF_CHANGED');
   });
 });

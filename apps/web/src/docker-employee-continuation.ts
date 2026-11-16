@@ -96,6 +96,11 @@ export interface DockerContinuationEngine {
   /** Only the captured original's inspected immutable config/home; no HTTP command/mount/path. */
   createDestination(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
+  /** Genuine read-owned native revision proof; never a request policy override. */
+  existingResourcePolicyCurrent?(
+    row: DockerEmployeeContinuationRecord,
+    actual: DockerEmployeeResourcePolicy | null
+  ): boolean;
   start(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   configureResources(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, requireCurrent: () => void): Promise<void>;
@@ -707,7 +712,14 @@ export class DockerEmployeeContinuation {
           await this.engine.configureResources(row, current);
           continue;
         }
-        if (!isDeepStrictEqual(destination.resources, row.policy))
+        if (
+          !isDeepStrictEqual(destination.resources, row.policy) &&
+          !(
+            row.version !== 3 &&
+            ['provider-issued', 'ready'].includes(row.phase) &&
+            this.engine.existingResourcePolicyCurrent?.(row, destination.resources)
+          )
+        )
           return this.#result(row, 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED');
         if (row.phase === 'resources-issued') {
           row = await this.#phase(row, 'resources-ready', current);

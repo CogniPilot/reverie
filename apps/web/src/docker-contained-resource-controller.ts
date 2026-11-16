@@ -213,13 +213,17 @@ export function requireDockerEffectiveResourceProof(
   row: DockerEmployeeContinuationRecord,
   actual: DockerEmployeeResourcePolicy
 ): void {
+  if (!(proof instanceof DockerEffectiveResourceProof)) refuse('DOCKER_RESOURCE_REVISION_PROOF_REQUIRED');
   DockerEffectiveResourceProof.prototype.require.call(proof as DockerEffectiveResourceProof, row, actual);
 }
 export class DockerContainedResources implements DockerContainedResourceController {
   readonly #parent: string;
   readonly #slice: string;
-  readonly #proofs = new Map<string, DockerEffectiveResourceProof>();
+  /** A policy returned by one native read owns its proof. A later read cannot
+   * replace it, and a JSON/structural copy cannot retrieve that authority. */
+  readonly #proofs = new WeakMap<DockerEmployeeResourcePolicy, DockerEffectiveResourceProof>();
   readonly #epochs = new Map<string, symbol>();
+  readonly #readFacts = new Map<string, string>();
   readonly #observedAt = new WeakMap<object, number>();
   constructor(
     private readonly command: DockerEngineCommand,
@@ -507,7 +511,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
       restore &&
       !isDeepStrictEqual(
         args,
-        this.#restoreArguments(fresh, policy, (acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).members)
+        this.#restoreArguments(
+          fresh,
+          policy,
+          (acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).members
+        )
       )
     )
       return false;
@@ -1047,13 +1055,25 @@ export class DockerContainedResources implements DockerContainedResourceControll
   }
   #beginRead(row: DockerEmployeeContinuationRecord): symbol {
     const epoch = Symbol('actual native observation');
-    this.#proofs.delete(row.request.operationId);
+    this.#readFacts.delete(row.request.operationId);
     this.#epochs.set(row.request.operationId, epoch);
     if (this.#epochs.size > 128) {
       const oldest = this.#epochs.keys().next().value!;
       this.#epochs.delete(oldest);
-      this.#proofs.delete(oldest);
+      this.#readFacts.delete(oldest);
     }
+    return epoch;
+  }
+  #readEpoch(row: DockerEmployeeContinuationRecord): symbol {
+    return this.#epochs.get(row.request.operationId) ?? this.#beginRead(row);
+  }
+  #recordRead(row: DockerEmployeeContinuationRecord, seen: Observation, policy: DockerEmployeeResourcePolicy): symbol {
+    const key = row.request.operationId;
+    const facts = dockerContinuationDigest({ identity: this.#identity(seen), policy });
+    const previous = this.#readFacts.get(key);
+    let epoch = this.#readEpoch(row);
+    if (previous !== undefined && previous !== facts) epoch = this.#beginRead(row);
+    this.#readFacts.set(key, facts);
     return epoch;
   }
   #fresh(seen: Observation): number {
@@ -1769,42 +1789,56 @@ export class DockerContainedResources implements DockerContainedResourceControll
       }
     );
     proof.require(row, candidate.policy);
-    this.#proofs.set(row.request.operationId, proof);
-    if (this.#proofs.size > 128) this.#proofs.delete(this.#proofs.keys().next().value!);
+    this.#proofs.set(candidate.policy, proof);
   }
   existingPolicy(
     row: DockerEmployeeContinuationRecord,
     actual: DockerEmployeeResourcePolicy
   ): DockerEffectiveResourceProof {
-    const proof = this.#proofs.get(row.request.operationId);
+    const proof = this.#proofs.get(actual);
     requireDockerEffectiveResourceProof(proof, row, actual);
     return proof!;
   }
   async read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null> {
-    const epoch = this.#beginRead(row);
-    let seen = await this.#live(row);
-    if (!seen) return null;
-    if (this.#matches(seen, row.policy, row.policy.memoryHighBytes)) return structuredClone(row.policy);
-    const candidate = this.#approved(row, seen);
-    if (!candidate) return null;
-    seen = await this.#closedHistory(row, seen, () => {});
-    if (
-      candidate.attempt.state === 'applied' &&
-      !(await this.#ack(
-        candidate.attempt.task,
-        seen,
-        candidate.policy,
-        candidate.policy.memoryHighBytes,
-        true,
-        candidate.attempt.task.imageId
-      ))
-    )
-      refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
-    seen = await this.#refresh(seen);
-    if (!isDeepStrictEqual(this.#approved(row, seen), candidate)) refuse();
-    // Publication follows every required applied-helper ACK and fresh ledger/current-scope check.
-    this.#publishProof(row, candidate, seen, epoch);
-    return candidate.policy;
+    try {
+      this.#readEpoch(row);
+      let seen = await this.#live(row);
+      if (!seen) {
+        this.#beginRead(row);
+        return null;
+      }
+      if (this.#matches(seen, row.policy, row.policy.memoryHighBytes)) {
+        this.#recordRead(row, seen, row.policy);
+        return structuredClone(row.policy);
+      }
+      const candidate = this.#approved(row, seen);
+      if (!candidate) {
+        this.#beginRead(row);
+        return null;
+      }
+      seen = await this.#closedHistory(row, seen, () => {});
+      if (
+        candidate.attempt.state === 'applied' &&
+        !(await this.#ack(
+          candidate.attempt.task,
+          seen,
+          candidate.policy,
+          candidate.policy.memoryHighBytes,
+          true,
+          candidate.attempt.task.imageId
+        ))
+      )
+        refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
+      seen = await this.#refresh(seen);
+      if (!isDeepStrictEqual(this.#approved(row, seen), candidate)) refuse();
+      // Publication follows every required applied-helper ACK and fresh ledger/current-scope check.
+      const epoch = this.#recordRead(row, seen, candidate.policy);
+      this.#publishProof(row, candidate, seen, epoch);
+      return candidate.policy;
+    } catch (error) {
+      this.#beginRead(row);
+      throw error;
+    }
   }
 
   /** Read-only profile refresh. Actual unadopted high is visible DATA, never a revision ACK. */
@@ -1819,56 +1853,64 @@ export class DockerContainedResources implements DockerContainedResourceControll
     approvalSource: 'original-policy' | 'owner-revision' | null;
     approvedRevision: string | null;
   }> {
-    this.#beginRead(row);
-    let seen = await this.#live(row, current);
-    current();
-    if (!seen || !dockerOtherResourceLimitsMatch(seen.resources, row.policy))
-      refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
-    const candidate = this.#approved(row, seen);
-    if (candidate) seen = await this.#closedHistory(row, seen, current);
-    if (
-      candidate?.attempt.state === 'applied' &&
-      !(await this.#ack(
-        candidate.attempt.task,
-        seen,
-        candidate.policy,
-        candidate.policy.memoryHighBytes,
-        true,
-        candidate.attempt.task.imageId
-      ))
-    )
-      refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
-    current();
-    seen = await this.#refresh(seen, current);
-    if (!dockerOtherResourceLimitsMatch(seen.resources, row.policy))
-      refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
-    const raw = seen.resources.memoryHigh;
-    const actual = raw === 'max' ? null : /^(0|[1-9][0-9]{0,15})$/.test(raw) ? Number(raw) : NaN;
-    if (actual !== null && (!Number.isSafeInteger(actual) || actual < 0)) refuse('DOCKER_RESOURCE_REVISION_READBACK');
-    const original = this.#matches(seen, row.policy, row.policy.memoryHighBytes);
-    const finalCandidate = original ? undefined : this.#approved(row, seen);
-    const approvedRevision =
-      candidate && isDeepStrictEqual(candidate, finalCandidate) ? candidate.desired.revision : null;
-    this.#fresh(seen);
-    current();
-    return {
-      actualMemoryHighBytes: actual,
-      memoryMaxBytes: row.policy.memoryMaxBytes,
-      // Every non-high value just matched the fresh native leaf observation.
-      // The immutable launch policy alone never supplies a readback.
-      actualLimits: {
-        memoryHighBytes: actual,
+    try {
+      this.#readEpoch(row);
+      let seen = await this.#live(row, current);
+      current();
+      if (!seen || !dockerOtherResourceLimitsMatch(seen.resources, row.policy))
+        refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
+      const candidate = this.#approved(row, seen);
+      if (candidate) seen = await this.#closedHistory(row, seen, current);
+      if (
+        candidate?.attempt.state === 'applied' &&
+        !(await this.#ack(
+          candidate.attempt.task,
+          seen,
+          candidate.policy,
+          candidate.policy.memoryHighBytes,
+          true,
+          candidate.attempt.task.imageId
+        ))
+      )
+        refuse('DOCKER_RESOURCE_REVISION_HELPER_UNACKNOWLEDGED');
+      current();
+      seen = await this.#refresh(seen, current);
+      if (!dockerOtherResourceLimitsMatch(seen.resources, row.policy))
+        refuse('DOCKER_RESOURCE_REVISION_OTHER_LIMIT_CHANGED');
+      const raw = seen.resources.memoryHigh;
+      const actual = raw === 'max' ? null : /^(0|[1-9][0-9]{0,15})$/.test(raw) ? Number(raw) : NaN;
+      if (actual !== null && (!Number.isSafeInteger(actual) || actual < 0)) refuse('DOCKER_RESOURCE_REVISION_READBACK');
+      const original = this.#matches(seen, row.policy, row.policy.memoryHighBytes);
+      const finalCandidate = original ? undefined : this.#approved(row, seen);
+      const approvedRevision =
+        candidate && isDeepStrictEqual(candidate, finalCandidate) ? candidate.desired.revision : null;
+      this.#fresh(seen);
+      current();
+      if (original) this.#recordRead(row, seen, row.policy);
+      else if (approvedRevision && finalCandidate) this.#recordRead(row, seen, finalCandidate.policy);
+      else this.#beginRead(row);
+      return {
+        actualMemoryHighBytes: actual,
         memoryMaxBytes: row.policy.memoryMaxBytes,
-        swapMaxBytes: row.policy.swapMaxBytes,
-        pidsMax: row.policy.pidsMax,
-        cpuWeight: row.policy.cpuWeight,
-        allowedCpus: [...row.policy.allowedCpus],
-        cpuQuota: 'unlimited',
-      },
-      approved: original || approvedRevision !== null,
-      approvalSource: original ? 'original-policy' : approvedRevision ? 'owner-revision' : null,
-      approvedRevision,
-    };
+        // Every non-high value just matched the fresh native leaf observation.
+        // The immutable launch policy alone never supplies a readback.
+        actualLimits: {
+          memoryHighBytes: actual,
+          memoryMaxBytes: row.policy.memoryMaxBytes,
+          swapMaxBytes: row.policy.swapMaxBytes,
+          pidsMax: row.policy.pidsMax,
+          cpuWeight: row.policy.cpuWeight,
+          allowedCpus: [...row.policy.allowedCpus],
+          cpuQuota: 'unlimited',
+        },
+        approved: original || approvedRevision !== null,
+        approvalSource: original ? 'original-policy' : approvedRevision ? 'owner-revision' : null,
+        approvedRevision,
+      };
+    } catch (error) {
+      this.#beginRead(row);
+      throw error;
+    }
   }
   /** Explicit owner request. Native current facts may be adopted without a helper write.
    * An issued cursor is resumed by observation; never start an already-issued helper again. */
