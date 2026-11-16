@@ -2,6 +2,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+mod image_profile;
 mod profile;
 pub use profile::DeploymentProfile;
 #[cfg(test)]
@@ -144,9 +145,9 @@ pub(super) fn create_body_profile(
     candidate: &Value,
     selected_profile: DeploymentProfile,
 ) -> Result<(Value, Vec<String>)> {
+    let entrypoint = image_profile::selected_entrypoint(source, old_image, candidate)?;
     require(
-        source["Config"]["Entrypoint"] == candidate["Config"]["Entrypoint"]
-            && source["Config"]["Cmd"] == candidate["Config"]["Cmd"],
+        source["Config"]["Cmd"] == candidate["Config"]["Cmd"],
         "DEPLOYMENT_ENTRYPOINT_CHANGED",
     )?;
     let previous = environment(&old_image["Config"])?;
@@ -196,6 +197,7 @@ pub(super) fn create_body_profile(
         .as_object_mut()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_CONFIG_REQUIRED"))?;
     fields.insert("Image".into(), candidate["Id"].clone());
+    fields.insert("Entrypoint".into(), entrypoint);
     fields.insert(
         "Env".into(),
         json!(merged.into_values().collect::<Vec<_>>()),

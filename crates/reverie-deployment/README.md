@@ -14,6 +14,14 @@ preserving old entries that differ from the old image defaults; it does not
 infer whether an equal-to-default value was explicitly selected historically.
 Private environment values remain in the owner-only operation record.
 
+The existing GPU image has one fixed entrypoint ABI: `tini -g -s --`, the
+immutable `reverie-container-runtime` executable, then
+`/usr/local/bin/reverie-start`. Updating that profile may refresh the runtime's
+Nix store hash from the exact owner-selected image. The source entrypoint must
+match its original image, both runtime package versions must agree, and every
+other argument and the command must remain unchanged. This does not admit an
+arbitrary entrypoint, change the GPU device grant or qualify a new image.
+
 `preview --image sha256:IMAGE_ID --profile protected-website` explicitly selects
 the fixed website security profile through the same application service. It
 retains the original numeric non-root user, command, real bind grants and
