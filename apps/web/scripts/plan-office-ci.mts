@@ -115,6 +115,26 @@ export function planOfficeCiImage(value: unknown, namespace: string, role: strin
   assert.ok(image.RepoTags.every((tag: unknown) => typeof tag === 'string' && tag.startsWith(namespace + '-')));
   return image.Id as string;
 }
+/** Actual import/identity-read sequence. The caller first admits the original
+ * absent tag, immutable archive and disposable disk reserve. No failed load is
+ * retried or followed by an identity read that could disguise its outcome. */
+export function loadPlanOfficeCiImage(
+  role: string,
+  file: string,
+  namespace: string,
+  docker: (label: string, argv: string[], timeout?: number) => string
+): string {
+  assert.ok(['source', 'worker', 'helper', 'control'].includes(role));
+  assert.match(namespace, /^reverie-ci-plan-office-[a-f0-9]{32}$/);
+  // Compressed control imports exceeded the metadata command's two minutes on
+  // the hosted runner. This bounds only that one daemon import, without retry.
+  docker('load-' + role, ['image', 'load', '--input', file], 600000);
+  const rows: unknown[] = JSON.parse(
+    docker('inspect-' + role, ['image', 'inspect', namespace + '-' + role + ':latest'])
+  );
+  assert.equal(rows.length, 1);
+  return planOfficeCiImage(rows[0], namespace, role);
+}
 export function planOfficeCiContract(
   metadata: unknown,
   instance: string,
@@ -568,9 +588,18 @@ function diagnosticSnapshot(value: unknown, keys: readonly string[]): Json {
   }
   return snapshot;
 }
+/** Capture the real child result without promoting messages, paths or args. */
+export function planOfficeCiSpawnDiagnostic(value: unknown): Json {
+  const result = diagnosticSnapshot(value, ['status', 'signal', 'error']);
+  const error = diagnosticSnapshot(result.error, ['name', 'code']);
+  return planOfficeCiFailureDiagnostic(
+    { status: result.status, signal: result.signal, errorName: error.name, errorCode: error.code },
+    []
+  ).child;
+}
 /** Explicit projection only: even a public DTO's message/error/stack can contain credentials. */
 export function planOfficeCiFailureDiagnostic(child: unknown, observations: readonly unknown[], instance?: string) {
-  const c = diagnosticSnapshot(child, ['status', 'signal', 'errorName', 'startup', 'build']);
+  const c = diagnosticSnapshot(child, ['status', 'signal', 'errorName', 'errorCode', 'startup', 'build']);
   const childStatus: Json = {};
   if (c.status === null || (Number.isInteger(c.status) && Number(c.status) >= 0 && Number(c.status) <= 255))
     childStatus.status = c.status;
@@ -585,6 +614,8 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
     ['Error', 'TimeoutError', 'AbortError', 'TypeError', 'RangeError'].includes(c.errorName)
   )
     childStatus.errorName = c.errorName;
+  if (typeof c.errorCode === 'string' && ['ETIMEDOUT', 'ENOBUFS', 'ENOENT', 'EACCES'].includes(c.errorCode))
+    childStatus.errorCode = c.errorCode;
   const operations = observations.slice(-16).flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const v = diagnosticSnapshot(value, [
@@ -769,9 +800,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       env: { ...env, DOCKER_CONFIG: dockerConfig, DOCKER_HOST: 'unix:///var/run/docker.sock' },
     });
     lastChild = {
-      status: result.status,
-      signal: result.signal,
-      errorName: result.error?.name,
+      ...planOfficeCiSpawnDiagnostic(result),
       ...(label === 'actual-' + selection ? { startup: readPlanOfficeStartupDiagnostic(result.stdout, instance) } : {}),
       ...(label === 'build-fixture-inputs' || label === 'build-control'
         ? { build: readPlanOfficeBuildDiagnostic(result.stderr, instance) }
@@ -790,8 +819,8 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
     assert.equal(result.status, 0, label + ' failed; private raw replies are not published');
     return result.stdout;
   };
-  const docker = (label: string, argv: string[]) =>
-    run(label, 'docker', ['--host', 'unix:///var/run/docker.sock', ...argv]);
+  const docker = (label: string, argv: string[], timeout?: number) =>
+    run(label, 'docker', ['--host', 'unix:///var/run/docker.sock', ...argv], timeout);
   const build = (label: string, expression: string, output: string) =>
     run(
       label,
@@ -853,10 +882,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
         free.bavail * free.bsize > 3 * 1024 ** 3 + 5 * stat.size,
         'Insufficient disposable runner disk reserve'
       );
-      docker('load-' + role, ['image', 'load', '--input', file]);
-      const rows: unknown[] = JSON.parse(docker('inspect-' + role, ['image', 'inspect', tag]));
-      assert.equal(rows.length, 1);
-      ids[role] = planOfficeCiImage(rows[0], namespace, role);
+      ids[role] = loadPlanOfficeCiImage(role, file, namespace, docker);
     };
     for (const role of ['source', 'worker', 'helper']) load(role, path.join(stage, role + '.tar.gz'));
     const control = path.join(evidence, 'control-image');

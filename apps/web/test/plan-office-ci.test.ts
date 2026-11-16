@@ -24,6 +24,8 @@ import {
   createPlanOfficeCiPublishedDirectory,
   planOfficeCiNamespace,
   planOfficeCiImage,
+  loadPlanOfficeCiImage,
+  planOfficeCiSpawnDiagnostic,
   planOfficeCiContract,
   requirePlanOfficeCiAcceptance,
   planOfficeCiFailureDiagnostic,
@@ -44,6 +46,111 @@ const metadata = {
   platformClosure: '/nix/store/' + 'e'.repeat(32) + '-closure',
   clientManifestDigest: 'f'.repeat(64),
 };
+it.each(['source', 'worker', 'helper', 'control'])(
+  'imports an original %s image beyond the metadata deadline then verifies its exact identity',
+  (role) => {
+    const calls: Array<{ label: string; argv: string[]; timeout?: number }> = [];
+    const id = loadPlanOfficeCiImage(
+      role,
+      '/nix/store/' + 'a'.repeat(32) + '-image.tar.gz',
+      namespace,
+      (label, argv, timeout) => {
+        calls.push({ label, argv, timeout });
+        if (label === 'load-' + role) {
+          // A controlled command port models a 3-minute import without waiting or
+          // calling Docker. The old metadata deadline genuinely refuses it.
+          if ((timeout ?? 120000) < 180000)
+            throw Object.assign(Error('Original load outcome unconfirmed'), { code: 'ETIMEDOUT' });
+          return 'Loaded original image';
+        }
+        return JSON.stringify([
+          { Id: sha, Os: 'linux', Architecture: 'amd64', RepoTags: [namespace + '-' + role + ':latest'] },
+        ]);
+      }
+    );
+    expect(id).toBe(sha);
+    expect(calls).toEqual([
+      {
+        label: 'load-' + role,
+        argv: ['image', 'load', '--input', '/nix/store/' + 'a'.repeat(32) + '-image.tar.gz'],
+        timeout: 600000,
+      },
+      { label: 'inspect-' + role, argv: ['image', 'inspect', namespace + '-' + role + ':latest'], timeout: undefined },
+    ]);
+  }
+);
+it('retains an unknown image import without retry or post-load identity inspection', () => {
+  const calls: string[] = [],
+    failure = Object.assign(Error('Original load outcome unconfirmed'), { code: 'ETIMEDOUT' });
+  expect(() =>
+    loadPlanOfficeCiImage('control', '/nix/store/' + 'a'.repeat(32) + '-image.tar.gz', namespace, (label) => {
+      calls.push(label);
+      throw failure;
+    })
+  ).toThrow(failure);
+  expect(calls).toEqual(['load-control']);
+});
+it('requires the loaded image identity and original scoped tag after import success', () => {
+  for (const reply of [[], [{ Id: sha, Os: 'linux', Architecture: 'amd64', RepoTags: ['foreign:latest'] }]]) {
+    const calls: string[] = [];
+    expect(() =>
+      loadPlanOfficeCiImage('control', '/nix/store/' + 'a'.repeat(32) + '-image.tar.gz', namespace, (label) => {
+        calls.push(label);
+        return label === 'load-control' ? 'Loaded image' : JSON.stringify(reply);
+      })
+    ).toThrow();
+    expect(calls).toEqual(['load-control', 'inspect-control']);
+  }
+});
+it.each(['ETIMEDOUT', 'ENOBUFS', 'ENOENT', 'EACCES'])(
+  'retains the actual child %s code through the closed outbound diagnostic',
+  (code) => {
+    const token = 'HOSTILE_TOKEN_PATH_ARGUMENT_DO_NOT_PUBLISH';
+    const child = planOfficeCiSpawnDiagnostic({
+      status: 143,
+      signal: null,
+      error: Object.assign(Error(token), { code, path: token, spawnargs: [token] }),
+      stdout: token,
+      stderr: token,
+    });
+    const report = planOfficeCiFailureDiagnostic(child, []);
+    expect(report.child).toEqual({ status: 143, signal: null, errorName: 'Error', errorCode: code });
+    expect(JSON.stringify(report)).not.toContain(token);
+  }
+);
+it('snapshots child error fields once and rejects unknown or object error codes during outbound revalidation', () => {
+  const token = 'HOSTILE_TOKEN_DO_NOT_PUBLISH',
+    reads = new Map<string, number>();
+  const once = (key: string, value: unknown) => {
+    const count = (reads.get(key) ?? 0) + 1;
+    reads.set(key, count);
+    return count === 1 ? value : token;
+  };
+  const child = planOfficeCiSpawnDiagnostic({
+    get error() {
+      return once('error', {
+        get name() {
+          return once('name', 'Error');
+        },
+        get code() {
+          return once('code', 'ETIMEDOUT');
+        },
+        get message() {
+          throw Error(token);
+        },
+        get stack() {
+          throw Error(token);
+        },
+      });
+    },
+  });
+  expect(child).toEqual({ errorName: 'Error', errorCode: 'ETIMEDOUT' });
+  expect([...reads.values()]).toEqual([1, 1, 1]);
+  for (const code of [token, { toString: () => 'ETIMEDOUT' }, 143, null]) {
+    expect(planOfficeCiSpawnDiagnostic({ error: { name: token, code } })).toEqual({});
+    expect(planOfficeCiFailureDiagnostic({ errorCode: code }, []).child).toEqual({});
+  }
+});
 it('retains the actual producer refusal through closed Nix builder records without publishing raw errors', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-build-diagnostic-'));
   const token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
