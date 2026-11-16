@@ -58,5 +58,6 @@ let
       && builtins.elem "/nix/store/controlled-inference" gpu.contents
       && builtins.elem "KEPT=yes" gpu.config.Env;
     gpuExportsItsActualConfig = gpu.passthru.reverieConfig == gpu.config;
+    gpuLeavesRoomForBoxedWebsite = gpu.maxLayers + 2 <= 125;
   };
 in assert builtins.all (value: value) (builtins.attrValues checks); checks

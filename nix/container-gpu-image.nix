@@ -8,7 +8,9 @@ assert builtins.isAttrs baseConfig && builtins.isList baseConfig.Entrypoint;
 pkgs.dockerTools.buildLayeredImage rec {
   name = "reverie-gpu";
   tag = "latest";
-  maxLayers = 125;
+  # The boxed website adds its customisation layer and dockerTools requires at
+  # least one contents layer even when contents is empty. Reserve both slots.
+  maxLayers = 125 - 2;
   fromImage = baseImage;
   passthru.reverieConfig = config;
   contents = [ containerRuntime gpuTelemetry inferenceRuntime ];
