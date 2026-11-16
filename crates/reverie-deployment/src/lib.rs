@@ -8,10 +8,13 @@ mod installation;
 mod model;
 #[cfg(test)]
 mod native_fixture;
+mod networks;
 mod operation;
 mod pins;
 mod rollout;
 mod service;
+#[cfg(test)]
+mod test_namespace;
 pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus};
 pub use rollout::{
     InitialWebsiteRolloutClosed, InitialWebsiteRolloutError, InitialWebsiteRolloutFailure,

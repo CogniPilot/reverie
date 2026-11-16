@@ -96,8 +96,63 @@ fn fixture_operation() -> Operation {
                 broker_preserved: true,
                 backup_metadata_scope: "fixture".into(),
                 profile: None,
+                preserved_networks: None,
             },
             bind_identities: Vec::new(),
+            network_topology: None,
         },
     }
+}
+
+fn network_operation() -> Operation {
+    let mut operation = fixture_operation();
+    let id = "1".repeat(64);
+    let topology: crate::networks::Topology = serde_json::from_value(json!({
+        "version":1,"endpoints":[{"name":"bridge","network_id":id,"aliases":[]}],
+        "configurations":{(id.clone()):{"Id":id,"Name":"bridge","Driver":"bridge",
+            "Scope":"local","Ingress":false,"ConfigOnly":false}}
+    }))
+    .unwrap();
+    operation.plan.source["HostConfig"] = json!({"AutoRemove":false,"NetworkMode":"bridge",
+        "Privileged":false,"ContainerIDFile":""});
+    operation.plan.source["Mounts"] = json!([{"Type":"bind"}]);
+    operation.plan.source["NetworkSettings"] = json!({"Networks":{"bridge":{
+        "NetworkID":id,"Aliases":null,"IPAMConfig":null,"Links":null}}});
+    operation.plan.body = json!({"NetworkingConfig":topology.request().unwrap()});
+    operation.plan.preview.preserved_networks = Some(topology.preview());
+    operation.plan.network_topology = Some(topology);
+    operation.plan.version = 4;
+    operation
+}
+
+#[test]
+fn network_operation_roundtrips_only_in_its_new_format_and_exact_request() {
+    let operation = network_operation();
+    let raw = serde_json::to_value(&operation.plan).unwrap();
+    let decoded: Plan = serde_json::from_value(raw.clone()).unwrap();
+    decoded.validate_profile().unwrap();
+    for fault in [
+        "version", "topology", "preview", "request", "alias", "extra",
+    ] {
+        let mut changed = raw.clone();
+        match fault {
+            "version" => changed["version"] = json!(1),
+            "topology" => {
+                changed.as_object_mut().unwrap().remove("network_topology");
+            }
+            "preview" => changed["preview"]["preserved_networks"]["bridge"] = json!("2".repeat(64)),
+            "request" => {
+                changed["body"]["NetworkingConfig"]["EndpointsConfig"]["bridge"]["NetworkID"] =
+                    json!("2".repeat(64))
+            }
+            "alias" => {
+                changed["body"]["NetworkingConfig"]["EndpointsConfig"]["bridge"]["Aliases"] =
+                    json!(["foreign"])
+            }
+            _ => changed["body"]["NetworkingConfig"]["EndpointsConfig"]["extra"] = json!({}),
+        }
+        let decoded: Plan = serde_json::from_value(changed).unwrap();
+        assert!(decoded.validate_profile().is_err(), "{fault}");
+    }
+    fs::remove_dir_all(operation.directory).unwrap();
 }

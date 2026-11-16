@@ -23,12 +23,32 @@ pub(super) struct Plan {
     pub(super) body: Value,
     pub(super) preview: DeploymentPreview,
     pub(super) bind_identities: Vec<crate::pins::Identity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) network_topology: Option<crate::networks::Topology>,
 }
 pub(super) struct Operation {
     pub(super) directory: PathBuf,
     pub(super) plan: Plan,
 }
 impl Plan {
+    pub(super) fn require_effect(&self) -> Result<()> {
+        self.validate_profile()?;
+        require(
+            self.version == self.profile().version()
+                || (self.version == 4 && self.network_topology.is_some()),
+            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
+        )
+    }
+    pub(super) fn source_matches(&self, current: &Value) -> Result<()> {
+        require(
+            model::projection(current) == model::projection(&self.source),
+            "DEPLOYMENT_SOURCE_CHANGED",
+        )?;
+        if let Some(topology) = &self.network_topology {
+            topology.require_container(current)?;
+        }
+        Ok(())
+    }
     pub(super) fn profile(&self) -> model::DeploymentProfile {
         self.preview.profile.unwrap_or_default()
     }
@@ -36,14 +56,32 @@ impl Plan {
         let profile = self.profile();
         let historical = self.version == 2 && profile == model::DeploymentProfile::ProtectedWebsite;
         require(
-            self.version == profile.version() || historical,
+            (self.network_topology.is_some() && self.version == 4)
+                || (self.network_topology.is_none()
+                    && (self.version == profile.version() || historical)),
             "DEPLOYMENT_OPERATION_INVALID",
         )?;
         require(
             self.preview.profile == profile.preview(),
             "DEPLOYMENT_OPERATION_PROFILE_INVALID",
         )?;
-        if profile == model::DeploymentProfile::ProtectedWebsite {
+        require(
+            self.preview.preserved_networks
+                == self
+                    .network_topology
+                    .as_ref()
+                    .map(crate::networks::Topology::preview),
+            "DEPLOYMENT_OPERATION_NETWORKS_INVALID",
+        )?;
+        if let Some(topology) = &self.network_topology {
+            topology.validate()?;
+            model::supported_network_profile(&self.source, profile, topology)?;
+            require(
+                self.body["NetworkingConfig"] == topology.request()?,
+                "DEPLOYMENT_OPERATION_NETWORKS_INVALID",
+            )?;
+            model::validate_profile_body(&self.source, &self.body, profile)?;
+        } else if profile == model::DeploymentProfile::ProtectedWebsite {
             model::supported_profile(&self.source, profile)?;
             if historical {
                 model::validate_legacy_invalid_body(&self.source, &self.body)?;
@@ -54,16 +92,21 @@ impl Plan {
         Ok(())
     }
     pub(super) fn candidate_matches(&self, actual: &Value) -> Result<()> {
-        model::candidate_matches(actual, &self.source, &self.body, self.profile())
+        match &self.network_topology {
+            Some(topology) => model::candidate_matches_selection(
+                actual,
+                &self.source,
+                &self.body,
+                self.profile(),
+                Some(topology),
+            ),
+            None => model::candidate_matches(actual, &self.source, &self.body, self.profile()),
+        }
     }
 }
 impl Operation {
     pub(super) fn create(state: &Path, plan: Plan) -> Result<Self> {
-        require(
-            plan.version == plan.profile().version(),
-            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
-        )?;
-        plan.validate_profile()?;
+        plan.require_effect()?;
         let parent = state.join("console-deployments");
         std::fs::DirBuilder::new()
             .mode(0o700)

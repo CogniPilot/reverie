@@ -77,7 +77,7 @@ impl DeploymentService {
                 .stderr(std::process::Stdio::null())
                 .status()?;
             require(status.success(), "DEPLOYMENT_RETAINED_COPY_UNCONFIRMED")?;
-            pins.verify()?;
+            self.verify_effect_pins(&operation, &pins)?;
             self.source_current(&operation, false)?;
             operation.record(
                 "unverified-backup-accepted",
@@ -133,7 +133,7 @@ impl DeploymentService {
             operation.attempt("stop-attempt")?;
             self.engine.stop(model::string(&source, "Id")?)?;
             self.source_current(&operation, false)?;
-            pins.verify()?;
+            self.verify_effect_pins(&operation, &pins)?;
             self.swap_scoped(&operation, &candidate, &pins, deadline)?;
             operation.status()
         })();
@@ -195,7 +195,7 @@ impl DeploymentService {
         deadline.check()?;
         self.engine.stop(model::string(&source, "Id")?)?;
         self.source_current(operation, false)?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         let end = deadline.snapshot();
         let mut snapshot = tools
             .capture_console(&source_root, &operation.directory.join("snapshot"), end)
@@ -235,7 +235,7 @@ impl DeploymentService {
         deadline.check()?;
         let old = model::string(&operation.plan.source, "Id")?;
         self.source_current(operation, false)?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         operation.attempt("old-rename-attempt")?;
         deadline.check()?;
         self.engine
@@ -246,7 +246,7 @@ impl DeploymentService {
         self.engine.rename(candidate, &operation.plan.container)?;
         operation.record("new-renamed", &json!({"id":candidate}))?;
         operation.attempt("start-attempt")?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         operation
             .plan
             .candidate_matches(&self.engine.container(candidate)?)?;

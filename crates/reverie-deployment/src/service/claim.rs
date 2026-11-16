@@ -140,10 +140,10 @@ fn assert_source(
     current: &Value,
 ) -> Result<()> {
     let selected = &operation.plan.source;
+    operation.plan.source_matches(current)?;
     require(
         operation.plan.container == installation.name
             && operation.plan.installation_revision == installation.revision
-            && model::projection(current) == model::projection(selected)
             && current["Name"] == format!("/{}", installation.name)
             && current["State"]["Running"] == true
             && current["State"]["Paused"] == false

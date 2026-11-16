@@ -22,6 +22,21 @@ match its original image, both runtime package versions must agree, and every
 other argument and the command must remain unchanged. This does not admit an
 arbitrary entrypoint, change the GPU device grant or qualify a new image.
 
+`preview --preserve-network-grants` selects the checked original dynamic bridge
+networks and aliases. The operation records exact native network IDs and
+configuration, reobserves them before effects and verifies the candidate's
+complete network set. Static addressing, custom driver options and non-bridge
+drivers remain unsupported. CREATE sends original `NetworkID` values rather
+than selecting a newly reused name; allocated endpoint IDs, addresses and DNS
+names are not replayed. This is an immutable version-four operation: older
+clients refuse it. The default preview and its network refusal are unchanged,
+and this selection does not permit live account writers or waive verified backup.
+
+The exact-ID lookup follows Moby's
+[`getNetworkID` in docker-v29.6.1](https://github.com/moby/moby/blob/docker-v29.6.1/daemon/container_operations.go#L1083).
+Built-in `bridge` remains name-selected by Docker, so independent native ID and
+configuration revalidation remains required for it as well.
+
 `preview --image sha256:IMAGE_ID --profile protected-website` explicitly selects
 the fixed website security profile through the same application service. It
 retains the original numeric non-root user, command, real bind grants and

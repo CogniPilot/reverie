@@ -136,6 +136,7 @@ fn make_operation(
         broker_preserved: true,
         backup_metadata_scope: "fixture".into(),
         profile: None,
+        preserved_networks: None,
     };
     Operation::create(
         &service.installation.state,
@@ -148,6 +149,7 @@ fn make_operation(
             body,
             preview,
             bind_identities: Vec::new(),
+            network_topology: None,
         },
     )
     .unwrap()

@@ -25,6 +25,10 @@ enum Action {
         /// fixed actor security profile without changing command or real binds.
         #[arg(long, value_enum, default_value_t = DeploymentProfile::Ordinary)]
         profile: DeploymentProfile,
+        /// Preserve the original dynamic bridge network IDs and aliases.
+        /// This does not waive the shared-writer or verified snapshot guard.
+        #[arg(long)]
+        preserve_network_grants: bool,
     },
     /// Create and inspect the candidate while the old console stays online.
     Prepare { operation: String },
@@ -76,9 +80,15 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
     let mut service = DeploymentService::capture(&args.root)?;
     let result: Result<serde_json::Value, reverie_deployment::DeploymentError> = (|| {
         let value = match args.action {
-            Action::Preview { image, profile } => {
-                serde_json::to_value(service.preview_with_profile(&image, profile)?)?
-            }
+            Action::Preview {
+                image,
+                profile,
+                preserve_network_grants,
+            } => serde_json::to_value(if preserve_network_grants {
+                service.preview_preserving_networks(&image, profile)?
+            } else {
+                service.preview_with_profile(&image, profile)?
+            })?,
             Action::Prepare { operation } => serde_json::to_value(service.prepare(&operation)?)?,
             Action::Confirm { operation } => serde_json::to_value(service.confirm(&operation)?)?,
             Action::RecoverInvalidCreate { operation } => {
@@ -107,6 +117,39 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn preserved_networks_are_an_explicit_preview_selection_not_a_raw_network_request() {
+        let image = format!("sha256:{}", "a".repeat(64));
+        let base = [
+            "reverie-deployment",
+            "--root",
+            "/fixture",
+            "preview",
+            "--image",
+            &image,
+        ];
+        let default = Arguments::try_parse_from(base).unwrap();
+        assert!(matches!(
+            default.action,
+            Action::Preview {
+                preserve_network_grants: false,
+                ..
+            }
+        ));
+        let mut selected = base.to_vec();
+        selected.push("--preserve-network-grants");
+        let parsed = Arguments::try_parse_from(selected).unwrap();
+        assert!(matches!(
+            parsed.action,
+            Action::Preview {
+                preserve_network_grants: true,
+                ..
+            }
+        ));
+        let mut arbitrary = base.to_vec();
+        arbitrary.extend(["--networks", "request-selected"]);
+        assert!(Arguments::try_parse_from(arbitrary).is_err());
+    }
     #[test]
     fn body_and_close_errors_both_survive_cli_finalization() {
         let body = serde_json::from_slice::<serde_json::Value>(b"invalid")

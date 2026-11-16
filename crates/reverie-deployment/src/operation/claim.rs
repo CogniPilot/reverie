@@ -41,11 +41,11 @@ impl Operation {
                 "DEPLOYMENT_PREDECESSOR_NOT_TERMINAL",
             )?;
             let receipt = self.read_record("restored")?;
+            self.plan.source_matches(current)?;
             require(
                 receipt["containerId"] == self.plan.source["Id"]
                     && receipt["dataRestored"] == false
-                    && receipt["brokerChanged"] == false
-                    && model::projection(current) == model::projection(&self.plan.source),
+                    && receipt["brokerChanged"] == false,
                 "DEPLOYMENT_PREDECESSOR_SOURCE_CHANGED",
             )
         }
