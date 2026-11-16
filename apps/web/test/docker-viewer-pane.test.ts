@@ -3,6 +3,9 @@
  * issuance ordering and Session attachment are separately composed tests. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
+import cp from 'node:child_process';
+import { DockerPlanLocalClient } from '../src/docker-plan-local-client.js';
+import type { IPty } from 'node-pty';
 import * as nativePort from '../src/docker-viewer-process.js';
 import { DockerViewerPane, type DockerViewerCommand } from '../src/docker-viewer-pane.js';
 import {
@@ -98,7 +101,12 @@ function fixture(viewer = false, shell = false) {
     socketPath = recordedDockerViewerSocketPath('synthetic-office'),
     { pane, server: manager, socket } = recorder.seed(row, command, serverPid, shell, socketPath),
     rows = new Map([[row.sessionId, row]]),
-    mux = { muxSocket: 'synthetic-office', getSession: (id: string) => rows.get(id) } as unknown as TerminalMultiplexer;
+    mux = {
+      muxSocket: 'synthetic-office',
+      getSession: (id: string) => rows.get(id),
+      getAttachCommand: () => 'tmux',
+      getAttachArgs: (name: string) => ['-L', 'synthetic-office', 'attach-session', '-t', name],
+    } as unknown as TerminalMultiplexer;
   pane.stat = stat(panePid, serverPid, '333');
   manager.stat = stat(serverPid, 1, '222');
   pane.statAfter = pane.stat;
@@ -121,12 +129,75 @@ function fixture(viewer = false, shell = false) {
     socket,
     socketPath,
     readSocket: recorder.readSocket,
+    recorder,
     capture,
     proof,
   };
 }
 
 describe.runIf(typeof process.getuid === 'function')('original Docker viewer process proof', () => {
+  it('the shared recording port delegates real local-client capture and closes its retained readonly TTY on public exit', () => {
+    const f = fixture(),
+      exits: Array<(event: { exitCode: number; signal: number }) => void> = [];
+    f.recorder.recordCapture();
+    f.proof();
+    const calls = f.recorder.recordLocalClients();
+    const pty = {
+      pid: 2000001,
+      ptsName: '/dev/pts/901',
+      onExit: (callback: (typeof exits)[number]) => {
+        exits.push(callback);
+        return { dispose: () => {} };
+      },
+    } as unknown as IPty;
+    const local = DockerPlanLocalClient.capture(pty, f.mux, f.row);
+    expect(local).toBeInstanceOf(DockerPlanLocalClient);
+    expect(JSON.stringify(local)).toBe('{}');
+    expect(calls).toHaveBeenCalledOnce();
+    const raw = f.recorder.client(pty.pid);
+    expect(raw.connectedServerPid).toBe(serverPid);
+    expect(raw.connectedSocketPath).toBe(f.socketPath);
+    const census = () =>
+      cp.execFileSync(
+        'tmux',
+        [
+          '-N',
+          '-f',
+          '/dev/null',
+          '-L',
+          f.mux.muxSocket,
+          'list-clients',
+          '-F',
+          '#{client_pid}|#{client_tty}|#{client_name}|#{session_name}|#{pid}|#{socket_path}',
+        ],
+        { encoding: 'utf8' }
+      );
+    expect(census()).toContain(String(pty.pid) + '|/dev/pts/901|/dev/pts/901|');
+    raw.connectedServerPid++;
+    expect(census()).toBe('');
+    raw.connectedServerPid--;
+    expect(census()).toContain(String(pty.pid));
+    const close = vi.mocked(fs.closeSync);
+    expect(close).not.toHaveBeenCalled();
+    for (const callback of exits) callback({ exitCode: 0, signal: 0 });
+    expect(raw.alive).toBe(false);
+    expect(raw.listed).toBe(false);
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it('the shared raw local-client port cannot bypass the real child-parent admission check', () => {
+    const f = fixture();
+    f.recorder.recordCapture();
+    f.proof();
+    f.recorder.recordLocalClients((raw) => {
+      raw.parent = process.pid + 1;
+    });
+    const pty = { pid: 2000002, ptsName: '/dev/pts/902', onExit: vi.fn() } as unknown as IPty;
+    expect(() => DockerPlanLocalClient.capture(pty, f.mux, f.row)).toThrow('original local tmux client');
+    expect(pty.onExit).not.toHaveBeenCalled();
+    expect(vi.mocked(fs.openSync)).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])(
     'earns exact live %s process currency without treating raw DATA as an opaque proof',
     (viewer) => {
