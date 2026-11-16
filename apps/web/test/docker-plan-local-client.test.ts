@@ -175,6 +175,81 @@ async function fixture() {
   };
 }
 describe.runIf(process.platform === 'linux')('actual exact website-owned tmux client detach', () => {
+  it('observes exact live client membership and private server correlation without any client effect', async () => {
+    const f = await fixture(),
+      calls = vi.spyOn(cp, 'execFileSync');
+    const scopes: unknown[] = [];
+    f.capture.requireAttached(
+      f.first,
+      f.mux,
+      f.record,
+      () => {},
+      (scope) => {
+        expect(Object.isFrozen(scope)).toBe(true);
+        expect(scope.serverPid).toBe(f.server);
+        expect(scope.serverBirth).toBe(f.serverBirth);
+        expect(scope.socketPath).toBe(f.socketPath);
+        scopes.push(scope);
+      }
+    );
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).toEqual(scopes[1]);
+    expect(f.exited.size).toBe(0);
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+    expect(calls.mock.calls.every(([, args]) => (args as string[]).includes('list-clients'))).toBe(true);
+  });
+  it('refuses a missing original client after a genuine server-side detach without detaching its sibling', async () => {
+    const f = await fixture();
+    f.tm(['detach-client', '-t', String(Reflect.get(f.first, 'ptsName'))]);
+    await until(() => f.exited.has(f.first));
+    expect(() =>
+      f.capture.requireAttached(
+        null,
+        f.mux,
+        f.record,
+        () => {},
+        () => {}
+      )
+    ).toThrow('unconfirmed');
+    expect(f.census()).toEqual([f.second.pid]);
+  });
+  it('cannot promote foreign or readable client DATA and preserves a denied join without any effect', async () => {
+    const f = await fixture(),
+      calls = vi.spyOn(cp, 'execFileSync');
+    expect(() =>
+      f.capture.requireAttached(
+        f.second,
+        f.mux,
+        f.record,
+        () => {},
+        () => {}
+      )
+    ).toThrow('unconfirmed');
+    expect(() =>
+      DockerPlanLocalClient.prototype.requireAttached.call(
+        {} as never,
+        f.first,
+        f.mux,
+        f.record,
+        () => {},
+        () => {}
+      )
+    ).toThrow();
+    expect(() =>
+      f.capture.requireAttached(
+        f.first,
+        f.mux,
+        f.record,
+        () => {},
+        () => {
+          throw Error('Different original server');
+        }
+      )
+    ).toThrow('Different original server');
+    expect(f.exited.size).toBe(0);
+    expect(f.census().sort()).toEqual([f.first.pid, f.second.pid].sort());
+    expect(calls.mock.calls.every(([, args]) => (args as string[]).includes('list-clients'))).toBe(true);
+  });
   it.each(['live', 'already-exited'] as const)(
     'joins the last captured %s client across the real socket attachment signal',
     async (state) => {

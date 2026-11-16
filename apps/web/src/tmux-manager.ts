@@ -4,6 +4,7 @@ import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
+import { DockerViewerPane, type DockerViewerCommand } from './docker-viewer-pane.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
 import { MuxSessionMetadataStore, type MuxMetadataPublicationStatus, type MuxMetadataReconciliation, type MuxMetadataIncidentSelector } from './mux-session-metadata-store.js';
 import {TerminalInputAttempt} from './terminal-input-outcome.js';
@@ -46,6 +47,7 @@ const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { isAbsolute, resolve } from 'node:path';
 import {
   dataPath,
   DEFAULT_TMUX_SOCKET,
@@ -218,6 +220,7 @@ export const CLAUDE_CODE_NOFILE_LIMIT = 2147483646;
  * - Read/write ~/.reverie/mux-sessions.json
  */
 const IS_TEST_MODE = !!process.env.VITEST;
+let boxedRecordingPid = 100_000;
 
 /** Path to persisted mux session metadata */
 const MUX_SESSIONS_FILE = dataPath('mux-sessions.json');
@@ -259,6 +262,7 @@ interface PaneMutation {
   readonly registration: MuxSession | undefined;
   current(): boolean;
   publishCreated(subject: MuxSession): void;
+  publishRespawned(subject: MuxSession, pid: number): void;
   release(): void;
 }
 
@@ -1034,9 +1038,10 @@ export function buildTmuxPaneLaunchCommand(
   tmux: string,
   muxName: string,
   launchCommand: string,
-  onlyIfDead = false
+  onlyIfDead = false,
+  shell: 'bash' | '/bin/bash' = 'bash'
 ): string {
-  return `${tmux} respawn-pane${onlyIfDead ? '' : ' -k'} -c ${TMUX_LAUNCH_CWD} -t ${shellescape(muxName)} bash -c ${shellescape(launchCommand)}`;
+  return `${tmux} respawn-pane${onlyIfDead ? '' : ' -k'} -c ${TMUX_LAUNCH_CWD} -t ${shellescape(muxName)} ${shellescape(shell)} -c ${shellescape(launchCommand)}`;
 }
 
 /**
@@ -1437,6 +1442,24 @@ export interface DockerLaunchOptions {
   canonicalCommand?: string;
   continuationLaunch?: DockerEmployeeProviderLaunch;
   continuationView?: DockerEmployeeProviderView;
+  /** Private Manager issuance metadata; never supplied by HTTP or saved JSON. */
+  captureExecution?: (command: DockerViewerCommand) => void;
+}
+
+/** One boxed renderer for the actual dispatcher and its recording test port. */
+function boxedMuxCommand(options: CreateSessionOptions | RespawnPaneOptions,
+  captureExecution: (command: DockerViewerCommand) => void, statusLineCommand?: string): string {
+  const docker = options.docker;
+  if (!docker?.continuation) throw Error('Original boxed placement required');
+  const command = wrapWithNice(buildSpawnCommand({ ...options, boxedWorkerHooks: true,
+    sessionName: options.cliName, statusLineCommand }), options.niceConfig ?? DEFAULT_NICE_CONFIG);
+  return buildDockerLaunchCommand({
+    ...resolveDockerLaunchOptions(options.mode, docker, options.sessionId, options.resumeSessionId, options.claudeResumeCandidates),
+    canonicalCommand: buildNofileLimitCommand() + ' && ' + command,
+    continuationLaunch: options.dockerContinuationLaunch, continuationView: options.dockerContinuationView,
+    execEnvNames: [...new Set([...(getCli(options.mode)?.env.dockerExecEnvNames ?? []), ...Object.keys(options.envOverrides ?? {})])],
+    captureExecution,
+  });
 }
 
 /**
@@ -1588,12 +1611,15 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  if(!opts.continuationLaunch && !opts.continuationView) throw Error('Original boxed provider view required');
  if(opts.continuationView) DockerEmployeeProviderView.prototype.require.call(opts.continuationView,sessionId,docker);
  const selectedEnvironment=replacementExecutionEnvironment(opts);
- const base=buildDockerBaseArgs(docker).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
+ if(docker.engine!=='docker'||docker.context!==undefined||docker.daemonHost!=='unix:///run/reverie-engine/docker.sock')throw Error('Fixed boxed Docker command required');
+ const rawBase=['/bin/docker','--host','unix:///run/reverie-engine/docker.sock'];
+ const base=rawBase.map(shellescape).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
  const env={...selectedEnvironment.env,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:selectedEnvironment.identityFile,REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
- const flags=Object.entries(env).flatMap(([key,value])=>['--env',shellescape(key+'='+value)]);
- flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',shellescape(key)]));
+ const flags=Object.entries(env).flatMap(([key,value])=>['--env',key+'='+value]);
+ flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',key]));
  let inner:string;
+ let innerArgs:string[];
  if(opts.continuationLaunch){
    if(!opts.canonicalCommand)throw Error('Canonical saved provider command required');
    const workspace = DockerEmployeeProviderLaunch.prototype.workspaceForCommand.call(opts.continuationLaunch, sessionId, docker);
@@ -1606,16 +1632,18 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
     ['set', '-t', target, 'status', 'off'],
    ]);
    inner='printf %s '+shellescape(source)+' | '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L reverie-docker start-server '+shellescape(';')+' source-file - && exec '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L reverie-docker attach-session -t '+shellescape(target);
+   innerArgs=['sh','-lc','export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner];
  }else {
    const descriptor=opts.continuationView!.descriptor;
-   flags.push(...DOCKER_PROVIDER_VIEW_ENV.map(shellescape), '--env', 'ENV=', '--env', 'BASH_ENV=');
-   inner=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'--','attach',sessionId,placement.operationId,descriptor.hooks.kind,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hooks.kind==='generation'?descriptor.hooks.generation:''].map(shellescape).join(' ');
+   flags.push(...DOCKER_PROVIDER_VIEW_ENV, '--env', 'ENV=', '--env', 'BASH_ENV=');
+   innerArgs=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'--','attach',sessionId,placement.operationId,descriptor.hooks.kind,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hooks.kind==='generation'?descriptor.hooks.generation:''];
  }
- if(opts.continuationLaunch) inner='export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner;
  const expected=shellescape(docker.image+' true '+docker.containerName);
  const checked=base+' inspect -f '+shellescape('{{.Image}} {{.State.Running}} {{.Id}}')+' '+name+' | grep -Fx '+expected;
- const command = checked+' && exec '+base+' exec -it --workdir '+shellescape(docker.containerWorkdir)+' '+flags.join(' ')+' '+name+' '+(opts.continuationLaunch?'sh -lc '+shellescape(inner):inner);
+ const argv=[...rawBase,'exec','-it','--workdir',docker.containerWorkdir,...flags,docker.containerName,...innerArgs];
+ const command = checked+' && exec '+argv.map(shellescape).join(' ');
  tmuxSourceCommands([['bash', '-c', command]]);
+ opts.captureExecution?.(Object.freeze({argv:Object.freeze(argv),shellCommand:command}));
  opts.continuationLaunch?.claim(sessionId,docker);
  return command;
 }
@@ -1954,6 +1982,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   private sessions: Map<string, MuxSession> = new Map();
   /** Exclusion and metadata ownership only; never execution or provider-readiness authority. */
   readonly #paneMutations = new Map<string, object>();
+  readonly #dockerViewerPanes = new WeakMap<MuxSession, DockerViewerPane>();
   readonly #metadata = new MuxSessionMetadataStore(MUX_SESSIONS_FILE);
   // Routing continuation belongs to this exact product-created record. A saved
   // path, restored DTO or manually registered pane cannot recreate its custody.
@@ -2397,6 +2426,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     if (this.#paneMutations.has(sessionId)) return undefined;
     const token = Object.freeze({});
     const registration = this.sessions.get(sessionId);
+    if (registration) this.#dockerViewerPanes.delete(registration);
     const fingerprint = (subject: MuxSession | undefined) => subject && JSON.stringify([
       subject.sessionId, subject.owner, subject.muxName, subject.pid, subject.workingDir, subject.mode, subject.remote, subject.docker,
     ]);
@@ -2413,6 +2443,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (selection.state !== 'original' || !current() || subject.sessionId !== sessionId)
           throw new MuxMutationRefusedError('changed');
         this.sessions.set(sessionId, subject);
+        selection = {state: 'created', subject, snapshot: fingerprint(subject)!};
+      },
+      publishRespawned: (subject: MuxSession, pid: number) => {
+        if (selection.state !== 'original' || selection.subject !== subject || !current() ||
+          !Number.isSafeInteger(pid) || pid <= 1) throw new MuxMutationRefusedError('changed');
+        subject.pid = pid;
         selection = {state: 'created', subject, snapshot: fingerprint(subject)!};
       },
       release: () => {if (this.#paneMutations.get(sessionId) === token) this.#paneMutations.delete(sessionId);},
@@ -2494,7 +2530,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     // TEST MODE: Create in-memory session only — no real tmux session
     if (IS_TEST_MODE) {
       requireCurrent();
-      const execution = Object.freeze({kind:'mux' as const,sessionId,owner:owner ?? null,mode,command:'test-mode',cwd:workingDir,environment:envOverrides ?? {}});
+      let boxedCommand: DockerViewerCommand | undefined;
+      const rendered = docker?.continuation ? boxedMuxCommand(options, command => { boxedCommand = command; }) : 'test-mode';
+      const execution = Object.freeze({kind:'mux' as const,sessionId,owner:owner ?? null,mode,command:rendered,cwd:workingDir,environment:envOverrides ?? {}});
       if (publication) await publication.prepare(options.providerSubject, execution);
       requireCurrent();
       notifyMuxDispatch(options, requiresPublication);
@@ -2503,7 +2541,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const session: MuxSession = {
         sessionId,
         muxName,
-        pid: 99999,
+        pid: docker?.continuation ? ++boxedRecordingPid : 99999,
         createdAt: Date.now(),
         workingDir,
         remote,
@@ -2514,6 +2552,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         name,
       };
       mutation.publishCreated(session);
+      await this.captureDockerViewerPane(session, boxedCommand, mutation.current);
       if (viewerEndpoint) this.#workerViewerEndpoints.set(session, Object.freeze({endpoint: viewerEndpoint, sessionId, owner, muxName, workingDir}));
       this.emit('sessionCreated', session);
       if (!mutation.current()) throw new MuxMutationRefusedError('changed');
@@ -2588,7 +2627,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     try {
       // Build the full command to run inside tmux
       const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
-      const fullCmd = docker
+      let boxedCommand: DockerViewerCommand | undefined;
+      const fullCmd = docker?.continuation
+        ? boxedMuxCommand(options, command => { boxedCommand = command; }, statusLineCommand)
+        : docker
         ? buildDockerLaunchCommand({...resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates), canonicalCommand:buildNofileLimitCommand()+' && '+cmd,continuationLaunch:options.dockerContinuationLaunch,continuationView:options.dockerContinuationView,execEnvNames:[...new Set([...(getCli(mode)?.env.dockerExecEnvNames??[]),...Object.keys(envOverrides??{})])]})
         : remote
           ? buildRemoteSessionCommand({ mode, remote, sessionId, claudeMode, allowedTools, ompConfig, resumeSessionId, claudeResumeCandidates: options.claudeResumeCandidates })
@@ -2596,7 +2638,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
             : workerLaunchCommand(localFullCmd, workingDir, sessionId, attachOnly, options.workerResourceLaunch, publication);
 
       const sourceLaunch = docker?.continuation
-        ? tmuxSourceCommands([['respawn-pane', '-k', '-c', TMUX_LAUNCH_CWD, '-t', muxName, 'bash', '-c', fullCmd]])
+        ? tmuxSourceCommands([['respawn-pane', '-k', '-c', TMUX_LAUNCH_CWD, '-t', muxName, '/bin/bash', '-c', fullCmd]])
         : undefined;
       const cleanEnv = { ...process.env };
       delete cleanEnv.TMUX;
@@ -2754,6 +2796,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       };
 
       mutation.publishCreated(session);
+      await this.captureDockerViewerPane(session, boxedCommand, mutation.current);
       if (viewerEndpoint) this.#workerViewerEndpoints.set(session, Object.freeze({endpoint: viewerEndpoint, sessionId, owner, muxName, workingDir}));
       this.saveSessions();
       this.emit('sessionCreated', session);
@@ -2926,15 +2969,19 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       if (!isValidMuxName(muxName) || !isValidPath(workingDir)) return null;
       if (IS_TEST_MODE) {
         if (!dispatchCurrent()) return null;
-        const execution = Object.freeze({kind:'mux' as const,sessionId,owner:options.owner ?? null,mode,command:'test-mode',cwd:workingDir,environment:envOverrides ?? {}});
+        let boxedCommand: DockerViewerCommand | undefined;
+        const rendered = docker?.continuation ? boxedMuxCommand(options, command => { boxedCommand = command; }) : 'test-mode';
+        const execution = Object.freeze({kind:'mux' as const,sessionId,owner:options.owner ?? null,mode,command:rendered,cwd:workingDir,environment:envOverrides ?? {}});
         if (publication) await publication.prepare(options.providerSubject, execution);
         if (!dispatchCurrent()) return null;
         notifyMuxDispatch(options, requiresPublication);
         if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
         if (!dispatchCurrent()) return null;
+        mutation.publishRespawned(session, docker?.continuation ? ++boxedRecordingPid : session.pid || 99999);
         session.mode = mode;
         session.remote = remote;
         session.docker = docker;
+        await this.captureDockerViewerPane(session, boxedCommand, dispatchCurrent);
         return session.pid || 99999;
       }
 
@@ -2978,7 +3025,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const config = niceConfig || DEFAULT_NICE_CONFIG;
       const cmd = wrapWithNice(baseCmd, config);
       const localFullCmd = `${buildNofileLimitCommand()} && ${pathExport}${envExportsStr} && ${cmd}`;
-      const fullCmd = docker
+      let boxedCommand: DockerViewerCommand | undefined;
+      const fullCmd = docker?.continuation
+        ? boxedMuxCommand(options, command => { boxedCommand = command; }, statusLineCommand)
+        : docker
         ? buildDockerLaunchCommand({...resolveDockerLaunchOptions(mode, docker, sessionId, resumeSessionId, options.claudeResumeCandidates),canonicalCommand:buildNofileLimitCommand()+' && '+cmd,continuationLaunch:options.dockerContinuationLaunch,continuationView:options.dockerContinuationView,execEnvNames:[...new Set([...(getCli(mode)?.env.dockerExecEnvNames??[]),...Object.keys(envOverrides??{})])]})
         : remote
           ? remoteAttachOnly
@@ -3018,7 +3068,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (requiresPublication) publication!.assertClaimed(options.providerSubject, execution);
         if (!dispatchCurrent()) return null;
         await execAsync(
-          buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead),
+          buildTmuxPaneLaunchCommand(this.tmux(), muxName, launchCmd, options.onlyIfDead, docker?.continuation ? '/bin/bash' : 'bash'),
           {
             timeout: EXEC_TIMEOUT_MS,
             env: launchEnvironment,
@@ -3035,11 +3085,12 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         // write the old death back over the pane that just replaced it.
         this.clearPaneExit(muxName);
         const pid = this.getPanePid(muxName);
-        if (pid) session.pid = pid;
+        if (pid) mutation.publishRespawned(session, pid);
         if (session.statusLine !== statusLine) {
           session.statusLine = statusLine;
           this.saveSessions();
         }
+        if (pid) await this.captureDockerViewerPane(session, boxedCommand, dispatchCurrent);
         return pid;
       } catch (err) {
         console.error('[TmuxManager] Failed to respawn pane:', err);
@@ -3190,6 +3241,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     if (!session) {
       return false;
     }
+    this.#dockerViewerPanes.delete(session);
 
     const assertCurrent = () => {
       if (admitted && (!admitted() || this.sessions.get(sessionId) !== original || session !== original))
@@ -3407,6 +3459,39 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     return this.sessions.get(sessionId);
   }
 
+  /** Existing private issuance only. Never reconstruct it from saved metadata. */
+  dockerViewerPane(sessionId: string, original: MuxSession): DockerViewerPane | undefined {
+    return this.sessions.get(sessionId) === original ? this.#dockerViewerPanes.get(original) : undefined;
+  }
+  private async captureDockerViewerPane(original: MuxSession, command: DockerViewerCommand | undefined,
+    admitted: () => boolean): Promise<void> {
+    if (!command || !original.docker?.continuation) return;
+    const pid = original.pid;
+    try {
+      if (!admitted() || this.sessions.get(original.sessionId) !== original) return;
+      const server = await this.getDockerViewerServerAsync();
+      if (!server || !admitted() || original.pid !== pid || this.sessions.get(original.sessionId) !== original) return;
+      const proof = DockerViewerPane.capture(this, original, command, server.pid, server.socketPath);
+      if (proof && admitted() && original.pid === pid && this.sessions.get(original.sessionId) === original)
+        this.#dockerViewerPanes.set(original, proof);
+    } catch { /* Unobservable issuance grants no later viewer repair. */ }
+  }
+  private getDockerViewerServerAsync(): Promise<{ pid: number; socketPath: string } | undefined> {
+    return new Promise(resolveRead => {
+      execFile('/bin/tmux', ['-N', '-f', '/dev/null', '-L', this.muxSocket, 'display-message', '-p', '#{pid}|#{socket_path}'],
+        {encoding: 'utf8', timeout: 1000, maxBuffer: 8192}, (error, stdout) => {
+          if (error) { resolveRead(undefined); return; }
+          const body = stdout.endsWith('\n') ? stdout.slice(0, -1) : stdout;
+          const fields = body.split('|'), selected = fields[0], socketPath = fields[1];
+          if (fields.length !== 2 || !selected || !/^[1-9][0-9]*$/.test(selected) ||
+            !Number.isSafeInteger(Number(selected)) || Number(selected) <= 1 || Number(selected) > 2147483647 ||
+            !socketPath || !isAbsolute(socketPath) || resolve(socketPath) !== socketPath ||
+            socketPath.length > 4096 || /[\0\r\n]/.test(socketPath)) { resolveRead(undefined); return; }
+          resolveRead({pid: Number(selected), socketPath});
+        });
+    });
+  }
+
   updateSessionName(sessionId: string, name: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) {
@@ -3472,7 +3557,10 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       const pid = active.get(session.muxName);
       if (pid !== undefined) {
         alive.push(sessionId);
-        if (pid !== session.pid && !this.#paneMutations.has(sessionId)) session.pid = pid;
+        if (pid !== session.pid && !this.#paneMutations.has(sessionId)) {
+          this.#dockerViewerPanes.delete(session);
+          session.pid = pid;
+        }
       } else {
         dead.push(sessionId);
         this.sessions.delete(sessionId);
@@ -4089,6 +4177,9 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   }
 
   registerSession(session: MuxSession): void {
+    const previous = this.sessions.get(session.sessionId);
+    if (previous) this.#dockerViewerPanes.delete(previous);
+    this.#dockerViewerPanes.delete(session);
     this.sessions.set(session.sessionId, session);
     this.saveSessions();
   }

@@ -77,6 +77,13 @@ interface Client {
   server: number;
   socket: string;
 }
+/** Correlation DATA only. A consumer still requires both actual native owners. */
+export interface DockerLocalClientServerScope {
+  readonly serverPid: number;
+  readonly serverBirth: string;
+  readonly socketPath: string;
+  readonly socketStamp: string;
+}
 /** Capture is minted by an actual own PTY child; it supplies no native grant.
  * Session must separately re-require its genuine stopped-source/target proof. */
 export class DockerPlanLocalClient {
@@ -285,6 +292,29 @@ export class DockerPlanLocalClient {
     )
       return refuse();
   }
+  #attached(census: readonly Client[]): void {
+    const matches = census.filter(c => c.pid === this.#pid || c.tty === this.#tty || c.name === this.#tty);
+    if (matches.length !== 1 || matches[0]!.pid !== this.#pid || matches[0]!.tty !== this.#tty ||
+      matches[0]!.name !== this.#tty || matches[0]!.session !== this.#record.muxName) return refuse();
+  }
+  /** Read-only membership of this exact owned website client. The callback can
+   * only narrow it against a separately earned original outer-server proof. */
+  requireAttached(pty: IPty | null, mux: TerminalMultiplexer | undefined, record: MuxSession | null,
+    current: () => void, pair: (scope: DockerLocalClientServerScope) => void): void {
+    const check = () => this.#currency(pty, mux, record, current);
+    check();
+    if (this.#exited || pty !== this.#pty) return refuse();
+    this.#live();
+    const before = this.#census();
+    check(); this.#live(); this.#attached(before);
+    pair(Object.freeze({ serverPid: this.#server, serverBirth: this.#serverBirth,
+      socketPath: this.#socketPath, socketStamp: this.#socketStamp }));
+    const after = this.#census();
+    check(); this.#live(); this.#attached(after);
+    pair(Object.freeze({ serverPid: this.#server, serverBirth: this.#serverBirth,
+      socketPath: this.#socketPath, socketStamp: this.#socketStamp }));
+    check();
+  }
   async detach(
     pty: IPty | null,
     mux: TerminalMultiplexer | undefined,
@@ -297,15 +327,7 @@ export class DockerPlanLocalClient {
     check();
     if (!this.#exited) {
       this.#live();
-      const matches = before.filter((c) => c.pid === this.#pid || c.tty === this.#tty || c.name === this.#tty);
-      if (
-        matches.length !== 1 ||
-        matches[0]!.pid !== this.#pid ||
-        matches[0]!.tty !== this.#tty ||
-        matches[0]!.name !== this.#tty ||
-        matches[0]!.session !== this.#record.muxName
-      )
-        return refuse();
+      this.#attached(before);
       // No await between the last native identity check and this one-client
       // effect. Default detach never sends a signal (-P) or selects other clients.
       check();

@@ -1,5 +1,5 @@
 /** Pure build construction/locked dependency checks. Never builds or calls Docker. */
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -9,6 +9,8 @@ import { readPlanOfficeStartupDiagnostic } from './helpers/plan-office-startup-d
 import {
   planOfficeAssetSources,
   requirePlanOfficeDependencyLock,
+  requirePlanOfficeViewerExecutables,
+  buildPlanOffice,
   PLAN_OFFICE_TEST_ENTRIES,
 } from '../scripts/build-plan-office.mjs';
 const repositorySource = path.resolve('../..');
@@ -18,6 +20,128 @@ const owningSource = fs.existsSync(path.join(repositorySource, 'nix/ci-plan-offi
 const factory = path.join(owningSource, 'nix/ci-plan-office-images.nix');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
+it('closes viewer executable metadata over the packaged wrapper and actual leaf ABI', () => {
+  const prefix = '/nix/store/' + 'a'.repeat(32) + '-';
+  const manifest = {
+    version: 1,
+    purpose: 'reverie-docker-viewer-executables-v1',
+    executables: {
+      '/bin/docker': {
+        entry: prefix + 'docker-29.6.1/bin/docker',
+        executable: prefix + 'docker-29.6.1/libexec/docker/docker',
+        argv0: prefix + 'docker-29.6.1/libexec/docker/docker',
+      },
+      '/bin/bash': { entry: prefix + 'bash/bin/bash', executable: prefix + 'bash/bin/bash', argv0: '/bin/bash' },
+      '/bin/tmux': { entry: prefix + 'tmux/bin/tmux', executable: prefix + 'tmux/bin/tmux', argv0: '/bin/tmux' },
+    },
+  };
+  expect(() => requirePlanOfficeViewerExecutables(manifest, manifest.executables['/bin/docker'].entry)).not.toThrow();
+  expect(() => requirePlanOfficeViewerExecutables(manifest, prefix + 'another/bin/docker')).toThrow();
+  for (const mutate of [
+    (m: typeof manifest) => {
+      m.version = 2;
+    },
+    (m: typeof manifest) => {
+      m.purpose = 'instance-selected';
+    },
+    (m: typeof manifest) => {
+      Object.assign(m, { extra: true });
+    },
+    (m: typeof manifest) => {
+      Object.assign(m.executables, { '/bin/other': m.executables['/bin/docker'] });
+    },
+    (m: typeof manifest) => {
+      Object.assign(m.executables['/bin/docker'], { extra: true });
+    },
+    (m: typeof manifest) => {
+      m.executables['/bin/docker'].argv0 = '/bin/docker';
+    },
+    (m: typeof manifest) => {
+      m.executables['/bin/docker'].executable = prefix + 'foreign/libexec/docker/docker';
+    },
+    (m: typeof manifest) => {
+      m.executables['/bin/docker'].entry = '/usr/bin/docker';
+    },
+    (m: typeof manifest) => {
+      m.executables['/bin/bash'].argv0 = prefix + 'bash/bin/bash';
+    },
+    (m: typeof manifest) => {
+      m.executables['/bin/tmux'].executable = prefix + 'foreign/bin/tmux';
+    },
+  ]) {
+    const changed = structuredClone(manifest);
+    mutate(changed);
+    expect(() => requirePlanOfficeViewerExecutables(changed)).toThrow();
+  }
+  for (const malformed of [null, [], {}, { ...manifest, executables: null }])
+    expect(() => requirePlanOfficeViewerExecutables(malformed)).toThrow();
+});
+
+it('wires the one immutable viewer executable producer into console and current-source CI output', () => {
+  const producer = fs.readFileSync(path.join(owningSource, 'nix/docker-viewer-executables.nix'), 'utf8');
+  expect(producer).toContain('executable = "${pkgs.docker-client}/libexec/docker/docker";');
+  expect(producer).toContain('argv0 = "${pkgs.docker-client}/libexec/docker/docker";');
+  const consolePath = fs.existsSync(path.join(repositorySource, 'nix/package.nix'))
+    ? path.join(repositorySource, 'nix/package.nix')
+    : path.resolve('test/fixtures/nix-package/package.nix');
+  const consoleSource = fs.readFileSync(consolePath, 'utf8');
+  const ciSource = fs.readFileSync(factory, 'utf8');
+  for (const source of [consoleSource, ciSource])
+    expect(source).toContain('import ./docker-viewer-executables.nix { inherit pkgs; }');
+  expect(consoleSource).toContain('"$out/lib/reverie/dist/docker-viewer-executables.json"');
+  expect(ciSource).toContain('--viewer-executables ${dockerViewerExecutables}');
+  expect(ciSource).toContain('--docker ${pkgs.docker-client}/bin/docker');
+});
+
+it('refuses a mismatched executable ABI before the actual current-source builder creates output', () => {
+  const prefix = '/nix/store/' + 'a'.repeat(32) + '-build-input',
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-executable-input-')),
+    output = path.join(root, 'output');
+  const inputs = ['source', 'modules', 'esbuild', 'node', 'docker', 'viewer-executables'];
+  const realpath = fs.realpathSync,
+    stat = fs.statSync,
+    read = fs.readFileSync;
+  const malformed = {
+    version: 1,
+    purpose: 'reverie-docker-viewer-executables-v1',
+    executables: Object.fromEntries(
+      ['docker', 'bash', 'tmux'].map((name) => [
+        '/bin/' + name,
+        {
+          entry: prefix + '/bin/' + name,
+          executable: prefix + '/bin/' + name,
+          argv0: '/bin/' + name,
+        },
+      ])
+    ),
+  };
+  const flags = inputs.flatMap((name) => ['--' + name, '/selected/' + name]).concat(['--output', output]);
+  try {
+    vi.spyOn(fs, 'realpathSync').mockImplementation(((file: fs.PathLike) => {
+      const text = String(file);
+      return inputs.some((name) => text === '/selected/' + name) ? prefix + '/' + path.basename(text) : realpath(file);
+    }) as typeof fs.realpathSync);
+    vi.spyOn(fs, 'statSync').mockImplementation(((file: fs.PathLike, options?: unknown) => {
+      const name = String(file).slice(prefix.length + 1);
+      return String(file).startsWith(prefix + '/') && inputs.includes(name)
+        ? {
+            size: 4096,
+            isDirectory: () => ['source', 'modules'].includes(name),
+            isFile: () => !['source', 'modules'].includes(name),
+          }
+        : stat(file, options as never);
+    }) as typeof fs.statSync);
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, options?: unknown) =>
+      file === prefix + '/viewer-executables'
+        ? JSON.stringify(malformed)
+        : read(file, options as never)) as typeof fs.readFileSync);
+    expect(() => buildPlanOffice(flags)).toThrow('Fixed viewer executable ABI required');
+    expect(fs.existsSync(output)).toBe(false);
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 it('imports the actual unbundled canary graph without Driver and closes startup argument/import failures', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-canary-import-'));
   const web = process.cwd(),

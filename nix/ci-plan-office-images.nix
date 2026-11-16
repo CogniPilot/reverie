@@ -10,12 +10,15 @@ let
   imageId = value: builtins.isString value && builtins.match "sha256:[a-f0-9]{64}" value != null;
   names = builtins.mapAttrs (_: role: imageNamespace + "-" + role) { source = "source"; worker = "worker"; helper = "helper"; control = "control"; };
   node = pkgs.nodejs_22;
+  dockerViewerExecutables = pkgs.writeText "docker-viewer-executables.json"
+    (builtins.toJSON (import ./docker-viewer-executables.nix { inherit pkgs; }));
   runtime = pkgs.runCommand "reverie-ci-plan-office-runtime" {
     nativeBuildInputs = [ node pkgs.esbuild ];
   } ''
     ${node}/bin/node --experimental-strip-types ${src}/apps/web/scripts/build-plan-office.mts \
       --source ${src} --modules ${dependencyConsole}/lib/reverie/node_modules \
-      --esbuild ${pkgs.esbuild}/bin/esbuild --node ${node}/bin/node --docker ${pkgs.docker-client}/bin/docker --output "$out"
+      --esbuild ${pkgs.esbuild}/bin/esbuild --node ${node}/bin/node --docker ${pkgs.docker-client}/bin/docker \
+      --viewer-executables ${dockerViewerExecutables} --output "$out"
     # Import/CLI sanity only: --help never starts the server or admits Docker operations.
     HOME="$TMPDIR/ci-help-home" ${node}/bin/node "$out/lib/reverie/dist/index.js" --help > "$TMPDIR/help.txt"
     grep -q 'web' "$TMPDIR/help.txt"

@@ -3,6 +3,13 @@ import type { ClaudeMode } from '../src/types.js';
 /** Actual private Engine capture over controlled OS replies, real saved StateStore
  * and Session. No installed/native/provider acceptance; no view/receipt DTO grant. */
 import fs from 'node:fs';
+import * as childProcess from 'node:child_process';
+import {
+  installRecordedDockerViewer,
+  recordedDockerViewerSocketPath,
+  recordedDockerViewerStat,
+  type RecordedDockerViewerClient,
+} from './helpers/recorded-docker-viewer.js';
 import { openDockerEmployeeRuntime } from '../src/docker-employee-runtime.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService } from '../src/company-service.js';
@@ -34,6 +41,13 @@ import {
 } from '../src/docker-employee-continuation-data.js';
 import { DockerEmployeeInspect, boxedOriginal } from '../src/docker-employee-engine-data.js';
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
+import { captureDockerEmployeeProviderLaunch } from '../src/docker-employee-provider-launch.js';
+import { registerDockerWorkerIdentity, dockerWorkerIdentityOf } from '../src/docker-worker-identity.js';
+import { DockerPlanLocalClient } from '../src/docker-plan-local-client.js';
+import { DockerViewerPane } from '../src/docker-viewer-pane.js';
+import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
+import { AGENT_EXIT as EXIT } from '../src/agent-exit-codes.js';
+import Fastify from 'fastify';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 import type { DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
@@ -227,6 +241,7 @@ async function dockerEncodedDestination() {
 }
 
 const native = vi.hoisted(() => ({
+  nextPid: 2_000_000,
   ptys: [] as Array<{ file: string; args: string[] }>,
   writes: [] as string[],
   data: [] as Array<(data: string) => void>,
@@ -244,9 +259,15 @@ vi.mock('node-pty', () => ({
       args[1] !== 'if (process.stdin.isTTY) process.stdin.setRawMode(true); process.stdin.pipe(process.stdout);'
     )
       throw Error('Unexpected control-local provider PTY');
-    let exit: ((value: { exitCode: number; signal: number }) => void) | undefined;
+    const exits: Array<(value: { exitCode: number; signal: number }) => void> = [];
+    const emitExit = (value: { exitCode: number; signal: number }) => {
+      for (const callback of exits) callback(value);
+    };
+    native.exits.push(emitExit);
+    const pid = ++native.nextPid;
     return {
-      pid: 2147483647,
+      pid,
+      ptsName: '/dev/pts/' + pid,
       cols: 80,
       rows: 24,
       process: 'tmux',
@@ -259,12 +280,11 @@ vi.mock('node-pty', () => ({
         native.data.push(callback);
         return { dispose: () => {} };
       },
-      onExit: (fn: typeof exit) => {
-        exit = fn;
-        if (fn) native.exits.push(fn);
+      onExit: (fn: (value: { exitCode: number; signal: number }) => void) => {
+        exits.push(fn);
         return { dispose: () => {} };
       },
-      kill: () => exit?.({ exitCode: 0, signal: 0 }),
+      kill: () => emitExit({ exitCode: 0, signal: 0 }),
     };
   }),
 }));
@@ -293,6 +313,24 @@ vi.mock('node:child_process', async (original) => {
   };
 });
 const cleanup: Array<() => Promise<void>> = [];
+function installViewerCustody(beforeCapture?: (client: RecordedDockerViewerClient) => void) {
+  const recorder = installRecordedDockerViewer();
+  recorder.recordCapture();
+  recorder.recordLocalClients(beforeCapture);
+  vi.mocked(childProcess.execFile).mockImplementation(((
+    file: string,
+    args: string[],
+    _options: unknown,
+    callback: (error: Error | null, stdout: string, stderr: string) => void
+  ) => {
+    const at = args.indexOf('-L');
+    if (file !== '/bin/tmux' || at < 0 || args.at(-1) !== '#{pid}|#{socket_path}')
+      throw Error('Unexpected viewer custody subprocess');
+    queueMicrotask(() => callback(null, '500000|' + recordedDockerViewerSocketPath(args[at + 1]!) + '\n', ''));
+    return { pid: 2147483647, on: vi.fn(), kill: vi.fn() };
+  }) as unknown as typeof childProcess.execFile);
+  return recorder;
+}
 afterEach(async () => {
   for (const finish of cleanup.splice(0).reverse()) await finish();
   native.ptys.length = 0;
@@ -899,8 +937,8 @@ describe('in-place Docker existing-view renewal', () => {
     );
     // The configuration filesystem port maps one fixed read to a real private fixture inode.
     // Its real fstat/read/retained-FD currency and the real key remain enforced.
-    const open = fs.openSync,
-      lstat = fs.lstatSync;
+    const open = vi.isMockFunction(fs.openSync) ? vi.mocked(fs.openSync).getMockImplementation()! : fs.openSync,
+      lstat = vi.isMockFunction(fs.lstatSync) ? vi.mocked(fs.lstatSync).getMockImplementation()! : fs.lstatSync;
     vi.spyOn(fs, 'openSync').mockImplementation(((name: fs.PathLike, flags: number, mode?: number) =>
       open(name === '/etc/reverie/boxed-runtime.json' ? configPath : name, flags, mode)) as typeof fs.openSync);
     vi.spyOn(fs, 'lstatSync').mockImplementation(((name: fs.PathLike, options?: unknown) =>
@@ -927,9 +965,10 @@ describe('in-place Docker existing-view renewal', () => {
     runtime.attach(company, { sessions, store: f.loaded, mux: f.mux } as unknown as SessionPort &
       ConfigPort &
       InfraPort);
-    return { ...f, employee, companyFile, sessions, runtime, captured, attach };
+    return { ...f, employee, company, companyFile, sessions, runtime, captured, attach };
   }
   it('repairs a naturally exited actual Docker Session viewer whose old private view was revoked', async () => {
+    installViewerCustody();
     const f = await runtimeFixture();
     f.attach.mockRestore(); // Exercise the actual existing Session/provider binding boundary.
     expect(f.session.docker?.continuation).toBeDefined();
@@ -939,14 +978,309 @@ describe('in-place Docker existing-view renewal', () => {
     expect(f.session.pid).toBeNull();
     const pane = f.mux.getSession(sid)!;
     vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
-    const creates = vi.mocked(f.command.create).mock.calls.length, configures = vi.mocked(f.resources.configure).mock.calls.length;
-    await expect(f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)).resolves.toBe('connected');
+    const creates = vi.mocked(f.command.create).mock.calls.length,
+      configures = vi.mocked(f.resources.configure).mock.calls.length;
+    await expect(
+      f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+    ).resolves.toBe('connected');
     expect(native.ptys).toHaveLength(before.ptys + 1);
     expect(native.writes).toEqual(before.writes);
     expect(vi.mocked(f.command.create).mock.calls.length).toBe(creates);
     expect(vi.mocked(f.resources.configure).mock.calls.length).toBe(configures);
     expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(before.intent);
+    const now = performance.now.bind(performance);
+    vi.spyOn(performance, 'now').mockImplementation(() => now() + 30_000);
+    expect(f.session.dockerContinuationViewCurrent).toBe(true);
   });
+  it.each(['pid', 'command', 'birth', 'socket', 'restored-row'] as const)(
+    'fresh genuine Engine proof cannot adopt changed outer %s before attaching any website client',
+    async (fault) => {
+      const recorder = installViewerCustody(),
+        f = await runtimeFixture();
+      native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+      const pane = f.mux.getSession(sid)!,
+        count = native.ptys.length,
+        writes = [...native.writes];
+      const originalPid = pane.pid;
+      const raw = recorder.data(originalPid);
+      if (fault === 'pid') pane.pid++;
+      if (fault === 'command') raw.cmdline = Buffer.from('/bin/bash\0-c\0unrelated command\0');
+      if (fault === 'birth') raw.statAfter = raw.stat = recordedDockerViewerStat(originalPid, 500000, '999999');
+      if (fault === 'socket')
+        recorder.socket(recorder.issued.find((item) => item.row === pane)!.socketPath).stat.ino = '999999';
+      if (fault === 'restored-row') f.mux.registerSession(structuredClone(pane));
+      vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+      await expect(
+        f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+      ).resolves.not.toBe('connected');
+      expect(native.ptys).toHaveLength(count);
+      expect(native.writes).toEqual(writes);
+      expect(f.session.pid).toBeNull();
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    }
+  );
+  it.each(['missing', 'readable-data'] as const)(
+    'fresh native provider and outer proofs cannot promote a %s website client capture',
+    async (fault) => {
+      installViewerCustody();
+      const f = await runtimeFixture();
+      native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+      const pane = f.mux.getSession(sid)!,
+        count = native.ptys.length,
+        writes = [...native.writes];
+      vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+      vi.spyOn(DockerPlanLocalClient, 'capture').mockImplementation(() => {
+        if (fault === 'missing') throw Error('Actual client capture unavailable');
+        return Object.freeze({
+          serverPid: 500000,
+          socketPath: recordedDockerViewerSocketPath(f.mux.muxSocket),
+        }) as unknown as DockerPlanLocalClient;
+      });
+      await expect(
+        f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+      ).resolves.toBe('unconfirmed');
+      expect(native.ptys).toHaveLength(count + 1);
+      expect(native.writes).toEqual(writes);
+      expect(f.session.viewerInputHeld).toBe(true);
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    }
+  );
+  it.each(['server', 'socket'] as const)(
+    'a restored original endpoint cannot confirm a new website client connected to another %s',
+    async (fault) => {
+      let replacing = false;
+      installViewerCustody((client) => {
+        if (!replacing) return;
+        if (fault === 'server') client.connectedServerPid = 500001;
+        else client.connectedSocketPath += '-other';
+      });
+      const f = await runtimeFixture();
+      replacing = true;
+      native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+      const pane = f.mux.getSession(sid)!,
+        count = native.ptys.length,
+        writes = [...native.writes];
+      vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+      await expect(
+        f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+      ).resolves.toBe('unconfirmed');
+      expect(native.ptys).toHaveLength(count + 1);
+      expect(native.writes).toEqual(writes);
+      expect(f.session.viewerInputHeld).toBe(true);
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    }
+  );
+  it('an unretained dead-pane attachment receipt stays held without later adoption or another attachment', async () => {
+    const recorder = installViewerCustody(),
+      f = await runtimeFixture();
+    native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+    const pane = f.mux.getSession(sid)!,
+      originalPid = pane.pid,
+      ptys = native.ptys.length;
+    recorder.remove(originalPid);
+    const read = vi
+      .spyOn(f.mux, 'readPaneLiveness')
+      .mockImplementation(async () =>
+        pane.pid === originalPid ? { state: 'dead' } : { state: 'live', pid: pane.pid }
+      );
+    const capture = DockerViewerPane.capture;
+    vi.spyOn(DockerViewerPane, 'capture').mockImplementation((...args) => {
+      capture(...args); // Earn the real factory proof from recorded native reads, then lose its retained receipt.
+      return undefined;
+    });
+    const respawn = vi.spyOn(f.mux, 'respawnPane');
+    for (let attempt = 0; attempt < 2; attempt++)
+      await expect(
+        f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+      ).resolves.toBe('unconfirmed');
+    expect(read).toHaveBeenCalledOnce();
+    expect(respawn).toHaveBeenCalledOnce();
+    expect(recorder.issued.at(-1)!.command.argv).toContain('attach');
+    expect(recorder.issued.at(-1)!.command.argv).not.toContain('sh');
+    expect(native.ptys).toHaveLength(ptys);
+    expect(f.session.viewerInputHeld).toBe(true);
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+  });
+  it.each(['completed', 'grant-revoked-at-final-view'] as const)(
+    'a genuinely current healthy boxed teammate uses the noMUX CLI and real HTTP API: %s',
+    async (resultKind) => {
+      installViewerCustody();
+      const f = await runtimeFixture();
+      const targetToken = f.runtime.authentication.issue(
+        { ...f.employee.dockerBinding!, employeeId: eid, owner: undefined },
+        () => true
+      );
+      const targetRequest = { headers: { 'x-reverie-worker-identity': targetToken, 'x-reverie-parent-session': sid } };
+      native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+      expect(f.session.pid).toBeNull();
+      expect(f.runtime.authentication.capture(targetRequest)).toBeUndefined(); // Self admission is still held while its viewer is lost.
+      const targetIntent = JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY].rows[sid];
+      const actorId = '80000000-0000-4000-8000-000000000008',
+        actorSid = '90000000-0000-4000-8000-000000000009';
+      const actorOperation = 'a0000000-0000-4000-8000-00000000000a',
+        actorCredential = 'b0000000-0000-4000-8000-00000000000b';
+      const actorDocker = structuredClone(f.docker);
+      actorDocker.containerName = 'e'.repeat(64);
+      Object.assign(actorDocker.continuation!, { operationId: actorOperation, employeeId: actorId });
+      const row = structuredClone(f.row);
+      row.employeeId = actorId;
+      row.credentialId = actorCredential;
+      Object.assign(row.request, { operationId: actorOperation, sessionId: actorSid, containerId: 'c'.repeat(64) });
+      Object.assign(row.original, { employeeId: actorId, sessionId: actorSid, containerId: 'c'.repeat(64) });
+      Object.assign(row.destination!, {
+        employeeId: actorId,
+        sessionId: actorSid,
+        containerId: actorDocker.containerName,
+      });
+      const binding = {
+        ...f.employee.dockerBinding!,
+        operationId: actorOperation,
+        credentialId: actorCredential,
+        sessionId: actorSid,
+        containerId: actorDocker.containerName,
+        originalDigest: dockerContinuationDigest(row.destination),
+      };
+      const actor = new Session({
+        ...f.loaded.getSession(sid)!,
+        id: actorSid,
+        name: 'Healthy coordinator',
+        docker: actorDocker,
+        publicationStore: f.loaded,
+        useMux: true,
+        mux: f.mux,
+        providerDispatchHeld: false,
+        terminalInputHeld: false,
+      });
+      cleanup.push(() => actor.stop(false));
+      f.sessions.set(actorSid, actor);
+      const launch = captureDockerEmployeeProviderLaunch(actor, binding, () => {});
+      actor.bindDockerContinuationLaunch(launch);
+      // The recording Manager now uses the same real one-shot boxed renderer as production.
+      await actor.startInteractive();
+      expect(actor.pid).not.toBeNull();
+      expect(actor.providerDispatchHeld).toBe(false);
+      const employee = EmployeeSchema.parse({
+        ...f.employee,
+        id: actorId,
+        sessionId: actorSid,
+        name: 'Healthy coordinator',
+        permissions: { recoverEmployees: true },
+        dockerBinding: binding,
+      });
+      f.loaded.setSession(actorSid, actor.toPersistedState());
+      row.sourceDigest = dockerEmployeeSourceDigest(employee, f.loaded.getSession(actorSid)!);
+      await f.companyFile.update((state) => {
+        state.employees.push(employee);
+        state.dockerEmployeeContinuations!.push(row);
+      });
+      const credential = join(dirname(f.path), 'coordinator-identity');
+      const token = f.runtime.authentication.issue({ ...binding, employeeId: actorId, owner: undefined }, () => true);
+      fs.writeFileSync(credential, token + '\n', { mode: 0o600 });
+      const before = {
+        creates: vi.mocked(f.command.create).mock.calls.length,
+        configures: vi.mocked(f.resources.configure).mock.calls.length,
+        ptys: native.ptys.length,
+        writes: [...native.writes],
+      };
+      const pane = f.mux.getSession(sid)!;
+      vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+      let viewReads = 0;
+      if (resultKind === 'grant-revoked-at-final-view') {
+        const capture = f.captured.getMockImplementation()!;
+        f.captured.mockImplementation(async (...args) => {
+          const view = await capture(...args);
+          if (++viewReads === 2)
+            await f.company.update(actorId, undefined, { permissions: { recoverEmployees: false } }, () => {});
+          return view;
+        });
+      }
+      const app = Fastify();
+      cleanup.push(() => app.close());
+      registerDockerWorkerIdentity(app, f.runtime.authentication, '', { requireMachineProof: true });
+      app.get('/api/company', (req) => {
+        expect(dockerWorkerIdentityOf(req)?.employeeId).toBe(actorId);
+        return { success: true, data: f.company.view(undefined) };
+      });
+      const controller = new WorkerViewerReconnect({
+        company: f.company,
+        session: (id) => f.sessions.get(id),
+        ready: () => true,
+        providerHealthy: () => true,
+        moveGuard: async () => () => true,
+        pause: () => () => {},
+        publish: () => {},
+        dockerReconnect: (target, allowed, revalidate) =>
+          f.runtime.reconnectViewer(
+            target.id,
+            { sessionId: target.sessionId, sessionGeneration: target.sessionGeneration },
+            target.owner,
+            allowed,
+            revalidate
+          ),
+      });
+      registerWorkerViewerReconnect(app, controller, () => false);
+      await app.listen({ host: '127.0.0.1', port: 0 });
+      // The server's fixed configuration and the employee CLI have different
+      // process environments in production. Preserve that boundary here as well.
+      const childEnv: NodeJS.ProcessEnv = {
+        ...process.env,
+        REVERIE_SESSION_ID: actorSid,
+        REVERIE_WORKER_IDENTITY_FILE: credential,
+        REVERIE_API_URL: 'http://127.0.0.1:' + (app.server.address() as { port: number }).port,
+      };
+      delete childEnv.REVERIE_MUX;
+      delete childEnv.VITEST; // The child exercises the production CLI path, independently of the recording server ports.
+      const actualProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+        actualProcess.execFile(
+          process.execPath,
+          [
+            '--import',
+            'tsx',
+            '--input-type=module',
+            '-e',
+            'import {Command} from "commander"; import {registerAgentCommands} from "./src/cli-agent.ts"; const p=new Command(); registerAgentCommands(p); await p.parseAsync(process.argv.slice(1),{from:"user"});',
+            'agent',
+            'reconnect-viewer',
+            eid,
+            '--json',
+          ],
+          { env: childEnv, timeout: 15_000, maxBuffer: 65536 },
+          (error, stdout, stderr) => {
+            resolve({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0, stdout, stderr });
+          }
+        );
+      });
+      expect(result.code, result.stderr).toBe(resultKind === 'completed' ? EXIT.ok : EXIT.refused);
+      expect(f.sessions.get(sid)).toBe(f.session);
+      expect(native.ptys).toHaveLength(before.ptys + 1);
+      expect(native.writes).toEqual(before.writes);
+      expect(vi.mocked(f.command.create).mock.calls.length).toBe(before.creates);
+      expect(vi.mocked(f.resources.configure).mock.calls.length).toBe(before.configures);
+      expect(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY].rows[sid]).toEqual(targetIntent);
+      if (resultKind === 'grant-revoked-at-final-view') {
+        expect(viewReads).toBe(2);
+        expect(f.session.viewerInputHeld).toBe(true);
+        expect(f.session.dockerContinuationViewCurrent).toBe(false);
+        return;
+      }
+      expect(JSON.parse(result.stdout)).toMatchObject({ state: 'viewer-connected' });
+      expect(f.session.dockerContinuationViewCurrent).toBe(true); // Controller finally already closed move/claim leases.
+      const targetIdentity = f.runtime.authentication.capture(targetRequest);
+      expect(targetIdentity?.current()).toBe(true);
+      await f.company.update(actorId, undefined, { permissions: { recoverEmployees: false } }, () => {});
+      expect(f.session.dockerContinuationViewCurrent).toBe(true); // Repairer authority never owns target transport lifetime.
+      const now = performance.now.bind(performance);
+      vi.spyOn(performance, 'now').mockImplementation(() => now() + 30_000);
+      expect(f.session.dockerContinuationViewCurrent).toBe(true); // One-shot 25s admission is no longer a transport lifetime.
+      expect(targetIdentity?.current()).toBe(true);
+      await f.companyFile.update((state) => {
+        state.employees.find((value) => value.id === eid)!.sessionGeneration++;
+      });
+      expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(targetIdentity?.current()).toBe(false);
+    }
+  );
   it('actual Runtime.wake renews a revoked same-provider view after caller lease completion without another attach', async () => {
     const f = await runtimeFixture();
     let allowed = true;

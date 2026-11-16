@@ -13,6 +13,38 @@ import {
 interface Lock {
   packages: Record<string, { version?: string; integrity?: string; link?: boolean; resolved?: string }>;
 }
+/** Build input only. The native reader independently earns custody from actual files. */
+export function requirePlanOfficeViewerExecutables(value: unknown, dockerEntry?: string): void {
+  const record = (item: unknown, keys: string[]): Record<string, unknown> => {
+    if (
+      !item ||
+      typeof item !== 'object' ||
+      Array.isArray(item) ||
+      JSON.stringify(Object.keys(item).sort()) !== JSON.stringify([...keys].sort())
+    )
+      throw Error('Closed viewer executable metadata required');
+    return item as Record<string, unknown>;
+  };
+  const manifest = record(value, ['version', 'purpose', 'executables']);
+  if (manifest.version !== 1 || manifest.purpose !== 'reverie-docker-viewer-executables-v1')
+    throw Error('Fixed viewer executable metadata version required');
+  const entries = record(manifest.executables, ['/bin/docker', '/bin/bash', '/bin/tmux']);
+  for (const logical of ['/bin/docker', '/bin/bash', '/bin/tmux']) {
+    const item = record(entries[logical], ['entry', 'executable', 'argv0']);
+    if (
+      typeof item.entry !== 'string' ||
+      !/^\/nix\/store\/[a-z0-9]{32}-[A-Za-z0-9+._?-]+\/bin\/(docker|bash|tmux)$/.test(item.entry) ||
+      !item.entry.endsWith(logical)
+    )
+      throw Error('Fixed immutable viewer executable entry required');
+    const executable =
+      logical === '/bin/docker' ? item.entry.slice(0, -'/bin/docker'.length) + '/libexec/docker/docker' : item.entry;
+    if (item.executable !== executable || item.argv0 !== (logical === '/bin/docker' ? executable : logical))
+      throw Error('Fixed viewer executable ABI required');
+    if (logical === '/bin/docker' && dockerEntry !== undefined && item.entry !== dockerEntry)
+      throw Error('Owning Docker executable metadata required');
+  }
+}
 export function requirePlanOfficeDependencyLock(installed: Lock, source: Lock): void {
   if (!installed.packages || !source.packages) throw Error('Locked dependencies required');
   let count = 0;
@@ -75,7 +107,7 @@ function buildPlanOfficeAtStage(args: readonly string[], entered: (stage: PlanOf
     const key = args[i]!,
       value = args[i + 1];
     if (
-      !['--source', '--modules', '--esbuild', '--node', '--docker', '--output'].includes(key) ||
+      !['--source', '--modules', '--esbuild', '--node', '--docker', '--viewer-executables', '--output'].includes(key) ||
       !value ||
       flags.has(key)
     )
@@ -95,7 +127,11 @@ function buildPlanOfficeAtStage(args: readonly string[], entered: (stage: PlanOf
     modules = input('--modules', true),
     esbuild = input('--esbuild', false),
     node = input('--node', false),
-    docker = input('--docker', false);
+    docker = input('--docker', false),
+    viewerExecutables = input('--viewer-executables', false);
+  if (fs.statSync(viewerExecutables).size > 16384) throw Error('Bounded viewer executable metadata required');
+  const viewerExecutableBytes = fs.readFileSync(viewerExecutables, 'utf8');
+  requirePlanOfficeViewerExecutables(JSON.parse(viewerExecutableBytes), docker);
   const output = flags.get('--output');
   if (!output || !path.isAbsolute(output) || fs.existsSync(output)) throw Error('Fresh CI output required');
   const web = path.join(source, 'apps/web'),
@@ -109,6 +145,10 @@ function buildPlanOfficeAtStage(args: readonly string[], entered: (stage: PlanOf
   const runtime = path.join(output, 'lib/reverie'),
     dist = path.join(runtime, 'dist');
   fs.mkdirSync(dist, { recursive: true });
+  fs.writeFileSync(path.join(dist, 'docker-viewer-executables.json'), viewerExecutableBytes, {
+    mode: 0o444,
+    flag: 'wx',
+  });
   const selectedModules = path.join(runtime, 'node_modules');
   fs.mkdirSync(selectedModules);
   const select = (name: string) => {

@@ -190,6 +190,9 @@ describe('test suite partition', () => {
       'test/boxed-plan-provider-entry.test.ts',
       'test/plan-office-agent-force.test.ts',
       'test/worker-viewer-docker-cli.test.ts',
+      'test/docker-employee-saved-attach.test.ts',
+      'test/docker-viewer-pane.test.ts',
+      'test/docker-paid-viewer-reconnect.test.ts',
     ]);
     expect(namespace).toContain('bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL');
     expect(namespace).toContain('--ro-bind "$TMPDIR/boxed-sdk-check-root" /');

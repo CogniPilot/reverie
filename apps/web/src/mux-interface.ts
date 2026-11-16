@@ -441,6 +441,8 @@ export interface TerminalMultiplexer extends EventEmitter {
   isPaneDead(muxName: string): boolean;
   /** Positive exact-pane readback; unreadable must never count as connected. */
   readPaneLiveness?(muxName: string): Promise<import('./signal-target.js').PaneLiveness>;
+  /** Current process-local receipt of this manager's own original boxed pane dispatch. */
+  dockerViewerPane?(sessionId: string, original: MuxSession): import('./docker-viewer-pane.js').DockerViewerPane | undefined;
 
   /**
    * What the last pane read saw of this session's agent, or `undefined` for

@@ -451,12 +451,16 @@ export class DockerEmployeeRuntime {
     if (!saved) return 'unavailable';
     const source = row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
     const end = performance.now() + 25_000;
+    let publication: 'preparing' | 'published' | 'failed' = 'preparing';
+    const published = () => publication === 'published';
     let revoked = false;
     const current = () => {
       if (revoked) throw Error('Original Docker viewer repair changed');
       const live = a.company.registeredEmployees().find(value => value.id === employeeId);
       const subject = a.store.existingSubject(employeeId, row);
-      if (!admitted() || !this.current() || a.company.store.publicationUnconfirmed || performance.now() >= end ||
+      if (publication === 'failed' ||
+        (publication === 'preparing' && (!admitted() || performance.now() >= end)) ||
+        !this.current() || a.company.store.publicationUnconfirmed ||
         !live || !subject || live.owner !== owner || subject.owner !== owner || live.onVacation ||
         live.desiredRunning !== true || live.bindingMigration || live.sessionId !== expected.sessionId ||
         live.sessionGeneration !== expected.sessionGeneration || subject.sessionId !== expected.sessionId ||
@@ -484,9 +488,14 @@ export class DockerEmployeeRuntime {
     };
     try {
       const view = await capture();
-      return await Session.prototype.reconnectDockerContinuationView.call(session, view, allowed, capture)
-        && allowed() ? 'connected' : 'unconfirmed';
-    } catch { return 'unconfirmed'; }
+      const repaired = await Session.prototype.reconnectDockerContinuationView.call(session, view, allowed, capture, () => {
+        current();
+        publication = 'published';
+      });
+      if (repaired && published() && allowed()) return 'connected';
+      publication = 'failed';
+      return 'unconfirmed';
+    } catch { publication = 'failed'; return 'unconfirmed'; }
   }
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */

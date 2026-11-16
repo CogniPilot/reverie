@@ -11,6 +11,8 @@ let
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   rustFront = import ./rust-front.nix { inherit pkgs src; };
+  dockerViewerExecutables = pkgs.writeText "docker-viewer-executables.json"
+    (builtins.toJSON (import ./docker-viewer-executables.nix { inherit pkgs; }));
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
@@ -65,6 +67,7 @@ let
       # Copied workspace package tests are build-input DATA, outside test discovery.
       mkdir -p build-fixtures/plan-office-source/nix build-fixtures/plan-office-source/apps/web build-fixtures/plan-office-source/skills
       cp ${consoleFixture "nix/ci-plan-office-images.nix"} build-fixtures/plan-office-source/nix/ci-plan-office-images.nix
+      cp ${consoleFixture "nix/docker-viewer-executables.nix"} build-fixtures/plan-office-source/nix/docker-viewer-executables.nix
       cp ${consoleFixture "nix/docker-resource-helper-image.nix"} build-fixtures/plan-office-source/nix/docker-resource-helper-image.nix
       cp -r ${consoleFixture "apps/web/scripts"} build-fixtures/plan-office-source/apps/web/scripts
       cp -r ${consoleFixture "apps/web/packages"} build-fixtures/plan-office-source/apps/web/packages
@@ -105,7 +108,6 @@ let
         test/docker-engine-command.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
-        test/docker-employee-saved-attach.test.ts \
         test/docker-employee-startup-restore.test.ts \
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \
@@ -153,7 +155,10 @@ let
       boxedSdkCredentialCheck() {
         npm test -- test/boxed-plan-provider-entry.test.ts \
           test/plan-office-agent-force.test.ts \
-          test/worker-viewer-docker-cli.test.ts
+          test/worker-viewer-docker-cli.test.ts \
+          test/docker-employee-saved-attach.test.ts \
+          test/docker-viewer-pane.test.ts \
+          test/docker-paid-viewer-reconnect.test.ts
       }
       ${if pkgs.stdenv.isLinux then ''
         mkdir -p "$TMPDIR/boxed-sdk-check-root"/{nix,source,fixture,proc,dev,bin}
@@ -576,6 +581,13 @@ let
       npm prune --omit=dev --ignore-scripts
       mkdir -p "$out/lib/reverie" "$out/bin"
       cp -r dist node_modules package.json skills scripts packages LICENSE "$out/lib/reverie/"
+      # Keep fixed packaging metadata next to the compiled module that reads it.
+      test -x ${pkgs.docker-client}/bin/docker
+      test -x ${pkgs.docker-client}/libexec/docker/docker
+      test -x ${pkgs.bashInteractive}/bin/bash
+      test -x ${pkgs.tmux}/bin/tmux
+      cp ${dockerViewerExecutables} "$out/lib/reverie/dist/docker-viewer-executables.json"
+      chmod 0444 "$out/lib/reverie/dist/docker-viewer-executables.json"
       # node-gyp's build metadata references the download cache and the Node.js
       # source tree (the generated Makefile and *.mk files); none of it is needed
       # to load the compiled PTY module (build/Release/pty.node) at runtime.
