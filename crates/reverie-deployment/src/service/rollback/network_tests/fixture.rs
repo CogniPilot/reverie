@@ -58,6 +58,12 @@ impl Port {
             vec![(404, json!({"message":"controlled absent CID"}))].into(),
         );
     }
+    pub(in crate::service) fn replies(&self, id: &str, values: Vec<(u16, Value)>) {
+        self.facts
+            .lock()
+            .unwrap()
+            .insert(format!("/containers/{id}/json"), values.into());
+    }
     pub(in crate::service) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
@@ -145,6 +151,41 @@ impl Fixture {
     }
     pub(in crate::service) fn adopting() -> Self {
         Self::selected(false, true)
+    }
+    pub(in crate::service) fn missing_candidate() -> Self {
+        Self::missing(Self::new())
+    }
+    pub(in crate::service) fn missing_live_accounts() -> Self {
+        Self::missing(Self::live_accounts())
+    }
+    fn missing(mut fixture: Self) -> Self {
+        fixture.source["State"]["Running"] = json!(true);
+        fixture.source["State"]["Status"] = json!("running");
+        fixture.source["State"]["Pid"] = json!(std::process::id());
+        fixture.operation.plan.source = fixture.source.clone();
+        fs::write(
+            fixture.operation.directory.join("plan.json"),
+            serde_json::to_vec(&fixture.operation.plan).unwrap(),
+        )
+        .unwrap();
+        fixture.port.set(
+            format!("/containers/{}/json", "a".repeat(64)),
+            fixture.source.clone(),
+        );
+        fixture
+            .port
+            .set("/containers/fixture/json".into(), fixture.source.clone());
+        fixture.port.set(
+            format!(
+                "/containers/{}/top?ps_args=-eo%20pid,ppid,comm",
+                "a".repeat(64)
+            ),
+            json!({"Processes":[["1","0","reverie-front"],["2","1","node"]]}),
+        );
+        fixture.port.absent(&"b".repeat(64));
+        fixture.health.healthy();
+        fixture.port.clear();
+        fixture
     }
     fn selected(live_accounts: bool, adopting: bool) -> Self {
         let port = Port::start();

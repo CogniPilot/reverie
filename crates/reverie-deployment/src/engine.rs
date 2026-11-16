@@ -18,6 +18,7 @@ mod tests;
 enum ReplyPolicy {
     Json,
     AbsentContainer,
+    ContainerOrAbsent,
 }
 
 pub(super) struct Engine {
@@ -173,7 +174,10 @@ impl Engine {
                 bytes.extend_from_slice(&data);
             }
         }
-        if matches!(reply, ReplyPolicy::AbsentContainer) {
+        if matches!(reply, ReplyPolicy::AbsentContainer)
+            || matches!(reply, ReplyPolicy::ContainerOrAbsent)
+                && status == hyper::StatusCode::NOT_FOUND
+        {
             require(
                 status == hyper::StatusCode::NOT_FOUND,
                 "DEPLOYMENT_OLD_CONTAINER_ABSENCE_UNCONFIRMED",
@@ -191,6 +195,12 @@ impl Engine {
             return Ok(Value::Null);
         }
         require(success, "DEPLOYMENT_ENGINE_REFUSED")?;
+        if matches!(reply, ReplyPolicy::ContainerOrAbsent) {
+            require(status == hyper::StatusCode::OK, "DEPLOYMENT_ENGINE_REFUSED")?;
+            let value: Value = serde_json::from_slice(&bytes)?;
+            require(value.is_object(), "DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN")?;
+            return Ok(value);
+        }
         if bytes.is_empty() {
             Ok(Value::Null)
         } else {
@@ -199,6 +209,18 @@ impl Engine {
     }
     pub(super) fn container(&self, id: &str) -> Result<Value> {
         self.json("GET", &format!("/containers/{id}/json"), None)
+    }
+    pub(super) fn container_or_absent(&self, id: &str) -> Result<Option<Value>> {
+        model::cid(id)?;
+        let value = self.request_with_policy(
+            "GET",
+            &format!("/containers/{id}/json"),
+            None,
+            Duration::from_secs(75),
+            0,
+            ReplyPolicy::ContainerOrAbsent,
+        )?;
+        Ok((!value.is_null()).then_some(value))
     }
     /// Only an authenticated complete HTTP404 from this exact immutable CID.
     /// No error text, empty inventory or transport failure implies absence.

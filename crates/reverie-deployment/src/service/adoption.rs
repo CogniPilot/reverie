@@ -5,7 +5,7 @@ use std::io::Read;
 #[cfg(test)]
 mod tests;
 
-fn birth(source: &Value) -> Result<String> {
+pub(super) fn birth(source: &Value) -> Result<String> {
     let pid = source["State"]["Pid"]
         .as_u64()
         .filter(|pid| *pid > 0)

@@ -1,4 +1,5 @@
 use super::*;
+mod missing_candidate;
 #[cfg(test)]
 pub(super) mod network_tests;
 impl DeploymentService {
@@ -25,7 +26,9 @@ impl DeploymentService {
         let source = self.engine.container(source_id)?;
         self.original_source_selection(operation, &source)?;
         let candidate = operation.candidate()?;
-        let current = self.engine.container(&candidate)?;
+        let Some(current) = self.engine.container_or_absent(&candidate)? else {
+            return self.rollback_missing_candidate(operation, pins, &candidate);
+        };
         operation.plan.candidate_matches(&current)?;
         let original_name = format!("/{}", operation.plan.container);
         let backup_name = format!("/{}", temporary_name(operation, "before-front"));
