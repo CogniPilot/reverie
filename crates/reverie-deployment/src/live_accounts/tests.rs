@@ -143,3 +143,64 @@ fn replaced_account_directory_and_unconfirmed_inventory_refuse() {
     row["State"] = serde_json::json!("exited");
     assert!(rows(&serde_json::json!([row])).is_err());
 }
+
+#[test]
+fn census_ignores_only_container_and_mount_enumeration_order() {
+    let f = Fixture::new();
+    let mut first = f.row();
+    first["Mounts"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "Type":"bind", "Source":"/unrelated", "Destination":"/other", "RW":false
+        }));
+    let mut second = first.clone();
+    second["Id"] = serde_json::json!("b".repeat(64));
+    let baseline = census(&serde_json::json!([first, second])).unwrap();
+    first["Mounts"].as_array_mut().unwrap().reverse();
+    second["Mounts"].as_array_mut().unwrap().reverse();
+    assert_eq!(
+        baseline,
+        census(&serde_json::json!([second, first])).unwrap()
+    );
+}
+
+#[test]
+fn census_preserves_every_mount_field_and_multiplicity() {
+    let f = Fixture::new();
+    let original = f.row();
+    let baseline = census(&serde_json::json!([original])).unwrap();
+    for (key, value) in [
+        ("Source", serde_json::json!("/changed")),
+        ("Destination", serde_json::json!("/changed")),
+        ("RW", serde_json::json!(false)),
+        ("Type", serde_json::json!("volume")),
+        ("Propagation", serde_json::json!("rshared")),
+    ] {
+        let mut changed = original.clone();
+        changed["Mounts"][0][key] = value;
+        assert_ne!(
+            baseline,
+            census(&serde_json::json!([changed])).unwrap(),
+            "{key}"
+        );
+    }
+    let mut duplicate = original.clone();
+    let mount = duplicate["Mounts"][0].clone();
+    duplicate["Mounts"].as_array_mut().unwrap().push(mount);
+    assert_ne!(baseline, census(&serde_json::json!([duplicate])).unwrap());
+}
+
+#[test]
+fn census_refuses_missing_or_non_array_mounts() {
+    let f = Fixture::new();
+    for value in [
+        Value::Null,
+        serde_json::json!({}),
+        serde_json::json!("unknown"),
+    ] {
+        let mut row = f.row();
+        row["Mounts"] = value;
+        assert!(census(&serde_json::json!([row])).is_err());
+    }
+}

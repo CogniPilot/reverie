@@ -201,9 +201,21 @@ fn writer(
 fn census(value: &Value) -> Result<Value> {
     let mut rows = rows(value)?.to_vec();
     rows.sort_by_key(|row| row["Id"].as_str().unwrap_or_default().to_owned());
-    Ok(Value::Array(rows.into_iter().map(|row| serde_json::json!({
-        "Id":row["Id"],"ImageID":row["ImageID"],"State":row["State"],"Mounts":row["Mounts"]
-    })).collect()))
+    let rows = rows
+        .into_iter()
+        .map(|mut row| {
+            // Moby enumerates mount points from a map. Preserve every field
+            // and duplicate while comparing the observed multiset, not order.
+            row["Mounts"]
+                .as_array_mut()
+                .ok_or_else(|| DeploymentError::new(INVALID))?
+                .sort_by_key(Value::to_string);
+            Ok(serde_json::json!({
+                "Id":row["Id"],"ImageID":row["ImageID"],"State":row["State"],"Mounts":row["Mounts"]
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Value::Array(rows))
 }
 
 impl Inventory {
