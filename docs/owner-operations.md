@@ -18,6 +18,23 @@ preview. The updater never stops those writers implicitly. This early check is
 an observation, not a whole-host writer-exclusion guarantee; the existing byte,
 metadata and restore-rehearsal checks remain required.
 
+An outside-product replacement can leave a terminal active claim pointing at two
+containers that no longer exist. The local owner may explicitly select
+`preview --adopt-stale-claim OLD_OPERATION --expected-current-container FULL_CID`
+alongside the existing image/profile/network/writer selections. Format 6 records
+the old immutable READY/candidate/plan and the selected current website. It does
+not turn that old READY receipt into current readiness. Both old exact CIDs must
+return authenticated complete Engine 404 responses; the current registered
+website must pass fresh configuration, init-incarnation, bind custody, native
+process-tree and status checks. The three declared data/home/workspace bind
+grants must agree; this does not prove old inode or data continuity.
+
+Preview only freezes the selection. Prepare repeats the observations after
+archiving the active claim, before atomically handing it over under the original
+installation lock. Old records remain intact. Any uncertain handover or receipt
+failure holds the original attempt before candidate creation; inspect its status
+and retained records rather than submitting another operation or editing claims.
+
 This follows Docker's documented [bind-mount write semantics](https://docs.docker.com/engine/storage/bind-mounts/).
 Docker's [container commit](https://docs.docker.com/reference/cli/docker/container/commit/)
 pauses the selected container and excludes mounted-volume data, so an image

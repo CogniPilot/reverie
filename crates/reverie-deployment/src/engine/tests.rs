@@ -10,6 +10,59 @@ use std::{
 };
 
 static NEXT: AtomicU64 = AtomicU64::new(0);
+#[test]
+fn old_container_absence_requires_complete_authenticated_404_not_error_text() {
+    for (status, body, length, accepted) in [
+        ("404 Not Found", r#"{"message":"gone"}"#, None, true),
+        ("200 OK", r#"{"message":"not found"}"#, None, false),
+        ("500 Refused", r#"{"message":"not found"}"#, None, false),
+        (
+            "404 Not Found",
+            r#"{"message":"gone","foreign":true}"#,
+            None,
+            false,
+        ),
+        ("404 Not Found", "", None, false),
+        ("404 Not Found", r#"{"message":"gone"}"#, Some(100), false),
+        ("404 Not Found", r#"{"message":false}"#, None, false),
+    ] {
+        let fixture = Fixture::new();
+        let listener = fixture.listener.try_clone().unwrap();
+        thread::scope(|scope| {
+            let server = scope.spawn(move || {
+                let mut stream = accept(&listener);
+                assert!(read_head(&mut stream).starts_with(
+                    format!("GET /containers/{}/json HTTP/1.1\r\n", "a".repeat(64)).as_bytes()
+                ));
+                write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\nContent-Length:{}\r\nConnection:close\r\n\r\n{body}",
+                    length.unwrap_or(body.len())
+                )
+                .unwrap();
+            });
+            let result = fixture.engine().request_with_policy(
+                "GET",
+                &format!("/containers/{}/json", "a".repeat(64)),
+                None,
+                Duration::from_secs(2),
+                nix::unistd::getuid().as_raw(),
+                ReplyPolicy::AbsentContainer,
+            );
+            assert_eq!(result.is_ok(), accepted, "status {status}, body {body}");
+            server.join().unwrap();
+        });
+    }
+    let fixture = Fixture::new();
+    assert_eq!(
+        fixture
+            .engine()
+            .require_absent_container("name/or?selector")
+            .unwrap_err()
+            .code(),
+        "DEPLOYMENT_CANONICAL_ID_REQUIRED"
+    );
+}
 struct Fixture {
     directory: PathBuf,
     listener: UnixListener,

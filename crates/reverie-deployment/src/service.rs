@@ -9,12 +9,20 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+mod adoption;
 mod apply;
 mod claim;
 mod invalid_create;
 mod rollback;
 mod shared_writers;
 use apply::OperationDeadline;
+
+#[derive(Default)]
+struct PreviewGrants {
+    networks: Option<crate::networks::Topology>,
+    writers: Option<crate::live_accounts::Inventory>,
+    adoption: Option<crate::adoption::Selection>,
+}
 
 /// Local host-owner bootstrap service over the registered deployment. The
 /// installed owner executes this API; guests and role names confer no access.
@@ -151,8 +159,7 @@ impl DeploymentService {
             body,
             refreshed_environment_keys,
             profile,
-            None,
-            None,
+            PreviewGrants::default(),
         )
     }
     /// Preserve only the observed original dynamic bridge network grants.
@@ -170,7 +177,16 @@ impl DeploymentService {
         let (body, refreshed) =
             self.profile_body_selection(&source, image, profile, Some(&topology))?;
         topology.require_current(&self.engine)?;
-        self.record_preview(source, body, refreshed, profile, Some(topology), None)
+        self.record_preview(
+            source,
+            body,
+            refreshed,
+            profile,
+            PreviewGrants {
+                networks: Some(topology),
+                ..Default::default()
+            },
+        )
     }
     /// Explicit fix-forward disposition for exact independently live account
     /// directory writers. This never certifies a consistent backup or rollback.
@@ -197,8 +213,11 @@ impl DeploymentService {
             body,
             refreshed,
             profile,
-            Some(topology),
-            Some(writers),
+            PreviewGrants {
+                networks: Some(topology),
+                writers: Some(writers),
+                adoption: None,
+            },
         )
     }
     fn record_preview(
@@ -207,9 +226,13 @@ impl DeploymentService {
         body: Value,
         refreshed_environment_keys: Vec<String>,
         profile: model::DeploymentProfile,
-        network_topology: Option<crate::networks::Topology>,
-        live_account_writers: Option<crate::live_accounts::Inventory>,
+        grants: PreviewGrants,
     ) -> Result<DeploymentPreview> {
+        let PreviewGrants {
+            networks: network_topology,
+            writers: live_account_writers,
+            adoption: claim_adoption,
+        } = grants;
         let pins = crate::pins::Pins::capture(&source)?;
         if let Err(error) = pins.running_mounts(&source) {
             return DeploymentError::finalized(Err(error), pins.close());
@@ -218,6 +241,7 @@ impl DeploymentService {
         let result = (|| {
             let operation = new_id()?;
             let preview = DeploymentPreview {
+            claim_adoption: claim_adoption.as_ref().map(|selected|selected.preview.clone()),
             operation: operation.clone(),
             container: self.installation.name.clone(),
             source_id: model::string(&source, "Id")?.into(),
@@ -232,7 +256,9 @@ impl DeploymentService {
             live_accounts: live_account_writers.as_ref().map(crate::live_accounts::Inventory::preview),
         };
             let plan = Plan {
-                version: if live_account_writers.is_some() {
+                version: if claim_adoption.is_some() {
+                    6
+                } else if live_account_writers.is_some() {
                     5
                 } else if network_topology.is_some() {
                     4
@@ -248,6 +274,7 @@ impl DeploymentService {
                 bind_identities,
                 network_topology,
                 live_account_writers,
+                claim_adoption,
             };
             Operation::create(&self.installation.state, plan)?;
             Ok(preview)

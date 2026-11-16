@@ -68,6 +68,8 @@ fn child(directory: &Path, test: &str) -> std::process::Output {
         "virtual-cgroup",
         "virtual-cgroup-overlay",
         "hidden-run/cgroup",
+        "home/agent",
+        "reverie_workspace",
     ] {
         fs::create_dir_all(directory.join(name)).unwrap();
     }
@@ -123,6 +125,10 @@ fn child(directory: &Path, test: &str) -> std::process::Output {
         .args(["/tmp/deployment/data", "--bind"])
         .arg(&data)
         .args(["/instances/default", "--bind"])
+        .arg(&data)
+        .args(["/home/agent", "--bind"])
+        .arg(&data)
+        .args(["/reverie_workspace", "--bind"])
         .arg(account)
         .args(["/accounts/profile", "--bind"])
         .arg(stale)

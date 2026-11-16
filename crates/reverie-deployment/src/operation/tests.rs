@@ -79,6 +79,7 @@ fn fixture_operation() -> Operation {
     Operation {
         directory: directory.clone(),
         plan: Plan {
+            claim_adoption: None,
             version: 1,
             operation: "c".repeat(32),
             container: "fixture".into(),
@@ -86,6 +87,7 @@ fn fixture_operation() -> Operation {
             source: json!({"Id":old,"Config":{"Env":["REVERIE_NATIVE_FRONT=1"]}}),
             body: Value::Null,
             preview: DeploymentPreview {
+                claim_adoption: None,
                 operation: "c".repeat(32),
                 container: "fixture".into(),
                 source_id: old.clone(),

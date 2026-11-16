@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use reverie_deployment::{DeploymentProfile, DeploymentService};
+use reverie_deployment::{DeploymentPreviewMode, DeploymentProfile, DeploymentService};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
@@ -33,6 +33,12 @@ enum Action {
         /// unverified copy and no guaranteed code/data rollback compatibility.
         #[arg(long, requires = "preserve_network_grants")]
         live_account_writers_fix_forward: bool,
+        /// Explicit terminal stale claim; both old full CIDs must be absent.
+        #[arg(long, requires = "expected_current_container")]
+        adopt_stale_claim: Option<String>,
+        /// Exact currently registered website full CID, independently verified.
+        #[arg(long, requires = "adopt_stale_claim")]
+        expected_current_container: Option<String>,
     },
     /// Create and inspect the candidate while the old console stays online.
     Prepare { operation: String },
@@ -89,7 +95,24 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 profile,
                 preserve_network_grants,
                 live_account_writers_fix_forward,
-            } => serde_json::to_value(if live_account_writers_fix_forward {
+                adopt_stale_claim,
+                expected_current_container,
+            } => serde_json::to_value(if let Some(previous) = adopt_stale_claim {
+                let mode = if live_account_writers_fix_forward {
+                    DeploymentPreviewMode::LiveAccountsFixForward
+                } else if preserve_network_grants {
+                    DeploymentPreviewMode::PreserveNetworks
+                } else {
+                    DeploymentPreviewMode::Ordinary
+                };
+                service.preview_adopting_stale_claim(
+                    &image,
+                    profile,
+                    mode,
+                    &previous,
+                    expected_current_container.as_deref().unwrap_or_default(),
+                )?
+            } else if live_account_writers_fix_forward {
                 service.preview_live_accounts_fix_forward(&image, profile)?
             } else if preserve_network_grants {
                 service.preview_preserving_networks(&image, profile)?
@@ -124,6 +147,42 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_claim_selection_requires_both_explicit_ids_and_default_stays_unchanged() {
+        let image = format!("sha256:{}", "a".repeat(64));
+        let base = [
+            "reverie-deployment",
+            "--root",
+            "/fixture",
+            "preview",
+            "--image",
+            &image,
+        ];
+        for flag in ["--adopt-stale-claim", "--expected-current-container"] {
+            let mut args = base.to_vec();
+            args.extend([flag, "selected"]);
+            assert!(Arguments::try_parse_from(args).is_err());
+        }
+        let previous = "c".repeat(32);
+        let current = "e".repeat(64);
+        let mut args = base.to_vec();
+        args.extend([
+            "--adopt-stale-claim",
+            &previous,
+            "--expected-current-container",
+            &current,
+        ]);
+        assert!(matches!(Arguments::try_parse_from(args).unwrap().action,
+            Action::Preview {adopt_stale_claim:Some(op),expected_current_container:Some(cid),..} if op==previous && cid==current));
+        assert!(matches!(
+            Arguments::try_parse_from(base).unwrap().action,
+            Action::Preview {
+                adopt_stale_claim: None,
+                expected_current_container: None,
+                ..
+            }
+        ));
+    }
     #[test]
     fn preserved_networks_are_an_explicit_preview_selection_not_a_raw_network_request() {
         let image = format!("sha256:{}", "a".repeat(64));

@@ -126,6 +126,7 @@ fn make_operation(
     let id = letter.to_string().repeat(32);
     let (body, refreshed) = model::create_body(&source, old, next).unwrap();
     let preview = DeploymentPreview {
+        claim_adoption: None,
         operation: id.clone(),
         container: "fixture".into(),
         source_id: source["Id"].as_str().unwrap().into(),
@@ -142,6 +143,7 @@ fn make_operation(
     Operation::create(
         &service.installation.state,
         Plan {
+            claim_adoption: None,
             version: 1,
             operation: id,
             container: "fixture".into(),

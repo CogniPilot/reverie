@@ -15,6 +15,7 @@ pub(super) struct Health {
     port: u16,
     requests: Arc<AtomicUsize>,
     stop: Arc<AtomicBool>,
+    healthy: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 impl Health {
@@ -28,12 +29,14 @@ impl Health {
         listener.set_nonblocking(true).unwrap();
         let requests = Arc::new(AtomicUsize::new(0));
         let stop = Arc::new(AtomicBool::new(false));
-        let inputs = (requests.clone(), stop.clone());
+        let healthy = Arc::new(AtomicBool::new(false));
+        let inputs = (requests.clone(), stop.clone(), healthy.clone());
         let thread = thread::spawn(move || serve(listener, inputs));
         Self {
             port,
             requests,
             stop,
+            healthy,
             thread: Some(thread),
         }
     }
@@ -43,6 +46,12 @@ impl Health {
     pub(super) fn requests(&self) -> usize {
         self.requests.load(Ordering::Acquire)
     }
+    pub(super) fn healthy(&self) {
+        self.healthy.store(true, Ordering::Release);
+    }
+    pub(super) fn refuse(&self) {
+        self.healthy.store(false, Ordering::Release);
+    }
 }
 impl Drop for Health {
     fn drop(&mut self) {
@@ -50,13 +59,13 @@ impl Drop for Health {
         self.thread.take().unwrap().join().unwrap();
     }
 }
-fn serve(listener: TcpListener, inputs: (Arc<AtomicUsize>, Arc<AtomicBool>)) {
-    let (requests, stop) = inputs;
+fn serve(listener: TcpListener, inputs: (Arc<AtomicUsize>, Arc<AtomicBool>, Arc<AtomicBool>)) {
+    let (requests, stop, healthy) = inputs;
     while !stop.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, _)) => {
                 requests.fetch_add(1, Ordering::AcqRel);
-                refuse(stream);
+                refuse(stream, healthy.load(Ordering::Acquire));
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(1))
@@ -65,7 +74,7 @@ fn serve(listener: TcpListener, inputs: (Arc<AtomicUsize>, Arc<AtomicBool>)) {
         }
     }
 }
-fn refuse(mut stream: TcpStream) {
+fn refuse(mut stream: TcpStream, healthy: bool) {
     stream
         .set_read_timeout(Some(Duration::from_millis(100)))
         .unwrap();
@@ -81,9 +90,12 @@ fn refuse(mut stream: TcpStream) {
         }
         head.push(byte[0]);
     }
-    let _ = stream.write_all(
-        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length:0\r\nConnection:close\r\n\r\n",
-    );
+    let response: &[u8] = if healthy {
+        b"HTTP/1.1 401 Unauthorized\r\nContent-Length:0\r\nConnection:close\r\n\r\n"
+    } else {
+        b"HTTP/1.1 503 Service Unavailable\r\nContent-Length:0\r\nConnection:close\r\n\r\n"
+    };
+    let _ = stream.write_all(response);
 }
 
 #[test]

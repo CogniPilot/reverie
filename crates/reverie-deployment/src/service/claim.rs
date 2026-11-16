@@ -6,7 +6,7 @@ use file::ClaimFile;
 mod tests;
 
 pub(super) struct PreparedClaim<'a> {
-    installation: &'a Installation,
+    service: &'a DeploymentService,
     active: ClaimFile,
     successor: Option<Box<Successor>>,
 }
@@ -20,7 +20,7 @@ struct Successor {
 }
 impl PreparedClaim<'_> {
     pub(super) fn finish(self, operation: &Operation, current: &Value) -> Result<()> {
-        let installation = self.installation;
+        let installation = &self.service.installation;
         installation.current()?;
         assert_source(installation, operation, current)?;
         self.active.assert_current()?;
@@ -36,9 +36,14 @@ impl PreparedClaim<'_> {
         )?;
         successor.pending.assert_current()?;
         successor.archived.assert_current()?;
-        successor
-            .previous
-            .assert_claim_source(successor.terminal, current)?;
+        if let Some(selection) = &operation.plan.claim_adoption {
+            self.service
+                .require_adoption_current(selection, current, true)?;
+        } else {
+            successor
+                .previous
+                .assert_claim_source(successor.terminal, current)?;
+        }
         successor.replacement.assert_current()?;
         installation.current()?;
         successor.pending.assert_current()?;
@@ -76,10 +81,14 @@ impl DeploymentService {
             .join("console-deployment-active.json");
         match std::fs::symlink_metadata(&path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                require(
+                    operation.plan.claim_adoption.is_none(),
+                    "DEPLOYMENT_ADOPTION_PREDECESSOR_CHANGED",
+                )?;
                 let bytes = serde_json::to_vec(&json!({"operation":operation.plan.operation}))?;
                 installation::exclusive_bytes(&path, &bytes)?;
                 Ok(PreparedClaim {
-                    installation: &self.installation,
+                    service: self,
                     active: ClaimFile::capture_written(path, &bytes)?,
                     successor: None,
                 })
@@ -99,7 +108,17 @@ impl DeploymentService {
             "DEPLOYMENT_CLAIM_HANDOVER_ALREADY_ATTEMPTED",
         )?;
         let previous = self.operation(&active.selected()?)?;
-        let terminal = previous.claim_terminal(current)?;
+        let terminal = if let Some(selection) = &operation.plan.claim_adoption {
+            require(
+                active.selected()? == selection.preview.previous_operation,
+                "DEPLOYMENT_ADOPTION_PREDECESSOR_CHANGED",
+            )?;
+            self.require_adoption_current(selection, current, false)?;
+            operation.record("adoption-selected", &serde_json::to_value(selection)?)?;
+            "STALE_READY_ADOPTION"
+        } else {
+            previous.claim_terminal(current)?
+        };
         let attempt = json!({"successor":operation.plan.operation,"claimDigest":installation::digest(&active.bytes)});
         // The active predecessor is latched BEFORE any archive/replacement work.
         // An uncertain outcome never becomes a replayable completed claim.
@@ -121,7 +140,7 @@ impl DeploymentService {
         installation::exclusive_bytes(&replacement, &replacement_bytes)?;
         let replacement = ClaimFile::capture_written(replacement, &replacement_bytes)?;
         Ok(PreparedClaim {
-            installation: &self.installation,
+            service: self,
             active,
             successor: Some(Box::new(Successor {
                 previous,
@@ -133,6 +152,9 @@ impl DeploymentService {
             })),
         })
     }
+}
+pub(super) fn selected(installation: &Installation) -> Result<String> {
+    ClaimFile::capture(installation.state.join("console-deployment-active.json"))?.selected()
 }
 fn assert_source(
     installation: &Installation,

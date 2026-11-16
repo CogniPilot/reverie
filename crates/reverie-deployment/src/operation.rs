@@ -27,6 +27,8 @@ pub(super) struct Plan {
     pub(super) network_topology: Option<crate::networks::Topology>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) live_account_writers: Option<crate::live_accounts::Inventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) claim_adoption: Option<crate::adoption::Selection>,
 }
 pub(super) struct Operation {
     pub(super) directory: PathBuf,
@@ -36,7 +38,8 @@ impl Plan {
     pub(super) fn require_effect(&self) -> Result<()> {
         self.validate_profile()?;
         require(
-            self.version == self.profile().version()
+            self.version == 6
+                || self.version == self.profile().version()
                 || (self.version == 4
                     && self.network_topology.is_some()
                     && self.live_account_writers.is_none())
@@ -62,15 +65,27 @@ impl Plan {
     fn validate_profile(&self) -> Result<()> {
         let profile = self.profile();
         let historical = self.version == 2 && profile == model::DeploymentProfile::ProtectedWebsite;
+        let effective = if self.claim_adoption.is_some() {
+            require(self.version == 6, "DEPLOYMENT_OPERATION_INVALID")?;
+            if self.live_account_writers.is_some() {
+                5
+            } else if self.network_topology.is_some() {
+                4
+            } else {
+                profile.version()
+            }
+        } else {
+            self.version
+        };
         require(
             (self.network_topology.is_some()
-                && self.version == 4
+                && effective == 4
                 && self.live_account_writers.is_none())
                 || (self.network_topology.is_some()
-                    && self.version == 5
+                    && effective == 5
                     && self.live_account_writers.is_some())
                 || (self.network_topology.is_none()
-                    && (self.version == profile.version() || historical)),
+                    && (effective == profile.version() || historical)),
             "DEPLOYMENT_OPERATION_INVALID",
         )?;
         require(
@@ -95,7 +110,7 @@ impl Plan {
         )?;
         if let Some(writers) = &self.live_account_writers {
             require(
-                self.version == 5 && self.network_topology.is_some(),
+                effective == 5 && self.network_topology.is_some(),
                 "DEPLOYMENT_OPERATION_WRITERS_INVALID",
             )?;
             writers.validate(&crate::service::data_source_value(&self.source)?.join("console"))?;
@@ -115,6 +130,17 @@ impl Plan {
             } else {
                 model::validate_profile_body(&self.source, &self.body, profile)?;
             }
+        }
+        require(
+            self.preview.claim_adoption
+                == self
+                    .claim_adoption
+                    .as_ref()
+                    .map(|selected| selected.preview.clone()),
+            "DEPLOYMENT_ADOPTION_SELECTION_INVALID",
+        )?;
+        if let Some(selected) = &self.claim_adoption {
+            selected.validate(&self.source)?;
         }
         Ok(())
     }

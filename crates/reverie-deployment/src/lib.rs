@@ -1,5 +1,6 @@
 //! Registered console deployment application service. Its CLI and future HTTP
 //! adapter share these operations; no request supplies engine argv or a shell.
+mod adoption;
 mod binds;
 mod engine;
 mod error;
@@ -16,6 +17,7 @@ mod rollout;
 mod service;
 #[cfg(test)]
 mod test_namespace;
+pub use adoption::{ClaimAdoptionPreview, DeploymentPreviewMode};
 pub use live_accounts::{LiveAccountDispositionPreview, LiveAccountWriterPreview};
 pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus};
 pub use rollout::{

@@ -17,7 +17,7 @@ use std::{
 };
 mod health;
 
-type Facts = Arc<Mutex<BTreeMap<String, VecDeque<Value>>>>;
+type Facts = Arc<Mutex<BTreeMap<String, VecDeque<(u16, Value)>>>>;
 pub(in crate::service) struct Port {
     facts: Facts,
     calls: Arc<Mutex<Vec<String>>>,
@@ -47,7 +47,16 @@ impl Port {
     }
     pub(in crate::service) fn set_sequence(&self, path: String, values: Vec<Value>) {
         assert!(!values.is_empty());
-        self.facts.lock().unwrap().insert(path, values.into());
+        self.facts
+            .lock()
+            .unwrap()
+            .insert(path, values.into_iter().map(|value| (200, value)).collect());
+    }
+    pub(in crate::service) fn absent(&self, id: &str) {
+        self.facts.lock().unwrap().insert(
+            format!("/containers/{id}/json"),
+            vec![(404, json!({"message":"controlled absent CID"}))].into(),
+        );
     }
     pub(in crate::service) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
@@ -92,23 +101,17 @@ fn respond(mut stream: UnixStream, facts: &Facts, calls: &Mutex<Vec<String>>) {
     let path = words.next().unwrap_or("missing");
     calls.lock().unwrap().push(format!("{method} {path}"));
     let value = response(facts, method, path);
-    let status = if value.is_some() {
-        "200 OK"
-    } else {
-        "500 Refused"
-    };
-    let body =
-        serde_json::to_vec(&value.unwrap_or_else(|| json!({"message":"controlled refusal"})))
-            .unwrap();
+    let (status, value) = value.unwrap_or_else(|| (500, json!({"message":"controlled refusal"})));
+    let body = serde_json::to_vec(&value).unwrap();
     write!(
         stream,
-        "HTTP/1.1 {status}\r\nContent-Length:{}\r\nConnection:close\r\n\r\n",
+        "HTTP/1.1 {status} Fixture\r\nContent-Length:{}\r\nConnection:close\r\n\r\n",
         body.len()
     )
     .unwrap();
     stream.write_all(&body).unwrap();
 }
-fn response(facts: &Facts, method: &str, path: &str) -> Option<Value> {
+fn response(facts: &Facts, method: &str, path: &str) -> Option<(u16, Value)> {
     let mut facts = facts.lock().unwrap();
     let key = format!("{method} {path}");
     let key = if facts.contains_key(&key) {
@@ -135,12 +138,15 @@ pub(in crate::service) struct Fixture {
 }
 impl Fixture {
     pub(in crate::service) fn new() -> Self {
-        Self::selected(false)
+        Self::selected(false, false)
     }
     pub(in crate::service) fn live_accounts() -> Self {
-        Self::selected(true)
+        Self::selected(true, false)
     }
-    fn selected(live_accounts: bool) -> Self {
+    pub(in crate::service) fn adopting() -> Self {
+        Self::selected(false, true)
+    }
+    fn selected(live_accounts: bool, adopting: bool) -> Self {
         let port = Port::start();
         let health = health::Health::start();
         let root = Path::new("/tmp/deployment");
@@ -150,6 +156,18 @@ impl Fixture {
         installation::exclusive_json(&root.join("deployment.json"), &config).unwrap();
         let service = DeploymentService::capture(root).unwrap();
         let mut source = source(health.port());
+        if adopting {
+            source["State"]["Running"] = json!(true);
+            source["State"]["Status"] = json!("running");
+            source["State"]["Pid"] = json!(std::process::id());
+            source["Mounts"] = json!(["/instances/default","/home/agent","/reverie_workspace"].map(|target|json!({"Type":"bind","Source":"/tmp/deployment/data","Destination":target,"RW":true,"Propagation":"rprivate"})));
+            source["HostConfig"]["Binds"] = json!([
+                "/tmp/deployment/data:/instances/default:rw",
+                "/tmp/deployment/data:/home/agent:rw",
+                "/tmp/deployment/data:/reverie_workspace:rw"
+            ]);
+            fs::create_dir_all(root.join("data/console")).unwrap();
+        }
         if live_accounts {
             fs::create_dir_all(root.join("data/console/accounts/profile")).unwrap();
             fs::remove_file(root.join("data/disjoint-source")).unwrap();
@@ -204,6 +222,9 @@ impl Fixture {
             format!("/containers/{}/json", "b".repeat(64)),
             candidate(&operation),
         );
+        if adopting {
+            configure_adoption(&port, &health, &operation, &mut source);
+        }
         port.clear();
         Self {
             service,
@@ -226,6 +247,52 @@ impl Fixture {
             "Unexpected fixture health request"
         );
     }
+    pub(in crate::service) fn close_adoption(mut self) {
+        self.service.close().unwrap();
+        assert!(self.health.requests() > 0);
+    }
+    pub(in crate::service) fn refuse_health(&self) {
+        self.health.refuse();
+    }
+}
+fn configure_adoption(
+    port: &Port,
+    health: &health::Health,
+    operation: &Operation,
+    source: &mut Value,
+) {
+    operation
+        .record(
+            "ready",
+            &json!({"containerId":"b".repeat(64),"mode":"hybrid-rust-front","brokerChanged":false}),
+        )
+        .unwrap();
+    source["Id"] = json!("e".repeat(64));
+    port.absent(&"a".repeat(64));
+    port.absent(&"b".repeat(64));
+    port.set("/containers/fixture/json".into(), source.clone());
+    port.set(
+        format!("/containers/{}/json", "e".repeat(64)),
+        source.clone(),
+    );
+    port.set(
+        "/containers/json".into(),
+        json!([{"Id":source["Id"],"State":"running","Mounts":source["Mounts"]}]),
+    );
+    for name in ['e', 'f'] {
+        port.set(
+            format!("/images/{}/json", image(name)["Id"].as_str().unwrap()),
+            image(name),
+        );
+    }
+    port.set(
+        format!(
+            "/containers/{}/top?ps_args=-eo%20pid,ppid,comm",
+            "e".repeat(64)
+        ),
+        json!({"Processes":[["1","0","reverie-front"],["2","1","node"]]}),
+    );
+    health.healthy();
 }
 pub(in crate::service) fn image(letter: char) -> Value {
     json!({"Id":format!("sha256:{}", letter.to_string().repeat(64)), "Config":{
@@ -260,6 +327,7 @@ fn operation(
     let identities = pins.identities();
     pins.close().unwrap();
     let preview = DeploymentPreview {
+        claim_adoption: None,
         operation: "c".repeat(32),
         container: "fixture".into(),
         source_id: "a".repeat(64),
@@ -278,6 +346,7 @@ fn operation(
     let operation = Operation::create(
         &service.installation.state,
         Plan {
+            claim_adoption: None,
             version: if writers.is_some() { 5 } else { 4 },
             operation: preview.operation.clone(),
             container: "fixture".into(),
