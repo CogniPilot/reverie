@@ -633,13 +633,26 @@ async function seed(scenario: string) {
 }
 async function startup(scenario: string) {
   const physical = PhysicalDocker.load();
+  if (scenario === 'retained-ready-without-original') {
+    assert(physical.containers.delete(sourceId), 'Remove only the obsolete original after genuine READY setup');
+    assert(physical.containers.has(destinationId), 'Keep the exact published boxed destination');
+    assert.equal(
+      [...physical.containers.values()].filter((raw) => raw.Config.Labels?.['reverie.worker'] === deployment).length,
+      0,
+      'The retained boxed provider has no legacy original labels'
+    );
+  }
   physical.absent = ['absent', 'issued-absent'].includes(scenario);
   physical.providerAbsent = scenario === 'ram-absent';
   if (scenario.startsWith('ram-') && scenario !== 'ram-unsupported') physical.highBytes = 48 * 1024 ** 3;
   const { PackagedDockerEngineCommand } = await import('../src/docker-engine-command.js');
   const originalRun = PackagedDockerEngineCommand.prototype.run,
     originalCreate = PackagedDockerEngineCommand.prototype.create;
-  PackagedDockerEngineCommand.prototype.run = physical.run.bind(physical);
+  const observedCommands: string[][] = [];
+  PackagedDockerEngineCommand.prototype.run = async (args, input) => {
+    observedCommands.push([...args]);
+    return physical.run(args, input);
+  };
   PackagedDockerEngineCommand.prototype.create = physical.create.bind(physical);
   const require = createRequire(import.meta.url),
     pty = require('node-pty');
@@ -761,6 +774,44 @@ async function startup(scenario: string) {
     const cookies = enrollment.headers['set-cookie'];
     assert(cookies);
     const cookie = (Array.isArray(cookies) ? cookies : [cookies]).map((value) => value.split(';')[0]).join('; ');
+    if (scenario === 'retained-ready-without-original') {
+      const retained = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0];
+      assert.equal(retained.version, 2, 'The actual canonical provider-source migration must earn the retained v2 row');
+      assert.equal(retained.phase, 'ready');
+      assert.equal(retained.destination.containerId, destinationId);
+      const policy = await app.inject({
+        method: 'GET',
+        url: '/api/company/employees/' + eid + '/docker-policy',
+        headers: { host: 'reverie:3000', cookie },
+      });
+      assert.equal(physical.mutations, 0, 'Retained selection must not recreate a source, helper or provider');
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync('/fixture/data/state.json', 'utf8'))[PROVIDER_LAUNCH_DISK_KEY],
+        before
+      );
+      assert.equal(policy.statusCode, 200, 'READY selection must use the exact retained boxed row: ' + policy.body);
+      const selected = policy.json().data;
+      assert.equal(
+        selected.containerId,
+        sourceId,
+        'Selection retains the original request correlation, not a new source'
+      );
+      assert.equal(selected.imageId, sourceImage);
+      assert.equal(selected.operationId, oid);
+      assert.equal(selected.originalRequest.containerId, sourceId, 'Preserve the historical request unchanged');
+      assert.deepEqual(selected.allowedActions, ['observe']);
+      assert.notEqual(selected.state, 'stopped', 'A deleted ancestor cannot supply a fresh stopped observation');
+      assert.equal(
+        observedCommands.some((args) => args.includes('label=reverie.worker=' + deployment)),
+        false,
+        'An existing READY row must not fall back to legacy original discovery'
+      );
+      assert.equal(
+        observedCommands.some((args) => args[0] === 'container' && args[1] === 'inspect' && args[2] === sourceId),
+        false,
+        'Read-only current provider/view observation must not require the deleted ancestor'
+      );
+    }
     if (scenario === 'ram-later' || scenario === 'ram-offline') {
       const initial = await app.inject({
         method: 'GET',
@@ -813,8 +864,15 @@ async function startup(scenario: string) {
       assert(ready(), 'Approved default must converge and finish private-view publication without another Apply/BEGIN');
     }
     const shouldAttach =
-      ['attached', 'issued-live', 'ram-startup', 'ram-later', 'ram-offline', 'ram-unsupported'].includes(scenario) ||
-      scenario.startsWith('codex-');
+      [
+        'attached',
+        'retained-ready-without-original',
+        'issued-live',
+        'ram-startup',
+        'ram-later',
+        'ram-offline',
+        'ram-unsupported',
+      ].includes(scenario) || scenario.startsWith('codex-');
     if (scenario.startsWith('ram-')) {
       const observation = await app.inject({
         method: 'GET',
@@ -921,6 +979,7 @@ async function startup(scenario: string) {
       assert(reports.some((report) => report.sessionId === sid && report.state === 'held'));
     } else if (shouldAttach) {
       assert(session, 'A genuine existing provider must restore a Session with empty control-local mux');
+      if (scenario === 'retained-ready-without-original') assert.equal(session.docker?.containerName, destinationId);
       assert.equal(session.dockerContinuationViewCurrent, true);
       assert.equal(session.providerDispatchHeld, true);
       assert.equal(session.providerInputHeld, false);
@@ -1152,6 +1211,7 @@ if (process.argv.includes('--namespace')) {
   describe('actual boxed WebServer startup restores only existing provider viewers', () => {
     for (const scenario of [
       'attached',
+      'retained-ready-without-original',
       'absent',
       'desired-off',
       'unknown',

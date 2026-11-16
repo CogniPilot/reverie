@@ -57,6 +57,7 @@ export function runBoxedStartupNamespace(entry = 'test/fixtures/boxed-webserver-
     scenario === undefined ||
       [
         'attached',
+        'retained-ready-without-original',
         'absent',
         'desired-off',
         'unknown',
