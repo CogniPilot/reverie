@@ -58,7 +58,11 @@ import { Session } from '../src/session.js';
 import { PlanMoves, PlanMoveComposerNotReady } from '../src/plan-move.js';
 import type { PlanMoveRecord, PlanMoveInput, PlanMoveExecutor, PlanMovePort } from '../src/plan-move.js';
 import { PlanMoveRequests } from '../src/plan-request.js';
-import { requireDockerPlanDisjointGeneration } from '../src/docker-plan-disjoint-generation.js';
+import {
+  captureDockerPlanDisjointGeneration,
+  requireDockerPlanDisjointGeneration,
+} from '../src/docker-plan-disjoint-generation.js';
+import { DockerPlanSourceProof } from '../src/docker-plan-source.js';
 import { dockerPlanMaximumStates } from '../src/docker-plan-move-capacity.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
@@ -428,6 +432,7 @@ async function fixture(running = true, retainedAccount = false) {
     accounts,
     moves,
     freshActor: () => baseActor.withRequesterAuthority(proof),
+    requester: proof,
     auth,
     token,
     loseStop: () => {
@@ -1454,6 +1459,19 @@ describe('cold legacy disjoint native admission', () => {
         undefined
       )
     ).toThrow();
+    const noOp = vi.fn();
+    const shadowed = Object.create(Object.getPrototypeOf(proof), {
+      require: { value: noOp },
+      requireReservation: { value: noOp },
+    });
+    expect(() => requireDockerPlanDisjointGeneration(shadowed, [old], f.input.employeeId, undefined)).toThrow();
+    await expect(store.dockerReserve(f.record, () => {}, shadowed)).rejects.toThrow();
+    const fakeNative = Object.create(DockerPlanSourceProof.prototype, { require: { value: noOp } });
+    const state = f.companyStore.snapshot(),
+      row = state.dockerEmployeeContinuations![0]!,
+      binding = state.employees[0]!.dockerBinding!;
+    expect(() => captureDockerPlanDisjointGeneration(f.requester, fakeNative, row, binding, [old], () => {})).toThrow();
+    expect(noOp).not.toHaveBeenCalled();
     const changed = { ...old, error: 'Historical observation changed' };
     await store.save([changed]);
     await expect(store.dockerReserve(f.record, () => {}, proof)).rejects.toThrow();

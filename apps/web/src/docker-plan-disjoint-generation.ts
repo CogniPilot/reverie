@@ -60,7 +60,7 @@ export class DockerPlanDisjointGeneration {
     this.current();
   }
   requireReservation(record: Readonly<PlanMoveRecord>, rows: readonly Readonly<PlanMoveRecord>[]): void {
-    this.require(rows, record.employeeId, record.owner);
+    DockerPlanDisjointGeneration.prototype.require.call(this, rows, record.employeeId, record.owner);
     const source = record.dockerReplacement?.seed.source.binding;
     if (
       record.oldSession !== this.sessionId ||
@@ -91,7 +91,7 @@ export function captureDockerPlanDisjointGeneration(
       scope.containerId !== binding.containerId
     )
       refuse();
-    native.require(row, binding);
+    DockerPlanSourceProof.prototype.require.call(native, row, binding);
     current();
   };
   return new DockerPlanDisjointGeneration(
@@ -112,6 +112,8 @@ export function requireDockerPlanDisjointGeneration(
   owner: string | undefined
 ): DockerPlanDisjointGeneration {
   if (!(proof instanceof DockerPlanDisjointGeneration)) refuse();
-  proof.require(rows, employeeId, owner);
+  DockerPlanDisjointGeneration.prototype.require.call(proof, rows, employeeId, owner);
   return proof;
 }
+Object.freeze(DockerPlanDisjointGeneration.prototype);
+Object.freeze(DockerPlanDisjointGeneration);
