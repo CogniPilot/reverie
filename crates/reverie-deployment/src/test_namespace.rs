@@ -1,5 +1,7 @@
 //! Source-test-only UID0 fixture. No host Docker socket or instance data is
 //! mounted. Production Engine root-peer authentication remains unchanged.
+//! Unix fixtures need no network namespace or loopback interface setup. Their
+//! readiness address is held by an owned ephemeral refusal listener.
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -17,6 +19,11 @@ pub(crate) fn run(test: &str, scenario: fn()) {
         assert_ne!(
             fs::read_link("/proc/self/ns/user").unwrap(),
             PathBuf::from(fs::read_to_string("/fixture/parent-namespace").unwrap())
+        );
+        assert_eq!(
+            fs::read_link("/proc/self/ns/net").unwrap(),
+            PathBuf::from(fs::read_to_string("/fixture/parent-network-namespace").unwrap()),
+            "Unix-only fixture must not configure another network namespace"
         );
         assert_eq!(nix::unistd::geteuid().as_raw(), 0);
         assert_eq!(fs::metadata("/").unwrap().uid(), 0);
@@ -53,13 +60,20 @@ fn child(directory: &Path, test: &str) -> std::process::Output {
             .unwrap(),
     )
     .unwrap();
+    fs::write(
+        directory.join("fixture/parent-network-namespace"),
+        fs::read_link("/proc/self/ns/net")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+    )
+    .unwrap();
     let bwrap =
         std::env::var_os("NIX_REVERIE_TEST_DEPLOYMENT_BWRAP").unwrap_or_else(|| "bwrap".into());
     Command::new(bwrap)
         .args([
             "--unshare-user",
             "--unshare-pid",
-            "--unshare-net",
             "--uid",
             "0",
             "--gid",

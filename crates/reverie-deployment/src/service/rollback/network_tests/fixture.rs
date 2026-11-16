@@ -15,6 +15,7 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
+mod health;
 
 type Facts = Arc<Mutex<BTreeMap<String, Value>>>;
 pub(super) struct Port {
@@ -111,18 +112,19 @@ pub(super) struct Fixture {
     pub(super) operation: Operation,
     pub(super) source: Value,
     pub(super) port: Port,
+    health: health::Health,
 }
 impl Fixture {
     pub(super) fn new() -> Self {
         let port = Port::start();
+        let health = health::Health::start();
         let root = Path::new("/tmp/deployment");
         fs::DirBuilder::new().mode(0o700).create(root).unwrap();
         fs::create_dir(root.join("data")).unwrap();
-        let config =
-            json!({"version":1,"containerName":"fixture","port":3000,"websiteRuntime":"default"});
+        let config = json!({"version":1,"containerName":"fixture","port":health.port(),"websiteRuntime":"default"});
         installation::exclusive_json(&root.join("deployment.json"), &config).unwrap();
         let service = DeploymentService::capture(root).unwrap();
-        let source = source();
+        let source = source(health.port());
         for (name, id) in [("bridge", "1".repeat(64)), ("api", "2".repeat(64))] {
             port.set(
                 format!("/networks/{id}"),
@@ -155,6 +157,7 @@ impl Fixture {
             operation,
             source,
             port,
+            health,
         }
     }
     pub(super) fn drifted(&self) -> Value {
@@ -164,19 +167,24 @@ impl Fixture {
     }
     pub(super) fn close(mut self) {
         self.service.close().unwrap();
+        assert_eq!(
+            self.health.requests(),
+            0,
+            "Unexpected fixture health request"
+        );
     }
 }
 fn image(letter: char) -> Value {
     json!({"Id":format!("sha256:{}", letter.to_string().repeat(64)), "Config":{
         "Env":["REVERIE_NATIVE_FRONT=1"],"Entrypoint":["entry"],"Cmd":["web"],"Volumes":null}})
 }
-fn source() -> Value {
+fn source(port: u16) -> Value {
     let mut config = image('e')["Config"].clone();
     config["Image"] = image('e')["Id"].clone();
     json!({"Id":"a".repeat(64),"Name":"/fixture","Image":image('e')["Id"],"Config":config,
         "State":{"Running":false,"Status":"exited","Paused":false,"Restarting":false,"Dead":false,"Pid":0,"StartedAt":"epoch"},
         "HostConfig":{"Binds":["/tmp/deployment/data:/tmp/deployment/data:ro"],"AutoRemove":false,
-            "Privileged":false,"NetworkMode":"bridge","PortBindings":{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"3000"}]}},
+            "Privileged":false,"NetworkMode":"bridge","PortBindings":{"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":port.to_string()}]}},
         "Mounts":[{"Type":"bind","Source":"/tmp/deployment/data","Destination":"/tmp/deployment/data","RW":false,"Propagation":"rprivate"}],
         "NetworkSettings":{"Networks":{"bridge":{"NetworkID":"1".repeat(64),"Aliases":null},
             "api":{"NetworkID":"2".repeat(64),"Aliases":["reverie"]}}}})
