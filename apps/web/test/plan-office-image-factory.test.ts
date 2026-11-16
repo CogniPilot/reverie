@@ -26,6 +26,56 @@ const fixtureManifestDigest = createHash('sha256')
   .digest('hex');
 const good = 'sha256:' + 'a'.repeat(64),
   ns = 'reverie-ci-plan-office-' + 'b'.repeat(32);
+it('keeps the bundled fake SDK graph free of website Session and native PTY implementation', () => {
+  const graph = buildSync({
+    entryPoints: ['test/fixtures/boxed-plan-provider.mts'],
+    bundle: true,
+    write: false,
+    metafile: true,
+    platform: 'node',
+    format: 'esm',
+    target: 'node22',
+    logLevel: 'silent',
+  });
+  expect(Object.keys(graph.metafile!.inputs).filter((file) => /(?:^|\/)node-pty\//.test(file))).toEqual([]);
+  expect(Object.keys(graph.metafile!.inputs)).not.toContain('src/session.ts');
+});
+it('runs the actual bundled fake SDK version through its entry and symlink without native addons', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-sdk-bundle-'));
+  try {
+    const entry = path.join(root, 'claude.mjs'),
+      alias = path.join(root, 'claude-alias.mjs');
+    buildSync({
+      entryPoints: ['test/fixtures/boxed-plan-provider.mts'],
+      outfile: entry,
+      bundle: true,
+      platform: 'node',
+      format: 'esm',
+      target: 'node22',
+      banner: {
+        js: "import {createRequire as __ciRequire} from 'node:module';const require=__ciRequire(import.meta.url);",
+      },
+      logLevel: 'silent',
+    });
+    fs.symlinkSync(entry, alias);
+    for (const program of [entry, alias]) {
+      const reply = spawnSync(process.execPath, ['--no-addons', program, '--version'], {
+        cwd: root,
+        env: { HOME: root, TMPDIR: root, PATH: path.dirname(process.execPath), LANG: 'C.UTF-8' },
+        encoding: 'utf8',
+        timeout: 3000,
+        maxBuffer: 65536,
+      });
+      expect(reply.error).toBeUndefined();
+      expect(reply.signal).toBeNull();
+      expect(reply.stderr).toBe('');
+      expect(reply.status).toBe(0);
+      expect(reply.stdout).toBe('2.1.251 (Claude Code; synthetic plan fixture)\n');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 it('closes viewer executable metadata over the packaged wrapper and actual leaf ABI', () => {
   const prefix = '/nix/store/' + 'a'.repeat(32) + '-';
   const manifest = {

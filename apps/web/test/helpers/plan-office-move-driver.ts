@@ -3,7 +3,7 @@
  * adapter; a fake SDK report and a completed API record are never that proof. */
 import assert from 'node:assert/strict';
 import { z } from 'zod';
-import { PlanRequestSchema } from '../../src/plan-request.js';
+import { PlanRequestSchema } from '../../src/plan-request-data.js';
 import { PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
 const uuid = z.string().uuid(),
   account = z.enum(['ci-plan-a', 'ci-plan-b']);
