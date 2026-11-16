@@ -306,6 +306,43 @@ it('repairs a paid v3 outer viewer with fresh engine/installer proof and no new 
   f.unchanged();
 });
 
+it.each(['retained', 'deleted'] as const)(
+  'keeps the published v3 target readable after retired-source cleanup: %s original',
+  async (sourceState) => {
+    const f = await paidFixture();
+    const row = f.native.state.work!;
+    expect(row.version).toBe(3);
+    expect(row.phase).toBe('ready');
+    expect(f.native.state.sourceStop?.phase).toBe('closed');
+    expect(f.native.record.phase).toBe('completed');
+    // Earn the real current target view and retire only the old Session view
+    // before changing the controlled read-only Engine observation port.
+    await f.capture();
+    f.native.old.retireDockerPlanSourceView(f.native.proof);
+    expect(f.native.old.providerDispatchHeld).toBe(true);
+    expect(f.native.old.terminalInputHeld).toBe(true);
+    if (sourceState === 'deleted') {
+      const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+      vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === row.original.containerId)
+          throw Error('Controlled Engine absence: the retired original container no longer exists');
+        return run(args, input);
+      });
+    }
+    const result = await f
+      .capture()
+      .then((view) => f.session.reconnectDockerContinuationView(view, () => true, f.capture))
+      .then(
+        (connected) => ({ connected, failure: undefined }),
+        (failure: unknown) => ({ connected: false, failure })
+      );
+    f.unchanged();
+    expect(result.failure).toBeUndefined();
+    expect(result.connected).toBe(true);
+    expect(f.session.dockerContinuationViewCurrent).toBe(true);
+  }
+);
+
 it('repairs only the lost website client while the original claimed paid outer command remains live', async () => {
   const f = await paidFixture(false),
     original = f.custody.issued[0]!;
