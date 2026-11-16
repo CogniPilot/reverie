@@ -63,6 +63,7 @@ interface Raw {
     OOMKilled?: boolean;
     Pid?: number;
     ExitCode?: number;
+    StartedAt?: string;
   };
 }
 const noop = () => {};
@@ -439,6 +440,7 @@ async function seed(scenario: string) {
     Dead: false,
     OOMKilled: false,
     Pid: 200,
+    StartedAt: '2026-11-16T10:00:00.000000000Z',
   };
   row.destination = boxedOriginal(DockerEmployeeInspect.parse(destination), subject, deployment, true);
   await resources.configure(row, noop);
@@ -643,6 +645,7 @@ async function startup(scenario: string) {
     );
   }
   physical.absent = ['absent', 'issued-absent'].includes(scenario);
+  if (physical.absent) assert(physical.containers.delete(destinationId), 'Absent means the exact container is gone');
   physical.providerAbsent = scenario === 'ram-absent';
   if (scenario.startsWith('ram-') && scenario !== 'ram-unsupported') physical.highBytes = 48 * 1024 ** 3;
   const { PackagedDockerEngineCommand } = await import('../src/docker-engine-command.js');
