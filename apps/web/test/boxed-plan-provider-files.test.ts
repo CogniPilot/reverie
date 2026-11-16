@@ -53,6 +53,36 @@ it('loads only the closed private contract and keeps each original approval latc
   expect(new PlanProviderFixtureFiles(f.home, f.generation).prepareApproval('request-1', 'no replay')).toBe('existing');
   expect(() => f.files.prepareApproval('../escape', 'not written')).toThrow();
 });
+it('keeps viewer inputs closed and its issued latch exclusive across new SDK file adapters', () => {
+  const f = fixture(),
+    id = '55555555-5555-4555-8555-555555555555';
+  const input = {
+    version: 1,
+    purpose: 'reverie-ci-sdk-viewer-command-v1',
+    id,
+    command: 'viewer-status',
+    expected: 'allowed',
+    callerEmployeeId: f.config.employeeId,
+    callerSessionId: '22222222-2222-4222-8222-222222222222',
+    employeeId: '33333333-3333-4333-8333-333333333333',
+    sessionId: '44444444-4444-4444-8444-444444444444',
+    sessionGeneration: 2,
+  };
+  const file = path.join(f.home, '.fixture/viewer-command-input-' + id + '.json');
+  fs.writeFileSync(file, JSON.stringify(input), { mode: 0o600 });
+  expect(f.files.viewerCommand(id)).toEqual(input);
+  f.files.viewerCommandRecord('issued', input);
+  expect(() => new PlanProviderFixtureFiles(f.home, f.generation).viewerCommandRecord('issued', input)).toThrow();
+  expect(fs.statSync(path.join(f.home, '.fixture/viewer-command-issued-' + id + '.json')).mode & 0o777).toBe(0o600);
+  expect(() => f.files.viewerCommandRecord('returned', { ...input, token: 'HOSTILE' })).toThrow();
+  expect(fs.existsSync(path.join(f.home, '.fixture/viewer-command-returned-' + id + '.json'))).toBe(false);
+  fs.writeFileSync(file, JSON.stringify({ ...input, id: '66666666-6666-4666-8666-666666666666' }));
+  expect(() => f.files.viewerCommand(id)).toThrow('ID changed');
+  fs.unlinkSync(file);
+  fs.symlinkSync(f.canonical, file);
+  expect(() => f.files.viewerCommand(id)).toThrow();
+  expect(() => f.files.viewerCommand('../escape')).toThrow();
+});
 it('rotates only private generation SDK auth once and never changes canonical account bytes or stamp', () => {
   const f = fixture(),
     before = fs.statSync(f.canonical);

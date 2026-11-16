@@ -30,6 +30,28 @@ import { dockerContinuationDigest } from '../../src/docker-employee-continuation
 import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
 import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
+import {
+  runPlanOfficeViewerRepair,
+  PlanOfficeViewerCommandInput,
+  PlanOfficeViewerCommandReceipt,
+  PlanOfficeWebsiteClient,
+  PlanOfficeViewerRepairCompletion,
+  PLAN_OFFICE_WEBSITE_CLIENT_PROGRAM,
+  PLAN_OFFICE_WEBSITE_GONE_PROGRAM,
+  planOfficeViewerPrompt,
+  planOfficeViewerDigest,
+  planOfficeViewerArgs,
+  type PlanOfficeWebsiteClientInput,
+} from './plan-office-viewer-repair.js';
+import {
+  DOCKER_PROVIDER_VIEW_ENV,
+  DOCKER_PROVIDER_VIEW_PROGRAM,
+  DOCKER_PROVIDER_VIEW_TMUX,
+} from '../../src/docker-employee-provider-view-native.js';
+import { dockerEmployeeProviderSourceDigest } from '../../src/docker-employee-store.js';
+import { PROVIDER_LAUNCH_DISK_KEY } from '../../src/provider-launch-publication.js';
+import { EmployeeSchema } from '../../src/company-types.js';
+import { planFixtureTurnBarrier } from './boxed-plan-provider.js';
 import type { PlanOfficeStartupCheckpoint } from './plan-office-startup-diagnostic.js';
 import {
   PlanOfficeAgentForceInput,
@@ -1216,6 +1238,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     let ownerForceAccepted = false;
     let agentForceAccepted = false;
     let teamAccepted = false;
+    let viewerRepairAccepted = false;
     const acceptance = input.acceptance;
     if (acceptance === 'team-plan-move') {
       const caller = input.bootstrap.employees[0]!,
@@ -1430,6 +1453,24 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
         capsulePositive: true,
         callerPreserved: true,
       });
+      await runPlanOfficeTeamViewerRepair({
+        input,
+        evidence,
+        driver,
+        control,
+        owner,
+        caller,
+        target,
+        callerHome,
+        targetHome,
+        current,
+        employee,
+        originalCallerNative,
+        targetPhysical: readPrivate(
+          path.join(evidence.root, 'physical-move-' + completed.scenario.id + '.json')
+        ) as Json,
+      });
+      viewerRepairAccepted = true;
       planMovesAccepted = teamAccepted = true;
     } else if (acceptance !== 'baseline') {
       const originalControl = driver.owned(control, 'control').State as Json;
@@ -1507,6 +1548,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       ownerForceAccepted,
       agentForceAccepted,
       teamAccepted,
+      viewerRepairAccepted,
       acceptedScenario: input.acceptance,
       refreshReuseAccepted: false,
       forceAccepted: ownerForceAccepted || agentForceAccepted,
@@ -1524,6 +1566,528 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
 }
 
 /** Shared one-shot move adapter; the first self latch and per-operation return latches never replay. */
+async function runPlanOfficeTeamViewerRepair(p: {
+  input: Input;
+  evidence: Evidence;
+  driver: Driver;
+  control: string;
+  owner: Awaited<ReturnType<typeof enrollIsolatedPlanOfficeOwner>>;
+  caller: Input['bootstrap']['employees'][number];
+  target: Input['bootstrap']['employees'][number];
+  callerHome: string;
+  targetHome: string;
+  current(): void;
+  employee(id: string): { current: Json; row: DockerEmployeeContinuationRecord };
+  originalCallerNative: unknown;
+  targetPhysical: Json;
+}) {
+  const { input, evidence, driver, control, owner, caller, target, current } = p;
+  assert.equal(input.acceptance, 'team-plan-move');
+  const native = z
+    .object({
+      paneId: z.string().regex(/^%[0-9]+$/),
+      panePid: z.number().int().min(2),
+      paneStartTicks: z.string().regex(/^[1-9][0-9]*$/),
+      hooks: z.object({ kind: z.literal('generation'), generation: z.string() }).strict(),
+    })
+    .strict();
+  const callerNative = native.parse(p.originalCallerNative),
+    targetNative = native.parse(p.targetPhysical.pane);
+  const controlConfig = driver.owned(control, 'control').Config as Json;
+  const controlCommand = [
+    ...z.array(z.string()).parse(controlConfig.Entrypoint),
+    ...z.array(z.string()).parse(controlConfig.Cmd),
+  ];
+  const node = controlCommand[0]!,
+    module = input.runtimePath + '/lib/reverie/test/helpers/plan-office-viewer-repair.js';
+  const selected = () => ({ caller: p.employee(caller.employeeId), target: p.employee(target.employeeId) });
+  const initial = selected(),
+    callerSid = initial.caller.row.request.sessionId,
+    targetSid = initial.target.row.request.sessionId;
+  assert.equal(callerSid, caller.sessionId);
+  assert.notEqual(targetSid, target.sessionId, 'The mandatory viewer exercise follows the completed team replacement');
+  const permissions = structuredClone(initial.caller.current.permissions) as Json;
+  const draft = 'BCVIEW_DRAFT_' + randomUUID().replaceAll('-', '');
+  let requirePublishedView = false;
+  const metadata = (args: string[]) => {
+    current();
+    const value = driver.docker(args);
+    current();
+    return value;
+  };
+  const observeProvider = (row: DockerEmployeeContinuationRecord) =>
+    native.parse(
+      JSON.parse(
+        metadata([
+          'exec',
+          ...DOCKER_PROVIDER_VIEW_ENV,
+          row.destination!.containerId,
+          '/opt/reverie-worker-client/bin/node',
+          '--input-type=commonjs',
+          '--no-warnings',
+          '-e',
+          DOCKER_PROVIDER_VIEW_PROGRAM,
+          '--',
+          'observe',
+          row.request.sessionId,
+          row.request.operationId,
+          'generation',
+        ])
+      )
+    );
+  const captureTarget = () => {
+    const row = selected().target.row;
+    return metadata([
+      'exec',
+      ...DOCKER_PROVIDER_VIEW_ENV,
+      row.destination!.containerId,
+      DOCKER_PROVIDER_VIEW_TMUX,
+      '-N',
+      '-f',
+      '/dev/null',
+      '-L',
+      'reverie-docker',
+      'capture-pane',
+      '-p',
+      '-J',
+      '-S',
+      '-',
+      '-t',
+      targetNative.paneId,
+    ]);
+  };
+  const websiteInput = async (who: 'caller' | 'target'): Promise<PlanOfficeWebsiteClientInput> => {
+    const row = selected()[who].row;
+    const session = await planOfficeSession(
+      await owner.request('/api/sessions/' + row.request.sessionId),
+      row.request.sessionId
+    );
+    const mux = z
+      .array(
+        z
+          .object({
+            sessionId: z.string(),
+            muxName: z.string(),
+            pid: z.number().int().positive(),
+            docker: z.record(z.string(), z.unknown()),
+          })
+          .passthrough()
+      )
+      .parse(readPrivate(path.join(evidence.root, 'data/mux-sessions.json')))
+      .filter((value) => value.sessionId === row.request.sessionId);
+    assert.equal(mux.length, 1);
+    assert.equal(mux[0]!.muxName, 'reverie-' + row.request.sessionId.slice(0, 8));
+    assert.equal(mux[0]!.docker.containerName, row.destination!.containerId);
+    assert.equal((mux[0]!.docker.continuation as Json).operationId, row.request.operationId);
+    return {
+      operation: 'observe',
+      sessionId: row.request.sessionId,
+      pid: z.number().int().min(2).parse(session.pid),
+      outerPid: mux[0]!.pid,
+      containerId: row.destination!.containerId,
+      operationId: row.request.operationId,
+      controlCommand: controlCommand as PlanOfficeWebsiteClientInput['controlCommand'],
+    };
+  };
+  const website = async (who: 'caller' | 'target') =>
+    PlanOfficeWebsiteClient.parse(
+      JSON.parse(
+        metadata([
+          'exec',
+          control,
+          node,
+          '--input-type=module',
+          '-e',
+          PLAN_OFFICE_WEBSITE_CLIENT_PROGRAM,
+          '--',
+          module,
+          JSON.stringify(await websiteInput(who)),
+        ])
+      )
+    );
+  const presence = (record: Json, key: string) => ({ present: Object.hasOwn(record, key), value: record[key] ?? null });
+  const snapshot = async () => {
+    current();
+    const chosen = selected(),
+      state = readPrivate(path.join(evidence.root, 'data/state.json')) as Json;
+    const rows = state.sessions as Record<string, SessionState>;
+    const records = await Promise.all(
+      (['caller', 'target'] as const).map(async (who) => {
+        const { row, current: employee } = chosen[who];
+        const actual = DockerEmployeeInspect.parse(driver.inspect(row.destination!.containerId));
+        assert.equal(actual.State.Running, true);
+        const view = observeProvider(row);
+        assert.deepEqual(view, who === 'caller' ? callerNative : targetNative);
+        const limits = await data(
+          await owner.request('/api/company/employees/' + row.employeeId + '/docker-resources')
+        );
+        assert.equal(limits.enforcement, 'fresh-native-readback');
+        assert.equal(limits.actualMemoryHighBytes, row.policy.memoryHighBytes);
+        assert.equal(limits.memoryMaxBytes, row.policy.memoryMaxBytes);
+        const { pool: _pool, ...leafPolicy } = row.policy;
+        assert.deepEqual(limits.actualLimits, { ...leafPolicy, cpuQuota: 'unlimited' });
+        const session = await planOfficeSession(
+          await owner.request('/api/sessions/' + row.request.sessionId),
+          row.request.sessionId
+        );
+        assert.equal(session.providerInputHeld, false);
+        assert.equal(session.viewerInputHeld, false);
+        const viewCurrent = z.boolean().parse(session.dockerProviderViewCurrent);
+        if (who === 'target' && requirePublishedView)
+          assert.equal(
+            viewCurrent,
+            true,
+            'The product must retain its actual published private Engine view after repair and caller revocation'
+          );
+        const saved = rows[row.request.sessionId]!;
+        assert.ok(saved);
+        return [
+          who,
+          {
+            scope: {
+              employeeId: row.employeeId,
+              sessionId: row.request.sessionId,
+              generation: row.request.sessionGeneration,
+              binding: employee.dockerBinding,
+              rowDigest: dockerContinuationDigest(row),
+              recipeDigest: dockerEmployeeProviderSourceDigest(EmployeeSchema.parse(employee), saved),
+            },
+            container: {
+              id: actual.Id,
+              image: actual.Image,
+              state: actual.State,
+              config: actual.Config,
+              host: actual.HostConfig,
+              mounts: actual.Mounts,
+            },
+            native: view,
+            kernel: limits,
+            website: await website(who),
+            viewCurrent,
+            fences: {
+              publicTerminal: presence(session, 'terminalInputHeld'),
+              savedTerminal: presence(saved as unknown as Json, 'terminalInputHeld'),
+              publicProvider: presence(session, 'providerDispatchHeld'),
+              savedProvider: presence(saved as unknown as Json, 'providerDispatchHeld'),
+            },
+          },
+        ] as const;
+      })
+    );
+    const output = captureTarget();
+    assert.equal(output.split(draft).length - 1, 1, 'One unsubmitted native draft only');
+    assert.ok(output.trimEnd().endsWith(draft), 'The same unsubmitted text remains in the native composer');
+    const turns = fs
+      .readdirSync(path.join(p.targetHome, '.fixture'))
+      .filter((name) => name.startsWith('plan-turn-' + targetSid + '-'))
+      .sort();
+    const paidHistory = z
+      .object({
+        version: z.literal(1),
+        kind: z.enum(['observed', 'unconfirmed']),
+        rows: z.record(z.string(), z.unknown()),
+      })
+      .strict()
+      .parse(state[PROVIDER_LAUNCH_DISK_KEY]);
+    assert.ok(
+      paidHistory.rows[callerSid] && paidHistory.rows[targetSid],
+      'Both original paid launch histories required'
+    );
+    const result = {
+      records: Object.fromEntries(records),
+      draft: {
+        occurrences: 1,
+        nativeDraftSha256: planOfficeViewerDigest(draft),
+        targetTurns: turns,
+        consumingHistoryBarriers: output.match(/BCPLAN(?:_TURN)?_[a-f0-9]{64}/g) ?? [],
+      },
+      nativeCaptureObservationSha256: planOfficeViewerDigest(output), // terminal reflow is not a new SDK turn
+      journals: {
+        provider: dockerContinuationDigest(paidHistory),
+        canonicalAuth: {
+          caller: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-a'),
+          target: planOfficeCanonicalAuthDigest(evidence.root, 'ci-plan-b'),
+        },
+        plans: ['plan-requests.json', 'plan-moves.json'].map((name) => ({
+          name,
+          sha256: planOfficeViewerDigest(fs.readFileSync(path.join(evidence.root, 'data', name))),
+        })),
+      },
+      uncertaintyScope:
+        'Exact public/saved fence presence only; absent/false is not an exercised unknown-input history',
+    };
+    current();
+    return result;
+  };
+  const command = async (kind: 'viewer-status' | 'reconnect-viewer', expected: 'allowed' | 'denied', id: string) => {
+    const chosen = selected(),
+      row = chosen.target.row;
+    const value = PlanOfficeViewerCommandInput.parse({
+      version: 1,
+      purpose: 'reverie-ci-sdk-viewer-command-v1',
+      id,
+      command: kind,
+      expected,
+      callerEmployeeId: caller.employeeId,
+      callerSessionId: callerSid,
+      employeeId: target.employeeId,
+      sessionId: targetSid,
+      sessionGeneration: row.request.sessionGeneration,
+    });
+    evidence.save('viewer-command-' + id + '-intent', value);
+    const files = new Evidence(path.join(p.callerHome, '.fixture'), true);
+    try {
+      files.save('viewer-command-input-' + id, value);
+    } finally {
+      files.close();
+    }
+    const oldTurns = new Set(
+      fs
+        .readdirSync(path.join(p.callerHome, '.fixture'))
+        .filter((name) => name.startsWith('plan-turn-' + callerSid + '-'))
+    );
+    await data(await owner.request('/api/sessions/' + callerSid + '/input', 'POST', planOfficeViewerPrompt(id)));
+    const receiptFile = path.join(p.callerHome, '.fixture', 'viewer-command-returned-' + id + '.json');
+    let receipt: z.infer<typeof PlanOfficeViewerCommandReceipt> | undefined;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      current();
+      if (fs.existsSync(receiptFile)) {
+        const result = PlanOfficeViewerCommandReceipt.parse(readPrivate(receiptFile));
+        const session = await planOfficeSession(await owner.request('/api/sessions/' + callerSid), callerSid);
+        const terminal = await planOfficeTerminal(await owner.request('/api/sessions/' + callerSid + '/terminal'));
+        const reports = fs
+          .readdirSync(path.join(p.callerHome, '.fixture'))
+          .filter((name) => name.startsWith('plan-turn-' + callerSid + '-') && !oldTurns.has(name))
+          .map(
+            (name) =>
+              readPrivate(
+                path.join(p.callerHome, '.fixture', name)
+              ) as import('./boxed-plan-provider.js').PlanProviderFixtureReport
+          );
+        const turn = reports.find(
+          (report) =>
+            report.state === 'idle' &&
+            report.requestId === null &&
+            report.sessionId === callerSid &&
+            report.employeeId === caller.employeeId &&
+            report.providerThread === caller.nativeThreadId &&
+            report.hookGenerationSha256 === planOfficeViewerDigest(callerNative.hooks.generation) &&
+            report.probes.some(
+              (probe) =>
+                probe.exitCode === 0 &&
+                JSON.stringify(probe.args) === JSON.stringify(['worker-callback', 'hook-event', '--event', 'stop'])
+            ) &&
+            terminal.includes(planFixtureTurnBarrier(report)) &&
+            report.namespacePid === callerNative.panePid
+        );
+        if (
+          turn &&
+          terminal.includes('BCVIEW_RETURNED_' + id) &&
+          terminal.trimEnd().endsWith('❯') &&
+          session.isWorking === false &&
+          session.providerInputHeld === false &&
+          session.status === 'idle'
+        ) {
+          receipt = result;
+          break;
+        }
+      }
+      await wait(250);
+    }
+    assert.ok(receipt, 'SDK viewer command/consuming-close outcome unknown; never issue another command');
+    for (const key of [
+      'id',
+      'command',
+      'expected',
+      'callerEmployeeId',
+      'callerSessionId',
+      'employeeId',
+      'sessionId',
+      'sessionGeneration',
+    ] as const)
+      assert.equal(receipt[key], value[key]);
+    assert.equal(receipt.namespacePid, callerNative.panePid);
+    assert.equal(receipt.child.parentPid, callerNative.panePid);
+    assert.equal(receipt.child.sessionId, callerSid);
+    assert.equal(
+      receipt.child.argsDigest,
+      planOfficeViewerDigest(JSON.stringify(planOfficeForceChildArgs(planOfficeViewerArgs(value))))
+    );
+    assert.equal(
+      receipt.child.identityFileDigest,
+      planOfficeViewerDigest(planOfficeSelfIdentityFile(chosen.caller.row))
+    );
+    assert.deepEqual(observeProvider(chosen.caller.row), callerNative);
+    assert.deepEqual(observeProvider(chosen.target.row), targetNative);
+    if (kind === 'reconnect-viewer') requirePublishedView = true;
+    evidence.save('viewer-command-' + id + '-checked', {
+      ...receipt,
+      cliRefusalOnlyNotHttpStatus: expected === 'denied',
+    });
+    return receipt;
+  };
+  const result = await runPlanOfficeViewerRepair({
+    current,
+    grant: async (enabled) => {
+      await data(
+        await owner.request('/api/company/employees/' + caller.employeeId, 'PUT', {
+          permissions: { recoverEmployees: enabled },
+        })
+      );
+      const readback = await data(await owner.request('/api/company/employees/' + caller.employeeId + '/permissions'));
+      assert.equal(readback.employeeId, caller.employeeId);
+      assert.equal((readback.permissions as Json).recoverEmployees, enabled);
+      assert.equal((selected().caller.current.permissions as Json).recoverEmployees, enabled);
+      for (const [key, value] of Object.entries(permissions))
+        if (key !== 'recoverEmployees') assert.equal((readback.permissions as Json)[key], value);
+      evidence.save('viewer-grant-' + randomUUID(), {
+        employeeId: caller.employeeId,
+        recoverEmployees: enabled,
+        apiAndCanonicalReadback: true,
+      });
+    },
+    draft: async () => {
+      assert.ok(captureTarget().trimEnd().endsWith('❯'));
+      await data(await owner.request('/api/sessions/' + targetSid + '/input', 'POST', { input: draft, useMux: true }));
+    },
+    snapshot,
+    detach: async () => {
+      const original = await website('target'),
+        request = { ...(await websiteInput('target')), operation: 'detach', expected: original };
+      evidence.save('viewer-detach-intent', { original, noReplay: true, control });
+      const acknowledged = PlanOfficeWebsiteClient.parse(
+        JSON.parse(
+          metadata([
+            'exec',
+            control,
+            node,
+            '--input-type=module',
+            '-e',
+            PLAN_OFFICE_WEBSITE_CLIENT_PROGRAM,
+            '--',
+            module,
+            JSON.stringify(request),
+          ])
+        )
+      );
+      assert.deepEqual(acknowledged, original);
+      let gone = false;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        current();
+        const session = await planOfficeSession(await owner.request('/api/sessions/' + targetSid), targetSid);
+        if (
+          session.pid === null &&
+          JSON.parse(
+            metadata([
+              'exec',
+              control,
+              node,
+              '--input-type=module',
+              '-e',
+              PLAN_OFFICE_WEBSITE_GONE_PROGRAM,
+              '--',
+              module,
+              JSON.stringify({ value: original, controlCommand }),
+            ])
+          ) === true
+        ) {
+          gone = true;
+          break;
+        }
+        await wait(100);
+      }
+      assert.equal(gone, true, 'One website detach outcome unconfirmed; never repeat it');
+      evidence.save('viewer-detach-confirmed', { original, exitedAndAbsentFromOriginalCensus: true });
+    },
+    command,
+    verify: (beforeValue, afterValue, transport) => {
+      const before = beforeValue as Awaited<ReturnType<typeof snapshot>>,
+        after = afterValue as Awaited<ReturnType<typeof snapshot>>;
+      assert.deepEqual(after.draft, before.draft);
+      assert.deepEqual(after.journals, before.journals);
+      for (const who of ['caller', 'target']) {
+        const a = before.records[who]!,
+          b = after.records[who]!;
+        assert.deepEqual(
+          { ...b, website: undefined, viewCurrent: undefined },
+          { ...a, website: undefined, viewCurrent: undefined }
+        );
+        if (who === 'caller' || transport === 'same') assert.deepEqual(b.website, a.website);
+        else {
+          assert.notEqual(b.website.pid, a.website.pid);
+          const omitClient = ({
+            pid: _pid,
+            birth: _birth,
+            tty: _tty,
+            ttyStamp: _stamp,
+            ...rest
+          }: PlanOfficeWebsiteClient) => rest;
+          assert.deepEqual(omitClient(b.website), omitClient(a.website));
+        }
+      }
+    },
+    record: (name, value) => evidence.save(name, value),
+  });
+  const before = result.before as Awaited<ReturnType<typeof snapshot>>,
+    after = result.after as Awaited<ReturnType<typeof snapshot>>,
+    revoked = result.revoked as Awaited<ReturnType<typeof snapshot>>;
+  const websiteProjection = ({ socketPath, ...value }: PlanOfficeWebsiteClient) => ({
+    ...value,
+    socketPathSha256: planOfficeViewerDigest(socketPath),
+  });
+  const providerProjection = (value: z.infer<typeof native>, threadId: string) => ({
+    paneId: value.paneId,
+    panePid: value.panePid,
+    paneStartTicks: value.paneStartTicks,
+    threadId,
+    hookGenerationSha256: planOfficeViewerDigest(value.hooks.generation),
+  });
+  const fences = before.records.target!.fences;
+  const receipt = PlanOfficeViewerRepairCompletion.parse({
+    version: 1,
+    purpose: 'reverie-ci-team-viewer-repair-completed-v1',
+    id: result.id,
+    controlId: control,
+    callerEmployeeId: caller.employeeId,
+    employeeId: target.employeeId,
+    callerSessionId: callerSid,
+    sessionId: targetSid,
+    sessionGeneration: initial.target.row.request.sessionGeneration,
+    operationId: initial.target.row.request.operationId,
+    containerId: initial.target.row.destination!.containerId,
+    callerNative: providerProjection(callerNative, caller.nativeThreadId),
+    targetNative: providerProjection(targetNative, target.nativeThreadId),
+    oldWebsite: websiteProjection(before.records.target!.website),
+    newWebsite: websiteProjection(after.records.target!.website),
+    afterRevokeWebsite: websiteProjection(revoked.records.target!.website),
+    commands: [result.status, result.repaired, result.connected, result.denied],
+    draft: {
+      sha256: before.draft.nativeDraftSha256,
+      occurrences: 1,
+      targetTurnFilesSha256: planOfficeViewerDigest(JSON.stringify(before.draft.targetTurns)),
+      consumingHistoryBarriersSha256: planOfficeViewerDigest(JSON.stringify(before.draft.consumingHistoryBarriers)),
+    },
+    paidJournalSha256: before.journals.provider,
+    kernelPolicySha256: dockerContinuationDigest(Object.values(before.records).map((record) => record.kernel)),
+    canonicalScopeSha256: dockerContinuationDigest(Object.values(before.records).map((record) => record.scope)),
+    inputFences: fences,
+    activeUnknownInputExercised: [fences.publicTerminal, fences.savedTerminal].some(
+      (flag) => flag.present && flag.value === true
+    ),
+    unknownPipelineHistoryNativeQualified: false,
+    sdkInheritedMinusOnlyMux: true,
+    realPackagedCliAndHttp: true,
+    oneWebsiteClientOnly: true,
+    originalPaidProviderAndDraftRetained: true,
+    grantRevokedAndReadBack: true,
+    currentAfterCallerGrantRevoked: revoked.records.target!.viewCurrent,
+    productViewCurrentAfterRepair: after.records.target!.viewCurrent,
+    productViewCurrentAfterCallerRevoke: revoked.records.target!.viewCurrent,
+    limitation: 'External fake provider; no paid vendor/chat/self/website-restart recovery proof.',
+  });
+  evidence.save('team-viewer-repair-completed', receipt);
+}
+
 async function runPlanOfficeMoveLeg(
   input: Input,
   evidence: Evidence,

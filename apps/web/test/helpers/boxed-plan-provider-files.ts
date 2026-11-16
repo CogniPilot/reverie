@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { PlanRequestId } from '../../src/plan-request-capability.js';
 import { PlanProviderFixtureContract, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
 import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
+import { PlanOfficeViewerCommandInput, PlanOfficeViewerCommandReceipt } from './plan-office-viewer-repair.js';
 import {
   PlanOfficeAgentForceInput,
   PlanOfficeAgentForceReceipt,
@@ -227,6 +228,21 @@ export class PlanProviderFixtureFiles {
       if (value.id !== id) throw Error('Permission probe ID changed');
       return value;
     });
+  }
+  viewerCommand(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficeViewerCommandInput.parse(json(read(fixture, `viewer-command-input-${id}.json`)));
+      if (value.id !== id) throw Error('Viewer command ID changed');
+      return value;
+    });
+  }
+  viewerCommandRecord(kind: 'issued' | 'returned', value: unknown) {
+    const receipt =
+      kind === 'issued' ? PlanOfficeViewerCommandInput.parse(value) : PlanOfficeViewerCommandReceipt.parse(value);
+    this.#scope((_home, fixture) =>
+      write(fixture, `viewer-command-${kind}-${receipt.id}.json`, Buffer.from(JSON.stringify(receipt) + '\n'))
+    );
   }
   forceInput(id: string) {
     z.string().uuid().parse(id);

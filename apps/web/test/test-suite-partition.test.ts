@@ -189,6 +189,7 @@ describe('test suite partition', () => {
     expect(nixCheckedFiles("    checkPhase = ''\n" + namespace + '\nrunHook postCheck')).toEqual([
       'test/boxed-plan-provider-entry.test.ts',
       'test/plan-office-agent-force.test.ts',
+      'test/plan-office-viewer-repair.test.ts',
       'test/worker-viewer-docker-cli.test.ts',
       'test/docker-employee-saved-attach.test.ts',
       'test/docker-viewer-pane.test.ts',

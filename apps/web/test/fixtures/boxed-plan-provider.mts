@@ -15,6 +15,7 @@ import {
 import { WORKER_CLIENT_ENTRY } from '../../src/worker-client-manifest.js';
 import { observePlanOfficeForceChild, type PlanOfficeForceChild } from '../helpers/plan-office-force-child.js';
 import { runPlanOfficePermissionProbe } from '../helpers/plan-office-permission-probe.js';
+import { runPlanOfficeViewerCommand } from '../helpers/plan-office-viewer-repair.js';
 import {
   planOfficeForceEnvironment,
   preparePlanOfficeAgentForce,
@@ -261,6 +262,14 @@ export async function planProviderMain(args = process.argv.slice(2)) {
       serial = serial
         .then(async () => {
           if (stopped) return;
+          const viewer = /^BOXED_VIEWER_COMMAND_([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(line);
+          if (viewer) {
+            const input = files.viewerCommand(viewer[1]!);
+            await runPlanOfficeViewerCommand(input, contract.employeeId, files, planFixtureCli);
+            process.stdout.write('BCVIEW_RETURNED_' + input.id + '\n');
+            await fake.turn(); // real Stop and consuming-close barrier; never caller-supplied CLI arguments
+            return;
+          }
           const force = /^BOXED_PLAN_FORCE_(PREPARE|EXECUTE)_([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})$/.exec(line);
           if (force) {
             if (contract.sdkForceEnabled !== true) throw Error('SDK force cooperation was not selected');
