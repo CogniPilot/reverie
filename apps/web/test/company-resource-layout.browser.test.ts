@@ -348,6 +348,142 @@ for (const width of [320, 1280])
     }
   });
 
+it.each([320, 1280])(
+  'retains visible viewer read failures and isolates closed pending dialogs at %ipx',
+  async (width) => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await fixture(page, { viewerObservation: true });
+      await page.evaluate((employeeId) => {
+        type Reply = { ok: boolean; status: number; json(): Promise<unknown> };
+        const w = window as unknown as {
+          __server: { handle(path: string, options?: unknown): Promise<Reply> };
+          __nextViewerRead: 'failed' | 'normal' | 'hold';
+          __releaseClosedViewerRead(): void;
+        };
+        const original = w.__server.handle;
+        w.__nextViewerRead = 'failed';
+        w.__server.handle = async (path, options) => {
+          const reply = await original(path, options);
+          if (path !== '/api/company/employees/' + employeeId + '/reconnect/status') return reply;
+          const fault = w.__nextViewerRead;
+          w.__nextViewerRead = 'normal';
+          if (fault === 'failed')
+            return {
+              ok: false,
+              status: 503,
+              json: async () => ({
+                success: false,
+                error: 'Synthetic viewer status unavailable. Refresh to check again.',
+              }),
+            };
+          // The response is already captured. Closing must not let this older
+          // reply paint either the detached dialog or a newly opened one.
+          if (fault === 'hold')
+            await new Promise<void>((resolve) => {
+              w.__releaseClosedViewerRead = resolve;
+            });
+          return reply;
+        };
+      }, employeeId);
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompany('people'));
+      const statusButton = page.locator('#ca-company-people').getByRole('button', {
+        name: 'Terminal reconnect status',
+        exact: true,
+      });
+      await statusButton.click();
+      const dialog = page.getByRole('dialog', { name: 'Terminal status for River', exact: true });
+      const report = dialog.getByRole('status');
+      await expect
+        .poll(() => report.textContent())
+        .toBe('Synthetic viewer status unavailable. Refresh to check again.');
+      const refresh = dialog.getByRole('button', { name: 'Refresh terminal status', exact: true });
+      expect(await refresh.isEnabled()).toBe(true);
+      await page.evaluate(() => {
+        (window as unknown as { __viewerObservation: string }).__viewerObservation = 'responsive';
+      });
+      await refresh.click();
+      await expect.poll(() => report.textContent()).toContain('The terminal viewer responded.');
+      expect(await report.textContent()).toContain('Employee and chat readiness are still unconfirmed.');
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toHaveLength(2);
+      await page.evaluate(() => {
+        const w = window as unknown as { __nextViewerRead: string; __viewerObservation: string };
+        w.__nextViewerRead = 'hold';
+        w.__viewerObservation = 'unconfirmed';
+      });
+      await refresh.click();
+      await expect.poll(() => refresh.isDisabled()).toBe(true);
+      await dialog.getByRole('button', { name: 'Close terminal status', exact: true }).click();
+      expect(await dialog.count()).toBe(0);
+      await page.evaluate(() => {
+        const w = window as unknown as { __viewerObservation: string; __viewerReason: string };
+        w.__viewerObservation = 'responsive';
+        w.__viewerReason = 'native-health-unavailable';
+      });
+      await statusButton.click();
+      const reopened = page.getByRole('dialog', { name: 'Terminal status for River', exact: true });
+      await expect.poll(() => reopened.getByRole('status').textContent()).toContain('native health is unconfirmed');
+      const currentText = await reopened.getByRole('status').textContent();
+      const cachedStatus = () =>
+        page.evaluate(
+          ({ employeeId, sessionId }) => {
+            const w = window as unknown as {
+              reverieChat: {
+                viewerReconnectStatus(employee: { id: string; sessionId: string; sessionGeneration: number }): unknown;
+              };
+            };
+            return w.reverieChat.viewerReconnectStatus({ id: employeeId, sessionId, sessionGeneration: 2 });
+          },
+          { employeeId, sessionId }
+        );
+      const currentStatus = await cachedStatus();
+      expect(currentStatus).toMatchObject({
+        reason: 'native-health-unavailable',
+        observation: 'outer-pane-responsive',
+      });
+      await page.evaluate(async () => {
+        (window as unknown as { __releaseClosedViewerRead(): void }).__releaseClosedViewerRead();
+        await new Promise(requestAnimationFrame);
+      });
+      expect(await reopened.getByRole('status').textContent()).toBe(currentText);
+      expect(await cachedStatus()).toEqual(currentStatus);
+      expect(await reopened.count()).toBe(1);
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual(
+        [1, 2, 3, 4].map(() => ({
+          path: `/api/company/employees/${employeeId}/reconnect/status`,
+          method: 'POST',
+          body: { sessionId, sessionGeneration: 2 },
+        }))
+      );
+      const bounds = await reopened.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `viewer-closed-read-${width}.png`),
+        });
+      }
+      await reopened.getByRole('button', { name: 'Close terminal status', exact: true }).click();
+      expect(await reopened.count()).toBe(0);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  }
+);
+
 for (const width of [320, 390, 1280])
   it(`shows a server-projected sampled pressure warning and clears its severity on a stale refresh at ${width}px`, async () => {
     const browser = await chromium.launch({

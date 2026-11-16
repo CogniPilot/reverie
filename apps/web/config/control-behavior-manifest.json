@@ -1193,6 +1193,26 @@
         "expect(requests).toEqual(['PUT', 'GET', 'PUT'])"
       ],
       "outcome": "The actual desktop Rename group menu, input, fetch API client, editor and toast handle a closed synthetic commit whose reply is aborted. A gated GET returns the exact committed version5 layout, the visible rail adopts it without replaying the original PUT, and only a later explicit menu edit writes with baseVersion5. Actual Dismiss works. This qualifies consumer readback and dispatch, not real server persistence, multi-user authorization, production effects or phone rail editing."
+    },
+    "employee.viewer-status.failed-read-close": {
+      "test": "test/company-resource-layout.browser.test.ts",
+      "title": "retains visible viewer read failures and isolates closed pending dialogs at %ipx",
+      "assertions": [
+        "await statusButton.click()",
+        ".toBe('Synthetic viewer status unavailable. Refresh to check again.')",
+        "await refresh.click()",
+        "toHaveLength(2)",
+        "await dialog.getByRole('button', { name: 'Close terminal status', exact: true }).click()",
+        "expect(await dialog.count()).toBe(0)",
+        "await statusButton.click()",
+        "reason: 'native-health-unavailable'",
+        "__releaseClosedViewerRead()",
+        "expect(await cachedStatus()).toEqual(currentStatus)",
+        "body: { sessionId, sessionGeneration: 2 }",
+        "await reopened.getByRole('button', { name: 'Close terminal status', exact: true }).click()",
+        "expect(await reopened.count()).toBe(0)"
+      ],
+      "outcome": "Actual shipped viewer-status controls in Chromium at 320/1280px retain a closed synthetic503 error, make one explicit refresh, close during a pending status read, reopen with newer status and refuse the delayed closed-dialog response as both visible report and shared status-cache state. All four POSTs target the exact original read-only status binding; no reconnect/restart/chat effects or native worker health are qualified."
     }
   },
   "mappings": [
@@ -1639,6 +1659,16 @@
       "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
       "scenarios": ["ui.motion.stale-destination-drop", "ui.motion.rename-lost-readback"],
       "remaining": "Only actual Dismiss on the two named desktop tab-layout error toasts is qualified. Other toast call sites, action buttons, timing/accessibility states, narrow viewports and authority or backend effects remain separately unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::close::button:Close terminal status",
+      "scenarios": ["employee.viewer-status.failed-read-close"],
+      "remaining": "Synthetic status failures and reply ordering qualify only the named human consumer behavior. Actual Docker attachment, delegated identity/authority, provider health and reconnect effects require separate native acceptance; Escape/backdrop/keyboard close variants remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::refresh::button:Refresh terminal status",
+      "scenarios": ["employee.viewer-status.failed-read-close"],
+      "remaining": "Synthetic status failures and reply ordering qualify only the named human consumer behavior. Actual Docker attachment, delegated identity/authority, provider health and reconnect effects require separate native acceptance; Escape/backdrop/keyboard close variants remain gaps."
     }
   ],
   "gaps": [
@@ -2672,14 +2702,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.settingsPage::invite::button:Invite agents",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::close::button:Close terminal status",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::refresh::button:Refresh terminal status",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -7583,7 +7605,7 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1485,
+  "gapBudget": 1483,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
