@@ -12,7 +12,7 @@ import {
   readPlanOfficeStartupDiagnostic,
   projectPlanOfficeStartupDiagnostic,
   readPlanOfficeBuildDiagnostic,
-  PLAN_OFFICE_BUILD_STAGES,
+  projectPlanOfficeBuildDiagnostic,
 } from '../test/helpers/plan-office-startup-diagnostic.ts';
 
 type Json = Record<string, unknown>;
@@ -492,9 +492,21 @@ const diagnosticKinds = new Set([
   'canonical-move',
   'owner-refusal',
 ]);
+function diagnosticSnapshot(value: unknown, keys: readonly string[]): Json {
+  const snapshot: Json = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return snapshot;
+  for (const key of keys) {
+    try {
+      snapshot[key] = (value as Json)[key];
+    } catch {
+      /* An unreadable field supplies no public diagnostic. */
+    }
+  }
+  return snapshot;
+}
 /** Explicit projection only: even a public DTO's message/error/stack can contain credentials. */
 export function planOfficeCiFailureDiagnostic(child: unknown, observations: readonly unknown[], instance?: string) {
-  const c = child && typeof child === 'object' ? (child as Json) : {};
+  const c = diagnosticSnapshot(child, ['status', 'signal', 'errorName', 'startup', 'build']);
   const childStatus: Json = {};
   if (c.status === null || (Number.isInteger(c.status) && Number(c.status) >= 0 && Number(c.status) <= 255))
     childStatus.status = c.status;
@@ -511,7 +523,18 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
     childStatus.errorName = c.errorName;
   const operations = observations.slice(-16).flatMap((value) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-    const v = value as Json;
+    const v = diagnosticSnapshot(value, [
+      'kind',
+      'id',
+      'employeeId',
+      'sessionId',
+      'newSession',
+      'phase',
+      'movePhase',
+      'state',
+      'httpStatus',
+      'errorCode',
+    ]);
     if (typeof v.kind !== 'string' || !diagnosticKinds.has(v.kind)) return [];
     const result: Json = { kind: v.kind };
     for (const key of ['id', 'employeeId', 'sessionId', 'newSession'])
@@ -524,13 +547,12 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
     return Object.keys(result).length > 1 ? [result] : [];
   });
   const startup = instance ? projectPlanOfficeStartupDiagnostic(c.startup, instance) : undefined;
-  const build = c.build && typeof c.build === 'object' ? (c.build as Json) : {};
-  const builder = projectPlanOfficeStartupDiagnostic(build.builder, '0'.repeat(32));
-  const importSmoke = projectPlanOfficeStartupDiagnostic(build.importSmoke, '0'.repeat(32));
-  const fixtureBuild =
-    builder && (PLAN_OFFICE_BUILD_STAGES as readonly string[]).includes(builder.stage)
-      ? { builder, ...(importSmoke ? { importSmoke } : {}) }
-      : undefined;
+  let fixtureBuild: ReturnType<typeof projectPlanOfficeBuildDiagnostic>;
+  try {
+    fixtureBuild = projectPlanOfficeBuildDiagnostic(c.build, instance);
+  } catch {
+    /* An untrusted getter supplies no public diagnostic. */
+  }
   return {
     child: childStatus,
     operations,
@@ -541,7 +563,9 @@ export function planOfficeCiFailureDiagnostic(child: unknown, observations: read
       : startup
         ? 'last-known-entered-stage'
         : fixtureBuild
-          ? 'last-known-build-stage'
+          ? fixtureBuild.builder
+            ? 'last-known-build-stage'
+            : 'last-reported-nix-error'
           : 'unavailable',
   };
 }
@@ -689,7 +713,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       errorName: result.error?.name,
       ...(label === 'actual-' + selection ? { startup: readPlanOfficeStartupDiagnostic(result.stdout, instance) } : {}),
       ...(label === 'build-fixture-inputs' || label === 'build-control'
-        ? { build: readPlanOfficeBuildDiagnostic(result.stderr) }
+        ? { build: readPlanOfficeBuildDiagnostic(result.stderr, instance) }
         : {}),
     };
     // Raw replies can contain synthetic passwords/tokens. They stay outside artifacts and console logs.

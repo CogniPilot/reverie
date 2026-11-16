@@ -13,6 +13,8 @@ import {
   readPlanOfficeStartupDiagnostic,
   projectPlanOfficeStartupDiagnostic,
   readPlanOfficeBuildDiagnostic,
+  projectPlanOfficeBuildDiagnostic,
+  projectPlanOfficeNixDiagnostic,
 } from './helpers/plan-office-startup-diagnostic.js';
 import {
   requireHostedPlanOffice,
@@ -94,6 +96,267 @@ it('retains the actual producer refusal through closed Nix builder records witho
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+const nixRecord = (value: unknown) => '@nix ' + JSON.stringify(value) + '\n';
+const nixDrv = '/nix/store/' + 'c'.repeat(32) + '-reverie-ci-plan-office-runtime.drv';
+it.each([
+  {
+    category: 'builder-failure',
+    component: 'fixture-runtime',
+    source: 'unavailable',
+    record: {
+      action: 'msg',
+      level: 0,
+      msg: "error: Cannot build '" + nixDrv + "'.\n       Reason: builder failed with exit code 1.\nHOSTILE_AUTH_TOKEN",
+    },
+  },
+  {
+    category: 'dependency-failure',
+    component: 'fixture-runtime',
+    source: 'unavailable',
+    record: {
+      action: 'msg',
+      level: 0,
+      msg: 'error: HOSTILE_AUTH_TOKEN',
+      raw_msg: "Cannot build '" + nixDrv + "'.\nReason: 1 dependency failed.\nHOSTILE_AUTH_TOKEN",
+    },
+  },
+  {
+    category: 'evaluation-error',
+    component: 'unavailable',
+    source: 'ci-plan-office-images',
+    record: {
+      action: 'msg',
+      level: 0,
+      msg: 'HOSTILE_AUTH_TOKEN',
+      file: '/private/HOSTILE_AUTH_TOKEN/nix/ci-plan-office-images.nix',
+      line: 42,
+      column: 3,
+    },
+  },
+  {
+    category: 'nix-error',
+    component: 'unavailable',
+    source: 'unavailable',
+    record: { action: 'msg', level: 0, msg: 'HOSTILE_AUTH_TOKEN', file: null, line: null },
+  },
+])('retains a child-reported $category before Node producer entry without publishing raw content', (expected) => {
+  // A real failed child supplies stderr; these are captured Nix protocol shapes,
+  // not a Nix execution or a claim about the hosted failure's underlying cause.
+  const result = spawnSync(
+    process.execPath,
+    ['-e', 'process.stderr.write(process.argv[1]);process.exitCode=1', nixRecord(expected.record)],
+    {
+      encoding: 'utf8',
+      timeout: 10000,
+      maxBuffer: 65536,
+      env: { PATH: path.dirname(process.execPath), LANG: 'C.UTF-8' },
+    }
+  );
+  expect(result.error).toBeUndefined();
+  expect(result.status).toBe(1);
+  expect(result.signal).toBeNull();
+  expect(result.stderr).toContain('HOSTILE_AUTH_TOKEN');
+  const build = readPlanOfficeBuildDiagnostic(result.stderr, instance);
+  expect(build?.builder).toBeUndefined();
+  expect(build?.nix).toEqual({
+    version: 1,
+    purpose: 'reverie-ci-plan-office-nix-diagnostic-v1',
+    observation: 'last-reported-nix-error',
+    instance,
+    category: expected.category,
+    component: expected.component,
+    source: expected.source,
+    reports: 'one',
+  });
+  const report = planOfficeCiFailureDiagnostic({ status: result.status, signal: result.signal, build }, [], instance);
+  expect(report.fixtureBuild).toEqual(build);
+  expect(report.observation).toBe('last-reported-nix-error');
+  expect(JSON.stringify(report)).not.toMatch(/HOSTILE_AUTH_TOKEN|\/private|\/nix\/store|Reason:|exit code/);
+});
+it('retains only the last reported Nix error alongside independently valid Node checkpoints', () => {
+  const nil = '0'.repeat(32),
+    token = 'HOSTILE_AUTH_TOKEN';
+  const builder = planOfficeStartupDiagnostic('build-product-modules', nil, { name: 'TypeError' });
+  const frame = nixRecord({
+    action: 'result',
+    type: 101,
+    fields: [PLAN_OFFICE_STARTUP_PREFIX + JSON.stringify(builder)],
+  });
+  const first = nixRecord({
+    action: 'msg',
+    level: 0,
+    msg: token,
+    file: '/private/' + token + '/nix/package.nix',
+    line: 1,
+  });
+  const last = nixRecord({
+    action: 'msg',
+    level: 0,
+    msg: "Cannot build '" + nixDrv + "'.\nReason: 2 dependencies failed.\n" + token,
+  });
+  const result = readPlanOfficeBuildDiagnostic(first + frame + last, instance);
+  expect(result?.builder).toEqual(builder);
+  expect(result?.nix).toMatchObject({ category: 'dependency-failure', reports: 'multiple', source: 'unavailable' });
+  expect(planOfficeCiFailureDiagnostic({ build: result }, [], instance).observation).toBe('last-known-build-stage');
+  expect(JSON.stringify(result)).not.toContain(token);
+  expect(readPlanOfficeBuildDiagnostic(first + frame + frame + last, instance)).toBeUndefined();
+});
+it.each(['fixture-image', 'other-derivation'] as const)(
+  'projects the fixed %s component without retaining a derivation name',
+  (component) => {
+    const name =
+      component === 'fixture-image'
+        ? 'docker-image-reverie-ci-plan-office-' + instance + '-control.tar.gz'
+        : 'HOSTILE_AUTH_TOKEN-dependency';
+    const raw = nixRecord({
+      action: 'msg',
+      level: 0,
+      msg: 'HOSTILE_AUTH_TOKEN',
+      raw_msg:
+        "Cannot build '/nix/store/" + 'c'.repeat(32) + '-' + name + ".drv'.\nReason: builder failed with exit code 1.",
+    });
+    const result = readPlanOfficeBuildDiagnostic(raw, instance);
+    expect(result?.nix).toMatchObject({ category: 'builder-failure', component });
+    expect(JSON.stringify(result)).not.toMatch(/HOSTILE_AUTH_TOKEN|\/nix\/store|tar\.gz|\.drv/);
+  }
+);
+it('ignores ordinary logs, warnings, malformed or oversized records instead of inferring a Nix failure', () => {
+  const msg = { action: 'msg', level: 0, msg: 'HOSTILE_AUTH_TOKEN' };
+  for (const raw of [
+    'error: HOSTILE_AUTH_TOKEN\n',
+    nixRecord({ ...msg, level: 3 }),
+    nixRecord({ action: 'result', type: 101, fields: [nixRecord(msg)] }),
+    nixRecord({ action: 'start', type: 105, text: 'HOSTILE_AUTH_TOKEN' }),
+    nixRecord({ ...msg, msg: '' }),
+    nixRecord([]),
+    '@nix {"action":\n',
+    nixRecord(msg).slice(0, -1),
+    nixRecord({ ...msg, msg: 'x'.repeat(256 * 1024) }),
+  ])
+    expect(readPlanOfficeBuildDiagnostic(raw, instance)).toBeUndefined();
+  expect(readPlanOfficeBuildDiagnostic(nixRecord(msg))).toBeUndefined();
+  expect(readPlanOfficeBuildDiagnostic(nixRecord(msg), 'foreign')).toBeUndefined();
+});
+it('revalidates every outbound Nix enum, closed field and run rather than trusting a projected DTO', () => {
+  const token = 'HOSTILE_AUTH_TOKEN',
+    raw = nixRecord({ action: 'msg', level: 0, msg: token });
+  const nix = readPlanOfficeBuildDiagnostic(raw, instance)!.nix!;
+  expect(projectPlanOfficeNixDiagnostic(nix, instance)).toEqual(nix);
+  for (const changed of [
+    { ...nix, message: token },
+    { ...nix, category: token },
+    { ...nix, component: token },
+    { ...nix, source: token },
+    { ...nix, observation: token },
+    { ...nix, reports: token },
+    { ...nix, instance: 'b'.repeat(32) },
+    { ...nix, version: 2 },
+    { ...nix, purpose: token },
+    { ...nix, [Symbol('untrusted')]: token },
+  ]) {
+    expect(projectPlanOfficeNixDiagnostic(changed, instance)).toBeUndefined();
+    expect(projectPlanOfficeBuildDiagnostic({ nix: changed }, instance)).toBeUndefined();
+    expect(planOfficeCiFailureDiagnostic({ build: { nix: changed } }, [], instance).fixtureBuild).toBeUndefined();
+  }
+  expect(projectPlanOfficeBuildDiagnostic({ nix }, 'b'.repeat(32))).toBeUndefined();
+  expect(projectPlanOfficeBuildDiagnostic({ nix, path: token }, instance)).toBeUndefined();
+  expect(projectPlanOfficeBuildDiagnostic({ nix, builder: undefined }, instance)).toBeUndefined();
+  let reads = 0;
+  const getter = {
+    ...nix,
+    get category() {
+      return ++reads === 1 ? nix.category : token;
+    },
+  };
+  expect(projectPlanOfficeNixDiagnostic(getter, instance)?.category).toBe(nix.category);
+  expect(reads).toBe(1);
+  expect(
+    projectPlanOfficeBuildDiagnostic(
+      {
+        get nix() {
+          throw Error(token);
+        },
+      },
+      instance
+    )
+  ).toBeUndefined();
+  expect(
+    planOfficeCiFailureDiagnostic(
+      {
+        get build() {
+          throw Error(token);
+        },
+      },
+      [],
+      instance
+    ).fixtureBuild
+  ).toBeUndefined();
+});
+it('snapshots promoted child and operation fields once so hostile getters cannot change after validation', () => {
+  const token = 'HOSTILE_AUTH_TOKEN',
+    reads = new Map<string, number>();
+  const get = (key: string, value: unknown, limit: number) => {
+    const count = (reads.get(key) ?? 0) + 1;
+    reads.set(key, count);
+    return count <= limit ? value : token;
+  };
+  const report = planOfficeCiFailureDiagnostic(
+    {
+      get status() {
+        return get('status', 1, 4);
+      },
+      get signal() {
+        return get('signal', 'SIGTERM', 3);
+      },
+      get errorName() {
+        return get('errorName', 'Error', 2);
+      },
+    },
+    [
+      {
+        get kind() {
+          return get('kind', 'request-status', 2);
+        },
+        get id() {
+          return get('id', employeeId, 2);
+        },
+        get phase() {
+          return get('phase', 'executing', 2);
+        },
+        get httpStatus() {
+          return get('httpStatus', 403, 3);
+        },
+        get errorCode() {
+          return get('errorCode', 'FORBIDDEN', 2);
+        },
+      },
+    ],
+    instance
+  );
+  expect(JSON.stringify(report)).not.toContain(token);
+  expect(report.child).toEqual({ status: 1, signal: 'SIGTERM', errorName: 'Error' });
+  expect(report.operations).toEqual([
+    { kind: 'request-status', id: employeeId, phase: 'executing', httpStatus: 403, errorCode: 'FORBIDDEN' },
+  ]);
+  expect([...reads.values()]).toEqual(Array(8).fill(1));
+  expect(() =>
+    planOfficeCiFailureDiagnostic(
+      {
+        get status() {
+          throw Error(token);
+        },
+      },
+      [
+        {
+          get kind() {
+            throw Error(token);
+          },
+        },
+      ],
+      instance
+    )
+  ).not.toThrow();
 });
 it('projects only complete correlated startup stages/classes/codes and never hostile error content', () => {
   const token = 'HOSTILE_AUTH_TOKEN_DO_NOT_PUBLISH';
