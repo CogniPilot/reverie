@@ -92,6 +92,18 @@ hides all lower-layer capsule children, so upgrading a base with an older capsul
 cannot retain unlisted stale files. Image construction is not physical runtime or
 old-worker compatibility acceptance.
 
+`nix build .#workerClientCapsule` exposes the same canonical capsule used by the
+website factory. Its manifest is at `opt/reverie-worker-client/manifest.json`;
+`workerNativeClient` is a different artifact. The maintainer adapter
+`scripts/build-boxed-worker-image.mts` replaces the whole client directory in an
+immutable worker base before copying the new capsule. Its fixed build-only
+root step runs `/bin/rm` with an exact argument vector, then restores the
+inspected numeric `UID:GID`. Unsupported or empty source users refuse before
+image tagging or building. The optional tools overlay keeps its existing behavior.
+The adapter still verifies the entire target configuration and ordered source
+layer prefix. Artifact construction does not qualify a running worker, native
+plan protocol, provider readiness, or an old employee client.
+
 After verifying the container's local-model endpoint and fresh GPU readings,
 retire any legacy host `reverie-local-model`, GPU telemetry and source-updater
 services. Keep model files and credentials. The old host services are not part

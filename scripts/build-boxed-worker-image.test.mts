@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import {
   capsuleMembers,
   sha,
@@ -12,7 +16,60 @@ import {
   workerEnvironment,
   toolsEnvironment,
   workerToolsMembers,
+  capsuleReplacementArguments,
+  build,
 } from "./build-boxed-worker-image.mts";
+import { fileURLToPath } from "node:url";
+
+test("both fixed Dockerfiles replace the entire client tree before COPY and restore the inspected user", () => {
+  for (const name of ["Dockerfile.boxed-worker", "Dockerfile.worker-tools"]) {
+    const lines = fs
+      .readFileSync(
+        fileURLToPath(new URL("../docker/" + name, import.meta.url)),
+        "utf8",
+      )
+      .split("\n")
+      .map((line) => line.trim());
+    const root = lines.indexOf("USER 0:0"),
+      remove = lines.findIndex((line) => line.startsWith("RUN ")),
+      copy = lines.indexOf("COPY --chown=0:0 opt/ /opt/"),
+      restored = lines.indexOf("USER ${REVERIE_WORKER_USER}");
+    assert(lines.indexOf("ARG REVERIE_WORKER_USER") < root);
+    assert(root > 0 && root < remove && remove < copy && copy < restored);
+    assert.equal(lines.filter((line) => line.startsWith("RUN ")).length, 1);
+    assert.deepEqual(JSON.parse(lines[remove]!.slice(4)), [
+      "/bin/rm",
+      "-rf",
+      "--",
+      "/opt/reverie-worker-client",
+    ]);
+    assert.equal(lines.filter((line) => line.startsWith("USER ")).length, 2);
+  }
+});
+test("only the exact canonical inspected UID:GID enters the fixed restoration argument", () => {
+  for (const user of ["1000:100", "0:0", "4294967294:4294967294"])
+    assert.deepEqual(capsuleReplacementArguments(user), [
+      "--build-arg",
+      "REVERIE_WORKER_USER=" + user,
+    ]);
+  for (const user of [
+    undefined,
+    null,
+    "",
+    "root",
+    "1000",
+    "01:2",
+    "1:02",
+    "-1:2",
+    "1:4294967295",
+    "1:2\n",
+    "1:2;id",
+    "$(id):2",
+    {},
+    [],
+  ])
+    assert.throws(() => capsuleReplacementArguments(user));
+});
 
 test("capsule directories are sealed to the producer's required 0555 before COPY", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "reverie-capsule-modes-"));
@@ -186,4 +243,77 @@ test("worker tools require their own fixed manifest roles", () => {
   );
   assert.equal(workerToolsMembers(raw, sha(raw)).length, 3);
   assert.throws(() => capsuleMembers(raw, sha(raw)));
+});
+
+test("actual adapter refuses an unsupported source user before the first image mutation", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reverie-source-user-"));
+  const capsule = path.join(root, "capsule"),
+    helper = path.join(root, "helper");
+  fs.mkdirSync(path.join(capsule, "bin"), { recursive: true });
+  const bytes = Buffer.from("owned-test-entry");
+  const member = { ...file(), sha256: sha(bytes), bytes: bytes.length };
+  const raw = encoded([member]);
+  fs.writeFileSync(path.join(capsule, "manifest.json"), raw, { mode: 0o444 });
+  fs.writeFileSync(path.join(capsule, member.path), bytes, {
+    mode: member.mode,
+  });
+  fs.writeFileSync(helper, Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+  const calls: string[][] = [];
+  const original = childProcess.spawn;
+  try {
+    // Negative-only native port: no Docker executable or daemon is contacted.
+    childProcess.spawn = ((command: string, args: readonly string[] = []) => {
+      assert.equal(command, path.join(root, "docker"));
+      calls.push([...args]);
+      assert.deepEqual(args, ["image", "inspect", imageId]);
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        kill: () => true,
+      });
+      queueMicrotask(() => {
+        child.stdout.end(
+          JSON.stringify([
+            { ...base(), Config: { ...base().Config, User: "" } },
+          ]),
+        );
+        child.stderr.end();
+        child.emit("close", 0, null);
+      });
+      return child;
+    }) as unknown as typeof childProcess.spawn;
+    syncBuiltinESMExports();
+    await assert.rejects(
+      build([
+        "--docker",
+        path.join(root, "docker"),
+        "--source-image",
+        imageId,
+        "--capsule",
+        capsule,
+        "--client-digest",
+        sha(raw),
+        "--helper",
+        helper,
+        "--context",
+        path.join(root, "context"),
+        "--evidence",
+        path.join(root, "evidence"),
+        "--tag",
+        "reverie-test:owned",
+      ]),
+      /canonical numeric source UID:GID/,
+    );
+    assert.deepEqual(calls, [["image", "inspect", imageId]]);
+  } finally {
+    childProcess.spawn = original;
+    syncBuiltinESMExports();
+    function writable(directory: string) {
+      fs.chmodSync(directory, 0o700);
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true }))
+        if (entry.isDirectory()) writable(path.join(directory, entry.name));
+    }
+    writable(root);
+    fs.rmSync(root, { recursive: true });
+  }
 });
