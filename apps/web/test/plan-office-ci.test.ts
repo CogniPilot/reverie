@@ -809,6 +809,8 @@ it('requires separate team API denial/revocation, positive capsule and physical 
     baselineReady: true,
     planMovesAccepted: true,
     teamAccepted: true,
+    viewerRepairAccepted: true,
+    controlId: 'd'.repeat(64),
     evidence: root,
     forceAccepted: false,
     refreshReuseAccepted: false,
@@ -841,7 +843,140 @@ it('requires separate team API denial/revocation, positive capsule and physical 
     sessionGeneration: 2,
     nativeThreadId: operation,
     actualCallbacksAndConsumingCloses: true,
+    pane: {
+      paneId: '%9',
+      panePid: 200,
+      paneStartTicks: '1000',
+      hooks: { kind: 'generation', generation: 'ci-target-hook' },
+    },
   };
+  const callerThread = '88888888-8888-4888-8888-888888888888';
+  const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+  const oldWebsite = {
+    sessionId: target,
+    muxName: 'reverie-' + target.slice(0, 8),
+    pid: 301,
+    birth: '1001',
+    tty: '/dev/pts/3',
+    ttyStamp: 'tty-before',
+    parentBirth: '900',
+    parentCommandDigest: 'e'.repeat(64),
+    serverPid: 302,
+    serverBirth: '901',
+    socketStamp: 'socket',
+    outerPid: 303,
+    outerBirth: '902',
+    outerCommandDigest: 'f'.repeat(64),
+    outerForm: 'paid-launch',
+    manifestDigest: 'a'.repeat(64),
+    socketPathSha256: 'b'.repeat(64),
+  };
+  const newWebsite = { ...oldWebsite, pid: 304, birth: '1010', tty: '/dev/pts/4', ttyStamp: 'tty-after' };
+  const commands = ['viewer-status', 'reconnect-viewer', 'viewer-status', 'viewer-status'].map((command, i) => ({
+    version: 1,
+    purpose: 'reverie-ci-sdk-viewer-command-returned-v1',
+    id: '11111111-1111-4111-8111-11111111110' + i,
+    command,
+    expected: i === 3 ? 'denied' : 'allowed',
+    callerEmployeeId: caller,
+    callerSessionId: callerSession,
+    employeeId,
+    sessionId: target,
+    sessionGeneration: 2,
+    namespacePid: 55,
+    child: {
+      childPid: 600 + i,
+      parentPid: 55,
+      childBirthTicks: '200' + i,
+      nodeStage: '/opt/reverie-worker-client/bin/node',
+      argsDigest: digest(
+        JSON.stringify([
+          '/opt/reverie-worker-client/bin/node',
+          '--no-global-search-paths',
+          '--no-addons',
+          '/opt/reverie-worker-client/bin/reverie.mjs',
+          'agent',
+          command,
+          employeeId,
+          '--json',
+        ])
+      ),
+      sessionId: callerSession,
+      identityFileDigest: 'c'.repeat(64),
+      childMuxAbsent: true,
+      requiredEnvironmentMatched: true,
+    },
+    exitCode: i === 3 ? 4 : 0,
+    reconnect:
+      i === 3
+        ? null
+        : {
+            state: i === 0 ? 'blocked' : 'connected',
+            reason: i === 0 ? 'not-attempted' : 'connected',
+            attempts: i ? 1 : 0,
+            retryAfterMs: 0,
+          },
+    stdoutSha256: 'a'.repeat(64),
+    stderrSha256: 'b'.repeat(64),
+  }));
+  const viewer = {
+    version: 1,
+    purpose: 'reverie-ci-team-viewer-repair-completed-v1',
+    id: '99999999-9999-4999-8999-999999999999',
+    controlId: result.controlId,
+    callerEmployeeId: caller,
+    employeeId,
+    callerSessionId: callerSession,
+    sessionId: target,
+    sessionGeneration: 2,
+    operationId: operation,
+    containerId: receipt.targetContainerId,
+    callerNative: {
+      paneId: '%1',
+      panePid: 55,
+      paneStartTicks: '800',
+      threadId: callerThread,
+      hookGenerationSha256: 'c'.repeat(64),
+    },
+    targetNative: {
+      paneId: '%9',
+      panePid: 200,
+      paneStartTicks: '1000',
+      threadId: operation,
+      hookGenerationSha256: digest('ci-target-hook'),
+    },
+    oldWebsite,
+    newWebsite,
+    afterRevokeWebsite: { ...newWebsite },
+    commands,
+    draft: {
+      sha256: 'd'.repeat(64),
+      occurrences: 1,
+      targetTurnFilesSha256: 'e'.repeat(64),
+      consumingHistoryBarriersSha256: 'f'.repeat(64),
+    },
+    paidJournalSha256: 'a'.repeat(64),
+    kernelPolicySha256: 'b'.repeat(64),
+    canonicalScopeSha256: 'c'.repeat(64),
+    inputFences: Object.fromEntries(
+      ['publicTerminal', 'savedTerminal', 'publicProvider', 'savedProvider'].map((key) => [
+        key,
+        { present: false, value: null },
+      ])
+    ),
+    activeUnknownInputExercised: false,
+    unknownPipelineHistoryNativeQualified: false,
+    sdkInheritedMinusOnlyMux: true,
+    realPackagedCliAndHttp: true,
+    oneWebsiteClientOnly: true,
+    originalPaidProviderAndDraftRetained: true,
+    grantRevokedAndReadBack: true,
+    currentAfterCallerGrantRevoked: true,
+    productViewCurrentAfterRepair: true,
+    productViewCurrentAfterCallerRevoke: true,
+    limitation: 'External fake provider; no paid vendor/chat/self/website-restart recovery proof.',
+  };
+  const bootstrapCaller = { sessionId: callerSession, nativeThreadId: callerThread };
   const permissionReceipts = [403, 200, 403, 200].map((status, i) => ({
     version: 1,
     purpose: 'reverie-ci-team-permission-receipt-v1',
@@ -873,15 +1008,25 @@ it('requires separate team API denial/revocation, positive capsule and physical 
       actualSdkProcess: true,
     })),
   };
-  expect(requirePlanOfficeCiTeamAcceptance(result, summary, receipt, physical, root, caller, employeeId)).toMatchObject(
-    {
-      teamAccepted: true,
-      teamManagePlansGrantRevocationAccepted: true,
-      ordinarySelfAccepted: false,
-      permissionMatrixAccepted: false,
-      agentForceAccepted: false,
-    }
-  );
+  expect(
+    requirePlanOfficeCiTeamAcceptance(
+      result,
+      summary,
+      receipt,
+      physical,
+      root,
+      caller,
+      employeeId,
+      viewer,
+      bootstrapCaller
+    )
+  ).toMatchObject({
+    teamAccepted: true,
+    teamManagePlansGrantRevocationAccepted: true,
+    ordinarySelfAccepted: false,
+    permissionMatrixAccepted: false,
+    agentForceAccepted: false,
+  });
   for (const change of [
     { callerPreserved: false },
     { permissionReceipts: permissionReceipts.slice(1) },
@@ -889,7 +1034,17 @@ it('requires separate team API denial/revocation, positive capsule and physical 
     { permissionReceipts: permissionReceipts.map((p, i) => (i === 2 ? { ...p, id: permissionReceipts[0]!.id } : p)) },
   ])
     expect(() =>
-      requirePlanOfficeCiTeamAcceptance(result, { ...summary, ...change }, receipt, physical, root, caller, employeeId)
+      requirePlanOfficeCiTeamAcceptance(
+        result,
+        { ...summary, ...change },
+        receipt,
+        physical,
+        root,
+        caller,
+        employeeId,
+        viewer,
+        bootstrapCaller
+      )
     ).toThrow();
   for (const change of [
     { realCapsuleHmac: false },
@@ -897,7 +1052,17 @@ it('requires separate team API denial/revocation, positive capsule and physical 
     { callerSessionId: source },
   ])
     expect(() =>
-      requirePlanOfficeCiTeamAcceptance(result, summary, { ...receipt, ...change }, physical, root, caller, employeeId)
+      requirePlanOfficeCiTeamAcceptance(
+        result,
+        summary,
+        { ...receipt, ...change },
+        physical,
+        root,
+        caller,
+        employeeId,
+        viewer,
+        bootstrapCaller
+      )
     ).toThrow();
   expect(() =>
     requirePlanOfficeCiTeamAcceptance(
@@ -907,9 +1072,107 @@ it('requires separate team API denial/revocation, positive capsule and physical 
       { ...physical, actualCallbacksAndConsumingCloses: false },
       root,
       caller,
-      employeeId
+      employeeId,
+      viewer,
+      bootstrapCaller
     )
   ).toThrow();
+  expect(() =>
+    requirePlanOfficeCiTeamAcceptance(
+      result,
+      summary,
+      receipt,
+      physical,
+      root,
+      caller,
+      employeeId,
+      undefined,
+      bootstrapCaller
+    )
+  ).toThrow();
+  expect(() =>
+    requirePlanOfficeCiTeamAcceptance(
+      { ...result, viewerRepairAccepted: false },
+      summary,
+      receipt,
+      physical,
+      root,
+      caller,
+      employeeId,
+      viewer,
+      bootstrapCaller
+    )
+  ).toThrow();
+  const acceptViewer = (candidate: unknown) =>
+    requirePlanOfficeCiTeamAcceptance(
+      result,
+      summary,
+      receipt,
+      physical,
+      root,
+      caller,
+      employeeId,
+      candidate,
+      bootstrapCaller
+    );
+  for (const change of [
+    { employeeId: caller },
+    { callerSessionId: source },
+    { sessionId: source },
+    { sessionGeneration: 1 },
+    { operationId: id },
+    { containerId: receipt.sourceContainerId },
+    { controlId: 'e'.repeat(64) },
+    { targetNative: { ...viewer.targetNative, panePid: 201 } },
+    { targetNative: { ...viewer.targetNative, hookGenerationSha256: 'e'.repeat(64) } },
+    { callerNative: { ...viewer.callerNative, threadId: operation } },
+    {
+      callerNative: { ...viewer.callerNative, panePid: 56 },
+      commands: commands.map((v) => ({ ...v, namespacePid: 56, child: { ...v.child, parentPid: 56 } })),
+    },
+    { newWebsite: oldWebsite },
+    { newWebsite: { ...newWebsite, outerPid: 305 } },
+    { afterRevokeWebsite: { ...newWebsite, pid: 305 } },
+    { commands: commands.slice(1) },
+    { commands: commands.map((v, i) => (i === 3 ? { ...v, exitCode: 0 } : v)) },
+    { commands: commands.map((v, i) => (i === 2 ? { ...v, id: commands[0]!.id } : v)) },
+    { commands: commands.map((v, i) => (i === 2 ? { ...v, child: commands[0]!.child } : v)) },
+    { commands: commands.map((v, i) => (i === 1 ? { ...v, child: { ...v.child, childMuxAbsent: false } } : v)) },
+    { commands: commands.map((v, i) => (i === 1 ? { ...v, child: { ...v.child, argsDigest: 'f'.repeat(64) } } : v)) },
+    { commands: commands.map((v, i) => (i === 1 ? { ...v, child: { ...v.child, parentPid: 200 } } : v)) },
+    {
+      commands: commands.map((v, i) =>
+        i === 1 ? { ...v, child: { ...v.child, identityFileDigest: 'f'.repeat(64) } } : v
+      ),
+    },
+    { commands: commands.map((v, i) => (i === 3 ? { ...v, httpStatus: 403 } : v)) },
+    { draft: { ...viewer.draft, occurrences: 2 } },
+    { productViewCurrentAfterRepair: false },
+    { productViewCurrentAfterCallerRevoke: false },
+    { currentAfterCallerGrantRevoked: false },
+    { activeUnknownInputExercised: true },
+    { unknownPipelineHistoryNativeQualified: true },
+    { inputFences: { ...viewer.inputFences, savedTerminal: { present: false, value: true } } },
+    { inputFences: { ...viewer.inputFences, savedTerminal: { present: true, value: null } } },
+    { extraAuthority: true },
+  ])
+    expect(() => acceptViewer({ ...viewer, ...change })).toThrow();
+  expect(
+    acceptViewer({
+      ...viewer,
+      inputFences: { ...viewer.inputFences, savedTerminal: { present: true, value: true } },
+      activeUnknownInputExercised: true,
+    })
+  ).toMatchObject({ activeUnknownInputExercised: true, unknownPipelineHistoryNativeQualified: false });
+  expect(acceptViewer(viewer)).toMatchObject({ teamViewerRepairAccepted: true, recoveryGrantRevocationAccepted: true });
+  expect(
+    acceptViewer({
+      ...viewer,
+      commands: commands.map((v, i) =>
+        i === 2 ? { ...v, child: { ...commands[0]!.child, childBirthTicks: '3000' } } : v
+      ),
+    })
+  ).toMatchObject({ teamViewerRepairAccepted: true });
   expect(() => requirePlanOfficeCiAcceptance(result, receipt, root, employeeId, 'team-plan-move')).toThrow();
 });
 it('requires both separately completed opposite moves with linked new sessions to accept opt-in roundtrip', () => {

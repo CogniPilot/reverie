@@ -8,6 +8,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { requirePlanOfficeViewerAcceptance } from './plan-office-viewer-acceptance.mts';
 // The hosted command executes this source with Node --experimental-strip-types.
 import {
   readPlanOfficeStartupDiagnostic,
@@ -362,7 +363,9 @@ export function requirePlanOfficeCiTeamAcceptance(
   physical: unknown,
   root: string,
   callerEmployeeId: string,
-  employeeId: string
+  employeeId: string,
+  viewer: unknown,
+  caller: { sessionId: string; nativeThreadId: string }
 ) {
   const r = object(result),
     s = object(summary),
@@ -373,6 +376,7 @@ export function requirePlanOfficeCiTeamAcceptance(
   assert.equal(r.baselineReady, true);
   assert.equal(r.planMovesAccepted, true);
   assert.equal(r.teamAccepted, true);
+  assert.equal(r.viewerRepairAccepted, true);
   assert.equal(r.evidence, root);
   assert.equal(r.forceAccepted, false);
   assert.equal(r.refreshReuseAccepted, false);
@@ -398,6 +402,7 @@ export function requirePlanOfficeCiTeamAcceptance(
   assert.equal(p.employeeId, employeeId);
   assert.equal(p.callerEmployeeId, callerEmployeeId);
   assert.equal(p.callerSessionId, s.callerSessionId);
+  assert.equal(p.callerSessionId, caller.sessionId);
   assert.notEqual(p.sessionId, p.callerSessionId);
   assert.equal(p.fromAccount, 'ci-plan-a');
   assert.equal(p.toAccount, 'ci-plan-b');
@@ -446,7 +451,22 @@ export function requirePlanOfficeCiTeamAcceptance(
     if (i) assert.equal(v.namespacePid, pid);
     else pid = v.namespacePid;
   }
+  const viewerAcceptance = requirePlanOfficeViewerAcceptance(viewer, {
+    controlId: r.controlId,
+    callerEmployeeId,
+    callerSessionId: caller.sessionId,
+    callerThreadId: caller.nativeThreadId,
+    callerPid: pid,
+    employeeId,
+    sessionId: p.newSession,
+    sessionGeneration: native.sessionGeneration,
+    operationId: p.targetOperationId,
+    containerId: p.targetContainerId,
+    nativeThreadId: p.nativeThreadId,
+    pane: native.pane,
+  });
   return {
+    ...viewerAcceptance,
     scenarioId: s.id,
     employeeId,
     callerEmployeeId,
@@ -881,7 +901,9 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
         JSON.parse(fs.readFileSync(path.join(root, 'physical-move-' + summary.id + '.json'), 'utf8')),
         root,
         contract.bootstrap.employees[0]!.employeeId,
-        contract.bootstrap.employees[1]!.employeeId
+        contract.bootstrap.employees[1]!.employeeId,
+        JSON.parse(fs.readFileSync(path.join(root, 'team-viewer-repair-completed.json'), 'utf8')),
+        contract.bootstrap.employees[0]!
       );
     } else {
       const proof = JSON.parse(fs.readFileSync(path.join(root, 'first-self-move-completed.json'), 'utf8'));
