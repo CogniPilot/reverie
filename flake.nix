@@ -142,6 +142,12 @@
           };
         };
     in {
+      lib.mkBoxedWebsiteImage = { system, runtimeConfiguration,
+        baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig }:
+        import ./nix/boxed-website-image.nix {
+          pkgs = pkgsFor system;
+          inherit baseImage baseConfig runtimeConfiguration;
+        };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
         baseConfig ? baseImage.reverieConfig }:
         import ./nix/container-gpu-image.nix {
@@ -245,6 +251,8 @@
             mutations = import ./tests/boxed_runtime_boundary_eval.nix;
           in assert checked.passed; pkgs.writeText "reverie-boxed-runtime-boundary.json"
             (builtins.toJSON { inherit (checked) checks; inherit mutations; });
+          boxedWebsiteImage = pkgs.writeText "reverie-boxed-website-image-checks.json"
+            (builtins.toJSON (import ./tests/boxed_website_image_eval.nix));
 
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";

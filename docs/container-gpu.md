@@ -66,6 +66,19 @@ to preview, stop, retain and replace the existing container with the GPU image.
 `baseConfig`. This supports a GPU-only rollout of an accepted application image
 without implicitly upgrading the website or migrating company data.
 
+An existing Docker employee office also needs its accepted immutable
+`/etc/reverie/boxed-runtime.json`. Package that configuration with
+`lib.mkBoxedWebsiteImage { system = "x86_64-linux"; baseImage = gpuImage;
+runtimeConfiguration = acceptedConfiguration; }`, where `gpuImage` is the
+result of `lib.mkContainerGpuImage`. The factory preserves the image command,
+user, GPU runtime and configuration values, adds a root-owned read-only
+configuration file, and selects the Docker backend. It does not read or edit a
+running instance. The build-time URL subset accepts HTTP(S) DNS/IPv4 endpoints
+with an optional port/path and excludes credentials, query strings and fragments.
+Preserve the accepted worker, helper and source image IDs and client manifest
+digest when updating only the website; a website update does not qualify or
+replace existing employee clients.
+
 After verifying the container's local-model endpoint and fresh GPU readings,
 retire any legacy host `reverie-local-model`, GPU telemetry and source-updater
 services. Keep model files and credentials. The old host services are not part

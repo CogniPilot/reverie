@@ -56,5 +56,6 @@ let
     gpuKeepsInferenceAndBase = gpu.fromImage == "/nix/store/controlled-base"
       && builtins.elem "/nix/store/controlled-inference" gpu.contents
       && builtins.elem "KEPT=yes" gpu.config.Env;
+    gpuExportsItsActualConfig = gpu.passthru.reverieConfig == gpu.config;
   };
 in assert builtins.all (value: value) (builtins.attrValues checks); checks

@@ -5,11 +5,12 @@ let
   entrypoint = pkgs.writeShellScript "reverie-container-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
 in
 assert builtins.isAttrs baseConfig && builtins.isList baseConfig.Entrypoint;
-pkgs.dockerTools.buildLayeredImage {
+pkgs.dockerTools.buildLayeredImage rec {
   name = "reverie-gpu";
   tag = "latest";
   maxLayers = 125;
   fromImage = baseImage;
+  passthru.reverieConfig = config;
   contents = [ containerRuntime gpuTelemetry inferenceRuntime ];
   extraCommands = ''
     mkdir -p usr/local/bin

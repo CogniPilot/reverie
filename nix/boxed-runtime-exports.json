@@ -12,6 +12,7 @@
     "update"
   ],
   "lib": [
+    "mkBoxedWebsiteImage",
     "mkContainerGpuImage",
     "workerChildImageAnnex",
     "workerDockerImage",
