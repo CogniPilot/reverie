@@ -47,6 +47,7 @@ let
     serviceUnitCannotReturn = !(passes expected ./fixtures/retired_host_unit);
     dockerCannotDisappear = !(passes (without "packages" "dockerImage") ../.);
     gpuFactoryCannotDisappear = !(passes (without "lib" "mkContainerGpuImage") ../.);
+    boxedClientCapsuleCannotDisappear = !(passes (without "packages" "workerClientCapsule") ../.);
     gpuKeepsContainerSupervisor = gpu.config.Entrypoint == [
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"
