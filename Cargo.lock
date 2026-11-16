@@ -1066,6 +1066,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-company-api"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "clap",
+ "getrandom",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
+ "reverie-core",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "tokio",
+]
+
+[[package]]
 name = "reverie-container-runtime"
 version = "0.1.0"
 dependencies = [
