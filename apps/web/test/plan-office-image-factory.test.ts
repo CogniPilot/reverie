@@ -270,7 +270,7 @@ function evaluate(
     good +
     '";}; }'
 ) {
-  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";procps="/fake/procps";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
+  const code = `let pkgs={lib.optionalAttrs=condition: value: if condition then value else {};runCommand=name: attrs:  script: "/fake/"+name;buildEnv=attrs: "/fake/platform";closureInfo=attrs: "/fake/closure";writeText=name: text: if name == "reverie-helper-image-identity" then "/fake/identity-" + builtins.hashString "sha256" text else "/fake/config";dockerTools.buildLayeredImage=x: x;nodejs_22="/fake/node";esbuild="/fake/esbuild";bashInteractive="/fake/bash";coreutils="/fake/core";findutils="/fake/find";gnugrep="/fake/grep";gnused="/fake/sed";gawk="/fake/awk";util-linux="/fake/util";python3="/fake/python";docker-client="/fake/docker";tmux="/fake/tmux";which="/fake/which";procps="/fake/procps";}; f=import ${JSON.stringify(factory)} ({inherit pkgs;src="/owning/source";dependencyConsole="/deps-only";imageNamespace="${ns}";clientCapsule="/capsule";clientManifestDigest="${'c'.repeat(64)}";initCapsule="/init";workerTools="/tools";resourceHelper="/helper";} // {${overrides}}); in ${expression}`;
   const result = spawnSync('nix-instantiate', ['--store', 'dummy://', '--eval', '--strict', '--expr', code], {
     encoding: 'utf8',
     timeout: 10000,
@@ -328,7 +328,7 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   expect(v.control.config.Env).not.toContainEqual(expect.stringMatching(/BROKER|WORKER_SOCKET/));
 });
 it.each(['source', 'worker', 'helper', 'control'] as const)(
-  'separates %s configuration identity across successive office namespaces without weakening its program contract',
+  'separates %s immutable image inputs across successive office namespaces without weakening its program contract',
   (role) => {
     const next = 'reverie-ci-plan-office-' + 'd'.repeat(32);
     const first = evaluate(),
@@ -337,9 +337,22 @@ it.each(['source', 'worker', 'helper', 'control'] as const)(
     expect(second.status, second.stderr).toBe(0);
     const a = JSON.parse(JSON.parse(first.stdout))[role];
     const b = JSON.parse(JSON.parse(second.stdout))[role];
-    const label = role === 'helper' ? 'org.opencontainers.image.title' : 'org.reverie.fixture.namespace';
-    expect(a.config.Labels[label]).toBe(role === 'helper' ? ns + '-helper' : ns);
-    expect(b.config.Labels[label]).toBe(role === 'helper' ? next + '-helper' : next);
+    if (role === 'helper') {
+      // Helper CREATE has an exact runtime configuration. Image labels inherit
+      // into containers, so namespace identity belongs in immutable image data.
+      expect(a.config).toEqual(b.config);
+      expect(a.config.Labels).toEqual({ 'org.reverie.purpose': 'boxed-resource-helper-v1' });
+      expect(a.extraCommands).not.toBe(b.extraCommands);
+      const eraseIdentity = (script: string) =>
+        script.replace(/\/fake\/identity-[a-f0-9]{64}/g, '/fake/fixed-identity');
+      expect(eraseIdentity(a.extraCommands)).toBe(eraseIdentity(b.extraCommands));
+      expect(a.extraCommands).toContain('share/reverie/helper-image-identity.json');
+      expect(a.extraCommands).toContain('chmod 0444 share/reverie/helper-image-identity.json');
+      return;
+    }
+    const label = 'org.reverie.fixture.namespace';
+    expect(a.config.Labels[label]).toBe(ns);
+    expect(b.config.Labels[label]).toBe(next);
     // RepoTags/name alone do not distinguish the same Docker config identity.
     // Evaluate the actual Nix factory with a dummy store; this is construction
     // evidence, never a fabricated image ID or physical Docker acceptance.
