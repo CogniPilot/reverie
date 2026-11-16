@@ -15,6 +15,7 @@ import type { SessionWriteOptions, PromptCacheStatus, SessionAttachmentHistoryIt
  */
 export class MockSession extends EventEmitter {
   id: string;
+  declare owner?: string;
   workingDir: string = '/tmp/test-workdir';
   /**
    * Mirrors `Session.remote` — set to a `SessionRemote` to model a remote-SSH case,
@@ -418,7 +419,6 @@ export class MockSession extends EventEmitter {
 
   /** Custom Model Endpoint Profiles (docs/custom-model-endpoints-plan.md) */
   customModel: { endpointId: string; modelId: string; label?: string } | undefined = undefined;
-  remote: unknown = undefined;
   docker: unknown = undefined;
   private _mockCustomModel:
     | {
