@@ -34,6 +34,14 @@ unit and missing Docker inputs. The GPU recipe is also evaluated with inert
 inputs to preserve its internal supervisor, telemetry and inference wiring.
 This checks the declared surface; it does not prove arbitrary program behavior.
 
+The unreferenced `nix/local-model.nix`, `nix/ops-core.nix` and
+`nix/owner-terminal-packages.nix` host-entry factories have also been removed.
+The boundary check refuses their reintroduction. Their shared Rust libraries,
+container image producers and actively referenced component fixtures remain.
+This cleanup does not remove the Python runtime: current memory, hands, speech
+and workspace-tool packaging still depends on it. Those callers must migrate
+before the root `python/` tree can be retired.
+
 Remaining debt is explicit: unselected legacy broker/model implementation and
 its compatibility tests still exist, as do routine and cleanup host tools. The persistent OPS daemon installer is
 retired from public selections; its distinct in-container headless client remains. The default package's unboxed development web launcher has not

@@ -24,6 +24,11 @@ let
     "reverie" "reverie-engine" "reverie-host" "reverie-gpu-publisher"
     "reverie-worker-broker" "reverie-local-model" "reverie-worker-viewer" "reverie-ops"
   ];
+  retiredFactories = [
+    "nix/local-model.nix"
+    "nix/ops-core.nix"
+    "nix/owner-terminal-packages.nix"
+  ];
   groups = [ "packages" "apps" "nixosModules" "lib" ];
   sorted = values: builtins.sort builtins.lessThan values;
   checks = builtins.listToAttrs (map (group: {
@@ -33,9 +38,11 @@ let
   }) groups) // {
     retiredUnitsAbsent = builtins.all
       (name: !(builtins.pathExists (source + "/systemd/${name}"))) retiredUnits;
+    retiredFactoriesAbsent = builtins.all
+      (name: !(builtins.pathExists (source + "/${name}"))) retiredFactories;
     dockerInputsRetained = builtins.all (name: builtins.elem name actual.packages)
       [ "dockerImage" "containerRuntime" "workerImage" "workerChild" "workerDocker" "workerGpuToolkit" ];
     containerGpuFactoryRetained = builtins.elem "mkContainerGpuImage" actual.lib;
   };
-in if builtins.all (value: value) (builtins.attrValues checks) then { passed = true; inherit checks retiredUnits; }
-else throw "Retired host launch export/unit returned, unreviewed public export changed, or Docker input disappeared"
+in if builtins.all (value: value) (builtins.attrValues checks) then { passed = true; inherit checks retiredUnits retiredFactories; }
+else throw "Retired host launch export/unit/factory returned, unreviewed public export changed, or Docker input disappeared"

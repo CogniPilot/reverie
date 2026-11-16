@@ -41,7 +41,8 @@ and the actual native executable over an owned TCP phone. The Python byte-format
 vectors were generated from the retired `python/reverie/ops_cli.py`, whose hash
 each fixture records; they remain the frozen compatibility oracle.
 
-`nix/ops-core.nix` installs this executable as its `reverie-ops` command; the
-Python client is removed. The OPS daemon and installer in that package remain
-Python until their own port. Selecting the package does not establish
-real-host acceptance.
+`nix/ops-cli.nix` builds this executable as `reverie-ops`; the container runtime
+selects the native client. The unreferenced `ops-core.nix` host daemon/installer
+wrapper is retired. Legacy Python implementation and compatibility fixtures remain
+migration debt; this client does not select or install them. Build selection does
+not establish installed API acceptance.

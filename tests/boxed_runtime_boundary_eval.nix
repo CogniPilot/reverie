@@ -30,6 +30,11 @@ let
       "reverie-worker-viewer.service"
       "reverie-ops.service"
     ];
+    exactRetiredFactoryNamesPreserved = (verify expected ../.).retiredFactories == [
+      "nix/local-model.nix"
+      "nix/ops-core.nix"
+      "nix/owner-terminal-packages.nix"
+    ];
     brokerCannotReturn = !(passes (add "packages" "workerBroker") ../.);
     renamedHostAliasCannotSneakIn = !(passes (add "packages" "newHostDaemon") ../.);
     opsExecutorCannotReturn = !(passes (add "packages" "opsCore") ../.);
