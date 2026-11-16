@@ -283,7 +283,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     journal: DockerContinuationTaskJournal,
     helperImageId: string,
     private readonly boxId: string,
-    private readonly providerMode: (row: DockerEmployeeContinuationRecord) => string = () => 'claude'
+    private readonly providerMode: (row: DockerEmployeeContinuationRecord) => string = () => 'claude',
+    /** Existing original credential verification only; never used by installation or launch. */
+    private readonly verifyExistingCredential?: (row: DockerEmployeeContinuationRecord, digest: string) => boolean
   ) {
     this.#storage = new DockerEmployeeStorage(
       command,
@@ -952,6 +954,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED');
     const provider = raw.State.Running ? await this.#provider(original, row) : { kind: 'absent' as const };
     let credentialDigest: string | null = null;
+    let recoveredCredential = false;
     if (raw.State.Running) {
       // Read-only self verification of the fixed capsule outside private /nix.
       // This is not a provider launch, native grant or callback readiness claim.
@@ -976,8 +979,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           credentialDigest = (await this.#planInstaller.observe(row, current)).live.tokenDigest;
         }
       } else if (['identity-issued', 'identity-ready', 'provider-issued', 'ready'].includes(row.phase)) {
-        const installed = await this.#credentials.observe(row);
-        if (installed !== null) {
+        const retainedRead =
+          ['provider-issued', 'ready'].includes(row.phase) &&
+          !!this.verifyExistingCredential && await this.#credentials.originalInstallerAbsent(row);
+        const installed = retainedRead ? null : await this.#credentials.observe(row);
+        if (installed !== null || retainedRead) {
           const readback = parseWorkerCredentialReadback(
             await this.command.run([
               'exec',
@@ -995,8 +1001,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
             row.workerImage.clientManifestDigest,
             row.request.sessionId
           );
-          if (readback.tokenDigest !== installed) refuse('DOCKER_CONTINUATION_IDENTITY_READBACK_CHANGED');
+          if (retainedRead) {
+            if (!this.verifyExistingCredential!(row, readback.tokenDigest) ||
+              !await this.#credentials.originalInstallerAbsent(row))
+              refuse('DOCKER_CONTINUATION_IDENTITY_READBACK_CHANGED');
+          } else if (readback.tokenDigest !== installed) refuse('DOCKER_CONTINUATION_IDENTITY_READBACK_CHANGED');
           credentialDigest = readback.tokenDigest;
+          recoveredCredential = retainedRead;
         }
       }
       if (row.destination) {
@@ -1008,6 +1019,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const after = await this.#destination(row, () => {}, true);
     if (!after || !isDeepStrictEqual(containerReadState(after), containerReadState(raw)))
       refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+    if (recoveredCredential && (!await this.#credentials.originalInstallerAbsent(row) ||
+      !this.verifyExistingCredential!(row, credentialDigest!)))
+      refuse('DOCKER_CONTINUATION_IDENTITY_READBACK_CHANGED');
     return {
       original,
       state: raw.State.Running ? 'running' : 'stopped',

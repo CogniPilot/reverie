@@ -68,6 +68,7 @@ interface Raw {
 }
 const noop = () => {};
 const file = '/fixture/protocol.json';
+const missingInstallerScenario = (scenario: string) => scenario.startsWith('retained-ready-missing-installer');
 
 class PhysicalDocker implements DockerEngineCommand {
   readonly containers = new Map<string, Raw>();
@@ -445,7 +446,29 @@ async function seed(scenario: string) {
   row.destination = boxedOriginal(DockerEmployeeInspect.parse(destination), subject, deployment, true);
   await resources.configure(row, noop);
   row.phase = 'identity-issued';
-  await engine.provisionIdentity(row, 'synthetic-test-token-not-server-authority', noop);
+  let installedToken = 'synthetic-test-token-not-server-authority';
+  if (missingInstallerScenario(scenario)) {
+    const { DockerWorkerIdentityAuthentication } = await import('../src/docker-worker-identity.js');
+    const issuerKey = new DockerRuntimeKey('/fixture/data/docker-runtime');
+    const issuer = new DockerWorkerIdentityAuthentication(issuerKey.instanceId, issuerKey.key, {
+      keyCurrent: () => issuerKey.current(),
+      binding: () => undefined,
+    });
+    installedToken = issuer.issue(
+      {
+        employeeId: eid,
+        sessionId: sid,
+        sessionGeneration: 1,
+        owner: undefined,
+        containerId: destinationId,
+        credentialId: scenario.endsWith('-bad-token') ? '99999999-9999-4999-8999-999999999999' : row.credentialId,
+      },
+      () => true
+    );
+    issuer.close();
+    issuerKey.close();
+  }
+  await engine.provisionIdentity(row, installedToken, noop);
   row.phase =
     scenario.startsWith('issued-') || scenario.startsWith('codex-') || scenario.startsWith('ram-')
       ? 'provider-issued'
@@ -538,8 +561,8 @@ async function seed(scenario: string) {
     position: 'Employee',
     expertise: ['testing'],
     createdAt: 1,
-    onVacation: scenario === 'ram-offline',
-    desiredRunning: !['desired-off', 'ram-offline'].includes(scenario),
+    onVacation: scenario === 'ram-offline' || missingInstallerScenario(scenario),
+    desiredRunning: !['desired-off', 'ram-offline'].includes(scenario) && !missingInstallerScenario(scenario),
     dockerResourcePolicy: policy,
     dockerBinding: {
       version: 1,
@@ -635,7 +658,7 @@ async function seed(scenario: string) {
 }
 async function startup(scenario: string) {
   const physical = PhysicalDocker.load();
-  if (scenario === 'retained-ready-without-original') {
+  if (scenario === 'retained-ready-without-original' || missingInstallerScenario(scenario)) {
     assert(physical.containers.delete(sourceId), 'Remove only the obsolete original after genuine READY setup');
     assert(physical.containers.has(destinationId), 'Keep the exact published boxed destination');
     assert.equal(
@@ -643,6 +666,18 @@ async function startup(scenario: string) {
       0,
       'The retained boxed provider has no legacy original labels'
     );
+  }
+  let removedInstaller: { id: string; raw: Raw } | undefined;
+  if (missingInstallerScenario(scenario)) {
+    const state = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8'));
+    const installer = state.dockerEmployeeContinuations[0].tasks.find(
+      (task: DockerContinuationTask) => task.role === 'identity-helper'
+    );
+    assert(installer?.containerId);
+    const raw = physical.containers.get(installer.containerId);
+    assert(raw);
+    removedInstaller = { id: installer.containerId, raw };
+    assert(physical.containers.delete(installer.containerId));
   }
   physical.absent = ['absent', 'issued-absent'].includes(scenario);
   if (physical.absent) assert(physical.containers.delete(destinationId), 'Absent means the exact container is gone');
@@ -652,9 +687,22 @@ async function startup(scenario: string) {
   const originalRun = PackagedDockerEngineCommand.prototype.run,
     originalCreate = PackagedDockerEngineCommand.prototype.create;
   const observedCommands: string[][] = [];
+  let installerCensuses = 0;
   PackagedDockerEngineCommand.prototype.run = async (args, input) => {
     observedCommands.push([...args]);
-    return physical.run(args, input);
+    if (args.includes('label=reverie.box.identity.employee=' + eid)) {
+      installerCensuses++;
+      if (scenario.endsWith('-census-malformed')) return 'not-an-engine-container-id';
+      if (scenario.endsWith('-census-unknown')) throw Error('Controlled completed inventory reply unavailable');
+      if (scenario.endsWith('-key-revoked') && installerCensuses === 3)
+        fs.appendFileSync('/fixture/data/docker-runtime/worker-identity.json', ' ');
+    }
+    const result = await physical.run(args, input);
+    if (scenario.endsWith('-reappears') && args.includes('credential-status')) {
+      assert(removedInstaller);
+      physical.containers.set(removedInstaller.id, removedInstaller.raw);
+    }
+    return result;
   };
   PackagedDockerEngineCommand.prototype.create = physical.create.bind(physical);
   const require = createRequire(import.meta.url),
@@ -777,6 +825,27 @@ async function startup(scenario: string) {
     const cookies = enrollment.headers['set-cookie'];
     assert(cookies);
     const cookie = (Array.isArray(cookies) ? cookies : [cookies]).map((value) => value.split(';')[0]).join('; ');
+    if (missingInstallerScenario(scenario)) {
+      assert.equal(internal.sessions.get(sid), undefined, 'OFF attendance must not publish a viewer');
+      const original = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0];
+      const entered = await app.inject({
+        method: 'POST',
+        url: '/api/company/employees/' + eid + '/vacation',
+        headers: { host: 'reverie:3000', origin: 'http://reverie:3000', cookie },
+        payload: { enabled: false },
+      });
+      assert.equal(entered.statusCode, 200, entered.body);
+      assert.equal(
+        entered.json().data.startup.state,
+        scenario === 'retained-ready-missing-installer' ? 'started' : 'blocked',
+        entered.body
+      );
+      assert.deepEqual(
+        JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0],
+        original,
+        'Read-only recovery must retain the missing installer task and all launch history unchanged'
+      );
+    }
     if (scenario === 'retained-ready-without-original') {
       const retained = JSON.parse(fs.readFileSync('/fixture/data/company.json', 'utf8')).dockerEmployeeContinuations[0];
       assert.equal(retained.version, 2, 'The actual canonical provider-source migration must earn the retained v2 row');
@@ -870,6 +939,7 @@ async function startup(scenario: string) {
       [
         'attached',
         'retained-ready-without-original',
+        'retained-ready-missing-installer',
         'issued-live',
         'ram-startup',
         'ram-later',
@@ -989,11 +1059,12 @@ async function startup(scenario: string) {
       assert.equal(session.claudeSessionId, thread);
       assert.equal(session.claudeSessionIdPending, false);
       assert.equal(ptys, 1);
-      if (scenario !== 'ram-offline') assert(reports.some((r) => r.sessionId === sid && r.state === 'attached'));
+      if (!['ram-offline', 'retained-ready-missing-installer'].includes(scenario))
+        assert(reports.some((r) => r.sessionId === sid && r.state === 'attached'));
     } else {
       assert.equal(session, undefined);
       assert.equal(ptys, 0);
-      if (!['desired-off', 'ram-offline'].includes(scenario))
+      if (!['desired-off', 'ram-offline'].includes(scenario) && !missingInstallerScenario(scenario))
         assert(reports.some((r) => r.sessionId === sid && r.state === 'held'));
     }
     assert.equal(writes.length, 0, 'Restoring an existing viewer must not type or replay a draft');
@@ -1215,6 +1286,12 @@ if (process.argv.includes('--namespace')) {
     for (const scenario of [
       'attached',
       'retained-ready-without-original',
+      'retained-ready-missing-installer',
+      'retained-ready-missing-installer-bad-token',
+      'retained-ready-missing-installer-census-malformed',
+      'retained-ready-missing-installer-census-unknown',
+      'retained-ready-missing-installer-reappears',
+      'retained-ready-missing-installer-key-revoked',
       'absent',
       'desired-off',
       'unknown',

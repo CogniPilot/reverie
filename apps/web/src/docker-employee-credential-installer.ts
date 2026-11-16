@@ -48,6 +48,32 @@ export class DockerEmployeeCredentialInstaller {
       refuse('DOCKER_IDENTITY_ORIGINAL_CHANGED');
     return task;
   }
+  /** Completed native inventory only, never an inference from a failed inspect.
+   * This is restricted to a published original with no remaining installer for
+   * the same employee. The old task and its uncertain ACK remain unchanged. */
+  async originalInstallerAbsent(row: DockerEmployeeContinuationRecord): Promise<boolean> {
+    if (row.version === 3 || !row.destination || !['provider-issued', 'ready'].includes(row.phase)) return false;
+    const task = this.journal.read(row, 'identity-helper');
+    if (!task || !('containerId' in task) || !['start-issued', 'completed'].includes(task.phase)) return false;
+    const selected = await this.command.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'label=reverie.box.identity.box=' + this.boxId,
+      '--filter',
+      'label=reverie.box.identity.employee=' + row.employeeId,
+      '--format',
+      '{{.ID}}',
+    ]);
+    if (Buffer.byteLength(selected) > 16384) refuse('DOCKER_IDENTITY_ORIGINAL_INSTALL_HELD');
+    if (selected.trim() === '') return true;
+    const ids = selected.trim().split('\n');
+    if (ids.length > 128 || new Set(ids).size !== ids.length || ids.some((id) => !cid.safeParse(id).success))
+      refuse('DOCKER_IDENTITY_ORIGINAL_INSTALL_HELD');
+    return false;
+  }
   async provision(row: DockerEmployeeContinuationRecord, token: string, current: () => void): Promise<void> {
     if (token.length > 2048 || token.length === 0 || /[\r\n\0]/.test(token)) refuse('DOCKER_IDENTITY_TOKEN_INVALID');
     const home = await this.home(row);

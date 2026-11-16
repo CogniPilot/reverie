@@ -58,6 +58,12 @@ export function runBoxedStartupNamespace(entry = 'test/fixtures/boxed-webserver-
       [
         'attached',
         'retained-ready-without-original',
+        'retained-ready-missing-installer',
+        'retained-ready-missing-installer-bad-token',
+        'retained-ready-missing-installer-census-malformed',
+        'retained-ready-missing-installer-census-unknown',
+        'retained-ready-missing-installer-reappears',
+        'retained-ready-missing-installer-key-revoked',
         'absent',
         'desired-off',
         'unknown',

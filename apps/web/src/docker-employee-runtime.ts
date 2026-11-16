@@ -311,7 +311,27 @@ export class DockerEmployeeRuntime {
       store,
       configuration.helperImageId,
       boxId,
-      dockerProviderModeReader(company, ctx.store)
+      dockerProviderModeReader(company, ctx.store),
+      (row, digest) => {
+        const recordDigest = dockerContinuationDigest(row);
+        const current = () => {
+          if (!this.current() || row.version === 3 || !row.destination ||
+            !['provider-issued', 'ready'].includes(row.phase) ||
+            dockerContinuationDigest(store.record(row.employeeId)) !== recordDigest ||
+            !store.existingSubject(row.employeeId, row))
+            throw Error('Original published worker credential binding changed');
+          return true;
+        };
+        current();
+        return this.authentication.matchesIssuedDigest({
+          employeeId: row.employeeId,
+          owner: row.owner,
+          sessionId: row.request.sessionId,
+          sessionGeneration: row.request.sessionGeneration,
+          containerId: row.destination!.containerId,
+          credentialId: row.credentialId,
+        }, digest, current);
+      }
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl, (row, workingDir, current) =>
       engine.observeCodexWorkspace(row, workingDir, current)

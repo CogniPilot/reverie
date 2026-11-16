@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { isMultiUserMode } from './config/multiuser.js';
 /** Docker callback identity only. Company permissions and native effect custody remain independent. */
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 export const DOCKER_WORKER_IDENTITY_HEADER = 'x-reverie-worker-identity';
 const PURPOSE = 'docker-worker-identity';
@@ -167,6 +167,19 @@ export class DockerWorkerIdentityAuthentication {
     const signature = this.sign(encoded).toString('hex');
     if (!current()) throw Error('Docker worker provisioning changed');
     return encoded + '.' + signature;
+  }
+
+  /** Read-only verification of the original installed credential. Reproducing
+   * its deterministic digest neither installs a token nor authenticates a request.
+   * The caller must independently retain the exact published canonical binding. */
+  matchesIssuedDigest(binding: DockerWorkerIdentityBinding, digest: string, stillCurrent: () => boolean): boolean {
+    if (!/^[a-f0-9]{64}$/.test(digest)) return false;
+    const token = this.issue(binding, stillCurrent);
+    const expected = createHash('sha256').update(token).digest();
+    const matches = timingSafeEqual(expected, Buffer.from(digest, 'hex'));
+    if (this.#closed || !this.ports.keyCurrent() || !stillCurrent())
+      throw Error('Original worker credential verification changed');
+    return matches;
   }
 
   /** Possession authenticates this one current worker, never an employee grant. */
