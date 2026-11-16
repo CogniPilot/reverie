@@ -46,6 +46,11 @@ impl Stamp {
             && self.mode & 0o022 == 0
     }
 }
+// The pinned dependency's libc and raw-Linux backends expose different signedness.
+// Normalize losslessly before the checked conversion used in our stable stamp.
+fn nanoseconds(value: impl Into<i128>) -> io::Result<i64> {
+    i64::try_from(value.into()).map_err(|_| io::ErrorKind::InvalidData.into())
+}
 fn open_at(parent: impl AsFd, name: &OsStr, flags: OFlags, mode: Mode) -> io::Result<File> {
     fs::openat(
         parent,
@@ -122,14 +127,8 @@ impl Directory {
             dev: meta.st_dev,
             ino: meta.st_ino,
             size: meta.st_size as u64,
-            mtime: (
-                meta.st_mtime,
-                i64::try_from(meta.st_mtime_nsec).map_err(|_| io::ErrorKind::InvalidData)?,
-            ),
-            ctime: (
-                meta.st_ctime,
-                i64::try_from(meta.st_ctime_nsec).map_err(|_| io::ErrorKind::InvalidData)?,
-            ),
+            mtime: (meta.st_mtime, nanoseconds(meta.st_mtime_nsec)?),
+            ctime: (meta.st_ctime, nanoseconds(meta.st_ctime_nsec)?),
             mode: meta.st_mode,
             uid: meta.st_uid,
             links: meta.st_nlink,
