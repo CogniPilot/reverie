@@ -1,3 +1,4 @@
+import { dockerResourceProbeReadRace } from './docker-engine-command.js';
 import { dockerOriginalAttemptKey } from './docker-resource-revisions.js';
 import {
   requireDockerOriginalResourceWriterProof,
@@ -247,11 +248,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
   originalWriterReader(): DockerOriginalResourceWriterReader {
     return new DockerOriginalResourceWriterReader(this.command);
   }
-  async #inspect(id: string): Promise<Record<string, unknown>> {
-    return inspectDockerResourceContainer(this.command, id);
+  async #inspect(id: string, command: DockerEngineCommand = this.command): Promise<Record<string, unknown>> {
+    return inspectDockerResourceContainer(command, id);
   }
-  async #init(id: string): Promise<Init | null> {
-    const raw = await this.#inspect(id);
+  async #init(id: string, command: DockerEngineCommand = this.command): Promise<Init | null> {
+    const raw = await this.#inspect(id, command);
     const state = z
       .object({
         Running: z.boolean(),
@@ -270,24 +271,58 @@ export class DockerContainedResources implements DockerContainedResourceControll
     // Root resource anchors use host PID namespace; their own host PID is read
     // by the Rust probe. Workers must use a private namespace with PID1.
     if (host.PidMode === 'host') return { id, pid: state.Pid, startTicks: '' };
-    const ticks = startTicks(await this.command.run(['exec', id, '/bin/cat', '/proc/1/stat']));
-    const after = await this.#inspect(id);
+    const ticks = startTicks(await command.run(['exec', id, '/bin/cat', '/proc/1/stat']));
+    const after = await this.#inspect(id, command);
     if (!isDeepStrictEqual(raw.State, after.State)) refuse('DOCKER_RESOURCE_INIT_CHANGED');
     return { id, pid: state.Pid, startTicks: ticks };
   }
-  async #members(worker?: string): Promise<string[]> {
-    const ids = [...(await this.configuration.selectedWorkerContainerIds())];
+  async #members(
+    worker?: string,
+    command: DockerEngineCommand = this.command,
+    bindings?: Record<string, unknown>[],
+    deadline?: number
+  ): Promise<string[]> {
+    const selected = this.configuration.selectedWorkerContainerIds();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let values: readonly string[];
+    try {
+      if (deadline === undefined) values = await selected;
+      else {
+        const remaining = Math.floor(deadline - performance.now());
+        if (!Number.isFinite(remaining) || remaining <= 0) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
+        values = await Promise.race([
+          Promise.resolve(selected),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new DockerEmployeeContinuationError('DOCKER_RESOURCE_PROBE_DEADLINE')),
+              remaining
+            );
+          }),
+        ]);
+        if (performance.now() >= deadline) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
+      }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+    const ids = [...values];
     if (ids.length > 64 || new Set(ids).size !== ids.length) refuse('DOCKER_RESOURCE_MEMBERS_UNKNOWN');
     const args: string[] = [];
     for (const id of ids.sort()) {
       cid.parse(id);
       if (id === worker) continue;
-      const raw = await this.#inspect(id);
+      const raw = await this.#inspect(id, command);
       const config = z.object({ Labels: z.record(z.string(), z.string()) }).parse(raw.Config);
       const host = z.record(z.string(), z.unknown()).parse(raw.HostConfig);
       if (config.Labels['reverie.boxed.instance'] !== this.configuration.deployment || host.PidMode === 'host')
         refuse('DOCKER_RESOURCE_MEMBER_BINDING_CHANGED');
-      const init = await this.#init(id);
+      const init = await this.#init(id, command);
+      bindings?.push({
+        Id: raw.Id,
+        Image: raw.Image,
+        Config: raw.Config,
+        HostConfig: raw.HostConfig,
+        State: raw.State,
+      });
       if (init) args.push('--member', `${id}:${init.pid}:${init.startTicks}`);
     }
     return args;
@@ -402,23 +437,83 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return { ...init, startTicks: seen.anchor.startTicks };
   }
   async #probe(anchor: Init, worker?: Init): Promise<Observation> {
-    const args = [
-      worker ? 'probe-worker' : 'probe-pool',
-      '--box-id',
-      this.configuration.boxId,
-      '--anchor-id',
-      anchor.id,
-      '--anchor-pid',
-      String(anchor.pid),
-      ...(anchor.startTicks ? ['--anchor-start', anchor.startTicks] : []),
-      ...(await this.#members(worker?.id)),
-    ];
-    if (worker)
-      args.push('--worker-id', worker.id, '--worker-pid', String(worker.pid), '--worker-start', worker.startTicks);
-    const started = performance.now();
-    const result = observation.parse(
-      JSON.parse(await this.command.run(['exec', anchor.id, '/bin/reverie-docker-resources', ...args]))
-    );
+    const end = performance.now() + 30000;
+    const remaining = () => {
+      const value = Math.floor(end - performance.now());
+      if (!Number.isFinite(value) || value <= 0) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
+      return Math.min(30000, value);
+    };
+    const command: DockerEngineCommand = {
+      run: (args, input) => {
+        const inspect = args.length === 3 && args[0] === 'container' && args[1] === 'inspect';
+        const init = args.length === 4 && args[0] === 'exec' && args[2] === '/bin/cat' && args[3] === '/proc/1/stat';
+        const probe =
+          args[0] === 'exec' &&
+          args[2] === '/bin/reverie-docker-resources' &&
+          ['probe-pool', 'probe-worker'].includes(args[3] ?? '');
+        if (input !== undefined || (!inspect && !init && !probe)) refuse('DOCKER_RESOURCE_PROBE_READ_REQUIRED');
+        return this.command.run(args, undefined, remaining());
+      },
+      create: async () => refuse('DOCKER_RESOURCE_PROBE_READ_REQUIRED'),
+    };
+    const scope = async () => {
+      const rawAnchor = await this.#inspect(anchor.id, command);
+      const state = z.object({ Running: z.literal(true), Pid: z.literal(anchor.pid) }).parse(rawAnchor.State);
+      void state;
+      const rawWorker = worker ? await this.#inspect(worker.id, command) : undefined;
+      if (worker && !isDeepStrictEqual(await this.#init(worker.id, command), worker))
+        refuse('DOCKER_RESOURCE_OBSERVATION_CHANGED');
+      const bindings: Record<string, unknown>[] = [];
+      const members = await this.#members(worker?.id, command, bindings, end);
+      return {
+        anchor: {
+          Id: rawAnchor.Id,
+          Image: rawAnchor.Image,
+          Config: rawAnchor.Config,
+          HostConfig: rawAnchor.HostConfig,
+          State: rawAnchor.State,
+        },
+        worker: rawWorker
+          ? {
+              Id: rawWorker.Id,
+              Image: rawWorker.Image,
+              Config: rawWorker.Config,
+              HostConfig: rawWorker.HostConfig,
+              State: rawWorker.State,
+            }
+          : null,
+        members,
+        bindings,
+      };
+    };
+    const initial = await scope();
+    let result!: Observation,
+      started = 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt && !isDeepStrictEqual(await scope(), initial)) refuse('DOCKER_RESOURCE_OBSERVATION_CHANGED');
+      const args = [
+        worker ? 'probe-worker' : 'probe-pool',
+        '--box-id',
+        this.configuration.boxId,
+        '--anchor-id',
+        anchor.id,
+        '--anchor-pid',
+        String(anchor.pid),
+        ...(anchor.startTicks ? ['--anchor-start', anchor.startTicks] : []),
+        ...initial.members,
+      ];
+      if (worker)
+        args.push('--worker-id', worker.id, '--worker-pid', String(worker.pid), '--worker-start', worker.startTicks);
+      const argv = ['exec', anchor.id, '/bin/reverie-docker-resources', ...args];
+      started = performance.now();
+      try {
+        result = observation.parse(JSON.parse(await command.run(argv)));
+        break;
+      } catch (error) {
+        if (attempt === 2 || !dockerResourceProbeReadRace(error, argv)) throw error;
+      }
+    }
+    remaining();
     this.#observedAt.set(result, started);
     if (
       result.boxId !== this.configuration.boxId ||

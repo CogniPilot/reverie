@@ -34,6 +34,7 @@
     "../test/fixtures/docker-memory-high-canary.ts",
     "../test/docker-memory-high-canary.test.ts",
     "../test/docker-resource-original-writer.test.ts",
+    "../test/docker-resource-probe-retry.test.ts",
     "../test/fixtures/docker-original-writer-native.ts",
     "../test/helpers/boxed-plan-provider.ts",
     "../test/boxed-plan-provider.test.ts",
