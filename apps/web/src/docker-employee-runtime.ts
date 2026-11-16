@@ -57,6 +57,7 @@ export const DockerRuntimeConfiguration = z
     sourceImageIds: z.array(sha).min(1).max(32),
     helperImageId: sha,
     memoryHighHelperImageId: sha.optional(),
+    poolRestoreHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
   })
   .strict();
@@ -293,6 +294,7 @@ export class DockerEmployeeRuntime {
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
+        poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(

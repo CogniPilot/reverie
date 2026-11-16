@@ -604,6 +604,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           boxId: this.#d.boxId,
           helperImageId: this.#d.configuration.helperImageId,
           memoryHighHelperImageId: this.#d.configuration.memoryHighHelperImageId,
+          poolRestoreHelperImageId: this.#d.configuration.poolRestoreHelperImageId,
           target: {
             imageId: state.seed.target.workerImage.imageId,
             clientManifestDigest: state.seed.target.workerImage.clientManifestDigest,

@@ -42,6 +42,11 @@ let
     };
     configAvailableForGpuComposition = image.passthru.reverieConfig == image.config;
     approvedOptionalHelperPreserved = accepts (cfg // { memoryHighHelperImageId = "sha256:${id}"; }) baseConfig;
+    approvedOptionalPoolRestorePreserved = let
+      selected = cfg // { poolRestoreHelperImageId = "sha256:${builtins.concatStringsSep "" (builtins.genList (_: "b") 64)}"; };
+      restored = make selected baseConfig;
+    in restored.passthru.runtimeConfiguration == selected
+      && restored.passthru.runtimeConfiguration.helperImageId == cfg.helperImageId;
     backendNotDuplicated = (make cfg (baseConfig // {
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
     })).config == image.config;
@@ -56,6 +61,7 @@ let
       null [] "config" (cfg // { version = 2; }) (cfg // { purpose = "other"; })
       (cfg // { deployment = "../office"; }) (cfg // { workerImageId = "latest"; })
       (cfg // { helperImageId = "sha256:${id}x"; }) (cfg // { memoryHighHelperImageId = null; })
+      (cfg // { poolRestoreHelperImageId = null; }) (cfg // { poolRestoreHelperImageId = "latest"; })
       (cfg // { clientManifestDigest = "short"; }) (cfg // { sourceImageIds = []; })
       (cfg // { sourceImageIds = [ "latest" ]; })
       (cfg // { sourceImageIds = builtins.genList (_: "sha256:${id}") 33; })

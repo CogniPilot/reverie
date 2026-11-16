@@ -33,6 +33,7 @@ export function dockerResourceHelperConfiguration(
       'reverie.box.resource.role': role,
       'reverie.box.resource.name': name,
       ...(args[0] === 'configure-memory-high' ? { 'org.reverie.resource.memory-high-only': 'v1' } : {}),
+      ...(args[0] === 'restore-pool' ? { 'org.reverie.resource.pool-restore': 'v1' } : {}),
     },
     HostConfig: {
       Privileged: false,
@@ -150,4 +151,36 @@ export async function requireDockerMemoryHighHelperImage(
     raw.Config.Labels['org.reverie.resource.memory-high-only'] !== 'v1'
   )
     refuse('DOCKER_RESOURCE_MEMORY_HIGH_WRITE_UNSUPPORTED');
+}
+
+/** Deny-only qualification of the separately operator-pinned restore image. */
+export async function requireDockerPoolRestoreHelperImage(
+  command: Pick<DockerEngineCommand, 'run'>,
+  selected: string,
+  current: () => void
+): Promise<void> {
+  if (!/^sha256:[a-f0-9]{64}$/.test(selected)) refuse();
+  current();
+  const raw = z
+    .array(
+      z.object({
+        Id: z.string(),
+        Config: z.object({
+          User: z.string(),
+          Entrypoint: z.array(z.string()),
+          Labels: z.record(z.string(), z.string()),
+        }),
+      })
+    )
+    .length(1)
+    .parse(JSON.parse(await command.run(['image', 'inspect', selected])))[0]!;
+  current();
+  if (
+    raw.Id !== selected ||
+    raw.Config.User !== '0:0' ||
+    !isDeepStrictEqual(raw.Config.Entrypoint, ['/bin/reverie-docker-resources']) ||
+    raw.Config.Labels['org.reverie.purpose'] !== 'boxed-resource-helper-v1' ||
+    raw.Config.Labels['org.reverie.resource.pool-restore'] !== 'v1'
+  )
+    refuse('DOCKER_RESOURCE_POOL_RESTORE_UNSUPPORTED');
 }

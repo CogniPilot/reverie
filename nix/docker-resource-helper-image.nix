@@ -1,5 +1,5 @@
 # No engine client, shell, network tool or writable host hierarchy is included.
-{ pkgs, helper, memoryHighOnly ? false, name ? (if memoryHighOnly then "reverie-boxed-memory-high-helper" else "reverie-boxed-resource-helper") }:
+{ pkgs, helper, memoryHighOnly ? false, poolRestore ? false, name ? (if memoryHighOnly then "reverie-boxed-memory-high-helper" else if poolRestore then "reverie-boxed-pool-restore-helper" else "reverie-boxed-resource-helper") }:
 let
   # Image-only identity DATA: unlike Config labels, this is not inherited by
   # Docker CREATE and cannot change an original helper's configuration digest.
@@ -26,6 +26,7 @@ pkgs.dockerTools.buildLayeredImage {
     Cmd = [ "anchor" ];
     WorkingDir = "/";
     Labels = { "org.reverie.purpose" = "boxed-resource-helper-v1"; }
-      // pkgs.lib.optionalAttrs memoryHighOnly { "org.reverie.resource.memory-high-only" = "v1"; };
+      // pkgs.lib.optionalAttrs memoryHighOnly { "org.reverie.resource.memory-high-only" = "v1"; }
+      // pkgs.lib.optionalAttrs poolRestore { "org.reverie.resource.pool-restore" = "v1"; };
   };
 }

@@ -11,6 +11,7 @@ import {
   DockerResourceObservation as observation,
   type DockerResourceObservation as Observation,
   DockerPoolObservationRecord,
+  DockerPoolRestoreAcknowledgement,
 } from './docker-pool-observation-data.js';
 import { DockerEmployeePoolPolicy } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
@@ -42,6 +43,7 @@ import {
   inspectDockerResourceContainer,
   requireDockerResourceHelperConfiguration,
   requireDockerMemoryHighHelperImage,
+  requireDockerPoolRestoreHelperImage,
 } from './docker-resource-helper-inspection.js';
 import { DockerOriginalResourceWriterReader } from './docker-resource-original-writer.js';
 
@@ -84,6 +86,8 @@ export interface DockerContainedResourcesConfiguration {
   readonly helperImageId: string;
   /** Independently qualified fixed high-only image. Never replaces the original anchor/helper pin. */
   readonly memoryHighHelperImageId?: string;
+  /** Separate immutable restore capability; never replaces the original anchor pin. */
+  readonly poolRestoreHelperImageId?: string;
   /** Canonical selected bindings AND retained destinations. These IDs are DATA;
    * Engine/current kernel observations must independently validate every one. */
   selectedWorkerContainerIds(): readonly string[] | Promise<readonly string[]>;
@@ -227,6 +231,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
       !/^sha256:[a-f0-9]{64}$/.test(configuration.helperImageId) ||
       (configuration.memoryHighHelperImageId !== undefined &&
         !/^sha256:[a-f0-9]{64}$/.test(configuration.memoryHighHelperImageId)) ||
+      (configuration.poolRestoreHelperImageId !== undefined &&
+        !/^sha256:[a-f0-9]{64}$/.test(configuration.poolRestoreHelperImageId)) ||
       !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(configuration.deployment)
     )
       throw Error('Fixed contained resource configuration required');
@@ -265,7 +271,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return { id, pid: state.Pid, startTicks: ticks };
   }
   async #members(worker?: string): Promise<string[]> {
-    const ids = [...await this.configuration.selectedWorkerContainerIds()];
+    const ids = [...(await this.configuration.selectedWorkerContainerIds())];
     if (ids.length > 64 || new Set(ids).size !== ids.length) refuse('DOCKER_RESOURCE_MEMBERS_UNKNOWN');
     const args: string[] = [];
     for (const id of ids.sort()) {
@@ -439,22 +445,44 @@ export class DockerContainedResources implements DockerContainedResourceControll
     worker: boolean,
     revisionImage?: string
   ): Promise<boolean> {
+    const restore = !worker && task.imageId === this.configuration.poolRestoreHelperImageId;
     if (
       !('containerId' in task) ||
       !['start-issued', 'running', 'completed'].includes(task.phase) ||
       task.role !== (worker ? 'leaf-helper' : 'pool-helper') ||
-      task.imageId !== (revisionImage ?? this.configuration.helperImageId)
+      task.imageId !==
+        (revisionImage ?? (restore ? this.configuration.poolRestoreHelperImageId : this.configuration.helperImageId))
     )
       return false;
     const raw = await this.#inspect(task.containerId);
     const args = z.object({ Cmd: z.array(z.string()).min(1).max(512) }).parse(raw.Config).Cmd;
-    if (args[0] !== (revisionImage ? 'configure-memory-high' : worker ? 'configure-high' : 'configure-pool'))
+    if (
+      args[0] !==
+      (revisionImage
+        ? 'configure-memory-high'
+        : worker
+          ? 'configure-high'
+          : restore
+            ? 'restore-pool'
+            : 'configure-pool')
+    )
       return false;
+    const members = restore ? await this.#restoreMembers(fresh) : undefined;
+    if (restore) {
+      await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
+      if (!isDeepStrictEqual(args, this.#restoreArguments(fresh, policy, members!))) return false;
+    }
     const writable = {
       path: worker ? fresh.worker!.path : this.#parent,
       target: worker ? '/run/reverie-worker-cgroup' : '/run/reverie-box-pool',
     };
-    const config = this.#configuration(task.role, task.name, args, writable, revisionImage);
+    const config = this.#configuration(
+      task.role,
+      task.name,
+      args,
+      writable,
+      revisionImage ?? (restore ? task.imageId : undefined)
+    );
     if (dockerContinuationDigest(config) !== task.configurationDigest) return false;
     await this.#fixed(task.containerId, config);
     const state = z
@@ -474,8 +502,17 @@ export class DockerContainedResources implements DockerContainedResourceControll
       (state.Error ?? '') !== ''
     )
       return false;
-    const result = observation.parse(JSON.parse(await this.command.run(['container', 'logs', task.containerId])));
-    if (task.phase === 'completed' && task.resultDigest !== dockerContinuationDigest(result)) return false;
+    const output: unknown = JSON.parse(await this.command.run(['container', 'logs', task.containerId]));
+    const acknowledged = restore ? DockerPoolRestoreAcknowledgement.parse(output) : observation.parse(output);
+    if (
+      restore &&
+      !isDeepStrictEqual((acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).members, members)
+    )
+      return false;
+    const result = restore
+      ? (acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).observation
+      : (acknowledged as Observation);
+    if (task.phase === 'completed' && task.resultDigest !== dockerContinuationDigest(acknowledged)) return false;
     return (
       result.boxId === fresh.boxId &&
       isDeepStrictEqual(result.parent, fresh.parent) &&
@@ -486,15 +523,27 @@ export class DockerContainedResources implements DockerContainedResourceControll
   }
   async #poolWriterClosed(task: DockerContinuationTask): Promise<boolean> {
     if (task.phase === 'create-issued' || task.phase === 'created') return true;
-    if (task.role !== 'pool-helper' || task.imageId !== this.configuration.helperImageId || !('containerId' in task))
+    const restore = task.imageId === this.configuration.poolRestoreHelperImageId;
+    if (
+      task.role !== 'pool-helper' ||
+      (!restore && task.imageId !== this.configuration.helperImageId) ||
+      !('containerId' in task)
+    )
       return false;
     const raw = await this.#inspect(task.containerId);
     const args = z.array(z.string()).min(1).max(512).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Cmd);
-    if (args[0] !== 'configure-pool') return false;
-    const expected = this.#configuration('pool-helper', task.name, args, {
-      path: this.#parent,
-      target: '/run/reverie-box-pool',
-    });
+    if (args[0] !== (restore ? 'restore-pool' : 'configure-pool')) return false;
+    if (restore) await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
+    const expected = this.#configuration(
+      'pool-helper',
+      task.name,
+      args,
+      {
+        path: this.#parent,
+        target: '/run/reverie-box-pool',
+      },
+      restore ? task.imageId : undefined
+    );
     if (dockerContinuationDigest(expected) !== task.configurationDigest) return false;
     await this.#fixed(task.containerId, expected);
     const state = z
@@ -635,6 +684,35 @@ export class DockerContainedResources implements DockerContainedResourceControll
       canonicalCpus(policy.allowedCpus),
     ];
   }
+  async #restoreMembers(seen: Observation): Promise<NonNullable<Observation['worker']>[]> {
+    const args = await this.#members();
+    if (!args.length) refuse('DOCKER_RESOURCE_RESTORE_MEMBERS_REQUIRED');
+    const members: NonNullable<Observation['worker']>[] = [];
+    for (let index = 1; index < args.length; index += 2) {
+      const [id, pid, startTicks] = args[index]!.split(':');
+      const actual = await this.#probe(seen.anchor, { id: cid.parse(id), pid: Number(pid), startTicks: startTicks! });
+      if (
+        !actual.worker ||
+        !isDeepStrictEqual(actual.parent, seen.parent) ||
+        !isDeepStrictEqual(actual.anchor, seen.anchor)
+      )
+        refuse('DOCKER_POOL_EPOCH_CHANGED');
+      members.push(actual.worker);
+    }
+    if (!isDeepStrictEqual(await this.#members(), args)) refuse('DOCKER_RESOURCE_MEMBERS_CHANGED');
+    return members;
+  }
+  #restoreArguments(
+    seen: Observation,
+    policy: DockerEmployeeResourcePolicy['pool'],
+    members: NonNullable<Observation['worker']>[]
+  ): string[] {
+    return [
+      'restore-pool',
+      ...this.#poolArguments(seen, policy).slice(1),
+      ...members.flatMap((member) => ['--member', `${member.id}:${member.pid}:${member.startTicks}`]),
+    ];
+  }
   async #poolCensus(role: 'anchor' | 'pool-helper'): Promise<string[]> {
     const raw = await this.command.run([
       'container',
@@ -695,10 +773,23 @@ export class DockerContainedResources implements DockerContainedResourceControll
         .string()
         .regex(/^reverie-boxed-pool-helper-[a-f0-9]{64}$/)
         .parse(label['reverie.box.resource.name']);
-      const expected = this.#configuration('pool-helper', taskName, this.#poolArguments(fresh, policy), {
-        path: this.#parent,
-        target: '/run/reverie-box-pool',
-      });
+      const restore = raw.Image === this.configuration.poolRestoreHelperImageId;
+      const imageId = restore ? this.configuration.poolRestoreHelperImageId! : this.configuration.helperImageId;
+      if (restore) await requireDockerPoolRestoreHelperImage(this.command, imageId, current);
+      const args = restore
+        ? this.#restoreArguments(fresh, policy, await this.#restoreMembers(fresh))
+        : this.#poolArguments(fresh, policy);
+      current();
+      const expected = this.#configuration(
+        'pool-helper',
+        taskName,
+        args,
+        {
+          path: this.#parent,
+          target: '/run/reverie-box-pool',
+        },
+        imageId
+      );
       await this.#fixed(candidate, expected);
       current();
       const state = z
@@ -724,12 +815,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
         (state.Error ?? '') !== ''
       )
         refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
-      const ack = observation.parse(JSON.parse(await this.command.run(['container', 'logs', candidate])));
+      const output: unknown = JSON.parse(await this.command.run(['container', 'logs', candidate]));
+      const ack = restore ? DockerPoolRestoreAcknowledgement.parse(output) : observation.parse(output);
       current();
       const task = DockerContinuationTask.parse({
         role: 'pool-helper',
         name: taskName,
-        imageId: this.configuration.helperImageId,
+        imageId,
         configurationDigest: dockerContinuationDigest(expected),
         phase: 'completed',
         containerId: candidate,
@@ -786,7 +878,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
         )
       ) ?? matches[0]!;
     const record = DockerPoolObservationRecord.parse({
-      version: 1,
+      version: chosen.imageId === this.configuration.poolRestoreHelperImageId ? 2 : 1,
+      ...(chosen.imageId === this.configuration.poolRestoreHelperImageId
+        ? { poolRestoreHelperImageId: chosen.imageId }
+        : {}),
       purpose: 'reverie-boxed-pool-observation-v1',
       boxId: this.configuration.boxId,
       deployment: this.configuration.deployment,

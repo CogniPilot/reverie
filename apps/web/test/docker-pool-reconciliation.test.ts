@@ -6,13 +6,23 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
-import { fixture as physicalFixture, helper, policy } from './helpers/docker-resource-physical.js';
+import {
+  fixture as physicalFixture,
+  helper,
+  policy,
+  deployment,
+  workerId,
+} from './helpers/docker-resource-physical.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService, type CompanyServiceDeps } from '../src/company-service.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { DockerPoolReconciliation } from '../src/docker-pool-reconciliation.js';
-import { DockerPoolReconciliationReceipt } from '../src/docker-contained-resource-controller.js';
+import {
+  DockerPoolReconciliationReceipt,
+  DockerContainedResources,
+} from '../src/docker-contained-resource-controller.js';
+import { dockerResourceHelperConfiguration } from '../src/docker-resource-helper-inspection.js';
 import { dockerPoolMetadataDigest } from '../src/docker-pool-observation-data.js';
 import { DockerEmployeeContinuation, type DockerContinuationEngine } from '../src/docker-employee-continuation.js';
 import { registerDockerEmployeeContinuationRoutes } from '../src/web/routes/docker-employee-continuation-routes.js';
@@ -29,6 +39,201 @@ import {
   registerDockerWorkerIdentity,
 } from '../src/docker-worker-identity.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
+
+async function restoredPoolFixture(pin = true) {
+  const physical = physicalFixture(),
+    boxId = 'b'.repeat(64),
+    restoreImage = 'sha256:' + '9'.repeat(64);
+  await physical.controller.preparePool(physical.row(), physical.current);
+  const old = physical.tasks.get('pool-helper')!;
+  if (!('containerId' in old)) throw Error('Actual helper required');
+  const oldRaw = physical.containers.get(old.containerId)!;
+  const seen = JSON.parse(physical.logs.get(old.containerId)!) as Record<string, unknown>;
+  const oldArgs = (oldRaw.Config as { Cmd: string[] }).Cmd;
+  const args = ['restore-pool', ...oldArgs.slice(1), '--member', `${workerId}:200:20`];
+  physical.tasks.delete('pool-helper');
+  physical.containers.delete(old.containerId);
+  physical.makeWorker();
+  const id = '8'.repeat(64),
+    name = 'reverie-boxed-pool-helper-' + '7'.repeat(64);
+  const parent = (seen.parent as { path: string }).path;
+  const config = dockerResourceHelperConfiguration(
+    boxId,
+    'pool-helper',
+    name,
+    args,
+    { path: parent, target: '/run/reverie-box-pool' },
+    restoreImage
+  );
+  const mounts = (config.HostConfig as { Binds: string[] }).Binds.map((value) => {
+    const [Source, Destination, mode] = value.split(':');
+    return { Type: 'bind', Source, Destination, RW: mode === 'rw' };
+  });
+  physical.containers.set(id, {
+    Id: id,
+    Name: '/' + name,
+    Image: restoreImage,
+    Config: structuredClone(config),
+    HostConfig: structuredClone(config.HostConfig),
+    Mounts: mounts,
+    State: { Status: 'exited', Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0, ExitCode: 0 },
+  });
+  const anchor = (seen.anchor as { id: string }).id;
+  const member = (
+    JSON.parse(await physical.command.run(['exec', anchor, '/bin/reverie-docker-resources', 'probe-worker'])) as {
+      worker: unknown;
+    }
+  ).worker;
+  physical.logs.set(
+    id,
+    JSON.stringify({ version: 1, purpose: 'reverie-boxed-restore-pool-ack-v1', observation: seen, members: [member] })
+  );
+  const command = {
+    ...physical.command,
+    run: async (args: readonly string[]) => {
+      if (args[0] === 'image' && args[2] === restoreImage)
+        return JSON.stringify([
+          {
+            Id: restoreImage,
+            Config: {
+              User: '0:0',
+              Entrypoint: ['/bin/reverie-docker-resources'],
+              Labels: { 'org.reverie.purpose': 'boxed-resource-helper-v1', 'org.reverie.resource.pool-restore': 'v1' },
+            },
+          },
+        ]);
+      return physical.command.run(args);
+    },
+  };
+  const controller = new DockerContainedResources(command, physical.journal, {
+    boxId,
+    deployment,
+    helperImageId: helper,
+    poolRestoreHelperImageId: pin ? restoreImage : undefined,
+    selectedWorkerContainerIds: () => [workerId],
+    retainedPoolConfigurationTasks: () => [],
+  });
+  const before = { creates: [...physical.creates], starts: [...physical.starts] };
+  return { physical, controller, id, restoreImage, before, config, seen };
+}
+
+describe('separately pinned populated-pool restore ACK adoption', () => {
+  it('publishes and reloads strict v2 correlation while the actual anchor retains its old image', async () => {
+    const f = await restoredPoolFixture();
+    const receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current);
+    const directory = await fs.mkdtemp(join(tmpdir(), 'restore-pool-observation-'));
+    cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+    const store = new CompanyStore(join(directory, 'company.json'));
+    await store.init();
+    const result = await store.publishDockerPoolObservation(
+      receipt,
+      dockerPoolMetadataDigest(store.snapshot()),
+      f.physical.current
+    );
+    expect(result.state).toBe('committed');
+    const restarted = new CompanyStore(join(directory, 'company.json'));
+    await restarted.init();
+    expect(restarted.snapshot().dockerPoolObservations?.[0]).toMatchObject({
+      version: 2,
+      helperImageId: helper,
+      poolRestoreHelperImageId: f.restoreImage,
+      anchorTask: { imageId: helper },
+      configuration: { imageId: f.restoreImage, containerId: f.id },
+    });
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+  });
+  it.each([
+    'missing-pin',
+    'missing-member',
+    'missing-member-argument',
+    'foreign-member-argument',
+    'foreign-member',
+    'stale-birth',
+    'wrong-purpose',
+    'wrong-command',
+    'wrong-image',
+    'running',
+    'extra-mount',
+    'epoch-drift',
+  ] as const)('refuses %s without any native effects', async (mode) => {
+    const f = await restoredPoolFixture(mode !== 'missing-pin');
+    const raw = f.physical.containers.get(f.id)!,
+      config = raw.Config as { Cmd: string[] },
+      ack = JSON.parse(f.physical.logs.get(f.id)!) as {
+        purpose: string;
+        members: Array<{ id: string; startTicks: string }>;
+      };
+    if (mode === 'missing-member') ack.members = [];
+    if (mode === 'missing-member-argument') config.Cmd.splice(-2);
+    if (mode === 'foreign-member-argument') config.Cmd[config.Cmd.length - 1] = `${'6'.repeat(64)}:200:20`;
+    if (mode === 'foreign-member') ack.members[0]!.id = '6'.repeat(64);
+    if (mode === 'stale-birth') ack.members[0]!.startTicks = '21';
+    if (mode === 'wrong-purpose') ack.purpose = 'reverie-boxed-resource-observation-v1';
+    if (mode === 'wrong-command') config.Cmd[0] = 'configure-pool';
+    if (mode === 'wrong-image') raw.Image = helper;
+    if (mode === 'running')
+      raw.State = {
+        Status: 'running',
+        Running: true,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Pid: 400,
+        ExitCode: 0,
+      };
+    if (mode === 'extra-mount')
+      (raw.Mounts as unknown[]).push({ Type: 'bind', Source: '/foreign', Destination: '/foreign', RW: true });
+    if (mode === 'epoch-drift') f.physical.driftEpoch();
+    f.physical.logs.set(f.id, JSON.stringify(ack));
+    await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).rejects.toThrow();
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+  });
+  it('holds the original read when authority is revoked across a native observation await', async () => {
+    const f = await restoredPoolFixture();
+    let revoked = false;
+    f.physical.beforeRun((args) => {
+      if (!revoked && args[0] === 'container' && args[1] === 'logs' && args[2] === f.id) {
+        revoked = true;
+        f.physical.revoke();
+      }
+    });
+    await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).rejects.toThrow('revoked');
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+  });
+  it('a lost v2 publication reply requires fresh original native inspection after reload and never reissues the restore', async () => {
+    const f = await restoredPoolFixture(),
+      directory = await fs.mkdtemp(join(tmpdir(), 'restore-pool-lost-ack-'));
+    cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
+    const file = join(directory, 'company.json'),
+      store = new CompanyStore(file);
+    await store.init();
+    const receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current),
+      rename = fs.rename;
+    vi.spyOn(fs, 'rename').mockImplementationOnce(async (a, b) => {
+      await rename(a, b);
+      throw Error('Lost canonical rename reply');
+    });
+    expect(
+      (
+        await store.publishDockerPoolObservation(
+          receipt,
+          dockerPoolMetadataDigest(store.snapshot()),
+          f.physical.current
+        )
+      ).state
+    ).toBe('unconfirmed');
+    vi.restoreAllMocks();
+    const restarted = new CompanyStore(file);
+    await restarted.init();
+    expect(restarted.snapshot().dockerPoolObservations?.[0]?.configuration.containerId).toBe(f.id);
+    await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).resolves.toBeInstanceOf(
+      DockerPoolReconciliationReceipt
+    );
+    f.physical.logs.set(f.id, '{}');
+    await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).rejects.toThrow();
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+  });
+});
 
 const actor = '99999999-9999-4999-8999-999999999999',
   actorSid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

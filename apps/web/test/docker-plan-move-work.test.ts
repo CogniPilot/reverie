@@ -1,6 +1,7 @@
 /** Real target-work coordinator and durable PlanMoveStore, with controlled native
  * observation ports. These tests prove orchestration/fencing, not Docker effects. */
 import fs from 'node:fs';
+import ts from 'typescript';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -28,6 +29,48 @@ import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js'
 // This exposes only Work's supplied journal port to the contract tests below;
 // it grants no native proof, and unexpected native commands still fail.
 const taskPorts = vi.hoisted(() => new WeakMap<object, DockerContinuationTaskJournal & EphemeralJournal>());
+const resourcePins = vi.hoisted(() => new WeakMap<object, string | undefined>());
+vi.mock('../src/docker-contained-resource-controller.js', async (original) => {
+  const actual = await original<typeof import('../src/docker-contained-resource-controller.js')>();
+  return {
+    ...actual,
+    DockerContainedResources: class extends actual.DockerContainedResources {
+      constructor(...args: ConstructorParameters<typeof actual.DockerContainedResources>) {
+        super(...args);
+        resourcePins.set(this, args[2].poolRestoreHelperImageId);
+      }
+    },
+  };
+});
+
+it('forwards the optional restore image at the actual Actor work-construction boundary', () => {
+  const file = new URL('../src/docker-plan-move-actor.ts', import.meta.url);
+  const source = ts.createSourceFile(file.pathname, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
+  const actor = source.statements.find(
+    (node): node is ts.ClassDeclaration => ts.isClassDeclaration(node) && node.name?.text === 'DockerPlanMoveActor'
+  );
+  const method = actor?.members.find(
+    (node): node is ts.MethodDeclaration => ts.isMethodDeclaration(node) && node.name.getText(source) === '#workFor'
+  );
+  const calls: ts.NewExpression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'DockerPlanMoveWork')
+      calls.push(node);
+    ts.forEachChild(node, visit);
+  };
+  if (method) visit(method);
+  expect(calls).toHaveLength(1);
+  const input = calls[0]!.arguments?.[0];
+  expect(input && ts.isObjectLiteralExpression(input)).toBe(true);
+  const field =
+    input && ts.isObjectLiteralExpression(input)
+      ? input.properties.find(
+          (node): node is ts.PropertyAssignment =>
+            ts.isPropertyAssignment(node) && node.name.getText(source) === 'poolRestoreHelperImageId'
+        )
+      : undefined;
+  expect(field?.initializer.getText(source)).toBe('this.#d.configuration.poolRestoreHelperImageId');
+});
 vi.mock('../src/docker-employee-engine.js', async (original) => {
   const actual = await original<typeof import('../src/docker-employee-engine.js')>();
   return {
@@ -116,6 +159,7 @@ async function fixture(phase: DockerEmployeePlanReplacementWorkRecord['phase'] =
       deployment: 'synthetic-office',
       boxId: '7'.repeat(64),
       helperImageId: 'sha256:' + '8'.repeat(64),
+      poolRestoreHelperImageId: 'sha256:' + '9'.repeat(64),
       target: { ...f.work.workerImage, sourceImageIds: [f.work.workerImage.imageId] },
       canonical: new CompanyDockerContinuationStore(company, () => undefined),
       moves,
@@ -125,6 +169,7 @@ async function fixture(phase: DockerEmployeePlanReplacementWorkRecord['phase'] =
     journal
   );
   cleanup.push(() => work.close());
+  expect(resourcePins.get(work.resources)).toBe('sha256:' + '9'.repeat(64));
   const calls: string[] = [];
   let observe: DockerContainerObservation | null = {
     original: destination,

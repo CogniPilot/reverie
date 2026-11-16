@@ -1,8 +1,9 @@
 mod memory_high;
+mod pool;
 
 use crate::{
     args::{Common, HighWrite, MemoryHighWrite, PoolWrite, Worker},
-    data::{self, Resources},
+    data::Resources,
     error::{Result, need},
     files::Files,
     scope::{self, Identity, Scope},
@@ -110,63 +111,19 @@ fn write_checked(
     scope.assert_current(files)
 }
 pub(crate) fn configure_pool(files: &mut Files, input: &PoolWrite) -> Result<String> {
-    let cpus = input
-        .cpuset_cpus
-        .as_deref()
-        .map(data::canonical_cpus)
-        .transpose()?;
-    need(
-        input.common.anchor_start.is_some_and(|v| v > 0),
-        "BOXED_RESOURCE_ANCHOR_BIRTH_REQUIRED",
-    )?;
     need(
         input.common.member.is_empty(),
         "BOXED_RESOURCE_POOL_INITIALIZATION_ONLY",
     )?;
+    pool::configure(files, input)
+}
+pub(crate) fn restore_pool(files: &mut Files, input: &PoolWrite) -> Result<String> {
+    pool::require_restore_members(&input.common)?;
     need(
-        input.memory_max > 0 && input.pids_max > 0 && (1..=10000).contains(&input.cpu_weight),
-        "BOXED_RESOURCE_POLICY",
+        input.cpuset_cpus.is_some(),
+        "BOXED_RESOURCE_RESTORE_CPU_SET_REQUIRED",
     )?;
-    let scope = Scope::capture(files, &input.common)?;
-    let expected = (input.parent_dev, input.parent_ino);
-    need(
-        files.identity(scope.parent)? == expected,
-        "BOXED_RESOURCE_PARENT_CHANGED",
-    )?;
-    let index = writable(files, "/run/reverie-box-pool", expected)?;
-    if let Some(cpus) = &cpus {
-        let selected = data::cpus(cpus)?;
-        let available = data::cpus(&files.read(index, "cpuset.cpus.effective", 4096)?)?;
-        need(
-            !selected.is_empty() && selected.is_subset(&available),
-            "BOXED_RESOURCE_CPU_SET_UNAVAILABLE",
-        )?;
-        write_checked(files, &scope, index, expected, "cpuset.cpus", cpus)?;
-    }
-    for (name, value) in [
-        ("memory.max", input.memory_max.to_string()),
-        ("memory.swap.max", input.swap_max.to_string()),
-        ("pids.max", input.pids_max.to_string()),
-        ("memory.high", "max".into()),
-        ("cpu.weight", input.cpu_weight.to_string()),
-    ] {
-        write_checked(files, &scope, index, expected, name, &value)?;
-    }
-    let result = observation(files, &scope, None)?;
-    need(
-        cpus.as_ref()
-            .is_none_or(|cpus| result.resources.cpuset_cpus == *cpus),
-        "BOXED_RESOURCE_FINAL_CPU_SET",
-    )?;
-    need(
-        result.resources.memory_max == input.memory_max.to_string()
-            && result.resources.swap_max == input.swap_max.to_string()
-            && result.resources.pids_max == input.pids_max.to_string()
-            && result.resources.memory_high == "max"
-            && result.resources.cpu_weight == input.cpu_weight.to_string(),
-        "BOXED_RESOURCE_FINAL_POLICY",
-    )?;
-    encoded(&result)
+    pool::configure(files, input)
 }
 fn require_hard(resources: &Resources, input: &HighWrite) -> Result<()> {
     need(

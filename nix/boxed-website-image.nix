@@ -7,7 +7,7 @@ let
   clientManifestDigest = builtins.hashFile "sha256" "${clientRoot}/manifest.json";
   required = [ "version" "purpose" "deployment" "workerImageId" "clientManifestDigest"
     "sourceImageIds" "helperImageId" "apiUrl" ];
-  optional = [ "memoryHighHelperImageId" ];
+  optional = [ "memoryHighHelperImageId" "poolRestoreHelperImageId" ];
   matches = pattern: value: builtins.isString value && builtins.match pattern value != null;
   imageId = matches "sha256:[a-f0-9]{64}";
   decimal = max: value: matches "(0|[1-9][0-9]{0,4})" value
@@ -36,6 +36,7 @@ let
     && matches "[A-Za-z0-9][A-Za-z0-9_.-]{0,99}" cfg.deployment
     && imageId cfg.workerImageId && imageId cfg.helperImageId
     && (!(cfg ? memoryHighHelperImageId) || imageId cfg.memoryHighHelperImageId)
+    && (!(cfg ? poolRestoreHelperImageId) || imageId cfg.poolRestoreHelperImageId)
     && matches "[a-f0-9]{64}" cfg.clientManifestDigest
     && builtins.isList cfg.sourceImageIds && builtins.length cfg.sourceImageIds > 0
     && builtins.length cfg.sourceImageIds <= 32 && builtins.all imageId cfg.sourceImageIds
