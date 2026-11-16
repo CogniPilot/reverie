@@ -3143,6 +3143,8 @@ export class Session extends EventEmitter {
       providerDispatchHeld: this.providerDispatchHeld,
       providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
       providerInputHeld: this.providerInputHeld,
+      // Retained private view currency only; never fresh native health or an effect grant.
+      ...(this._docker?.continuation ? { dockerProviderViewCurrent: this.dockerContinuationViewCurrent } : {}),
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
       viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
@@ -3205,6 +3207,7 @@ export class Session extends EventEmitter {
       snapshot.claudeMode = this._claudeMode;
       snapshot.allowedTools = this._allowedTools;
     }
+    delete snapshot.dockerProviderViewCurrent;
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
     if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;

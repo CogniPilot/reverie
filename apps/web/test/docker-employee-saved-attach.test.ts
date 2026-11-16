@@ -48,6 +48,8 @@ import { DockerViewerPane } from '../src/docker-viewer-pane.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
 import { AGENT_EXIT as EXIT } from '../src/agent-exit-codes.js';
 import Fastify from 'fastify';
+import { createRouteTestHarness } from './routes/_route-test-utils.js';
+import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 import type { DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
@@ -967,12 +969,65 @@ describe('in-place Docker existing-view renewal', () => {
       InfraPort);
     return { ...f, employee, company, companyFile, sessions, runtime, captured, attach };
   }
+  async function sessionWire(f: Awaited<ReturnType<typeof runtimeFixture>>) {
+    const { app } = await createRouteTestHarness((app, ctx) => {
+      ctx.sessions = f.sessions;
+      ctx.store = f.loaded;
+      ctx.getSessionStateWithRespawn = (session: Session) => session.toLightDetailedState();
+      registerSessionRoutes(app, ctx);
+    });
+    cleanup.push(() => app.close());
+    return async () => {
+      const response = await app.inject({ method: 'GET', url: '/api/sessions/' + sid });
+      expect(response.statusCode).toBe(200);
+      const wire: SessionState = response.json();
+      expect(wire.id).toBe(sid);
+      return wire;
+    };
+  }
+  it('recomputes Docker view currency instead of adopting a forged saved observation', async () => {
+    const f = await savedFixture();
+    expect(f.session.toState().dockerProviderViewCurrent).toBe(false);
+    const saved = f.loaded.getSession(sid)!;
+    f.loaded.setSession(sid, { ...saved, dockerProviderViewCurrent: true });
+    f.loaded.flush();
+    const reloaded = new StateStore(f.path),
+      raw = reloaded.getSession(sid)!;
+    expect(raw.dockerProviderViewCurrent).toBe(true); // Untrusted historical DATA only.
+    const restored = new Session({ ...raw, publicationStore: reloaded, useMux: true, mux: f.mux });
+    cleanup.push(() => restored.stop(false));
+    const wire = JSON.parse(JSON.stringify(restored.toState()));
+    expect(wire.dockerProviderViewCurrent).toBe(false);
+    expect(restored.dockerContinuationViewCurrent).toBe(false);
+    expect(restored.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
+    expect(restored.providerDispatchHeld).toBe(true);
+    expect(restored.pid).toBeNull();
+  });
+  it.each(['local', 'ordinary-docker'] as const)(
+    'omits the retained-view diagnostic for %s placement',
+    async (placement) => {
+      const f = await savedFixture();
+      const saved: SessionState = {
+        ...f.loaded.getSession(sid)!,
+        dockerProviderViewCurrent: true,
+        docker: placement === 'local' ? undefined : { ...f.docker, continuation: undefined },
+      };
+      const restored = new Session({ ...saved });
+      cleanup.push(() => restored.stop(false));
+      expect(restored.toState()).not.toHaveProperty('dockerProviderViewCurrent');
+      expect(JSON.parse(JSON.stringify(restored.toState()))).not.toHaveProperty('dockerProviderViewCurrent');
+      expect(restored.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
+    }
+  );
   it('repairs a naturally exited actual Docker Session viewer whose old private view was revoked', async () => {
     installViewerCustody();
     const f = await runtimeFixture();
+    let admitted = true;
+    const readWire = await sessionWire(f);
     f.attach.mockRestore(); // Exercise the actual existing Session/provider binding boundary.
     expect(f.session.docker?.continuation).toBeDefined();
     expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(false);
     const before = { ptys: native.ptys.length, writes: [...native.writes], intent: f.before.intent };
     native.exits.at(-1)!({ exitCode: 1, signal: 0 }); // Actual public PTY exit callback, no Session field mutation.
     expect(f.session.pid).toBeNull();
@@ -981,16 +1036,22 @@ describe('in-place Docker existing-view renewal', () => {
     const creates = vi.mocked(f.command.create).mock.calls.length,
       configures = vi.mocked(f.resources.configure).mock.calls.length;
     await expect(
-      f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => true)
+      f.runtime.reconnectViewer(eid, { sessionId: sid, sessionGeneration: 3 }, undefined, () => admitted)
     ).resolves.toBe('connected');
     expect(native.ptys).toHaveLength(before.ptys + 1);
     expect(native.writes).toEqual(before.writes);
     expect(vi.mocked(f.command.create).mock.calls.length).toBe(creates);
     expect(vi.mocked(f.resources.configure).mock.calls.length).toBe(configures);
     expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(before.intent);
+    admitted = false;
+    expect((await readWire()).dockerProviderViewCurrent).toBe(true);
+    expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(true);
+    expect(f.session.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
     const now = performance.now.bind(performance);
     vi.spyOn(performance, 'now').mockImplementation(() => now() + 30_000);
     expect(f.session.dockerContinuationViewCurrent).toBe(true);
+    expect((await readWire()).dockerProviderViewCurrent).toBe(true);
+    expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(true);
   });
   it.each(['pid', 'command', 'birth', 'socket', 'restored-row'] as const)(
     'fresh genuine Engine proof cannot adopt changed outer %s before attaching any website client',
@@ -1106,6 +1167,7 @@ describe('in-place Docker existing-view renewal', () => {
     async (resultKind) => {
       installViewerCustody();
       const f = await runtimeFixture();
+      const readWire = await sessionWire(f);
       const targetToken = f.runtime.authentication.issue(
         { ...f.employee.dockerBinding!, employeeId: eid, owner: undefined },
         () => true
@@ -1113,6 +1175,8 @@ describe('in-place Docker existing-view renewal', () => {
       const targetRequest = { headers: { 'x-reverie-worker-identity': targetToken, 'x-reverie-parent-session': sid } };
       native.exits.at(-1)!({ exitCode: 1, signal: 0 });
       expect(f.session.pid).toBeNull();
+      expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(false);
+      expect((await readWire()).dockerProviderViewCurrent).toBe(false);
       expect(f.runtime.authentication.capture(targetRequest)).toBeUndefined(); // Self admission is still held while its viewer is lost.
       const targetIntent = JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY].rows[sid];
       const actorId = '80000000-0000-4000-8000-000000000008',
@@ -1262,22 +1326,33 @@ describe('in-place Docker existing-view renewal', () => {
         expect(viewReads).toBe(2);
         expect(f.session.viewerInputHeld).toBe(true);
         expect(f.session.dockerContinuationViewCurrent).toBe(false);
+        expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(false);
+        expect((await readWire()).dockerProviderViewCurrent).toBe(false);
         return;
       }
       expect(JSON.parse(result.stdout)).toMatchObject({ state: 'viewer-connected' });
       expect(f.session.dockerContinuationViewCurrent).toBe(true); // Controller finally already closed move/claim leases.
+      expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(true);
+      expect((await readWire()).dockerProviderViewCurrent).toBe(true);
+      expect(f.session.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
       const targetIdentity = f.runtime.authentication.capture(targetRequest);
       expect(targetIdentity?.current()).toBe(true);
       await f.company.update(actorId, undefined, { permissions: { recoverEmployees: false } }, () => {});
       expect(f.session.dockerContinuationViewCurrent).toBe(true); // Repairer authority never owns target transport lifetime.
+      expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(true);
+      expect((await readWire()).dockerProviderViewCurrent).toBe(true);
       const now = performance.now.bind(performance);
       vi.spyOn(performance, 'now').mockImplementation(() => now() + 30_000);
       expect(f.session.dockerContinuationViewCurrent).toBe(true); // One-shot 25s admission is no longer a transport lifetime.
+      expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(true);
+      expect((await readWire()).dockerProviderViewCurrent).toBe(true);
       expect(targetIdentity?.current()).toBe(true);
       await f.companyFile.update((state) => {
         state.employees.find((value) => value.id === eid)!.sessionGeneration++;
       });
       expect(f.session.dockerContinuationViewCurrent).toBe(false);
+      expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(false);
+      expect((await readWire()).dockerProviderViewCurrent).toBe(false);
       expect(targetIdentity?.current()).toBe(false);
     }
   );
