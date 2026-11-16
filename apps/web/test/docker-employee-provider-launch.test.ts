@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
+import { shellescape } from '../src/docker-hosts.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import { dockerEmployeeSourceDigest } from '../src/docker-employee-store.js';
 import {
@@ -202,13 +203,48 @@ describe('boxed original provider publication', () => {
     expect(current).toHaveBeenCalled();
   });
   it.each([
-    ['daemon', (value: SessionDocker) => (value.daemonHost = 'unix:///other.sock')],
-    ['image', (value: SessionDocker) => (value.image = 'sha256:' + 'd'.repeat(64))],
-    ['container', (value: SessionDocker) => (value.containerName = 'e'.repeat(64))],
-    ['workspace', (value: SessionDocker) => (value.containerWorkdir = '/different')],
-    ['network', (value: SessionDocker) => (value.network = 'different')],
-    ['credentials', (value: SessionDocker) => (value.mountCredentials = true)],
-    ['generation', (value: SessionDocker) => (value.continuation!.sessionGeneration = 8)],
+    [
+      'daemon',
+      (value: SessionDocker): void => {
+        value.daemonHost = 'unix:///other.sock';
+      },
+    ],
+    [
+      'image',
+      (value: SessionDocker): void => {
+        value.image = 'sha256:' + 'd'.repeat(64);
+      },
+    ],
+    [
+      'container',
+      (value: SessionDocker): void => {
+        value.containerName = 'e'.repeat(64);
+      },
+    ],
+    [
+      'workspace',
+      (value: SessionDocker): void => {
+        value.containerWorkdir = '/different';
+      },
+    ],
+    [
+      'network',
+      (value: SessionDocker): void => {
+        value.network = 'none';
+      },
+    ],
+    [
+      'credentials',
+      (value: SessionDocker): void => {
+        value.mountCredentials = true;
+      },
+    ],
+    [
+      'generation',
+      (value: SessionDocker): void => {
+        value.continuation!.sessionGeneration = 8;
+      },
+    ],
   ] as const)('rejects changed captured Docker %s without consuming the original owner', (_field, mutate) => {
     const f = fixture(),
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
@@ -356,18 +392,41 @@ describe('boxed original provider publication', () => {
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('revoked');
     expect(() => Object.create(DockerEmployeeProviderLaunch.prototype).claim(sid, f.place)).toThrow();
   });
-  it('explicit Docker binding does not inherit a globally configured native viewer hold', () => {
-    vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic/native.sock');
-    const session = new Session({
-      id: sid,
-      workingDir: '/synthetic/work',
-      mode: 'claude',
-      docker: docker(),
-      viewerInputHeld: true,
-    });
-    sessions.push(session);
-    expect(session.toState().viewerInputHeld).not.toBe(true);
-  });
+  it.each([
+    { placement: 'boxed', nativeEnvironment: true, requested: undefined, expected: false },
+    { placement: 'boxed', nativeEnvironment: true, requested: false, expected: false },
+    { placement: 'boxed', nativeEnvironment: true, requested: true, expected: true },
+    { placement: 'boxed', nativeEnvironment: false, requested: true, expected: true },
+    { placement: 'ordinary', nativeEnvironment: true, requested: undefined, expected: false },
+    { placement: 'ordinary', nativeEnvironment: true, requested: true, expected: false },
+    { placement: 'ordinary', nativeEnvironment: false, requested: true, expected: false },
+  ])(
+    'retains only an explicit boxed viewer fence ($placement, native=$nativeEnvironment, requested=$requested)',
+    ({ placement, nativeEnvironment, requested, expected }) => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', nativeEnvironment ? '/synthetic/native.sock' : undefined);
+      const place = docker();
+      if (placement === 'ordinary') delete place.continuation;
+      const session = new Session({
+        id: sid,
+        workingDir: '/synthetic/work',
+        mode: 'claude',
+        docker: place,
+        viewerInputHeld: requested,
+      });
+      sessions.push(session);
+      expect(session.viewerInputHeld).toBe(expected);
+      expect(session.toState().viewerInputHeld).toBe(expected);
+      const saved = session.toPersistedState();
+      expect(saved.viewerInputHeld).toBe(expected);
+      // Actual saved-state reconstruction must retain the boxed fence even when
+      // the controller no longer has a global native-worker deployment setting.
+      vi.stubEnv('REVERIE_WORKER_SOCKET', undefined);
+      const restored = new Session({ ...saved });
+      sessions.push(restored);
+      expect(restored.viewerInputHeld).toBe(expected);
+      expect(restored.toState().viewerInputHeld).toBe(expected);
+    }
+  );
   it('normal same-thread Session construction keeps the source recipe correlation stable', () => {
     const employee = EmployeeSchema.parse({
       id: eid,
@@ -412,15 +471,70 @@ describe('boxed original provider publication', () => {
 });
 
 describe('boxed provider command contract', () => {
-  it('pins the control Engine even when the provider environment selects a private nested daemon', () => {
-    vi.stubEnv('DOCKER_HOST', 'unix:///private-worker/docker.sock');
+  it('pins both actual control invocations and the captured exec vector despite a private provider daemon', () => {
+    const privateEndpoint = 'unix:///private-worker/docker.sock';
+    vi.stubEnv('DOCKER_HOST', privateEndpoint);
     const f = fixture(),
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}),
-      command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
-    expect(command.split('unix:///run/reverie-engine/docker.sock').slice(1)).toHaveLength(2);
-    expect(command.match(/-H /g)).toHaveLength(2);
-    expect(command).not.toContain('/private-worker');
+      captured = vi.fn<(command: import('../src/docker-viewer-pane.js').DockerViewerCommand) => void>(),
+      command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner, captureExecution: captured });
+    expect(captured).toHaveBeenCalledOnce();
+    const actual = captured.mock.calls[0]![0];
+    expect(actual.shellCommand).toBe(command);
+    expect(actual.argv.slice(0, 7)).toEqual([
+      '/bin/docker',
+      '--host',
+      'unix:///run/reverie-engine/docker.sock',
+      'exec',
+      '-it',
+      '--workdir',
+      f.place.containerWorkdir,
+    ]);
+    const target = actual.argv.indexOf(cid);
+    expect(target).toBeGreaterThan(6);
+    expect(actual.argv.slice(target, target + 3)).toEqual([cid, 'sh', '-lc']);
+    expect(actual.argv.at(-1)).toContain(f.opts.canonicalCommand);
+    expect(Object.isFrozen(actual)).toBe(true);
+    expect(Object.isFrozen(actual.argv)).toBe(true);
+    // The shell's independent image/running/CID check must select the same
+    // control Engine and exact container as the actual captured exec request.
+    const inspect =
+      "'/bin/docker' '--host' 'unix:///run/reverie-engine/docker.sock' inspect -f '{{.Image}} {{.State.Running}} {{.Id}}' '" +
+      cid +
+      "' | grep -Fx '" +
+      image +
+      ' true ' +
+      cid +
+      "'";
+    expect(command).toBe(inspect + ' && exec ' + actual.argv.map(shellescape).join(' '));
+    expect(command).not.toContain(privateEndpoint);
+    expect(actual.argv).not.toContain(privateEndpoint);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
   });
+  it.each(['daemon', 'context'] as const)(
+    'refuses a %s redirect before emitting or consuming a boxed command',
+    (selection) => {
+      const f = fixture(),
+        owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}),
+        captured = vi.fn(),
+        redirected = structuredClone(f.place);
+      if (selection === 'daemon') redirected.daemonHost = 'unix:///private-worker/docker.sock';
+      else redirected.context = 'private-worker';
+      expect(() =>
+        buildDockerLaunchCommand({
+          ...f.opts,
+          docker: redirected,
+          continuationLaunch: owner,
+          captureExecution: captured,
+        })
+      ).toThrow('Fixed boxed Docker command required');
+      expect(captured).not.toHaveBeenCalled();
+      const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner, captureExecution: captured });
+      expect(command).toContain('source-file -');
+      expect(captured).toHaveBeenCalledOnce();
+      expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    }
+  );
   it('folds fixed capsule hooks into the same Claude settings value as advisor/effort without a HOME writer', () => {
     const command = buildSpawnCommand({
       mode: 'claude',
