@@ -31,15 +31,6 @@ let
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
     };
     configAvailableForGpuComposition = image.passthru.reverieConfig == image.config;
-    readonlyRealRootOwnedFile = image.extraCommands == ''
-      mkdir -p etc/reverie
-      cp /nix/store/controlled-boxed-configuration etc/reverie/boxed-runtime.json
-      chmod 0444 etc/reverie/boxed-runtime.json
-    '' && image.fakeRootCommands == ''
-      chown 0:0 etc/reverie etc/reverie/boxed-runtime.json
-      chmod 0755 etc/reverie
-      chmod 0444 etc/reverie/boxed-runtime.json
-    '' && image.enableFakechroot;
     approvedOptionalHelperPreserved = accepts (cfg // { memoryHighHelperImageId = "sha256:${id}"; }) baseConfig;
     backendNotDuplicated = (make cfg (baseConfig // {
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
