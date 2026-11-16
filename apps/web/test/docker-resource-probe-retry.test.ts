@@ -242,3 +242,42 @@ describe('bounded whole resource probe retries', () => {
     }
   });
 });
+
+describe('expired inventory admission has no detached rejection', () => {
+  it('does not invoke a rejecting inventory callback when earlier native I/O consumed the budget', async () => {
+    const f = await prepared();
+    const inventory = vi.fn(() => Promise.reject(Error('late inventory must remain uninvoked')));
+    const controller = new DockerContainedResources(f.command, f.journal, {
+      boxId: box,
+      deployment,
+      helperImageId: helper,
+      selectedWorkerContainerIds: inventory,
+      retainedPoolConfigurationTasks: () => [],
+    });
+    const task = f.tasks.get('anchor')!;
+    if (!('containerId' in task)) throw Error('Prepared anchor missing');
+    const now = performance.now();
+    let inspections = 0,
+      probes = 0;
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', listener);
+    f.beforeRun((args) => {
+      if (args[0] === 'container' && args[1] === 'inspect' && args[2] === task.containerId && ++inspections === 3)
+        vi.spyOn(performance, 'now').mockReturnValue(now + 60000);
+      if (args.includes('probe-pool') || args.includes('probe-worker')) probes++;
+    });
+    try {
+      await expect(controller.read(f.row())).rejects.toThrow('PROBE_DEADLINE');
+      expect(inspections).toBe(3);
+      expect(inventory).not.toHaveBeenCalled();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(probes).toBe(0);
+    } finally {
+      process.off('unhandledRejection', listener);
+    }
+  });
+});

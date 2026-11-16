@@ -282,24 +282,28 @@ export class DockerContainedResources implements DockerContainedResourceControll
     bindings?: Record<string, unknown>[],
     deadline?: number
   ): Promise<string[]> {
+    if (deadline !== undefined) {
+      const remaining = Math.floor(deadline - performance.now());
+      if (!Number.isFinite(remaining) || remaining <= 0) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
+    }
     const selected = this.configuration.selectedWorkerContainerIds();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let values: readonly string[];
     try {
       if (deadline === undefined) values = await selected;
       else {
-        const remaining = Math.floor(deadline - performance.now());
-        if (!Number.isFinite(remaining) || remaining <= 0) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
         values = await Promise.race([
           Promise.resolve(selected),
           new Promise<never>((_resolve, reject) => {
+            const remaining = Math.floor(deadline - performance.now());
             timer = setTimeout(
               () => reject(new DockerEmployeeContinuationError('DOCKER_RESOURCE_PROBE_DEADLINE')),
-              remaining
+              Number.isFinite(remaining) ? Math.max(0, remaining) : 0
             );
           }),
         ]);
-        if (performance.now() >= deadline) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
+        const settledAt = performance.now();
+        if (!Number.isFinite(settledAt) || settledAt >= deadline) refuse('DOCKER_RESOURCE_PROBE_DEADLINE');
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);
