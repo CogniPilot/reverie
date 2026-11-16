@@ -12,7 +12,10 @@ import {
   policy,
   deployment,
   workerId,
+  writer,
 } from './helpers/docker-resource-physical.js';
+import { DockerResourceRevisionStore } from '../src/docker-resource-revisions.js';
+import type { DockerContinuationTask } from '../src/docker-continuation-task.js';
 import { CompanyStore } from '../src/company-store.js';
 import { CompanyService, type CompanyServiceDeps } from '../src/company-service.js';
 import { EmployeeSchema } from '../src/company-types.js';
@@ -40,8 +43,8 @@ import {
 } from '../src/docker-worker-identity.js';
 import type { SessionPort } from '../src/web/ports/session-port.js';
 
-async function restoredPoolFixture(pin = true) {
-  const physical = physicalFixture(),
+async function restoredPoolFixture(pin = true, revisions?: DockerResourceRevisionStore) {
+  const physical = physicalFixture('b'.repeat(64), revisions, revisions ? writer : undefined),
     boxId = 'b'.repeat(64),
     restoreImage = 'sha256:' + '9'.repeat(64);
   await physical.controller.preparePool(physical.row(), physical.current);
@@ -102,22 +105,191 @@ async function restoredPoolFixture(pin = true) {
             },
           },
         ]);
-      return physical.command.run(args);
+      const output = await physical.command.run(args);
+      if (args[0] === 'exec' && args.includes('probe-worker') && args.includes('--worker-id')) {
+        const id = args[args.indexOf('--worker-id') + 1]!,
+          current = physical.containers.get(id);
+        if (!current) throw Error('The actual current fixture worker is missing');
+        const seen = JSON.parse(output) as { worker: { id: string; pid: number; path: string; ino: string } };
+        seen.worker = {
+          ...seen.worker,
+          id,
+          pid: (current.State as { Pid: number }).Pid,
+          path: parent + '/docker-' + id + '.scope',
+          ino: id === workerId ? '4' : '5',
+        };
+        return JSON.stringify(seen);
+      }
+      return output;
     },
   };
-  const controller = new DockerContainedResources(command, physical.journal, {
-    boxId,
-    deployment,
-    helperImageId: helper,
-    poolRestoreHelperImageId: pin ? restoreImage : undefined,
-    selectedWorkerContainerIds: () => [workerId],
-    retainedPoolConfigurationTasks: () => [],
-  });
+  let members = [workerId];
+  let retained: DockerContinuationTask[] = [];
+  const controller = new DockerContainedResources(
+    command,
+    physical.journal,
+    {
+      boxId,
+      deployment,
+      helperImageId: helper,
+      poolRestoreHelperImageId: pin ? restoreImage : undefined,
+      memoryHighHelperImageId: revisions ? writer : undefined,
+      selectedWorkerContainerIds: () => members,
+      retainedPoolConfigurationTasks: () => retained,
+    },
+    revisions
+  );
   const before = { creates: [...physical.creates], starts: [...physical.starts] };
-  return { physical, controller, id, restoreImage, before, config, seen };
+  return {
+    physical,
+    controller,
+    id,
+    restoreImage,
+    before,
+    config,
+    seen,
+    setMembers: (ids: string[]) => {
+      members = [...ids];
+    },
+    retainPool: (tasks: DockerContinuationTask[]) => {
+      retained = structuredClone(tasks);
+    },
+  };
 }
 
 describe('separately pinned populated-pool restore ACK adoption', () => {
+  it.each(['retired', 'replaced', 'new-current', 'same-cid-new-pid'] as const)(
+    'keeps a genuine historical restore ACK after a member is %s while probing only the current complete scope',
+    async (change) => {
+      const f = await restoredPoolFixture(),
+        old = structuredClone(f.physical.containers.get(workerId)!),
+        current = '6'.repeat(64);
+      const calls: string[][] = [];
+      if (change === 'retired' || change === 'replaced') f.physical.containers.delete(workerId);
+      if (change === 'replaced' || change === 'new-current') {
+        old.Id = current;
+        (old.State as Record<string, unknown>).Pid = 300;
+        f.physical.containers.set(current, old);
+        f.setMembers(change === 'replaced' ? [current] : [workerId, current]);
+      } else if (change === 'retired') f.setMembers([]);
+      else (f.physical.containers.get(workerId)!.State as Record<string, unknown>).Pid = 300;
+      f.physical.beforeRun((args) => {
+        calls.push([...args]);
+        if (
+          (change === 'retired' || change === 'replaced') &&
+          args[0] === 'container' &&
+          args[1] === 'inspect' &&
+          args[2] === workerId
+        )
+          throw Error('Historical CID must never be queried');
+      });
+      const before = {
+        creates: [...f.physical.creates],
+        starts: [...f.physical.starts],
+        tasks: structuredClone([...f.physical.tasks]),
+        ack: f.physical.logs.get(f.id),
+        configuration: structuredClone(f.physical.containers.get(f.id)),
+      };
+      const receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current);
+      expect(receipt.snapshot(f.physical.current)).toMatchObject({ version: 2, configuration: { containerId: f.id } });
+      expect({
+        creates: f.physical.creates,
+        starts: f.physical.starts,
+        tasks: [...f.physical.tasks],
+        ack: f.physical.logs.get(f.id),
+        configuration: f.physical.containers.get(f.id),
+      }).toEqual(before);
+      const probes = calls.filter((args) => args[0] === 'exec' && args.includes('probe-pool'));
+      expect(probes.length).toBeGreaterThanOrEqual(2);
+      if (change === 'replaced' || change === 'new-current')
+        expect(probes.every((args) => args.includes(current + ':300:20'))).toBe(true);
+      if (change === 'retired') expect(probes.every((args) => !args.includes('--member'))).toBe(true);
+      if (change === 'same-cid-new-pid') expect(probes.every((args) => args.includes(workerId + ':300:20'))).toBe(true);
+    }
+  );
+  it('propagates a fresh Rust FOREIGN_CHILD refusal despite a valid historical restore ACK', async () => {
+    const f = await restoredPoolFixture();
+    let probes = 0;
+    f.physical.beforeRun((args) => {
+      if (args[0] === 'exec' && args.includes('probe-pool') && ++probes === 2)
+        throw Error('BOXED_RESOURCE_FOREIGN_CHILD');
+    });
+    await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).rejects.toThrow(
+      'BOXED_RESOURCE_FOREIGN_CHILD'
+    );
+    expect(probes).toBe(2);
+    expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+  });
+  it('keeps v2 pool proof and repaired original16 leaf ACK through approved48 and a later member joining', async () => {
+    const directory = await fs.mkdtemp(join(tmpdir(), 'pool-leaf-membership-')),
+      revisions = new DockerResourceRevisionStore(join(directory, 'revisions'));
+    cleanups.push(async () => {
+      revisions.close();
+      await fs.rm(directory, { recursive: true, force: true });
+    });
+    const f = await restoredPoolFixture(true, revisions),
+      receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current);
+    const canonical = new CompanyStore(join(directory, 'company.json'));
+    await canonical.init();
+    expect(
+      (
+        await canonical.publishDockerPoolObservation(
+          receipt,
+          dockerPoolMetadataDigest(canonical.snapshot()),
+          f.physical.current
+        )
+      ).state
+    ).toBe('committed');
+    f.retainPool(canonical.snapshot().dockerPoolObservations!.map((row) => row.configuration));
+    f.physical.row().pool = (await f.controller.observePool(f.physical.row()))!;
+    await f.controller.configure(f.physical.row(), f.physical.current);
+    f.physical.ready();
+    const original = f.physical.tasks.get('leaf-helper')!;
+    if (original.phase !== 'completed') throw Error('Actual completed helper required');
+    const replacement = structuredClone(f.physical.containers.get(original.containerId)!),
+      replacementId = 'f'.repeat(64),
+      name = 'reverie-boxed-leaf-helper-' + 'e'.repeat(64);
+    replacement.Id = replacementId;
+    replacement.Name = '/' + name;
+    (replacement.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] = name;
+    f.physical.containers.set(replacementId, replacement);
+    f.physical.logs.set(replacementId, f.physical.logs.get(original.containerId)!);
+    f.physical.containers.delete(original.containerId);
+    f.physical.logs.delete(original.containerId);
+    expect(await f.controller.read(f.physical.row())).toEqual(policy);
+    const desired = {
+      revision: '44444444-4444-4444-8444-444444444444',
+      owner: null,
+      scope: 'all-current-and-future' as const,
+      memoryHighBytes: 48 * 1024 ** 3,
+    };
+    await revisions.approve(desired, null, f.physical.current);
+    const result = await f.controller.reviseMemoryHigh(f.physical.row(), desired.revision, f.physical.current);
+    expect(result).toEqual({ state: 'applied', policy: { ...policy, memoryHighBytes: 48 * 1024 ** 3 } });
+    const joined = '6'.repeat(64),
+      raw = structuredClone(f.physical.containers.get(workerId)!);
+    raw.Id = joined;
+    (raw.State as Record<string, unknown>).Pid = 300;
+    f.physical.containers.set(joined, raw);
+    f.setMembers([workerId, joined]);
+    const before = {
+      creates: [...f.physical.creates],
+      starts: [...f.physical.starts],
+      tasks: structuredClone([...f.physical.tasks]),
+      row: structuredClone(f.physical.row()),
+    };
+    expect(await f.controller.read(f.physical.row())).toEqual(result.policy);
+    expect(await f.controller.observeMemoryHigh(f.physical.row(), f.physical.current)).toMatchObject({
+      approved: true,
+      actualMemoryHighBytes: 48 * 1024 ** 3,
+    });
+    expect({
+      creates: f.physical.creates,
+      starts: f.physical.starts,
+      tasks: [...f.physical.tasks],
+      row: f.physical.row(),
+    }).toEqual(before);
+  });
   it('publishes and reloads strict v2 correlation while the actual anchor retains its old image', async () => {
     const f = await restoredPoolFixture();
     const receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current);

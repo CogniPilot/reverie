@@ -468,10 +468,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
             : 'configure-pool')
     )
       return false;
-    const members = restore ? await this.#restoreMembers(fresh) : undefined;
     if (restore) {
       await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
-      if (!isDeepStrictEqual(args, this.#restoreArguments(fresh, policy, members!))) return false;
     }
     const writable = {
       path: worker ? fresh.worker!.path : this.#parent,
@@ -507,7 +505,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const acknowledged = restore ? DockerPoolRestoreAcknowledgement.parse(output) : observation.parse(output);
     if (
       restore &&
-      !isDeepStrictEqual((acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).members, members)
+      !isDeepStrictEqual(
+        args,
+        this.#restoreArguments(fresh, policy, (acknowledged as z.infer<typeof DockerPoolRestoreAcknowledgement>).members)
+      )
     )
       return false;
     const result = restore
@@ -685,24 +686,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
       canonicalCpus(policy.allowedCpus),
     ];
   }
-  async #restoreMembers(seen: Observation): Promise<NonNullable<Observation['worker']>[]> {
-    const args = await this.#members();
-    if (!args.length) refuse('DOCKER_RESOURCE_RESTORE_MEMBERS_REQUIRED');
-    const members: NonNullable<Observation['worker']>[] = [];
-    for (let index = 1; index < args.length; index += 2) {
-      const [id, pid, startTicks] = args[index]!.split(':');
-      const actual = await this.#probe(seen.anchor, { id: cid.parse(id), pid: Number(pid), startTicks: startTicks! });
-      if (
-        !actual.worker ||
-        !isDeepStrictEqual(actual.parent, seen.parent) ||
-        !isDeepStrictEqual(actual.anchor, seen.anchor)
-      )
-        refuse('DOCKER_POOL_EPOCH_CHANGED');
-      members.push(actual.worker);
-    }
-    if (!isDeepStrictEqual(await this.#members(), args)) refuse('DOCKER_RESOURCE_MEMBERS_CHANGED');
-    return members;
-  }
   #restoreArguments(
     seen: Observation,
     policy: DockerEmployeeResourcePolicy['pool'],
@@ -777,8 +760,15 @@ export class DockerContainedResources implements DockerContainedResourceControll
       const restore = raw.Image === this.configuration.poolRestoreHelperImageId;
       const imageId = restore ? this.configuration.poolRestoreHelperImageId! : this.configuration.helperImageId;
       if (restore) await requireDockerPoolRestoreHelperImage(this.command, imageId, current);
+      // The terminal ACK records the complete scope at the ORIGINAL write.
+      // Current membership is independently earned by the fresh Rust probe;
+      // leaving or replacing a worker cannot rewrite this historical receipt.
+      const historical = restore
+        ? DockerPoolRestoreAcknowledgement.parse(JSON.parse(await this.command.run(['container', 'logs', candidate])))
+        : undefined;
+      current();
       const args = restore
-        ? this.#restoreArguments(fresh, policy, await this.#restoreMembers(fresh))
+        ? this.#restoreArguments(fresh, policy, historical!.members)
         : this.#poolArguments(fresh, policy);
       current();
       const expected = this.#configuration(
@@ -818,6 +808,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
       const output: unknown = JSON.parse(await this.command.run(['container', 'logs', candidate]));
       const ack = restore ? DockerPoolRestoreAcknowledgement.parse(output) : observation.parse(output);
+      if (restore && !isDeepStrictEqual(ack, historical)) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
       current();
       const task = DockerContinuationTask.parse({
         role: 'pool-helper',
