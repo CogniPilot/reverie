@@ -14,7 +14,7 @@ pkgs.dockerTools.buildLayeredImage {
     Entrypoint = [ "/bin/reverie-docker-resources" ];
     Cmd = [ "anchor" ];
     WorkingDir = "/";
-    Labels = { "org.reverie.purpose" = "boxed-resource-helper-v1"; }
+    Labels = { "org.reverie.purpose" = "boxed-resource-helper-v1"; "org.opencontainers.image.title" = name; }
       // pkgs.lib.optionalAttrs memoryHighOnly { "org.reverie.resource.memory-high-only" = "v1"; };
   };
 }

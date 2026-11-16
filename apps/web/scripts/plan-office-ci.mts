@@ -1,6 +1,7 @@
 /** Mandatory hosted acceptance. All model executables and credentials are synthetic;
  * the ordinary owner API, HMAC client, Docker lifecycle and native verifier are real.
- * --ci keeps the ordinary-self gate; other scenarios require explicit selection. */
+ * The default hosted gate runs every supported scenario. A manual workflow may
+ * select one scenario for diagnosis; it does not establish suite acceptance. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -18,20 +19,16 @@ import {
 type Json = Record<string, unknown>;
 const imageId = /^sha256:[a-f0-9]{64}$/;
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
-export type PlanOfficeCiSelection =
-  | 'ordinary-self'
-  | 'self-roundtrip'
-  | 'self-owner-force'
-  | 'self-agent-force'
-  | 'team-plan-move';
+export const PLAN_OFFICE_CI_SCENARIOS = Object.freeze([
+  'ordinary-self',
+  'self-roundtrip',
+  'self-owner-force',
+  'self-agent-force',
+  'team-plan-move',
+] as const);
+export type PlanOfficeCiSelection = (typeof PLAN_OFFICE_CI_SCENARIOS)[number];
 function requireSelection(value: string): asserts value is PlanOfficeCiSelection {
-  assert.ok(
-    value === 'ordinary-self' ||
-      value === 'self-roundtrip' ||
-      value === 'self-owner-force' ||
-      value === 'self-agent-force' ||
-      value === 'team-plan-move'
-  );
+  assert.ok((PLAN_OFFICE_CI_SCENARIOS as readonly string[]).includes(value));
 }
 function object(value: unknown): Json {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value));
@@ -53,6 +50,53 @@ export function requireHostedPlanOffice(
   assert.equal(arch, 'x64');
   assert.ok(env.RUNNER_TEMP && path.isAbsolute(env.RUNNER_TEMP));
   return selection;
+}
+/** Closed execution plan only. No fixture, image, credential or business result
+ * is manufactured by selecting the suite. Every case still admits its own run. */
+export function planOfficeCiSelections(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  platform = process.platform,
+  arch = process.arch
+): readonly PlanOfficeCiSelection[] {
+  if (args.length === 3 && args[2] === 'all') {
+    assert.deepEqual(args, ['--ci', '--scenario', 'all']);
+    requireHostedPlanOffice(['--ci'], env, platform, arch);
+    return PLAN_OFFICE_CI_SCENARIOS;
+  }
+  return [requireHostedPlanOffice(args, env, platform, arch)];
+}
+/** Fail fast on the original failed/unconfirmed case. Never repeat it or launch
+ * another case as a recovery attempt. The CLI always supplies the real runner. */
+export async function runPlanOfficeCiSuite(
+  args: readonly string[],
+  env = process.env,
+  run: (args: readonly string[], env: NodeJS.ProcessEnv) => Promise<void> = runPlanOfficeCi
+): Promise<void> {
+  for (const selection of planOfficeCiSelections(args, env)) await run(['--ci', '--scenario', selection], env);
+}
+/** One public artifact slot per scenario. Existing slots are attempt latches,
+ * including failed attempts: they cannot be overwritten to manufacture green. */
+export function createPlanOfficeCiPublishedDirectory(source: string, selection: PlanOfficeCiSelection): string {
+  requireSelection(selection);
+  assert.ok(path.isAbsolute(source));
+  const root = path.resolve(source);
+  assert.equal(fs.realpathSync(root), root);
+  let parent = root;
+  for (const leaf of ['acceptance', 'plan-office']) {
+    parent = path.join(parent, leaf);
+    try {
+      fs.mkdirSync(parent, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    assert.equal(fs.realpathSync(parent), parent);
+    const stat = fs.lstatSync(parent);
+    assert.ok(stat.isDirectory() && stat.uid === process.getuid!() && (stat.mode & 0o022) === 0);
+  }
+  const published = path.join(parent, selection);
+  fs.mkdirSync(published, { mode: 0o700 });
+  return published;
 }
 export function planOfficeCiNamespace(instance: string) {
   assert.match(instance, /^[a-f0-9]{32}$/);
@@ -687,10 +731,7 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
   fs.mkdirSync(evidence, { mode: 0o700 });
   const dockerConfig = path.join(evidence, 'docker-config');
   fs.mkdirSync(dockerConfig, { mode: 0o700 });
-  const published = path.join(source, 'acceptance', 'plan-office');
-  fs.mkdirSync(path.dirname(published), { recursive: true });
-  assert.equal(fs.realpathSync(path.dirname(published)), path.dirname(published));
-  fs.mkdirSync(published, { mode: 0o700 });
+  const published = createPlanOfficeCiPublishedDirectory(source, selection);
   let serial = 0,
     lastStage = 'admission';
   let lastChild: unknown;
@@ -923,4 +964,4 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
   }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(fs.realpathSync(process.argv[1])).href)
-  await runPlanOfficeCi(process.argv.slice(2));
+  await runPlanOfficeCiSuite(process.argv.slice(2));

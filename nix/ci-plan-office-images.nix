@@ -56,7 +56,7 @@ let
       Cmd = [];
       WorkingDir = "/tmp";
       Env = [ "HOME=/home/agent" "PATH=/opt/reverie-ci-plan-provider/bin:/opt/reverie-worker-client/bin:/opt/reverie-worker-tools/bin:/bin" "TERMINFO=/opt/reverie-worker-tools/share/terminfo" "TERMINFO_DIRS=/opt/reverie-worker-tools/share/terminfo" "LOCALE_ARCHIVE=/opt/reverie-worker-tools/share/locale/locale-archive" "LC_ALL=C.UTF-8" ];
-      Labels = { "org.reverie.worker-client.manifest" = clientManifestDigest; "org.reverie.fixture" = "ci-plan-office-v1"; };
+      Labels = { "org.reverie.worker-client.manifest" = clientManifestDigest; "org.reverie.fixture" = "ci-plan-office-v1"; "org.reverie.fixture.namespace" = imageNamespace; };
     };
   };
   helperImage = import ./docker-resource-helper-image.nix { inherit pkgs; helper = resourceHelper; name = names.helper; };
@@ -87,7 +87,7 @@ let
         Cmd = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
         WorkingDir = "/fixture";
         Env = [ "HOME=/fixture/home" "REVERIE_DATA_DIR=/fixture/data" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" "REVERIE_OWNER_SETUP=1" "REVERIE_API_URL=http://reverie:3000" "REVERIE_ALLOWED_HOSTS=reverie" "PATH=/opt/reverie-ci-plan-provider/bin:/bin" ];
-        Labels = { "org.reverie.fixture" = "ci-plan-office-v1"; };
+        Labels = { "org.reverie.fixture" = "ci-plan-office-v1"; "org.reverie.fixture.namespace" = imageNamespace; };
         ExposedPorts = { "3000/tcp" = {}; };
       };
     };

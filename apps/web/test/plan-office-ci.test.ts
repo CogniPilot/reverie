@@ -18,6 +18,10 @@ import {
 } from './helpers/plan-office-startup-diagnostic.js';
 import {
   requireHostedPlanOffice,
+  PLAN_OFFICE_CI_SCENARIOS,
+  planOfficeCiSelections,
+  runPlanOfficeCiSuite,
+  createPlanOfficeCiPublishedDirectory,
   planOfficeCiNamespace,
   planOfficeCiImage,
   planOfficeCiContract,
@@ -463,7 +467,7 @@ it('requires the explicit hosted-only command before any filesystem, build or En
   expect(() => requireHostedPlanOffice(['--ci'], env, 'darwin', 'x64')).toThrow();
   expect(() => requireHostedPlanOffice(['--ci'], env, 'linux', 'arm64')).toThrow();
 });
-it('offers only closed dispatch choices and passes them as quoted data while PR/main stays ordinary-self', () => {
+it('requires every supported scenario on PR/main and permits closed quoted manual selections', () => {
   const repositoryWorkflow = path.resolve('../../.github/workflows/image.yml');
   const workflowFile = fs.existsSync(repositoryWorkflow)
     ? repositoryWorkflow
@@ -477,19 +481,21 @@ it('offers only closed dispatch choices and passes them as quoted data while PR/
   };
   const input = workflow.on.workflow_dispatch.inputs.plan_office_scenario;
   expect(input.type).toBe('choice');
-  expect(input.default).toBe('ordinary-self');
+  expect(input.default).toBe('all');
   expect(input.options).toEqual([
+    'all',
     'ordinary-self',
     'self-roundtrip',
     'self-owner-force',
     'self-agent-force',
     'team-plan-move',
   ]);
-  for (const choice of input.options)
-    expect(requireHostedPlanOffice(['--ci', '--scenario', choice], env, 'linux', 'x64')).toBe(choice);
+  expect(planOfficeCiSelections(['--ci', '--scenario', 'all'], env, 'linux', 'x64')).toEqual(PLAN_OFFICE_CI_SCENARIOS);
+  for (const choice of PLAN_OFFICE_CI_SCENARIOS)
+    expect(planOfficeCiSelections(['--ci', '--scenario', choice], env, 'linux', 'x64')).toEqual([choice]);
   const office = workflow.jobs.image.steps.find((step) => step.run?.includes('scripts/plan-office-ci.mts'))!;
   expect(office.env?.PLAN_OFFICE_SCENARIO).toBe(
-    "${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'ordinary-self' }}"
+    "${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'all' }}"
   );
   expect(office.run).toContain('--ci --scenario "$PLAN_OFFICE_SCENARIO"');
   expect(office.run).not.toContain('${{');
@@ -499,7 +505,92 @@ it('offers only closed dispatch choices and passes them as quoted data while PR/
     'self-owner-force\n--force',
     '--help',
   ])
-    expect(() => requireHostedPlanOffice(['--ci', '--scenario', hostile], env, 'linux', 'x64')).toThrow();
+    expect(() => planOfficeCiSelections(['--ci', '--scenario', hostile], env, 'linux', 'x64')).toThrow();
+});
+it('awaits each isolated scenario before the next and runs all five once without changing the hosted environment', async () => {
+  let entered!: () => void, release!: () => void;
+  const paused = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const calls: Array<{ args: readonly string[]; env: NodeJS.ProcessEnv }> = [];
+  const pending = runPlanOfficeCiSuite(['--ci', '--scenario', 'all'], env, async (args, environment) => {
+    calls.push({ args, env: environment });
+    if (args[2] === 'self-roundtrip') {
+      entered();
+      await gate;
+    }
+  });
+  try {
+    await paused;
+    expect(calls.map((c) => c.args[2])).toEqual(['ordinary-self', 'self-roundtrip']);
+    release();
+    await pending;
+    expect(calls.map((c) => c.args)).toEqual(PLAN_OFFICE_CI_SCENARIOS.map((s) => ['--ci', '--scenario', s]));
+    expect(calls.every((c) => c.env === env)).toBe(true);
+  } finally {
+    release();
+    await pending;
+  }
+});
+it('retains a failed or unconfirmed scenario without retrying it or advancing the suite', async () => {
+  const failed = new Error('Synthetic original outcome unconfirmed');
+  const calls: string[] = [];
+  await expect(
+    runPlanOfficeCiSuite(['--ci', '--scenario', 'all'], env, async (args) => {
+      calls.push(args[2]!);
+      if (args[2] === 'self-owner-force') throw failed;
+    })
+  ).rejects.toBe(failed);
+  expect(calls).toEqual(['ordinary-self', 'self-roundtrip', 'self-owner-force']);
+  const selected: string[] = [];
+  await runPlanOfficeCiSuite(['--ci', '--scenario', 'team-plan-move'], env, async (args) => {
+    selected.push(args[2]!);
+  });
+  expect(selected).toEqual(['team-plan-move']); // Manual diagnosis cannot masquerade as the suite.
+  let dispatched = false;
+  for (const args of [
+    ['--ci', '--scenario', 'all', '--again'],
+    ['--no-ci', '--scenario', 'all'],
+  ])
+    await expect(
+      runPlanOfficeCiSuite(args, env, async () => {
+        dispatched = true;
+      })
+    ).rejects.toThrow();
+  expect(dispatched).toBe(false);
+});
+it('keeps separate public artifact slots and refuses to overwrite any earlier attempt or follow a publication symlink', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-suite-publication-'));
+  try {
+    const source = path.join(root, 'source');
+    fs.mkdirSync(source, { mode: 0o700 });
+    const a = createPlanOfficeCiPublishedDirectory(source, 'ordinary-self');
+    fs.writeFileSync(path.join(a, 'failure.json'), 'synthetic original unconfirmed outcome');
+    const b = createPlanOfficeCiPublishedDirectory(source, 'team-plan-move');
+    expect(a).not.toBe(b);
+    expect(path.dirname(a)).toBe(path.dirname(b));
+    expect(fs.statSync(a).mode & 0o777).toBe(0o700);
+    expect(() => createPlanOfficeCiPublishedDirectory(source, 'ordinary-self')).toThrow();
+    expect(fs.readFileSync(path.join(a, 'failure.json'), 'utf8')).toBe('synthetic original unconfirmed outcome');
+    const foreign = path.join(root, 'foreign'),
+      redirected = path.join(root, 'redirected');
+    fs.mkdirSync(foreign);
+    fs.mkdirSync(redirected);
+    fs.symlinkSync(foreign, path.join(redirected, 'acceptance'));
+    expect(() => createPlanOfficeCiPublishedDirectory(redirected, 'ordinary-self')).toThrow();
+    expect(fs.readdirSync(foreign)).toEqual([]); // Refusal occurs before even making the next directory.
+    const guarded = path.join(root, 'guarded');
+    fs.mkdirSync(guarded);
+    fs.mkdirSync(path.join(guarded, 'acceptance'), { mode: 0o777 });
+    fs.chmodSync(path.join(guarded, 'acceptance'), 0o777);
+    expect(() => createPlanOfficeCiPublishedDirectory(guarded, 'ordinary-self')).toThrow();
+    expect(fs.readdirSync(path.join(guarded, 'acceptance'))).toEqual([]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 it('publishes useful closed child/operation diagnostics without hostile tokens, freeform errors or objects', () => {
   const token = 'HOSTILE_TOKEN_DO_NOT_PUBLISH_abcdefghijklmnopqrstuv';
@@ -1107,12 +1198,15 @@ it('requires both the ordinary-self result and separate real HMAC/physical-compl
     expect(() => requirePlanOfficeCiAcceptance(result, { ...proof, ...change }, root, employeeId)).toThrow();
   expect(() => requirePlanOfficeCiAcceptance(result, undefined, root, employeeId)).toThrow();
 });
-it('the actual executable exits nonzero on an unqualified host without touching its proposed fixture directory', () => {
+it.each([
+  { mode: 'single', args: ['--ci'] },
+  { mode: 'suite', args: ['--ci', '--scenario', 'all'] },
+])('the actual executable refuses an unqualified host before fixtures ($mode)', ({ args }) => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-office-ci-refusal-'));
   try {
     const result = spawnSync(
       process.execPath,
-      ['--experimental-strip-types', path.resolve('scripts/plan-office-ci.mts'), '--ci'],
+      ['--experimental-strip-types', path.resolve('scripts/plan-office-ci.mts'), ...args],
       {
         env: {
           PATH: process.env.PATH,

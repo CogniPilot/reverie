@@ -327,6 +327,28 @@ it('preserves ordinary current-source control and fixed unprivileged worker imag
   expect(v.control.config.Env).toContain('REVERIE_ALLOWED_HOSTS=reverie');
   expect(v.control.config.Env).not.toContainEqual(expect.stringMatching(/BROKER|WORKER_SOCKET/));
 });
+it.each(['source', 'worker', 'helper', 'control'] as const)(
+  'separates %s configuration identity across successive office namespaces without weakening its program contract',
+  (role) => {
+    const next = 'reverie-ci-plan-office-' + 'd'.repeat(32);
+    const first = evaluate(),
+      second = evaluate(`imageNamespace="${next}";`);
+    expect(first.status, first.stderr).toBe(0);
+    expect(second.status, second.stderr).toBe(0);
+    const a = JSON.parse(JSON.parse(first.stdout))[role];
+    const b = JSON.parse(JSON.parse(second.stdout))[role];
+    const label = role === 'helper' ? 'org.opencontainers.image.title' : 'org.reverie.fixture.namespace';
+    expect(a.config.Labels[label]).toBe(role === 'helper' ? ns + '-helper' : ns);
+    expect(b.config.Labels[label]).toBe(role === 'helper' ? next + '-helper' : next);
+    // RepoTags/name alone do not distinguish the same Docker config identity.
+    // Evaluate the actual Nix factory with a dummy store; this is construction
+    // evidence, never a fabricated image ID or physical Docker acceptance.
+    expect(a.config).not.toEqual(b.config);
+    delete a.config.Labels[label];
+    delete b.config.Labels[label];
+    expect(a.config).toEqual(b.config); // Root, program, arguments and environment stay fixed.
+  }
+);
 it('rejects generic/invalid namespaces and malformed manifest or actual Engine IDs before image construction', () => {
   for (const override of [
     'imageNamespace="reverie-boxed";',

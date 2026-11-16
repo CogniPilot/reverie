@@ -19,8 +19,9 @@ on:
         description: Synthetic Docker office scenario to qualify
         required: true
         type: choice
-        default: ordinary-self
+        default: all
         options:
+          - all
           - ordinary-self
           - self-roundtrip
           - self-owner-force
@@ -66,7 +67,7 @@ jobs:
 
   image:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
     steps:
@@ -156,11 +157,11 @@ jobs:
           # old outputs and the multi-GB image tar instead of caching it twice.
           rm "$HOME/scratch/reverie/build/docker-image"
 
-      - name: Prove the selected plan move scenario in a fresh Docker office
-        timeout-minutes: 60
+      - name: Prove all plan move scenarios in fresh Docker offices
+        timeout-minutes: 120
         env:
           REVERIE_CI_RUNNER_ENVIRONMENT: ${{ runner.environment }}
-          PLAN_OFFICE_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'ordinary-self' }}
+          PLAN_OFFICE_SCENARIO: ${{ github.event_name == 'workflow_dispatch' && inputs.plan_office_scenario || 'all' }}
         run: nix develop --command node --experimental-strip-types apps/web/scripts/plan-office-ci.mts --ci --scenario "$PLAN_OFFICE_SCENARIO"
 
       # Only closed acceptance summaries are artifacts. Private synthetic owner
@@ -585,7 +586,8 @@ jobs:
             debian:12 bash /ci/debian-install.sh
 
   publish-image:
-    needs: [image, debian-install, worker-browser, memory-high-native, native-hooks]
+    needs:
+      [image, debian-install, worker-browser, memory-high-native, native-hooks]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -646,7 +648,8 @@ jobs:
           printf 'Image publication verified: %s\n' "$digest" | tee -a "$GITHUB_STEP_SUMMARY"
 
   release-assets:
-    needs: [image, debian-install, worker-browser, memory-high-native, native-hooks]
+    needs:
+      [image, debian-install, worker-browser, memory-high-native, native-hooks]
     if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-24.04
     timeout-minutes: 10

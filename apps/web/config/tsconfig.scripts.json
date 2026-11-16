@@ -56,6 +56,7 @@
     "../test/docker-viewer-pane.test.ts",
     "../test/docker-plan-local-client.test.ts",
     "../test/docker-paid-viewer-reconnect.test.ts",
+    "../test/docker-employee-provider-launch.test.ts",
     "../test/docker-employee-saved-attach.test.ts",
     "../test/fixtures/plan-office-canary.mts",
     "../test/plan-office-driver.test.ts",
