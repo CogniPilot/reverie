@@ -303,7 +303,7 @@ it('keeps every known viewer reason meaningful and unknown pressure-like or prot
  }
  for(const reason of ['memory-pressure','kernel-pressure-timeout','unknown-native-failure','constructor','__proto__','toString']){
   const status=h.shell.viewerReconnectStatus(employee,{state:'blocked',reason,observation:'outer-pane-responsive',attempts:0,retryAfterMs:0});
-  expect(status).not.toBeNull();expect(h.shell.viewerReconnectDescription(status)).toBe('The terminal viewer could not be confirmed. Employee and chat readiness are still unconfirmed.');
+  expect(status).not.toBeNull();expect(h.shell.viewerReconnectDescription(status)).toBe('The terminal viewer could not be confirmed. This viewer check does not measure employee or chat readiness.');
  }
  for(const[ms,seconds]of [[1,1],[4500,5],[60000,60]]){
   const status=h.shell.viewerReconnectStatus(employee,{state:'blocked',reason:'backoff',attempts:3,retryAfterMs:ms});
@@ -329,6 +329,31 @@ function nativeProof(employee:any,state='healthy',extra={}){
  return {binding:JSON.stringify([employee.id,employee.owner,employee.sessionId,employee.sessionGeneration??1,employee.desiredRunning,employee.onVacation,employee.bindingMigration,employee.runtimeRecipe,employee.permissions],(_key,value)=>value&&typeof value==='object'&&!Array.isArray(value)?Object.fromEntries(Object.keys(value).sort().map(key=>[key,value[key]])):value),employeeId:employee.id,sessionId:employee.sessionId,sessionGeneration:employee.sessionGeneration??1,
   state,observedAtEpochMs:Date.now(),reason:state==='healthy'?'LIVE_NATIVE_COMMAND':'COMMAND_EXITED',...extra};
 }
+it('does not turn a viewer-only status check into a claim that an independently healthy employee is unconfirmed', async () => {
+ const {h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal',working:true});
+ Object.assign(employee,{sessionGeneration:1,workerViewerReconnect:true});
+ const proof=nativeProof(employee);
+ Object.assign(employee,{providerHealth:proof});
+ Object.assign(session,{providerHealth:proof,viewerHealth:'connected',workerViewerReconnect:true});
+ const original=h.app._chatApi.bind(h.app),checks:any[]=[];
+ h.app._chatApi=async(path:string,options:any)=>{
+  if(path.endsWith('/reconnect/status')){
+   checks.push({path,...options});
+   return{ok:true,data:{reconnect:{state:'idle',reason:'viewer-not-disconnected',attempts:0,retryAfterMs:0,observation:'outer-pane-responsive'}}};
+  }
+  return original(path,options);
+ };
+ await h.shell.openCompany();
+ await h.shell.showEmployeeViewerStatus(employee);await h.flush(80);
+ const report=h.document.querySelector('.ca-viewer-status-report').textContent;
+ expect(report).toContain('The terminal viewer responded.');
+ expect(report).toContain('This viewer check does not measure employee or chat readiness.');
+ expect(report).not.toContain('Employee and chat readiness are still unconfirmed');
+ expect(h.document.querySelector('.ca-company-state').textContent).toBe('Online');
+ expect(h.shell.presenceOf(member(SID,'Alex',{working:true}))).toBe('working');
+ expect(checks).toHaveLength(1);expect(posts).toHaveLength(0);
+ expect(session.isWorking).toBe(true);expect(session.runtimeHealth).toBe('unknown');
+});
 it('clears stale saved Working and green presence when connected worker proof expires',async()=>{
  const{h,employee,session,posts}=await fixture({health:'unknown',scope:'terminal'});
  let epoch=100000,mono=0;vi.spyOn(h.window.Date,'now').mockImplementation(()=>epoch);vi.spyOn(h.window.performance,'now').mockImplementation(()=>mono);

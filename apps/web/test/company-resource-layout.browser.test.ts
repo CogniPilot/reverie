@@ -264,7 +264,7 @@ for (const width of [320, 1280])
       await expect
         .poll(() => dialog.locator('[role="status"]').textContent())
         .toContain('terminal viewer could not be checked');
-      expect(await dialog.textContent()).toContain('Employee and chat readiness are still unconfirmed');
+      expect(await dialog.textContent()).toContain('This viewer check does not measure employee or chat readiness');
       expect(await dialog.textContent()).toContain('does not restart the employee or resend chat input');
       const geometry = () =>
         dialog.evaluate((el) => {
@@ -306,7 +306,7 @@ for (const width of [320, 1280])
       await dialog.getByRole('button', { name: 'Refresh terminal status', exact: true }).click();
       await expect.poll(() => dialog.locator('[role="status"]').textContent()).toContain('terminal viewer responded');
       expect(await dialog.locator('[role="status"]').textContent()).toContain(
-        'Employee and chat readiness are still unconfirmed'
+        'This viewer check does not measure employee or chat readiness'
       );
       expect(await dialog.locator('[role="status"]').textContent()).toContain('Retry the viewer connection in 3s');
       expect(await dialog.locator('[role="status"]').textContent()).not.toMatch(
@@ -413,7 +413,7 @@ it.each([320, 1280])(
       });
       await refresh.click();
       await expect.poll(() => report.textContent()).toContain('The terminal viewer responded.');
-      expect(await report.textContent()).toContain('Employee and chat readiness are still unconfirmed.');
+      expect(await report.textContent()).toContain('This viewer check does not measure employee or chat readiness.');
       expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toHaveLength(2);
       await page.evaluate(() => {
         const w = window as unknown as { __nextViewerRead: string; __viewerObservation: string };

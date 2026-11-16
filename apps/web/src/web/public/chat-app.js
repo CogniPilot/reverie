@@ -9163,7 +9163,7 @@ class ReverieChatApp {
     return [
       responsive && status.reason === 'viewer-not-disconnected' ? '' : reason,
       responsive ? 'The terminal viewer responded.' : '',
-      'Employee and chat readiness are still unconfirmed.',
+      'This viewer check does not measure employee or chat readiness.',
       retry,
     ]
       .filter(Boolean)
