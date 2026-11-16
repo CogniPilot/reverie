@@ -12,8 +12,10 @@ import type { SessionDocker } from './types/session.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import type { DockerPlanMoveSeed } from './docker-plan-move-data.js';
 
-/** Fixed bootstrap clears supplement the existing view protocol. No provider,
- * filesystem write, process signal or tmux command is issued by this probe. */
+/** Fixed bootstrap clears supplement the existing view protocol. A bare Docker
+ * environment key removes it: an empty LD_SHOW_AUXV still enables loader output.
+ * PackagedDockerEngineCommand passes only PATH/HOME, so the CLI cannot inherit
+ * these keys from its own environment. No provider, write or signal is issued. */
 const DOCKER_PLAN_SOURCE_ENV = Object.freeze([
   ...DOCKER_PROVIDER_VIEW_ENV,
   ...[
@@ -29,7 +31,7 @@ const DOCKER_PLAN_SOURCE_ENV = Object.freeze([
     'LD_WARN',
     'LD_VERBOSE',
     'MALLOC_TRACE',
-  ].flatMap((key) => ['--env', key + '=']),
+  ].flatMap((key) => ['--env', key]),
 ]);
 export const DOCKER_PLAN_INIT_PROGRAM = String.raw`const fs=require('node:fs');
 function refuse(){throw Error('Docker init identity unconfirmed');}
@@ -236,7 +238,11 @@ export class DockerPlanSourceReader {
     ]);
     current();
     if (Buffer.byteLength(text) > 4096) refuse();
-    return nativeInit.parse(JSON.parse(text));
+    try {
+      return nativeInit.parse(JSON.parse(text));
+    } catch {
+      refuse();
+    }
   }
   async capture(
     row: DockerEmployeeContinuationRecord,

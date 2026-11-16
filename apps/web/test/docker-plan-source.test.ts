@@ -1,10 +1,52 @@
 import { describe, expect, it, vi } from 'vitest';
 import vm from 'node:vm';
+import { spawnSync } from 'node:child_process';
 import { DOCKER_PLAN_INIT_PROGRAM } from '../src/docker-plan-source.js';
 import { dockerPlanSourceFixture as fixture } from './helpers/docker-plan-source-fixture.js';
 const hex = (c: string) => c.repeat(64),
   uuid = (n: number) => n.toString().padStart(8, '0') + '-0000-4000-8000-000000000001';
 describe('native plan source observation independent of disposable viewer', () => {
+  it('keeps actual dynamic-loader output from corrupting the fixed init JSON', async () => {
+    const f = fixture();
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args) => {
+      if (!args.includes(DOCKER_PLAN_INIT_PROGRAM)) return original(args);
+      const env: Record<string, string> = {};
+      for (let i = 1; args[i] === '--env'; i += 2) {
+        const value = args[i + 1]!;
+        const equals = value.indexOf('=');
+        // Docker exec's Env entries without '=' remove an inherited key.
+        if (equals >= 0) env[value.slice(0, equals)] = value.slice(equals + 1);
+      }
+      const child = spawnSync(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({startTicks:"123"}))'], {
+        env,
+        encoding: 'utf8',
+        timeout: 5000,
+      });
+      expect(child.error).toBeUndefined();
+      expect(child.status).toBe(0);
+      expect(child.stderr).toBe('');
+      return child.stdout;
+    });
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    expect(proof.observation(f.row, f.binding)).toMatchObject({ init: { startTicks: '123' } });
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it.each([
+    'AT_SYSINFO: PRIVATE_NATIVE_OUTPUT',
+    '{"startTicks":"0"}',
+    '{"startTicks":"123","extra":"PRIVATE_NATIVE_OUTPUT"}',
+  ])('reports malformed native init output as a bounded refusal (%s)', async (output) => {
+    const f = fixture();
+    const original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args) =>
+      args.includes(DOCKER_PLAN_INIT_PROGRAM) ? output : original(args)
+    );
+    const error = await f.reader.capture(f.row, f.binding, () => {}, true).catch((error: unknown) => error);
+    expect(error).toMatchObject({ code: 'DOCKER_PLAN_SOURCE_UNCONFIRMED', message: 'DOCKER_PLAN_SOURCE_UNCONFIRMED' });
+    expect(String(error)).not.toContain('PRIVATE_NATIVE_OUTPUT');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
   it('permits explicit force when actual bound init is healthy and viewer is absent', async () => {
     const f = fixture();
     const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
