@@ -16,11 +16,335 @@ import {
   type DockerResourceDesiredRevision,
 } from '../src/docker-resource-revisions.js';
 import {
+  DockerContainedResources,
   requireDockerEffectiveResourceProof,
   dockerOtherResourceLimitsMatch,
 } from '../src/docker-contained-resource-controller.js';
 
+async function replacementLeafFixture(prepared?: ReturnType<typeof fixture>) {
+  const f = prepared ?? fixture();
+  if (!prepared) {
+    await f.controller.preparePool(f.row(), f.current);
+    await f.setPool();
+    f.makeWorker();
+    await f.controller.configure(f.row(), f.current);
+  }
+  f.ready();
+  const original = f.tasks.get('leaf-helper')!;
+  if (original.phase !== 'completed') throw Error('The original actual helper must have completed');
+  const candidateId = 'f'.repeat(64),
+    candidate = structuredClone(f.containers.get(original.containerId)!);
+  const name = 'reverie-boxed-leaf-helper-' + 'e'.repeat(64);
+  candidate.Id = candidateId;
+  candidate.Name = '/' + name;
+  (candidate.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] = name;
+  // Controlled Engine data for the separately executed manual helper: the
+  // actual adapter must re-earn its config, terminal state and native ACK.
+  f.containers.set(candidateId, candidate);
+  f.logs.set(candidateId, f.logs.get(original.containerId)!);
+  f.containers.delete(original.containerId);
+  f.logs.delete(original.containerId);
+  const calls: string[][] = [];
+  f.beforeRun((args) => {
+    calls.push([...args]);
+  });
+  const snapshot = () => ({
+    creates: [...f.creates],
+    starts: [...f.starts],
+    phases: [...f.phases],
+    tasks: structuredClone([...f.tasks]),
+  });
+  return { f, original, candidateId, candidate, calls, snapshot };
+}
 describe('fixed Docker resource orchestration', () => {
+  it('re-earns a missing completed leaf ACK from a different exact terminal helper without rewriting its journal', async () => {
+    const { f, calls, snapshot } = await replacementLeafFixture(),
+      before = snapshot();
+    await expect(f.controller.read(f.row())).resolves.toEqual(policy);
+    expect(snapshot()).toEqual(before);
+    expect(
+      calls.filter(
+        (args) =>
+          args[0] === 'container' && args[1] === 'ls' && args.includes('label=reverie.box.resource.role=leaf-helper')
+      ).length
+    ).toBeGreaterThanOrEqual(2);
+    expect(
+      calls.every(
+        (args) =>
+          args[0] === 'image' ||
+          (args[0] === 'container' && ['inspect', 'ls', 'logs'].includes(args[1]!)) ||
+          (args[0] === 'exec' &&
+            (args[2] === '/bin/cat' || args.includes('probe-pool') || args.includes('probe-worker')))
+      )
+    ).toBe(true);
+  });
+  it.each(['retired', 'replaced'] as const)(
+    'keeps a same-leaf terminal ACK usable after an unrelated historical member is %s',
+    async (membership) => {
+      const { f, candidate, calls, snapshot } = await replacementLeafFixture();
+      const args = (candidate.Config as { Cmd: string[] }).Cmd,
+        old = '8'.repeat(64),
+        replacement = '9'.repeat(64);
+      args.splice(args.indexOf('--leaf-dev'), 0, '--member', old + ':300:30');
+      let controller = f.controller;
+      if (membership === 'replaced') {
+        const raw = structuredClone(f.containers.get('d'.repeat(64))!);
+        raw.Id = replacement;
+        (raw.Config as { Labels: Record<string, string> }).Labels['reverie.boxed.employee'] =
+          '77777777-7777-4777-8777-777777777777';
+        (raw.State as Record<string, unknown>).Pid = 300;
+        f.containers.set(replacement, raw);
+        controller = new DockerContainedResources(f.command, f.journal, {
+          boxId: 'b'.repeat(64),
+          deployment,
+          helperImageId: helper,
+          selectedWorkerContainerIds: () => ['d'.repeat(64), replacement],
+          retainedPoolConfigurationTasks: () => [],
+        });
+      }
+      const before = snapshot();
+      await expect(controller.read(f.row())).resolves.toEqual(policy);
+      expect(snapshot()).toEqual(before);
+      expect(calls.some((command) => command.includes(old))).toBe(false);
+      if (membership === 'replaced')
+        expect(calls.some((command) => command.includes(replacement + ':300:20'))).toBe(true);
+    }
+  );
+  it('propagates a fresh native FOREIGN_CHILD refusal instead of accepting historical helper membership', async () => {
+    const { f, snapshot } = await replacementLeafFixture();
+    f.beforeRun((args) => {
+      if (args[0] === 'exec' && args.includes('probe-worker')) throw Error('BOXED_RESOURCE_FOREIGN_CHILD');
+    });
+    const before = snapshot();
+    await expect(f.controller.read(f.row())).rejects.toThrow('BOXED_RESOURCE_FOREIGN_CHILD');
+    expect(snapshot()).toEqual(before);
+  });
+  it('keeps a repaired original16 ACK valid through a genuine approved48 helper and later read-only policy proof', async () => {
+    const f = await revisionFixture();
+    const { snapshot } = await replacementLeafFixture(f);
+    const original = structuredClone([...f.tasks]),
+      row = structuredClone(f.row());
+    expect(await f.controller.read(f.row())).toEqual(policy);
+    const result = await f.controller.reviseMemoryHigh(f.row(), f.desired.revision, f.current);
+    expect(result).toEqual({ state: 'applied', policy: { ...policy, memoryHighBytes: 48 * 1024 ** 3 } });
+    const before = snapshot();
+    expect(await f.controller.read(f.row())).toEqual(result.policy);
+    expect(() =>
+      requireDockerEffectiveResourceProof(f.controller.existingPolicy(f.row(), result.policy), f.row(), result.policy)
+    ).not.toThrow();
+    expect(snapshot()).toEqual(before);
+    expect([...f.tasks]).toEqual(original);
+    expect(f.row()).toEqual(row);
+  });
+  it('does not turn unapproved actual48 into an effective policy through a historical original16 ACK', async () => {
+    const { f, snapshot } = await replacementLeafFixture();
+    f.setHigh(48 * 1024 ** 3);
+    const before = snapshot();
+    expect(await f.controller.read(f.row())).toBeNull();
+    expect(() => f.controller.existingPolicy(f.row(), { ...policy, memoryHighBytes: 48 * 1024 ** 3 })).toThrow();
+    expect(await f.controller.observeMemoryHigh(f.row(), f.current)).toMatchObject({
+      actualMemoryHighBytes: 48 * 1024 ** 3,
+      approved: false,
+      approvalSource: null,
+    });
+    expect(snapshot()).toEqual(before);
+  });
+  it('requires closure rather than matching policy or worker arguments from an unrelated completed9080 helper', async () => {
+    const { f, candidate, snapshot } = await replacementLeafFixture();
+    const other = structuredClone(candidate),
+      id = '6'.repeat(64),
+      worker = '8'.repeat(64),
+      name = 'reverie-boxed-leaf-helper-' + '7'.repeat(64);
+    other.Id = id;
+    other.Name = '/' + name;
+    const config = other.Config as { Cmd: string[]; Labels: Record<string, string> },
+      host = other.HostConfig as { Binds: string[] };
+    config.Labels['reverie.box.resource.name'] = name;
+    config.Cmd[config.Cmd.indexOf('--worker-id') + 1] = worker;
+    config.Cmd[config.Cmd.indexOf('--worker-pid') + 1] = '300';
+    config.Cmd[config.Cmd.indexOf('--worker-start') + 1] = '30';
+    config.Cmd[config.Cmd.indexOf('--memory-high') + 1] = String(32 * 1024 ** 3);
+    const previous = 'docker-' + 'd'.repeat(64) + '.scope',
+      current = 'docker-' + worker + '.scope';
+    host.Binds = host.Binds.map((bind) => bind.replace(previous, current));
+    (other.Mounts as Array<{ Source: string }>).forEach((mount) => {
+      mount.Source = mount.Source.replace(previous, current);
+    });
+    f.containers.set(id, other);
+    const before = snapshot();
+    await expect(f.controller.read(f.row())).resolves.toEqual(policy);
+    expect(snapshot()).toEqual(before);
+  });
+  it.each([
+    'running',
+    'created',
+    'pid',
+    'paused',
+    'restarting',
+    'dead',
+    'failed',
+    'oom',
+    'error',
+    'image',
+    'mount',
+    'argv',
+    'extra-flag',
+    'ack-parent',
+    'ack-worker',
+    'ack-policy',
+    'missing-ack',
+    'unknown-other-writer',
+    'issued-old',
+    'present-invalid-old',
+  ] as const)('refuses replacement leaf %s without any write or journal publication', async (change) => {
+    const { f, candidate, candidateId, original, snapshot } = await replacementLeafFixture();
+    const state = candidate.State as Record<string, unknown>,
+      config = candidate.Config as { Cmd: string[] },
+      ack = JSON.parse(f.logs.get(candidateId)!) as {
+        parent: { ino: string };
+        worker: { startTicks: string };
+        resources: { memoryHigh: string };
+      };
+    if (change === 'running') {
+      state.Status = 'running';
+      state.Running = true;
+      state.Pid = 300;
+    }
+    if (change === 'created') state.Status = 'created';
+    if (change === 'pid') state.Pid = 300;
+    if (change === 'paused') state.Paused = true;
+    if (change === 'restarting') state.Restarting = true;
+    if (change === 'dead') state.Dead = true;
+    if (change === 'failed') state.ExitCode = 1;
+    if (change === 'oom') state.OOMKilled = true;
+    if (change === 'error') state.Error = 'unknown';
+    if (change === 'image') candidate.Image = writer;
+    if (change === 'mount')
+      (candidate.Mounts as unknown[]).push({ Type: 'bind', Source: '/foreign', Destination: '/foreign', RW: true });
+    if (change === 'argv') config.Cmd[config.Cmd.indexOf('--memory-high') + 1] = String(policy.memoryHighBytes + 1);
+    if (change === 'extra-flag') config.Cmd.push('--unsafe', '1');
+    if (change === 'ack-parent') ack.parent.ino = '999';
+    if (change === 'ack-worker') ack.worker.startTicks = '999';
+    if (change === 'ack-policy') ack.resources.memoryHigh = '999';
+    f.logs.set(candidateId, change === 'missing-ack' ? '{}' : JSON.stringify(ack));
+    if (change === 'unknown-other-writer') {
+      const other = structuredClone(candidate),
+        id = '6'.repeat(64),
+        name = 'reverie-boxed-leaf-helper-' + '7'.repeat(64);
+      other.Id = id;
+      other.Name = '/' + name;
+      (other.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] = name;
+      other.State = {
+        Status: 'running',
+        Running: true,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Pid: 300,
+        ExitCode: 0,
+      };
+      f.containers.set(id, other);
+    }
+    if (change === 'issued-old') {
+      f.tasks.set('leaf-helper', {
+        role: original.role,
+        name: original.name,
+        imageId: original.imageId,
+        configurationDigest: original.configurationDigest,
+        containerId: original.containerId,
+        phase: 'start-issued',
+      });
+    }
+    if (change === 'present-invalid-old') {
+      const previous = structuredClone(candidate);
+      previous.Id = original.containerId;
+      previous.Name = '/' + original.name;
+      (previous.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'] = original.name;
+      previous.State = {
+        Status: 'running',
+        Running: true,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Pid: 300,
+        ExitCode: 0,
+      };
+      f.containers.set(original.containerId, previous);
+    }
+    const before = snapshot();
+    await expect(f.controller.read(f.row())).rejects.toThrow();
+    expect(snapshot()).toEqual(before);
+  });
+  it.each(['epoch', 'policy', 'journal', 'census', 'pool-writer'] as const)(
+    'refuses late replacement %s drift after a native ACK await',
+    async (change) => {
+      const { f, candidateId } = await replacementLeafFixture();
+      let changed = false;
+      f.beforeRun((args) => {
+        if (changed || args[0] !== 'container' || args[1] !== 'logs' || args[2] !== candidateId) return;
+        changed = true;
+        if (change === 'epoch') f.driftEpoch();
+        if (change === 'policy') f.row().policy = { ...policy, memoryHighBytes: policy.memoryHighBytes + 1 };
+        if (change === 'journal') f.tasks.delete('leaf-helper');
+        if (change === 'census') f.containers.delete(candidateId);
+        if (change === 'pool-writer') {
+          const task = f.tasks.get('pool-helper')!;
+          if (!('containerId' in task)) throw Error('Actual pool helper required');
+          (f.containers.get(task.containerId)!.State as Record<string, unknown>).Running = true;
+        }
+      });
+      const before = { creates: [...f.creates], starts: [...f.starts], phases: [...f.phases] };
+      await expect(f.controller.read(f.row())).rejects.toThrow();
+      expect(changed).toBe(true);
+      expect({ creates: f.creates, starts: f.starts, phases: f.phases }).toEqual(before);
+    }
+  );
+  it.each([
+    'mode',
+    'odd-length',
+    'duplicate',
+    'box',
+    'cid',
+    'pid',
+    'birth',
+    'overflow',
+    'member',
+    'duplicate-member',
+    'missing-field',
+    'weight',
+    'unsupported-cpus',
+  ] as const)('rejects unknown terminal leaf command %s before accepting its ACK', async (change) => {
+    const { f, candidate, snapshot } = await replacementLeafFixture();
+    const args = (candidate.Config as { Cmd: string[] }).Cmd;
+    if (change === 'mode') args[0] = 'configure-pool';
+    if (change === 'odd-length') args.pop();
+    if (change === 'duplicate') args.push('--box-id', 'b'.repeat(64));
+    if (change === 'box') args[args.indexOf('--box-id') + 1] = 'a'.repeat(64);
+    if (change === 'cid') args[args.indexOf('--worker-id') + 1] = 'short';
+    if (change === 'pid') args[args.indexOf('--worker-pid') + 1] = '-1';
+    if (change === 'birth') args[args.indexOf('--worker-start') + 1] = '0';
+    if (change === 'overflow') args[args.indexOf('--memory-max') + 1] = '18446744073709551616';
+    if (change === 'member') args.push('--member', 'unknown');
+    if (change === 'duplicate-member') args.push('--member', 'd'.repeat(64) + ':200:20');
+    if (change === 'missing-field') args.splice(args.indexOf('--leaf-dev'), 2);
+    if (change === 'weight') args[args.indexOf('--cpu-weight') + 1] = '10001';
+    if (change === 'unsupported-cpus') args.push('--cpuset-cpus', '0-1');
+    const before = snapshot();
+    await expect(f.controller.read(f.row())).rejects.toThrow();
+    expect(snapshot()).toEqual(before);
+  });
+  it('reprobes the native scope after the final matching replacement ACK before returning policy', async () => {
+    const { f, candidateId } = await replacementLeafFixture();
+    let acknowledgements = 0;
+    f.beforeRun((args) => {
+      if (args[0] === 'container' && args[1] === 'logs' && args[2] === candidateId && ++acknowledgements === 3)
+        f.driftEpoch();
+    });
+    const before = { creates: [...f.creates], starts: [...f.starts], phases: [...f.phases] };
+    await expect(f.controller.read(f.row())).rejects.toThrow();
+    expect(acknowledgements).toBe(3);
+    expect({ creates: f.creates, starts: f.starts, phases: f.phases }).toEqual(before);
+  });
   it('a real canonical owner-row archival/reload leaves the native pool proof available to another employee', async () => {
     const f = fixture();
     await f.controller.preparePool(f.row(), f.current);
