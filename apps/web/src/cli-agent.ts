@@ -328,6 +328,9 @@ export function baseHeaders(ctx: AgentContext): Record<string, string> {
   return headers;
 }
 
+/** Default per-request bound, also used by real CLI subprocess qualification. */
+export const DEFAULT_AGENT_HTTP_TIMEOUT_MS = 30_000;
+
 /** The real transport. `rejectUnauthorized:false` because the HTTPS install uses a self-signed cert. */
 export const httpRequest: ApiRequest = (ctx, options) => {
   const url = new URL(options.path, ctx.apiUrl);
@@ -376,7 +379,7 @@ export const httpRequest: ApiRequest = (ctx, options) => {
         path: goalClientTarget(options) ?? `${url.pathname}${url.search}`,
         rejectUnauthorized: false,
         headers,
-        timeout: options.timeoutMs ?? 30_000,
+        timeout: options.timeoutMs ?? DEFAULT_AGENT_HTTP_TIMEOUT_MS,
         signal: options.signal,
       },
       (res) => {
@@ -434,7 +437,7 @@ export const httpRequest: ApiRequest = (ctx, options) => {
         });
       }
     );
-    req.on('timeout', () => req.destroy(new Error(`request timed out after ${options.timeoutMs ?? 30_000} ms`)));
+    req.on('timeout', () => req.destroy(new Error(`request timed out after ${options.timeoutMs ?? DEFAULT_AGENT_HTTP_TIMEOUT_MS} ms`)));
     req.on('error', failed);
     if (bounds) deadline = setTimeout(() => req.destroy(new Error('download deadline exceeded')), bounds.deadlineMs);
     if (options.rawBody !== undefined) req.write(options.rawBody);

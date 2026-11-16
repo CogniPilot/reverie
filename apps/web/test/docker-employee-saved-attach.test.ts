@@ -47,6 +47,7 @@ import { DockerPlanLocalClient } from '../src/docker-plan-local-client.js';
 import { DockerViewerPane } from '../src/docker-viewer-pane.js';
 import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../src/worker-viewer-reconnect.js';
 import { AGENT_EXIT as EXIT } from '../src/agent-exit-codes.js';
+import { DEFAULT_AGENT_HTTP_TIMEOUT_MS } from '../src/cli-agent.js';
 import Fastify from 'fastify';
 import { createRouteTestHarness } from './routes/_route-test-utils.js';
 import { registerSessionRoutes } from '../src/web/routes/session-routes.js';
@@ -57,6 +58,13 @@ const cid = 'a'.repeat(64),
   image = 'sha256:' + 'b'.repeat(64),
   target = 'sha256:' + 'c'.repeat(64),
   helper = 'sha256:' + 'f'.repeat(64);
+// GET company and POST reconnect each own the unchanged CLI HTTP bound. The
+// Runtime's 25s one-shot admission is inside the POST, not an extra request.
+// Retain the original 15s allowance for child bootstrap, and another for the
+// parent's real fixture setup/cleanup; a slow/unknown child still fails once.
+const CLI_BOOTSTRAP_MS = 15_000;
+const VIEWER_CLI_CHILD_MS = CLI_BOOTSTRAP_MS + 2 * DEFAULT_AGENT_HTTP_TIMEOUT_MS;
+const VIEWER_CLI_TEST_MS = VIEWER_CLI_CHILD_MS + CLI_BOOTSTRAP_MS;
 const eid = '10000000-0000-4000-8000-000000000001',
   sid = '20000000-0000-4000-8000-000000000002',
   oid = '30000000-0000-4000-8000-000000000003';
@@ -1260,6 +1268,10 @@ describe('in-place Docker existing-view renewal', () => {
       }
       const app = Fastify();
       cleanup.push(() => app.close());
+      const requests: string[] = [];
+      app.addHook('onRequest', async (req) => {
+        requests.push(`${req.method} ${req.url}`);
+      });
       registerDockerWorkerIdentity(app, f.runtime.authentication, '', { requireMachineProof: true });
       app.get('/api/company', (req) => {
         expect(dockerWorkerIdentityOf(req)?.employeeId).toBe(actorId);
@@ -1295,7 +1307,15 @@ describe('in-place Docker existing-view renewal', () => {
       delete childEnv.REVERIE_MUX;
       delete childEnv.VITEST; // The child exercises the production CLI path, independently of the recording server ports.
       const actualProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-      const result = await new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
+      const result = await new Promise<{
+        code: number | null;
+        transportCode: string | null;
+        killed: boolean;
+        signal: string | null;
+        phase: 'bootstrap' | 'executing' | 'parsed';
+        stdout: string;
+        stderrBytes: number;
+      }>((resolve) => {
         actualProcess.execFile(
           process.execPath,
           [
@@ -1303,19 +1323,35 @@ describe('in-place Docker existing-view renewal', () => {
             'tsx',
             '--input-type=module',
             '-e',
-            'import {Command} from "commander"; import {registerAgentCommands} from "./src/cli-agent.ts"; const p=new Command(); registerAgentCommands(p); await p.parseAsync(process.argv.slice(1),{from:"user"});',
+            'import {Command} from "commander"; import {registerAgentCommands} from "./src/cli-agent.ts"; console.error("VIEWER_CLI_READY"); const p=new Command(); registerAgentCommands(p); await p.parseAsync(process.argv.slice(1),{from:"user"}); console.error("VIEWER_CLI_PARSED");',
             'agent',
             'reconnect-viewer',
             eid,
             '--json',
           ],
-          { env: childEnv, timeout: 15_000, maxBuffer: 65536 },
+          { env: childEnv, timeout: VIEWER_CLI_CHILD_MS, maxBuffer: 65536 },
           (error, stdout, stderr) => {
-            resolve({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0, stdout, stderr });
+            resolve({
+              code: error ? (typeof error.code === 'number' ? error.code : null) : 0,
+              transportCode: typeof error?.code === 'string' ? error.code : null,
+              killed: error?.killed === true,
+              signal: error?.signal ?? null,
+              phase: stderr.includes('VIEWER_CLI_PARSED\n')
+                ? 'parsed'
+                : stderr.includes('VIEWER_CLI_READY\n')
+                  ? 'executing'
+                  : 'bootstrap',
+              stdout,
+              stderrBytes: Buffer.byteLength(stderr),
+            });
           }
         );
       });
-      expect(result.code, result.stderr).toBe(resultKind === 'completed' ? EXIT.ok : EXIT.refused);
+      const { stdout: _stdout, ...diagnostic } = result;
+      expect(result.code, JSON.stringify(diagnostic)).toBe(resultKind === 'completed' ? EXIT.ok : EXIT.refused);
+      expect(result.phase).toBe('parsed');
+      expect(result.killed).toBe(false);
+      expect(requests).toEqual(['GET /api/company', `POST /api/company/employees/${eid}/reconnect`]);
       expect(f.sessions.get(sid)).toBe(f.session);
       expect(native.ptys).toHaveLength(before.ptys + 1);
       expect(native.writes).toEqual(before.writes);
@@ -1354,7 +1390,8 @@ describe('in-place Docker existing-view renewal', () => {
       expect(JSON.parse(JSON.stringify(f.session.toState())).dockerProviderViewCurrent).toBe(false);
       expect((await readWire()).dockerProviderViewCurrent).toBe(false);
       expect(targetIdentity?.current()).toBe(false);
-    }
+    },
+    VIEWER_CLI_TEST_MS
   );
   it('actual Runtime.wake renews a revoked same-provider view after caller lease completion without another attach', async () => {
     const f = await runtimeFixture();
