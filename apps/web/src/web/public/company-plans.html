@@ -976,9 +976,18 @@
           !!record.sourceViewRetirement &&
           record.sourceViewRetirement.state !== 'completed';
         const paint = () => {
-          status.textContent = `${record.phase === 'recovery-required' ? 'Recovery required' : record.phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
-          if (record.phase === 'completed' && record.sourceViewRetirement?.state === 'unconfirmed')
-            status.textContent += ` · Previous terminal cleanup unconfirmed${record.sourceViewRetirement.error ? ': ' + record.sourceViewRetirement.error : ''}`;
+          const phase =
+            record.phase === 'completed'
+              ? 'Plan moved'
+              : record.phase === 'recovery-required'
+                ? 'Recovery required'
+                : record.phase;
+          status.textContent = `${phase}${record.error ? ': ' + record.error : ''}${feedback ? ' · ' + feedback : ''}`;
+          if (record.phase === 'completed' && record.sourceViewRetirement?.state === 'unconfirmed') {
+            const notice = 'Previous terminal cleanup unconfirmed',
+              detail = record.sourceViewRetirement.error;
+            status.textContent += ` · ${notice}${detail && detail !== notice ? ': ' + detail : ''}`;
+          }
           dialog.querySelector('[data-move-sessions]').textContent =
             `Old session: ${record.oldSession || record.sessionId || 'not recorded'}; new session: ${record.newSession || 'not created yet'}`;
           cancel.hidden = record.phase !== 'waiting';
@@ -1121,7 +1130,7 @@
             // can refresh this unknown outcome; a response status is not a non-dispatch receipt.
             unconfirmed = dispatched;
             feedback = unconfirmed
-              ? `${error.message} · Recovery outcome unconfirmed; refresh status without replaying.`
+              ? `${error.message} · Recovery outcome unconfirmed.`
               : `${error.message} · Recovery was not requested; the move journal is retained.`;
           } finally {
             busy = false;

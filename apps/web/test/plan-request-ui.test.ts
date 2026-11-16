@@ -480,6 +480,7 @@ describe('held plan move recovery navigation', () => {
     h.dialog.showModal();
     h.methods.showPlanMoveProgress(h.dialog, move, 'Alex');
     expect(h.dialog.open).toBe(true);
+    expect(h.dialog.querySelector('.status')?.textContent).toMatch(/^Plan moved/);
     expect(h.dialog.querySelector('.status')?.textContent).toContain('Previous terminal cleanup unconfirmed');
     const recover = h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
     expect(recover.hidden).toBe(false);
@@ -523,6 +524,10 @@ describe('held plan move recovery navigation', () => {
     const recover = h.dialog.querySelector<HTMLButtonElement>('[data-resolve]')!;
     recover.click();
     await vi.waitFor(() => expect(h.dialog.querySelector('.status')?.textContent).toContain('Cleanup reply lost'));
+    const status = h.dialog.querySelector('.status')!.textContent!;
+    expect(status.match(/Previous terminal cleanup unconfirmed/g)).toHaveLength(1);
+    expect(status).toContain('Recovery outcome unconfirmed');
+    expect(status).not.toContain('refresh status without replaying');
     await vi.waitFor(() => expect(recover.disabled).toBe(true));
     expect(posts).toBe(1);
     h.dialog.querySelector<HTMLButtonElement>('[data-refresh]')!.click();

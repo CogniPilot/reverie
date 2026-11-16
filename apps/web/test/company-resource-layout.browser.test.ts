@@ -1702,8 +1702,10 @@ for (const width of [320, 1280])
 
 // A completed move and its source-view cleanup are separate facts. Exercise
 // the shipped progress client in Chromium; all replies below remain synthetic.
-for (const width of [320, 1280])
-  it(`keeps completed plan cleanup visible and requires an explicit lost-reply retry at ${width}px`, async () => {
+for (const { width, colorScheme } of [320, 1280].flatMap((width) =>
+  (['light', 'dark'] as const).map((colorScheme) => ({ width, colorScheme }))
+))
+  it(`keeps completed plan cleanup visible and requires an explicit lost-reply retry in ${colorScheme} at ${width}px`, async () => {
     const browser = await chromium.launch({
       headless: true,
       chromiumSandbox: true,
@@ -1715,7 +1717,7 @@ for (const width of [320, 1280])
       releaseCleanup = () => {};
     try {
       const height = width === 320 ? 640 : 900;
-      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, colorScheme });
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       const move = {
@@ -1773,6 +1775,11 @@ for (const width of [320, 1280])
       expect(writes).toEqual([]);
       await clean.click();
       await expect.poll(() => dialog.getByRole('status').textContent()).toContain('Recovery outcome unconfirmed');
+      const statusText = await dialog.getByRole('status').textContent();
+      expect(statusText).toMatch(/^Plan moved/);
+      expect(statusText!.match(/Previous terminal cleanup unconfirmed/g)).toHaveLength(1);
+      expect(statusText).not.toContain('refresh status without replaying');
+      expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme);
       expect(await clean.isDisabled()).toBe(true);
       expect(posts).toBe(1);
       const statusBounds = await dialog.getByRole('status').boundingBox();
@@ -1782,7 +1789,7 @@ for (const width of [320, 1280])
       if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
         await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({
-          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-cleanup-lost-reply-${width}.png`),
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-cleanup-lost-reply-${colorScheme}-${width}.png`),
         });
       }
       pauseRefresh = true;
@@ -1807,7 +1814,7 @@ for (const width of [320, 1280])
       if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
         await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
         await page.screenshot({
-          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-completed-cleanup-${width}.png`),
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-completed-cleanup-${colorScheme}-${width}.png`),
         });
       }
       await clean.click();
