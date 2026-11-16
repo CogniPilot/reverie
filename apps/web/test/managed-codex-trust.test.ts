@@ -11,11 +11,37 @@ import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { installRecordedDockerViewer, recordedDockerViewerSocketPath } from './helpers/recorded-docker-viewer.js';
+import { tmuxSourceCommands } from '../src/tmux-source-command.js';
 import { managedCodexTrust, codexTrustArgument } from '../src/managed-codex-trust.js';
 import { codexHookTrustArgument, reverieCodexHookTrust } from '../src/codex-hook-trust.js';
 import { Session } from '../src/session.js';
 import { TmuxManager, buildSpawnCommand } from '../src/tmux-manager.js';
 import * as users from '../src/user-store.js';
+
+// Replace only the fixed readonly server query with a bounded Node child. The
+// original renderer and native proof factories still run; no tmux/Docker starts.
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  const execFile = (...args: Parameters<typeof actual.execFile>) => {
+    const [file, argv] = args;
+    if (
+      file !== '/bin/tmux' ||
+      !Array.isArray(argv) ||
+      argv.length !== 8 ||
+      argv.slice(0, 4).join('|') !== '-N|-f|/dev/null|-L' ||
+      typeof argv[4] !== 'string' ||
+      argv.slice(5).join('|') !== 'display-message|-p|#{pid}|#{socket_path}'
+    )
+      throw Error('Unexpected fixture process');
+    return Reflect.apply(actual.execFile, actual, [
+      process.execPath,
+      ['-e', 'process.stdout.write(process.argv[1])', '500000|' + recordedDockerViewerSocketPath(argv[4]) + '\n'],
+      ...args.slice(2),
+    ]);
+  };
+  return { ...actual, execFile };
+});
 
 let dir: string;
 const sessions: Session[] = [];
@@ -166,6 +192,8 @@ describe('private Docker employee Codex trust', () => {
     await fs.mkdir(worker);
     await fs.mkdir(join(worker, '.codex'));
     await fs.writeFile(join(worker, '.codex/hooks.json'), JSON.stringify(generateCodexTurnSummaryHooks()));
+    const custody = installRecordedDockerViewer();
+    custody.recordCapture();
     const docker = dockerFor(worker),
       mux = new TmuxManager(),
       create = vi.spyOn(mux, 'createSession');
@@ -202,16 +230,20 @@ describe('private Docker employee Codex trust', () => {
     expect(canonical).toContain('--config ' + options.codexHookTrust);
     expect(session.toPersistedState()).not.toHaveProperty('codexTrustWorkspace');
     expect(session.toPersistedState()).not.toHaveProperty('codexHookTrust');
-    const command = buildDockerLaunchCommand({
-      mode: 'codex',
-      docker: session.docker!,
-      sessionId: sid,
-      createContext: {} as never,
-      execEnv: {},
-      execEnvNames: [],
-      canonicalCommand: canonical,
-      continuationLaunch: owner,
-    });
+    expect(custody.issued).toHaveLength(1);
+    const issued = custody.issued[0]!;
+    expect(issued.mux).toBe(mux);
+    expect(issued.row).toBe(mux.getSession(sid));
+    const command = issued.command.shellCommand,
+      inner = issued.command.argv.at(-1)!;
+    const encoded = (value: string) => tmuxSourceCommands([[value]]).slice(1, -2);
+    expect(inner).toContain(encoded(canonical));
+    expect(inner).toContain(encoded('--config ' + codexTrustArgument(worker)));
+    expect(inner).toContain(encoded('--config ' + options.codexHookTrust));
+    const observed = await reader.mock.results[0]!.value;
+    expect(inner).toContain(
+      encoded("'--' 'verify' '" + observed.realPath + "' '" + observed.dev + "' '" + observed.ino + "'")
+    );
     expect(command).toContain('Managed Docker workspace changed');
     expect(command).toContain('NODE_OPTIONS=');
     expect((await fs.readdir(dir)).filter((p) => p !== 'state.json' && !p.startsWith('state.json.'))).toEqual([
@@ -229,7 +261,8 @@ describe('private Docker employee Codex trust', () => {
         canonicalCommand: canonical,
         continuationLaunch: owner,
       })
-    ).toThrow();
+    ).toThrow('already held');
+    expect(custody.issued).toHaveLength(1);
   });
   it.each(['restricted', 'ungranted', 'revoked', 'eligibility-revoked', 'plain-docker'])(
     'never earns Docker workspace trust for %s',
