@@ -1235,8 +1235,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "nix",
  "reverie-contracts",
  "reverie-core",
+ "rustix",
  "sha2",
  "toml",
 ]
