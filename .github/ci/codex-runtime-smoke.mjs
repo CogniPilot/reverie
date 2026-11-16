@@ -2,13 +2,42 @@
 // The pinned provider is installed at runtime, never added to a published image.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 const consoleRoot = '/opt/reverie/console';
+// Check the published image itself: the smaller synthetic office must not hide
+// a missing runtime executable by supplying extra tools in its own contents.
+// These version commands never connect to an engine or start a tmux server.
+const { parseDockerViewerExecutables } = await import(pathToFileURL(join(consoleRoot, 'dist/docker-viewer-process.js')));
+const viewerManifestFile = join(consoleRoot, 'dist/docker-viewer-executables.json');
+const viewerManifestStat = statSync(viewerManifestFile);
+assert.ok(viewerManifestStat.isFile() && viewerManifestStat.uid === 0 && (viewerManifestStat.mode & 0o222) === 0,
+  'Viewer executable metadata must be immutable image content');
+const viewerExecutables = parseDockerViewerExecutables(readFileSync(viewerManifestFile, 'utf8'));
+for (const [logical, args, version] of [
+  ['/bin/docker', ['--version'], /^Docker version /],
+  ['/bin/bash', ['--version'], /^GNU bash, version /],
+  ['/bin/tmux', ['-V'], /^tmux /],
+]) {
+  const pin = viewerExecutables.executables[logical];
+  assert.equal(realpathSync(logical), pin.entry, 'Image executable differs from its viewer manifest');
+  for (const file of [pin.entry, pin.executable]) {
+    const stat = statSync(file);
+    assert.ok(stat.isFile() && stat.uid === 0 && (stat.mode & 0o222) === 0 && (stat.mode & 0o111) !== 0,
+      'Viewer executable must be immutable and executable');
+  }
+  const result = spawnSync(logical, args, {
+    cwd: '/', env: { PATH: '/bin', LANG: 'C.UTF-8' }, encoding: 'utf8', timeout: 5000, maxBuffer: 8192,
+  });
+  assert.equal(result.error, undefined, 'Packaged viewer executable failed to run');
+  assert.equal(result.signal, null, 'Packaged viewer executable was interrupted');
+  assert.equal(result.status, 0, 'Packaged viewer executable returned failure');
+  assert.match(result.stdout, version, 'Unexpected packaged viewer executable');
+}
 const { STOCK_CLIS } = await import(pathToFileURL(join(consoleRoot, 'dist/config/cli-registry/stock.js')));
 const { buildSpawnCommandFromRegistry } = await import(pathToFileURL(join(consoleRoot, 'dist/session-cli-registry-bridge.js')));
 const require = createRequire(join(consoleRoot, 'package.json'));
