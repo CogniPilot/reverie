@@ -112,7 +112,51 @@ fn configuration(value: Value, endpoint: &Endpoint) -> Result<Value> {
     // Membership changes normally when the candidate starts. It is not a
     // network configuration change and is never used to select another object.
     fields.remove("Containers");
+    normalize_allocation_status(&mut fields)?;
     Ok(Value::Object(fields))
+}
+
+fn normalize_allocation_status(fields: &mut serde_json::Map<String, Value>) -> Result<()> {
+    let Some(status) = fields.get_mut("Status") else {
+        return Ok(());
+    };
+    let status = status
+        .as_object_mut()
+        .ok_or_else(|| crate::DeploymentError::new(INVALID))?;
+    require(status.len() == 1 && status.contains_key("IPAM"), INVALID)?;
+    let ipam = status
+        .get_mut("IPAM")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| crate::DeploymentError::new(INVALID))?;
+    require(ipam.len() == 1 && ipam.contains_key("Subnets"), INVALID)?;
+    let subnets = ipam
+        .get_mut("Subnets")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| crate::DeploymentError::new(INVALID))?;
+    require(subnets.len() <= 128, INVALID)?;
+    for (subnet, counters) in subnets {
+        require(
+            !subnet.is_empty() && subnet.len() <= 128 && !subnet.chars().any(char::is_control),
+            INVALID,
+        )?;
+        let counters = counters
+            .as_object_mut()
+            .ok_or_else(|| crate::DeploymentError::new(INVALID))?;
+        require(
+            counters.is_empty()
+                || (counters.len() == 2
+                    && counters.get("IPsInUse").is_some_and(Value::is_u64)
+                    && counters
+                        .get("DynamicIPsAvailable")
+                        .is_some_and(Value::is_u64)),
+            INVALID,
+        )?;
+        // These two allocation counters change on STOP/START. Keep the subnet
+        // keys and every static field; normalized empty leaves revalidate.
+        counters.remove("IPsInUse");
+        counters.remove("DynamicIPsAvailable");
+    }
+    Ok(())
 }
 
 impl Topology {
@@ -185,7 +229,10 @@ impl Topology {
                 .configurations
                 .get(&endpoint.network_id)
                 .ok_or_else(|| crate::DeploymentError::new(INVALID))?;
-            require(configuration(value.clone(), endpoint)? == *value, INVALID)?;
+            // Old on-disk plans retain raw counters and must remain byte-exact.
+            // Validate their projection without changing serialized selection.
+            configuration(value.clone(), endpoint)?;
+            require(value.get("Containers").is_none(), INVALID)?;
         }
         require(
             names.contains(&"bridge".to_owned())
@@ -223,7 +270,7 @@ impl Topology {
                 .collect();
             require(
                 matching.len() == 1
-                    && self.configurations[&endpoint.network_id]
+                    && configuration(self.configurations[&endpoint.network_id].clone(), endpoint)?
                         == configuration(matching[0].clone(), endpoint)?,
                 "DEPLOYMENT_NETWORK_CHANGED",
             )?;

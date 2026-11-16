@@ -1,5 +1,79 @@
 use super::*;
 
+#[test]
+fn retained_raw_status_allocation_counters_change_without_rewriting_the_plan() {
+    let (source, mut facts) = fixture();
+    for fact in &mut facts {
+        fact["Status"] =
+            json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":3,"DynamicIPsAvailable":253}}}});
+    }
+    let mut topology = Topology::observed(&source, facts.clone()).unwrap();
+    // Format4/5/6 operations already on disk contain this original raw Status.
+    for fact in &facts {
+        topology
+            .configurations
+            .get_mut(fact["Id"].as_str().unwrap())
+            .unwrap()["Status"] = fact["Status"].clone();
+    }
+    let original = serde_json::to_vec(&topology).unwrap();
+    let restored: Topology = serde_json::from_slice(&original).unwrap();
+    restored.validate().unwrap();
+    for fact in &mut facts {
+        fact["Status"]["IPAM"]["Subnets"]["192.0.2.0/24"] =
+            json!({"IPsInUse":2,"DynamicIPsAvailable":254});
+    }
+    restored.require_observations(facts).unwrap();
+    assert_eq!(serde_json::to_vec(&restored).unwrap(), original);
+}
+
+#[test]
+fn allocation_projection_keeps_static_subnets_ipam_options_internal_and_ids_strict() {
+    let (source, mut facts) = fixture();
+    for fact in &mut facts {
+        fact["Status"] =
+            json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":3,"DynamicIPsAvailable":253}}}});
+    }
+    let topology = Topology::observed(&source, facts.clone()).unwrap();
+    topology.validate().unwrap(); // Newly normalized empty counter leaves.
+    for field in ["Id", "IPAM", "Options", "Internal", "Status"] {
+        let mut changed = facts.clone();
+        changed[1][field] = match field {
+            "Id" => json!("f".repeat(64)),
+            "Internal" => json!(false),
+            "Status" => {
+                json!({"IPAM":{"Subnets":{"198.51.100.0/24":{"IPsInUse":2,"DynamicIPsAvailable":254}}}})
+            }
+            _ => json!({"changed":"static configuration"}),
+        };
+        assert!(topology.require_observations(changed).is_err(), "{field}");
+    }
+}
+
+#[test]
+fn malformed_or_unknown_allocation_status_refuses_in_stored_and_fresh_shapes() {
+    let (source, facts) = fixture();
+    let topology = Topology::observed(&source, facts.clone()).unwrap();
+    for status in [
+        Value::Null,
+        json!([]),
+        json!({"extra":{}}),
+        json!({"IPAM":{"extra":{}}}),
+        json!({"IPAM":{"Subnets":[]}}),
+        json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":1}}}}),
+        json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":-1,"DynamicIPsAvailable":253}}}}),
+        json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":"3","DynamicIPsAvailable":253}}}}),
+        json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":1.5,"DynamicIPsAvailable":253}}}}),
+        json!({"IPAM":{"Subnets":{"192.0.2.0/24":{"IPsInUse":3,"DynamicIPsAvailable":253,"unknown":true}}}}),
+    ] {
+        let mut changed = facts.clone();
+        changed[1]["Status"] = status.clone();
+        assert!(topology.require_observations(changed).is_err());
+        let mut stored = topology.clone();
+        stored.configurations.get_mut(&"2".repeat(64)).unwrap()["Status"] = status;
+        assert!(stored.validate().is_err());
+    }
+}
+
 fn fixture() -> (Value, Vec<Value>) {
     let mut networks = serde_json::Map::new();
     let mut facts = Vec::new();
