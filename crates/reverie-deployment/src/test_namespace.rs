@@ -46,7 +46,7 @@ pub(crate) fn run(test: &str, scenario: fn()) {
 }
 
 use std::os::unix::fs::MetadataExt;
-fn child(directory: &Path, test: &str) -> std::process::Output {
+fn prepare(directory: &Path) -> (PathBuf, PathBuf, PathBuf) {
     for name in [
         "nix/store",
         "fixture",
@@ -84,6 +84,10 @@ fn child(directory: &Path, test: &str) -> std::process::Output {
             .unwrap(),
     )
     .unwrap();
+    (data, account, stale)
+}
+fn child(directory: &Path, test: &str) -> std::process::Output {
+    let (data, account, stale) = prepare(directory);
     let bwrap =
         std::env::var_os("NIX_REVERIE_TEST_DEPLOYMENT_BWRAP").unwrap_or_else(|| "bwrap".into());
     Command::new(bwrap)
