@@ -155,11 +155,11 @@ async fn call(
         if value.get("requestId").and_then(Value::as_str) != request {
             return Err(reverie_company_api::Error::Invalid);
         }
-        Some(value)
+        raw.into_bytes()
     } else {
-        None
+        Vec::new()
     };
-    client::call(
+    client::call_raw(
         address,
         &token,
         if matches!(method, Method::Get) {

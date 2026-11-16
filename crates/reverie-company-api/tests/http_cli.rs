@@ -71,6 +71,21 @@ impl Fixture {
         request: Option<&str>,
         body: Option<&Value>,
     ) -> std::process::Output {
+        self.cli_raw(
+            method,
+            path,
+            request,
+            body.map(|value| serde_json::to_vec(value).unwrap())
+                .as_deref(),
+        )
+    }
+    fn cli_raw(
+        &self,
+        method: &str,
+        path: &str,
+        request: Option<&str>,
+        body: Option<&[u8]>,
+    ) -> std::process::Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-company"));
         command.args([
             "call",
@@ -100,17 +115,59 @@ impl Fixture {
             .spawn()
             .unwrap();
         if let Some(value) = body {
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(&serde_json::to_vec(value).unwrap())
-                .unwrap();
+            child.stdin.take().unwrap().write_all(value).unwrap();
         } else {
             drop(child.stdin.take());
         }
         child.wait_with_output().unwrap()
     }
+}
+#[tokio::test]
+async fn compiled_cli_preserves_duplicate_json_fields_for_strict_api_refusal() {
+    let f = Fixture::new();
+    let registered = f
+        .post(
+            &f.owner,
+            "/api/company/employees",
+            json!({"requestId":id(60),"name":"Original"}),
+        )
+        .await;
+    let office = format!(
+        "/api/company/employees/{}/office/operations",
+        registered["data"]["employeeId"].as_str().unwrap()
+    );
+    let session = registered["data"]["sessionId"].as_str().unwrap();
+    let before = fs::read(f.instance.join("company.json")).unwrap();
+    for (path, n, raw) in [
+        (
+            "/api/company/employees",
+            61,
+            format!(r#"{{"requestId":"{}","name":"one","name":"two"}}"#, id(61)),
+        ),
+        (
+            office.as_str(),
+            62,
+            format!(
+                r#"{{"requestId":"{}","scope":{{"sessionId":"{session}","sessionGeneration":1,"sessionGeneration":2}},"action":"leave"}}"#,
+                id(62)
+            ),
+        ),
+        (
+            office.as_str(),
+            63,
+            format!(
+                r#"{{"requestId":"{}","scope":{{"sessionId":"{session}","sessionGeneration":1}},"action":"leave","action":"restart"}}"#,
+                id(63)
+            ),
+        ),
+    ] {
+        let output = f.cli_raw("post", path, Some(&id(n)), Some(raw.as_bytes()));
+        assert_eq!(output.status.code(), Some(3));
+        let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["code"], "INVALID_REQUEST");
+        assert_eq!(value["requestId"], id(n));
+    }
+    assert_eq!(fs::read(f.instance.join("company.json")).unwrap(), before);
 }
 impl Drop for Fixture {
     fn drop(&mut self) {

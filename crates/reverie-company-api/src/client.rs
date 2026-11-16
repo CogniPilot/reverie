@@ -65,12 +65,26 @@ pub async fn call(
     path: &str,
     body: Option<Value>,
 ) -> Result<Value> {
+    let bytes = body
+        .map(|value| serde_json::to_vec(&value).map_err(|_| Error::Invalid))
+        .transpose()?
+        .unwrap_or_default();
+    call_raw(address, token, method, path, bytes).await
+}
+/// Preserve caller JSON bytes so typed server decoding sees duplicate fields.
+pub async fn call_raw(
+    address: SocketAddr,
+    token: &str,
+    method: &str,
+    path: &str,
+    bytes: Vec<u8>,
+) -> Result<Value> {
     if !address.ip().is_loopback() {
         return Err(Error::Forbidden);
     }
     tokio::time::timeout(
         Duration::from_secs(5),
-        send(address, token, method, path, body),
+        send(address, token, method, path, bytes),
     )
     .await
     .map_err(|_| Error::PublicationUnconfirmed)?
@@ -80,12 +94,8 @@ async fn send(
     token: &str,
     method: &str,
     path: &str,
-    body: Option<Value>,
+    bytes: Vec<u8>,
 ) -> Result<Value> {
-    let bytes = body
-        .map(|value| serde_json::to_vec(&value).map_err(|_| Error::Invalid))
-        .transpose()?
-        .unwrap_or_default();
     if bytes.len() > 16384 {
         return Err(Error::Invalid);
     }
