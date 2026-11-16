@@ -47,11 +47,27 @@ pub(crate) fn run(test: &str, scenario: fn()) {
 
 use std::os::unix::fs::MetadataExt;
 fn child(directory: &Path, test: &str) -> std::process::Output {
-    for name in ["nix/store", "fixture", "run", "var", "tmp", "proc", "dev"] {
+    for name in [
+        "nix/store",
+        "fixture",
+        "run",
+        "var",
+        "tmp",
+        "proc",
+        "dev",
+        "instances",
+        "accounts",
+        "other-writer",
+    ] {
         fs::create_dir_all(directory.join(name)).unwrap();
     }
     fs::write(directory.join("fixture/marker"), MARKER).unwrap();
     fs::write(directory.join("fixture/tests"), []).unwrap();
+    let data = directory.join("writer-data");
+    let account = data.join("console/accounts/profile");
+    fs::create_dir_all(&account).unwrap();
+    let stale = data.join("disjoint-source");
+    std::os::unix::fs::symlink(data.join("console"), &stale).unwrap();
     fs::write(
         directory.join("fixture/parent-namespace"),
         fs::read_link("/proc/self/ns/user")
@@ -96,6 +112,21 @@ fn child(directory: &Path, test: &str) -> std::process::Output {
             "/var",
             "--tmpfs",
             "/tmp",
+            "--tmpfs",
+            "/instances",
+            "--tmpfs",
+            "/accounts",
+            "--bind",
+        ])
+        .arg(&data)
+        .args(["/tmp/deployment/data", "--bind"])
+        .arg(&data)
+        .args(["/instances/default", "--bind"])
+        .arg(account)
+        .args(["/accounts/profile", "--bind"])
+        .arg(stale)
+        .args([
+            "/other-writer",
             "--proc",
             "/proc",
             "--dev",

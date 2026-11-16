@@ -137,6 +137,7 @@ fn make_operation(
         backup_metadata_scope: "fixture".into(),
         profile: None,
         preserved_networks: None,
+        live_accounts: None,
     };
     Operation::create(
         &service.installation.state,
@@ -150,6 +151,7 @@ fn make_operation(
             preview,
             bind_identities: Vec::new(),
             network_topology: None,
+            live_account_writers: None,
         },
     )
     .unwrap()

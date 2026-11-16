@@ -1,6 +1,7 @@
 use super::*;
 use reverie_host::deployment_snapshot::SnapshotTools;
 use std::io::{Read, Write};
+mod live_accounts;
 /// Ordinary legacy budgets remain unchanged. The whole initial owner passes
 /// its SAME original bound, never a new grace period or a writer exception.
 #[derive(Clone, Copy)]
@@ -186,6 +187,9 @@ impl DeploymentService {
             current["Name"] == format!("/{}", temporary_name(operation, "candidate")),
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
+        if operation.plan.live_account_writers.is_some() {
+            return self.apply_live_accounts(operation, &source, &candidate, pins, deadline);
+        }
         let source_root = self.data_source(operation)?;
         let tools = snapshot_tools()?;
         pins.running_mounts(&source)?;
@@ -254,8 +258,26 @@ impl DeploymentService {
         self.engine.start(candidate)?;
         operation.record("started", &json!({"id":candidate}))?;
         self.await_ready_scoped(candidate, true, deadline)?;
+        self.publish_ready(operation, candidate, pins, deadline)
+    }
+    fn publish_ready(
+        &self,
+        operation: &Operation,
+        candidate: &str,
+        pins: &crate::pins::Pins,
+        deadline: OperationDeadline,
+    ) -> Result<()> {
         self.source_current(operation, false)?;
+        let old = model::string(&operation.plan.source, "Id")?;
+        require(
+            operation.candidate()? == candidate,
+            "DEPLOYMENT_CANDIDATE_CHANGED",
+        )?;
         let running = self.engine.container(candidate)?;
+        require(
+            running["Id"] == candidate && running["State"]["Running"] == true,
+            "DEPLOYMENT_CANDIDATE_CHANGED",
+        )?;
         operation.plan.candidate_matches(&running)?;
         model::port_binding(&running, self.installation.port)?;
         require(
@@ -263,6 +285,7 @@ impl DeploymentService {
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
         pins.running_mounts(&running)?;
+        self.verify_effect_pins(operation, pins)?;
         deadline.check()?;
         operation.record(
             "ready",

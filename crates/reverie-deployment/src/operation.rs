@@ -25,6 +25,8 @@ pub(super) struct Plan {
     pub(super) bind_identities: Vec<crate::pins::Identity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) network_topology: Option<crate::networks::Topology>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) live_account_writers: Option<crate::live_accounts::Inventory>,
 }
 pub(super) struct Operation {
     pub(super) directory: PathBuf,
@@ -35,7 +37,12 @@ impl Plan {
         self.validate_profile()?;
         require(
             self.version == self.profile().version()
-                || (self.version == 4 && self.network_topology.is_some()),
+                || (self.version == 4
+                    && self.network_topology.is_some()
+                    && self.live_account_writers.is_none())
+                || (self.version == 5
+                    && self.network_topology.is_some()
+                    && self.live_account_writers.is_some()),
             "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
         )
     }
@@ -56,7 +63,12 @@ impl Plan {
         let profile = self.profile();
         let historical = self.version == 2 && profile == model::DeploymentProfile::ProtectedWebsite;
         require(
-            (self.network_topology.is_some() && self.version == 4)
+            (self.network_topology.is_some()
+                && self.version == 4
+                && self.live_account_writers.is_none())
+                || (self.network_topology.is_some()
+                    && self.version == 5
+                    && self.live_account_writers.is_some())
                 || (self.network_topology.is_none()
                     && (self.version == profile.version() || historical)),
             "DEPLOYMENT_OPERATION_INVALID",
@@ -73,6 +85,21 @@ impl Plan {
                     .map(crate::networks::Topology::preview),
             "DEPLOYMENT_OPERATION_NETWORKS_INVALID",
         )?;
+        require(
+            self.preview.live_accounts
+                == self
+                    .live_account_writers
+                    .as_ref()
+                    .map(crate::live_accounts::Inventory::preview),
+            "DEPLOYMENT_OPERATION_WRITERS_INVALID",
+        )?;
+        if let Some(writers) = &self.live_account_writers {
+            require(
+                self.version == 5 && self.network_topology.is_some(),
+                "DEPLOYMENT_OPERATION_WRITERS_INVALID",
+            )?;
+            writers.validate(&crate::service::data_source_value(&self.source)?.join("console"))?;
+        }
         if let Some(topology) = &self.network_topology {
             topology.validate()?;
             model::supported_network_profile(&self.source, profile, topology)?;

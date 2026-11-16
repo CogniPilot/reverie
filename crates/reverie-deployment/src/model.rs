@@ -23,6 +23,8 @@ pub struct DeploymentPreview {
     pub profile: Option<DeploymentProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preserved_networks: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_accounts: Option<crate::live_accounts::LiveAccountDispositionPreview>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentStatus {

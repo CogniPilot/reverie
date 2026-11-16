@@ -146,7 +146,14 @@ impl DeploymentService {
         let source = self.profile_source(profile)?;
         self.refuse_shared_writers(&source)?;
         let (body, refreshed_environment_keys) = self.profile_body(&source, image, profile)?;
-        self.record_preview(source, body, refreshed_environment_keys, profile, None)
+        self.record_preview(
+            source,
+            body,
+            refreshed_environment_keys,
+            profile,
+            None,
+            None,
+        )
     }
     /// Preserve only the observed original dynamic bridge network grants.
     /// Verified backup and the existing shared-writer refusal still apply.
@@ -163,7 +170,36 @@ impl DeploymentService {
         let (body, refreshed) =
             self.profile_body_selection(&source, image, profile, Some(&topology))?;
         topology.require_current(&self.engine)?;
-        self.record_preview(source, body, refreshed, profile, Some(topology))
+        self.record_preview(source, body, refreshed, profile, Some(topology), None)
+    }
+    /// Explicit fix-forward disposition for exact independently live account
+    /// directory writers. This never certifies a consistent backup or rollback.
+    pub fn preview_live_accounts_fix_forward(
+        &self,
+        image: &str,
+        profile: model::DeploymentProfile,
+    ) -> Result<DeploymentPreview> {
+        model::image_id(image)?;
+        let source = self.running_source()?;
+        let topology = crate::networks::Topology::capture(&source, &self.engine)?;
+        model::supported_network_profile(&source, profile, &topology)?;
+        let console = data_source_value(&source)?.join("console");
+        let selected = model::string(&source, "Id")?;
+        let writers =
+            crate::live_accounts::Inventory::capture(&self.engine, &console, &[selected])?;
+        writers.validate(&console)?;
+        let (body, refreshed) =
+            self.profile_body_selection(&source, image, profile, Some(&topology))?;
+        topology.require_current(&self.engine)?;
+        writers.require_current(&self.engine, &[selected])?;
+        self.record_preview(
+            source,
+            body,
+            refreshed,
+            profile,
+            Some(topology),
+            Some(writers),
+        )
     }
     fn record_preview(
         &self,
@@ -172,6 +208,7 @@ impl DeploymentService {
         refreshed_environment_keys: Vec<String>,
         profile: model::DeploymentProfile,
         network_topology: Option<crate::networks::Topology>,
+        live_account_writers: Option<crate::live_accounts::Inventory>,
     ) -> Result<DeploymentPreview> {
         let pins = crate::pins::Pins::capture(&source)?;
         if let Err(error) = pins.running_mounts(&source) {
@@ -192,9 +229,12 @@ impl DeploymentService {
             backup_metadata_scope:"console bytes and caller-visible metadata/ACLs/xattrs; no automatic live data restore".into(),
             profile: profile.preview(),
             preserved_networks: network_topology.as_ref().map(crate::networks::Topology::preview),
+            live_accounts: live_account_writers.as_ref().map(crate::live_accounts::Inventory::preview),
         };
             let plan = Plan {
-                version: if network_topology.is_some() {
+                version: if live_account_writers.is_some() {
+                    5
+                } else if network_topology.is_some() {
                     4
                 } else {
                     profile.version()
@@ -207,6 +247,7 @@ impl DeploymentService {
                 preview: serde_json::from_value(serde_json::to_value(&preview)?)?,
                 bind_identities,
                 network_topology,
+                live_account_writers,
             };
             Operation::create(&self.installation.state, plan)?;
             Ok(preview)
@@ -244,6 +285,7 @@ impl DeploymentService {
         let current = self.source_current(operation, true)?;
         claim.finish(operation, &current)?;
         pins.running_mounts(&current)?;
+        self.verify_effect_pins(operation, pins)?;
         operation.attempt("create-attempt")?;
         deadline.check()?;
         let name = temporary_name(operation, "candidate");
@@ -348,7 +390,7 @@ impl DeploymentService {
             )?;
             deadline.check()?;
             self.process_tree(&id, front)?;
-            self.verify_effect_pins(operation, &pins)?;
+            self.verify_observation_pins(operation, &pins)?;
             deadline.check()
         })();
         DeploymentError::finalized(result, pins.close())
@@ -394,9 +436,32 @@ impl DeploymentService {
         Ok(current)
     }
     fn verify_effect_pins(&self, operation: &Operation, pins: &crate::pins::Pins) -> Result<()> {
+        self.verify_observation_pins(operation, pins)?;
+        self.verify_live_account_writers(operation)
+    }
+    fn verify_observation_pins(
+        &self,
+        operation: &Operation,
+        pins: &crate::pins::Pins,
+    ) -> Result<()> {
         pins.verify()?;
         if let Some(topology) = &operation.plan.network_topology {
             topology.require_current(&self.engine)?;
+        }
+        Ok(())
+    }
+    fn verify_live_account_writers(&self, operation: &Operation) -> Result<()> {
+        if let Some(writers) = &operation.plan.live_account_writers {
+            let source = model::string(&operation.plan.source, "Id")?;
+            let candidate = operation
+                .exists("candidate")
+                .then(|| operation.candidate())
+                .transpose()?;
+            let mut websites = vec![source];
+            if let Some(candidate) = &candidate {
+                websites.push(candidate.as_str());
+            }
+            writers.require_current(&self.engine, &websites)?;
         }
         Ok(())
     }
@@ -436,7 +501,7 @@ impl DeploymentService {
         data_source_value(&operation.plan.source)
     }
 }
-fn data_source_value(source: &Value) -> Result<PathBuf> {
+pub(super) fn data_source_value(source: &Value) -> Result<PathBuf> {
     let mounts = source["Mounts"]
         .as_array()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;

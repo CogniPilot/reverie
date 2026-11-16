@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(test)]
-mod network_tests;
+pub(super) mod network_tests;
 impl DeploymentService {
     /// Restore only the exact retained old container. This never restores data,
     /// reconfigures the broker, deletes a container or invents a release receipt.

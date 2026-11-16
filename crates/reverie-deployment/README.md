@@ -93,3 +93,33 @@ The snapshot is a verified copy of the observed stopped console subtree. Other
 worker-writable account paths require an explicit writer/consistency disposition;
 the shared deployment lock alone does not establish whole-company quiescence.
 This source is under qualification and is not an installed deployment claim.
+
+`preview --image sha256:IMAGE_ID --preserve-network-grants
+--live-account-writers-fix-forward` explicitly selects a different disposition.
+Its version-five private plan lists the exact active writer container IDs,
+immutable images, process incarnations and mounts. Only canonical direct
+`console/accounts/PROFILE` directory binds qualify; console roots, ancestors,
+metadata, aliases and other overlapping writers refuse. Prepare, website STOP,
+candidate START and readiness publication recheck that inventory. Employees
+receive no stop, start, pause, input, mount or network changes.
+Every observed other active host-writable bind or volume is first matched to
+its actual mounted inode through an anchored process-root descriptor and a
+directory walk that refuses symlinks. A changed source pathname cannot make a
+retained console bind appear disjoint. Unprovable bindings refuse. This finite
+Docker observation also maps held FD mount IDs through the existing kernel
+mount-table parser to compare physical backing paths. Current aliases of the
+console, its ancestors or metadata are not disjoint. Nested host mounts under a
+writable directory refuse with `DEPLOYMENT_LIVE_ACCOUNT_HOST_MOUNT_UNSUPPORTED`.
+This does not certify absence of independent host-process, open-descriptor or
+hardlink writers, and never certifies a consistent backup.
+
+Apply first retains an ordinary full console copy while the website and account
+writers may be active. This copy is **unverified**; no consistent backup or
+automatic data restore is promised. Its receipt and status report
+`backupVerified: false`. The preview also reports that code rollback compatibility
+is not guaranteed: even a version-one to version-two company publication can
+make the retained old console unable to read current data. Both containers and
+the live source data remain retained for inspection and fixing forward. Normal
+preview/apply and the existing skip-backup path retain their writer refusal.
+Older plan readers refuse version-five effects rather than silently dropping
+this disposition. No successful local deployment is claimed by these source tests.

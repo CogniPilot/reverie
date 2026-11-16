@@ -1,7 +1,7 @@
 use super::*;
 use crate::model::DeploymentPreview;
 use std::{fs, path::Path};
-mod fixture;
+pub(in crate::service) mod fixture;
 use fixture::Fixture;
 
 fn namespace(test: &str, scenario: fn()) {

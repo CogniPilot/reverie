@@ -3,10 +3,10 @@
 use super::*;
 use crate::{engine::Engine, installation, networks::Topology};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     io::{Read, Write},
     os::unix::{
-        fs::{DirBuilderExt, PermissionsExt, symlink},
+        fs::{PermissionsExt, symlink},
         net::{UnixListener, UnixStream},
     },
     sync::{
@@ -17,8 +17,8 @@ use std::{
 };
 mod health;
 
-type Facts = Arc<Mutex<BTreeMap<String, Value>>>;
-pub(super) struct Port {
+type Facts = Arc<Mutex<BTreeMap<String, VecDeque<Value>>>>;
+pub(in crate::service) struct Port {
     facts: Facts,
     calls: Arc<Mutex<Vec<String>>>,
     stop: Arc<AtomicBool>,
@@ -42,13 +42,17 @@ impl Port {
             thread: Some(thread),
         }
     }
-    pub(super) fn set(&self, path: String, value: Value) {
-        self.facts.lock().unwrap().insert(path, value);
+    pub(in crate::service) fn set(&self, path: String, value: Value) {
+        self.set_sequence(path, vec![value]);
     }
-    pub(super) fn calls(&self) -> Vec<String> {
+    pub(in crate::service) fn set_sequence(&self, path: String, values: Vec<Value>) {
+        assert!(!values.is_empty());
+        self.facts.lock().unwrap().insert(path, values.into());
+    }
+    pub(in crate::service) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
-    pub(super) fn clear(&self) {
+    pub(in crate::service) fn clear(&self) {
         self.calls.lock().unwrap().clear();
     }
 }
@@ -87,9 +91,7 @@ fn respond(mut stream: UnixStream, facts: &Facts, calls: &Mutex<Vec<String>>) {
     let method = words.next().unwrap_or("missing");
     let path = words.next().unwrap_or("missing");
     calls.lock().unwrap().push(format!("{method} {path}"));
-    let value = (method == "GET")
-        .then(|| facts.lock().unwrap().get(path).cloned())
-        .flatten();
+    let value = response(facts, method, path);
     let status = if value.is_some() {
         "200 OK"
     } else {
@@ -106,25 +108,69 @@ fn respond(mut stream: UnixStream, facts: &Facts, calls: &Mutex<Vec<String>>) {
     .unwrap();
     stream.write_all(&body).unwrap();
 }
+fn response(facts: &Facts, method: &str, path: &str) -> Option<Value> {
+    let mut facts = facts.lock().unwrap();
+    let key = format!("{method} {path}");
+    let key = if facts.contains_key(&key) {
+        key.as_str()
+    } else if method == "GET" {
+        path
+    } else {
+        return None;
+    };
+    let values = facts.get_mut(key)?;
+    if values.len() > 1 {
+        values.pop_front()
+    } else {
+        values.front().cloned()
+    }
+}
 
-pub(super) struct Fixture {
-    pub(super) service: DeploymentService,
-    pub(super) operation: Operation,
-    pub(super) source: Value,
-    pub(super) port: Port,
+pub(in crate::service) struct Fixture {
+    pub(in crate::service) service: DeploymentService,
+    pub(in crate::service) operation: Operation,
+    pub(in crate::service) source: Value,
+    pub(in crate::service) port: Port,
     health: health::Health,
 }
 impl Fixture {
-    pub(super) fn new() -> Self {
+    pub(in crate::service) fn new() -> Self {
+        Self::selected(false)
+    }
+    pub(in crate::service) fn live_accounts() -> Self {
+        Self::selected(true)
+    }
+    fn selected(live_accounts: bool) -> Self {
         let port = Port::start();
         let health = health::Health::start();
         let root = Path::new("/tmp/deployment");
-        fs::DirBuilder::new().mode(0o700).create(root).unwrap();
-        fs::create_dir(root.join("data")).unwrap();
-        let config = json!({"version":1,"containerName":"fixture","port":health.port(),"websiteRuntime":"default"});
+        fs::create_dir_all(root.join("data")).unwrap();
+        fs::set_permissions(root, fs::Permissions::from_mode(0o700)).unwrap();
+        let config =
+            json!({"version":1,"containerName":"fixture","port":health.port(),"websiteRuntime":"default"});
         installation::exclusive_json(&root.join("deployment.json"), &config).unwrap();
         let service = DeploymentService::capture(root).unwrap();
-        let source = source(health.port());
+        let mut source = source(health.port());
+        if live_accounts {
+            fs::create_dir_all(root.join("data/console/accounts/profile")).unwrap();
+            fs::remove_file(root.join("data/disjoint-source")).unwrap();
+            fs::create_dir(root.join("data/disjoint-source")).unwrap();
+            source["Mounts"][0]["Destination"] = json!("/instances/default");
+            source["Mounts"][0]["RW"] = json!(true);
+            source["HostConfig"]["Binds"] = json!(["/tmp/deployment/data:/instances/default:rw"]);
+            source["State"]["Running"] = json!(true);
+            source["State"]["Status"] = json!("running");
+            source["State"]["Pid"] = json!(std::process::id());
+            let worker = worker();
+            port.set(
+                format!("/containers/{}/json", "d".repeat(64)),
+                worker.clone(),
+            );
+            port.set("/containers/json".into(), json!([
+                {"Id":"a".repeat(64),"State":"running","ImageID":source["Image"],"Mounts":source["Mounts"]},
+                {"Id":"d".repeat(64),"State":"running","ImageID":worker["Image"],"Mounts":worker["Mounts"]}
+            ]));
+        }
         for (name, id) in [("bridge", "1".repeat(64)), ("api", "2".repeat(64))] {
             port.set(
                 format!("/networks/{id}"),
@@ -134,7 +180,15 @@ impl Fixture {
         }
         let engine = Engine::new(Path::new("/var/run/docker.sock")).unwrap();
         let topology = Topology::capture(&source, &engine).unwrap();
-        let operation = operation(&service, &source, topology);
+        let writers = live_accounts.then(|| {
+            crate::live_accounts::Inventory::capture(
+                &engine,
+                &root.join("data/console"),
+                &[&"a".repeat(64)],
+            )
+            .unwrap()
+        });
+        let operation = operation(&service, &source, topology, writers);
         installation::exclusive_json(
             &service
                 .installation
@@ -160,12 +214,12 @@ impl Fixture {
             health,
         }
     }
-    pub(super) fn drifted(&self) -> Value {
+    pub(in crate::service) fn drifted(&self) -> Value {
         let mut value = self.source.clone();
         value["NetworkSettings"]["Networks"]["api"]["Aliases"] = json!(["foreign"]);
         value
     }
-    pub(super) fn close(mut self) {
+    pub(in crate::service) fn close(mut self) {
         self.service.close().unwrap();
         assert_eq!(
             self.health.requests(),
@@ -174,7 +228,7 @@ impl Fixture {
         );
     }
 }
-fn image(letter: char) -> Value {
+pub(in crate::service) fn image(letter: char) -> Value {
     json!({"Id":format!("sha256:{}", letter.to_string().repeat(64)), "Config":{
         "Env":["REVERIE_NATIVE_FRONT=1"],"Entrypoint":["entry"],"Cmd":["web"],"Volumes":null}})
 }
@@ -189,7 +243,12 @@ fn source(port: u16) -> Value {
         "NetworkSettings":{"Networks":{"bridge":{"NetworkID":"1".repeat(64),"Aliases":null},
             "api":{"NetworkID":"2".repeat(64),"Aliases":["reverie"]}}}})
 }
-fn operation(service: &DeploymentService, source: &Value, topology: Topology) -> Operation {
+fn operation(
+    service: &DeploymentService,
+    source: &Value,
+    topology: Topology,
+    writers: Option<crate::live_accounts::Inventory>,
+) -> Operation {
     let (body, refreshed) = model::create_body_selection(
         source,
         &image('e'),
@@ -213,11 +272,14 @@ fn operation(service: &DeploymentService, source: &Value, topology: Topology) ->
         backup_metadata_scope: "controlled fixture".into(),
         profile: None,
         preserved_networks: Some(topology.preview()),
+        live_accounts: writers
+            .as_ref()
+            .map(crate::live_accounts::Inventory::preview),
     };
     let operation = Operation::create(
         &service.installation.state,
         Plan {
-            version: 4,
+            version: if writers.is_some() { 5 } else { 4 },
             operation: preview.operation.clone(),
             container: "fixture".into(),
             installation_revision: service.installation.revision.clone(),
@@ -226,6 +288,7 @@ fn operation(service: &DeploymentService, source: &Value, topology: Topology) ->
             preview,
             bind_identities: identities,
             network_topology: Some(topology),
+            live_account_writers: writers,
         },
     )
     .unwrap();
@@ -254,5 +317,13 @@ fn candidate(operation: &Operation) -> Value {
         super::super::temporary_name(operation, "candidate")
     ));
     value["State"]["Status"] = json!("created");
+    value["State"]["Running"] = json!(false);
+    value["State"]["Pid"] = json!(0);
     value
+}
+
+pub(in crate::service) fn worker() -> Value {
+    json!({"Id":"d".repeat(64),"Image":image('e')["Id"],"Config":{"Cmd":["existing-provider"],"Env":["FAKE_PRIVATE=not-public"]},"HostConfig":{},
+        "Mounts":[{"Type":"bind","Source":"/tmp/deployment/data/console/accounts/profile","Destination":"/accounts/profile","RW":true}],
+        "State":{"Running":true,"Paused":false,"Restarting":false,"Dead":false,"Pid":std::process::id(),"StartedAt":"original"}})
 }

@@ -6,7 +6,7 @@ use std::{path::PathBuf, process::ExitCode};
 #[command(
     about = "Preview, prepare, apply or roll back the registered Reverie console release.",
     long_about = "Local owner bootstrap API for an existing ordinary Docker deployment. Reads the registered deployment.json and holds its existing update lock. It never changes the worker broker or bulk-wakes employees. Each effect attempt is durable and is never automatically retried. All output is structured JSON; private environment/configuration stays in the owner-only operation record.",
-    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission."
+    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Ordinary apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. The explicit live-account-writers-fix-forward preview instead selects an unverified live copy and no guaranteed code rollback compatibility. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission."
 )]
 struct Arguments {
     /// Existing private installation root containing deployment.json.
@@ -29,6 +29,10 @@ enum Action {
         /// This does not waive the shared-writer or verified snapshot guard.
         #[arg(long)]
         preserve_network_grants: bool,
+        /// Retain exact independently live account writers; accept an
+        /// unverified copy and no guaranteed code/data rollback compatibility.
+        #[arg(long, requires = "preserve_network_grants")]
+        live_account_writers_fix_forward: bool,
     },
     /// Create and inspect the candidate while the old console stays online.
     Prepare { operation: String },
@@ -84,7 +88,10 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 image,
                 profile,
                 preserve_network_grants,
-            } => serde_json::to_value(if preserve_network_grants {
+                live_account_writers_fix_forward,
+            } => serde_json::to_value(if live_account_writers_fix_forward {
+                service.preview_live_accounts_fix_forward(&image, profile)?
+            } else if preserve_network_grants {
                 service.preview_preserving_networks(&image, profile)?
             } else {
                 service.preview_with_profile(&image, profile)?
@@ -149,6 +156,37 @@ mod tests {
         let mut arbitrary = base.to_vec();
         arbitrary.extend(["--networks", "request-selected"]);
         assert!(Arguments::try_parse_from(arbitrary).is_err());
+    }
+    #[test]
+    fn live_account_disposition_requires_the_explicit_network_preservation_selection() {
+        let image = format!("sha256:{}", "a".repeat(64));
+        let base = [
+            "reverie-deployment",
+            "--root",
+            "/fixture",
+            "preview",
+            "--image",
+            &image,
+        ];
+        let mut unbound = base.to_vec();
+        unbound.push("--live-account-writers-fix-forward");
+        assert!(Arguments::try_parse_from(&unbound).is_err());
+        unbound.push("--preserve-network-grants");
+        assert!(matches!(
+            Arguments::try_parse_from(unbound).unwrap().action,
+            Action::Preview {
+                preserve_network_grants: true,
+                live_account_writers_fix_forward: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            Arguments::try_parse_from(base).unwrap().action,
+            Action::Preview {
+                live_account_writers_fix_forward: false,
+                ..
+            }
+        ));
     }
     #[test]
     fn body_and_close_errors_both_survive_cli_finalization() {

@@ -97,9 +97,11 @@ fn fixture_operation() -> Operation {
                 backup_metadata_scope: "fixture".into(),
                 profile: None,
                 preserved_networks: None,
+                live_accounts: None,
             },
             bind_identities: Vec::new(),
             network_topology: None,
+            live_account_writers: None,
         },
     }
 }
