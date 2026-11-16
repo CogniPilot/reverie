@@ -42,6 +42,7 @@ export const PLAN_OFFICE_STARTUP_STAGES = [
   'driver-control-create',
   'driver-control-connect',
   'driver-control-start',
+  'driver-control-transport',
   'driver-control-owner-preflight',
   'driver-control-tools',
   'driver-internal-host',

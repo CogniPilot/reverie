@@ -78,6 +78,7 @@ export const PLAN_OFFICE_TEST_ENTRIES = [
   'test/fixtures/plan-office-bootstrap.ts',
   'test/helpers/plan-office-bootstrap.ts',
   'test/helpers/plan-office-driver.ts',
+  'test/helpers/plan-office-control-transport.ts',
   'test/helpers/plan-office-startup-diagnostic.ts',
   'test/helpers/plan-office-move-driver.ts',
   'test/helpers/plan-office-permission-probe.ts',

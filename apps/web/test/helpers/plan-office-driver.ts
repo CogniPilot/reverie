@@ -54,6 +54,11 @@ import { EmployeeSchema } from '../../src/company-types.js';
 import { planFixtureTurnBarrier } from './boxed-plan-provider.js';
 import type { PlanOfficeStartupCheckpoint } from './plan-office-startup-diagnostic.js';
 import {
+  openPlanOfficeControlTransport,
+  planOfficeControlTarget,
+  type PlanOfficeControlTransport,
+} from './plan-office-control-transport.js';
+import {
   PlanOfficeAgentForceInput,
   PlanOfficeAgentForceReceipt,
   PlanOfficeAgentForceSpawn,
@@ -666,6 +671,35 @@ class Driver {
     assert.equal(rows[0].Options['com.docker.network.bridge.enable_icc'], 'true');
     return id;
   }
+  controlTransport(control: string) {
+    const expected = this.createdConfigurations.get(control);
+    assert.ok(expected);
+    const networkId = cid.parse((expected.HostConfig as Json).NetworkMode);
+    const scope = {
+      instance: this.input.instance,
+      containerId: control,
+      imageId: this.input.controlImageId,
+      networkId,
+    };
+    // This closure retains the original issued control, never a request URL or
+    // a later adopted endpoint. All reads come from the same owned Engine.
+    return openPlanOfficeControlTransport(() => {
+      const before = this.owned(control, 'control');
+      const birth = planOfficeControlBirth((before.State as Json).Pid as number);
+      const rows = JSON.parse(this.docker(['network', 'inspect', networkId])) as Json[];
+      assert.equal(rows.length, 1);
+      const first = planOfficeControlTarget(scope, before, rows[0], birth);
+      const after = this.owned(control, 'control');
+      const second = planOfficeControlTarget(
+        scope,
+        after,
+        rows[0],
+        planOfficeControlBirth((after.State as Json).Pid as number)
+      );
+      assert.deepEqual(second, first);
+      return second;
+    });
+  }
   bind(source: string, target: string, readOnly = false): Json {
     return {
       Type: 'bind',
@@ -825,6 +859,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
   const evidence = new Evidence(path.join(path.dirname(contractFile), 'office-' + input.instance)),
     driver = new Driver(input, evidence, metadata.dockerExecutable),
     names = driver.names;
+  let transport: PlanOfficeControlTransport | undefined;
   try {
     evidence.save('plan', {
       ...input,
@@ -879,7 +914,8 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       [controlNode, input.runtimePath + '/lib/reverie/plan-office-bootstrap.mjs'],
       [driver.bind(evidence.root, '/fixture')]
     );
-    // Both fixture networks block external provider egress; the host reaches only the mapped loopback API.
+    // Both networks remain internal. Only the owned host-side loopback transport
+    // reaches the exact control endpoint; Docker cannot publish internal ports.
     entered('driver-network-front');
     const front = await driver.network(names.front, true);
     entered('driver-network-workers');
@@ -1022,7 +1058,6 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
           driver.bind(path.join(evidence.root, 'scratch'), '/scratch'),
           driver.bind('/var/run/docker.sock', '/run/reverie-engine/docker.sock', true),
         ],
-        PortBindings: { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '0' }] },
       },
     });
     entered('driver-control-connect');
@@ -1033,15 +1068,13 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     driver.docker(['start', control]);
     const running = driver.owned(control, 'control');
     assert.equal((running.State as Json).Running, true);
-    const ports = (running.NetworkSettings as Json).Ports as Record<string, { HostIp: string; HostPort: string }[]>;
-    assert.equal(ports['3000/tcp']!.length, 1);
-    assert.equal(ports['3000/tcp']![0]!.HostIp, '127.0.0.1');
-    const port = Number(ports['3000/tcp']![0]!.HostPort);
-    assert.ok(port >= 1024 && port !== 3000);
-    const endpoint = 'http://127.0.0.1:' + port;
+    entered('driver-control-transport');
+    transport = await driver.controlTransport(control);
+    const endpoint = transport.endpoint;
     entered('driver-control-owner-preflight');
     let responding = false;
     for (let i = 0; i < 60; i++) {
+      transport.requireCurrent();
       driver.owned(control, 'control');
       try {
         const r = await fetch(endpoint + '/api/owner/status', { redirect: 'error', signal: AbortSignal.timeout(1000) });
@@ -1584,6 +1617,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       forceAccepted: ownerForceAccepted || agentForceAccepted,
       cleanup: 'Preserved only owned fixture state; no stop/prune/paid replay.',
     };
+    await transport.close();
     evidence.save('completed', result);
     return result;
   } catch (error) {
@@ -1591,7 +1625,11 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       evidence.save('owner-api-refused', { status: error.status, response: error.response });
     throw error;
   } finally {
-    evidence.close();
+    try {
+      await transport?.close();
+    } finally {
+      evidence.close();
+    }
   }
 }
 
@@ -2605,6 +2643,7 @@ export async function runPlanOfficeReadySelf(contractFile: string, entered: Plan
   );
   const evidence = new Evidence(root, true),
     driver = new Driver(input, evidence, originalMetadata.dockerExecutable as string);
+  let transport: PlanOfficeControlTransport | undefined;
   try {
     const { limitation, ...recordedPlan } = readPrivate(path.join(root, 'plan.json')) as Json;
     assert.equal(typeof limitation, 'string');
@@ -2624,10 +2663,8 @@ export async function runPlanOfficeReadySelf(contractFile: string, entered: Plan
     assert.equal(state.Running, true);
     const originalBirth = planOfficeControlBirth(z.number().int().positive().parse(state.Pid));
     assert.equal((actual.HostConfig as Json).AutoRemove, false);
-    const ports = (actual.NetworkSettings as Json).Ports as Record<string, { HostIp: string; HostPort: string }[]>;
-    assert.equal(ports['3000/tcp']!.length, 1);
-    assert.equal(ports['3000/tcp']![0]!.HostIp, '127.0.0.1');
-    const endpoint = 'http://127.0.0.1:' + ports['3000/tcp']![0]!.HostPort;
+    transport = await driver.controlTransport(control);
+    const endpoint = transport.endpoint;
     const owner = await resumeIsolatedPlanOfficeOwner(endpoint, path.join(root, 'auth'));
     const employee = input.bootstrap.employees[0]!;
     const current = () => {
@@ -2724,10 +2761,15 @@ export async function runPlanOfficeReadySelf(contractFile: string, entered: Plan
       refreshReuseAccepted: false,
       resumedAlreadyReady: true,
     };
+    await transport.close();
     evidence.save('ready-self-completed', result);
     return result;
   } finally {
-    evidence.close();
+    try {
+      await transport?.close();
+    } finally {
+      evidence.close();
+    }
   }
 }
 function readJsonPinned(file: string): Json {

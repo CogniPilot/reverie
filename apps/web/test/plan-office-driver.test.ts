@@ -10,6 +10,13 @@ import { installResponseEnvelope } from '../src/web/response-envelope.js';
 import { isPlainPromptInput } from '../src/web/route-helpers.js';
 import { Session } from '../src/session.js';
 import { createHash } from 'node:crypto';
+import net from 'node:net';
+const actualSocketConnection = net.createConnection;
+import {
+  openPlanOfficeControlTransport,
+  planOfficeControlTarget,
+  type PlanOfficeControlTarget,
+} from './helpers/plan-office-control-transport.js';
 import {
   DockerEmployeeContinuation,
   dockerContinuationDigest,
@@ -819,3 +826,349 @@ it('reads actual procfs controller birth and refuses nonpositive PID selectors',
   expect(planOfficeControlBirth(process.pid)).toBe(planOfficeControlBirth(process.pid));
   for (const pid of [0, -1, NaN, Infinity]) expect(() => planOfficeControlBirth(pid)).toThrow();
 });
+
+function internalControlFixture() {
+  const scope = {
+    instance: 'a'.repeat(32),
+    containerId: 'b'.repeat(64),
+    imageId: 'sha256:' + 'c'.repeat(64),
+    networkId: 'd'.repeat(64),
+  };
+  const name = 'reverie-ci-plan-office-' + scope.instance + '-front',
+    endpointId = 'e'.repeat(64),
+    macAddress = '02:42:0a:58:00:02';
+  const labels = { 'reverie.disposable': scope.instance, 'reverie.task': 'plan-office-baseline-v1' };
+  const container = {
+    Id: scope.containerId,
+    Image: scope.imageId,
+    Config: { Labels: { ...labels, 'reverie.role': 'control' } },
+    HostConfig: { NetworkMode: scope.networkId, PortBindings: {} },
+    State: { Running: true, Status: 'running', Pid: 1234, StartedAt: '2026-11-16T00:00:00.123456789Z' },
+    NetworkSettings: {
+      SandboxID: 'f'.repeat(64),
+      Ports: { '3000/tcp': null },
+      Networks: {
+        [name]: {
+          NetworkID: scope.networkId,
+          EndpointID: endpointId,
+          IPAddress: '10.88.0.2',
+          IPPrefixLen: 24,
+          MacAddress: macAddress,
+        },
+      },
+    },
+  };
+  const network = {
+    Id: scope.networkId,
+    Name: name,
+    Driver: 'bridge',
+    Internal: true,
+    Labels: labels,
+    Containers: {
+      [scope.containerId]: { EndpointID: endpointId, IPv4Address: '10.88.0.2/24', MacAddress: macAddress },
+    },
+  };
+  return { scope, container, network, name, target: () => planOfficeControlTarget(scope, container, network, '12345') };
+}
+it('uses the exact owned internal endpoint when Docker correctly reports null published ports', () => {
+  const f = internalControlFixture();
+  expect(f.container.NetworkSettings.Ports['3000/tcp']).toBeNull();
+  expect(f.target()).toMatchObject({
+    containerId: f.scope.containerId,
+    networkId: f.scope.networkId,
+    address: '10.88.0.2',
+    pid: 1234,
+  });
+  expect(Object.isFrozen(f.target())).toBe(true);
+});
+it.each([
+  'external-network',
+  'wrong-network',
+  'wrong-realm',
+  'foreign-control',
+  'foreign-member',
+  'wrong-member-ip',
+  'public-ip',
+  'loopback-ip',
+  'ipv6',
+  'published-port',
+  'publish-request',
+  'dead-control',
+])('refuses inconsistent internal control selection: %s', (kind) => {
+  const f = internalControlFixture();
+  if (kind === 'external-network') f.network.Internal = false;
+  if (kind === 'wrong-network') f.network.Id = '1'.repeat(64);
+  if (kind === 'wrong-realm') f.network.Labels['reverie.disposable'] = '0'.repeat(32);
+  if (kind === 'foreign-control') f.container.Id = '1'.repeat(64);
+  if (kind === 'foreign-member') f.network.Containers[f.scope.containerId]!.EndpointID = '1'.repeat(64);
+  if (kind === 'wrong-member-ip') f.network.Containers[f.scope.containerId]!.IPv4Address = '10.88.0.3/24';
+  if (kind === 'public-ip') f.container.NetworkSettings.Networks[f.name]!.IPAddress = '8.8.8.8';
+  if (kind === 'loopback-ip') f.container.NetworkSettings.Networks[f.name]!.IPAddress = '127.0.0.1';
+  if (kind === 'ipv6') f.container.NetworkSettings.Networks[f.name]!.IPAddress = '::1';
+  if (kind === 'published-port')
+    Object.assign(f.container.NetworkSettings.Ports, { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '12345' }] });
+  if (kind === 'publish-request')
+    Object.assign(f.container.HostConfig.PortBindings, { '3000/tcp': [{ HostIp: '127.0.0.1', HostPort: '0' }] });
+  if (kind === 'dead-control') f.container.State.Running = false;
+  expect(() => f.target()).toThrow();
+});
+function socketClosed(socket: net.Socket) {
+  return socket.closed ? Promise.resolve() : new Promise<void>((resolve) => socket.once('close', () => resolve()));
+}
+async function controlRelayFixture(onPeer: (socket: net.Socket) => void, issued?: () => void) {
+  const peers = new Set<net.Socket>(),
+    outbound: net.Socket[] = [],
+    clients: net.Socket[] = [];
+  const backend = net.createServer((socket) => {
+    peers.add(socket);
+    socket.on('error', () => {});
+    socket.once('close', () => peers.delete(socket));
+    onPeer(socket);
+  });
+  await new Promise<void>((resolve) => backend.listen(0, '127.0.0.1', resolve));
+  const address = backend.address();
+  if (!address || typeof address === 'string') throw Error('Owned ephemeral backend missing');
+  const realConnect = actualSocketConnection,
+    f = internalControlFixture();
+  let target: PlanOfficeControlTarget = { ...f.target() };
+  // Controlled raw socket port only: actual native target selection is separate
+  // from this real TCP stream/cleanup qualification. No Docker or authority mock.
+  const connect = vi.spyOn(net, 'createConnection').mockImplementation(((options: net.NetConnectOpts) => {
+    expect(options).toEqual({ host: '10.88.0.2', port: 3000, family: 4 });
+    issued?.();
+    const socket = realConnect({ host: '127.0.0.1', port: address.port });
+    outbound.push(socket);
+    return socket;
+  }) as typeof net.createConnection);
+  const bridge = await openPlanOfficeControlTransport(() => ({ ...target }));
+  const port = Number(new URL(bridge.endpoint).port);
+  const client = () => {
+    const socket = realConnect({ host: '127.0.0.1', port });
+    socket.on('error', () => {});
+    clients.push(socket);
+    return socket;
+  };
+  return {
+    bridge,
+    client,
+    connect,
+    outbound,
+    peers,
+    mutate: (change: Partial<PlanOfficeControlTarget>) => {
+      target = { ...target, ...change };
+    },
+    dispose: async () => {
+      try {
+        await bridge.close();
+      } finally {
+        for (const socket of [...peers, ...clients]) socket.destroy();
+        await new Promise<void>((resolve, reject) => backend.close((error) => (error ? reject(error) : resolve())));
+        connect.mockRestore();
+      }
+    },
+  };
+}
+it('forwards opaque bytes and half-close/backpressure without inventing a response', async () => {
+  const f = await controlRelayFixture((socket) => socket.pipe(socket));
+  try {
+    const client = f.client(),
+      chunks: Buffer[] = [],
+      payload = Buffer.alloc(512 * 1024, 65);
+    payload.write('POST /api/ordinary HTTP/1.1\r\nAuthorization: opaque-HMAC-fixture\r\n\r\n');
+    const reply = new Promise<Buffer>((resolve) => {
+      client.on('data', (chunk: Buffer) => chunks.push(chunk));
+      client.once('end', () => resolve(Buffer.concat(chunks)));
+    });
+    client.end(payload);
+    expect(await reply).toEqual(payload);
+    await socketClosed(client);
+    await f.bridge.close();
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+    expect(f.connect).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('refuses a changed original scope before opening any upstream connection', async () => {
+  const f = await controlRelayFixture(() => {});
+  try {
+    f.mutate({ pid: 9999 });
+    const client = f.client();
+    await socketClosed(client);
+    await f.bridge.close();
+    expect(f.connect).not.toHaveBeenCalled();
+    f.mutate({ pid: 1234 });
+    expect(() => f.bridge.requireCurrent()).toThrow();
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('joins all real streams when the original target changes across connect', async () => {
+  let change = () => {};
+  const received: Buffer[] = [],
+    f = await controlRelayFixture(
+      (socket) => socket.on('data', (chunk: Buffer) => received.push(chunk)),
+      () => change()
+    );
+  change = () => f.mutate({ endpointId: '1'.repeat(64) });
+  try {
+    const client = f.client();
+    client.write('must-not-forward');
+    await socketClosed(client);
+    await f.bridge.close();
+    expect(Buffer.concat(received).length).toBe(0);
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+    expect(f.connect).toHaveBeenCalledTimes(1);
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('holds later bytes on drift without pretending earlier remote bytes were undone', async () => {
+  const received: Buffer[] = [],
+    f = await controlRelayFixture((socket) => {
+      socket.on('data', (chunk: Buffer) => {
+        received.push(chunk);
+        socket.write(chunk);
+      });
+    });
+  try {
+    const client = f.client();
+    const first = new Promise<void>((resolve) => client.once('data', () => resolve()));
+    client.write('earlier-observed');
+    await first;
+    const settled = new Promise<void>((resolve) => {
+      client.once('data', () => resolve());
+      client.once('close', () => resolve());
+    });
+    f.mutate({ birthTicks: '99999' });
+    client.write('forbidden-after-drift');
+    await settled;
+    expect(Buffer.concat(received).toString()).toBe('earlier-observed');
+    await f.bridge.close();
+    await socketClosed(client);
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('closes and joins existing idle sockets and the listener idempotently', async () => {
+  let connected!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    connected = resolve;
+  });
+  const f = await controlRelayFixture(() => connected());
+  try {
+    const client = f.client();
+    await ready;
+    const closed = socketClosed(client),
+      first = f.bridge.close();
+    expect(f.bridge.close()).toBe(first);
+    await first;
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+    await closed;
+    expect(() => f.bridge.requireCurrent()).toThrow();
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('forwards no invented HTTP success when the actual peer closes', async () => {
+  const f = await controlRelayFixture((socket) => socket.destroy());
+  try {
+    const client = f.client(),
+      received: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => received.push(chunk));
+    client.write('GET / HTTP/1.1\r\n\r\n');
+    await socketClosed(client);
+    expect(Buffer.concat(received).length).toBe(0);
+    await f.bridge.close();
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('bounds live pairs and closes every accepted socket without opening another destination', async () => {
+  let count = 0,
+    ready!: () => void;
+  const accepted = new Promise<void>((resolve) => {
+    ready = resolve;
+  });
+  const f = await controlRelayFixture(() => {
+    if (++count === 32) ready();
+  });
+  try {
+    const clients = Array.from({ length: 33 }, () => f.client());
+    await accepted;
+    await Promise.race(clients.map(socketClosed));
+    expect(f.connect).toHaveBeenCalledTimes(32);
+    await f.bridge.close();
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+    await Promise.all(clients.map(socketClosed));
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('a socket inactivity event closes the real pair without inventing a reply or retry', async () => {
+  let connected!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    connected = resolve;
+  });
+  const f = await controlRelayFixture(() => connected());
+  try {
+    const client = f.client(),
+      bytes: Buffer[] = [];
+    client.on('data', (chunk: Buffer) => bytes.push(chunk));
+    await ready;
+    expect(f.outbound[0]!.timeout).toBe(30_000);
+    f.outbound[0]!.emit('timeout');
+    await socketClosed(client);
+    expect(Buffer.concat(bytes).length).toBe(0);
+    expect(f.connect).toHaveBeenCalledTimes(1);
+    await f.bridge.close();
+    expect(f.outbound.every((socket) => socket.closed)).toBe(true);
+  } finally {
+    await f.dispose();
+  }
+}, 15000);
+it('does not acknowledge cleanup before the actual listener close callback', async () => {
+  const f = await controlRelayFixture(() => {}),
+    port = Number(new URL(f.bridge.endpoint).port);
+  let release = () => {},
+    observed!: () => void,
+    closing: Promise<void> | undefined;
+  const listenerClosed = new Promise<void>((resolve) => {
+    observed = resolve;
+  });
+  const actualClose = net.Server.prototype.close;
+  const close = vi.spyOn(net.Server.prototype, 'close').mockImplementation(function (
+    this: net.Server,
+    callback?: (error?: Error) => void
+  ) {
+    const address = this.address();
+    if (address && typeof address === 'object' && address.port === port) {
+      return actualClose.call(this, (error) => {
+        release = () => callback?.(error);
+        observed();
+      });
+    }
+    return actualClose.call(this, callback);
+  });
+  try {
+    let completed = false;
+    closing = f.bridge.close();
+    void closing.then(() => {
+      completed = true;
+    });
+    await listenerClosed;
+    expect(completed).toBe(false);
+    release();
+    await closing;
+    expect(completed).toBe(true);
+  } finally {
+    close.mockRestore();
+    if (closing) {
+      await listenerClosed;
+      release();
+      await closing;
+    }
+    await f.dispose();
+  }
+}, 15000);
