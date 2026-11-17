@@ -2542,3 +2542,25 @@ describe('fresh owner original-recovery composition', () => {
     ).toBe(false);
   });
 });
+
+it.each(['unattached', 'busy', 'dialog', 'revoked-input'] as const)(
+  'keeps handoff unissued after a known %s input refusal at the final boundary', async kind => {
+    const f = await publishedTargetFixture('published'), journal = await f.loadJournal(), actor = f.actor();
+    // Controlled local UI observations let the real Engine-earned target fence
+    // reach finalization. They are not a native provider/readiness acceptance.
+    vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+    vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockReturnValue('❯ \n shift+tab to cycle');
+    await actor.verify(f.record, journal);
+    if (kind === 'busy') vi.spyOn(f.native.target, 'isWorking', 'get').mockReturnValue(true);
+    if (kind === 'dialog') vi.spyOn(f.native.target, 'paneDialog', 'get').mockReturnValue('Permission needed');
+    if (kind === 'revoked-input') f.native.target.holdUnconfirmedInput(Error('Prior input remains unknown'));
+    const before = journal.read(), write = vi.spyOn(f.native.target, 'writeViaMux');
+    await expect(actor.finalize(f.record, journal)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
+    expect(journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(before.handoff).toBeUndefined();
+    expect(write).not.toHaveBeenCalled();
+    expect(f.launch).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  }
+);

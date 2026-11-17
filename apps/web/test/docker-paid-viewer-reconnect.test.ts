@@ -751,3 +751,44 @@ it('renews a loaded v3 reader after READY metadata publication without retaining
   f.revokeRuntime();
   expect(f.session.providerInputHeld).toBe(true);
 });
+
+it.each(['operation', 'runtime', 'owner', 'binding', 'recipe', 'resources', 'native', 'hooks'] as const)(
+  'refuses READY reader renewal after %s drift without provider, helper or input effects', async kind => {
+    const f = await loadedPlanViewTransition(), before = transport.clients.length;
+    if (kind === 'runtime') f.revokeRuntime();
+    if (kind === 'owner') await f.companyFile.update(state => {state.employees[0]!.owner = 'another-owner';});
+    if (kind === 'binding') await f.companyFile.update(state => {state.employees[0]!.dockerBinding!.containerId = 'f'.repeat(64);});
+    if (kind === 'recipe') f.session.workingDir = '/changed';
+    if (kind === 'resources') vi.mocked(f.native.resources.read).mockResolvedValue(null);
+    if (kind === 'native' || kind === 'hooks') {
+      const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+      vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
+        const text = await run(args, input);
+        if (kind === 'native' && args[0] === 'container' && args[1] === 'inspect' && args[2] === f.row.destination!.containerId) {
+          const value = JSON.parse(text); value[0].State.Pid += 1; return JSON.stringify(value);
+        }
+        if (kind === 'hooks' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) {
+          const value = JSON.parse(text); value.hooks = {kind:'none'}; return JSON.stringify(value);
+        }
+        return text;
+      });
+    }
+    await expect(renewExistingDockerProviderView(f.deps, f.row, f.session, () => kind !== 'operation')).rejects.toThrow();
+    expect(f.session.providerInputHeld).toBe(true);
+    expect(transport.clients).toHaveLength(before);
+    expect(f.native.command.create).not.toHaveBeenCalled();
+    expect(transport.writes).toEqual([]);
+    expect(vi.mocked(f.native.command.run).mock.calls.some(([args]) => args[0] === 'container' && ['start','stop','create','restart'].includes(args[1]!))).toBe(false);
+  }
+);
+
+it('does not clear a local input hold or an unsent draft when renewing READY metadata', async () => {
+  const f = await loadedPlanViewTransition();
+  f.session.holdUnconfirmedInput(Error('Prior input remains unknown'));
+  vi.mocked(f.mux.capturePaneText).mockReturnValue('❯ retained draft\n  shift+tab to cycle');
+  await renewExistingDockerProviderView(f.deps, f.row, f.session, () => true);
+  expect(f.session.dockerContinuationViewCurrent).toBe(true);
+  expect(f.session.captureInputAdmission()()).toBe(false);
+  expect(f.session.canAcceptChatInput()).toBe(false);
+  expect(transport.writes).toEqual([]);
+});
