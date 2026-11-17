@@ -15,16 +15,19 @@ let
     Cmd = [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ];
     Env = [ "KEPT=yes" ]; User = "1000:100"; Labels.kept = "yes";
   };
-  make = runtimeConfiguration: selectedConfig: import ../nix/boxed-website-image.nix {
+  makeWithRuntime = privateAccessRuntime: runtimeConfiguration: selectedConfig: import ../nix/boxed-website-image.nix {
     pkgs = {
       writeText = _: bytes: assert builtins.fromJSON bytes == runtimeConfiguration;
         "/nix/store/controlled-boxed-configuration";
       dockerTools.buildLayeredImage = value: value;
+      tailscale.overrideAttrs = update: assert builtins.length (update {}).patches == 1;
+        "/nix/store/controlled-tailscale";
     };
     baseImage = "/nix/store/controlled-base";
     baseConfig = selectedConfig;
-    inherit runtimeConfiguration clientCapsule;
+    inherit runtimeConfiguration clientCapsule privateAccessRuntime;
   };
+  make = makeWithRuntime null;
   image = make cfg baseConfig;
   accepts = value: selected: (builtins.tryEval (builtins.deepSeq (make value selected) true)).success;
   checks = {
@@ -41,6 +44,23 @@ let
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
     };
     configAvailableForGpuComposition = image.passthru.reverieConfig == image.config;
+    privateAccessIsOptIn = image.contents == [] && !(image.config.Labels ? "org.reverie.tailscale")
+      && builtins.match ".*tailscaled.*" image.extraCommands == null;
+    privateAccessComposition = let
+      gpuConfig = baseConfig // {
+        Entrypoint = [ "/bin/tini" "-g" "-s" "--"
+          "/nix/store/controlled-runtime/bin/reverie-container-runtime" "/usr/local/bin/reverie-start" ];
+      };
+      runtime = "/nix/store/controlled-private-runtime";
+      selected = makeWithRuntime runtime cfg gpuConfig;
+    in selected.contents == [ runtime "/nix/store/controlled-tailscale" ]
+      && selected.config == image.config // {
+        Entrypoint = [ "/bin/tini" "-g" "-s" "--"
+          "${runtime}/bin/reverie-container-runtime" "/usr/local/bin/reverie-start" ];
+        Labels = baseConfig.Labels // { "org.reverie.tailscale" = "1"; };
+      }
+      && builtins.match ".*controlled-tailscale/bin/tailscaled usr/local/libexec/reverie-tailscale/.*"
+        selected.extraCommands != null;
     approvedOptionalHelperPreserved = accepts (cfg // { memoryHighHelperImageId = "sha256:${id}"; }) baseConfig;
     approvedOptionalPoolRestorePreserved = let
       selected = cfg // { poolRestoreHelperImageId = "sha256:${builtins.concatStringsSep "" (builtins.genList (_: "b") 64)}"; };

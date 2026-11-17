@@ -56,10 +56,10 @@ let
     && builtins.substring 0 (builtins.stringLength prefix) value == prefix) env;
   config = baseConfig // {
     Env = env ++ (if backend == [] then [ "${prefix}boxed-docker-v1" ] else []);
-  } // pkgs.lib.optionalAttrs (privateAccessRuntime != null) {
+  } // (if privateAccessRuntime == null then {} else {
     Entrypoint = newEntrypoint;
     Labels = (baseConfig.Labels or {}) // { "org.reverie.tailscale" = "1"; };
-  };
+  });
   configuration = pkgs.writeText "reverie-boxed-runtime.json" (builtins.toJSON cfg);
 in
 assert valid;
@@ -79,7 +79,7 @@ pkgs.dockerTools.buildLayeredImage {
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
   maxLayers = 125;
-  contents = pkgs.lib.optionals (privateAccessRuntime != null) [ privateAccessRuntime tailscale.package ];
+  contents = if privateAccessRuntime == null then [] else [ privateAccessRuntime tailscale.package ];
   fromImage = baseImage;
   passthru = { reverieConfig = config; runtimeConfiguration = cfg; inherit clientManifestDigest; };
   extraCommands = ''
@@ -91,7 +91,7 @@ pkgs.dockerTools.buildLayeredImage {
     chmod -R a-w opt/reverie-worker-client
     cp ${configuration} etc/reverie/boxed-runtime.json
     chmod 0444 etc/reverie/boxed-runtime.json
-    ${pkgs.lib.optionalString (privateAccessRuntime != null) tailscale.install}
+    ${if privateAccessRuntime == null then "" else tailscale.install}
   '';
   fakeRootCommands = ''
     chown 0:0 etc/reverie etc/reverie/boxed-runtime.json
