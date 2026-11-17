@@ -1278,10 +1278,13 @@ dependencies = [
  "clap",
  "libc",
  "nix",
+ "regex-lite",
  "reverie-contracts",
  "reverie-core",
  "rustix",
+ "serde_json",
  "sha2",
+ "tokio",
  "toml",
 ]
 

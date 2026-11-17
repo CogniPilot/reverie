@@ -59,7 +59,7 @@ jobs:
           REVERIE_VOICE_CI_ARTIFACTS: ${{ runner.temp }}/voice-ci-artifacts
         run: |
           df -h / "$RUNNER_TEMP"
-          nix develop .#voice-ci --command python3 -m reverie.buildenv --scratch "$RUNNER_TEMP/voice-ci-build" --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 -- bash scripts/test-voice-ci.sh
+          nix develop .#voice-ci --command reverie-buildenv --scratch "$RUNNER_TEMP/voice-ci-build" --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 -- bash scripts/test-voice-ci.sh
           test -s "$REVERIE_VOICE_CI_ARTIFACTS/acceptance.json"
       - name: Keep synthetic audio, recognition, latency and browser evidence
         if: always()

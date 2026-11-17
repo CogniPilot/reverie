@@ -354,7 +354,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p acceptance
-          nix develop --command python3 -m reverie.buildenv \
+          laptop_tools=$(nix build .#laptopTools --no-link --print-out-paths)
+          nix develop --command "$laptop_tools/bin/reverie-buildenv" \
             --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
@@ -408,7 +409,8 @@ jobs:
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
           export TEST_BROWSER_COVERAGE_DIR="$REVERIE_BROWSER_ARTIFACTS/raw-coverage"
           df -h /
-          nix develop --command python3 -m reverie.buildenv \
+          laptop_tools=$(nix build .#laptopTools --no-link --print-out-paths)
+          nix develop --command "$laptop_tools/bin/reverie-buildenv" \
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
             2>&1 | tee acceptance/browser.log

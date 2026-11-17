@@ -8,11 +8,14 @@ publish.workspace = true
 [dependencies]
 clap.workspace = true
 libc.workspace = true
-nix.workspace = true
+nix = { workspace = true, features = ["feature", "fs", "process", "resource", "signal"] }
+regex-lite.workspace = true
 rustix = { workspace = true, features = ["fs", "process"] }
 reverie-core.workspace = true
 reverie-contracts.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
+tokio.workspace = true
 toml.workspace = true
 
 [lints]

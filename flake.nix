@@ -385,6 +385,7 @@
             inherit pkgs;
             kokoro = self.packages.${system}.kokoro;
             voiceVerifier = self.packages.${system}.voiceCiVerifier;
+            laptopTools = self.packages.${system}.laptopTools;
           };
           # The same Rust as CI (.github/workflows: toolchain 1.95.0), so local clippy, rustfmt and
           # tests run the toolchain CI runs. A nixpkgs update that moves it fails here, not in review.

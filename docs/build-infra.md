@@ -2,10 +2,11 @@
 
 The live container has a 4 GiB memory limit and no swap. On 2026-10-15 the OOM killer
 took the CTO pane during an unbounded test run. Every compile or heavy test goes
-through `reverie.buildenv`. Only start one after the coordinator has granted a slot.
+through `reverie-buildenv`, supplied by the laptop tools package. Only start one after the
+coordinator has granted a slot.
 
 ```sh
-python3 -m reverie.buildenv --project rumoca --repo /scratch/repos/rumoca \
+reverie-buildenv --project rumoca --repo /scratch/repos/rumoca \
     --expect 2.5G --disk 6G [--jobs 2] -- cargo build -p rumoca
 ```
 
@@ -15,7 +16,7 @@ python3 -m reverie.buildenv --project rumoca --repo /scratch/repos/rumoca \
   checkout's `rust-toolchain.toml`. Nothing is added to PATH or shell profiles. The
   wrapper sets `RUSTUP_AUTO_INSTALL=0`, so a different pin is refused rather than
   silently downloaded. Install a new pin deliberately (and gated, see below).
-- **Before start:** memory admission (`reverie.admission`; used memory excludes reclaimable
+- **Before start:** memory admission (used memory excludes reclaimable
   page cache, with a 512 MiB reserve), task headroom (`pids.max - pids.current` must cover
   ~32 + 16 x `--jobs` threads plus 64 reserved for other sessions; rustc otherwise dies with
   `failed to spawn work thread: EAGAIN`), free disk minus `--disk` must stay above 20 GiB,
@@ -26,8 +27,9 @@ python3 -m reverie.buildenv --project rumoca --repo /scratch/repos/rumoca \
   too small for the build plus reserve: `pids-limit:`). A wait shorter than 10 s still
   rechecks once at its deadline, and refusals record `waited_s`. The ledger's
   `peak_pids_delta` is the shared cgroup's task growth during the run, so other sessions count too.
-- **During the build:** `CARGO_TARGET_DIR=/scratch/build/<project>/cargo`,
-  `TMPDIR=/scratch/tmp` and `CARGO_BUILD_JOBS` (default 2, max 8). A watchdog stops the
+- During the build, the runner sets `CARGO_TARGET_DIR=/scratch/build/<project>/cargo`,
+  points `TMPDIR`, `TMP` and `TEMP` to `/scratch/tmp`, and sets `CARGO_BUILD_JOBS`
+  (default 2, max 8). A watchdog stops the
   build's process group when the cgroup has less than 256 MiB left, before the kernel
   picks an agent session.
 - **After:** `/scratch/profiles/build-ledger.jsonl` records three figures:
@@ -36,7 +38,7 @@ python3 -m reverie.buildenv --project rumoca --repo /scratch/repos/rumoca \
     this one. It errs HIGH, because shared pages (libraries, shared memory) are counted once
     per process. It also misses any child that leaves the group with `setsid`/`setpgid`
     (cargo, rustc and npm do not).
-  - `peak_rss_mib`: the largest single process (`wait4`). On its own it understates parallel
+  - `peak_rss_mib` records the largest single process when the build is reaped. On its own it understates parallel
     builds: a 2-job smoke build showed 63 MiB here against a 108 MiB tree.
   - `peak_cgroup_delta_mib`: an approximation. It is the growth of the container's SHARED
     cgroup during the run, so other sessions' activity counts too. It uses the admission

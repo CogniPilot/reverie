@@ -57,7 +57,7 @@ downloads, then run the guarded harness with a **new** artifact directory:
 ```bash
 nix develop .#voice-ci --command npm ci --prefix apps/web --ignore-scripts
 export REVERIE_VOICE_CI_ARTIFACTS=/scratch/build/voice-ci-run-001
-nix develop .#voice-ci --command python3 -m reverie.buildenv \
+nix develop .#voice-ci --command reverie-buildenv \
   --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 \
   -- bash scripts/test-voice-ci.sh
 ```
