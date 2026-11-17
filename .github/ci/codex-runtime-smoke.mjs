@@ -45,7 +45,10 @@ const pty = require('node-pty');
 const { Terminal } = require('@xterm/headless');
 const data = process.env.REVERIE_DATA || '/instances/default';
 const tools = join(data, 'tools');
-const installed = JSON.parse(readFileSync(join(tools, '.install-codex.json'), 'utf8'));
+const expectedVersion = process.env.REVERIE_CI_CODEX_VERSION ?? '';
+assert.match(expectedVersion, /^\d+\.\d+\.\d+$/, 'CI must supply the checked-out Codex release pin');
+const installed = JSON.parse(readFileSync(join(tools, 'codex', expectedVersion, '.install-codex.json'), 'utf8'));
+assert.equal(installed.version, expectedVersion, 'Installed Codex differs from the checked-out pin');
 assert.equal(installed.state, 'ready', 'Pinned Codex installation is not runnable');
 const entry = STOCK_CLIS.find((cli) => cli.id === 'codex');
 assert.ok(entry, 'Built application has no stock Codex entry');
@@ -61,7 +64,7 @@ try {
   }));
   // Construct rather than inherit: no API keys, provider logins, or user configuration.
   const env = { HOME: home, CODEX_HOME: join(home, '.codex'), TMPDIR: scratch,
-    PATH: `${join(tools, 'bin')}:/bin`, TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
+    PATH: '/bin', REVERIE_DATA: data, TERM: 'xterm-256color', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' };
   const run = (command) => spawnSync('bash', ['--noprofile', '--norc', '-c', command], {
     cwd: scratch, env, encoding: 'utf8', timeout: 10_000, maxBuffer: 1024 * 1024,
   });
