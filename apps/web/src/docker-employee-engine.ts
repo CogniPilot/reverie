@@ -1,7 +1,8 @@
 import { requireDockerEffectiveResourceProof } from './docker-contained-resource-controller.js';
-import { dockerPlanDestinationEnvironment } from './docker-plan-install-data.js';
+import { dockerPlanDestinationEnvironment, DockerPlanInitialReceipt, DockerPlanLiveReceipt } from './docker-plan-install-data.js';
 import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
-import type{DockerPlanInitialReceipt}from'./docker-plan-install-data.js';
+import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
+import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
@@ -54,6 +55,11 @@ export interface DockerContainedResourceController {
   read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null>;
   configure(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   existingPolicy?(row: DockerEmployeeContinuationRecord, actual: DockerEmployeeResourcePolicy): unknown;
+  readExistingAfterHostRestart?(
+    row: DockerEmployeeContinuationRecord,
+    policy: DockerEmployeeResourcePolicy,
+    current: () => void
+  ): Promise<DockerEmployeeResourcePolicy>;
 }
 export interface DockerEmployeeImageConfiguration {
   readonly imageId: string;
@@ -271,17 +277,32 @@ function containerReadState(raw: DockerEmployeeInspect) {
     OOMKilled: state.OOMKilled,
   };
 }
+function boundDestinationMatches(
+  raw: DockerEmployeeInspect,
+  row: DockerEmployeeContinuationRecord,
+  deployment: string,
+  afterRestart = false
+): boolean {
+  const subject = rowSubject(row);
+  if (isDeepStrictEqual(boxedOriginal(raw, subject, deployment, true), row.destination)) return true;
+  if (!afterRestart || !Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return false;
+  // Docker 29.9 re-encodes an unset DNS override from null to an empty list.
+  // The complete historical fingerprint must match with that one field restored.
+  const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
+  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), row.destination);
+}
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
   readonly #credentials: DockerEmployeeCredentialInstaller;
   readonly #planInstaller: DockerPlanInstaller;
   readonly #ephemeral: DockerEphemeralRestoration | undefined;
+  readonly #reattached = new Map<string, { row: string; state: ReturnType<typeof containerReadState> }>();
   constructor(
     private readonly command: DockerEngineCommand,
     private readonly deployment: string,
     private readonly resources: DockerContainedResourceController,
     private readonly workerImage: DockerEmployeeImageConfiguration,
-    journal: DockerContinuationTaskJournal,
+    private readonly journal: DockerContinuationTaskJournal,
     helperImageId: string,
     private readonly boxId: string,
     private readonly providerMode: (row: DockerEmployeeContinuationRecord) => string = () => 'claude',
@@ -322,7 +343,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         (row) => this.#source(row),
         (row) => this.#destination(row, () => {}, true),
         (row) => this.#storage.protectedDirectories(row),
-        (row) => this.#readSource(row)
+        (row) => this.#readSource(row),
+        (row, current) => this.#boundDestination(row, current, true)
       );
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/.test(deployment)) throw Error('Registered deployment required');
@@ -422,9 +444,18 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeInspect> {
     current();
     if (!this.#publishedRead(row) || !row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    return this.#boundDestination(row, this.#readCurrent(row, current));
+  }
+  /** The caller retains the canonical binding across each read. */
+  async #boundDestination(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void,
+    afterRestart = false
+  ): Promise<DockerEmployeeInspect> {
+    current();
+    if (!row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
     const raw = await this.#inspect(row.destination.containerId);
     current();
-    this.#publishedRead(row);
     const epoch = z
       .object({
         Pid: z.number().int().min(0).max(2147483647),
@@ -435,7 +466,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_DESTINATION_STATE_UNKNOWN');
     this.#requireCapsuleMounts(raw);
     if (
-      !isDeepStrictEqual(boxedOriginal(raw, rowSubject(row), this.deployment, true), row.destination) ||
+      !boundDestinationMatches(raw, row, this.deployment, afterRestart) ||
       raw.Image !== row.workerImage.imageId ||
       raw.Config.Labels?.['reverie.boxed.box'] !== this.boxId ||
       raw.Config.Labels?.['reverie.boxed.operation'] !== row.request.operationId ||
@@ -1271,14 +1302,18 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
     if (checked.phase !== 'provider-issued' && checked.phase !== 'ready')
       refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
+    const sameRow = this.#reattached.get(checked.employeeId);
+    const reattached = sameRow?.row === digest ? sameRow : undefined;
     let initialState: ReturnType<typeof containerReadState> | undefined;
     const inspect = async () => {
       requireCurrent();
-      const raw = await this.#destination(checked, requireCurrent, true);
+      const raw = reattached
+        ? await this.#boundDestination(checked, requireCurrent, true)
+        : await this.#destination(checked, requireCurrent, true);
       requireCurrent();
       if (
         !raw ||
-        !isDeepStrictEqual(boxedOriginal(raw, rowSubject(checked), this.deployment, true), checked.destination) ||
+        !boundDestinationMatches(raw, checked, this.deployment, !!reattached) ||
         raw.State.Paused ||
         raw.State.Restarting ||
         raw.State.Dead
@@ -1287,6 +1322,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (initialState && !isDeepStrictEqual(initialState, containerReadState(raw)))
         refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       initialState ??= containerReadState(raw);
+      if (reattached && raw.State.Running && !isDeepStrictEqual(initialState, reattached.state))
+        refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       return raw;
     };
     const firstContainer = await inspect();
@@ -1343,14 +1380,17 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'absent',
         requireCurrent
       );
-    if (this.#ephemeral) {
+    if (reattached) {
+      await this.#ephemeral!.verifyExistingDestination(checked, last, requireCurrent);
+      requireCurrent();
+    } else if (this.#ephemeral) {
       // LIVE may expose a retained private view. Re-earn actual leaf custody
       // read-only after restart; no preparation or helper effect is allowed.
       await this.#ephemeral.verifyDestination(checked);
       livePreparation = true;
       requireCurrent();
     }
-    if (checked.version === 3) {
+    if (checked.version === 3 && !reattached) {
       await this.#observePlanInstaller(checked, requireCurrent);
       requireCurrent();
     }
@@ -1414,9 +1454,99 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!policy) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     return policy;
   }
-  async captureProviderView(
+  async #reattachCredential(
     row: DockerEmployeeContinuationRecord,
+    home: DockerCredentialHome & { readonly originalHomeDev: string },
     current: () => void
+  ): Promise<string> {
+    const task = this.journal.read(row, 'identity-helper');
+    if (!row.destination || task?.phase !== 'completed' || task.imageId !== row.workerImage.imageId ||
+      task.name !== 'reverie-boxed-identity-' + dockerContinuationDigest([this.boxId, 'identity-helper', row.request.operationId]))
+      refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+    const cid = row.destination.containerId, manifest = row.workerImage.clientManifestDigest;
+    const client = ['/opt/reverie-worker-client/bin/reverie', 'worker-client'];
+    current();
+    await this.command.run(['exec', cid, ...client, 'status', '--expected-digest', manifest]);
+    current();
+    if (row.version === 3) {
+      const account = row.planReplacement.account;
+      const body = await this.command.run([
+        'exec', cid, ...client, 'plan-status', '--expected-digest', manifest,
+        '--projection-digest', account.projectionDigest, '--operation', row.request.operationId,
+        '--container-id', cid, '--read-mode', 'live', '--home-dev', home.dev, '--home-ino', home.ino,
+      ]);
+      current();
+      if (Buffer.byteLength(body) > 8192) refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+      const live = DockerPlanLiveReceipt.parse(parseBoxedConfigurationJson(body));
+      if (live.operationId !== row.request.operationId || live.sessionId !== row.request.sessionId ||
+        live.containerId !== cid || live.projectionDigest !== account.projectionDigest ||
+        live.accountId !== account.id || live.provider !== account.provider ||
+        live.contextInputDigest !== account.contextDigest || live.homeDev !== home.dev ||
+        live.homeIno !== home.ino || live.configDev !== home.dev)
+        refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+      // The installer ran on the held HOME filesystem. Recover its exact
+      // recorded digest from the current capsule metadata and original device.
+      const initial = DockerPlanInitialReceipt.parse({
+        ...live, purpose: 'reverie-plan-installed-v1', readMode: 'initial',
+        homeDev: home.originalHomeDev, configDev: home.originalHomeDev,
+        observedAuthDigest: live.installedAuthDigest, observedContextDigest: live.contextDigest,
+      });
+      if (task.resultDigest !== dockerContinuationDigest(initial))
+        refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+      return live.tokenDigest;
+    }
+    const live = parseWorkerCredentialReadback(await this.command.run([
+      'exec', '--env', 'REVERIE_SESSION_ID=' + row.request.sessionId,
+      '--env', 'REVERIE_WORKER_IDENTITY_FILE=/home/agent/.reverie/docker-worker-identity',
+      cid, ...client, 'credential-status', '--expected-digest', manifest,
+    ]), manifest, row.request.sessionId);
+    current();
+    if (task.resultDigest !== dockerContinuationDigest({
+      version: 1, purpose: 'reverie-worker-credential-installed-v1',
+      manifestDigest: manifest, sessionId: row.request.sessionId, tokenDigest: live.tokenDigest,
+      homeDev: home.originalHomeDev, homeIno: home.ino,
+    })) refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+    return live.tokenDigest;
+  }
+  /** Reobserve one canonically bound, already running pane after a lost
+   * storage-holder process. This never resolves or replays a prior effect. */
+  async captureReattachedProviderView(
+    row: DockerEmployeeContinuationRecord,
+    policy: DockerEmployeeResourcePolicy,
+    helper: DockerWorkerReattachHelper,
+    current: () => void
+  ): Promise<DockerEmployeeProviderView | undefined> {
+    current();
+    const checked = DockerEmployeeContinuationRecord.parse(row);
+    if (!checked.destination || !['ready', 'provider-issued'].includes(checked.phase)) return;
+    const raw = await this.#boundDestination(checked, current, true);
+    if (!raw.State.Running) return;
+    const state = containerReadState(raw);
+    const home = await this.#storage.readExistingReference(checked, raw, (destination, seen) =>
+      helper.storage(destination, seen, current), current);
+    if (!home) return;
+    if (!this.resources.readExistingAfterHostRestart || !this.#ephemeral ||
+      this.journal.read(checked, 'leaf-helper')?.phase !== 'completed')
+      refuse('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
+    const tokenDigest = await this.#reattachCredential(checked, home, current);
+    await helper.credential(checked, tokenDigest, current);
+    await this.#ephemeral.verifyExistingDestination(checked, raw, current);
+    current();
+    const limits = await this.resources.readExistingAfterHostRestart(checked, policy, current);
+    current();
+    if (!isDeepStrictEqual(limits, policy)) refuse('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
+    const view = await this.#captureProviderView(row, current, state);
+    current();
+    this.#reattached.set(checked.employeeId, { row: dockerContinuationDigest(checked), state });
+    return view;
+  }
+  captureProviderView(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeProviderView> {
+    return this.#captureProviderView(row, current);
+  }
+  async #captureProviderView(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void,
+    reattached?: ReturnType<typeof containerReadState>
   ): Promise<DockerEmployeeProviderView> {
     const checked = DockerEmployeeContinuationRecord.parse(row);
     const digest = dockerContinuationDigest(checked),
@@ -1438,11 +1568,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     requireCurrent();
     if (!['ready', 'provider-issued'].includes(checked.phase) || !checked.destination)
       refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    if (checked.version === 3) {
+    if (!reattached && checked.version === 3) {
       await this.#observePlanInstaller(checked, requireCurrent);
       requireCurrent();
     }
-    if (checked.phase === 'provider-issued') {
+    if (!reattached && checked.phase === 'provider-issued') {
       // A retained dispatch fence grants no attachment. Earn every original
       // storage/credential/resource observation before the private native view.
       const seen = await DockerEmployeeEngine.prototype.observeDestination.call(this, checked);
@@ -1458,14 +1588,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       )
         refuse('DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED');
     }
-    let initialState: ReturnType<typeof containerReadState> | undefined;
+    let initialState = reattached;
     const inspect = async () => {
       requireCurrent();
-      const raw = await this.#destination(checked, requireCurrent, true);
+      const raw = reattached
+        ? await this.#boundDestination(checked, requireCurrent, true)
+        : await this.#destination(checked, requireCurrent, true);
       requireCurrent();
       if (
         !raw?.State.Running ||
-        !isDeepStrictEqual(boxedOriginal(raw, rowSubject(checked), this.deployment, true), checked.destination)
+        !boundDestinationMatches(raw, checked, this.deployment, !!reattached)
       )
         refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       if (initialState && !isDeepStrictEqual(initialState, containerReadState(raw)))
@@ -1496,7 +1628,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (value.hooks.kind !== hooks.kind) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
       return value;
     };
-    await this.#ephemeral?.verifyDestination(checked);
+    if (!reattached) await this.#ephemeral?.verifyDestination(checked);
     requireCurrent();
     await inspect();
     const first = await pane();

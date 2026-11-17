@@ -37,6 +37,8 @@ import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } fr
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
+import { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import { DockerOwnerStopDiagnostic, DockerOwnerStopDiagnosticError } from './docker-owner-stop-status.js';
 import { registerDockerOwnerStopRoutes } from './web/routes/docker-owner-stop-routes.js';
 import { DockerEmployeeSessionProvider } from './docker-employee-session-provider.js';
@@ -58,6 +60,7 @@ export const DockerRuntimeConfiguration = z
     helperImageId: sha,
     memoryHighHelperImageId: sha.optional(),
     poolRestoreHelperImageId: sha.optional(),
+    recoveryHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
   })
   .strict();
@@ -71,6 +74,7 @@ interface Attached {
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
   resourceRevisions: DockerResourceRevisionService;
+  recoveryHelper?: DockerWorkerReattachHelper;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -377,7 +381,13 @@ export class DockerEmployeeRuntime {
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     });
     const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
-    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions };
+    const recoveryHelper = configuration.recoveryHelperImageId
+      ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({
+          instanceId: this.#key.instanceId,
+          key: this.#key.key.toString('hex'),
+        }))
+      : undefined;
+    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions, recoveryHelper };
   }
   registerRoutes(
     app: FastifyInstance,
@@ -464,6 +474,33 @@ export class DockerEmployeeRuntime {
       },
     });
   }
+  async #observeRunningProviderView(
+    a: Attached,
+    row: DockerEmployeeContinuationRecord,
+    binding: DockerEmployeeBinding,
+    current: () => void
+  ) {
+    current();
+    try {
+      const seen = await a.engine.observeDestination(row);
+      current();
+      if (seen?.state === 'running' && seen.provider.kind === 'running' &&
+        seen.provider.operationId === binding.operationId && seen.provider.sessionId === binding.sessionId &&
+        a.engine.existingResourcePolicyCurrent(row, seen.resources))
+        return await a.engine.captureProviderView(row, current);
+    } catch (cause) {
+      current();
+      if (!a.recoveryHelper) throw cause;
+    }
+    if (!a.recoveryHelper) return;
+    const policy = a.store.policy(row.employeeId), policyDigest = dockerContinuationDigest(policy);
+    const policyCurrent = () => {
+      current();
+      if (dockerContinuationDigest(a.store.policy(row.employeeId)) !== policyDigest)
+        throw Error('Boxed recovery resource policy changed');
+    };
+    return a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, policyCurrent);
+  }
   /** Read-only native observation plus one attach-only website client repair.
    * No resource convergence, provider installation or generic wake is admitted. */
   async reconnectViewer(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
@@ -508,13 +545,9 @@ export class DockerEmployeeRuntime {
       current();
       if (revalidateMove && !await revalidateMove()) throw Error('Original Docker viewer move hold changed');
       current();
-      const seen = await a.engine.observeDestination(row);
+      const view = await this.#observeRunningProviderView(a, row, binding, current);
       current();
-      if (!seen || seen.state !== 'running' || seen.provider.kind !== 'running' ||
-        seen.provider.operationId !== binding.operationId || seen.provider.sessionId !== binding.sessionId ||
-        !a.engine.existingResourcePolicyCurrent(row, seen.resources)) throw Error('Original Docker provider is unconfirmed');
-      const view = await a.engine.captureProviderView(row, current);
-      current();
+      if (!view) throw Error('Original Docker provider is unconfirmed');
       return view;
     };
     try {
@@ -560,18 +593,10 @@ export class DockerEmployeeRuntime {
     try { await a.resourceRevisions.converge(employee.id, current); }
     catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
-    const seen = await a.engine.observeDestination(row);
-    current();
-    if (
-      !seen ||
-      seen.state !== 'running' ||
-      seen.provider.kind !== 'running' ||
-      seen.provider.operationId !== binding.operationId ||
-      seen.provider.sessionId !== binding.sessionId ||
-      !a.engine.existingResourcePolicyCurrent(row, seen.resources)
-    ) { publication = 'failed'; return false; }
     const actual = a.ctx.sessions.get(employee.sessionId);
     if (
+      actual instanceof Session &&
+      actual.dockerContinuationViewCurrent &&
       actual?.pid !== null &&
       actual?.pid !== undefined &&
       !actual.paneExit &&
@@ -594,8 +619,9 @@ export class DockerEmployeeRuntime {
           throw Error('Boxed existing viewer recipe changed');
       };
       renewalCurrent();
-      const view = await a.engine.captureProviderView(row, renewalCurrent);
+      const view = await this.#observeRunningProviderView(a, row, binding, renewalCurrent);
       renewalCurrent();
+      if (!view) { publication = 'failed'; return false; }
       Session.prototype.renewDockerContinuationView.call(actual, view, () => {
         renewalCurrent();
         return true;
@@ -604,8 +630,9 @@ export class DockerEmployeeRuntime {
       publication = 'published';
       return true;
     }
-    const view = await a.engine.captureProviderView(row, current);
+    const view = await this.#observeRunningProviderView(a, row, binding, current);
     current();
+    if (!view) { publication = 'failed'; return false; }
     await a.provider.attach(row, binding, current, view);
     current();
     publication = 'published';

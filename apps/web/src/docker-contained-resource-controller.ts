@@ -14,12 +14,11 @@ import {
   DockerPoolObservationRecord,
   DockerPoolRestoreAcknowledgement,
 } from './docker-pool-observation-data.js';
-import { DockerEmployeePoolPolicy } from './docker-employee-continuation-data.js';
+import { DockerEmployeePoolPolicy, DockerEmployeeResourcePolicy } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type {
   DockerEmployeeContinuationRecord,
   DockerEmployeeOriginal,
-  DockerEmployeeResourcePolicy,
   DockerEmployeePool,
 } from './docker-employee-continuation-data.js';
 import type { DockerContainedResourceController } from './docker-employee-engine.js';
@@ -1897,6 +1896,75 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const proof = this.#proofs.get(actual);
     requireDockerEffectiveResourceProof(proof, row, actual);
     return proof!;
+  }
+  /** For attaching to an existing pane only. Re-earn the current kernel
+   * limits without replacing any historical anchor or writer receipt. */
+  async readExistingAfterHostRestart(
+    row: DockerEmployeeContinuationRecord,
+    approvedPolicy: DockerEmployeeResourcePolicy,
+    current: () => void
+  ): Promise<DockerEmployeeResourcePolicy> {
+    current();
+    const policy = DockerEmployeeResourcePolicy.parse(approvedPolicy),
+      original = dockerContinuationDigest(row),
+      pool = row.pool,
+      task = this.journal.read(row, 'anchor'),
+      name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32),
+      config = this.#configuration('anchor', name, ['anchor']);
+    if (
+      !row.destination ||
+      !['provider-issued', 'ready'].includes(row.phase) ||
+      !isDeepStrictEqual({ ...policy, memoryHighBytes: row.policy.memoryHighBytes }, row.policy) ||
+      !pool ||
+      pool.cgroupParent !== this.#slice ||
+      pool.policyDigest !== dockerContinuationDigest(policy.pool) ||
+      !task ||
+      task.phase !== 'running' ||
+      task.containerId !== pool.containerId ||
+      task.name !== name ||
+      task.imageId !== this.configuration.helperImageId ||
+      task.configurationDigest !== dockerContinuationDigest(config)
+    )
+      refuse('DOCKER_RESOURCE_REATTACH_SCOPE_CHANGED');
+    const anchorTask = dockerContinuationDigest(task);
+    const check = () => {
+      current();
+      if (
+        dockerContinuationDigest(row) !== original ||
+        !isDeepStrictEqual(policy, approvedPolicy) ||
+        dockerContinuationDigest(this.journal.read(row, 'anchor') ?? null) !== anchorTask ||
+        !isDeepStrictEqual(config, this.#configuration('anchor', name, ['anchor']))
+      )
+        refuse('DOCKER_RESOURCE_REATTACH_SCOPE_CHANGED');
+    };
+    check();
+    const anchorState = await this.#fixed(task.containerId, config),
+      anchor = await this.#init(task.containerId);
+    check();
+    if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    const parent = await this.#probe(anchor);
+    check();
+    const worker = await this.#worker(row);
+    check();
+    const observedAnchor = { ...anchor, startTicks: parent.anchor.startTicks },
+      leaf = await this.#probe(observedAnchor, worker);
+    check();
+    const after = await this.#probe(observedAnchor),
+      finalLeaf = await this.#refresh(leaf, check),
+      finalAnchorState = await this.#fixed(task.containerId, config);
+    check();
+    if (
+      !isDeepStrictEqual(anchorState.State, finalAnchorState.State) ||
+      !isDeepStrictEqual(parent, after) ||
+      !isDeepStrictEqual(after.parent, finalLeaf.parent) ||
+      !isDeepStrictEqual(after.anchor, finalLeaf.anchor) ||
+      !this.#matches(after, policy.pool, null) ||
+      !this.#matches(finalLeaf, policy, policy.memoryHighBytes)
+    )
+      refuse('DOCKER_RESOURCE_REATTACH_POLICY_UNCONFIRMED');
+    this.#fresh(after);
+    this.#fresh(finalLeaf);
+    return policy;
   }
   async read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null> {
     try {

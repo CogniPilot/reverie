@@ -26,6 +26,7 @@ import { fixture, policy, helper, deployment } from './helpers/docker-resource-p
 import { DockerContainedResources } from '../src/docker-contained-resource-controller.js';
 const marker = 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n';
 const missingThread = 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n';
+const exitedThread = 'BOXED_RESOURCE_PID_EXITED; effectIssued=false\n';
 const anchor = 'a'.repeat(64),
   box = 'b'.repeat(64);
 const argv = [
@@ -70,6 +71,12 @@ describe('complete actual subprocess read-race classification', () => {
     expect(dockerResourceProbeReadRace(fake, argv)).toBe(false);
     expect(JSON.stringify(receipt)).not.toContain('BOXED_RESOURCE_IO');
   });
+  it('retries a completed read that observed an exited process', async () => {
+    expect(dockerResourceProbeReadRace(await actualRace(argv, 30000, exitedThread), argv)).toBe(true);
+    const write = [...argv];
+    write[3] = 'configure-pool';
+    expect(dockerResourceProbeReadRace(await actualRace(write, 30000, exitedThread), write)).toBe(false);
+  });
   it.each([
     [marker, '', 2],
     [marker.replace('false', 'true'), '', 1],
@@ -84,6 +91,8 @@ describe('complete actual subprocess read-race classification', () => {
     [missingThread.trimEnd(), '', 1],
     [missingThread + 'extra\n', '', 1],
     [missingThread, 'partial', 1],
+    [exitedThread, 'partial', 1],
+    [exitedThread.replace('false', 'true'), '', 1],
   ])('refuses incomplete, foreign or ambiguous child result %s/%s/%s', async (stderr, stdout, exit) => {
     child(stderr, stdout, exit);
     const error = await new PackagedDockerEngineCommand().run(argv).catch((value: unknown) => value);

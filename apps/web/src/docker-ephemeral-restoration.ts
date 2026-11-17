@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerEmployeeInspect } from './docker-employee-engine-data.js';
+import { probeDockerEmployeeStorage } from './docker-employee-storage.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import { DOCKER_OWNER_STOP_NATIVE_ENV } from './docker-owner-stop-native.js';
 import { EphemeralDirectoryOwner } from './docker-ephemeral-directory.js';
@@ -13,6 +14,7 @@ import {
   EphemeralRequest,
   ephemeralContinuationProjection,
   ephemeralPublishedProjection,
+  ephemeralRetainedProjection,
   ephemeralDirectorySessionId,
   type EphemeralAttempt,
   type EphemeralJournal,
@@ -43,7 +45,8 @@ export class DockerEphemeralRestoration {
     private readonly forbidden: (
       row: DockerEmployeeContinuationRecord
     ) => Promise<readonly { dev: string; ino: string }[]>,
-    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source
+    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source,
+    private readonly reattachTarget: (row: DockerEmployeeContinuationRecord, current: () => void) => Promise<DockerEmployeeInspect | null> = target
   ) {
     if (!/^sha256:[a-f0-9]{64}$/.test(nativeImageId)) throw Error('Protected native image required');
   }
@@ -287,6 +290,12 @@ export class DockerEphemeralRestoration {
     const raw = await this.target(row);
     owner.assertCurrent();
     if (!raw?.State.Running) fail();
+    await this.#readMountedLeaves(raw, owner);
+    const after = await this.target(row);
+    owner.assertCurrent();
+    if (!after?.State.Running || after.Id !== raw.Id) fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
+  }
+  async #readMountedLeaves(raw: DockerEmployeeInspect, owner: EphemeralDirectoryOwner): Promise<void> {
     if (raw.Config.User !== owner.root.uid + ':' + owner.root.gid) fail('DOCKER_EPHEMERAL_USER_CHANGED');
     const env = DOCKER_OWNER_STOP_NATIVE_ENV.flatMap((value) => ['--env', value]);
     const seen = destination.parse(
@@ -308,9 +317,6 @@ export class DockerEphemeralRestoration {
     const leaves = owner.leaves();
     if (!isDeepStrictEqual(seen.scratch, leaves.scratch) || !isDeepStrictEqual(seen.tmp, leaves.tmp))
       fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
-    const after = await this.target(row);
-    owner.assertCurrent();
-    if (!after?.State.Running || after.Id !== raw.Id) fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued'> {
     const source = await this.readSource(row),
@@ -601,6 +607,73 @@ export class DockerEphemeralRestoration {
     const owner = this.#owners.get(row.request.operationId);
     if (!owner) fail();
     await this.#readDestination(row, owner);
+  }
+  /** Check a live, already-admitted placement with a local read-only owner.
+   * Do not publish this owner to the preparation cache or settle old cursors. */
+  async verifyExistingDestination(
+    row: DockerEmployeeContinuationRecord,
+    admitted: DockerEmployeeInspect,
+    current: () => void
+  ): Promise<void> {
+    current();
+    const expected = row.destination;
+    if (
+      !expected ||
+      !['provider-issued', 'ready'].includes(row.phase) ||
+      !admitted.State.Running ||
+      admitted.State.Paused ||
+      admitted.State.Restarting ||
+      admitted.State.Dead
+    )
+      fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
+    const projection = ephemeralRetainedProjection(admitted, expected);
+    if (!projection) return;
+    if (projection.layout !== 'employees' && projection.identity !== ephemeralDirectorySessionId(row))
+      fail('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+    // The retained mount census checks path overlap. Compare physical
+    // identities from the fixed guest probe too, including aliases of binds.
+    for (const path of ['/home/agent', '/nix']) {
+      const matches = admitted.Mounts.filter((mount) => mount.Destination === path);
+      if (matches.length !== 1 || matches[0]!.Type !== 'bind' || !matches[0]!.RW)
+        fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
+    }
+    const storage = await probeDockerEmployeeStorage(this.command, admitted.Id);
+    current();
+    if (storage.holderStartTicks !== null || storage.home.ino === '0' || storage.nix.ino === '0')
+      fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
+    const forbidden = [storage.home, storage.nix].map(({ dev, ino }) => ({ dev, ino }));
+    const owner = new EphemeralDirectoryOwner();
+    try {
+      owner.captureLeaves(projection, forbidden);
+      await this.#readMountedLeaves(admitted, owner);
+      current();
+      const repeatedStorage = await probeDockerEmployeeStorage(this.command, admitted.Id);
+      current();
+      const after = await this.reattachTarget(row, current);
+      current();
+      if (
+        !after?.State.Running ||
+        after.State.Paused ||
+        after.State.Restarting ||
+        after.State.Dead ||
+        admitted.State.Pid !== after.State.Pid ||
+        admitted.State.StartedAt !== after.State.StartedAt ||
+        admitted.Config.User !== after.Config.User ||
+        !isDeepStrictEqual(repeatedStorage, storage) ||
+        !isDeepStrictEqual(ephemeralRetainedProjection(after, expected), projection)
+      )
+        fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
+      owner.assertCurrent();
+    } catch (cause) {
+      try {
+        owner.close();
+      } catch (close) {
+        throw new AggregateError([cause, close]);
+      }
+      throw cause;
+    }
+    owner.close();
+    current();
   }
   #readImage(row: DockerEmployeeContinuationRecord): void {
     // Existing published providers retain their frozen image after a control
