@@ -26,6 +26,15 @@ pub(crate) enum Command {
         holder_start: u64,
     },
     ProbeStorage,
+    /// Compare two fixed read-only reference mounts with a current worker observation.
+    VerifyStorageReference {
+        #[arg(long)]
+        home: crate::storage::Directory,
+        #[arg(long)]
+        nix: crate::storage::Directory,
+    },
+    /// Check an existing worker credential digest from one bounded private stdin record.
+    VerifyWorkerCredential,
 }
 #[derive(Args, Clone)]
 pub(crate) struct Common {
