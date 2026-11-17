@@ -149,10 +149,11 @@
         };
     in {
       lib.mkBoxedWebsiteImage = { system, runtimeConfiguration,
-        baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig }:
+        baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig,
+        privateAccessRuntime ? null }:
         import ./nix/boxed-website-image.nix {
           pkgs = pkgsFor system;
-          inherit baseImage baseConfig runtimeConfiguration;
+          inherit baseImage baseConfig runtimeConfiguration privateAccessRuntime;
           clientCapsule = self.packages.${system}.workerClientCapsule;
         };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,

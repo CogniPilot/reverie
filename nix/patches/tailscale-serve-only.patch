@@ -1,0 +1,29 @@
+Reverie uses the bundled daemon only to serve HTTPS. The userspace
+netstack normally falls back to proxying otherwise unhandled inbound
+traffic to the same port on loopback. Keep model and control listeners
+private by refusing fallback traffic to the node's own addresses.
+
+--- a/wgengine/netstack/netstack.go
++++ b/wgengine/netstack/netstack.go
+@@ -1630,3 +1630,8 @@ func (ns *Impl) acceptTCP(r *tcp.ForwarderRequest) {
++	if isLocal && reqDetails.LocalPort != 443 {
++		r.Complete(true)
++		return
++	}
++
+ 	if ns.lb != nil {
+ 		handler, opts := ns.lb.TCPHandlerForDst(clientRemoteAddrPort, dstAddrPort)
+ 		if handler != nil {
+@@ -1693,3 +1698,5 @@ func (ns *Impl) acceptTCP(r *tcp.ForwarderRequest) {
+ 	case isTailscaleIP:
+-		dialIP = ipv4Loopback
++		// Reject unconfigured node ports, including 443 before Serve starts.
++		r.Complete(true)
++		return
+ 	}
+@@ -1927,4 +1934,4 @@ func (ns *Impl) acceptUDP(r *udp.ForwarderRequest) {
+ 	dstAddr, ok := ipPortOfNetstackAddr(sess.LocalAddress, sess.LocalPort)
+-	if !ok {
++	if !ok || ns.isLocalIP(dstAddr.Addr()) {
+ 		ep.Close()
+ 		return

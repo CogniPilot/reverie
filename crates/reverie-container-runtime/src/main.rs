@@ -1,6 +1,7 @@
 //! Docker-owned supervision for the website, local inference and GPU telemetry.
 //! The container never invokes Nix, Docker, systemctl or a host executable.
 mod config;
+mod tailscale;
 
 use config::{Model, Result};
 use nix::sys::signal::{Signal, kill};
@@ -144,6 +145,7 @@ async fn run() -> Result<i32> {
         .env("REVERIE_MODEL_RELAY_MANAGED", "1")
         .kill_on_drop(true)
         .spawn()?;
+    let private_access = tailscale::start(&directory.0);
     let result = tokio::select! {
         result = website.wait() => result?.code().unwrap_or(1),
         result = optional_exit(&mut server) => { eprintln!("local inference exited: {}", result?); 1 },
@@ -166,7 +168,8 @@ async fn run() -> Result<i32> {
         stop(&mut website),
         stop(&mut telemetry),
         stop_server,
-        stop_relay
+        stop_relay,
+        tailscale::stop(private_access)
     );
     Ok(result)
 }

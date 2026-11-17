@@ -3,6 +3,7 @@
 { pkgs, src, baseImage, baseConfig, containerRuntime, gpuTelemetry, inferenceRuntime }:
 let
   entrypoint = pkgs.writeShellScript "reverie-container-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  tailscale = import ./tailscale-serve.nix { inherit pkgs; };
 in
 assert builtins.isAttrs baseConfig && builtins.isList baseConfig.Entrypoint;
 pkgs.dockerTools.buildLayeredImage rec {
@@ -13,12 +14,14 @@ pkgs.dockerTools.buildLayeredImage rec {
   maxLayers = 125 - 2;
   fromImage = baseImage;
   passthru.reverieConfig = config;
-  contents = [ containerRuntime gpuTelemetry inferenceRuntime ];
+  contents = [ containerRuntime gpuTelemetry inferenceRuntime tailscale.package ];
   extraCommands = ''
     mkdir -p usr/local/bin
     ln -s ${entrypoint} usr/local/bin/reverie-start
+    ${tailscale.install}
   '';
   config = baseConfig // {
+    Labels = (baseConfig.Labels or {}) // { "org.reverie.tailscale" = "1"; };
     Entrypoint = [
       "/bin/tini" "-g" "-s" "--"
       "${containerRuntime}/bin/reverie-container-runtime"

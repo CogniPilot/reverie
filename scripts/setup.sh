@@ -11,7 +11,8 @@
 #
 # Options: --port N (default 3000), --name NAME (default reverie; also the volumes NAME-data and NAME-home),
 #          --image REF (default ghcr.io/cognipilot/reverie), --with-claude-code (installs that CLI at start,
-#          under your own account and its license), --engine docker|podman.
+#          under your own account and its license), --with-tailscale (private HTTPS),
+#          --engine docker|podman.
 # The server listens on 127.0.0.1 only. Expose it further only behind your own authenticated proxy or tunnel.
 set -euo pipefail
 
@@ -32,7 +33,7 @@ if [ "${1:-}" = --print-image-repository ]; then
 fi
 
 image=$(image_repository) version=latest port=3000 name=reverie engine= mode=install dry=0 clis=
-offline=0 archive=./reverie-image.tar
+offline=0 archive=./reverie-image.tar tailscale=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) version=${2#v}; shift ;;
@@ -45,11 +46,12 @@ while [ $# -gt 0 ]; do
       if [ "$#" -gt 1 ] && [[ "$2" != --* ]]; then archive=$2; shift; fi
       ;;
     --with-claude-code) clis="claude" ;;
+    --with-tailscale) tailscale=1 ;;
     --rollback) mode=rollback ;;
     --password) mode=password ;;
     --owner) mode=owner ;;
     --dry-run) dry=1 ;;
-    -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown option: $1 (see --help)" >&2; exit 2 ;;
   esac
   shift
@@ -101,6 +103,14 @@ pull() {
 }
 
 start() {  # start IMAGE_REF: replace the container, keep both volumes
+  local tailscale_options=()
+  if [ "$tailscale" = 1 ]; then
+    if [ "$dry" = 0 ] && [ "$("$engine" image inspect --format '{{index .Config.Labels "org.reverie.tailscale"}}' "$1")" != 1 ]; then
+      echo "The selected image does not support --with-tailscale." >&2
+      return 1
+    fi
+    tailscale_options=(--env REVERIE_TAILSCALE=1 --env "REVERIE_TAILSCALE_HOSTNAME=$name")
+  fi
   if exists; then run "$engine" stop --time 30 "$name"; run "$engine" rm "$name"; fi
   local restart=(--restart unless-stopped)
   [ "$engine" = podman ] && restart=(--restart always)
@@ -111,6 +121,7 @@ start() {  # start IMAGE_REF: replace the container, keep both volumes
     --mount "type=volume,src=$volume,dst=/instances" \
     --mount "type=volume,src=$home_volume,dst=/home/agent" \
     --env "REVERIE_INSTALL_CLIS=$clis" \
+    "${tailscale_options[@]}" \
     "$1"
 }
 

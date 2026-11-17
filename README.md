@@ -82,6 +82,12 @@ for HTTPS prerequisites and port options.
 
 ## Manual
 
+GPU website images with built-in Tailscale support accept `--with-tailscale`
+in the Docker installer. A direct Docker launch can set `REVERIE_TAILSCALE=1`.
+Set up the Reverie owner account locally, then follow the one-time sign-in link
+from `docker logs -f reverie`. Use the private HTTPS URL printed in the logs.
+The instance data volume preserves the Tailscale approval across restarts.
+
 Open **Office → Handbook** in Reverie for everyday company and employee workflows.
 The [Reverie manual](docs/manual.md) covers deployment settings, storage, employee
 laptops, updates, recovery, models, memory and development.
