@@ -19,9 +19,10 @@ try {
     instance = args.at(-1)!;
     args = args.slice(0, -2);
   }
-  const readySelf = args[2] === '--ready-self',
+  const readyForce = args[2] === '--ready-owner-force',
+    readySelf = args[2] === '--ready-self',
     checkImport = args[2] === '--check-import';
-  if (args.length !== (readySelf || checkImport ? 3 : 2) || args[0] !== '--contract' || !args[1])
+  if (args.length !== (readySelf || readyForce || checkImport ? 3 : 2) || args[0] !== '--contract' || !args[1])
     throw Error('Use --contract <private reviewed fixture JSON>');
   assert.ok(process.getuid!() > 0 && process.getgid!() > 0);
   stage = 'entry-contract';
@@ -52,7 +53,10 @@ try {
     fs.closeSync(fd);
   }
   stage = 'entry-private-home';
-  const home = path.join(parent, (readySelf ? 'ready-self-home-' : 'driver-home-') + instance);
+  const home = path.join(
+    parent,
+    (readyForce ? 'ready-owner-force-home-' : readySelf ? 'ready-self-home-' : 'driver-home-') + instance
+  );
   fs.mkdirSync(home, { mode: 0o700 });
   fs.mkdirSync(path.join(home, 'data'), { mode: 0o700 });
   fs.mkdirSync(path.join(home, 'tmp'), { mode: 0o700 });
@@ -79,7 +83,11 @@ try {
     };
     process.stdout.write(
       JSON.stringify(
-        await (readySelf ? driver.runPlanOfficeReadySelf(file, entered) : driver.runPlanOfficeBaseline(file, entered))
+        await (readyForce
+          ? driver.runPlanOfficeReadyOwnerForce(file, entered)
+          : readySelf
+            ? driver.runPlanOfficeReadySelf(file, entered)
+            : driver.runPlanOfficeBaseline(file, entered))
       ) + '\n'
     );
   }

@@ -35,6 +35,7 @@ import {
   requireOriginalPolicy,
   runPlanOfficeBaseline,
   runPlanOfficeReadySelf,
+  runPlanOfficeReadyOwnerForce,
   planOfficeControlBirth,
   requirePlanOfficeImage,
   requirePlanOfficeContainer,
@@ -801,26 +802,32 @@ it('admits team moves only with two distinct real employees/threads and initiall
   ).toThrow();
 });
 
-it('refuses mutable ready-only admission without touching existing fixture state or Engine', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-ready-refuse-'));
-  fs.chmodSync(root, 0o700);
-  try {
-    const file = path.join(root, 'contract.json');
-    fs.writeFileSync(
-      file,
-      JSON.stringify({
-        ...raw,
-        acceptance: 'ordinary-self',
-        bootstrap: { ...raw.bootstrap, employees: [{ ...employee, permissions: { moveOwnPlan: true } }] },
-      }),
-      { mode: 0o600 }
-    );
-    await expect(runPlanOfficeReadySelf(file)).rejects.toThrow();
-    expect(fs.readdirSync(root)).toEqual(['contract.json']);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+it.each([
+  ['ordinary-self', runPlanOfficeReadySelf],
+  ['baseline', runPlanOfficeReadyOwnerForce],
+] as const)(
+  'refuses mutable %s ready-only admission without touching existing fixture state or Engine',
+  async (acceptance, run) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-ready-refuse-'));
+    fs.chmodSync(root, 0o700);
+    try {
+      const file = path.join(root, 'contract.json');
+      fs.writeFileSync(
+        file,
+        JSON.stringify({
+          ...raw,
+          acceptance,
+          bootstrap: { ...raw.bootstrap, employees: [{ ...employee, permissions: { moveOwnPlan: true } }] },
+        }),
+        { mode: 0o600 }
+      );
+      await expect(run(file)).rejects.toThrow();
+      expect(fs.readdirSync(root)).toEqual(['contract.json']);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   }
-});
+);
 it('reads actual procfs controller birth and refuses nonpositive PID selectors', () => {
   expect(planOfficeControlBirth(process.pid)).toMatch(/^[1-9][0-9]*$/);
   expect(planOfficeControlBirth(process.pid)).toBe(planOfficeControlBirth(process.pid));

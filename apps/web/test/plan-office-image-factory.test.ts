@@ -244,14 +244,14 @@ it('imports the actual unbundled canary graph without Driver and closes startup 
     const entry = path.join(runtime, 'test/fixtures/plan-office-canary.mjs');
     fs.renameSync(entry.replace(/\.mjs$/, '.js'), entry);
     let serial = 0;
-    const run = (text: string, extra: string[] = [], correlation = instance) => {
+    const run = (text: string, extra: string[] = [], correlation = instance, mode = '--check-import') => {
       const parent = path.join(root, 'case-' + serial++);
       fs.mkdirSync(parent, { mode: 0o700 });
       const contract = path.join(parent, 'contract.json');
       fs.writeFileSync(contract, text, { mode: 0o600 });
       const result = spawnSync(
         process.execPath,
-        [entry, '--contract', contract, '--check-import', ...extra, '--diagnostic-instance', correlation],
+        [entry, '--contract', contract, mode, ...extra, '--diagnostic-instance', correlation],
         {
           cwd: parent,
           env: { HOME: parent, TMPDIR: parent, PATH: path.dirname(process.execPath), LANG: 'C.UTF-8' },
@@ -275,7 +275,15 @@ it('imports the actual unbundled canary graph without Driver and closes startup 
       instance,
       imported: true,
     });
-    for (const extra of [['--extra'], ['--ready-self'], ['--diagnostic-instance', instance]]) {
+    // The real entry recognizes the dedicated local facade and reaches the
+    // owning decoder. A non-fixture contract earns no Driver or Engine access.
+    const force = run(JSON.stringify({ instance }), [], instance, '--ready-owner-force');
+    expect(force.status).toBe(1);
+    expect(readPlanOfficeStartupDiagnostic(force.stdout, instance)).toMatchObject({
+      stage: 'ready-self-admission',
+      errorClass: 'ZodError',
+    });
+    for (const extra of [['--extra'], ['--ready-self'], ['--ready-owner-force'], ['--diagnostic-instance', instance]]) {
       const bad = run(JSON.stringify({ instance }), extra);
       expect(bad.status).toBe(1);
       expect(readPlanOfficeStartupDiagnostic(bad.stdout, instance)?.stage).toBe('entry-arguments');

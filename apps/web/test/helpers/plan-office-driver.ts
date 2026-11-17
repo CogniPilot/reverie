@@ -2169,7 +2169,8 @@ async function runPlanOfficeMoveLeg(
   actors?: { employeeId: string; callerEmployeeId: string; forbiddenIds: readonly string[] }
 ) {
   const direction = planOfficeSelfDirection(leg);
-  if (kind === 'owner-force' || kind === 'agent-force') assert.equal(leg, 'return');
+  if (kind === 'agent-force') assert.equal(leg, 'return');
+  if (kind === 'owner-force' && leg === 'first') assert.equal(input.acceptance, 'baseline');
   const names = driver.names;
   assert.equal(input.bootstrap.employees.length, kind === 'team' ? 2 : 1);
   assert.equal(kind === 'team', actors !== undefined);
@@ -2294,7 +2295,7 @@ async function runPlanOfficeMoveLeg(
         : kind === 'team'
           ? 'team-move-'
           : 'self-move-';
-  evidence.save(leg === 'first' && kind !== 'team' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
+  evidence.save(leg === 'first' && kind === 'self' ? 'before-self-move' : 'before-' + moveName + scenario.id, before);
   const ownerGet = async (p: string) => {
     current();
     const result = await owner.request(p);
@@ -2568,7 +2569,7 @@ async function runPlanOfficeMoveLeg(
     evidence.save('agent-force-sdk-checked-' + scenario.id, agentForceProof);
   }
   evidence.save(
-    leg === 'first' && kind !== 'team' ? 'first-self-move-completed' : moveName + scenario.id + '-completed',
+    leg === 'first' && kind === 'self' ? 'first-self-move-completed' : moveName + scenario.id + '-completed',
     {
       id: scenario.id,
       employeeId: scenario.employeeId,
@@ -2614,11 +2615,28 @@ export function planOfficeSelfIdentityFile(row: DockerEmployeeContinuationRecord
 /** Resume only the never-issued self scenario of an existing owned Ready fixture.
  * No setup, BEGIN, continuation, create, start, account write or new login occurs. */
 export async function runPlanOfficeReadySelf(contractFile: string, entered: PlanOfficeStartupCheckpoint = () => {}) {
+  return runPlanOfficeReadyMove(contractFile, 'self', entered);
+}
+
+/** Local qualification of the owner force API from an independently Ready baseline.
+ * It never counts as ordinary self approval or the hosted roundtrip scenario. */
+export async function runPlanOfficeReadyOwnerForce(
+  contractFile: string,
+  entered: PlanOfficeStartupCheckpoint = () => {}
+) {
+  return runPlanOfficeReadyMove(contractFile, 'owner-force', entered);
+}
+
+async function runPlanOfficeReadyMove(
+  contractFile: string,
+  kind: 'self' | 'owner-force',
+  entered: PlanOfficeStartupCheckpoint
+) {
   entered('ready-self-admission');
   assert.equal(process.platform, 'linux');
   privateDirectory(path.dirname(contractFile));
   const input = PlanOfficeDriverInput.parse(readPrivate(contractFile));
-  assert.equal(input.acceptance, 'ordinary-self');
+  assert.equal(input.acceptance, kind === 'self' ? 'ordinary-self' : 'baseline');
   const actualModule = fileURLToPath(import.meta.url),
     suffix = '/lib/reverie/test/helpers/plan-office-driver.js';
   assert.ok(actualModule.startsWith('/nix/store/') && actualModule.endsWith(suffix));
@@ -2741,8 +2759,9 @@ export async function runPlanOfficeReadySelf(contractFile: string, entered: Plan
     assert.equal(ownerStatus.signedIn, true);
     assert.equal(ownerStatus.policy, 'enforce');
     current();
-    evidence.save('ready-self-native', native);
-    evidence.save('ready-self-resume-intent', {
+    const label = kind === 'self' ? 'ready-self' : 'ready-owner-force';
+    evidence.save(label + '-native', native);
+    evidence.save(label + '-resume-intent', {
       operationId,
       control,
       actualStartupReceipt: report,
@@ -2751,18 +2770,28 @@ export async function runPlanOfficeReadySelf(contractFile: string, entered: Plan
       originalRuntime: input.runtimePath,
       noSetupOrRecoveryReplay: true,
     });
-    const completed = await runPlanOfficeMoveLeg(input, evidence, driver, control, owner, home);
+    const completed = await runPlanOfficeMoveLeg(
+      input,
+      evidence,
+      driver,
+      control,
+      owner,
+      home,
+      'first',
+      undefined,
+      kind
+    );
     const result = {
       scenarioId: completed.scenario.id,
       control,
       planMovesAccepted: true,
-      acceptedScenario: 'ordinary-self',
-      forceAccepted: false,
+      acceptedScenario: kind === 'self' ? 'ordinary-self' : 'ready-owner-force',
+      forceAccepted: kind === 'owner-force',
       refreshReuseAccepted: false,
       resumedAlreadyReady: true,
     };
     await transport.close();
-    evidence.save('ready-self-completed', result);
+    evidence.save(label + '-completed', result);
     return result;
   } finally {
     try {
