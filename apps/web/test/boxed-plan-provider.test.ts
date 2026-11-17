@@ -10,6 +10,8 @@ import {
   type PlanProviderFixtureReport,
 } from './helpers/boxed-plan-provider.js';
 import { workerHookSettings } from '../src/worker-client-callback.js';
+import { getCli } from '../src/config/cli-registry/registry.js';
+import { recoveryComposerReady } from '../src/company-recovery-prompt.js';
 const eid = '11111111-1111-4111-8111-111111111111',
   sid = '22222222-2222-4222-8222-222222222222',
   thread = '33333333-3333-4333-8333-333333333333';
@@ -127,8 +129,36 @@ it('boots with real CLI identity and Stop but defers account reads until the bou
   ]);
   expect(f.trace.slice(-2)).toEqual(['receipt-close', 'stdout']);
   expect(f.reports[0]!.accountId).toBeNull();
-  expect(f.output[0]).toMatch(/^BCPLAN_[a-f0-9]{64}\nBCPLAN_TURN_[a-f0-9]{64}\n❯ $/);
+  expect(f.output[0]).toMatch(/^BCPLAN_[a-f0-9]{64}\nBCPLAN_TURN_[a-f0-9]{64}\nshift\+tab to cycle permissions\n❯ $/);
   expect(f.output[0]).toContain(planFixtureTurnBarrier(f.reports[0]!) + '\n');
+});
+it('renders the real Claude composer readiness contract after Stop and receipt close on startup and each turn', async () => {
+  const f = fixture();
+  const mark = getCli('claude')?.capabilities.composerReadyMark;
+  if (!mark) throw Error('Claude composer contract missing');
+  await f.provider.start();
+  await f.provider.turn();
+  for (const terminalBuffer of f.output) {
+    const session = {
+      mode: 'claude',
+      pid: 12,
+      paneDialog: null,
+      isWorking: false,
+      terminalBuffer,
+      writeViaMux: async () => false,
+    };
+    expect(recoveryComposerReady(session, mark)).toBe(true);
+    expect(recoveryComposerReady({ ...session, terminalBuffer: terminalBuffer.replace(mark, '') }, mark)).toBe(false);
+    expect(recoveryComposerReady({ ...session, paneDialog: 'Approval required' }, mark)).toBe(false);
+    expect(recoveryComposerReady({ ...session, isWorking: true }, mark)).toBe(false);
+  }
+  expect(f.output).toHaveLength(2);
+  expect(f.trace.filter((entry) => entry === 'stdout')).toHaveLength(2);
+  for (const [index, entry] of f.trace.entries())
+    if (entry === 'stdout') {
+      expect(f.trace[index - 1]).toBe('receipt-close');
+      expect(f.trace[index - 2]).toBe('worker-callback hook-event --event stop');
+    }
 });
 it('approves one exact own pending request then yields through the actual Stop callback', async () => {
   const f = fixture(),

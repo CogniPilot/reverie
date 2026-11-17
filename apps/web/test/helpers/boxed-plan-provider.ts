@@ -208,7 +208,8 @@ export class BoxedPlanProviderFixture {
     await this.ports.record(report);
     const barrier = digest(this.identity.sessionId + '\0' + (report.requestId ?? '') + '\0' + report.state);
     const turnBarrier = planFixtureTurnBarrier(report);
-    this.ports.output(`BCPLAN_${barrier}\n${turnBarrier}\n❯ `);
+    // External Claude screen contract; keep the bundled fake free of server/registry imports.
+    this.ports.output(`BCPLAN_${barrier}\n${turnBarrier}\nshift+tab to cycle permissions\n❯ `);
     return report;
   }
   async start() {
