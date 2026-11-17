@@ -457,6 +457,7 @@ export async function dockerPlanRetirementFixture(options?: {
     record,
     state,
     command,
+    resources,
     src,
     engine: readerEngine,
     strictEngine: engine,

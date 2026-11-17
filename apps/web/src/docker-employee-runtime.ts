@@ -1,3 +1,5 @@
+import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
+import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
 import type{PlanService}from'./plan-accounts.js';
@@ -413,7 +415,7 @@ export class DockerEmployeeRuntime {
     const a=this.#attached;if(!a||!this.current())return;
     if(!(moves instanceof PlanMoveStore)||(this.#planMoves&&this.#planMoves!==moves))throw Error('Original private plan journal required');this.#planMoves=moves;
     const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
-    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,retain:actor=>this.#planActors.add(actor)});
+    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),retain:actor=>this.#planActors.add(actor)});
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
   providerHealthObserver(changed: () => void): DockerProviderHealth {
@@ -528,6 +530,19 @@ export class DockerEmployeeRuntime {
       return 'unconfirmed';
     } catch { publication = 'failed'; return 'unconfirmed'; }
   }
+  /** Server-private read renewal; a request cannot choose an Engine or a fallback effect. */
+  async #renewPublishedPlanView(row: DockerEmployeeContinuationRecord, session: Session, admitted: () => void): Promise<void> {
+    const a = this.#attached;
+    if (!a || row.version !== 3 || row.phase !== 'ready') throw Error('Original published plan reader required');
+    await renewExistingDockerProviderView({
+      company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
+      saved: id => a.ctx.store.getSession(id),
+      runtimeCurrent: () => {
+        if (!this.current() || this.#attached !== a) throw Error('Boxed runtime changed');
+      },
+    }, row, session, () => {admitted(); return true;});
+    admitted();
+  }
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
@@ -580,27 +595,13 @@ export class DockerEmployeeRuntime {
       actual.docker?.containerName === binding.containerId
     ) { publication = 'published'; return true; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
-      const saved = a.ctx.store.getSession(employee.sessionId);
-      if (!saved) throw Error('Boxed existing viewer saved recipe missing');
-      const providerSource =
-        row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
-      const renewalCurrent = () => {
-        current();
-        if (
-          a.ctx.sessions.get(employee.sessionId) !== actual ||
-          actual.owner !== employee.owner ||
-          dockerEmployeeProviderSourceDigest(employee, { ...saved, ...actual.providerRecipeState() }) !== providerSource
-        )
-          throw Error('Boxed existing viewer recipe changed');
-      };
-      renewalCurrent();
-      const view = await a.engine.captureProviderView(row, renewalCurrent);
-      renewalCurrent();
-      Session.prototype.renewDockerContinuationView.call(actual, view, () => {
-        renewalCurrent();
-        return true;
-      });
-      renewalCurrent();
+      await renewExistingDockerProviderView({
+        company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
+        saved: id => a.ctx.store.getSession(id),
+        runtimeCurrent: () => {
+          if (!this.current() || this.#attached !== a) throw Error('Boxed runtime changed');
+        },
+      }, row, actual, () => {current(); return true;}, () => {publication = 'published';});
       publication = 'published';
       return true;
     }

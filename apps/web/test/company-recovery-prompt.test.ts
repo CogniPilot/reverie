@@ -105,7 +105,7 @@ function realRecoverySession(initial = '') {
   const registry = registeredMuxFixture({mode: 'codex', sessionId: session.id, muxName: 'owned-recovery', pid: 42, owner: session.owner});
   const mux = {...registry,
     capturePaneText: () => pane,
-    sendInput: vi.fn(async (_id: string, data: string) => {
+    sendInput: vi.fn(async (_id: string, data: string, _options?: {admitted?: () => boolean}) => {
       writes.push(data);
       if (data === '\r') pane = codexPane('');
       else pane = codexPane(`[Pasted Content ${data.replace(/\r/g, '').length} chars]`);
@@ -230,4 +230,32 @@ it('keeps the null-PID delivery boundary even with a normalized ready marker', a
     )
   ).rejects.toThrow('canceled');
   expect(session.writeViaMux).not.toHaveBeenCalled();
+});
+
+it('retains the original recovery grant at the actual Session mux dispatch boundary', async () => {
+  const f = realRecoverySession();
+  let allowed = true,
+    entered = false,
+    release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const nativeKeys: string[] = [];
+  f.mux.sendInput.mockImplementation(async (_id, data, options) => {
+    entered = true;
+    await gate;
+    expect(options?.admitted).toBeTypeOf('function');
+    if (!options!.admitted!()) return false;
+    nativeKeys.push(data);
+    return true;
+  });
+  const pending = submitRecoveryPrompt(f.session, 'approved original handoff', () => allowed);
+  await expect.poll(() => entered).toBe(true);
+  allowed = false;
+  release();
+  const refused = await pending.catch((error: unknown) => error);
+  expect(nativeKeys).toEqual([]);
+  expect(refused).toBeInstanceOf(Error);
+  expect((refused as Error).message).toContain('could not be typed');
+  expect(f.writes).toEqual([]);
 });
