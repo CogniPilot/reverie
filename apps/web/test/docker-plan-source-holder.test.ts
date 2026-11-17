@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { DockerPlanAccountSnapshot } from '../src/docker-plan-account.js';
 import { boxedOriginal } from '../src/docker-employee-engine-data.js';
 import type { PlanAccount } from '../src/plan-accounts.js';
@@ -24,7 +25,7 @@ import { DOCKER_PLAN_SOURCE_READ_PROGRAM } from '../src/docker-plan-source-nativ
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 const cid = '9'.repeat(64);
-function fixture() {
+function fixture(imageEnvironment?: readonly string[]) {
   const src = dockerPlanSourceFixture(false),
     f = dockerPlanJournalFixture(),
     seed = structuredClone(f.state.seed);
@@ -127,7 +128,14 @@ function fixture() {
           {
             Id: seed.target.workerImage.imageId,
             Config: {
-              Env: ['PATH=/bin', 'NODE_OPTIONS=DO_NOT_LOAD', 'ANTHROPIC_API_KEY=DO_NOT_PROPAGATE'],
+              Env: imageEnvironment ?? [
+                'PATH=/bin',
+                'NODE_OPTIONS=DO_NOT_LOAD',
+                'ANTHROPIC_API_KEY=DO_NOT_PROPAGATE',
+                'LD_SHOW_AUXV=DO_NOT_PROPAGATE',
+                'UNRELATED_IMAGE_FEATURE=DO_NOT_PROPAGATE',
+                'ALREADY_UNSET',
+              ],
               Volumes: null,
               Labels: {
                 'org.reverie.worker-client.manifest': seed.target.workerImage.clientManifestDigest,
@@ -433,7 +441,7 @@ describe('same-journal readonly source holder', () => {
         BindOptions: { Propagation: 'rprivate', NonRecursive: true },
       },
     ]);
-    expect(body.Env).toContain('NODE_OPTIONS=');
+    expect(body.Env).toContain('NODE_OPTIONS');
     expect(JSON.stringify(body)).not.toContain('DO_NOT_PROPAGATE');
     expect(body.Labels).toMatchObject({ 'synthetic.inherited': 'kept' });
     const result = await f.holder.context(f.record, f.journal, selected);
@@ -444,6 +452,70 @@ describe('same-journal readonly source holder', () => {
     expect(f.state().sourceReader?.phase).toBe('closed');
     expect(f.src.raw.State.Running).toBe(false);
     await expect(f.holder.context(f.record, f.journal, selected)).rejects.toThrow();
+  });
+  it('unsets image and loader keys while retaining fixed HOME/PATH for an actual JSON-only Node process', async () => {
+    const f = fixture();
+    await f.holder.open(f.record, f.journal);
+    const entries = f.config().Env as string[];
+    // Node's subprocess env omits undefined values, modeling Docker's independently
+    // qualified bare-key unset encoding. This executes the actual test Node ELF;
+    // it does not claim Docker/container or paid-provider qualification.
+    const env = Object.fromEntries(
+      entries.map((entry) => {
+        const equals = entry.indexOf('=');
+        return equals === -1 ? [entry, undefined] : [entry.slice(0, equals), entry.slice(equals + 1)];
+      })
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--no-global-search-paths',
+        '--no-addons',
+        '--input-type=commonjs',
+        '-e',
+        'process.stdout.write(JSON.stringify({ok:true}));',
+      ],
+      {
+        env,
+        encoding: 'utf8',
+        timeout: 3000,
+        maxBuffer: 65536,
+      }
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(0);
+    expect(result.stdout === '{"ok":true}', 'fixed helper must execute Node rather than loader diagnostics').toBe(true);
+    expect(result.stderr).toBe('');
+    for (const key of [
+      'NODE_OPTIONS',
+      'ANTHROPIC_API_KEY',
+      'LD_SHOW_AUXV',
+      'LD_TRACE_LOADED_OBJECTS',
+      'LD_DEBUG',
+      'LD_PROFILE',
+      'UNRELATED_IMAGE_FEATURE',
+      'ALREADY_UNSET',
+    ]) {
+      expect(entries).toContain(key);
+      expect(entries.some((entry) => entry.startsWith(key + '='))).toBe(false);
+    }
+    expect(entries).toContain('HOME=/home/agent');
+    expect(entries).toContain('PATH=/bin');
+    expect(entries).toContain('TMUX_TMPDIR=/tmp');
+    await f.holder.close(f.record, f.journal);
+  });
+  it.each([
+    ['DUPLICATE', 'DUPLICATE=value'],
+    ['DUPLICATE=one', 'DUPLICATE=two'],
+    ['INVALID-KEY=value'],
+    ['=missing-key'],
+    [''],
+  ])('refuses malformed or duplicate selected image Env before any helper effect: %j', async (...entries) => {
+    const f = fixture(entries);
+    await expect(f.holder.open(f.record, f.journal)).rejects.toThrow('HOLDER_UNCONFIRMED');
+    expect(f.effects).toEqual([]);
+    expect(f.state().sourceReader).toBeUndefined();
   });
   it.each(['before', 'after'] as const)('never replays CREATE after an unknown %s reply', async (loss) => {
     const f = fixture();

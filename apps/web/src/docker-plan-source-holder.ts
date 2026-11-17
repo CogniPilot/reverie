@@ -156,14 +156,16 @@ export class DockerPlanSourceHolder {
       .parse(JSON.parse(await this.#native(['image', 'inspect', state.seed.target.workerImage.imageId], current)))[0]!;
     if (image.Config.Volumes && Object.keys(image.Config.Volumes).length) refuse();
     const env = image.Config.Env ?? [],
-      keys = env.map((v) => v.slice(0, v.indexOf('=')));
+      keys = env.map((v) => (v.includes('=') ? v.slice(0, v.indexOf('=')) : v));
     if (
       keys.some((k) => !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) ||
       new Set(keys).size !== keys.length ||
       image.Config.Labels?.['org.reverie.worker-client.manifest'] !== state.seed.target.workerImage.clientManifestDigest
     )
       refuse();
-    // Explicitly clear EVERY inherited key as well as all known pre-JS loaders.
+    // Docker's bare-key encoding unsets EVERY inherited key. KEY= is not an
+    // unset: glibc enables diagnostics such as LD_TRACE_LOADED_OBJECTS even
+    // with an empty value, so Node may never execute the fixed holder program.
     // The image ID remains separately pinned; no old provider account env survives.
     const fixed = [
       ...DOCKER_OWNER_STOP_NATIVE_ENV,
@@ -177,8 +179,12 @@ export class DockerPlanSourceHolder {
       'LD_TRACE_LOADED_OBJECTS=',
       'MALLOC_TRACE=',
     ];
-    const values = new Map(env.map((v) => [v.slice(0, v.indexOf('=')), v.slice(0, v.indexOf('=')) + '=']));
-    for (const entry of fixed) values.set(entry.slice(0, entry.indexOf('=')), entry);
+    const values = new Map(keys.map((key) => [key, key]));
+    for (const entry of fixed) {
+      const equals = entry.indexOf('='),
+        key = entry.slice(0, equals);
+      values.set(key, equals === entry.length - 1 ? key : entry);
+    }
     return { env: [...values.values()], labels: { ...image.Config.Labels } };
   }
   async #external(
