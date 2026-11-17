@@ -10,6 +10,7 @@ import type { RecoveryAuthority, WorkerRecoveryAuthentication } from './worker-r
 import { RECOVERY_HEADER } from './worker-recovery-auth.js';
 import { WorkerViewerEndpointCustodyError } from './worker-execution.js';
 import type { PlanViewerReconnectLease } from './plan-move.js';
+import { dockerWorkerIdentityOf, dockerWorkerIdentityPresented, type DockerWorkerRequestIdentity } from './docker-worker-identity.js';
 
 const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 export type ViewerReconnectResult = 'connected' | 'inspection-requested' | 'unavailable' | 'busy' | 'changed';
@@ -32,6 +33,9 @@ export interface ViewerReconnectDeps {
   /** Trusted dedicated attach-only endpoint; never selected by automatic repair. */
   diagnosticViewer?(): boolean;
   diagnosticMoveGuard?(employeeId: string, owner?: string): Promise<PlanViewerReconnectLease>;
+  /** Only the privately composed boxed Runtime may observe and attach a Docker viewer. */
+  dockerReconnect?(employee: CompanyEmployee, admitted: () => boolean,
+    revalidateMove?: () => Promise<boolean>): Promise<'connected' | 'unconfirmed' | 'unavailable'>;
   pause(id: string): () => void;
   publish(session: Session): void;
   now?(): number;
@@ -52,6 +56,23 @@ export class WorkerViewerReconnect {
       const employee = this.deps.company.registeredEmployees().find(e => e.id === authority.employeeId);
       return !!caller && this.deps.session(authority.sessionId) === caller && caller.owner === authority.owner &&
         !!employee && employee.permissions.recoverEmployees === true;
+    };
+  }
+
+  /** A verified Docker worker has its own request identity, never a synthetic
+   * native recovery assertion. The shared company action retains both bindings
+   * and rechecks its independently granted recovery permission at every await. */
+  delegatedWorker(identity: DockerWorkerRequestIdentity, employeeId: string): () => boolean {
+    identity.require();
+    const action = this.deps.company.recoveryAction(employeeId, identity.owner, identity.sessionId);
+    return () => {
+      try {
+        identity.require();
+        action.require();
+        const actor = this.deps.company.registeredEmployees().find(employee => employee.id === identity.employeeId);
+        return !!actor && actor.owner === identity.owner && actor.sessionId === identity.sessionId &&
+          actor.sessionGeneration === identity.sessionGeneration;
+      } catch { return false; }
     };
   }
 
@@ -134,6 +155,7 @@ export class WorkerViewerReconnect {
       (automatic && session.viewerInspectionRequested) ||
       (session.runtimeHealth !== 'disconnected' && (automatic || !session.viewerInputHeld)))
       return 'unavailable';
+    if (session.docker && (automatic || !d.dockerReconnect)) return 'unavailable';
     const manualDiagnostic = !automatic && d.diagnosticViewer?.() === true && !!d.diagnosticMoveGuard;
     let diagnostic = !d.providerHealthy(original);
     if (diagnostic && !manualDiagnostic) return 'unavailable';
@@ -178,7 +200,11 @@ export class WorkerViewerReconnect {
       claim = d.company.prepareWake(employeeId, original.sessionId);
       if (!claim || !current()) return outcome('lifecycle-in-progress', 'busy');
       release = d.pause(original.sessionId);
-      if (!await session.reconnectWorkerViewer(current, moveCurrent!.revalidate?.bind(moveCurrent), diagnostic)) return outcome(!authorized() ? 'authority-changed' :
+      const revalidate = moveCurrent!.revalidate?.bind(moveCurrent);
+      const repaired = session.docker
+        ? !diagnostic && await d.dockerReconnect!(original, current, revalidate) === 'connected'
+        : await session.reconnectWorkerViewer(current, revalidate, diagnostic);
+      if (!repaired) return outcome(!authorized() ? 'authority-changed' :
         session.workerViewerReconnectBlocker ?? 'readiness-unconfirmed', current() ? 'unavailable' : 'changed');
       if (!current()) return outcome('binding-or-authority-changed', 'changed');
       d.publish(session);
@@ -222,7 +248,13 @@ export function registerWorkerViewerReconnect(app: FastifyInstance, controller: 
   for (const action of ['', '/status']) app.post('/api/company/employees/:id/reconnect' + action, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     let authorized: () => boolean;
-    if (req.headers['x-reverie-parent-session'] === undefined && req.headers[RECOVERY_HEADER] === undefined &&
+    if (dockerWorkerIdentityPresented(req)) {
+      try {
+        const identity = dockerWorkerIdentityOf(req);
+        if (!identity || identity.owner !== ownerFor(req)) throw Error('Docker worker identity unavailable');
+        authorized = controller.delegatedWorker(identity, (req.params as { id: string }).id);
+      } catch { return reply.code(403).send({ success: false, error: 'Authenticated worker recovery permission is required' }); }
+    } else if (req.headers['x-reverie-parent-session'] === undefined && req.headers[RECOVERY_HEADER] === undefined &&
       req.headers['x-reverie-service-token'] === undefined && verifiedOwner(req)) authorized = () => verifiedOwner(req);
     else {
       try {

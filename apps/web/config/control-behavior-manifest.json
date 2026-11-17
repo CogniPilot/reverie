@@ -963,6 +963,256 @@
         "expect(f.writes()).toEqual([])"
       ],
       "outcome": "Explicit page and exact-status controls perform only bounded GETs; an exact retained terminal record is shown without manufacturing current activity or native policy evidence."
+    },
+    "ui.motion.rail-keyboard": {
+      "test": "test/tab-rail-resize.browser.test.ts",
+      "title": "resizes from the keyboard and settles once",
+      "assertions": [
+        "await handle.press('ArrowRight')",
+        "expect(await handle.getAttribute('aria-valuenow')).toBe('264')",
+        "expect(await page.evaluate(() => (window as any).__resizeCount)).toBe(1)"
+      ],
+      "outcome": "Actual controller and shipped separator/stylesheet respond to a real Chromium keyboard gesture and settle one synthetic terminal resize callback. Real terminal/backend geometry is not inferred."
+    },
+    "ui.motion.rail-pointer": {
+      "test": "test/tab-rail-resize.browser.test.ts",
+      "title": "drags the resize separator across the terminal iframe and settles exactly once",
+      "assertions": [
+        "await page.mouse.down()",
+        "expect(await page.locator('#tabRailResizeShield').isVisible()).toBe(true)",
+        "await page.mouse.move(700, bounds!.y + bounds!.height / 2, { steps: 8 })",
+        "await expect.poll(() => handle.getAttribute('aria-valuenow')).toBe('360')",
+        "expect(await page.evaluate(() => (window as unknown as RailFixtureWindow).__resizeCount)).toBe(0)",
+        "await page.mouse.up()",
+        "await expect.poll(() => page.evaluate(() => (window as unknown as RailFixtureWindow).__resizeCount)).toBe(1)",
+        "expect(await page.evaluate(() => (window as unknown as RailFixtureWindow).__settings.tabRailWidth)).toBe(360)",
+        "expect(await page.locator('#tabRailResizeShield').isVisible()).toBe(false)"
+      ],
+      "outcome": "The shipped focusable resize separator and actual controller keep pointer capture across a synthetic terminal iframe, clamp to the configured maximum and persist one preference with one settled callback after release. No provider/native terminal claim."
+    },
+    "ui.motion.group-rename": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "paints the inline group editor as you type, then saves the trimmed name",
+      "assertions": [
+        "await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click()",
+        "await page.keyboard.type('Front end')",
+        "expect(paint.width).toBeGreaterThan(120)",
+        "await page.keyboard.press('Enter')",
+        "expect(puts.at(-1).layout.groups[0].name).toBe('Front end')",
+        "expect(await page.locator('[data-tab-group-header=\"gx\"] .tab-layout-group-name').textContent()).toBe('Front end')"
+      ],
+      "outcome": "A real Chromium gesture opens the shipped group menu and invokes Rename group; the actual inline editor paints, writes the updated layout once through a synthetic API, and restores group focus."
+    },
+    "ui.motion.group-drag": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "drags a row from Ungrouped onto a group header: one PUT appending it there",
+      "assertions": [
+        "await drag('.session-tab[data-id=\"one\"]', '[data-tab-group-header=\"gy\"]')",
+        "expect(puts).toHaveLength(1)",
+        "expect(puts[0].baseVersion).toBe(4)",
+        "expect(puts[0].layout.ungrouped).toEqual([])",
+        "expect(await page.evaluate(() => (window as any).__activation)).toBeNull()"
+      ],
+      "outcome": "Existing Chromium pointer test moves an actual rendered row to a group, sends one expected-version synthetic PUT and suppresses the release click. This scenario records motion evidence without treating the dynamic renderer as a resolved control declaration."
+    },
+    "office.employee-general-permissions.real-roundtrip": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "persists and revokes all general profile grants through the real owner API at ${width}px",
+      "assertions": [
+        "await dialog.getByLabel('Role title', { exact: true }).fill('Unsubmitted general permission draft')",
+        "for (const [key, label] of generalGrants)",
+        "expect(await control.isChecked()).toBe(false)",
+        "await control.check()",
+        "await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(true)",
+        "expect((await diskPermissions())[key]).toBe(true)",
+        "await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()",
+        "expect((await current()).position).toBe(before.position)",
+        "expect(await control.isChecked()).toBe(true)",
+        "await control.uncheck()",
+        "await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(false)",
+        "expect((await diskPermissions())[key]).toBe(false)",
+        "expect(responses.filter((response) => /\\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([])"
+      ],
+      "outcome": "At320 and1280px the actual owner Chromium UI grants and revokes all five general profile permissions, observes the real canonical permission API and independently decoded company.json, retains grants across Cancel/reopen and does not persist the unsaved profile edit. Synthetic employees remain OFF; no wake/restart/vacation action is requested. This qualifies grant persistence and UI consumption, not delegated action authority or native execution."
+    },
+    "office.employee-office-goals-permissions.committed-lost-readback": {
+      "test": "test/office-owner-controls.browser.test.ts",
+      "title": "retains a committed general profile grant after a lost reply without replay (case %i)",
+      "assertions": [
+        "const width = caseIndex < 2 ? 320 : 1280",
+        "['manageOffice', 'Manage office attendance and restarts'] as const",
+        "['manageGoals', 'Manage team goals'] as const",
+        "expect(reply.status()).toBe(200)",
+        "await route.fulfill({ status: 503, json: { success: false, error: 'Synthetic reply unconfirmed' } })",
+        "await control.check()",
+        "await expect.poll(() => error.textContent()).toContain('It may already have saved')",
+        "await errorInViewport(error)",
+        "return !!bounds && !!body && bounds.y >= body.y && bounds.y + bounds.height <= body.y + body.height",
+        "expect(writes).toEqual([{ permissions: { [key]: true } }])",
+        "expect((await diskPermissions())[key]).toBe(true)",
+        "await refresh.click()",
+        "expect(writes).toHaveLength(1)",
+        "await control.uncheck()",
+        "expect(writes).toEqual([{ permissions: { [key]: true } }, { permissions: { [key]: false } }])",
+        "expect((await diskPermissions())[key]).toBe(false)",
+        "expect(await draft.inputValue()).toBe('Unsubmitted permission lost-reply draft')",
+        "expect((await current()).position).toBe(before.position)"
+      ],
+      "outcome": "Four static Chromium cases cover Office/Goals at phone/desktop widths. The real owner API commits before an injected503 loses its acknowledgement. All general grant controls stay held, the error and explicit Refresh fit the viewport, a readback observes the actual committed permission without replay, and an explicit revocation is independently confirmed on disk while the profile draft stays unsaved. No provider or delegated/native action is invoked."
+    },
+    "account.consumer.start-refusal-retry": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "retries a refused account sign-in only on an explicit click at ${width}px",
+      "assertions": [
+        "status: starts === 1 ? 503 : 403",
+        "await expect.poll(() => dialog.getByRole('status').textContent()).toContain('Synthetic service unavailable')",
+        "await page.clock.runFor(6000)",
+        "expect(starts).toBe(1)",
+        "await retry.click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toContain('Synthetic sign-in forbidden')",
+        "expect(starts).toBe(2)",
+        "expect(await page.getByRole('dialog').count()).toBe(1)",
+        "expect(calls).toEqual([{ path: startPath, method: 'POST' }, { path: startPath, method: 'POST' },])"
+      ],
+      "outcome": "At320 and1280px the shipped dialog retains a synthetic503 start failure, issues no automatic retry across four timer intervals, and dispatches exactly one new POST only when Try again is clicked. A synthetic403 refusal stays visible and Close removes the dialog. This is closed API consumer behavior, not real authentication or authorization enforcement."
+    },
+    "account.consumer.failed-poll-retry": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "stops a failed account poll and exposes one explicit retry at ${width}px",
+      "assertions": [
+        "status: 503, json: { ok: false, error: 'Synthetic poll unavailable' }",
+        "await page.clock.runFor(1500)",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('The sign-in helper stopped. Try again.')",
+        "await page.clock.runFor(6000)",
+        "expect({ starts, polls }).toEqual({ starts: 1, polls: 1 })",
+        "await page.getByRole('button', { name: 'Try again', exact: true }).click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for attempt-2')",
+        "expect(starts).toBe(2)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/attempt-2', method: 'DELETE' }",
+        "expect(await page.getByRole('dialog').count()).toBe(0)"
+      ],
+      "outcome": "Phone/desktop shipped UI stops polling after a synthetic503, displays the failure without automatic restart, and sends one explicit retry. Cancel targets only the replacement attempt and usage is not refreshed. Real helper retirement, provider credentials and account-service retry admission remain separate."
+    },
+    "account.consumer.wrong-account": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "starts another account attempt only through Wrong account at ${width}px",
+      "assertions": [
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Signed in')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app.refreshed)).toBe(1)",
+        "await page.clock.runFor(6000)",
+        "expect(starts).toBe(1)",
+        "await page.getByRole('button', { name: 'Wrong account? Sign in again', exact: true }).click()",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for choice-2')",
+        "expect(starts).toBe(2)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/choice-2', method: 'DELETE' }",
+        "expect(await page.getByRole('dialog').count()).toBe(0)"
+      ],
+      "outcome": "At both widths a synthetic successful poll refreshes usage once and stays settled until Wrong account is clicked. That shipped button starts exactly one new attempt for the same account; Cancel targets its ID without deleting the settled first attempt. Vendor identity, credentials and actual login success are not qualified."
+    },
+    "account.consumer.stale-poll": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "ignores a delayed account poll after cancellation and replacement at ${width}px",
+      "assertions": [
+        "await gate",
+        "await expect.poll(() => entered, { timeout: 5000 }).toBe(true)",
+        "await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click()",
+        "{ path: '/api/plans/logins/delayed-1', method: 'DELETE' }",
+        "await expect.poll(() => page.getByRole('status').textContent()).toBe('Waiting for delayed-2')",
+        "release()",
+        "await expect.poll(() => page.evaluate(() => (window as unknown as AccountWindow).previousSignIn?.polling)).toBe(false)",
+        "expect(await page.getByRole('status').textContent()).toBe('Waiting for delayed-2')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app._signIn?.view.id)).toBe('delayed-2')",
+        "expect(await page.evaluate(() => (window as unknown as AccountWindow).app.refreshed || 0)).toBe(0)",
+        "await page.getByRole('button', { name: 'Close', exact: true }).click()",
+        "{ path: '/api/plans/logins/delayed-2', method: 'DELETE' }"
+      ],
+      "outcome": "A real timer issues the closed synthetic GET and a held reply arrives after Cancel and a replacement dialog. The shipped stale-state guard prevents the old success from repainting the replacement or refreshing usage. Cancel and Close send DELETE for their exact live attempt IDs. This does not establish server cancellation or provider process retirement."
+    },
+    "account.consumer.close-cancels": {
+      "test": "test/account-ui.browser.test.ts",
+      "title": "opens and cancels a single account sign-in without a Plans screen",
+      "assertions": [
+        "await dialog.getByRole('button', { name: 'Close', exact: true }).click()",
+        "await page.waitForFunction(() => (window as unknown as AccountWindow).app._signIn === null)",
+        "expect(calls).toContainEqual({ path: '/api/plans/logins/test-login', method: 'DELETE' })",
+        "expect(await page.locator('.plans-screen').count()).toBe(0)"
+      ],
+      "outcome": "The existing Chromium case clicks shipped Close and observes a DELETE for the pending synthetic login without opening Plans. It proves consumer dispatch only, not authentication, server cancellation or provider effects."
+    },
+    "ui.motion.stale-destination-drop": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "drops a stale pointer move whose destination disappeared without replaying the write",
+      "assertions": [
+        "await route.fulfill({ status: 409, json: { success: false, data: { layout: current } } })",
+        "await drag('.session-tab[data-id=\"one\"]', '[data-tab-group-header=\"gy\"]')",
+        ".toBe('Tab groups changed elsewhere; part of your edit no longer applies.')",
+        ".poll(() => page.evaluate(() => (window as unknown as LayoutWindow).__app._tabLayoutEditor.hasPending()))",
+        ".toBe(false)",
+        "expect(puts).toHaveLength(1)",
+        "expect(puts[0].baseVersion).toBe(4)",
+        "expect(await page.locator('[data-tab-group-header=\"gy\"]').count()).toBe(0)",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current)",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__activation)).toBeNull()",
+        "await page.getByRole('button', { name: 'Dismiss', exact: true }).click()",
+        "await page.clock.runFor(5000)",
+        "expect(await page.locator('.toast-error').count()).toBe(0)",
+        "expect(requests).toEqual(['PUT'])",
+        "expect(puts).toHaveLength(1)"
+      ],
+      "outcome": "A real desktop Chromium pointer gesture optimistically moves a row, then a closed synthetic409 supplies a newer layout with the destination removed and an unrelated concurrent name. The shipped coordinator drops the inapplicable operation, preserves that authoritative layout, removes drag decoration, avoids row activation, reports through the actual toast, and issues no second PUT. Actual Dismiss works. Valid409 operation rebases remain supported; this scenario does not qualify real multi-user API authority or a resolved dynamic drag-control declaration."
+    },
+    "ui.motion.rename-lost-readback": {
+      "test": "test/tab-layout-editing.browser.test.ts",
+      "title": "reads a committed group rename after a lost reply without replay and saves only a later explicit edit",
+      "assertions": [
+        "await readGate",
+        "expect(body!.baseVersion).toBe(current.version)",
+        "current = { ...structuredClone(body!.layout), version: current.version + 1 }",
+        "if (puts.length === 1) await route.abort('failed')",
+        "await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click()",
+        "await page.locator('.tab-layout-group-rename-input').fill('Committed before lost reply')",
+        "await expect.poll(() => readEntered, { timeout: 5000 }).toBe(true)",
+        "await expect.poll(() => page.locator('.toast-message').textContent()).toBe('Could not save tab groups.')",
+        "expect(current.version).toBe(5)",
+        "expect(current.groups[0].name).toBe('Committed before lost reply')",
+        "expect(requests).toEqual(['PUT', 'GET'])",
+        "expect(puts).toHaveLength(1)",
+        "await page.getByRole('button', { name: 'Dismiss', exact: true }).click()",
+        "releaseRead()",
+        "expect(await page.evaluate(() => (window as unknown as LayoutWindow).__app.tabLayout)).toEqual(current)",
+        "await page.clock.runFor(5000)",
+        "expect(requests).toEqual(['PUT', 'GET'])",
+        "expect(puts).toHaveLength(1)",
+        "await page.getByRole('menuitem', { name: 'Rename group', exact: true }).click()",
+        "await page.locator('.tab-layout-group-rename-input').fill('Explicit next edit')",
+        "expect(puts.map((body: Write) => body.baseVersion)).toEqual([4, 5])",
+        "expect(current.groups[1]).toEqual(LAYOUT.groups[1])",
+        "expect(current.ungrouped).toEqual(LAYOUT.ungrouped)",
+        "expect(requests).toEqual(['PUT', 'GET', 'PUT'])"
+      ],
+      "outcome": "The actual desktop Rename group menu, input, fetch API client, editor and toast handle a closed synthetic commit whose reply is aborted. A gated GET returns the exact committed version5 layout, the visible rail adopts it without replaying the original PUT, and only a later explicit menu edit writes with baseVersion5. Actual Dismiss works. This qualifies consumer readback and dispatch, not real server persistence, multi-user authorization, production effects or phone rail editing."
+    },
+    "employee.viewer-status.failed-read-close": {
+      "test": "test/company-resource-layout.browser.test.ts",
+      "title": "retains visible viewer read failures and isolates closed pending dialogs at %ipx",
+      "assertions": [
+        "await statusButton.click()",
+        ".toBe('Synthetic viewer status unavailable. Refresh to check again.')",
+        "await refresh.click()",
+        "toHaveLength(2)",
+        "await dialog.getByRole('button', { name: 'Close terminal status', exact: true }).click()",
+        "expect(await dialog.count()).toBe(0)",
+        "await statusButton.click()",
+        "reason: 'native-health-unavailable'",
+        "__releaseClosedViewerRead()",
+        "expect(await cachedStatus()).toEqual(currentStatus)",
+        "body: { sessionId, sessionGeneration: 2 }",
+        "await reopened.getByRole('button', { name: 'Close terminal status', exact: true }).click()",
+        "expect(await reopened.count()).toBe(0)"
+      ],
+      "outcome": "Actual shipped viewer-status controls in Chromium at 320/1280px retain a closed synthetic503 error, make one explicit refresh, close during a pending status read, reopen with newer status and refuse the delayed closed-dialog response as both visible report and shared status-cache state. All four POSTs target the exact original read-only status binding; no reconnect/restart/chat effects or native worker health are qualified."
     }
   },
   "mappings": [
@@ -1029,7 +1279,8 @@
         "office.employee-recovery.cancel-keeps-saved",
         "office.employee-permission.lost-reply-readback",
         "office.employee-permission.disconnected-readback",
-        "office.employee-permission.malformed-readback"
+        "office.employee-permission.malformed-readback",
+        "office.employee-general-permissions.real-roundtrip"
       ]
     },
     {
@@ -1146,9 +1397,10 @@
         "office.employee-permission.lost-reply-readback",
         "office.employee-permission.disconnected-readback",
         "office.employee-permission.malformed-readback",
-        "office.employee-permission.derived-board-readback"
+        "office.employee-permission.derived-board-readback",
+        "office.employee-office-goals-permissions.committed-lost-readback"
       ],
-      "remaining": "These states exercise recovery and dependent board permissions. Other permission types, cross-account owner loss and stale-dialog responses still require actual browser scenarios; metadata/native recovery authority is separate."
+      "remaining": "Named recovery, dependent Board, Office and Goals lost-reply readback states are qualified. Other acknowledgement failures, hiring-form controls, cross-account owner loss, stale-dialog responses and delegated/native action authority remain separate."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.openEmployeeProfile::inline::button:Close profile for ${employee.name}",
@@ -1343,6 +1595,80 @@
       "declaration": "src/web/public/company-resources.js::OriginalRequestsPanel.render::inline::button:Next original requests",
       "scenarios": ["docker-resources.original-pagination"],
       "remaining": "Only the named synthetic DOM consumer scenario. Actual owner/CAS/native/helper proofs are separately qualified by the API producer; paid workers, all resource policies and whole-site coverage are not inferred."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp.startTabGroupRename::input::input:[binding label]",
+      "scenarios": ["ui.motion.group-rename", "ui.motion.rename-lost-readback"],
+      "remaining": "Only the actual desktop Rename group action/input success and named lost-reply consumer readback are qualified. Other menu actions, real multi-user API authorization/persistence, other stale or failed writes, reload recovery, touch movement and the unresolved dynamic group renderer remain gaps."
+    },
+    {
+      "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::button::button:[binding label]",
+      "scenarios": ["ui.motion.group-rename", "ui.motion.rename-lost-readback"],
+      "remaining": "Only the actual desktop Rename group action/input success and named lost-reply consumer readback are qualified. Other menu actions, real multi-user API authorization/persistence, other stale or failed writes, reload recovery, touch movement and the unresolved dynamic group renderer remain gaps."
+    },
+    {
+      "declaration": "src/web/public/index.html::html::separator:tabRailResizeHandle::1",
+      "scenarios": ["ui.motion.rail-keyboard", "ui.motion.rail-pointer"],
+      "remaining": "Only named desktop Chromium keyboard/pointer and settled callback behavior. Real terminal geometry/backend resize, pointer-cancel/lost-capture recovery, mobile touch, all viewport extrema and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageOffice::input:[binding label]",
+      "scenarios": [
+        "office.employee-general-permissions.real-roundtrip",
+        "office.employee-office-goals-permissions.committed-lost-readback"
+      ],
+      "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageGoals::input:[binding label]",
+      "scenarios": [
+        "office.employee-general-permissions.real-roundtrip",
+        "office.employee-office-goals-permissions.committed-lost-readback"
+      ],
+      "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",
+      "scenarios": ["account.consumer.start-refusal-retry", "account.consumer.failed-poll-retry"],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::wrong::button:plans-link",
+      "scenarios": ["account.consumer.wrong-account"],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::_renderSignIn::cancel::button:plans-link",
+      "scenarios": [
+        "account.consumer.failed-poll-retry",
+        "account.consumer.wrong-account",
+        "account.consumer.stale-poll"
+      ],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/account-ui.js::signInAccount::close::button:plans-btn",
+      "scenarios": [
+        "account.consumer.close-cancels",
+        "account.consumer.start-refusal-retry",
+        "account.consumer.stale-poll"
+      ],
+      "remaining": "Only the named shipped UI consumer states against a closed synthetic API are qualified. Real owner/employee authorization, vendor identity, login helper lifecycle/retirement, credential effects, other recovery/transport failures and production behavior remain unqualified."
+    },
+    {
+      "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
+      "scenarios": ["ui.motion.stale-destination-drop", "ui.motion.rename-lost-readback"],
+      "remaining": "Only actual Dismiss on the two named desktop tab-layout error toasts is qualified. Other toast call sites, action buttons, timing/accessibility states, narrow viewports and authority or backend effects remain separately unqualified."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::close::button:Close terminal status",
+      "scenarios": ["employee.viewer-status.failed-read-close"],
+      "remaining": "Synthetic status failures and reply ordering qualify only the named human consumer behavior. Actual Docker attachment, delegated identity/authority, provider health and reconnect effects require separate native acceptance; Escape/backdrop/keyboard close variants remain gaps."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::refresh::button:Refresh terminal status",
+      "scenarios": ["employee.viewer-status.failed-read-close"],
+      "remaining": "Synthetic status failures and reply ordering qualify only the named human consumer behavior. Actual Docker attachment, delegated identity/authority, provider health and reconnect effects require separate native acceptance; Escape/backdrop/keyboard close variants remain gaps."
     }
   ],
   "gaps": [
@@ -1411,7 +1737,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::render::summary:Active hires \u00b7 ${list.length}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.companyHiringFields::render::summary:Active hires · ${list.length}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1535,14 +1861,6 @@
       "reason": "Detection gap: input:[binding label]"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageGoals::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageOffice::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.ensureBackButton::back::button:Back to chat",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
@@ -1603,7 +1921,7 @@
       "reason": "Detection gap: semantic-role:alert.setAttribute('role', 'button')"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.messageEl::play::button:\u25b6 Play",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.messageEl::play::button:▶ Play",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1747,7 +2065,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::renderReports::summary:${cycle.date || ''} \u00b7 ${employee?.name || 'Expert'} \u00b7 ${cycle.kind || 'Report'} \u00b7 ${cycle.state || ''}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openCompanySettings::renderReports::summary:${cycle.date || ''} · ${employee?.name || 'Expert'} · ${cycle.kind || 'Report'} · ${cycle.state || ''}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -1991,7 +2309,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPollDialog::remove::button:\u00d7",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openPollDialog::remove::button:×",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2119,7 +2437,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openStartupContext::inline::summary:${section.label} \u00b7 ${section.status}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.openStartupContext::inline::summary:${section.label} · ${section.status}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2384,14 +2702,6 @@
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.settingsPage::invite::button:Invite agents",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::close::button:Close terminal status",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.showEmployeeViewerStatus::refresh::button:Refresh terminal status",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2847,7 +3157,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/company-ui.js::_renderCompany::inline::summary:${cycle.date} \u00b7 ${data.employees.find((e) => e.id === cycle.employeeId)?.name || 'Employee'} \u00b7 ${cycle.kind} \u00b7 ${cycle.state}",
+      "declaration": "src/web/public/company-ui.js::_renderCompany::inline::summary:${cycle.date} · ${data.employees.find((e) => e.id === cycle.employeeId)?.name || 'Employee'} · ${cycle.kind} · ${cycle.state}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -2947,7 +3257,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/company-resources.js::FleetPanel.renderNative::inline::summary:Employee thresholds \u00b7 ${Object.keys(selected.employeeMemoryHighMiB).length}",
+      "declaration": "src/web/public/company-resources.js::FleetPanel.renderNative::inline::summary:Employee thresholds · ${Object.keys(selected.employeeMemoryHighMiB).length}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
@@ -5915,10 +6225,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::cancel::button:plans-link",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/account-ui.js::_renderSignIn::done::button:plans-btn plans-btn--primary",
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
@@ -5935,15 +6241,7 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/account-ui.js::_renderSignIn::send::button:plans-btn plans-btn--primary",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/account-ui.js::_renderSignIn::wrong::button:plans-link",
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
@@ -5965,10 +6263,6 @@
     {
       "declaration": "src/web/public/account-ui.js::accountUiEl::node::dynamic-constructor:9332ac7d5042",
       "reason": "Detection gap: dynamic-constructor:9332ac7d5042"
-    },
-    {
-      "declaration": "src/web/public/account-ui.js::signInAccount::close::button:plans-btn",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
       "declaration": "src/web/public/account-ui.js::signInAccount::e::dynamic-constructor:9332ac7d5042",
@@ -6023,10 +6317,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::button::button:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/app.js::ReverieApp._openTabLayoutMenu::inline::semantic-role:button.setAttribute('role', 'menuitem')",
       "reason": "Detection gap: semantic-role:button.setAttribute('role', 'menuitem')"
     },
@@ -6065,10 +6355,6 @@
     {
       "declaration": "src/web/public/app.js::ReverieApp._showSoloSessionGone::inline::embedded-control-markup:50bdfae07191",
       "reason": "Detection gap: embedded-control-markup:50bdfae07191"
-    },
-    {
-      "declaration": "src/web/public/app.js::ReverieApp.startTabGroupRename::input::input:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
       "declaration": "src/web/public/approvals-ui.js::_approvalCardHtml::inline::embedded-control-markup:070a59753e62",
@@ -6799,10 +7085,6 @@
       "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
     },
     {
-      "declaration": "src/web/public/panels-ui.js::showToast::closeBtn::button:[binding label]",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; discovered source does not qualify this control."
-    },
-    {
       "declaration": "src/web/public/people.html::external-script::people.js",
       "reason": "Detection gap: Script dependency; review its coverage against the scoped source list: people.js"
     },
@@ -7323,9 +7605,9 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1494,
+  "gapBudget": 1483,
   "limitations": [
-    "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis.",
+    "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",
     "Property-assigned labels, arbitrary wrappers, imported modules outside the listed source surface, CSS interactions and runtime-only branches require additional source review and behavioral scenarios.",
     "Mappings qualify only their named assertion scenario. The remaining state gaps on each mapping are unresolved; no control or whole-site completeness is claimed.",

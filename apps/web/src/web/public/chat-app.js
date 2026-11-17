@@ -9163,7 +9163,7 @@ class ReverieChatApp {
     return [
       responsive && status.reason === 'viewer-not-disconnected' ? '' : reason,
       responsive ? 'The terminal viewer responded.' : '',
-      'Employee and chat readiness are still unconfirmed.',
+      'This viewer check does not measure employee or chat readiness.',
       retry,
     ]
       .filter(Boolean)
@@ -13007,6 +13007,7 @@ class ReverieChatApp {
     preferenceStatus.setAttribute('role', 'status');
     const preferenceError = this.el('p', 'ca-company-error ca-profile-permission-error');
     preferenceError.setAttribute('role', 'alert');
+    const preferenceFeedback = this.el('div', 'ca-profile-permission-feedback');
     const inputs = {
       recoverEmployees: recovery,
       manageOffice,
@@ -13042,7 +13043,7 @@ class ReverieChatApp {
       preferenceStatus.textContent = '';
       preferenceError.textContent = text;
       paint();
-      preferenceError.scrollIntoView({ block: 'nearest' });
+      preferenceFeedback.scrollIntoView({ block: 'nearest' });
     };
     const refreshPermissions = async () => {
       if (!live() || !['ready', 'unconfirmed'].includes(preferenceState.kind)) return;
@@ -13137,7 +13138,8 @@ class ReverieChatApp {
       goalLabel
     );
     preferenceStatus.classList.add('ca-profile-permission-status');
-    container.append(general, boardFields, preferenceStatus, preferenceError, refresh);
+    preferenceFeedback.append(preferenceStatus, preferenceError, refresh);
+    container.append(general, boardFields, preferenceFeedback);
     dialog.addEventListener(
       'close',
       () => {
@@ -13148,7 +13150,7 @@ class ReverieChatApp {
     if (!projection(employee)) {
       preferenceState = { kind: 'unconfirmed' };
       preferenceError.textContent = readUnconfirmed;
-      container.prepend(preferenceError, refresh);
+      container.prepend(preferenceFeedback);
     }
     paint();
   }

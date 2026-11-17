@@ -1,4 +1,6 @@
 //! Native laptop defaults shared by the packaged command-line entrypoints.
+#![forbid(unsafe_code)]
+
 use std::path::Path;
 
 pub mod autoenv;

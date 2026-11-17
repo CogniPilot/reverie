@@ -1,3 +1,4 @@
+import type{SessionState}from'./types.js';
 /**
  * @fileoverview Plans: every subscription account on this machine, its usage pace, the
  * sessions running on it, and the local GPU, for the Plans view and `/api/plans`.
@@ -545,6 +546,14 @@ export class PlanService {
     return (await planCatalogue(this.deps.home)).find((a) => a.id === id);
   }
 
+  /** Read-only account selection for a retained native worker whose controller
+   * viewer is absent. This describes saved recipe DATA and grants no launch. */
+  async accountForSavedState(saved:SessionState):Promise<PlanAccount|undefined>{
+    const raw=(saved as SessionState&{__envOverrides?:unknown}).__envOverrides;
+    if(raw!==undefined&&(!raw||typeof raw!=='object'||Array.isArray(raw)||Object.values(raw).some(v=>typeof v!=='string')))throw Error('Saved account selection unconfirmed');
+    const env=raw as Record<string,string>|undefined;
+    return accountForSession({id:saved.id,name:saved.name??'',mode:saved.mode??'claude',status:saved.status,subscriptionProfile:saved.subscriptionProfile,getEnvOverridesForPersist:()=>env},await planCatalogue(this.deps.home));
+  }
   /** The account a new session should use, and how to launch on it; null when none fits. */
   async suggest(provider: SubscriptionProvider) {
     const { accounts, catalogue } = await this.rows();

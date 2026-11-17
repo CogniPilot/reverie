@@ -1,5 +1,36 @@
 /** Fixed read/attach-only native protocol. These bytes and returned descriptors
  * are DATA; the original Engine-minted view still owns application admission. */
+export type DockerProviderRuntimeNamespace = 'session-v1';
+/** Placement DATA only. Callers retain their original private native authority. */
+export function dockerProviderSocketLabel(
+  sessionId: string,
+  runtimeNamespace?: DockerProviderRuntimeNamespace
+): string {
+  if (
+    !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(sessionId) ||
+    (runtimeNamespace !== undefined && runtimeNamespace !== 'session-v1')
+  )
+    throw Error('Fixed Docker provider namespace required');
+  return runtimeNamespace === 'session-v1' ? 'reverie-docker-' + sessionId : 'reverie-docker';
+}
+export function dockerProviderRuntimeArguments(runtimeNamespace?: DockerProviderRuntimeNamespace): readonly string[] {
+  if (runtimeNamespace === undefined) return [];
+  if (runtimeNamespace !== 'session-v1') throw Error('Fixed Docker provider namespace required');
+  return ['--runtime-namespace=session-v1'];
+}
+export function dockerPlanProviderSelection(
+  plan: Readonly<{
+    account: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }>;
+    runtimeNamespace?: DockerProviderRuntimeNamespace;
+  }>
+) {
+  dockerProviderRuntimeArguments(plan.runtimeNamespace);
+  return Object.freeze({
+    provider: plan.account.provider,
+    projectionDigest: plan.account.projectionDigest,
+    ...(plan.runtimeNamespace ? { runtimeNamespace: plan.runtimeNamespace } : {}),
+  });
+}
 export const DOCKER_PROVIDER_VIEW_ENV = Object.freeze([
   '--env',
   'TMUX=',
@@ -40,14 +71,17 @@ export const DOCKER_PROVIDER_VIEW_TMUX = '/opt/reverie-worker-tools/bin/tmux';
 export const DOCKER_PROVIDER_VIEW_PROGRAM = String.raw`
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
-const [mode, sid, operation, hookKind, pane, pidText, ticks, expectedGeneration] = process.argv.slice(1);
+const argv = process.argv.slice(1);
+const runtimeNamespace = argv[0] === '--runtime-namespace=session-v1' ? (argv.shift(), 'session-v1') : undefined;
+const [mode, sid, operation, hookKind, pane, pidText, ticks, expectedGeneration] = argv;
+const socketLabel = (${dockerProviderSocketLabel.toString()})(sid, runtimeNamespace);
 const tmuxProgram = ${JSON.stringify(DOCKER_PROVIDER_VIEW_TMUX)};
 const uuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 function refuse() { throw Error('Existing Docker provider view unavailable'); }
 if (!uuid.test(sid || '') || !uuid.test(operation || '') ||
     !['presence', 'observe', 'attach'].includes(mode) ||
     !['none', 'generation'].includes(hookKind) ||
-    process.argv.length !== (mode === 'attach' ? 9 : 5)) refuse();
+    argv.length !== (mode === 'attach' ? 8 : 4)) refuse();
 for (const path of ['/', '/opt', '/opt/reverie-worker-tools', '/opt/reverie-worker-tools/bin']) {
   const stat = fs.lstatSync(path);
   if (!stat.isDirectory() || stat.uid !== 0 || (stat.mode & 0o022) !== 0) refuse();
@@ -69,7 +103,7 @@ const childEnvironment = {
 };
 const target = '=reverie-dkr-' + sid;
 function tmux(args, optional = false) {
-  const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', 'reverie-docker', ...args],
+  const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, ...args],
     { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
   if (result.error || result.signal) refuse();
   if (optional && result.status === 1) return undefined;
@@ -96,7 +130,7 @@ if (mode === 'presence') {
     const directory = '/tmp/tmux-' + process.getuid();
     const parent = fs.lstatSync(directory);
     if (!parent.isDirectory() || parent.uid !== process.getuid() || (parent.mode & 0o022) !== 0) refuse();
-    const socket = fs.lstatSync(directory + '/reverie-docker');
+    const socket = fs.lstatSync(directory + '/' + socketLabel);
     if (!socket.isSocket() || socket.uid !== process.getuid()) refuse();
   } catch (error) {
     if (!error || error.code !== 'ENOENT') throw error;
@@ -129,7 +163,7 @@ const result = { ...first, paneStartTicks: start };
 if (mode !== 'attach') process.stdout.write(JSON.stringify(result) + '\n');
 else {
   if (pane !== result.paneId || pidText !== String(result.panePid) || ticks !== start || expectedGeneration !== (result.hooks.kind === 'generation' ? result.hooks.generation : '')) refuse();
-  const attached = spawnSync(tmuxProgram, ['-u', '-N', '-f', '/dev/null', '-L', 'reverie-docker', 'attach-session', '-t', target],
+  const attached = spawnSync(tmuxProgram, ['-u', '-N', '-f', '/dev/null', '-L', socketLabel, 'attach-session', '-t', target],
     { stdio: 'inherit', env: childEnvironment });
   if (attached.error || attached.signal || attached.status === null) refuse();
   process.exit(attached.status);

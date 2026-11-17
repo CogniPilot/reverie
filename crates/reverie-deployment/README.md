@@ -14,6 +14,29 @@ preserving old entries that differ from the old image defaults; it does not
 infer whether an equal-to-default value was explicitly selected historically.
 Private environment values remain in the owner-only operation record.
 
+The existing GPU image has one fixed entrypoint ABI: `tini -g -s --`, the
+immutable `reverie-container-runtime` executable, then
+`/usr/local/bin/reverie-start`. Updating that profile may refresh the runtime's
+Nix store hash from the exact owner-selected image. The source entrypoint must
+match its original image, both runtime package versions must agree, and every
+other argument and the command must remain unchanged. This does not admit an
+arbitrary entrypoint, change the GPU device grant or qualify a new image.
+
+`preview --preserve-network-grants` selects the checked original dynamic bridge
+networks and aliases. The operation records exact native network IDs and
+configuration, reobserves them before effects and verifies the candidate's
+complete network set. Static addressing, custom driver options and non-bridge
+drivers remain unsupported. CREATE sends original `NetworkID` values rather
+than selecting a newly reused name; allocated endpoint IDs, addresses and DNS
+names are not replayed. This is an immutable version-four operation: older
+clients refuse it. The default preview and its network refusal are unchanged,
+and this selection does not permit live account writers or waive verified backup.
+
+The exact-ID lookup follows Moby's
+[`getNetworkID` in docker-v29.6.1](https://github.com/moby/moby/blob/docker-v29.6.1/daemon/container_operations.go#L1083).
+Built-in `bridge` remains name-selected by Docker, so independent native ID and
+configuration revalidation remains required for it as well.
+
 `preview --image sha256:IMAGE_ID --profile protected-website` explicitly selects
 the fixed website security profile through the same application service. It
 retains the original numeric non-root user, command, real bind grants and
@@ -70,3 +93,45 @@ The snapshot is a verified copy of the observed stopped console subtree. Other
 worker-writable account paths require an explicit writer/consistency disposition;
 the shared deployment lock alone does not establish whole-company quiescence.
 This source is under qualification and is not an installed deployment claim.
+
+`preview --image sha256:IMAGE_ID --preserve-network-grants
+--live-account-writers-fix-forward` explicitly selects a different disposition.
+Its version-five private plan lists the exact active writer container IDs,
+immutable images, process incarnations and mounts. Only canonical direct
+`console/accounts/PROFILE` directory binds qualify; console roots, ancestors,
+metadata, aliases and other overlapping writers refuse. Prepare, website STOP,
+candidate START and readiness publication recheck that inventory. Employees
+receive no stop, start, pause, input, mount or network changes.
+Every observed other active host-writable ordinary-data bind or volume is first
+matched to its actual mounted inode through an anchored process-root descriptor
+and a directory walk that refuses symlinks. A changed source pathname cannot make a
+retained console bind appear disjoint. Unprovable bindings refuse. This finite
+Docker observation also maps held FD mount IDs through the existing kernel
+mount-table parser to compare physical backing paths. Current aliases of the
+console, its ancestors or metadata are not disjoint. Nested host mounts under a
+writable directory refuse with `DEPLOYMENT_LIVE_ACCOUNT_HOST_MOUNT_UNSUPPORTED`.
+This does not certify absence of independent host-process, open-descriptor or
+hardlink writers, and never certifies a consistent backup.
+
+Root-owned helpers whose writable mounts are exclusively real cgroup2 directories
+may instead earn a separate virtual-filesystem observation. Held source FDs must
+actually belong to cgroup2 and have a different filesystem from the ordinary
+console. The target's real kernel mount table must match each exact destination,
+device and backing root, a visible mount-parent chain and no nested overlay. Process birth, the complete
+Engine identity and the exact target mount table are rechecked around the reads.
+Missing or contradictory evidence refuses. No process-root permission check is
+waived for ordinary data, no cgroup is written, and a cgroup-looking pathname or
+root user label cannot select this proof. The three host-cgroup tests run as an
+explicit mandatory Rust CI step outside Nix build sandboxes; selection asserts
+all three pass and never silently skips an unavailable prerequisite.
+
+Apply first retains an ordinary full console copy while the website and account
+writers may be active. This copy is **unverified**; no consistent backup or
+automatic data restore is promised. Its receipt and status report
+`backupVerified: false`. The preview also reports that code rollback compatibility
+is not guaranteed: even a version-one to version-two company publication can
+make the retained old console unable to read current data. Both containers and
+the live source data remain retained for inspection and fixing forward. Normal
+preview/apply and the existing skip-backup path retain their writer refusal.
+Older plan readers refuse version-five effects rather than silently dropping
+this disposition. No successful local deployment is claimed by these source tests.

@@ -96,7 +96,7 @@ fn help() {
         "cargo xtask verify-worker-perf --image IMAGE --policy-manifest /nix/store/.../worker-perf-profile.json\n  Strict real nonroot container perf stat/record/report using verified task-v1 policy.\ncargo xtask verify-worker-perf --deployment DEPLOYMENT\n  Check every currently running laptop without changing configuration or restarting it.\ncargo xtask prepare-ci-perf\n  Disposable Ubuntu GitHub-hosted VM only: declare per-task user-space host support before the strict Nix-image test."
     );
     println!(
-        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability.\ncargo xtask prepare-ci-userns\n  Declared disposable Ubuntu24.04 GitHub-hosted runner only: prepare an exact Nix-unshare AppArmor exception; ordinary sudo permission is required."
+        "cargo xtask check | verify\n  Check Rust formatting, strict Clippy, workspace tests and repository policies.\ncargo xtask verify-portable\n  Check platform-neutral core, contracts, HTTP, OPS CLI, route handlers and task tooling; native Linux host acceptance is separate.\ncargo xtask verify-worker-package\n  Linux: qualify the selected executable/manifest and Goal-stream broker interoperability.\ncargo xtask prepare-ci-userns\n  Declared disposable Ubuntu24.04 GitHub-hosted runner only: prepare exact Nix unshare/bwrap AppArmor exceptions; ordinary sudo permission is required."
     );
 }
 

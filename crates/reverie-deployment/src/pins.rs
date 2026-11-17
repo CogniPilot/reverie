@@ -4,6 +4,67 @@ use reverie_host::deployment_snapshot::ObservedPath;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{os::unix::fs::MetadataExt, path::PathBuf};
+mod socket;
+
+enum Anchor {
+    Ordinary(ObservedPath),
+    Engine(socket::EngineSocket),
+}
+impl Anchor {
+    fn capture(path: &std::path::Path, destination: &str, readonly: bool) -> Result<Self> {
+        if socket::fixed_scope(path, destination) {
+            require(readonly, "DEPLOYMENT_ENGINE_BIND_NOT_READONLY")?;
+            return Ok(Self::Engine(socket::EngineSocket::capture(
+                path,
+                destination,
+            )?));
+        }
+        Ok(Self::Ordinary(ObservedPath::capture(path).map_err(
+            |_| DeploymentError::new("DEPLOYMENT_BIND_PIN_REFUSED"),
+        )?))
+    }
+    fn verify(&self) -> Result<()> {
+        match self {
+            Self::Ordinary(value) => value
+                .verify()
+                .map_err(|_| DeploymentError::new("DEPLOYMENT_BIND_CHANGED")),
+            Self::Engine(value) => value.verify(),
+        }
+    }
+    fn identity(&self, path: PathBuf) -> Result<Identity> {
+        match self {
+            Self::Ordinary(value) => {
+                let identity = Identity::capture(path)?;
+                require(
+                    value.identity() == (identity.device, identity.inode),
+                    "DEPLOYMENT_BIND_CHANGED",
+                )?;
+                Ok(identity)
+            }
+            Self::Engine(value) => value.identity(),
+        }
+    }
+    fn inside(&self, path: &std::path::Path, expected: &Identity) -> Result<()> {
+        match self {
+            Self::Ordinary(_) => {
+                let actual = std::fs::metadata(path)?;
+                require(
+                    (actual.dev(), actual.ino()) == (expected.device, expected.inode),
+                    "DEPLOYMENT_RUNNING_BIND_CHANGED",
+                )
+            }
+            Self::Engine(value) => value.inside(path),
+        }
+    }
+    fn close(self) -> Result<()> {
+        match self {
+            Self::Ordinary(value) => value
+                .close()
+                .map_err(|_| DeploymentError::new("DEPLOYMENT_BIND_CLOSE_UNCONFIRMED")),
+            Self::Engine(value) => value.close(),
+        }
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub(super) struct Identity {
@@ -40,7 +101,7 @@ impl Identity {
     }
 }
 pub(super) struct Pins {
-    entries: Vec<(ObservedPath, Identity, String)>,
+    entries: Vec<(Anchor, Identity, String)>,
 }
 impl Pins {
     pub(super) fn capture(source: &Value) -> Result<Self> {
@@ -64,8 +125,7 @@ impl Pins {
             }
             let path = PathBuf::from(model::string(mount, "Source")?);
             let destination = model::string(mount, "Destination")?.to_owned();
-            let held = ObservedPath::capture(&path)
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_BIND_PIN_REFUSED"))?;
+            let held = Anchor::capture(&path, &destination, mount["RW"] == false)?;
             // Adopt before the next fallible observation.
             let placeholder = Identity {
                 path: path.clone(),
@@ -78,11 +138,7 @@ impl Pins {
             };
             self.entries.push((held, placeholder, destination));
             let entry = self.entries.last_mut().expect("adopted bind owner");
-            entry.1 = Identity::capture(path)?;
-            require(
-                entry.0.identity() == (entry.1.device, entry.1.inode),
-                "DEPLOYMENT_BIND_CHANGED",
-            )?;
+            entry.1 = entry.0.identity(path)?;
         }
         self.verify()
     }
@@ -95,10 +151,9 @@ impl Pins {
     }
     pub(super) fn verify(&self) -> Result<()> {
         for (held, expected, _) in &self.entries {
-            held.verify()
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_BIND_CHANGED"))?;
+            held.verify()?;
             require(
-                &Identity::capture(expected.path.clone())? == expected,
+                &held.identity(expected.path.clone())? == expected,
                 "DEPLOYMENT_BIND_CHANGED",
             )?;
         }
@@ -113,14 +168,10 @@ impl Pins {
             .as_u64()
             .filter(|p| *p > 0)
             .ok_or_else(|| DeploymentError::new("DEPLOYMENT_PROCESS_UNKNOWN"))?;
-        for (_, expected, destination) in &self.entries {
+        for (held, expected, destination) in &self.entries {
             let inside = PathBuf::from(format!("/proc/{pid}/root"))
                 .join(destination.trim_start_matches('/'));
-            let actual = std::fs::metadata(inside)?;
-            require(
-                (actual.dev(), actual.ino()) == (expected.device, expected.inode),
-                "DEPLOYMENT_RUNNING_BIND_CHANGED",
-            )?;
+            held.inside(&inside, expected)?;
         }
         self.verify()?;
         model::observed_mounts(container)
@@ -128,11 +179,7 @@ impl Pins {
     pub(super) fn close(self) -> Result<()> {
         let mut result = Ok(());
         for (held, _, _) in self.entries {
-            result = DeploymentError::finalized(
-                result,
-                held.close()
-                    .map_err(|_| DeploymentError::new("DEPLOYMENT_BIND_CLOSE_UNCONFIRMED")),
-            );
+            result = DeploymentError::finalized(result, held.close());
         }
         result
     }

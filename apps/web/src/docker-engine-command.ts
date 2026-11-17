@@ -2,6 +2,7 @@
  * command route. JSON creation avoids secret values in process argv.
  */
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { request, type ClientRequest } from 'node:http';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 /** A completed rejection describes that response only. It grants no retry,
@@ -18,26 +19,77 @@ function createFailure(status?: number): DockerEmployeeContinuationError {
   return new DockerEmployeeContinuationError(code);
 }
 export interface DockerEngineCommand {
-  run(args: readonly string[], input?: string): Promise<string>;
+  run(args: readonly string[], input?: string, timeoutMs?: number): Promise<string>;
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string>;
+}
+const probeOrigin = Symbol('complete native read-only resource ESRCH');
+function probeArgs(args: readonly string[]): boolean {
+  return (
+    args.length >= 10 &&
+    args.length <= 512 &&
+    args[0] === 'exec' &&
+    /^[a-f0-9]{64}$/.test(args[1] ?? '') &&
+    args[2] === '/bin/reverie-docker-resources' &&
+    ['probe-pool', 'probe-worker'].includes(args[3] ?? '') &&
+    args.every((value) => typeof value === 'string' && value.length <= 4096 && !/[\r\n\0]/.test(value))
+  );
+}
+function probeDigest(args: readonly string[]): string {
+  return createHash('sha256').update(JSON.stringify(args)).digest('hex');
+}
+class ResourceProbeReadRace extends Error {
+  readonly #args: string;
+  constructor(origin: symbol, args: readonly string[]) {
+    super('DOCKER_RESOURCE_PROBE_PROCESS_EXITED');
+    if (origin !== probeOrigin) throw Error('Actual resource read required');
+    this.#args = probeDigest(args);
+    Object.freeze(this);
+  }
+  matches(args: readonly string[]): boolean {
+    return this.#args === probeDigest(args);
+  }
+}
+Object.freeze(ResourceProbeReadRace.prototype);
+export function dockerResourceProbeReadRace(error: unknown, args: readonly string[]): boolean {
+  if (!(error instanceof ResourceProbeReadRace) || !probeArgs(args)) return false;
+  try {
+    return ResourceProbeReadRace.prototype.matches.call(error, args);
+  } catch {
+    return false;
+  }
 }
 export class PackagedDockerEngineCommand implements DockerEngineCommand {
   constructor(private readonly endpoint = 'unix:///run/reverie-engine/docker.sock') {
     if (endpoint !== 'unix:///run/reverie-engine/docker.sock') throw Error('Fixed packaged Docker endpoint required');
   }
-  run(args: readonly string[], input?: string): Promise<string> {
+  run(originalArgs: readonly string[], input?: string, timeoutMs = 30000): Promise<string> {
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000)
+      return Promise.reject(Error('Invalid bounded Docker command deadline'));
+    const args = Object.freeze([...originalArgs]);
     return new Promise((resolve, reject) => {
       const child = execFile(
         '/bin/docker',
         ['--host', this.endpoint, ...args],
         {
-          timeout: 30000,
+          timeout: timeoutMs,
           maxBuffer: 1024 * 1024,
           encoding: 'utf8',
           env: { PATH: process.env.PATH, HOME: process.env.HOME },
         },
-        (error, stdout) => {
-          if (error) reject(error);
+        (error, stdout, stderr) => {
+          if (
+            error &&
+            error.code === 1 &&
+            error.killed === false &&
+            error.signal === null &&
+            input === undefined &&
+            stdout === '' &&
+            (stderr === 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n' ||
+              stderr === 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n') &&
+            probeArgs(args)
+          )
+            reject(new ResourceProbeReadRace(probeOrigin, args));
+          else if (error) reject(error);
           else resolve(stdout);
         }
       );

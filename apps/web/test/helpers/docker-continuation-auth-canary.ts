@@ -130,6 +130,33 @@ async function signIn(
     throw Error('Actual owner session currentness refused');
   return { cookie, sessionFile };
 }
+/** Real owner enrollment for a separately verified disposable Docker office.
+ * The caller must verify its owned CID/labels and mapped ephemeral port first.
+ * Requests retain the actual cookie privately and cannot select another origin. */
+export async function enrollIsolatedPlanOfficeOwner(endpoint: string, directory: string) {
+  const url = target(endpoint);
+  await privateDirectory(directory);
+  const requests: RecordedRequest[] = [];
+  const send = client(url, requests),
+    owner = await authenticate(send, directory);
+  return {
+    ownerSessionFile: owner.sessionFile,
+    requests: () => structuredClone(requests),
+    request: async (path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', body?: Json) => {
+      const next = new URL(path, url);
+      if (
+        !path.startsWith('/api/') ||
+        !next.pathname.startsWith('/api/') ||
+        next.origin !== url.origin ||
+        next.username ||
+        next.password ||
+        next.hash
+      )
+        throw Error('Only this disposable office API may receive its owner credential');
+      return send(path, method, body, { cookie: owner.cookie });
+    },
+  };
+}
 async function verifyFixture(
   request: ReturnType<typeof client>,
   cookie: string,
@@ -356,4 +383,45 @@ export async function loginDockerCanaryOwner(
   };
   await privateRecord(directory, 'owner-control-' + controlId + '-report.json', report);
   return { report, ownerSessionFile: owner.sessionFile };
+}
+
+/** Reuse only an actual still-authenticated saved fixture session; no login/reset. */
+export async function resumeIsolatedPlanOfficeOwner(endpoint: string, directory: string) {
+  const url = target(endpoint);
+  await privateDirectory(directory);
+  const saved = await privateSavedObject(directory, 'owner-session.json');
+  if (
+    Object.keys(saved).join(',') !== 'cookie' ||
+    typeof saved.cookie !== 'string' ||
+    !/^reverie_owner=[^;\r\n]+$/.test(saved.cookie)
+  )
+    throw Error('Actual saved owner session refused');
+  const requests: RecordedRequest[] = [],
+    send = client(url, requests),
+    cookie = saved.cookie;
+  const status = await success(await send('/api/owner/status', 'GET', undefined, { cookie }));
+  if (
+    status.configured !== true ||
+    status.signedIn !== true ||
+    status.policy !== 'enforce' ||
+    status.mustChange !== false
+  )
+    throw Error('Current actual owner login required');
+  return {
+    ownerSessionFile: join(directory, 'owner-session.json'),
+    requests: () => structuredClone(requests),
+    request: async (path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', body?: Json) => {
+      const next = new URL(path, url);
+      if (
+        !path.startsWith('/api/') ||
+        !next.pathname.startsWith('/api/') ||
+        next.origin !== url.origin ||
+        next.username ||
+        next.password ||
+        next.hash
+      )
+        throw Error('Only this disposable office API may receive its owner credential');
+      return send(path, method, body, { cookie });
+    },
+  };
 }

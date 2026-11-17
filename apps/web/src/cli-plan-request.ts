@@ -14,36 +14,85 @@ export function serverReason(body: unknown): string {
   return raw.replace(/\p{Cc}+/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 }
 
+/** Preserve the actual submitted ID; neither an error nor this diagnostic grants replay. */
+function planRequestFailure(deps: AgentDeps, message: string, requestId?: string): number {
+  const inspectionCommand = requestId ? `reverie agent plan-move status --json -- ${requestId}` : undefined;
+  const detail = requestId
+    ? `${message} Original request: ${requestId}. Inspect with ${inspectionCommand}. No retry was sent.`
+    : `${message} No plan request was sent.`;
+  if (deps.json)
+    deps.io.out(
+      JSON.stringify({ success: false, error: detail, ...(requestId ? { requestId, inspectionCommand } : {}) })
+    );
+  else deps.io.err(detail);
+  return 1;
+}
+
 /** Request a move through the scoped company API; session creation remains private to the executor. */
-export async function agentRequestPlanMove(deps: AgentDeps, input: { toAccount: string; employeeId?: string; id?: string; restart?: boolean }): Promise<number> {
+export async function agentRequestPlanMove(
+  deps: AgentDeps,
+  input: { toAccount: string; employeeId?: string; id?: string; restart?: boolean }
+): Promise<number> {
+  let submittedId: string | undefined;
   try {
     const response = await deps.request(deps.ctx, { method: 'GET', path: '/api/company' });
     const company = response.json as { success?: boolean; data?: { employees?: { id: string; sessionId: string }[] } };
-    const employee = company?.data?.employees?.find(item => input.employeeId ? item.id === input.employeeId : item.sessionId === deps.ctx.selfId);
+    const employee = company?.data?.employees?.find((item) =>
+      input.employeeId ? item.id === input.employeeId : item.sessionId === deps.ctx.selfId
+    );
     if (response.status >= 400 || !company.success || !employee) throw new Error('Unknown company expert');
     if (input.restart && employee.sessionId !== deps.ctx.selfId)
       throw new Error('A runtime refresh is only available for this exact expert');
     const id = PlanRequestId.parse(input.id ?? randomUUID());
-    const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body: {
-      id, employeeId: employee.id, sessionId: employee.sessionId, toAccount: PlanRequestId.parse(input.toAccount),
+    const body = {
+      id,
+      employeeId: employee.id,
+      sessionId: employee.sessionId,
+      toAccount: PlanRequestId.parse(input.toAccount),
       ...(input.restart ? { purpose: 'runtime-refresh' } : {}),
-    } });
-    const body = result.json as { success?: boolean; data?: { phase: string }; error?: string };
-    if (result.status >= 400 || !body?.success) {
-      const reason = serverReason(body);
+    };
+    // Capture before the transport can issue or lose the one request. Only validated IDs enter diagnostics.
+    submittedId = id;
+    const result = await deps.request(deps.ctx, { method: 'POST', path: '/api/plans/agent-requests', body });
+    const reply = result.json as { success?: boolean; data?: { phase: string }; error?: string };
+    if (result.status >= 400 || !reply?.success) {
+      const reason = serverReason(reply);
       const blocker = (result.json as { blocker?: { id?: unknown; action?: unknown; scope?: unknown } })?.blocker;
-      if (blocker?.action === 'inspect-existing' && typeof blocker.id === 'string' && PlanRequestId.safeParse(blocker.id).success)
-        deps.io.err(`Existing move ${blocker.id}: use agent plan-move recovery-status ${blocker.id}, then explicitly recover-existing if eligible. Do not create another move.`);
-      else if (blocker?.action === 'inspect-journal' && (blocker.scope === 'other-owner' || blocker.scope === 'unrecorded'))
-        deps.io.err(`Blocking move is not visible to this caller (${blocker.scope}): the owner must inspect it on the Plans page. Do not create another move.`);
-      deps.io.err(`Plan move request refused${reason ? `: ${reason}` : ''}. Check the destination ID and owner-granted plan permissions.`);
-      return 1;
+      if (
+        blocker?.action === 'inspect-existing' &&
+        typeof blocker.id === 'string' &&
+        PlanRequestId.safeParse(blocker.id).success
+      )
+        deps.io.err(
+          `Existing move ${blocker.id}: use agent plan-move recovery-status ${blocker.id}, then explicitly recover-existing if eligible. Do not create another move.`
+        );
+      else if (
+        blocker?.action === 'inspect-journal' &&
+        (blocker.scope === 'other-owner' || blocker.scope === 'unrecorded')
+      )
+        deps.io.err(
+          `Blocking move is not visible to this caller (${blocker.scope}): the owner must inspect it on the Plans page. Do not create another move.`
+        );
+      return planRequestFailure(
+        deps,
+        `Plan move request was not confirmed${reason ? `: ${reason}` : ''}. Check the destination ID and owner-granted plan permissions.`,
+        id
+      );
     }
-    deps.io.out(deps.json ? JSON.stringify({ success: true, id, phase: body.data?.phase }) : `Plan request ${id}: ${body.data?.phase}. The affected expert must prepare a handoff and approve.`);
+    deps.io.out(
+      deps.json
+        ? JSON.stringify({ success: true, id, phase: reply.data?.phase })
+        : `Plan request ${id}: ${reply.data?.phase}. The affected expert must prepare a handoff and approve.`
+    );
     return 0;
-  } catch { deps.io.err('Could not confirm the plan request. Check its status before retrying with the same request ID.'); return 1; }
+  } catch {
+    return planRequestFailure(
+      deps,
+      submittedId ? 'The plan request outcome is unconfirmed.' : 'Could not prepare the plan request.',
+      submittedId
+    );
+  }
 }
-
 export async function agentPlanMoveAction(deps: AgentDeps, id: string, action: 'status' | 'cancel' | 'reauthorize'): Promise<number> {
   try {
     const result = await deps.request(deps.ctx, { method: 'POST', path: `/api/plans/agent-requests/${PlanRequestId.parse(id)}/${action}` });
@@ -65,7 +114,7 @@ export async function agentPlanRequest(
   capabilities?: PlanRequestCapabilities
 ): Promise<number> {
   // The fixed-identity office proxy keeps the private credential outside the laptop.
-  const office = capabilities === undefined && process.env.REVERIE_WORKER === '1';
+  const office = capabilities === undefined && (typeof deps.ctx.workerIdentity === 'string' || process.env.REVERIE_WORKER === '1');
   let nonce: string | undefined, handoff: string | undefined;
   try {
     PlanRequestId.parse(input.id);

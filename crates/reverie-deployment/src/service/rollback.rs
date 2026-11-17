@@ -1,4 +1,7 @@
 use super::*;
+mod missing_candidate;
+#[cfg(test)]
+pub(super) mod network_tests;
 impl DeploymentService {
     /// Restore only the exact retained old container. This never restores data,
     /// reconfigures the broker, deletes a container or invents a release receipt.
@@ -21,12 +24,11 @@ impl DeploymentService {
         )?;
         let source_id = model::string(&operation.plan.source, "Id")?;
         let source = self.engine.container(source_id)?;
-        require(
-            model::projection(&source) == model::projection(&operation.plan.source),
-            "DEPLOYMENT_SOURCE_CHANGED",
-        )?;
+        self.original_source_selection(operation, &source)?;
         let candidate = operation.candidate()?;
-        let current = self.engine.container(&candidate)?;
+        let Some(current) = self.engine.container_or_absent(&candidate)? else {
+            return self.rollback_missing_candidate(operation, pins, &candidate);
+        };
         operation.plan.candidate_matches(&current)?;
         let original_name = format!("/{}", operation.plan.container);
         let backup_name = format!("/{}", temporary_name(operation, "before-front"));
@@ -40,7 +42,7 @@ impl DeploymentService {
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
         operation.attempt("rollback-attempt")?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         if current["State"]["Running"] == true {
             self.engine.stop(&candidate)?;
         }
@@ -54,9 +56,9 @@ impl DeploymentService {
                 .rename(&candidate, &temporary_name(operation, "failed-front"))?;
         }
         let source = self.engine.container(source_id)?;
+        self.original_source_selection(operation, &source)?;
         require(
-            model::projection(&source) == model::projection(&operation.plan.source)
-                && source["State"]["Paused"] == false
+            source["State"]["Paused"] == false
                 && source["State"]["Restarting"] == false
                 && source["State"]["Dead"] == false,
             "DEPLOYMENT_SOURCE_CHANGED",
@@ -68,7 +70,7 @@ impl DeploymentService {
                     && source["State"]["StartedAt"] == operation.plan.source["State"]["StartedAt"],
             "DEPLOYMENT_SOURCE_EPOCH_CHANGED",
         )?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         if source["Name"] != format!("/{}", operation.plan.container) {
             require(
                 source["Name"] == format!("/{}", temporary_name(operation, "before-front")),
@@ -81,15 +83,26 @@ impl DeploymentService {
         }
         self.await_ready(source_id, source_front)?;
         let restored = self.engine.container(source_id)?;
+        self.publish_restored(operation, &candidate, &restored, pins)
+    }
+    fn publish_restored(
+        &self,
+        operation: &Operation,
+        candidate: &str,
+        restored: &Value,
+        pins: &crate::pins::Pins,
+    ) -> Result<DeploymentStatus> {
+        self.original_source_selection(operation, restored)?;
         require(
-            model::projection(&restored) == model::projection(&operation.plan.source)
-                && restored["Name"] == format!("/{}", operation.plan.container),
+            restored["Name"] == format!("/{}", operation.plan.container)
+                && restored["State"]["Running"] == true,
             "DEPLOYMENT_SOURCE_CHANGED",
         )?;
-        pins.running_mounts(&restored)?;
+        pins.running_mounts(restored)?;
+        self.verify_effect_pins(operation, pins)?;
         operation.record(
             "restored",
-            &json!({"containerId":source_id,"dataRestored":false,
+            &json!({"containerId":operation.plan.source["Id"],"dataRestored":false,
             "retainedCandidate":candidate,"brokerChanged":false}),
         )?;
         operation.status()

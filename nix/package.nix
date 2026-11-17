@@ -11,12 +11,14 @@ let
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   rustFront = import ./rust-front.nix { inherit pkgs src; };
+  dockerViewerExecutables = pkgs.writeText "docker-viewer-executables.json"
+    (builtins.toJSON (import ./docker-viewer-executables.nix { inherit pkgs; }));
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
     src = lib.cleanSource (src + "/apps/web");
     nodejs = pkgs.nodejs_22;
-    npmDepsHash = "sha256-TdGKa0ICVZoFZ996zLhbluJKdnNgb7EgWnhikmQ0XRg=";
+    npmDepsHash = "sha256-T93KVV1pCvWtWHaI2cPM/PjAkHkqHXfGPK2185mDKfw=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
     npmFlags = [ "--ignore-scripts" ];
     npmRebuildFlags = [ "--ignore-scripts" ];
@@ -60,10 +62,24 @@ let
       # test/test-suite-partition.test.ts reads the npm test commands below from this copy.
       mkdir -p test/fixtures/nix-package
       cp ${consoleFixture "nix/package.nix"} test/fixtures/nix-package/package.nix
+      # Pure CI image construction tests need their real owning monorepo layout
+      # inside this flattened web derivation, not /build/../nix or a stub tree.
+      # Copied workspace package tests are build-input DATA, outside test discovery.
+      mkdir -p build-fixtures/plan-office-source/nix build-fixtures/plan-office-source/apps/web build-fixtures/plan-office-source/skills
+      cp ${consoleFixture "nix/ci-plan-office-images.nix"} build-fixtures/plan-office-source/nix/ci-plan-office-images.nix
+      cp ${consoleFixture "nix/boxed-website-image.nix"} build-fixtures/plan-office-source/nix/boxed-website-image.nix
+      mkdir -p build-fixtures/plan-office-source/tests/fixtures
+      cp -r ${consoleFixture "tests/fixtures/boxed_client_capsule"} build-fixtures/plan-office-source/tests/fixtures/boxed_client_capsule
+      cp ${consoleFixture "nix/docker-viewer-executables.nix"} build-fixtures/plan-office-source/nix/docker-viewer-executables.nix
+      cp ${consoleFixture "nix/docker-resource-helper-image.nix"} build-fixtures/plan-office-source/nix/docker-resource-helper-image.nix
+      cp -r ${consoleFixture "apps/web/scripts"} build-fixtures/plan-office-source/apps/web/scripts
+      cp -r ${consoleFixture "apps/web/packages"} build-fixtures/plan-office-source/apps/web/packages
+      cp -r ${consoleSkill} build-fixtures/plan-office-source/skills/reverie
+
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
@@ -76,6 +92,7 @@ let
       npm test -- test/docker-memory-high-canary.test.ts \
         test/docker-resource-original-writer.test.ts \
         test/docker-contained-resource-controller.test.ts \
+        test/docker-resource-probe-retry.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
         test/docker-resource-revisions.test.ts \
@@ -88,12 +105,18 @@ let
         test/docker-employee-source-correlation.test.ts \
         test/docker-employee-credential-installer.test.ts \
         test/docker-employee-engine.test.ts \
+        test/docker-plan-install-data.test.ts \
+        test/docker-plan-installer.test.ts \
+        test/docker-plan-source.test.ts test/docker-plan-source-data.test.ts test/docker-plan-move-recipe.test.ts test/docker-plan-protocol.test.ts test/docker-plan-account-status.test.ts test/docker-plan-move-actor.test.ts test/docker-plan-move-work.test.ts test/docker-plan-worker-inventory.test.ts test/docker-plan-local-client.test.ts test/docker-plan-source-native.test.ts test/docker-plan-source-holder.test.ts \
+        test/docker-plan-account.test.ts \
         test/docker-engine-command.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
-        test/docker-employee-saved-attach.test.ts \
         test/docker-employee-startup-restore.test.ts \
         test/boxed-fake-provider-input.test.ts \
+        test/boxed-plan-provider.test.ts \
+        test/plan-office-bootstrap.test.ts \
+        test/boxed-plan-provider-files.test.ts test/plan-office-image-factory.test.ts test/plan-office-driver.test.ts test/plan-office-move-driver.test.ts test/plan-office-move-verifier.test.ts test/plan-office-ci.test.ts \
         test/canary-cookie-files.test.ts \
         test/canary-browser-modules.test.ts \
         test/canary-fixture-contract.test.ts \
@@ -129,6 +152,40 @@ let
           '
       '' else ''
         boxedCredentialCheck
+      ''}
+      # SDK fixtures require a genuine nonroot identity as well as trusted
+      # credential ancestors. Map only this disposable owned root/fixture to
+      # UID1; never replace the production reader or relax its custody checks.
+      boxedSdkCredentialCheck() {
+        npm test -- test/boxed-plan-provider-entry.test.ts \
+          test/plan-office-agent-force.test.ts \
+          test/plan-office-viewer-repair.test.ts \
+          test/worker-viewer-docker-cli.test.ts \
+          test/docker-employee-saved-attach.test.ts \
+          test/docker-viewer-pane.test.ts \
+          test/docker-paid-viewer-reconnect.test.ts
+      }
+      ${if pkgs.stdenv.isLinux then ''
+        mkdir -p "$TMPDIR/boxed-sdk-check-root"/{nix,source,fixture,proc,dev,bin}
+        mkdir -p "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
+        chmod 700 "$TMPDIR/boxed-sdk-check-root" "$TMPDIR/boxed-sdk-check-fixture" "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
+        export -f boxedSdkCredentialCheck
+        ${pkgs.bubblewrap}/bin/bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL \
+          --ro-bind "$TMPDIR/boxed-sdk-check-root" / --ro-bind /nix /nix \
+          --ro-bind ${pkgs.bash}/bin /bin --bind "$PWD" /source \
+          --bind "$TMPDIR/boxed-sdk-check-fixture" /fixture --proc /proc --dev /dev \
+          --chdir /source --setenv HOME /fixture/home --setenv TMPDIR /fixture/tmp \
+          ${pkgs.bash}/bin/bash -euc '
+            test "$(id -u)" = 1
+            test "$(id -g)" = 1
+            test "$(stat -c %u /)" = 1
+            test "$(stat -c %a /)" = 700
+            test "$(stat -c %u /fixture)" = 1
+            test "$(stat -c %a /fixture)" = 700
+            boxedSdkCredentialCheck
+          '
+      '' else ''
+        boxedSdkCredentialCheck
       ''}
       ${lib.optionalString pkgs.stdenv.isLinux ''
         # Actual tmux stdin IPC (cold/literal/40KiB) and listener startup must
@@ -242,7 +299,7 @@ let
       npm test -- test/browser-job-evidence.test.ts
       npm test -- test/cli-plans-banked-resets.test.ts
       npm test -- test/routes/chatroom-clear-history.test.ts test/chat-dm-clear-history-ui.test.ts
-      npm test -- test/plan-request-pending-employee.test.ts test/cli-plan-move-list-employee.test.ts
+      npm test -- test/plan-request-pending-employee.test.ts test/plan-request-client-recovery.test.ts test/cli-plan-move-list-employee.test.ts
       npm test -- test/file-preview-source-reader.test.ts test/file-preview-sources-ui.test.ts \
         test/file-preview-worker-policy.test.ts test/workspace-preview-source.test.ts \
         test/pdf-preview-terminal-state.test.ts test/pdf-preview-worker-cancellation.test.ts
@@ -387,7 +444,7 @@ let
         test/pane-survivors.test.ts test/paste-image-dir-shared.test.ts test/paste-image-gc.test.ts test/path-picker-hidden.test.ts \
         test/path-picker-sort.test.ts test/path-picker-ui.test.ts test/person-row-actions.test.ts test/phone-status-ui.test.ts \
         test/pi-cli-resolver.test.ts test/pi-mode.test.ts test/plan-move-auth.test.ts test/plan-move-processes.test.ts \
-        test/plan-move-store.test.ts test/plan-move.test.ts test/plan-request-refusal-reason.test.ts test/plan-usage-chip.test.ts \
+        test/plan-move-store.test.ts test/plan-move-docker-journal.test.ts test/plan-move-docker-runner.test.ts test/docker-plan-move-requester.test.ts test/docker-plan-move-capacity.test.ts test/plan-move.test.ts test/plan-request-refusal-reason.test.ts test/plan-usage-chip.test.ts \
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
@@ -529,6 +586,13 @@ let
       npm prune --omit=dev --ignore-scripts
       mkdir -p "$out/lib/reverie" "$out/bin"
       cp -r dist node_modules package.json skills scripts packages LICENSE "$out/lib/reverie/"
+      # Keep fixed packaging metadata next to the compiled module that reads it.
+      test -x ${pkgs.docker-client}/bin/docker
+      test -x ${pkgs.docker-client}/libexec/docker/docker
+      test -x ${pkgs.bashInteractive}/bin/bash
+      test -x ${pkgs.tmux}/bin/tmux
+      cp ${dockerViewerExecutables} "$out/lib/reverie/dist/docker-viewer-executables.json"
+      chmod 0444 "$out/lib/reverie/dist/docker-viewer-executables.json"
       # node-gyp's build metadata references the download cache and the Node.js
       # source tree (the generated Makefile and *.mk files); none of it is needed
       # to load the compiled PTY module (build/Release/pty.node) at runtime.
@@ -658,7 +722,7 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli pkgs.nodejs_22 pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd

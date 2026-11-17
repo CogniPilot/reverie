@@ -16,7 +16,9 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Ordered gates: Rust/policies 15m + real cgroup 5m + selected package 15m,
+    # with 5m for checkout, Nix setup, boundary checks and namespace preparation.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,12 +36,23 @@ jobs:
           TMPDIR: ${{ runner.temp }}
         run: nix develop --command cargo xtask prepare-ci-userns
       - name: Verify Rust and repository policies through cargo xtask
+        timeout-minutes: 15
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
           TMPDIR: ${{ runner.temp }}
         run: nix develop --command cargo xtask verify
+      - name: Qualify real cgroup2 writer observation outside the Nix build sandbox
+        timeout-minutes: 5
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          nix develop --command cargo test --locked -p reverie-deployment --lib -- --ignored service::apply::live_accounts::tests::cgroup_observer | tee "$RUNNER_TEMP/reverie-cgroup2-observer-tests.log"
+          grep -F 'test result: ok. 3 passed; 0 failed;' "$RUNNER_TEMP/reverie-cgroup2-observer-tests.log"
       - name: Qualify selected native worker executable and manifest
+        timeout-minutes: 15
         env:
           CARGO_TARGET_DIR: ${{ runner.temp }}/reverie-rust-target
           TMPDIR: ${{ runner.temp }}

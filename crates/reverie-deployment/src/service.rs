@@ -9,12 +9,20 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+mod adoption;
 mod apply;
 mod claim;
 mod invalid_create;
 mod rollback;
 mod shared_writers;
 use apply::OperationDeadline;
+
+#[derive(Default)]
+struct PreviewGrants {
+    networks: Option<crate::networks::Topology>,
+    writers: Option<crate::live_accounts::Inventory>,
+    adoption: Option<crate::adoption::Selection>,
+}
 
 /// Local host-owner bootstrap service over the registered deployment. The
 /// installed owner executes this API; guests and role names confer no access.
@@ -71,9 +79,13 @@ impl DeploymentService {
         DeploymentError::finalized(result, pins.close())
     }
     fn profile_source(&self, profile: model::DeploymentProfile) -> Result<Value> {
+        let source = self.running_source()?;
+        model::supported_profile(&source, profile)?;
+        Ok(source)
+    }
+    fn running_source(&self) -> Result<Value> {
         self.installation.current()?;
         let source = self.engine.container(&self.installation.name)?;
-        model::supported_profile(&source, profile)?;
         model::port_binding(&source, self.installation.port)?;
         require(
             source["State"]["Running"] == true,
@@ -87,13 +99,31 @@ impl DeploymentService {
         image: &str,
         profile: model::DeploymentProfile,
     ) -> Result<(Value, Vec<String>)> {
+        self.profile_body_selection(source, image, profile, None)
+    }
+    fn profile_body_selection(
+        &self,
+        source: &Value,
+        image: &str,
+        profile: model::DeploymentProfile,
+        topology: Option<&crate::networks::Topology>,
+    ) -> Result<(Value, Vec<String>)> {
         let old_image = self.engine.image(model::string(source, "Image")?)?;
         let candidate = self.engine.image(image)?;
         require(
             candidate["Id"] == image,
             "DEPLOYMENT_CANDIDATE_IMAGE_CHANGED",
         )?;
-        model::create_body_profile(source, &old_image, &candidate, profile)
+        match topology {
+            Some(topology) => model::create_body_selection(
+                source,
+                &old_image,
+                &candidate,
+                profile,
+                Some(topology),
+            ),
+            None => model::create_body_profile(source, &old_image, &candidate, profile),
+        }
     }
     pub fn close(&mut self) -> Result<()> {
         self.installation.close()
@@ -124,6 +154,85 @@ impl DeploymentService {
         let source = self.profile_source(profile)?;
         self.refuse_shared_writers(&source)?;
         let (body, refreshed_environment_keys) = self.profile_body(&source, image, profile)?;
+        self.record_preview(
+            source,
+            body,
+            refreshed_environment_keys,
+            profile,
+            PreviewGrants::default(),
+        )
+    }
+    /// Preserve only the observed original dynamic bridge network grants.
+    /// Verified backup and the existing shared-writer refusal still apply.
+    pub fn preview_preserving_networks(
+        &self,
+        image: &str,
+        profile: model::DeploymentProfile,
+    ) -> Result<DeploymentPreview> {
+        model::image_id(image)?;
+        let source = self.running_source()?;
+        let topology = crate::networks::Topology::capture(&source, &self.engine)?;
+        model::supported_network_profile(&source, profile, &topology)?;
+        self.refuse_shared_writers(&source)?;
+        let (body, refreshed) =
+            self.profile_body_selection(&source, image, profile, Some(&topology))?;
+        topology.require_current(&self.engine)?;
+        self.record_preview(
+            source,
+            body,
+            refreshed,
+            profile,
+            PreviewGrants {
+                networks: Some(topology),
+                ..Default::default()
+            },
+        )
+    }
+    /// Explicit fix-forward disposition for exact independently live account
+    /// directory writers. This never certifies a consistent backup or rollback.
+    pub fn preview_live_accounts_fix_forward(
+        &self,
+        image: &str,
+        profile: model::DeploymentProfile,
+    ) -> Result<DeploymentPreview> {
+        model::image_id(image)?;
+        let source = self.running_source()?;
+        let topology = crate::networks::Topology::capture(&source, &self.engine)?;
+        model::supported_network_profile(&source, profile, &topology)?;
+        let console = data_source_value(&source)?.join("console");
+        let selected = model::string(&source, "Id")?;
+        let writers =
+            crate::live_accounts::Inventory::capture(&self.engine, &console, &[selected])?;
+        writers.validate(&console)?;
+        let (body, refreshed) =
+            self.profile_body_selection(&source, image, profile, Some(&topology))?;
+        topology.require_current(&self.engine)?;
+        writers.require_current(&self.engine, &[selected])?;
+        self.record_preview(
+            source,
+            body,
+            refreshed,
+            profile,
+            PreviewGrants {
+                networks: Some(topology),
+                writers: Some(writers),
+                adoption: None,
+            },
+        )
+    }
+    fn record_preview(
+        &self,
+        source: Value,
+        body: Value,
+        refreshed_environment_keys: Vec<String>,
+        profile: model::DeploymentProfile,
+        grants: PreviewGrants,
+    ) -> Result<DeploymentPreview> {
+        let PreviewGrants {
+            networks: network_topology,
+            writers: live_account_writers,
+            adoption: claim_adoption,
+        } = grants;
         let pins = crate::pins::Pins::capture(&source)?;
         if let Err(error) = pins.running_mounts(&source) {
             return DeploymentError::finalized(Err(error), pins.close());
@@ -132,19 +241,30 @@ impl DeploymentService {
         let result = (|| {
             let operation = new_id()?;
             let preview = DeploymentPreview {
+            claim_adoption: claim_adoption.as_ref().map(|selected|selected.preview.clone()),
             operation: operation.clone(),
             container: self.installation.name.clone(),
             source_id: model::string(&source, "Id")?.into(),
             source_image: model::string(&source, "Image")?.into(),
-            candidate_image: image.into(),
+            candidate_image: model::string(&body, "Image")?.into(),
             environment_policy: "refresh-image-defaults-preserve-differing-overrides".into(),
             refreshed_environment_keys,
             broker_preserved: true,
             backup_metadata_scope:"console bytes and caller-visible metadata/ACLs/xattrs; no automatic live data restore".into(),
             profile: profile.preview(),
+            preserved_networks: network_topology.as_ref().map(crate::networks::Topology::preview),
+            live_accounts: live_account_writers.as_ref().map(crate::live_accounts::Inventory::preview),
         };
             let plan = Plan {
-                version: profile.version(),
+                version: if claim_adoption.is_some() {
+                    6
+                } else if live_account_writers.is_some() {
+                    5
+                } else if network_topology.is_some() {
+                    4
+                } else {
+                    profile.version()
+                },
                 operation,
                 container: self.installation.name.clone(),
                 installation_revision: self.installation.revision.clone(),
@@ -152,6 +272,9 @@ impl DeploymentService {
                 body,
                 preview: serde_json::from_value(serde_json::to_value(&preview)?)?,
                 bind_identities,
+                network_topology,
+                live_account_writers,
+                claim_adoption,
             };
             Operation::create(&self.installation.state, plan)?;
             Ok(preview)
@@ -189,6 +312,7 @@ impl DeploymentService {
         let current = self.source_current(operation, true)?;
         claim.finish(operation, &current)?;
         pins.running_mounts(&current)?;
+        self.verify_effect_pins(operation, pins)?;
         operation.attempt("create-attempt")?;
         deadline.check()?;
         let name = temporary_name(operation, "candidate");
@@ -210,7 +334,7 @@ impl DeploymentService {
             actual["Name"] == format!("/{name}"),
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         operation.record(
             "prepared",
             &json!({"candidateId":candidate,"validated":true}),
@@ -278,10 +402,7 @@ impl DeploymentService {
                 operation.plan.candidate_matches(&current)?;
                 self.source_current(operation, false)?;
             } else {
-                require(
-                    model::projection(&current) == model::projection(&operation.plan.source),
-                    "DEPLOYMENT_SOURCE_CHANGED",
-                )?;
+                self.original_source_selection(operation, &current)?;
             }
             require(
                 current["State"]["Running"] == true
@@ -296,6 +417,7 @@ impl DeploymentService {
             )?;
             deadline.check()?;
             self.process_tree(&id, front)?;
+            self.verify_observation_pins(operation, &pins)?;
             deadline.check()
         })();
         DeploymentError::finalized(result, pins.close())
@@ -314,10 +436,7 @@ impl DeploymentService {
         self.installation.current()?;
         let id = model::cid(model::string(&operation.plan.source, "Id")?)?;
         let current = self.engine.container(id)?;
-        require(
-            model::projection(&current) == model::projection(&operation.plan.source),
-            "DEPLOYMENT_SOURCE_CHANGED",
-        )?;
+        self.original_source_selection(operation, &current)?;
         require(
             current["State"]["Running"] == running
                 && current["State"]["Paused"] == false
@@ -342,6 +461,43 @@ impl DeploymentService {
             )?;
         }
         Ok(current)
+    }
+    fn verify_effect_pins(&self, operation: &Operation, pins: &crate::pins::Pins) -> Result<()> {
+        self.verify_observation_pins(operation, pins)?;
+        self.verify_live_account_writers(operation)
+    }
+    fn verify_observation_pins(
+        &self,
+        operation: &Operation,
+        pins: &crate::pins::Pins,
+    ) -> Result<()> {
+        pins.verify()?;
+        if let Some(topology) = &operation.plan.network_topology {
+            topology.require_current(&self.engine)?;
+        }
+        Ok(())
+    }
+    fn verify_live_account_writers(&self, operation: &Operation) -> Result<()> {
+        if let Some(writers) = &operation.plan.live_account_writers {
+            let source = model::string(&operation.plan.source, "Id")?;
+            let candidate = operation
+                .exists("candidate")
+                .then(|| operation.candidate())
+                .transpose()?;
+            let mut websites = vec![source];
+            if let Some(candidate) = &candidate {
+                websites.push(candidate.as_str());
+            }
+            writers.require_current(&self.engine, &websites)?;
+        }
+        Ok(())
+    }
+    fn original_source_selection(&self, operation: &Operation, current: &Value) -> Result<()> {
+        operation.plan.source_matches(current)?;
+        if let Some(topology) = &operation.plan.network_topology {
+            topology.require_current(&self.engine)?;
+        }
+        Ok(())
     }
     fn claimed(&self, operation: &Operation) -> Result<()> {
         require(
@@ -372,7 +528,7 @@ impl DeploymentService {
         data_source_value(&operation.plan.source)
     }
 }
-fn data_source_value(source: &Value) -> Result<PathBuf> {
+pub(super) fn data_source_value(source: &Value) -> Result<PathBuf> {
     let mounts = source["Mounts"]
         .as_array()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_MOUNTS_REQUIRED"))?;

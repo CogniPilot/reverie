@@ -24,7 +24,8 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = each "-p";
   cargoTestFlags = each "-p";
   # reverie-deployment's fixed helper paths and test inputs; no other crate here reads them.
-  nativeCheckInputs = [ pkgs.gnutar pkgs.attr pkgs.acl ];
+  nativeCheckInputs = [ pkgs.gnutar pkgs.attr pkgs.acl pkgs.bubblewrap ];
+  NIX_REVERIE_TEST_DEPLOYMENT_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
   REVERIE_DEPLOYMENT_TAR = "${pkgs.gnutar}/bin/tar";
   REVERIE_DEPLOYMENT_GETFATTR = "${pkgs.attr}/bin/getfattr";
   REVERIE_DEPLOYMENT_GETFACL = "${pkgs.acl}/bin/getfacl";

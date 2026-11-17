@@ -1,56 +1,11 @@
+import { PlanRequestSchema, type PlanRequestRecord, type PlanRequestView } from './plan-request-data.js';
+export { PlanRequestSchema, type PlanRequestRecord, type PlanRequestView } from './plan-request-data.js';
+import { dockerPlanMoveNotIssuedOf } from './plan-move-store.js';
 import { containsHandoffControls } from './text-controls.js';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { z } from 'zod';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoves, type PlanMoveSnapshot } from './plan-move.js';
-import { PlanRequestId } from './plan-request-capability.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 
-export const PlanRequestSchema = z
-  .object({
-    id: PlanRequestId,
-    owner: z.string().optional(),
-    requestedBy: PlanRequestId.optional(),
-    employeeId: PlanRequestId,
-    sessionId: PlanRequestId,
-    name: z.string().max(100),
-    fromAccount: PlanRequestId,
-    toAccount: PlanRequestId,
-    mode: z.string(),
-    targetMode: z.enum(['codex', 'claude']).optional(),
-    model: z.string().optional(),
-    purpose: z.literal('runtime-refresh').optional(),
-    runtimeDigest: z.string().regex(/^[a-f0-9]{64}$/).optional(),
-    phase: z.enum([
-      'pending',
-      'reauthorize-required',
-      'executing',
-      'completed',
-      'failed',
-      'recovery-required',
-      'rejected',
-      'cancelled',
-      'expired',
-    ]),
-    createdAt: z.number().finite(),
-    expiresAt: z.number().finite(),
-    notified: z.boolean(),
-    nonceHash: z
-      .string()
-      .regex(/^[a-f0-9]{64}$/)
-      .optional(),
-    error: z.string().max(4000).optional(),
-    newSession: PlanRequestId.optional(),
-    movePhase: z.string().optional(),
-  })
-  .strict()
-  .superRefine((record, context) => {
-    if (record.purpose === 'runtime-refresh'
-      ? record.fromAccount !== record.toAccount || !record.runtimeDigest
-      : record.runtimeDigest !== undefined)
-      context.addIssue({ code: 'custom', message: 'A refresh request must bind its unchanged account and runtime' });
-  });
-export type PlanRequestRecord = z.infer<typeof PlanRequestSchema>;
-export type PlanRequestView = Omit<PlanRequestRecord, 'nonceHash'>;
 export interface PlanRequestExecution {
   executor: PlanMoveExecutor;
   authorized(): boolean;
@@ -61,7 +16,11 @@ export interface PlanRequestPort {
   save(records: PlanRequestRecord[]): Promise<void>;
   moves: Pick<PlanMoves, 'begin' | 'get' | 'cancel'> & Partial<Pick<PlanMoves, 'assertAvailable'>>;
   binding(employeeId: string, owner?: string): string | undefined;
-  validateTarget(snapshot: PlanMoveSnapshot, target: string, owner?: string): Promise<{ mode: 'codex' | 'claude' } | void>;
+  validateTarget(
+    snapshot: PlanMoveSnapshot,
+    target: string,
+    owner?: string
+  ): Promise<{ mode: 'codex' | 'claude' } | void>;
   capability: {
     write(value: { requestId: string; sessionId: string; nonce: string }): Promise<string>;
     remove(sessionId: string, id: string): Promise<void>;
@@ -157,11 +116,19 @@ export class PlanMoveRequests {
     // move and its durable recovery acknowledgement have already settled.
     if (record.phase === 'recovery-required') {
       const move = await this.port.moves.get(record.id, record.owner);
-      if (move?.phase === 'completed' && move.recoveryAction === 'adopt-existing' &&
-        move.sourceCleanupVerified === true && move.employeeId === record.employeeId &&
-        move.oldSession === record.sessionId && move.newSession === record.newSession &&
-        move.fromAccount === record.fromAccount && move.toAccount === record.toAccount) {
-        record.phase = 'completed'; record.movePhase = 'completed'; record.error = move.error;
+      if (
+        move?.phase === 'completed' &&
+        move.recoveryAction === 'adopt-existing' &&
+        move.sourceCleanupVerified === true &&
+        move.employeeId === record.employeeId &&
+        move.oldSession === record.sessionId &&
+        move.newSession === record.newSession &&
+        move.fromAccount === record.fromAccount &&
+        move.toAccount === record.toAccount
+      ) {
+        record.phase = 'completed';
+        record.movePhase = 'completed';
+        record.error = move.error;
         await this.save();
       }
     }
@@ -274,30 +241,37 @@ export class PlanMoveRequests {
           existing.owner !== owner ||
           existing.employeeId !== input.employeeId ||
           existing.sessionId !== input.sessionId ||
-          existing.toAccount !== input.toAccount
-          || existing.purpose !== input.purpose
+          existing.toAccount !== input.toAccount ||
+          existing.purpose !== input.purpose
         )
           throw new PlanMoveError('That request identifier is already in use');
         await this.current(existing);
         return view(existing);
       }
-      await this.port.moves.assertAvailable?.(input.employeeId, owner);
+      await this.port.moves.assertAvailable?.(input.employeeId, owner, execution.executor);
       if (!execution.authorized()) throw new PlanMoveError('The plan permission or binding changed', 403);
       for (const record of this.records.values())
         if (record.owner === owner && record.employeeId === input.employeeId) {
           await this.current(record);
           if (active(record.phase))
-            throw new PlanMoveError('This expert already has a pending move request or execution', 409,
-              { id: record.id, action: 'inspect-existing' });
+            throw new PlanMoveError('This expert already has a pending move request or execution', 409, {
+              id: record.id,
+              action: 'inspect-existing',
+            });
         }
       const snapshot = await execution.executor.snapshot(input.employeeId, owner, input.purpose);
-      if (snapshot.sessionId !== input.sessionId || (input.purpose === 'runtime-refresh'
-        ? snapshot.account !== input.toAccount || !snapshot.runtimeDigest
-        : snapshot.account === input.toAccount))
+      if (
+        snapshot.sessionId !== input.sessionId ||
+        (input.purpose === 'runtime-refresh'
+          ? snapshot.account !== input.toAccount || !snapshot.runtimeDigest
+          : snapshot.account === input.toAccount)
+      )
         throw new PlanMoveError('The expert or plan changed. Refresh before requesting a move.');
       const target = await this.port.validateTarget(snapshot, input.toAccount, owner);
-      if (input.purpose === 'runtime-refresh' &&
-          (!accountReplacementProfile(snapshot.mode) || target?.mode !== snapshot.mode))
+      if (
+        input.purpose === 'runtime-refresh' &&
+        (!accountReplacementProfile(snapshot.mode) || target?.mode !== snapshot.mode)
+      )
         throw new PlanMoveError('Runtime refresh requires the unchanged supported harness');
       if (this.records.size >= 100) {
         const old = [...this.records.values()].find((record) => !active(record.phase));
@@ -343,8 +317,11 @@ export class PlanMoveRequests {
       for (const record of this.records.values()) {
         if (record.owner !== owner || record.sessionId !== sessionId) continue;
         await this.current(record);
-        if (['pending', 'reauthorize-required'].includes(record.phase) &&
-            this.port.binding(record.employeeId, owner) === sessionId) result.push(view(record));
+        if (
+          ['pending', 'reauthorize-required'].includes(record.phase) &&
+          this.port.binding(record.employeeId, owner) === sessionId
+        )
+          result.push(view(record));
       }
       return result;
     });
@@ -415,13 +392,26 @@ export class PlanMoveRequests {
     nonce: string,
     decision: 'approve' | 'reject',
     handoff = '',
-    actorOwner?: string
+    actorOwner?: string,
+    decisionCurrent?: () => void,
+    decisionProof?: unknown
   ): Promise<PlanRequestView> {
     return this.serial(async () => {
+      let admissionRevoked = false;
+      const currentDecision = () => {
+        try {
+          decisionCurrent?.();
+        } catch (error) {
+          admissionRevoked = true;
+          throw error;
+        }
+      };
+      currentDecision();
       const record = this.records.get(id);
       if (!record || record.sessionId !== sessionId || record.owner !== actorOwner)
         throw new PlanMoveError('Unknown approval request', 403);
       await this.current(record);
+      currentDecision();
       const expected = record.nonceHash;
       if (
         record.phase !== 'pending' ||
@@ -438,13 +428,24 @@ export class PlanMoveRequests {
       if (decision === 'reject') {
         record.phase = 'rejected';
         await this.revoke(record);
+        currentDecision();
         await this.save();
+        currentDecision();
         await this.audit(record, 'plan_request_rejected');
+        currentDecision();
         return view(record);
+      }
+      let executor = execution.executor;
+      if (decisionProof !== undefined) {
+        if (!executor.withDecisionAuthority)
+          throw new PlanMoveError('The protected boxed plan actor is unavailable', 503);
+        executor = executor.withDecisionAuthority(decisionProof);
+        currentDecision();
       }
       if (!handoff.trim() || handoff.length > 12000 || containsHandoffControls(handoff))
         throw new PlanMoveError('Provide a work-safe handoff of 1–12000 characters');
-      const snapshot = await execution.executor.snapshot(record.employeeId, record.owner, record.purpose);
+      const snapshot = await executor.snapshot(record.employeeId, record.owner, record.purpose);
+      currentDecision();
       if (
         snapshot.sessionId !== record.sessionId ||
         snapshot.account !== record.fromAccount ||
@@ -454,15 +455,20 @@ export class PlanMoveRequests {
       )
         throw new PlanMoveError('The expert’s runtime changed; ask the owner for a new request');
       const target = await this.port.validateTarget(snapshot, record.toAccount, record.owner);
+      currentDecision();
       if (record.targetMode && record.targetMode !== target?.mode)
         throw new PlanMoveError('The destination harness changed; ask the owner for a new request');
       await this.current(record);
+      currentDecision();
       if (record.phase !== 'pending') throw new PlanMoveError('Approval expired or authorization ended', 403);
       record.phase = 'executing';
-      await this.revoke(record);
-      await this.save();
       try {
+        await this.revoke(record);
+        currentDecision();
+        await this.save();
+        currentDecision();
         await this.audit(record, 'plan_request_approved');
+        currentDecision();
         const move = await this.port.moves.begin(
           {
             id: record.id,
@@ -477,19 +483,25 @@ export class PlanMoveRequests {
             ...(record.purpose ? { purpose: record.purpose, runtimeDigest: record.runtimeDigest } : {}),
           },
           record.owner,
-          execution.executor
+          executor
         );
         record.movePhase = move.phase;
         record.newSession = move.newSession;
         await this.save();
       } catch (error) {
         record.phase = 'failed';
+        const notIssued = dockerPlanMoveNotIssuedOf(error);
+        if (notIssued) record.startRefusal = notIssued;
         // A refusal's own text (a lock, a changed account, an existing plan) is written for the expert; anything else
         // stays generic for them and goes to the log, so the reason is never lost.
         const reason = error instanceof PlanMoveError ? ` ${error.message.replace(/[.\s]+$/, '')}.` : '';
         record.error = `The approved move could not start.${reason} Inspect the current session before requesting again.`;
-        console.warn(`[plans] approved move ${record.id} could not start:`, error instanceof Error ? error.message : error);
+        console.warn(
+          `[plans] approved move ${record.id} could not start:`,
+          error instanceof Error ? error.message : error
+        );
         await this.save();
+        if (admissionRevoked) throw error;
       }
       return view(record);
     });

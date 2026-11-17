@@ -217,7 +217,9 @@ describe('buildDockerKillCommand (multi-session safe)', () => {
   it('kills ONLY this session in-container tmux, never the shared container', () => {
     const docker = toSessionDocker(HOST, CASE);
     const cmd = buildDockerKillCommand({ docker, sessionId: '1a2b3c4d5e6f' });
-    expect(cmd).toBe("docker exec 'reverie-case-myproj' tmux -L reverie-docker kill-session -t 'reverie-dkr-1a2b3c4d'");
+    expect(cmd).toBe(
+      "docker exec 'reverie-case-myproj' tmux -L 'reverie-docker' kill-session -t 'reverie-dkr-1a2b3c4d'"
+    );
     expect(cmd).not.toContain('docker stop');
     expect(cmd).not.toContain('docker rm');
   });

@@ -710,3 +710,22 @@ fn failed_spawn_preserves_primary_and_actual_close_failure_without_forgetting_ow
     );
     fixture.close_ok = false;
 }
+
+#[test]
+fn closing_listener_stops_shared_accept_queue_before_releasing_its_descriptor() {
+    let fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+    let path = fixture.root.join("retained-listener.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+    // A fork before exec can retain this same open-file description despite
+    // CLOEXEC. A controlled duplicate makes that lifetime deterministic.
+    let inherited = listener.try_clone().unwrap();
+    super::server::close_listener(listener).unwrap();
+    let connection = UnixStream::connect(&path);
+    // Join our controlled resource before asserting so a failure cannot retain
+    // a listening descriptor through fixture teardown.
+    drop(inherited);
+    assert!(
+        connection.is_err(),
+        "the old shared accept queue still accepts"
+    );
+}

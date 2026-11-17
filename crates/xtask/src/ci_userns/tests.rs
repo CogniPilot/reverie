@@ -2,6 +2,33 @@ use super::*;
 
 const EXECUTABLE: &str =
     "/nix/store/00000000000000000000000000000000-util-linux-2.42.2-bin/bin/unshare";
+const BWRAP: &str = "/nix/store/00000000000000000000000000000000-bubblewrap-0.13.1/bin/bwrap";
+#[test]
+fn exact_bubblewrap_role_gets_its_own_attachment_without_expanding_unshare() {
+    let text = profile(NamespaceTool::Bubblewrap, Path::new(BWRAP)).unwrap();
+    assert_eq!(
+        text,
+        format!(
+            "abi <abi/4.0>,\ninclude <tunables/global>\nprofile reverie-ci-owned-deployment-userns \"{BWRAP}\" flags=(unconfined) {{\n  userns,\n}}\n"
+        )
+    );
+    assert!(profile(NamespaceTool::Unshare, Path::new(BWRAP)).is_err());
+    assert!(profile(NamespaceTool::Bubblewrap, Path::new(EXECUTABLE)).is_err());
+    for path in [
+        "/usr/bin/bwrap",
+        "/nix/store/short-bubblewrap-0.13.1/bin/bwrap",
+        "/nix/store/00000000000000000000000000000000-caller/bin/bwrap",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-0.13.1/bin/unshare",
+        "/nix/store/00000000000000000000000000000000-util-linux-2/bin/bwrap",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-0.13.1/bin/*",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-0.13.1/bin/bwrap\ncapability,",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-\"0.13.1/bin/bwrap",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-[0.13.1]/bin/bwrap",
+        "/nix/store/00000000000000000000000000000000-bubblewrap-0.13.1/../bin/bwrap",
+    ] {
+        assert!(profile(NamespaceTool::Bubblewrap, Path::new(path)).is_err());
+    }
+}
 #[test]
 fn only_declared_disposable_linux_ci_passes_accidental_use_guard() {
     assert!(
@@ -59,7 +86,7 @@ fn distribution_requires_exact_unambiguous_supported_release() {
 }
 #[test]
 fn exact_profile_has_one_attachment_and_only_named_user_namespace_permission() {
-    let text = profile(Path::new(EXECUTABLE)).unwrap();
+    let text = profile(NamespaceTool::Unshare, Path::new(EXECUTABLE)).unwrap();
     assert_eq!(
         text,
         format!(
@@ -76,7 +103,10 @@ fn exact_profile_has_one_attachment_and_only_named_user_namespace_permission() {
         "/nix/store/00000000000000000000000000000000-util-linux-[2]/bin/unshare",
         "/nix/store/00000000000000000000000000000000-util-linux-2/../bin/unshare",
     ] {
-        assert!(profile(Path::new(path)).is_err(), "{path}");
+        assert!(
+            profile(NamespaceTool::Unshare, Path::new(path)).is_err(),
+            "{path}"
+        );
     }
 }
 
@@ -106,38 +136,40 @@ mod transport {
     }
     #[test]
     fn actual_bounded_stdin_reaches_owned_child_and_nonzero_never_reports_loaded() {
-        for refused in [false, true] {
-            let trace = std::env::temp_dir().join(format!(
-                "ci-profile-input-{}-{}",
-                std::process::id(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ));
-            let rules = profile(Path::new(EXECUTABLE)).unwrap();
-            let mut child = Command::new(std::env::current_exe().unwrap());
-            // The exact trace below proves execution even on zero-case typos;
-            // avoid counting nested libtest summaries as independent suites.
-            child.stdout(Stdio::null());
-            child
-                .args([
-                    "--exact",
-                    "ci_userns::tests::transport::profile_stdin_child",
-                    "--ignored",
-                    "--test-threads=1",
-                ])
-                .env("XTASK_CI_PROFILE_CHILD", "owned")
-                .env("XTASK_CI_PROFILE_TRACE", &trace)
-                .env(
-                    "XTASK_CI_PROFILE_REFUSE",
-                    if refused { "yes" } else { "no" },
+        for (tool, executable) in [
+            (NamespaceTool::Unshare, EXECUTABLE),
+            (NamespaceTool::Bubblewrap, BWRAP),
+        ] {
+            for (refused, refusal) in [(false, "no"), (true, "yes")] {
+                let trace = std::env::temp_dir().join(format!(
+                    "ci-profile-input-{}-{}",
+                    std::process::id(),
+                    NEXT.fetch_add(1, Ordering::Relaxed)
+                ));
+                let rules = profile(tool, Path::new(executable)).unwrap();
+                let mut child = Command::new(std::env::current_exe().unwrap());
+                // The exact trace below proves execution even on zero-case typos;
+                // avoid counting nested libtest summaries as independent suites.
+                child.stdout(Stdio::null());
+                child
+                    .args([
+                        "--exact",
+                        "ci_userns::tests::transport::profile_stdin_child",
+                        "--ignored",
+                        "--test-threads=1",
+                    ])
+                    .env("XTASK_CI_PROFILE_CHILD", "owned")
+                    .env("XTASK_CI_PROFILE_TRACE", &trace)
+                    .env("XTASK_CI_PROFILE_REFUSE", refusal);
+                let result = super::super::linux::load(&mut child, rules.as_bytes());
+                assert_eq!(
+                    fs::read(&trace).unwrap(),
+                    rules.as_bytes(),
+                    "actual helper required, not a zero-case exit"
                 );
-            let result = super::super::linux::load(&mut child, rules.as_bytes());
-            assert_eq!(
-                fs::read(&trace).unwrap(),
-                rules.as_bytes(),
-                "actual helper required, not a zero-case exit"
-            );
-            assert_eq!(result.is_err(), refused);
-            fs::remove_file(trace).unwrap();
+                assert_eq!(result.is_err(), refused);
+                fs::remove_file(trace).unwrap();
+            }
         }
     }
 }

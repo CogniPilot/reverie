@@ -5,10 +5,7 @@ mod inventory;
 impl DeploymentService {
     pub(super) fn effect_operation(&self, id: &str) -> Result<Operation> {
         let operation = self.operation(id)?;
-        require(
-            operation.plan.version == operation.plan.profile().version(),
-            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
-        )?;
+        operation.plan.require_effect()?;
         Ok(operation)
     }
     /// Preserve a rejected v2 plan and its attempt; never reissue its create.
@@ -62,7 +59,7 @@ impl DeploymentService {
         operation.assert_invalid_create_prefix()?;
         let current = self.source_current(operation, true)?;
         pins.running_mounts(&current)?;
-        pins.verify()?;
+        self.verify_effect_pins(operation, pins)?;
         self.installation.current()?;
         operation.record("invalid-create-refused", &receipt)?;
         operation.assert_invalid_create_refused(&current)?;

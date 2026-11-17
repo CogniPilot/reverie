@@ -1,3 +1,5 @@
+import {dockerWorkerIdentityPresented} from '../../docker-worker-identity.js';
+import {requireDockerPlanRequestDecision} from '../../docker-plan-request-decision.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PlanMoveError } from '../../plan-move.js';
@@ -16,7 +18,8 @@ export function registerPlanRequestRoutes(
   ownerAuth: Pick<OwnerAuthService, 'session'> | undefined,
   capture: (request: FastifyRequest) => PlanRequestExecution,
   agentCapture?: (request: FastifyRequest, input: { employeeId: string; sessionId: string; purpose?: 'runtime-refresh' }) => PlanRequestExecution | undefined,
-  selfCaller?: (request: FastifyRequest) => { sessionId: string; owner?: string } | undefined
+  selfCaller?: (request: FastifyRequest) => { sessionId: string; owner?: string } | undefined,
+  boxedDecision?: (request:FastifyRequest,requestId:string)=>Promise<unknown>
 ): void {
   const failure = (reply: FastifyReply, error: unknown) => {
     if (!(error instanceof PlanMoveError)) throw error;
@@ -146,23 +149,35 @@ export function registerPlanRequestRoutes(
               'Approval requires the exact current expert session and its private credential'
             )
           );
-      const body = parseBody(
-        decision === 'approve'
-          ? z
-              .object({ nonce: z.string().regex(/^[a-f0-9]{64}$/), handoff: z.string().trim().min(1).max(12000) })
-              .strict()
-          : z.object({ nonce: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
-        request.body
-      );
       try {
-        const data = await requests.decide(
-          PlanRequestId.parse(request.params.id),
-          actor as string,
-          body.nonce,
-          decision,
-          'handoff' in body && typeof body.handoff === 'string' ? body.handoff : '',
-          session.owner
+        const id = PlanRequestId.parse(request.params.id);
+        const proof = dockerWorkerIdentityPresented(request) ? await boxedDecision?.(request, id) : undefined;
+        if (dockerWorkerIdentityPresented(request) && !proof)
+          throw new PlanMoveError('Current boxed approval permission required', 403);
+        const nativeCurrent = proof
+          ? () => {
+              requireDockerPlanRequestDecision(proof, id, actor as string);
+            }
+          : undefined;
+        const nonce = proof ? requireDockerPlanRequestDecision(proof, id, actor as string) : undefined;
+        const Nonce = proof
+          ? z
+              .string()
+              .regex(/^[a-f0-9]{64}$/)
+              .optional()
+          : z.string().regex(/^[a-f0-9]{64}$/);
+        const body = parseBody(
+          decision === 'approve'
+            ? z.object({ nonce: Nonce, handoff: z.string().trim().min(1).max(12000) }).strict()
+            : z.object({ nonce: Nonce }).strict(),
+          request.body
         );
+        nativeCurrent?.();
+        const decisionArgs=[id,actor as string,nonce??body.nonce!,decision,
+          'handoff' in body&&typeof body.handoff==='string'?body.handoff:'',session.owner] as const;
+        const data=nativeCurrent
+          ?await requests.decide(...decisionArgs,nativeCurrent,proof)
+          :await requests.decide(...decisionArgs);
         return reply.code(202).send({ success: true, data });
       } catch (error) {
         return failure(reply, error);

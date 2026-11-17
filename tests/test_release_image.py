@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -14,6 +15,69 @@ HELPER=ROOT/'scripts/release-image.sh'
 SETUP=ROOT/'scripts/setup.sh'
 IMAGE='sha256:'+'a'*64
 COMMIT='b'*40
+RELEASE_GATES=('image','debian-install','worker-browser','memory-high-native','native-hooks')
+
+
+def release_dependencies(consumer):
+    """Read the direct job's closed needs list, independent of flow/block layout.
+
+    This is deliberately not a general YAML parser: expressions, aliases and
+    unfamiliar values fail rather than count as verified release gates.
+    """
+    lines=consumer.splitlines();values=[]
+    for index,line in enumerate(lines):
+        if not line.startswith('    needs:'):
+            continue
+        value=line[len('    needs:'):]
+        if value and not value.startswith(' '):
+            raise ValueError('Expected whitespace after release dependency key')
+        for following in lines[index+1:]:
+            if following.strip() and not following.startswith('      '):
+                break
+            value+='\n'+following
+        values.append(value)
+    if len(values)!=1:
+        raise ValueError('Expected one direct release dependency list')
+    value=values[0].strip()
+    if re.fullmatch(r'\[\s*[a-z0-9_,\s-]*\]',value):
+        gates=[gate.strip() for gate in value[1:-1].split(',')]
+    elif re.fullmatch(r' *\n {6}- [a-z0-9-]+(?:\n {6}- [a-z0-9-]+)*\s*',values[0]):
+        gates=[line.strip()[2:] for line in value.splitlines()]
+    else:
+        raise ValueError('Unsupported release dependency list')
+    return gates
+
+
+class ReleaseDependencies(unittest.TestCase):
+    def assert_release_gates(self,consumer):
+        self.assertCountEqual(release_dependencies(consumer),RELEASE_GATES)
+
+    def test_flow_and_block_layouts_keep_the_exact_same_gates(self):
+        layouts=[', '.join(RELEASE_GATES),',\n        '.join(reversed(RELEASE_GATES))]
+        for layout in layouts:
+            with self.subTest(layout=layout):
+                self.assert_release_gates('    needs: ['+layout+']\n    steps: []')
+                self.assert_release_gates('    needs:\n      ['+layout+']\n    steps: []')
+        self.assert_release_gates('    needs:\n'+''.join('      - '+gate+'\n' for gate in RELEASE_GATES)+'    steps: []')
+
+    def test_missing_extra_and_duplicate_gates_are_refused(self):
+        variants=[tuple(gate for gate in RELEASE_GATES if gate!=missing) for missing in RELEASE_GATES]
+        variants.extend([RELEASE_GATES+('unknown-gate',),RELEASE_GATES+('image',)])
+        for gates in variants:
+            with self.subTest(gates=gates),self.assertRaises(AssertionError):
+                self.assert_release_gates('    needs: ['+', '.join(gates)+']')
+
+    def test_nested_missing_duplicate_and_expression_needs_are_refused(self):
+        valid='    needs: ['+', '.join(RELEASE_GATES)+']'
+        block='    needs:\n'+''.join('      - '+gate+'\n' for gate in RELEASE_GATES)
+        for consumer in ('    steps:\n    '+valid,valid+'\n'+valid,'    needs: ${{ inputs.gates }}',
+                         valid.replace('needs: [','needs:['),
+                         block.replace('      - debian-install','        - debian-install'),
+                         block.replace('      - image','        - image'),
+                         block.replace('needs:\n      - image','needs: - image'),
+                         '    steps:\n      - run: |\n        '+valid):
+            with self.subTest(consumer=consumer),self.assertRaises(ValueError):
+                release_dependencies(consumer)
 
 
 class ReleaseImage(unittest.TestCase):
@@ -139,7 +203,7 @@ p.write_text(json.dumps(s))
         assets=workflow.split('\n  release-assets:',1)[1]
         self.assertIn('Image publication verified:',publisher)
         for consumer in (publisher, assets):
-            self.assertIn('needs: [image, debian-install, worker-browser, memory-high-native, native-hooks]',consumer)
+            self.assertCountEqual(release_dependencies(consumer),RELEASE_GATES)
         browser=workflow.split('\n  worker-browser:',1)[1].split('\n  native-hooks:',1)[0]
         hooks=workflow.split('\n  native-hooks:',1)[1].split('\n  debian-install:',1)[0]
         self.assertNotIn('scripts/test-native-worker-hooks.ts',browser)

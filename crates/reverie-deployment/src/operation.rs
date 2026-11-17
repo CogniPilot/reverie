@@ -23,27 +23,107 @@ pub(super) struct Plan {
     pub(super) body: Value,
     pub(super) preview: DeploymentPreview,
     pub(super) bind_identities: Vec<crate::pins::Identity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) network_topology: Option<crate::networks::Topology>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) live_account_writers: Option<crate::live_accounts::Inventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) claim_adoption: Option<crate::adoption::Selection>,
 }
 pub(super) struct Operation {
     pub(super) directory: PathBuf,
     pub(super) plan: Plan,
 }
 impl Plan {
+    pub(super) fn require_effect(&self) -> Result<()> {
+        self.validate_profile()?;
+        require(
+            self.version == 6
+                || self.version == self.profile().version()
+                || (self.version == 4
+                    && self.network_topology.is_some()
+                    && self.live_account_writers.is_none())
+                || (self.version == 5
+                    && self.network_topology.is_some()
+                    && self.live_account_writers.is_some()),
+            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
+        )
+    }
+    pub(super) fn source_matches(&self, current: &Value) -> Result<()> {
+        require(
+            model::projection(current) == model::projection(&self.source),
+            "DEPLOYMENT_SOURCE_CHANGED",
+        )?;
+        if let Some(topology) = &self.network_topology {
+            topology.require_container(current)?;
+        }
+        Ok(())
+    }
     pub(super) fn profile(&self) -> model::DeploymentProfile {
         self.preview.profile.unwrap_or_default()
     }
     fn validate_profile(&self) -> Result<()> {
         let profile = self.profile();
         let historical = self.version == 2 && profile == model::DeploymentProfile::ProtectedWebsite;
+        let effective = if self.claim_adoption.is_some() {
+            require(self.version == 6, "DEPLOYMENT_OPERATION_INVALID")?;
+            if self.live_account_writers.is_some() {
+                5
+            } else if self.network_topology.is_some() {
+                4
+            } else {
+                profile.version()
+            }
+        } else {
+            self.version
+        };
         require(
-            self.version == profile.version() || historical,
+            (self.network_topology.is_some()
+                && effective == 4
+                && self.live_account_writers.is_none())
+                || (self.network_topology.is_some()
+                    && effective == 5
+                    && self.live_account_writers.is_some())
+                || (self.network_topology.is_none()
+                    && (effective == profile.version() || historical)),
             "DEPLOYMENT_OPERATION_INVALID",
         )?;
         require(
             self.preview.profile == profile.preview(),
             "DEPLOYMENT_OPERATION_PROFILE_INVALID",
         )?;
-        if profile == model::DeploymentProfile::ProtectedWebsite {
+        require(
+            self.preview.preserved_networks
+                == self
+                    .network_topology
+                    .as_ref()
+                    .map(crate::networks::Topology::preview),
+            "DEPLOYMENT_OPERATION_NETWORKS_INVALID",
+        )?;
+        require(
+            self.preview.live_accounts
+                == self
+                    .live_account_writers
+                    .as_ref()
+                    .map(crate::live_accounts::Inventory::preview),
+            "DEPLOYMENT_OPERATION_WRITERS_INVALID",
+        )?;
+        if let Some(writers) = &self.live_account_writers {
+            require(
+                effective == 5 && self.network_topology.is_some(),
+                "DEPLOYMENT_OPERATION_WRITERS_INVALID",
+            )?;
+            writers.validate(&crate::service::data_source_value(&self.source)?.join("console"))?;
+        }
+        if let Some(topology) = &self.network_topology {
+            topology.validate()?;
+            model::supported_network_profile(&self.source, profile, topology)?;
+            require(
+                self.body["NetworkingConfig"] == topology.request()?,
+                "DEPLOYMENT_OPERATION_NETWORKS_INVALID",
+            )?;
+            model::validate_profile_body(&self.source, &self.body, profile)?;
+        } else if profile == model::DeploymentProfile::ProtectedWebsite {
             model::supported_profile(&self.source, profile)?;
             if historical {
                 model::validate_legacy_invalid_body(&self.source, &self.body)?;
@@ -51,19 +131,35 @@ impl Plan {
                 model::validate_profile_body(&self.source, &self.body, profile)?;
             }
         }
+        require(
+            self.preview.claim_adoption
+                == self
+                    .claim_adoption
+                    .as_ref()
+                    .map(|selected| selected.preview.clone()),
+            "DEPLOYMENT_ADOPTION_SELECTION_INVALID",
+        )?;
+        if let Some(selected) = &self.claim_adoption {
+            selected.validate(&self.source)?;
+        }
         Ok(())
     }
     pub(super) fn candidate_matches(&self, actual: &Value) -> Result<()> {
-        model::candidate_matches(actual, &self.source, &self.body, self.profile())
+        match &self.network_topology {
+            Some(topology) => model::candidate_matches_selection(
+                actual,
+                &self.source,
+                &self.body,
+                self.profile(),
+                Some(topology),
+            ),
+            None => model::candidate_matches(actual, &self.source, &self.body, self.profile()),
+        }
     }
 }
 impl Operation {
     pub(super) fn create(state: &Path, plan: Plan) -> Result<Self> {
-        require(
-            plan.version == plan.profile().version(),
-            "DEPLOYMENT_LEGACY_PLAN_READ_ONLY",
-        )?;
-        plan.validate_profile()?;
+        plan.require_effect()?;
         let parent = state.join("console-deployments");
         std::fs::DirBuilder::new()
             .mode(0o700)

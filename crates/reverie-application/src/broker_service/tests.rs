@@ -20,6 +20,7 @@ struct Fake {
     block_lease: AtomicBool,
     lease_closes: AtomicUsize,
     watchdog_exits: AtomicUsize,
+    block_watchdog_return: AtomicBool,
     stop: AtomicBool,
 }
 impl Fake {
@@ -57,6 +58,9 @@ impl BrokerCore for Fake {
             std::thread::sleep(Duration::from_millis(5));
         }
         self.watchdog_exits.fetch_add(1, Ordering::SeqCst);
+        while self.block_watchdog_return.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
     fn report(&self, mut stream: UnixStream) {
         // The owner reads its own frame, proving it arrived unread.
@@ -407,6 +411,7 @@ fn a_late_watchdog_is_retained_and_settled_later() {
         ..Fake::default()
     });
     core.block_watchdog.store(true, Ordering::Release);
+    core.block_watchdog_return.store(true, Ordering::Release);
     let socket = scratch("late-watchdog");
     let (service, handle) = running(core.clone(), all_owners(), &socket);
     service.request_close();
@@ -423,7 +428,31 @@ fn a_late_watchdog_is_retained_and_settled_later() {
         Err(ServiceError::Unconfirmed(vec!["SUPERVISOR_ACTIVE"]))
     );
     core.block_watchdog.store(false, Ordering::Release);
+    let start = Instant::now();
     while core.watchdog_exits.load(Ordering::SeqCst) == 0 {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "watchdog never exited its loop"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The counter is inside the watchdog: observing it cannot prove the
+    // retained thread has returned. Keep that interval deterministic.
+    assert_eq!(
+        service.settle_retained(),
+        Err(ServiceError::Unconfirmed(vec!["SUPERVISOR_ACTIVE"]))
+    );
+    core.block_watchdog_return.store(false, Ordering::Release);
+    while !service
+        .retain()
+        .watchdog
+        .as_ref()
+        .is_some_and(JoinHandle::is_finished)
+    {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "watchdog never returned"
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(service.settle_retained(), Ok(()));

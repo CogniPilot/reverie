@@ -9,6 +9,33 @@ use std::error::Error;
 #[cfg(any(target_os = "linux", test))]
 use std::path::Path;
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
+#[cfg(any(target_os = "linux", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NamespaceTool {
+    Unshare,
+    Bubblewrap,
+}
+#[cfg(any(target_os = "linux", test))]
+impl NamespaceTool {
+    fn executable(self) -> &'static str {
+        match self {
+            Self::Unshare => "unshare",
+            Self::Bubblewrap => "bwrap",
+        }
+    }
+    fn package_prefix(self) -> &'static str {
+        match self {
+            Self::Unshare => "util-linux-",
+            Self::Bubblewrap => "bubblewrap-",
+        }
+    }
+    fn profile_name(self) -> &'static str {
+        match self {
+            Self::Unshare => "reverie-ci-owned-memory-userns",
+            Self::Bubblewrap => "reverie-ci-owned-deployment-userns",
+        }
+    }
+}
 #[cfg(target_os = "linux")]
 pub(super) fn trusted_tool(path: &Path) -> Result<()> {
     linux::trusted_system_tool(path)
@@ -69,34 +96,38 @@ pub(super) fn ubuntu24(release: &str) -> Result<()> {
     Ok(())
 }
 #[cfg(any(target_os = "linux", test))]
-fn profile(path: &Path) -> Result<String> {
+fn profile(tool: NamespaceTool, path: &Path) -> Result<String> {
     let path = path
         .to_str()
-        .ok_or("Nix unshare attachment must be ASCII")?;
+        .ok_or("Nix user-namespace tool attachment must be ASCII")?;
     let relative = path
         .strip_prefix("/nix/store/")
-        .ok_or("exact immutable Nix unshare required")?;
+        .ok_or("exact immutable Nix user-namespace tool required")?;
     let fields = relative.split('/').collect::<Vec<_>>();
     if fields.len() != 3
         || fields[1] != "bin"
-        || fields[2] != "unshare"
+        || fields[2] != tool.executable()
         || !fields[0].split_once('-').is_some_and(|(hash, name)| {
             hash.len() == 32
                 && hash
                     .bytes()
                     .all(|v| b"0123456789abcdfghijklmnpqrsvwxyz".contains(&v))
-                && name.starts_with("util-linux-")
+                && name.starts_with(tool.package_prefix())
         })
         || !path
             .bytes()
             .all(|v| v.is_ascii_alphanumeric() || b"/._+-".contains(&v))
     {
-        return Err("exact immutable Nix util-linux unshare path required; no profile metacharacters/selectors".into());
+        return Err(
+            "exact immutable Nix tool role/path required; no profile metacharacters/selectors"
+                .into(),
+        );
     }
     // The closed ASCII spelling excludes quotes, escapes and glob characters;
     // quote it anyway. No caller-selected name, rule, include or program exists.
+    let name = tool.profile_name();
     let value = format!(
-        "abi <abi/4.0>,\ninclude <tunables/global>\nprofile reverie-ci-owned-memory-userns \"{path}\" flags=(unconfined) {{\n  userns,\n}}\n"
+        "abi <abi/4.0>,\ninclude <tunables/global>\nprofile {name} \"{path}\" flags=(unconfined) {{\n  userns,\n}}\n"
     );
     if value.len() > 4096 {
         return Err("bounded CI profile exceeded".into());

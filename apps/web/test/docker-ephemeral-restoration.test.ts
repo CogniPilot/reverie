@@ -23,13 +23,19 @@ import {
   EphemeralAck,
   EphemeralRestoration,
   ephemeralProjection,
+  ephemeralRetainedProjection,
+  ephemeralContinuationProjection,
+  ephemeralPublishedProjection,
   allowedEphemeralTransition,
   type EphemeralJournal,
   type EphemeralAttempt,
 } from '../src/docker-ephemeral-data.js';
 import { EPHEMERAL_PREPARE_PROGRAM, EPHEMERAL_DESTINATION_PROGRAM } from '../src/docker-ephemeral-native.js';
 import { DockerEmployeeInspect } from '../src/docker-employee-engine-data.js';
-import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
+import {
+  DockerEmployeeContinuationRecord,
+  DockerEmployeePlanReplacementWorkRecord,
+} from '../src/docker-employee-continuation-data.js';
 import type { DockerEphemeralRestoration } from '../src/docker-ephemeral-restoration.js';
 import type { EphemeralDirectoryOwner } from '../src/docker-ephemeral-directory.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
@@ -211,6 +217,52 @@ function row() {
     policy: { ...pool, memoryHighBytes: null, pool },
     credentialId: '40000000-0000-4000-8000-000000000004',
     phase: 'pool-ready',
+  });
+}
+function replacementRow(f: ReturnType<typeof fixture>, previousSession = sid) {
+  const before = row(),
+    original = {
+      ...before.original,
+      sessionId: previousSession,
+      mountDigest: dockerContinuationDigest(
+        [...source(f).Mounts].sort((a, b) => a.Destination.localeCompare(b.Destination))
+      ),
+    };
+  return DockerEmployeePlanReplacementWorkRecord.parse({
+    ...before,
+    version: 3,
+    purpose: 'docker-employee-plan-replacement-v3',
+    credentialId: '70000000-0000-4000-8000-000000000007',
+    original,
+    request: { ...before.request, sessionId: '60000000-0000-4000-8000-000000000006', sessionGeneration: 8 },
+    providerSourceDigest: before.sourceDigest,
+    planReplacement: {
+      version: 1,
+      purpose: 'docker-plan-replacement-provenance-v1',
+      moveId: 'synthetic-move',
+      source: {
+        binding: {
+          version: 1,
+          operationId: '50000000-0000-4000-8000-000000000005',
+          credentialId: before.credentialId,
+          sessionId: previousSession,
+          sessionGeneration: 7,
+          containerId: original.containerId,
+          imageId: original.imageId,
+          originalDigest: dockerContinuationDigest(original),
+          policyDigest: dockerContinuationDigest(before.policy),
+        },
+        continuationDigest: '1'.repeat(64),
+        providerSourceDigest: before.sourceDigest,
+        ephemeralSessionId: sid,
+      },
+      account: {
+        id: 'synthetic-plan',
+        provider: 'anthropic',
+        projectionDigest: '2'.repeat(64),
+        contextDigest: '3'.repeat(64),
+      },
+    },
   });
 }
 describe('closed ephemeral projection DATA', () => {
@@ -599,16 +651,26 @@ function adapter(f: ReturnType<typeof fixture>) {
     command,
     saved,
     journal,
-    restart() {
+    restart(nativeImage = image, publishedRead = false) {
       service.close();
       service = new Constructor(
         command,
         journal,
         '7'.repeat(64),
-        image,
-        async () => source(f),
+        nativeImage,
+        async () => {
+          if (publishedRead) throw Error('Controlled retired original absence');
+          return source(f);
+        },
         async () => target,
-        async () => []
+        async () => [],
+        async () => {
+          if (publishedRead) {
+            if (!target) throw Error('Missing target');
+            return target;
+          }
+          return source(f);
+        }
       );
       owners.push(service);
     },
@@ -641,6 +703,82 @@ function adapter(f: ReturnType<typeof fixture>) {
   };
 }
 describe.runIf(process.platform === 'linux' && process.getuid!() > 0)('canonical metadata-attempt integration', () => {
+  it.each(['operator-recovery', 'operator-sessions'] as const)(
+    'retains %s directories through distinct target and repeated source session identities',
+    async (layout) => {
+      const f = fixture(layout),
+        a = adapter(f),
+        r = replacementRow(f, oid);
+      expect(ephemeralRetainedProjection(source(f), r.original)).toEqual(f.projection);
+      await a.service.prepare(r, a.current);
+      const completed = a.cursor!.attempts.at(-1)!;
+      expect(completed.request.sessionId).toBe(sid);
+      expect(completed.request.sessionGeneration).toBe(8);
+      expect(completed.phase).toBe('completed');
+      const recorded = DockerEmployeePlanReplacementWorkRecord.parse({ ...r, ephemeralRestoration: a.cursor });
+      expect(recorded.request.sessionId).not.toBe(completed.request.sessionId);
+      expect(fs.existsSync(f.tmp)).toBe(true);
+      const before = fs.statSync(f.tmp, { bigint: true });
+      a.runningTarget();
+      await a.service.verifyDestination(recorded);
+      expect(fs.statSync(f.tmp, { bigint: true }).ino).toBe(before.ino);
+      const wrong = structuredClone(recorded);
+      if (wrong.version !== 3) throw Error('Replacement required');
+      wrong.planReplacement.source.ephemeralSessionId = oid;
+      expect(() => ephemeralContinuationProjection(source(f), wrong)).toThrow('ORIGINAL_CHANGED');
+      expect(() => ephemeralRetainedProjection({ ...source(f), Id: 'f'.repeat(64) }, r.original)).toThrow(
+        'ORIGINAL_CHANGED'
+      );
+    }
+  );
+  it.each(['employees', 'operator-recovery', 'operator-sessions'] as const)(
+    're-earns published v3 %s leaf custody after original removal without preparation',
+    async (layout) => {
+      const f = fixture(layout),
+        a = adapter(f),
+        r = replacementRow(f, oid);
+      await a.service.prepare(r, a.current);
+      a.runningTarget();
+      const published = DockerEmployeePlanReplacementWorkRecord.parse({
+        ...r,
+        phase: 'ready',
+        destination: { ...r.original, containerId: 'd'.repeat(64), sessionId: r.request.sessionId },
+        ephemeralRestoration: a.cursor,
+      });
+      const target = { ...source(f), Id: published.destination!.containerId };
+      expect(ephemeralPublishedProjection(target, published)).toEqual(f.projection);
+      const wrong = structuredClone(published);
+      wrong.planReplacement.source.ephemeralSessionId = '90000000-0000-4000-8000-000000000009';
+      if (layout !== 'employees') expect(() => ephemeralPublishedProjection(target, wrong)).toThrow('ORIGINAL_CHANGED');
+      const replaced = structuredClone(target);
+      replaced.Mounts[0]!.RW = false;
+      expect(() => ephemeralPublishedProjection(replaced, published)).toThrow('ORIGINAL_CHANGED');
+      a.restart(image, true);
+      vi.mocked(a.command.create).mockClear();
+      vi.mocked(a.command.run).mockClear();
+      expect(await a.service.observe(published)).toBe('ready');
+      await a.service.verifyDestination(published);
+      expect(a.command.create).not.toHaveBeenCalled();
+      expect(vi.mocked(a.command.run).mock.calls.every(([args]) => args[0] === 'exec')).toBe(true);
+      await expect(a.service.prepare(published, a.current)).rejects.toThrow('Controlled retired original absence');
+    }
+  );
+  it('reads a published old-image projection after an upgrade without issuing metadata effects', async () => {
+    const f = fixture(),
+      a = adapter(f),
+      r = row();
+    await a.service.prepare(r, a.current);
+    a.runningTarget();
+    r.phase = 'ready';
+    a.restart('sha256:' + '9'.repeat(64));
+    vi.mocked(a.command.create).mockClear();
+    vi.mocked(a.command.run).mockClear();
+    expect(await a.service.observe(r)).toBe('ready');
+    await a.service.verifyDestination(r);
+    expect(a.command.create).not.toHaveBeenCalled();
+    expect(vi.mocked(a.command.run).mock.calls.every(([args]) => args[1] !== 'start')).toBe(true);
+    await expect(a.service.prepare(r, a.current)).rejects.toThrow('IMAGE_CHANGED');
+  });
   it('holds original root and leaves through preparation; configs have only exact nonrecursive root bind', async () => {
     const f = fixture(),
       a = adapter(f),

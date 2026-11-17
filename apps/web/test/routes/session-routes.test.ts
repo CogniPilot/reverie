@@ -1,3 +1,4 @@
+import { planOfficeTerminal } from '../helpers/plan-office-driver.js';
 import { trustedFixtureOwner } from '../helpers/trusted-owner-fixture.js';
 /**
  * @fileoverview Tests for session route handlers.
@@ -169,6 +170,20 @@ describe('session-routes', () => {
 
   afterEach(async () => {
     await harness.app.close();
+  });
+
+  it('preserves the terminal fixture close barrier when parsed assistant output is empty', async () => {
+    const barrier = 'BCPLAN_' + 'a'.repeat(64);
+    harness.ctx._session.terminalBuffer = barrier + '\n❯ ';
+    harness.ctx._session.textOutput = '';
+    (harness.ctx.mux as { captureActivePaneBuffer?: unknown }).captureActivePaneBuffer = vi.fn(() => null);
+    const parsed = await harness.app.inject({ method: 'GET', url: '/api/sessions/' + harness.ctx._sessionId + '/output' });
+    expect(parsed.statusCode).toBe(200);
+    expect(parsed.json().data.textOutput).toBe('');
+    await expect(planOfficeTerminal(new Response(parsed.body, { status: parsed.statusCode }))).rejects.toThrow();
+    const actual = await harness.app.inject({ method: 'GET', url: '/api/sessions/' + harness.ctx._sessionId + '/terminal' });
+    expect(actual.statusCode).toBe(200);
+    expect(await planOfficeTerminal(new Response(actual.body, { status: actual.statusCode }))).toContain(barrier);
   });
 
   // ========== POST /api/sessions/:id/send-key ==========

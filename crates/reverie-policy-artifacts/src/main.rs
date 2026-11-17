@@ -1,4 +1,6 @@
 //! Build-only artifact producer; no service/runtime/owner operation entrypoint.
+#![forbid(unsafe_code)]
+
 use clap::Parser;
 use reverie_contracts::docker_profile::{MAX_PROFILE_BYTES, produce_docker_profile};
 use reverie_contracts::task_perf_v1::{

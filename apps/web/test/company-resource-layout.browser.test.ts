@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { expect, it } from 'vitest';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type Route } from 'playwright';
 import { JSDOM } from 'jsdom';
 import { createServer, member, room, message } from './helpers/chat-app-harness.mjs';
 import { EmployeeMemoryDiagnostics, memoryPressureAdvisory } from '../src/resource-employee-data.js';
@@ -37,7 +37,7 @@ async function fixture(
   // Keep the shipped document structure, but bootstrap only the conversation
   // shell fixture. Every request stays inside this intercepted synthetic origin.
   const document = new JSDOM(read('index.html'));
-  document.window.document.querySelectorAll('script,link').forEach((element) => element.remove());
+  document.window.document.querySelectorAll('script,link').forEach((element: Element) => element.remove());
   const html = document.serialize();
   document.window.close();
   // Canonical application projection in the test's server realm. The kernel
@@ -264,7 +264,7 @@ for (const width of [320, 1280])
       await expect
         .poll(() => dialog.locator('[role="status"]').textContent())
         .toContain('terminal viewer could not be checked');
-      expect(await dialog.textContent()).toContain('Employee and chat readiness are still unconfirmed');
+      expect(await dialog.textContent()).toContain('This viewer check does not measure employee or chat readiness');
       expect(await dialog.textContent()).toContain('does not restart the employee or resend chat input');
       const geometry = () =>
         dialog.evaluate((el) => {
@@ -306,7 +306,7 @@ for (const width of [320, 1280])
       await dialog.getByRole('button', { name: 'Refresh terminal status', exact: true }).click();
       await expect.poll(() => dialog.locator('[role="status"]').textContent()).toContain('terminal viewer responded');
       expect(await dialog.locator('[role="status"]').textContent()).toContain(
-        'Employee and chat readiness are still unconfirmed'
+        'This viewer check does not measure employee or chat readiness'
       );
       expect(await dialog.locator('[role="status"]').textContent()).toContain('Retry the viewer connection in 3s');
       expect(await dialog.locator('[role="status"]').textContent()).not.toMatch(
@@ -347,6 +347,142 @@ for (const width of [320, 1280])
       await browser.close();
     }
   });
+
+it.each([320, 1280])(
+  'retains visible viewer read failures and isolates closed pending dialogs at %ipx',
+  async (width) => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    try {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await fixture(page, { viewerObservation: true });
+      await page.evaluate((employeeId) => {
+        type Reply = { ok: boolean; status: number; json(): Promise<unknown> };
+        const w = window as unknown as {
+          __server: { handle(path: string, options?: unknown): Promise<Reply> };
+          __nextViewerRead: 'failed' | 'normal' | 'hold';
+          __releaseClosedViewerRead(): void;
+        };
+        const original = w.__server.handle;
+        w.__nextViewerRead = 'failed';
+        w.__server.handle = async (path, options) => {
+          const reply = await original(path, options);
+          if (path !== '/api/company/employees/' + employeeId + '/reconnect/status') return reply;
+          const fault = w.__nextViewerRead;
+          w.__nextViewerRead = 'normal';
+          if (fault === 'failed')
+            return {
+              ok: false,
+              status: 503,
+              json: async () => ({
+                success: false,
+                error: 'Synthetic viewer status unavailable. Refresh to check again.',
+              }),
+            };
+          // The response is already captured. Closing must not let this older
+          // reply paint either the detached dialog or a newly opened one.
+          if (fault === 'hold')
+            await new Promise<void>((resolve) => {
+              w.__releaseClosedViewerRead = resolve;
+            });
+          return reply;
+        };
+      }, employeeId);
+      await page.evaluate(() => (window as unknown as LayoutWindow).reverieChat.openCompany('people'));
+      const statusButton = page.locator('#ca-company-people').getByRole('button', {
+        name: 'Terminal reconnect status',
+        exact: true,
+      });
+      await statusButton.click();
+      const dialog = page.getByRole('dialog', { name: 'Terminal status for River', exact: true });
+      const report = dialog.getByRole('status');
+      await expect
+        .poll(() => report.textContent())
+        .toBe('Synthetic viewer status unavailable. Refresh to check again.');
+      const refresh = dialog.getByRole('button', { name: 'Refresh terminal status', exact: true });
+      expect(await refresh.isEnabled()).toBe(true);
+      await page.evaluate(() => {
+        (window as unknown as { __viewerObservation: string }).__viewerObservation = 'responsive';
+      });
+      await refresh.click();
+      await expect.poll(() => report.textContent()).toContain('The terminal viewer responded.');
+      expect(await report.textContent()).toContain('This viewer check does not measure employee or chat readiness.');
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toHaveLength(2);
+      await page.evaluate(() => {
+        const w = window as unknown as { __nextViewerRead: string; __viewerObservation: string };
+        w.__nextViewerRead = 'hold';
+        w.__viewerObservation = 'unconfirmed';
+      });
+      await refresh.click();
+      await expect.poll(() => refresh.isDisabled()).toBe(true);
+      await dialog.getByRole('button', { name: 'Close terminal status', exact: true }).click();
+      expect(await dialog.count()).toBe(0);
+      await page.evaluate(() => {
+        const w = window as unknown as { __viewerObservation: string; __viewerReason: string };
+        w.__viewerObservation = 'responsive';
+        w.__viewerReason = 'native-health-unavailable';
+      });
+      await statusButton.click();
+      const reopened = page.getByRole('dialog', { name: 'Terminal status for River', exact: true });
+      await expect.poll(() => reopened.getByRole('status').textContent()).toContain('native health is unconfirmed');
+      const currentText = await reopened.getByRole('status').textContent();
+      const cachedStatus = () =>
+        page.evaluate(
+          ({ employeeId, sessionId }) => {
+            const w = window as unknown as {
+              reverieChat: {
+                viewerReconnectStatus(employee: { id: string; sessionId: string; sessionGeneration: number }): unknown;
+              };
+            };
+            return w.reverieChat.viewerReconnectStatus({ id: employeeId, sessionId, sessionGeneration: 2 });
+          },
+          { employeeId, sessionId }
+        );
+      const currentStatus = await cachedStatus();
+      expect(currentStatus).toMatchObject({
+        reason: 'native-health-unavailable',
+        observation: 'outer-pane-responsive',
+      });
+      await page.evaluate(async () => {
+        (window as unknown as { __releaseClosedViewerRead(): void }).__releaseClosedViewerRead();
+        await new Promise(requestAnimationFrame);
+      });
+      expect(await reopened.getByRole('status').textContent()).toBe(currentText);
+      expect(await cachedStatus()).toEqual(currentStatus);
+      expect(await reopened.count()).toBe(1);
+      expect(await page.evaluate(() => (window as unknown as LayoutWindow).__writes)).toEqual(
+        [1, 2, 3, 4].map(() => ({
+          path: `/api/company/employees/${employeeId}/reconnect/status`,
+          method: 'POST',
+          body: { sessionId, sessionGeneration: 2 },
+        }))
+      );
+      const bounds = await reopened.boundingBox();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `viewer-closed-read-${width}.png`),
+        });
+      }
+      await reopened.getByRole('button', { name: 'Close terminal status', exact: true }).click();
+      expect(await reopened.count()).toBe(0);
+      expect(errors).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  }
+);
 
 for (const width of [320, 390, 1280])
   it(`shows a server-projected sampled pressure warning and clears its severity on a stale refresh at ${width}px`, async () => {
@@ -985,6 +1121,511 @@ for (const width of [320, 1280])
 
 // Same real Plans methods as the DOM suite, with shipped markup/styles and an
 // intercepted synthetic origin. This cannot authorize a real plan operation.
+const planEmployee = {
+  id: '11111111-1111-4111-8111-111111111111',
+  sessionId: '22222222-2222-4222-8222-222222222222',
+  name: 'Synthetic plan employee',
+};
+async function planLayoutFixture(page: Page, respond: (route: Route) => Promise<void>) {
+  const originalHtml = read('company-plans.html');
+  const document = new JSDOM(originalHtml);
+  document.window.document
+    .querySelectorAll('script:not(#company-plans-bootstrap)')
+    .forEach((el: Element) => el.remove());
+  const html = document.serialize();
+  document.window.close();
+  const accounts = [
+    { id: 'first', name: 'Original synthetic plan', provider: 'openai' },
+    { id: 'second', name: 'Destination synthetic plan', provider: 'anthropic' },
+  ];
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== 'https://plans-layout-fixture.test') return route.abort();
+    if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: html });
+    if (url.pathname === '/company-board.css')
+      return route.fulfill({ contentType: 'text/css', body: read('company-board.css') });
+    if (url.pathname.startsWith('/api/plans/')) return respond(route);
+    return route.abort();
+  });
+  await page.goto('https://plans-layout-fixture.test/');
+  const methods = originalHtml.slice(
+    originalHtml.indexOf('function planMemberHtml('),
+    originalHtml.indexOf('// Codex banked resets:')
+  );
+  await page.addScriptTag({
+    content: `const B={planBurn:${JSON.stringify(accounts)}};
+      let planAllocations={employees:[${JSON.stringify(planEmployee)}],accounts:[]};
+      let pendingPlanRequests=[],planMembersBusy=false,planMembersError=false;
+      const fmt=()=>'', esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      ${methods}
+      window.__openPlanMove=openPlanMove;
+      window.__showPlanMove=record=>{
+        const dialog=document.getElementById('moveDlg');
+        dialog.showModal();showPlanMoveProgress(dialog,record,${JSON.stringify(planEmployee.name)});
+      };`,
+  });
+}
+
+type ForcePlanBody = { id: string; employeeId: string; sessionId: string; toAccount: string; handoff: string };
+const forceWarning = `Force ${planEmployee.name} to move now? This skips their handoff approval. The current session is stopped before the replacement starts and becomes ready. Unfinished work may be interrupted, and downtime or recovery may be required.`;
+const heldPlanMove = (id: string) => ({
+  id,
+  employeeId: planEmployee.id,
+  oldSession: planEmployee.sessionId,
+  newSession: '44444444-4444-4444-8444-444444444444',
+  toAccount: 'second',
+  phase: 'recovery-required',
+  backend: 'docker',
+  sourceCleanupVerified: true,
+  allowedActions: ['continue-original'],
+});
+async function planConsumerFixture(page: Page, respond: (route: Route, pathname: string) => Promise<void>) {
+  await planLayoutFixture(page, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === '/api/plans/moves/preview')
+      return route.fulfill({
+        json: { success: true, data: { account: 'first', mode: 'codex', sessionId: planEmployee.sessionId } },
+      });
+    if (pathname === '/api/plans/move-impact')
+      return route.fulfill({ status: 503, json: { success: false, error: 'Synthetic estimate unavailable' } });
+    if (pathname === '/api/plans/requests/recent') return route.fulfill({ json: { success: true, data: [] } });
+    if (pathname === '/api/plans/allocations')
+      return route.fulfill({ json: { success: true, data: { employees: [planEmployee], accounts: [] } } });
+    return respond(route, pathname);
+  });
+}
+async function openPlanConsumer(page: Page) {
+  await page.evaluate(
+    (id) =>
+      (window as unknown as { __openPlanMove(id: string, destination: string): Promise<void> }).__openPlanMove(
+        id,
+        'second'
+      ),
+    planEmployee.id
+  );
+  return page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+}
+async function planConsumerBounds(
+  page: Page,
+  panel: ReturnType<Page['getByRole']>,
+  width: number,
+  controls: string[],
+  screenshot: string
+) {
+  const height = width === 320 ? 640 : 900;
+  expect(await panel.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(false);
+  const bounds = await panel.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+  for (const name of controls) {
+    const control = panel.getByRole('button', { name, exact: true });
+    await control.scrollIntoViewIfNeeded();
+    const rect = await control.boundingBox();
+    expect(rect).not.toBeNull();
+    expect(rect!.height).toBeGreaterThanOrEqual(32);
+    expect(rect!.x).toBeGreaterThanOrEqual(0);
+    expect(rect!.x + rect!.width).toBeLessThanOrEqual(width);
+    expect(rect!.y).toBeGreaterThanOrEqual(0);
+    expect(rect!.y + rect!.height).toBeLessThanOrEqual(height);
+  }
+  if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+    await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+    await page.screenshot({ path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, screenshot + '-' + width + '.png') });
+  }
+}
+function planTextContrast(foreground: string, background: string): number {
+  const luminance = (color: string) => {
+    const channels = color
+      .match(/[\d.]+/g)!
+      .slice(0, 3)
+      .map(Number)
+      .map((value) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      });
+    return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+  };
+  const a = luminance(foreground),
+    b = luminance(background);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+async function planConsumerBrowser(
+  width: number,
+  run: (page: Page) => Promise<void>,
+  colorScheme: 'light' | 'dark' = 'light'
+) {
+  const browser = await chromium.launch({
+    headless: true,
+    chromiumSandbox: true,
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+      : {}),
+  });
+  try {
+    const page = await browser.newPage({
+      viewport: { width, height: width === 320 ? 640 : 900 },
+      deviceScaleFactor: 1,
+      colorScheme,
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await run(page);
+    expect(errors).toEqual([]);
+  } finally {
+    await browser.close();
+  }
+}
+
+for (const colorScheme of ['light', 'dark'] as const)
+  for (const width of [320, 1280])
+    it(`distinguishes blocked force mutations from original-status inspection in ${colorScheme} at ${width}px`, async () => {
+      await planConsumerBrowser(
+        width,
+        async (page) => {
+          const writes: ForcePlanBody[] = [],
+            reads: string[] = [];
+          await planConsumerFixture(page, async (route, pathname) => {
+            expect(route.request().method()).toBe('POST');
+            if (pathname === '/api/plans/moves/force') {
+              writes.push(route.request().postDataJSON());
+              return route.abort('failed');
+            }
+            if (writes[0] && pathname === '/api/plans/moves/' + writes[0].id + '/status') {
+              reads.push(pathname);
+              return route.fulfill({ json: { success: true, data: heldPlanMove(writes[0].id) } });
+            }
+            throw Error('Unexpected themed force consumer request: ' + pathname);
+          });
+          const panel = await openPlanConsumer(page);
+          expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme);
+          page.once('dialog', (dialog) => dialog.accept());
+          await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+          const inspect = panel.getByRole('button', { name: 'Check original move', exact: true });
+          await inspect.waitFor();
+          const appearance = await panel.evaluate((element) => {
+            const style = (selector: string) => {
+              const button = element.querySelector<HTMLButtonElement>(selector)!;
+              const value = getComputedStyle(button);
+              return {
+                disabled: button.disabled,
+                border: value.borderTopStyle,
+                color: value.color,
+                background: value.backgroundColor,
+                cursor: value.cursor,
+                opacity: value.opacity,
+              };
+            };
+            return {
+              request: style('[type="submit"]'),
+              force: style('[data-force]'),
+              inspect: style('[data-inspect]'),
+              errorColor: getComputedStyle(element.querySelector('[role="alert"]')!).color,
+              panelBackground: getComputedStyle(element).backgroundColor,
+            };
+          });
+          for (const blocked of [appearance.request, appearance.force]) {
+            expect(blocked.disabled).toBe(true);
+            expect(blocked.border).toBe('dashed');
+            expect(blocked.color).not.toBe(appearance.inspect.color);
+            expect(blocked.background).not.toBe(appearance.inspect.background);
+            expect(blocked.cursor).toBe('not-allowed');
+            expect(blocked.opacity).toBe('1');
+            expect(planTextContrast(blocked.color, blocked.background)).toBeGreaterThanOrEqual(4.5);
+          }
+          expect(appearance.inspect.disabled).toBe(false);
+          expect(appearance.inspect.border).toBe('solid');
+          expect(appearance.inspect.cursor).toBe('pointer');
+          expect(planTextContrast(appearance.inspect.color, appearance.inspect.background)).toBeGreaterThanOrEqual(4.5);
+          expect(planTextContrast(appearance.errorColor, appearance.panelBackground)).toBeGreaterThanOrEqual(4.5);
+          await inspect.focus();
+          await page.keyboard.press('Tab');
+          expect(
+            await panel
+              .getByRole('button', { name: 'Cancel', exact: true })
+              .evaluate((el) => el === document.activeElement)
+          ).toBe(true);
+          await page.keyboard.press('Shift+Tab');
+          expect(
+            await inspect.evaluate(
+              (el) =>
+                el.matches(':focus-visible') &&
+                getComputedStyle(el).outlineStyle !== 'none' &&
+                parseFloat(getComputedStyle(el).outlineWidth) >= 1
+            )
+          ).toBe(true);
+          await planConsumerBounds(
+            page,
+            panel,
+            width,
+            ['Check original move', 'Cancel'],
+            'plan-force-disabled-' + colorScheme
+          );
+          if (process.env.TEST_RESOURCE_SCREENSHOT_DIR)
+            await writeFile(
+              join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-force-disabled-${colorScheme}-${width}.json`),
+              JSON.stringify({ colorScheme, width, appearance }, null, 2) + '\n'
+            );
+          expect(writes).toHaveLength(1);
+          expect(reads).toEqual([]);
+          await page.keyboard.press('Enter');
+          await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+          expect(reads).toEqual(['/api/plans/moves/' + writes[0]!.id + '/status']);
+          expect(writes).toHaveLength(1);
+          const readbackText = await panel
+            .locator('[data-move-sessions], [data-recovery-info]')
+            .evaluateAll((elements) =>
+              elements.map((element) => ({
+                text: element.textContent,
+                color: getComputedStyle(element).color,
+                background: getComputedStyle(element.closest('dialog')!).backgroundColor,
+                opacity: getComputedStyle(element).opacity,
+              }))
+            );
+          for (const value of readbackText) {
+            expect(value.text).toBeTruthy();
+            expect(value.opacity).toBe('1');
+            expect(planTextContrast(value.color, value.background)).toBeGreaterThanOrEqual(4.5);
+          }
+          expect(readbackText[0]!.text).toContain(planEmployee.sessionId);
+          expect(readbackText[0]!.text).toContain(heldPlanMove(writes[0]!.id).newSession);
+          expect(await panel.getByRole('status').textContent()).toBe('Recovery required');
+          await planConsumerBounds(
+            page,
+            panel,
+            width,
+            ['Recover original move', 'Refresh status'],
+            'plan-force-readback-' + colorScheme
+          );
+          if (process.env.TEST_RESOURCE_SCREENSHOT_DIR)
+            await writeFile(
+              join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-force-readback-${colorScheme}-${width}.json`),
+              JSON.stringify(
+                {
+                  colorScheme,
+                  width,
+                  text: readbackText.map((value) => ({
+                    ...value,
+                    contrast: planTextContrast(value.color, value.background),
+                  })),
+                },
+                null,
+                2
+              ) + '\n'
+            );
+        },
+        colorScheme
+      );
+    });
+
+// Actual Chromium consumers of the shipped Plans closure, with closed synthetic
+// API replies. These assert user actions/protocol scope, not native move effects.
+for (const width of [320, 1280]) {
+  it(`declines the actual force warning without sending a force operation at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: string[] = [],
+        warnings: string[] = [];
+      await planConsumerFixture(page, async (route, pathname) => {
+        writes.push(pathname);
+        return route.fulfill({ status: 500, json: { success: false, error: 'Unexpected business request' } });
+      });
+      const panel = await openPlanConsumer(page);
+      page.once('dialog', async (dialog) => {
+        warnings.push(dialog.message());
+        await dialog.dismiss();
+      });
+      await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+      expect(warnings).toEqual([forceWarning]);
+      expect(writes).toEqual([]);
+      expect(await panel.getByRole('button', { name: 'Force move now', exact: true }).isEnabled()).toBe(true);
+      expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isEnabled()).toBe(true);
+      await planConsumerBounds(page, panel, width, ['Force move now', 'Cancel'], 'plan-force-declined');
+    });
+  });
+
+  it(`accepts the force warning as one original operation and blocks duplicate GUI submission at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: ForcePlanBody[] = [],
+        warnings: string[] = [];
+      let release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await planConsumerFixture(page, async (route, pathname) => {
+        if (pathname === '/api/plans/moves/force') {
+          expect(route.request().method()).toBe('POST');
+          writes.push(route.request().postDataJSON());
+          await pending;
+          return route.fulfill({ status: 202, json: { success: true, data: heldPlanMove(writes[0]!.id) } });
+        }
+        throw Error('Unexpected force consumer request: ' + pathname);
+      });
+      try {
+        const panel = await openPlanConsumer(page),
+          force = panel.getByRole('button', { name: 'Force move now', exact: true });
+        page.once('dialog', async (dialog) => {
+          warnings.push(dialog.message());
+          await dialog.accept();
+        });
+        await force.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(warnings).toEqual([forceWarning]);
+        expect(await force.isDisabled()).toBe(true);
+        expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isDisabled()).toBe(true);
+        await force.evaluate((button) => (button as HTMLButtonElement).click());
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toEqual({
+          id: expect.stringMatching(/^force-[a-f0-9]{32}$/),
+          employeeId: planEmployee.id,
+          sessionId: planEmployee.sessionId,
+          toAccount: 'second',
+          handoff:
+            'The owner forced this plan move without waiting for a fresh handoff. Continue as the same employee using your existing identity, workspace and memory. Inspect saved checkpoints and recent owner messages before resuming; do not repeat uncertain side effects.',
+        });
+        release();
+        await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+        expect(await panel.locator('[data-move-sessions]').textContent()).toContain(planEmployee.sessionId);
+        await planConsumerBounds(
+          page,
+          panel,
+          width,
+          ['Recover original move', 'Refresh status'],
+          'plan-force-accepted'
+        );
+        expect(writes).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
+  });
+
+  it(`retains a lost force reply and checks only the original ID without blind replay at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const writes: ForcePlanBody[] = [],
+        reads: string[] = [];
+      await planConsumerFixture(page, async (route, pathname) => {
+        if (pathname === '/api/plans/moves/force') {
+          expect(route.request().method()).toBe('POST');
+          writes.push(route.request().postDataJSON());
+          return route.abort('failed');
+        }
+        if (writes[0] && pathname === '/api/plans/moves/' + writes[0].id + '/status') {
+          expect(route.request().method()).toBe('POST');
+          reads.push(pathname);
+          const record = heldPlanMove(writes[0].id);
+          return route.fulfill({
+            json: {
+              success: true,
+              data: reads.length === 1 ? { ...record, employeeId: '99999999-9999-4999-8999-999999999999' } : record,
+            },
+          });
+        }
+        throw Error('Unexpected lost-force consumer request: ' + pathname);
+      });
+      const panel = await openPlanConsumer(page);
+      page.once('dialog', (dialog) => dialog.accept());
+      await panel.getByRole('button', { name: 'Force move now', exact: true }).click();
+      const inspect = panel.getByRole('button', { name: 'Check original move', exact: true });
+      await inspect.waitFor();
+      expect(writes).toHaveLength(1);
+      expect(reads).toEqual([]);
+      expect(await panel.getByRole('alert').textContent()).toContain(writes[0]!.id);
+      expect(await panel.getByRole('button', { name: 'Force move now', exact: true }).isDisabled()).toBe(true);
+      expect(await panel.getByRole('button', { name: 'Request move', exact: true }).isDisabled()).toBe(true);
+      await planConsumerBounds(page, panel, width, ['Check original move', 'Cancel'], 'plan-force-original-unknown');
+      await inspect.click();
+      await expect.poll(() => panel.getByRole('alert').textContent()).toContain('original record scope changed');
+      expect(reads).toEqual(['/api/plans/moves/' + writes[0]!.id + '/status']);
+      expect(writes).toHaveLength(1);
+      await inspect.click();
+      await panel.getByRole('button', { name: 'Recover original move', exact: true }).waitFor();
+      expect(reads).toEqual(Array(2).fill('/api/plans/moves/' + writes[0]!.id + '/status'));
+      expect(writes).toHaveLength(1);
+    });
+  });
+
+  it(`recovers only an explicitly confirmed original Docker move and rechecks its exact tuple at ${width}px`, async () => {
+    await planConsumerBrowser(width, async (page) => {
+      const move = heldPlanMove('33333333-3333-4333-8333-333333333333');
+      const order: string[] = [],
+        writes: Array<{ path: string; body: unknown }> = [];
+      let foreign = true,
+        release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await planConsumerFixture(page, async (route, pathname) => {
+        order.push(pathname);
+        if (pathname === '/api/plans/moves/' + move.id + '/status') {
+          expect(route.request().method()).toBe('POST');
+          return route.fulfill({
+            json: {
+              success: true,
+              data: foreign ? { ...move, newSession: '99999999-9999-4999-8999-999999999999' } : move,
+            },
+          });
+        }
+        if (pathname === '/api/plans/moves/' + move.id + '/resolve') {
+          expect(route.request().method()).toBe('POST');
+          writes.push({ path: pathname, body: route.request().postDataJSON() });
+          await pending;
+          return route.fulfill({
+            status: 202,
+            json: {
+              success: true,
+              data: { ...move, phase: 'completed', allowedActions: [], sourceViewRetirement: { state: 'completed' } },
+            },
+          });
+        }
+        throw Error('Unexpected recovery consumer request: ' + pathname);
+      });
+      try {
+        await page.evaluate(
+          (record) => (window as unknown as { __showPlanMove(record: unknown): void }).__showPlanMove(record),
+          move
+        );
+        const panel = page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+        const recover = panel.getByRole('button', { name: 'Recover original move', exact: true });
+        expect(await recover.isEnabled()).toBe(true);
+        expect(writes).toEqual([]);
+        expect(order).toEqual([]);
+        await recover.click();
+        await expect.poll(() => panel.getByRole('status').textContent()).toContain('Recovery was not requested');
+        expect(writes).toEqual([]);
+        expect(order).toEqual(['/api/plans/moves/' + move.id + '/status']);
+        foreign = false;
+        await panel.getByRole('button', { name: 'Refresh status', exact: true }).click();
+        await expect.poll(() => recover.isEnabled()).toBe(true);
+        await planConsumerBounds(page, panel, width, ['Recover original move', 'Refresh status'], 'plan-held-recovery');
+        await recover.click();
+        await expect.poll(() => writes.length).toBe(1);
+        expect(order.slice(-2)).toEqual([
+          '/api/plans/moves/' + move.id + '/status',
+          '/api/plans/moves/' + move.id + '/resolve',
+        ]);
+        expect(writes).toEqual([
+          {
+            path: '/api/plans/moves/' + move.id + '/resolve',
+            body: {
+              action: 'continue-original',
+              oldSession: move.oldSession,
+              newSession: move.newSession,
+              toAccount: move.toAccount,
+            },
+          },
+        ]);
+        expect(await recover.isDisabled()).toBe(true);
+        release();
+        await panel.waitFor({ state: 'hidden' });
+        expect(writes).toHaveLength(1);
+      } finally {
+        release();
+      }
+    });
+  });
+}
 for (const width of [320, 1280])
   it(`keeps an unknown original plan request accessible at ${width}px`, async () => {
     const browser = await chromium.launch({
@@ -998,27 +1639,10 @@ for (const width of [320, 1280])
       const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1 });
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
-      const originalHtml = read('company-plans.html');
-      const document = new JSDOM(originalHtml);
-      document.window.document.querySelectorAll('script').forEach((el) => el.remove());
-      const html = document.serialize();
-      document.window.close();
-      const employee = {
-        id: '11111111-1111-4111-8111-111111111111',
-        sessionId: '22222222-2222-4222-8222-222222222222',
-        name: 'Synthetic plan employee',
-      };
-      const accounts = [
-        { id: 'first', name: 'Original synthetic plan', provider: 'openai' },
-        { id: 'second', name: 'Destination synthetic plan', provider: 'anthropic' },
-      ];
+      const employee = planEmployee;
       const sent: Array<{ path: string; body: { id: string } }> = [];
-      await page.route('**/*', (route) => {
+      await planLayoutFixture(page, async (route) => {
         const url = new URL(route.request().url());
-        if (url.origin !== 'https://plans-layout-fixture.test') return route.abort();
-        if (url.pathname === '/') return route.fulfill({ contentType: 'text/html', body: html });
-        if (url.pathname === '/company-board.css')
-          return route.fulfill({ contentType: 'text/css', body: read('company-board.css') });
         if (url.pathname === '/api/plans/moves/preview')
           return route.fulfill({
             json: { success: true, data: { account: 'first', mode: 'codex', sessionId: employee.sessionId } },
@@ -1038,19 +1662,6 @@ for (const width of [320, 1280])
           });
         }
         return route.fulfill({ status: 404, json: { success: false, error: 'Synthetic observation unavailable' } });
-      });
-      await page.goto('https://plans-layout-fixture.test/');
-      const methods = originalHtml.slice(
-        originalHtml.indexOf('function planMemberHtml('),
-        originalHtml.indexOf('// Codex banked resets:')
-      );
-      await page.addScriptTag({
-        content: `const B={planBurn:${JSON.stringify(accounts)}};
-        const planAllocations={employees:[${JSON.stringify(employee)}],accounts:[]};
-        let pendingPlanRequests=[],planMembersBusy=false,planMembersError=false;
-        const fmt=()=>'', esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-        ${methods}
-        window.__openPlanMove=openPlanMove;`,
       });
       await page.evaluate(
         (id) =>
@@ -1085,6 +1696,153 @@ for (const width of [320, 1280])
       expect(sent).toHaveLength(1); // Trial click never repeats the mutation or consumes a status.
       expect(errors).toEqual([]);
     } finally {
+      await browser.close();
+    }
+  });
+
+// A completed move and its source-view cleanup are separate facts. Exercise
+// the shipped progress client in Chromium; all replies below remain synthetic.
+for (const { width, colorScheme } of [320, 1280].flatMap((width) =>
+  (['light', 'dark'] as const).map((colorScheme) => ({ width, colorScheme }))
+))
+  it(`keeps completed plan cleanup visible and requires an explicit lost-reply retry in ${colorScheme} at ${width}px`, async () => {
+    const browser = await chromium.launch({
+      headless: true,
+      chromiumSandbox: true,
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
+    });
+    let releaseRefresh = () => {},
+      releaseCleanup = () => {};
+    try {
+      const height = width === 320 ? 640 : 900;
+      const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1, colorScheme });
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      const move = {
+        id: '33333333-3333-4333-8333-333333333333',
+        employeeId: planEmployee.id,
+        oldSession: planEmployee.sessionId,
+        newSession: '44444444-4444-4444-8444-444444444444',
+        phase: 'completed',
+        toAccount: 'second',
+        backend: 'docker',
+      };
+      let posts = 0;
+      let pauseRefresh = false;
+      let refreshEntered = false,
+        cleanupEntered = false;
+      const refreshReply = new Promise<void>((resolve) => (releaseRefresh = resolve));
+      const cleanupReply = new Promise<void>((resolve) => (releaseCleanup = resolve));
+      const writes: Array<{ path: string; body: unknown }> = [];
+      const held = {
+        ...move,
+        sourceViewRetirement: { state: 'unconfirmed', error: 'Previous terminal cleanup unconfirmed' },
+        allowedActions: ['continue-original'],
+      };
+      await planLayoutFixture(page, async (route) => {
+        const request = route.request(),
+          path = new URL(request.url()).pathname;
+        const reply = (data: unknown) => route.fulfill({ json: { success: true, data } });
+        if (path === `/api/plans/moves/${move.id}/status`) {
+          if (pauseRefresh) {
+            refreshEntered = true;
+            await refreshReply;
+          }
+          return reply(held);
+        }
+        if (path === `/api/plans/moves/${move.id}/resolve`) {
+          writes.push({ path, body: request.postDataJSON() });
+          if (++posts === 1)
+            return route.fulfill({ status: 503, json: { success: false, error: 'Cleanup reply lost' } });
+          cleanupEntered = true;
+          await cleanupReply;
+          return reply({ ...move, sourceViewRetirement: { state: 'completed' }, allowedActions: [] });
+        }
+        if (path === '/api/plans/requests/recent') return reply([]);
+        if (path === '/api/plans/allocations') return reply({ employees: [planEmployee], accounts: [] });
+        throw Error('Unexpected plan fixture request: ' + path);
+      });
+      await page.evaluate(
+        (record) => (window as unknown as { __showPlanMove(record: unknown): void }).__showPlanMove(record),
+        { ...move, sourceViewRetirement: { state: 'pending' }, allowedActions: [] }
+      );
+      const dialog = page.getByRole('dialog', { name: 'Move employee to another plan', exact: true });
+      expect(await dialog.isVisible()).toBe(true); // It must survive pending post-publication cleanup.
+      const clean = dialog.getByRole('button', { name: 'Clean up previous terminal', exact: true });
+      await clean.waitFor(); // Normal polling discovers the API-approved original action.
+      expect(writes).toEqual([]);
+      await clean.click();
+      await expect.poll(() => dialog.getByRole('status').textContent()).toContain('Recovery outcome unconfirmed');
+      const statusText = await dialog.getByRole('status').textContent();
+      expect(statusText).toMatch(/^Plan moved/);
+      expect(statusText!.match(/Previous terminal cleanup unconfirmed/g)).toHaveLength(1);
+      expect(statusText).not.toContain('refresh status without replaying');
+      expect(await page.locator('html').getAttribute('data-theme')).toBe(colorScheme);
+      expect(await clean.isDisabled()).toBe(true);
+      expect(posts).toBe(1);
+      const statusBounds = await dialog.getByRole('status').boundingBox();
+      expect(statusBounds).not.toBeNull();
+      expect(statusBounds!.y).toBeGreaterThanOrEqual(0);
+      expect(statusBounds!.y + statusBounds!.height).toBeLessThanOrEqual(height);
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-cleanup-lost-reply-${colorScheme}-${width}.png`),
+        });
+      }
+      pauseRefresh = true;
+      await dialog.getByRole('button', { name: 'Refresh status', exact: true }).click();
+      await expect.poll(() => refreshEntered).toBe(true);
+      expect(await dialog.isVisible()).toBe(true);
+      expect(await clean.isDisabled()).toBe(true);
+      expect(posts).toBe(1);
+      pauseRefresh = false;
+      releaseRefresh();
+      await expect.poll(() => clean.isEnabled()).toBe(true);
+      expect(posts).toBe(1); // Observation cannot dispatch the cleanup again.
+      expect(await dialog.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
+      for (const control of [clean, dialog.getByRole('button', { name: 'Refresh status', exact: true })]) {
+        const bounds = await control.boundingBox();
+        expect(bounds).not.toBeNull();
+        expect(bounds!.height).toBeGreaterThanOrEqual(32);
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+        expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(height);
+      }
+      if (process.env.TEST_RESOURCE_SCREENSHOT_DIR) {
+        await mkdir(process.env.TEST_RESOURCE_SCREENSHOT_DIR, { recursive: true });
+        await page.screenshot({
+          path: join(process.env.TEST_RESOURCE_SCREENSHOT_DIR, `plan-completed-cleanup-${colorScheme}-${width}.png`),
+        });
+      }
+      await clean.click();
+      await expect.poll(() => cleanupEntered).toBe(true);
+      expect(await dialog.isVisible()).toBe(true);
+      expect(await clean.isDisabled()).toBe(true);
+      expect(posts).toBe(2);
+      releaseCleanup();
+      await dialog.waitFor({ state: 'hidden' });
+      expect(posts).toBe(2);
+      expect(writes.map(({ body }) => body)).toEqual([
+        {
+          action: 'continue-original',
+          oldSession: move.oldSession,
+          newSession: move.newSession,
+          toAccount: move.toAccount,
+        },
+        {
+          action: 'continue-original',
+          oldSession: move.oldSession,
+          newSession: move.newSession,
+          toAccount: move.toAccount,
+        },
+      ]);
+      expect(errors).toEqual([]);
+    } finally {
+      releaseRefresh();
+      releaseCleanup();
       await browser.close();
     }
   });

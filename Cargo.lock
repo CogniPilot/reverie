@@ -1235,8 +1235,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "nix",
  "reverie-contracts",
  "reverie-core",
+ "rustix",
  "sha2",
  "toml",
 ]
@@ -1518,13 +1520,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reverie-worker-init"
-version = "0.1.0"
-dependencies = [
- "nix",
-]
-
-[[package]]
 name = "reverie-worker-client-capsule"
 version = "0.1.0"
 dependencies = [
@@ -1539,9 +1534,17 @@ name = "reverie-worker-client-entry"
 version = "0.1.0"
 dependencies = [
  "nix",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "reverie-worker-init"
+version = "0.1.0"
+dependencies = [
+ "nix",
 ]
 
 [[package]]

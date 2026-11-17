@@ -30,6 +30,11 @@ let
       "reverie-worker-viewer.service"
       "reverie-ops.service"
     ];
+    exactRetiredFactoryNamesPreserved = (verify expected ../.).retiredFactories == [
+      "nix/local-model.nix"
+      "nix/ops-core.nix"
+      "nix/owner-terminal-packages.nix"
+    ];
     brokerCannotReturn = !(passes (add "packages" "workerBroker") ../.);
     renamedHostAliasCannotSneakIn = !(passes (add "packages" "newHostDaemon") ../.);
     opsExecutorCannotReturn = !(passes (add "packages" "opsCore") ../.);
@@ -42,6 +47,16 @@ let
     serviceUnitCannotReturn = !(passes expected ./fixtures/retired_host_unit);
     dockerCannotDisappear = !(passes (without "packages" "dockerImage") ../.);
     gpuFactoryCannotDisappear = !(passes (without "lib" "mkContainerGpuImage") ../.);
+    boxedClientCapsuleCannotDisappear = !(passes (without "packages" "workerClientCapsule") ../.);
+    poolRestoreImageCannotDisappear = !(passes (without "packages" "docker-pool-restore-helper-image") ../.);
+    poolRestoreDoesNotChangeOriginalHelper = let
+      pkgs = { lib.optionalAttrs = condition: value: if condition then value else {}; writeText = _: _: "/fake/identity"; dockerTools.buildLayeredImage = value: value; };
+      make = import ../nix/docker-resource-helper-image.nix;
+      baseline = make { inherit pkgs; helper = "/fake/helper"; };
+      restore = make { inherit pkgs; helper = "/fake/helper"; poolRestore = true; };
+    in baseline.config.Labels == { "org.reverie.purpose" = "boxed-resource-helper-v1"; }
+      && restore.config.Labels == (baseline.config.Labels // { "org.reverie.resource.pool-restore" = "v1"; })
+      && removeAttrs restore.config [ "Labels" ] == removeAttrs baseline.config [ "Labels" ];
     gpuKeepsContainerSupervisor = gpu.config.Entrypoint == [
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"
@@ -51,5 +66,7 @@ let
     gpuKeepsInferenceAndBase = gpu.fromImage == "/nix/store/controlled-base"
       && builtins.elem "/nix/store/controlled-inference" gpu.contents
       && builtins.elem "KEPT=yes" gpu.config.Env;
+    gpuExportsItsActualConfig = gpu.passthru.reverieConfig == gpu.config;
+    gpuLeavesRoomForBoxedWebsite = gpu.maxLayers + 2 <= 125;
   };
 in assert builtins.all (value: value) (builtins.attrValues checks); checks

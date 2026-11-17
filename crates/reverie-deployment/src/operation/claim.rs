@@ -1,6 +1,31 @@
 use super::*;
 
 impl Operation {
+    pub(crate) fn stale_ready(&self, own_pending: bool) -> Result<()> {
+        self.prepared()?;
+        for name in [
+            "rollback-attempt",
+            "restored",
+            "superseded",
+            "invalid-create-refused",
+        ] {
+            require(
+                !self.record_present(name)?,
+                "DEPLOYMENT_PREDECESSOR_NOT_TERMINAL",
+            )?;
+        }
+        require(
+            own_pending || !self.record_present("successor-attempt")?,
+            "DEPLOYMENT_CLAIM_HANDOVER_ALREADY_ATTEMPTED",
+        )?;
+        let ready = self.read_record("ready")?;
+        require(
+            ready["mode"] == "hybrid-rust-front"
+                && ready["brokerChanged"] == false
+                && ready["containerId"] == self.candidate()?,
+            "DEPLOYMENT_PREDECESSOR_NOT_TERMINAL",
+        )
+    }
     pub(crate) fn claim_terminal(&self, current: &Value) -> Result<&'static str> {
         require(
             !self.record_present("successor-attempt")? && !self.record_present("superseded")?,
@@ -41,11 +66,11 @@ impl Operation {
                 "DEPLOYMENT_PREDECESSOR_NOT_TERMINAL",
             )?;
             let receipt = self.read_record("restored")?;
+            self.plan.source_matches(current)?;
             require(
                 receipt["containerId"] == self.plan.source["Id"]
                     && receipt["dataRestored"] == false
-                    && receipt["brokerChanged"] == false
-                    && model::projection(current) == model::projection(&self.plan.source),
+                    && receipt["brokerChanged"] == false,
                 "DEPLOYMENT_PREDECESSOR_SOURCE_CHANGED",
             )
         }

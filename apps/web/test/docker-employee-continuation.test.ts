@@ -14,7 +14,10 @@ import type {
   DockerEmployeeBinding,
   DockerEmployeePool,
 } from '../src/docker-employee-continuation-data.js';
-import { DockerEmployeeContinuationRecord as ContinuationRecordSchema } from '../src/docker-employee-continuation-data.js';
+import {
+  DockerEmployeePlanReplacementWorkRecord,
+  DockerEmployeeContinuationRecord as ContinuationRecordSchema,
+} from '../src/docker-employee-continuation-data.js';
 const eid = '10000000-0000-4000-8000-000000000001',
   sid = '20000000-0000-4000-8000-000000000002';
 const oid = '30000000-0000-4000-8000-000000000003',
@@ -85,7 +88,7 @@ function fixture() {
   const store: DockerContinuationStore = {
     subject: () => ({ ...subject }),
     existingSubject: (_id, record) =>
-      record.version === 2 && record.providerSourceDigest === subject.providerSourceDigest ? { ...subject } : undefined,
+      record.version !== 1 && record.providerSourceDigest === subject.providerSourceDigest ? { ...subject } : undefined,
     policy: () => structuredClone(policy),
     record: () => row,
     async replace(before, next, current) {
@@ -188,6 +191,9 @@ function fixture() {
     journal,
     store,
     original,
+    setRecord: (value: DockerEmployeeContinuationRecord) => {
+      row = structuredClone(value);
+    },
     record: () => row,
     binding: () => binding,
     destination: () => destination,
@@ -584,5 +590,216 @@ describe('existing-provider observation keeps its captured operation across awai
       code: 'DOCKER_CONTINUATION_ORIGINAL_CHANGED',
     });
     expect(f.provider.launch).toHaveBeenCalledTimes(1);
+  });
+});
+
+async function replacementReadFixture() {
+  const f = fixture();
+  await f.service.begin(eid, f.request, f.authority);
+  const old = f.record()!,
+    source = f.binding()!;
+  const targetSid = '40000000-0000-4000-8000-000000000004',
+    targetOp = '50000000-0000-4000-8000-000000000005';
+  const id = '6'.repeat(64),
+    name = (role: string) => 'reverie-boxed-' + role + '-synthetic';
+  const base = { imageId: 'sha256:' + '8'.repeat(64), configurationDigest: 'a'.repeat(64) };
+  const row = ContinuationRecordSchema.parse({
+    ...old,
+    version: 3,
+    purpose: 'docker-employee-plan-replacement-v3',
+    phase: 'provider-issued',
+    original: old.destination,
+    request: {
+      ...old.request,
+      sessionId: targetSid,
+      sessionGeneration: source.sessionGeneration + 1,
+      operationId: targetOp,
+      containerId: old.destination!.containerId,
+      imageId: old.destination!.imageId,
+    },
+    workerImage: { ...old.workerImage, sourceImageId: old.destination!.imageId },
+    credentialId: '60000000-0000-4000-8000-000000000006',
+    providerSourceDigest: '7'.repeat(64),
+    destination: { ...old.destination, containerId: id, sessionId: targetSid, storageDigest: 'a'.repeat(64) },
+    planReplacement: {
+      version: 1,
+      purpose: 'docker-plan-replacement-provenance-v1',
+      moveId: 'synthetic-move',
+      source: {
+        binding: source,
+        continuationDigest: dockerContinuationDigest(old),
+        providerSourceDigest: '7'.repeat(64),
+      },
+      account: {
+        id: 'anthropic-target',
+        provider: 'anthropic',
+        projectionDigest: 'b'.repeat(64),
+        contextDigest: 'c'.repeat(64),
+      },
+    },
+    tasks: [
+      {
+        ...base,
+        name: name('storage'),
+        role: 'storage-holder',
+        phase: 'running',
+        containerId: '1'.repeat(64),
+        initPid: 100,
+        initStartTicks: '10',
+      },
+      {
+        ...base,
+        name: name('leaf'),
+        role: 'leaf-helper',
+        phase: 'completed',
+        containerId: '2'.repeat(64),
+        resultDigest: 'd'.repeat(64),
+      },
+      {
+        ...base,
+        name: name('identity'),
+        role: 'identity-helper',
+        phase: 'completed',
+        containerId: '3'.repeat(64),
+        resultDigest: 'e'.repeat(64),
+      },
+    ],
+  });
+  return { f, row };
+}
+describe('explicit cross-SID plan replacement read DATA', () => {
+  it('retains honest source identity and separate target/account, while legacy shapes stay strict', async () => {
+    const { row } = await replacementReadFixture();
+    expect(ContinuationRecordSchema.parse(JSON.parse(JSON.stringify(row)))).toEqual(row);
+    expect(row.request.sessionId).not.toBe(row.original.sessionId);
+    expect(row.destination!.storageDigest).not.toBe(row.original.storageDigest); // protected account mount projection changes
+    const { planReplacement: _plan, ...legacy } = row as Extract<DockerEmployeeContinuationRecord, { version: 3 }>;
+    expect(
+      ContinuationRecordSchema.safeParse({ ...legacy, version: 2, purpose: 'docker-employee-continuation-v2' }).success
+    ).toBe(false);
+  });
+  it('allows mutable preparation only in the private work codec, never as a Company projection', async () => {
+    const { row } = await replacementReadFixture();
+    for (const phase of ['staged', 'pool-issued', 'identity-ready', 'resources-issued'] as const) {
+      const work = { ...row, phase, tasks: undefined, destination: undefined };
+      expect(DockerEmployeePlanReplacementWorkRecord.safeParse(work).success).toBe(true);
+      expect(ContinuationRecordSchema.safeParse(work).success).toBe(false);
+    }
+    expect(
+      ContinuationRecordSchema.safeParse({ ...row, tasks: row.tasks!.map((t) => ({ ...t, phase: 'created' })) }).success
+    ).toBe(false);
+  });
+  it.each([
+    'same-sid',
+    'same-op',
+    'wrong-generation',
+    'same-credential',
+    'foreign-source',
+    'foreign-home',
+    'foreign-target',
+    'unknown-account',
+    'secret-field',
+  ] as const)('rejects %s rather than normalizing provenance', async (change) => {
+    const { row } = await replacementReadFixture();
+    if (row.version !== 3) throw Error('replacement required');
+    const value = structuredClone(row);
+    if (change === 'same-sid') value.request.sessionId = value.original.sessionId;
+    if (change === 'same-op') value.request.operationId = value.planReplacement.source.binding.operationId;
+    if (change === 'wrong-generation') value.request.sessionGeneration++;
+    if (change === 'same-credential') value.credentialId = value.planReplacement.source.binding.credentialId;
+    if (change === 'foreign-source') value.planReplacement.source.binding.containerId = 'f'.repeat(64);
+    if (change === 'foreign-home') value.destination!.home.source = '/different-private-home';
+    if (change === 'foreign-target') value.destination!.sessionId = value.original.sessionId;
+    if (change === 'unknown-account') (value.planReplacement.account as { provider: string }).provider = 'unqualified';
+    if (change === 'secret-field') Object.assign(value.planReplacement.account, { token: 'synthetic-secret' });
+    expect(ContinuationRecordSchema.safeParse(value).success).toBe(false);
+  });
+  it('refuses ordinary begin before any native or provider call for an installed v3 projection', async () => {
+    const { f, row } = await replacementReadFixture();
+    f.setRecord(row);
+    const before = f.engine.observeDestination.mock.calls.length,
+      paid = f.provider.launch.mock.calls.length;
+    await expect(f.make().begin(eid, row.request, f.authority)).rejects.toThrow('PRIVATE_OWNER_REQUIRED');
+    expect(f.engine.observeDestination).toHaveBeenCalledTimes(before);
+    expect(f.provider.launch).toHaveBeenCalledTimes(paid);
+    expect(f.record()).toEqual(row);
+  });
+  it('never falls back to the legacy image allowlist when the v3 image reader is absent', async () => {
+    const { f, row } = await replacementReadFixture();
+    f.setRecord(row);
+    f.subject.sessionId = row.request.sessionId;
+    f.subject.sessionGeneration = row.request.sessionGeneration;
+    Object.assign(f.engine, {
+      observePlanReplacementSource: vi.fn(async () => ({ original: row.original, state: 'stopped' as const })),
+    });
+    f.engine.image.mockClear();
+    const paid = f.provider.launch.mock.calls.length;
+    expect(await f.make().observe(eid, row.request.operationId, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE',
+    });
+    expect(f.engine.image).not.toHaveBeenCalled();
+    expect(f.provider.launch).toHaveBeenCalledTimes(paid);
+  });
+  it('read-only genuine observation can promote provider-issued to ready, never dispatch', async () => {
+    const { f, row } = await replacementReadFixture();
+    f.setRecord(row);
+    f.subject.sessionId = row.request.sessionId;
+    f.subject.sessionGeneration = row.request.sessionGeneration;
+    Object.assign(f.engine, {
+      observePlanReplacementSource: vi.fn(async () => ({ original: row.original, state: 'stopped' as const })),
+      existingImage: vi.fn(async () => row.workerImage),
+    });
+    f.engine.image.mockClear();
+    f.setDestination({
+      original: row.destination!,
+      state: 'running',
+      resources: row.policy,
+      credentialDigest: createHash('sha256').update('synthetic-fixed-credential').digest('hex'),
+      provider: { kind: 'running', sessionId: row.request.sessionId, operationId: row.request.operationId },
+    });
+    const before = f.provider.launch.mock.calls.length;
+    const result = await f.make().observe(eid, row.request.operationId, f.authority);
+    expect(result).toMatchObject({ phase: 'ready', state: 'ready', allowedActions: ['observe'] });
+    expect(f.engine.image).not.toHaveBeenCalled();
+    expect(f.provider.launch).toHaveBeenCalledTimes(before);
+  });
+});
+
+describe('published original resource revision consumption', () => {
+  // Service routing only. The companion controller/real Engine case earns the
+  // actual private native proof; this test does not manufacture native credit.
+  it('asks the fixed Engine predicate only for a published original and preserves its immutable policy', async () => {
+    const f = fixture();
+    await f.service.begin(eid, f.request, f.authority);
+    const original = structuredClone(f.record()!);
+    const actual = { ...f.policy, memoryHighBytes: 48 * 1024 ** 3 };
+    f.setDestination({ ...f.destination()!, resources: actual });
+    f.engine.observeDestination.mockImplementation(async () => f.destination());
+    const current = vi.fn((_row, value) => value === actual);
+    Object.assign(f.engine, { existingResourcePolicyCurrent: current });
+    const effects = { starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length };
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ state: 'ready' });
+    expect(current).toHaveBeenCalledWith(expect.objectContaining({ phase: 'ready' }), actual);
+    expect(f.record()).toEqual(original);
+    expect({ starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length }).toEqual(
+      effects
+    );
+    current.mockReturnValue(false);
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED',
+    });
+    f.setRecord({ ...original, phase: 'resources-issued' });
+    current.mockReturnValue(true);
+    current.mockClear();
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED',
+    });
+    expect(current).not.toHaveBeenCalled();
+    expect({ starts: f.engine.start.mock.calls.length, launches: f.provider.launch.mock.calls.length }).toEqual(
+      effects
+    );
   });
 });

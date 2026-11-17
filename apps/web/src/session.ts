@@ -1,6 +1,10 @@
+import { DockerPlanLocalClient } from './docker-plan-local-client.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import type { DockerEmployeeProviderRecipe } from './docker-employee-provider-recipe.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
+import { DockerViewerPane } from './docker-viewer-pane.js';
+import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
+import { readFileSync } from 'node:fs';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
@@ -149,6 +153,7 @@ import {
 import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
+import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
@@ -582,6 +587,7 @@ export class Session extends EventEmitter {
   private readonly _submittedPromptTracker = new SubmittedPromptTracker();
   private _acceptsPrompts: boolean;
   private ptyProcess: pty.IPty | null = null;
+  #dockerPlanLocalClient?: DockerPlanLocalClient;
   private _pid: number | null = null;
   private _status: SessionStatus = 'idle';
   private _currentTaskId: string | null = null;
@@ -984,6 +990,7 @@ export class Session extends EventEmitter {
   // Prepared but unused is distinct from the provider that may still be running.
   #pendingProviderLaunch?: ProviderLaunchPublication;
   #dockerContinuationView?: DockerEmployeeProviderView;
+  #dockerViewerRepair?: { client: pty.IPty; pane: MuxSession; outer: DockerViewerPane; descriptor: DockerEmployeeProviderView['descriptor'] };
 
   static retainProviderLaunchPublication(subject: Session, store: StateStore, publication: ProviderLaunchPublication): void {
     if (!Session.usesProviderLaunchStore(subject, store) || !store.ownsProviderLaunchStaging(subject, publication) || !publication.owns(subject))
@@ -1540,7 +1547,7 @@ export class Session extends EventEmitter {
 
     this.id = config.id || uuidv4();
     this._workerAttachOnly = config.workerAttachOnly === true;
-    this._viewerInputHeld = this._workerBacked && config.viewerInputHeld === true;
+    this._viewerInputHeld = (this._workerBacked || !!config.docker?.continuation) && config.viewerInputHeld === true;
     this._workerResourceLaunch = config.workerResourceLaunch;
     if (config.providerDispatchHeld === true) this._holdUnconfirmedProvider();
     if (config.terminalInputHeld === true) this.#terminalInputUncertainty = new TerminalInputUnconfirmedError();
@@ -1917,6 +1924,76 @@ export class Session extends EventEmitter {
     this.#workspaceHookEvidence = hooks.kind === 'none' || getCli(this.mode)?.capabilities.hooks === 'none'
       ? { configuration: 'opted-out' }
       : { configuration: 'prepared', generation: hooks.generation };
+  }
+  /** Readiness of the old local viewer only. The native proof independently
+   * verifies its stopped worker and the employee's current running target. */
+  canRetireDockerPlanSourceView(proof: unknown): boolean {
+    const scope = requireDockerPlanSourceRetirement(proof, this);
+    if (
+      scope.oldSession !== this.id ||
+      scope.owner !== this.owner ||
+      this._remote ||
+      !dockerPlanSourceRetirementMatches(this._docker, scope)
+    )
+      throw Error('The original Docker source viewer changed');
+    if (this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
+    // A PID or wrapper never authorizes a signal. If its process is still
+    // present, wait for normal exit; even a reused PID is never touched here.
+    const pid = this.ptyProcess?.pid ?? this._pid;
+    if (!this.ptyProcess && pid === null) return true;
+    if (process.platform !== 'linux') throw Error('The old viewer process namespace is unavailable');
+    const self = readFileSync('/proc/self/stat', 'utf8');
+    if (Number(self.match(/^(\d+) \(/)?.[1]) !== process.pid)
+      throw Error('The old viewer process namespace is unconfirmed');
+    if (pid === null || !Number.isSafeInteger(pid) || pid <= 0)
+      throw Error('The old viewer process identity is unavailable');
+    try {
+      readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return false;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+      throw Error('The old viewer process state is unconfirmed');
+    }
+  }
+  /** Detach only this website's captured local attach client, never its pane. */
+  async detachDockerPlanSourceClient(proof: unknown): Promise<void> {
+    requireDockerPlanSourceRetirement(proof, this);
+    const captured = this.#dockerPlanLocalClient,
+      pty = this.ptyProcess,
+      mux = this._mux,
+      record = this._muxSession;
+    if (!captured && this.canRetireDockerPlanSourceView(proof)) return;
+    const current = () => {
+      requireDockerPlanSourceRetirement(proof, this);
+      if (this.paneLifecycleInFlight || this._muxWritesInFlight > 0 ||
+        captured !== this.#dockerPlanLocalClient || mux !== this._mux || record !== this._muxSession ||
+        (this.ptyProcess !== pty && this.ptyProcess !== null) || (!this.ptyProcess && this._pid !== null))
+        throw Error('The original local source transport changed');
+      if (!record || record.sessionId !== this.id || record.owner !== this.owner ||
+        !isDeepStrictEqual(record.docker, this._docker))
+        throw Error('The original local source placement changed');
+      this.canRetireDockerPlanSourceView(proof);
+    };
+    current();
+    if (!captured || !mux || !record) throw Error('The original local source client was not captured');
+    await captured.detach(pty, mux, record, current);
+    current();
+    if (!this.canRetireDockerPlanSourceView(proof)) throw Error('The original local source client has not exited');
+  }
+  /** Denial and local metadata only: no signal, mux command or native stop. */
+  retireDockerPlanSourceView(proof: unknown): void {
+    if (!this.canRetireDockerPlanSourceView(proof)) throw Error('The previous Docker viewer has not exited');
+    requireDockerPlanSourceRetirement(proof, this);
+    this._holdUnconfirmedProvider(new Error('The original Docker plan source is retired'));
+    this.holdUnconfirmedInput(new Error('The original Docker plan source is retired'));
+    this._isStopped = true;
+    this._clearAllTimers();
+    this.#dockerPlanLocalClient = undefined;
+    this.ptyProcess = null;
+    this._pid = null;
+    this._muxSession = null;
+    this.#dockerContinuationView = undefined;
+    this._dockerContinuationLaunch = undefined;
   }
   /** Renew only the proof of this same running provider; no transport or launch is replaced. */
   renewDockerContinuationView(view: DockerEmployeeProviderView, admitted: () => boolean): void {
@@ -3066,6 +3143,8 @@ export class Session extends EventEmitter {
       providerDispatchHeld: this.providerDispatchHeld,
       providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
       providerInputHeld: this.providerInputHeld,
+      // Retained private view currency only; never fresh native health or an effect grant.
+      ...(this._docker?.continuation ? { dockerProviderViewCurrent: this.dockerContinuationViewCurrent } : {}),
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
       viewerInspectionRequested: this.viewerInspectionRequested,
       attachmentHistory: this.attachmentHistory.length > 0 ? this.attachmentHistory : undefined,
@@ -3119,6 +3198,16 @@ export class Session extends EventEmitter {
       __customModel: this.getCustomModelForPersist() } as SessionState;
     // These observations never become authority on reload. The original disk
     // intent remains the provider-effect fence, rather than an invented failed launch.
+    // A plan generation must keep its explicit permission/tool recipe across
+    // replacement and restore. Legacy v1/v2 launch fingerprints stay unchanged.
+    if (
+      this._docker?.continuation?.planReplacement &&
+      accountReplacementProfile(this.mode)?.name === 'anthropic-account-v1'
+    ) {
+      snapshot.claudeMode = this._claudeMode;
+      snapshot.allowedTools = this._allowedTools;
+    }
+    delete snapshot.dockerProviderViewCurrent;
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
     if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;
@@ -3412,6 +3501,17 @@ export class Session extends EventEmitter {
           env: buildMuxAttachEnv(cliExportsTruecolor(this.mode)),
         })
       );
+      this.#dockerPlanLocalClient = undefined;
+      if (this._docker?.continuation) {
+        try {
+          if (this._muxSession?.sessionId !== this.id || this._muxSession.owner !== this.owner ||
+            !isDeepStrictEqual(this._muxSession.docker, this._docker))
+            throw Error('The local attach placement changed');
+          this.#dockerPlanLocalClient = DockerPlanLocalClient.capture(this.ptyProcess, mux, this._muxSession!);
+        } catch {
+          // Unknown capture never authorizes late PID adoption or a signal.
+        }
+      }
       this._notePtySpawnGeometry(ptyCols, ptyRows);
     } catch (spawnErr) {
       console.error(`[Session] Failed to spawn PTY for ${spawnErrLabel}:`, spawnErr);
@@ -3510,7 +3610,107 @@ export class Session extends EventEmitter {
 
   /** An attach-only viewer is available only for a local isolated worker pane. */
   get workerViewerReconnect(): boolean {
-    return this._workerBacked && !this._isStopped && this.paneExitApplies && !!this._mux?.readPaneLiveness;
+    const boxed = !!this._docker?.continuation && this._docker.owned === false && !!this._muxSession;
+    return (boxed || (this._workerBacked && this.paneExitApplies)) && !this._isStopped && !!this._mux?.readPaneLiveness;
+  }
+
+  /** Replace only a naturally exited website client of this exact provider.
+   * The private Engine view owns native placement/incarnation; no launch owner,
+   * provider receipt, composer content or unknown-input history is retired. */
+  async reconnectDockerContinuationView(view: DockerEmployeeProviderView, admitted: () => boolean,
+    fresh: () => Promise<DockerEmployeeProviderView>, publish?: () => void): Promise<boolean> {
+    const docker = this._docker, mux = this._mux, pane = this._muxSession;
+    if (!docker?.continuation || docker.owned !== false || !mux?.readPaneLiveness || !pane ||
+      this._remote || this._workerBacked || this._isStopped || this._closing || this.paneLifecycleInFlight ||
+      this._muxWritesInFlight > 0 || (!this.ptyProcess && this._pid !== null)) return false;
+    const pending = this.#dockerViewerRepair;
+    if (!pending && (!this._viewerClientLost || this.ptyProcess !== null || this._pid !== null)) return false;
+    if (this.ptyProcess && (!pending || pending.client !== this.ptyProcess || pending.pane !== pane)) return false;
+    let outer = mux.dockerViewerPane?.(this.id, pane);
+    if (!outer || (pending && pending.outer !== outer)) return false;
+    const recipe = this._providerLaunchConfiguration(), placement = structuredClone(docker), paneName = pane.muxName;
+    const oldView = this.#dockerContinuationView, launch = this._dockerContinuationLaunch;
+    const descriptor = view.descriptor;
+    if ((oldView && !isDeepStrictEqual(oldView.descriptor, descriptor)) ||
+      (pending && !isDeepStrictEqual(pending.descriptor, descriptor))) return false;
+    const current = () => admitted() && !this._isStopped && !this._closing && this._muxWritesInFlight === 0 &&
+      this._docker === docker && isDeepStrictEqual(docker, placement) && this._mux === mux &&
+      this._muxSession === pane && mux.getSession(this.id) === pane && pane.sessionId === this.id && pane.muxName === paneName &&
+      pane.owner === this.owner && isDeepStrictEqual(pane.docker, docker) &&
+      this._dockerContinuationLaunch === launch && isDeepStrictEqual(this._providerLaunchConfiguration(), recipe);
+    const requireView = (selected: DockerEmployeeProviderView) => {
+      if (!current() || selected.descriptor.mode !== this.mode || !isDeepStrictEqual(descriptor, selected.descriptor))
+        throw Error('Original Docker viewer binding changed');
+      DockerEmployeeProviderView.prototype.require.call(selected, this.id, docker);
+      if (!current()) throw Error('Original Docker viewer binding changed');
+    };
+    requireView(view);
+    return this._withPaneLifecycle(async () => {
+      this._viewerInputHeld = true;
+      this._submitVerifier?.cancel(); // Unknown Enter is retained, never repeated.
+      const before = await mux.readPaneLiveness!(paneName);
+      requireView(view);
+      let panePid = before.state === 'live' ? before.pid : undefined;
+      const requireOuter = () => {
+        if (!outer || mux.dockerViewerPane?.(this.id, pane) !== outer || pane.pid !== panePid)
+          throw Error('Original Docker outer pane changed');
+        DockerViewerPane.prototype.require.call(outer, mux, pane, current);
+      };
+      if (before.state === 'dead' && !pending) {
+        if (mux.dockerViewerPane?.(this.id, pane) !== outer) return false;
+        DockerViewerPane.prototype.requireIssued.call(outer, mux, pane, current);
+        const options = this._buildRespawnPaneOptions();
+        panePid = await mux.respawnPane({ ...options, dockerContinuationLaunch: undefined,
+          dockerContinuationView: view, onlyIfDead: true, stillCurrent: current, admitted: current }) ?? undefined;
+        requireView(view);
+        outer = mux.dockerViewerPane?.(this.id, pane);
+      }
+      if (!panePid || !current()) return false;
+      requireOuter();
+      if (!this.ptyProcess) {
+        this._attachExistingMuxClient('Docker existing viewer reconnect');
+        this._bindInteractivePty(false);
+        if (!this.ptyProcess) return false;
+        this.#dockerViewerRepair = { client: this.ptyProcess, pane, outer: outer!, descriptor };
+      }
+      const client = this.ptyProcess;
+      const local = this.#dockerPlanLocalClient;
+      if (!local) return false;
+      const requireClient = () => {
+        requireOuter();
+        if (this.ptyProcess !== client || this.#dockerPlanLocalClient !== local) throw Error('Original Docker website client changed');
+        DockerPlanLocalClient.prototype.requireAttached.call(local, client, mux, pane,
+          () => { if (!current() || this.ptyProcess !== client) throw Error('Original Docker website client changed'); },
+          scope => DockerViewerPane.prototype.requireClientServer.call(outer!, scope, current));
+        requireOuter();
+      };
+      const clientEnd = performance.now() + 2000;
+      for (;;) {
+        requireView(view); requireOuter();
+        try { requireClient(); break; }
+        catch (error) {
+          if (!current() || this.ptyProcess !== client || performance.now() >= clientEnd) throw error;
+          await new Promise(resolveRead => setTimeout(resolveRead, 10)); // Read-only census wait; never respawn/retry input.
+        }
+      }
+      const after = await mux.readPaneLiveness!(pane.muxName);
+      requireView(view);
+      requireOuter();
+      if (after.state !== 'live' || after.pid !== panePid || this.ptyProcess !== client || this._pid !== client.pid) return false;
+      const confirmed = await fresh();
+      requireView(confirmed);
+      const final = await mux.readPaneLiveness!(pane.muxName);
+      requireView(confirmed);
+      requireOuter();
+      if (final.state !== 'live' || final.pid !== panePid || this.ptyProcess !== client || this._pid !== client.pid) return false;
+      requireClient();
+      publish?.(); // Transfer only this fully observed attachment, before releasing its viewer hold.
+      this.#dockerContinuationView = confirmed;
+      this.#dockerViewerRepair = undefined;
+      this._viewerClientLost = false;
+      this._viewerInputHeld = false;
+      return true;
+    });
   }
 
   /** Repair only the disposable viewer. Never run provider setup, hooks or normal J. */
@@ -3621,6 +3821,7 @@ export class Session extends EventEmitter {
 
   async reconnectWorkerViewer(stillCurrent: () => boolean, revalidateMove?: () => Promise<boolean>, diagnostic = false): Promise<boolean> {
     const diagnosticEnd = performance.now() + 10_000;
+    if (this._docker) return false; // Only the private boxed adapter consumes Engine-origin views.
     if (!this.workerViewerReconnect || !stillCurrent() || this._closing || this.paneLifecycleInFlight || this._muxWritesInFlight > 0) return false;
     if (!this._viewerInputHeld && !this._viewerClientLost && !this.hasDeadPane()) return false;
     return this._withPaneLifecycle(async () => {
@@ -4593,7 +4794,7 @@ export class Session extends EventEmitter {
 
     client.onExit(({ exitCode }) => {
       if (this.ptyProcess !== client) return;
-      if (this._workerBacked && this._muxSession && !this._isStopped) this._viewerClientLost = true;
+      if ((this._workerBacked || this._docker?.continuation) && this._muxSession && !this._isStopped) this._viewerClientLost = true;
       console.log('[Session] Interactive PTY exited with code:', exitCode);
       // COD-118: record the exit in the circuit breaker BEFORE status bookkeeping.
       // A clean (0) exit resets the counter; rapid non-zero repeats trip it.

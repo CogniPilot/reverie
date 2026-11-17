@@ -69,7 +69,21 @@ export interface DockerContainerObservation extends DockerSourceObservation {
 }
 export interface DockerContinuationEngine {
   image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage>;
+  /** Re-earn the frozen published image. A newer launch selection must not
+   * turn existing-provider reads into admission of that newer image. */
+  existingImage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage>;
+  /** Private v3 read qualification from the actual prior boxed generation. */
+  imageForPlanReplacement?(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerEmployeeWorkerImage>;
   observeSource(subject: DockerContinuationSubject, containerId?: string): Promise<DockerSourceObservation>;
+  /** v3 source closure reads the retained OLD placement, not the target subject.
+   * The owning Engine must validate its genuine boxed source and no-restart state. */
+  observePlanReplacementSource?(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerSourceObservation>;
   validateCapabilities(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void>;
   /** Shared aggregate pool has its own retained controller owner; prepare is never a status action. */
   assertPreparationCurrent?(row: DockerEmployeeContinuationRecord): void;
@@ -82,6 +96,11 @@ export interface DockerContinuationEngine {
   /** Only the captured original's inspected immutable config/home; no HTTP command/mount/path. */
   createDestination(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
+  /** Genuine read-owned native revision proof; never a request policy override. */
+  existingResourcePolicyCurrent?(
+    row: DockerEmployeeContinuationRecord,
+    actual: DockerEmployeeResourcePolicy | null
+  ): boolean;
   start(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   configureResources(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, requireCurrent: () => void): Promise<void>;
@@ -302,11 +321,13 @@ export class DockerEmployeeContinuation {
       phase: row.phase,
       state: code ? 'held' : row.phase === 'ready' ? 'ready' : 'pending',
       allowedActions:
-        code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
-          ? ['observe', 'continue']
-          : code || row.phase === 'ready' || issued.has(row.phase)
-            ? ['observe']
-            : ['observe', 'continue'],
+        row.version === 3
+          ? ['observe']
+          : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
+            ? ['observe', 'continue']
+            : code || row.phase === 'ready' || issued.has(row.phase)
+              ? ['observe']
+              : ['observe', 'continue'],
       ...(code ? { code } : {}),
     };
   }
@@ -328,14 +349,36 @@ export class DockerEmployeeContinuation {
     current: () => void
   ): Promise<void> {
     current();
-    const observation = await this.engine.observeSource(subject, row.original.containerId);
+    // Published v1/v2 reads qualify the immutable current destination. The
+    // historical source is correlation, not a required surviving container.
+    if (row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase) && this.engine.existingImage) {
+      const image = DockerEmployeeWorkerImage.parse(await this.engine.existingImage(row, current));
+      current();
+      if (!isDeepStrictEqual(image, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+      return;
+    }
+    if (row.version === 3 && !this.engine.observePlanReplacementSource)
+      refuse('DOCKER_PLAN_REPLACEMENT_OBSERVER_UNAVAILABLE');
+    const observation =
+      row.version === 3
+        ? await this.engine.observePlanReplacementSource!(row, current)
+        : await this.engine.observeSource(subject, row.original.containerId);
     current();
     if (
       observation.state !== 'stopped' ||
       !isDeepStrictEqual(DockerEmployeeOriginal.parse(observation.original), row.original)
     )
       refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
-    const workerImage = DockerEmployeeWorkerImage.parse(await this.engine.image(row.original));
+    const published = ['provider-issued', 'ready'].includes(row.phase);
+    if (row.version === 3 && !this.engine.existingImage && !this.engine.imageForPlanReplacement)
+      refuse('DOCKER_PLAN_REPLACEMENT_IMAGE_UNAVAILABLE');
+    const workerImage = DockerEmployeeWorkerImage.parse(
+      published && this.engine.existingImage
+        ? await this.engine.existingImage(row, current)
+        : row.version === 3
+          ? await this.engine.imageForPlanReplacement!(row, current)
+          : await this.engine.image(row.original)
+    );
     current();
     if (!isDeepStrictEqual(workerImage, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
   }
@@ -367,7 +410,7 @@ export class DockerEmployeeContinuation {
       destination.employeeId !== row.employeeId ||
       destination.sessionId !== row.request.sessionId ||
       !isDeepStrictEqual(destination.home, row.original.home) ||
-      destination.storageDigest !== row.original.storageDigest ||
+      (row.version !== 3 && destination.storageDigest !== row.original.storageDigest) ||
       (row.destination && !isDeepStrictEqual(destination, row.destination))
     )
       refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED');
@@ -376,6 +419,29 @@ export class DockerEmployeeContinuation {
   }
   async selection(employeeId: string, authority: DockerContinuationAuthority) {
     authority.require();
+    const retained = this.store.record(employeeId);
+    if (retained && retained.version !== 3 && ['provider-issued', 'ready'].includes(retained.phase)) {
+      const subject = this.store.existingSubject(employeeId, retained);
+      if (!subject || subject.owner !== authority.owner || retained.owner !== authority.owner)
+        refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
+      const current = () => this.#requireExisting(subject, retained, authority, retained.policy);
+      current();
+      const operation = await this.observe(employeeId, retained.request.operationId, authority);
+      current();
+      return {
+        destinationImageId: retained.workerImage.imageId,
+        sessionId: subject.sessionId,
+        sessionGeneration: subject.sessionGeneration,
+        sourceDigest: subject.sourceDigest,
+        containerId: retained.original.containerId,
+        imageId: retained.original.imageId,
+        // Historical ORIGINAL state was not observed by this provider read.
+        state: 'unknown' as const,
+        operationId: retained.request.operationId,
+        originalRequest: retained.request,
+        operation,
+      };
+    }
     const subject = this.store.subject(employeeId);
     if (!subject || subject.owner !== authority.owner) refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
     const seen = await this.engine.observeSource(subject);
@@ -414,6 +480,7 @@ export class DockerEmployeeContinuation {
   ): Promise<DockerContinuationResult> {
     const request = DockerEmployeeContinuationRequest.parse(unchecked);
     authority.require();
+    if (this.store.record(employeeId)?.version === 3) refuse('DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED');
     const subject = this.store.subject(employeeId);
     if (
       !subject ||
@@ -645,7 +712,14 @@ export class DockerEmployeeContinuation {
           await this.engine.configureResources(row, current);
           continue;
         }
-        if (!isDeepStrictEqual(destination.resources, row.policy))
+        if (
+          !isDeepStrictEqual(destination.resources, row.policy) &&
+          !(
+            row.version !== 3 &&
+            ['provider-issued', 'ready'].includes(row.phase) &&
+            this.engine.existingResourcePolicyCurrent?.(row, destination.resources)
+          )
+        )
           return this.#result(row, 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED');
         if (row.phase === 'resources-issued') {
           row = await this.#phase(row, 'resources-ready', current);

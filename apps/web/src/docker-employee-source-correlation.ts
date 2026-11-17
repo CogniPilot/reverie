@@ -1,3 +1,4 @@
+import type { RuntimeRecipe } from './expert-runtime-recipe.js';
 import { DOCKER_EMPLOYEE_PROVIDER_RECIPE_FIELDS } from './docker-employee-provider-recipe.js';
 import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
 /** Launch selection and observations of an existing provider are distinct DATA.
@@ -43,6 +44,30 @@ function nativeConfigFacts(value: unknown, key: string): unknown {
     : null;
 }
 
+/** The same locked stock codec used for existing-provider correlation. It strips
+ * only runtime-owned native observation fields; unknown protocols stay strict. */
+function projectedRuntimeRecipe(
+  recipe: RuntimeRecipe | null,
+  profile: ReturnType<typeof nativeThreadProfile>
+): RuntimeRecipe | null {
+  if (!recipe || !profile) return recipe;
+  const value = { ...recipe };
+  delete value.runtimeThreads;
+  const binding = THREAD_STATE_BINDINGS[profile.name];
+  if ('field' in binding && value.configs && Object.hasOwn(value.configs, binding.field)) {
+    const projected = nativeConfigFacts(value.configs[binding.field], binding.key);
+    value.configs = projected
+      ? ({ ...value.configs, [binding.field]: projected } as typeof value.configs)
+      : Object.fromEntries(Object.entries(value.configs).filter(([name]) => name !== binding.field));
+  }
+  return value;
+}
+export function dockerProviderRuntimeRecipeDigest(recipe: RuntimeRecipe | undefined): string {
+  return dockerContinuationDigest(
+    projectedRuntimeRecipe(recipe ?? null, recipe ? nativeThreadProfile(recipe.mode) : undefined)
+  );
+}
+
 /** Freeze actual recipe/configuration separately from runtime-owned native IDs.
  * Only a locked stock native-thread codec permits this projection. Unknown or
  * overridden protocols retain the full strict launch fingerprint. */
@@ -62,18 +87,9 @@ export function dockerEmployeeProviderSourceDigest(employee: CompanyEmployee, sa
     delete fields.allowedTools;
   }
   for (const key of ['runtimeThreads', 'resumeSessionId', 'claudeSessionChain']) delete fields[key];
-  const recipe = value.recipe ? { ...value.recipe } : null;
-  if (recipe) delete recipe.runtimeThreads;
+  const recipe = projectedRuntimeRecipe(value.recipe, profile);
   const binding = THREAD_STATE_BINDINGS[profile.name];
-  if ('field' in binding) {
-    fields[binding.field] = nativeConfigFacts(fields[binding.field], binding.key);
-    if (recipe?.configs && Object.hasOwn(recipe.configs, binding.field)) {
-      const projected = nativeConfigFacts(recipe.configs[binding.field], binding.key);
-      recipe.configs = projected
-        ? ({ ...recipe.configs, [binding.field]: projected } as typeof recipe.configs)
-        : Object.fromEntries(Object.entries(recipe.configs).filter(([name]) => name !== binding.field));
-    }
-  }
+  if ('field' in binding) fields[binding.field] = nativeConfigFacts(fields[binding.field], binding.key);
   return dockerContinuationDigest({
     ...value,
     recipe,

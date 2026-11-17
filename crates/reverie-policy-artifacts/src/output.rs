@@ -1,8 +1,6 @@
 //! Build-owned exclusive output leaves, with one checked close per descriptor.
-#![allow(unsafe_code)]
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::fd::IntoRawFd;
 use std::path::Path;
 
 pub(super) fn read_bounded(path: &Path, maximum: usize) -> io::Result<Vec<u8>> {
@@ -58,14 +56,9 @@ fn finalized<T>(primary: io::Result<T>, close: io::Result<()>) -> io::Result<T> 
     }
 }
 pub(super) fn close(file: File) -> io::Result<()> {
-    let descriptor = file.into_raw_fd();
-    // SAFETY: sole File ownership was consumed. Close this owned descriptor
-    // exactly once; retrying after EINTR could close an unrelated reused fd.
-    let result = if unsafe { libc::close(descriptor) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    };
+    // Nix consumes File ownership and issues exactly one close, without retry
+    // or an additional Drop close when the syscall returns an error.
+    let result = nix::unistd::close(file).map_err(io::Error::from);
     #[cfg(test)]
     let result = finalized(result, tests::after_close());
     result

@@ -1,3 +1,8 @@
+import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
+import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
+import type{PlanService}from'./plan-accounts.js';
+import {PlanMoveStore}from'./plan-move-store.js';
+import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
@@ -52,6 +57,7 @@ export const DockerRuntimeConfiguration = z
     sourceImageIds: z.array(sha).min(1).max(32),
     helperImageId: sha,
     memoryHighHelperImageId: sha.optional(),
+    poolRestoreHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
   })
   .strict();
@@ -190,6 +196,8 @@ export class DockerEmployeeRuntime {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly #key: DockerRuntimeKey;
   #attached?: Attached;
+  readonly #planActors=new Set<DockerPlanMoveActor>();
+  #planMoves?:PlanMoveStore;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -286,9 +294,8 @@ export class DockerEmployeeRuntime {
         deployment: configuration.deployment,
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
-        selectedWorkerContainerIds: () => [
-          ...new Set(inventory().flatMap((row) => (row.destination ? [row.destination.containerId] : []))),
-        ],
+        poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
+        selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
             'reverie-boxed-anchor-' + boxId.slice(0, 32), configuration.helperImageId, boxId
@@ -306,7 +313,36 @@ export class DockerEmployeeRuntime {
       store,
       configuration.helperImageId,
       boxId,
-      dockerProviderModeReader(company, ctx.store)
+      dockerProviderModeReader(company, ctx.store),
+      (row, digest) => {
+        const recordDigest = dockerContinuationDigest(row);
+        const current = () => {
+          if (!this.current() || row.version === 3 || !row.destination ||
+            !['provider-issued', 'ready'].includes(row.phase) ||
+            dockerContinuationDigest(store.record(row.employeeId)) !== recordDigest ||
+            !store.existingSubject(row.employeeId, row))
+            throw Error('Original published worker credential binding changed');
+          return true;
+        };
+        current();
+        return this.authentication.matchesIssuedDigest({
+          employeeId: row.employeeId,
+          owner: row.owner,
+          sessionId: row.request.sessionId,
+          sessionGeneration: row.request.sessionGeneration,
+          containerId: row.destination!.containerId,
+          credentialId: row.credentialId,
+        }, digest, current);
+      },
+      (row) => {
+        if (
+          !this.current() ||
+          row.version !== 3 ||
+          row.phase !== 'ready' ||
+          !store.existingSubject(row.employeeId, row)
+        )
+          throw Error('Canonical published plan replacement changed');
+      }
     );
     const provider = new DockerEmployeeSessionProvider(store, ctx, configuration.apiUrl, (row, workingDir, current) =>
       engine.observeCodexWorkspace(row, workingDir, current)
@@ -371,6 +407,14 @@ export class DockerEmployeeRuntime {
       a.pool
     );
   }
+  /** Server composition only. Inert until the API supplies its genuine captured
+   * requester; no request body selects Engine, paths, accounts or commands. */
+  planMoveActor(plans:PlanService,moves:PlanMoveStore,chat:ChatroomService):DockerPlanMoveActor|undefined{
+    const a=this.#attached;if(!a||!this.current())return;
+    if(!(moves instanceof PlanMoveStore)||(this.#planMoves&&this.#planMoves!==moves))throw Error('Original private plan journal required');this.#planMoves=moves;
+    const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
+    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,retain:actor=>this.#planActors.add(actor)});
+  }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
   providerHealthObserver(changed: () => void): DockerProviderHealth {
     const a = this.#attached;
@@ -419,6 +463,70 @@ export class DockerEmployeeRuntime {
         return proof;
       },
     });
+  }
+  /** Read-only native observation plus one attach-only website client repair.
+   * No resource convergence, provider installation or generic wake is admitted. */
+  async reconnectViewer(employeeId: string, expected: { sessionId: string; sessionGeneration: number },
+    owner: string | undefined, admitted: () => boolean, revalidateMove?: () => Promise<boolean>
+  ): Promise<'connected' | 'unconfirmed' | 'unavailable'> {
+    const a = this.#attached;
+    if (!a || !this.current()) return 'unavailable';
+    const employee = a.company.registeredEmployees().find(value => value.id === employeeId && value.owner === owner);
+    const row = employee && a.store.record(employee.id), binding = employee?.dockerBinding;
+    const session = employee && a.ctx.sessions.get(employee.sessionId);
+    if (!employee || !row || !binding || !session || !session.docker?.continuation ||
+      employee.sessionId !== expected.sessionId || employee.sessionGeneration !== expected.sessionGeneration ||
+      !['ready', 'provider-issued'].includes(row.phase)) return 'unavailable';
+    const rowDigest = dockerContinuationDigest(row), bindingDigest = dockerContinuationDigest(binding);
+    const saved = a.ctx.store.getSession(employee.sessionId);
+    if (!saved) return 'unavailable';
+    const source = row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
+    const end = performance.now() + 25_000;
+    let publication: 'preparing' | 'published' | 'failed' = 'preparing';
+    const published = () => publication === 'published';
+    let revoked = false;
+    const current = () => {
+      if (revoked) throw Error('Original Docker viewer repair changed');
+      const live = a.company.registeredEmployees().find(value => value.id === employeeId);
+      const subject = a.store.existingSubject(employeeId, row);
+      if (publication === 'failed' ||
+        (publication === 'preparing' && (!admitted() || performance.now() >= end)) ||
+        !this.current() || a.company.store.publicationUnconfirmed ||
+        !live || !subject || live.owner !== owner || subject.owner !== owner || live.onVacation ||
+        live.desiredRunning !== true || live.bindingMigration || live.sessionId !== expected.sessionId ||
+        live.sessionGeneration !== expected.sessionGeneration || subject.sessionId !== expected.sessionId ||
+        subject.sessionGeneration !== expected.sessionGeneration || a.ctx.sessions.get(expected.sessionId) !== session ||
+        session.owner !== owner || dockerContinuationDigest(live.dockerBinding) !== bindingDigest ||
+        dockerContinuationDigest(a.store.record(employeeId)) !== rowDigest ||
+        dockerEmployeeProviderSourceDigest(live, { ...saved, ...session.providerRecipeState() }) !== source) {
+        revoked = true;
+        throw Error('Original Docker viewer repair changed');
+      }
+    };
+    const allowed = () => { try { current(); return true; } catch { return false; } };
+    const capture = async () => {
+      current();
+      if (revalidateMove && !await revalidateMove()) throw Error('Original Docker viewer move hold changed');
+      current();
+      const seen = await a.engine.observeDestination(row);
+      current();
+      if (!seen || seen.state !== 'running' || seen.provider.kind !== 'running' ||
+        seen.provider.operationId !== binding.operationId || seen.provider.sessionId !== binding.sessionId ||
+        !a.engine.existingResourcePolicyCurrent(row, seen.resources)) throw Error('Original Docker provider is unconfirmed');
+      const view = await a.engine.captureProviderView(row, current);
+      current();
+      return view;
+    };
+    try {
+      const view = await capture();
+      const repaired = await Session.prototype.reconnectDockerContinuationView.call(session, view, allowed, capture, () => {
+        current();
+        publication = 'published';
+      });
+      if (repaired && published() && allowed()) return 'connected';
+      publication = 'failed';
+      return 'unconfirmed';
+    } catch { publication = 'failed'; return 'unconfirmed'; }
   }
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */
@@ -475,7 +583,7 @@ export class DockerEmployeeRuntime {
       const saved = a.ctx.store.getSession(employee.sessionId);
       if (!saved) throw Error('Boxed existing viewer saved recipe missing');
       const providerSource =
-        row.version === 2 ? row.providerSourceDigest : dockerEmployeeProviderSourceDigest(employee, saved);
+        row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
       const renewalCurrent = () => {
         current();
         if (
@@ -606,8 +714,10 @@ export class DockerEmployeeRuntime {
   close(): void {
     if (this.#resourceTimer) clearInterval(this.#resourceTimer);
     this.#resourceTimer = undefined;
+    const errors:unknown[]=[];
+    for(const actor of this.#planActors){try{actor.close();}catch(error){errors.push(error);}}
+    this.#planActors.clear();
     this.authentication.close();
-    const errors = [];
     try { this.#attached?.resourceRevisions.revisions.close(); }
     catch (error) { errors.push(error); }
     try {

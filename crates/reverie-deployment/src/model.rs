@@ -2,6 +2,7 @@ use super::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+mod image_profile;
 mod profile;
 pub use profile::DeploymentProfile;
 #[cfg(test)]
@@ -9,6 +10,8 @@ mod tests;
 
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub claim_adoption: Option<crate::ClaimAdoptionPreview>,
     pub operation: String,
     pub container: String,
     pub source_id: String,
@@ -20,6 +23,10 @@ pub struct DeploymentPreview {
     pub backup_metadata_scope: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile: Option<DeploymentProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preserved_networks: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_accounts: Option<crate::live_accounts::LiveAccountDispositionPreview>,
 }
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentStatus {
@@ -69,7 +76,21 @@ pub(super) fn supported_profile(source: &Value, selected: DeploymentProfile) -> 
     supported_base(source)?;
     profile::source_mounts(source, selected)
 }
+pub(super) fn supported_network_profile(
+    source: &Value,
+    selected: DeploymentProfile,
+    topology: &crate::networks::Topology,
+) -> Result<()> {
+    supported_base_selection(source, Some(topology))?;
+    profile::source_mounts(source, selected)
+}
 fn supported_base(source: &Value) -> Result<()> {
+    supported_base_selection(source, None)
+}
+fn supported_base_selection(
+    source: &Value,
+    topology: Option<&crate::networks::Topology>,
+) -> Result<()> {
     cid(string(source, "Id")?)?;
     let host = &source["HostConfig"];
     require(
@@ -82,13 +103,19 @@ fn supported_base(source: &Value) -> Result<()> {
     let networks = source["NetworkSettings"]["Networks"]
         .as_object()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_NETWORK_UNSUPPORTED"))?;
-    require(
-        networks.len() == 1 && networks.contains_key("bridge"),
-        "DEPLOYMENT_NETWORK_UNSUPPORTED",
-    )?;
-    let network = &networks["bridge"];
-    for key in ["Aliases", "IPAMConfig", "Links"] {
-        require(network[key].is_null(), "DEPLOYMENT_NETWORK_UNSUPPORTED")?;
+    if let Some(topology) = topology {
+        topology.require_container(source)?;
+    } else {
+        require(
+            networks.len() == 1 && networks.contains_key("bridge"),
+            "DEPLOYMENT_NETWORK_UNSUPPORTED",
+        )?;
+    }
+    if topology.is_none() {
+        let network = &networks["bridge"];
+        for key in ["Aliases", "IPAMConfig", "Links"] {
+            require(network[key].is_null(), "DEPLOYMENT_NETWORK_UNSUPPORTED")?;
+        }
     }
     require(
         source["Config"]["Volumes"].is_null(),
@@ -144,9 +171,18 @@ pub(super) fn create_body_profile(
     candidate: &Value,
     selected_profile: DeploymentProfile,
 ) -> Result<(Value, Vec<String>)> {
+    create_body_selection(source, old_image, candidate, selected_profile, None)
+}
+pub(super) fn create_body_selection(
+    source: &Value,
+    old_image: &Value,
+    candidate: &Value,
+    selected_profile: DeploymentProfile,
+    topology: Option<&crate::networks::Topology>,
+) -> Result<(Value, Vec<String>)> {
+    let entrypoint = image_profile::selected_entrypoint(source, old_image, candidate)?;
     require(
-        source["Config"]["Entrypoint"] == candidate["Config"]["Entrypoint"]
-            && source["Config"]["Cmd"] == candidate["Config"]["Cmd"],
+        source["Config"]["Cmd"] == candidate["Config"]["Cmd"],
         "DEPLOYMENT_ENTRYPOINT_CHANGED",
     )?;
     let previous = environment(&old_image["Config"])?;
@@ -196,6 +232,7 @@ pub(super) fn create_body_profile(
         .as_object_mut()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_CONFIG_REQUIRED"))?;
     fields.insert("Image".into(), candidate["Id"].clone());
+    fields.insert("Entrypoint".into(), entrypoint);
     fields.insert(
         "Env".into(),
         json!(merged.into_values().collect::<Vec<_>>()),
@@ -206,7 +243,10 @@ pub(super) fn create_body_profile(
     );
     fields.insert(
         "NetworkingConfig".into(),
-        json!({"EndpointsConfig":{"bridge":{}}}),
+        match topology {
+            Some(topology) => topology.request()?,
+            None => json!({"EndpointsConfig":{"bridge":{}}}),
+        },
     );
     profile::validate_body(source, &body, selected_profile)?;
     Ok((body, refreshed))
@@ -217,7 +257,19 @@ pub(super) fn candidate_matches(
     body: &Value,
     selected: DeploymentProfile,
 ) -> Result<()> {
-    supported_profile(actual, selected)?;
+    candidate_matches_selection(actual, source, body, selected, None)
+}
+pub(super) fn candidate_matches_selection(
+    actual: &Value,
+    source: &Value,
+    body: &Value,
+    selected: DeploymentProfile,
+    topology: Option<&crate::networks::Topology>,
+) -> Result<()> {
+    match topology {
+        Some(topology) => supported_network_profile(actual, selected, topology)?,
+        None => supported_profile(actual, selected)?,
+    }
     profile::candidate(actual, selected)?;
     require(
         actual["Image"] == body["Image"],

@@ -1,0 +1,597 @@
+/** Private filesystem for the CI-only SDK fake. No production import or arbitrary host repair. */
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import { PlanRequestId } from '../../src/plan-request-capability.js';
+import { PlanProviderFixtureContract, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
+import { PlanOfficePermissionProbe, PlanOfficePermissionReceipt } from './plan-office-permission-probe.js';
+import { PlanOfficeViewerCommandInput, PlanOfficeViewerCommandReceipt } from './plan-office-viewer-repair.js';
+import {
+  PlanOfficeAgentForceInput,
+  PlanOfficeAgentForceReceipt,
+  PlanOfficeAgentForceSpawn,
+  PlanOfficeAgentForceClosed,
+} from './plan-office-agent-force.js';
+const C = fs.constants,
+  mode = (stat: fs.Stats) => stat.mode & 0o7777;
+const identity = (s: fs.Stats) => [s.dev, s.ino, s.uid, s.gid, mode(s)].join(':');
+const stamp = (s: fs.Stats) => [identity(s), s.size, s.mtimeMs, s.ctimeMs, s.nlink].join(':');
+const digest = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
+const at = (fd: number, leaf: string) => `/proc/self/fd/${fd}/${leaf}`;
+function directory(file: string): number {
+  const fd = fs.openSync(file, C.O_RDONLY | C.O_DIRECTORY | C.O_NOFOLLOW | C.O_NONBLOCK);
+  try {
+    const st = fs.fstatSync(fd);
+    if (
+      !st.isDirectory() ||
+      st.uid !== process.getuid?.() ||
+      st.gid !== process.getgid?.() ||
+      mode(st) !== 0o700 ||
+      identity(st) !== identity(fs.lstatSync(file))
+    )
+      throw Error('Private fixture directory refused');
+    return fd;
+  } catch (error) {
+    try {
+      fs.closeSync(fd);
+    } catch (close) {
+      throw new AggregateError([error, close], 'Fixture open and close failed');
+    }
+    throw error;
+  }
+}
+function owned<T>(fd: number, operation: (fd: number) => T): T {
+  let value: T | undefined,
+    cause: unknown,
+    failed = false;
+  try {
+    value = operation(fd);
+  } catch (error) {
+    cause = error;
+    failed = true;
+  }
+  // Exactly one consuming close. Never retry its descriptor number after an unknown result.
+  try {
+    fs.closeSync(fd);
+  } catch (error) {
+    if (failed) throw new AggregateError([cause, error], 'Fixture operation and close failed');
+    throw error;
+  }
+  if (failed) throw cause;
+  return value as T;
+}
+function read(fd: number, leaf: string): Buffer {
+  const file = at(fd, leaf),
+    child = fs.openSync(file, C.O_RDONLY | C.O_NOFOLLOW | C.O_NONBLOCK);
+  return owned(child, () => {
+    const before = fs.fstatSync(child);
+    if (
+      !before.isFile() ||
+      before.uid !== process.getuid?.() ||
+      before.gid !== process.getgid?.() ||
+      mode(before) !== 0o600 ||
+      before.nlink !== 1 ||
+      before.size < 1 ||
+      before.size > 65536 ||
+      stamp(before) !== stamp(fs.lstatSync(file))
+    )
+      throw Error('Private fixture file refused');
+    const buffer = Buffer.alloc(65537);
+    let count = 0;
+    while (count < buffer.length) {
+      const n = fs.readSync(child, buffer, count, buffer.length - count, null);
+      if (!n) break;
+      count += n;
+    }
+    if (
+      count !== before.size ||
+      count > 65536 ||
+      stamp(fs.fstatSync(child)) !== stamp(before) ||
+      stamp(fs.lstatSync(file)) !== stamp(before)
+    )
+      throw Error('Private fixture file changed');
+    return buffer.subarray(0, count);
+  });
+}
+function json(bytes: Buffer): unknown {
+  const text = bytes.toString('utf8');
+  if (!Buffer.from(text).equals(bytes)) throw Error('Fixture UTF8 refused');
+  return JSON.parse(text);
+}
+function write(fd: number, leaf: string, bytes: Buffer): void {
+  const file = at(fd, leaf),
+    child = fs.openSync(file, C.O_WRONLY | C.O_CREAT | C.O_EXCL | C.O_NOFOLLOW, 0o600);
+  owned(child, () => {
+    fs.writeFileSync(child, bytes);
+    fs.fsyncSync(child);
+    const st = fs.fstatSync(child);
+    if (
+      !st.isFile() ||
+      st.nlink !== 1 ||
+      mode(st) !== 0o600 ||
+      st.uid !== process.getuid?.() ||
+      st.gid !== process.getgid?.() ||
+      st.size !== bytes.length ||
+      stamp(st) !== stamp(fs.lstatSync(file))
+    )
+      throw Error('Fixture publication refused');
+  });
+  fs.fsyncSync(fd);
+}
+const diagnosticHash = z.string().regex(/^[a-f0-9]{64}$/);
+export const PlanFixtureDiagnostic = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('synthetic-plan-provider-diagnostic-v1'),
+    namespacePid: z.number().int().min(2),
+    stage: z.enum([
+      'launch-parse',
+      'contract-read',
+      'startup-refresh',
+      'startup-sequence',
+      'capabilities',
+      'hook-stop',
+      'hook-prompt',
+      'plans',
+      'move-list',
+      'move-status',
+      'move-approve',
+    ]),
+    state: z.enum(['issued', 'returned', 'failed']),
+    exitCode: z.number().int().min(0).max(255).nullable(),
+    signal: z
+      .string()
+      .regex(/^SIG[A-Z0-9]{1,16}$/)
+      .nullable(),
+    stdoutSha256: diagnosticHash.nullable(),
+    stderrSha256: diagnosticHash.nullable(),
+  })
+  .strict();
+export type PlanFixtureDiagnosticStage = z.infer<typeof PlanFixtureDiagnostic>['stage'];
+export type PlanFixtureDiagnosticResult = Pick<
+  z.infer<typeof PlanFixtureDiagnostic>,
+  'exitCode' | 'signal' | 'stdoutSha256' | 'stderrSha256'
+>;
+/** Diagnostics never establish readiness, idleness, authority or callback completion. */
+export class PlanProviderFixtureFiles {
+  #serial = 0;
+  // Namespace PIDs may repeat across replacement containers retaining the same HOME.
+  #publicationId = randomUUID();
+  /** home is a test-owned mapping in unit cases; the image entry always supplies literal /home/agent. */
+  constructor(
+    readonly home: string,
+    readonly claudeConfigDir: string | undefined
+  ) {
+    if (
+      process.getuid?.() === undefined ||
+      process.getuid?.() === 0 ||
+      !path.isAbsolute(home) ||
+      path.resolve(home) !== home
+    )
+      throw Error('Positive owned fixture UID/HOME required');
+  }
+  #scope<T>(operation: (home: number, fixture: number) => T): T {
+    const root = directory(this.home);
+    return owned(root, () => {
+      const rootStamp = identity(fs.fstatSync(root)),
+        file = at(root, '.fixture'),
+        fixture = directory(file);
+      return owned(fixture, () => {
+        const childStamp = identity(fs.fstatSync(fixture)),
+          result = operation(root, fixture);
+        if (
+          identity(fs.fstatSync(root)) !== rootStamp ||
+          identity(fs.lstatSync(this.home)) !== rootStamp ||
+          identity(fs.fstatSync(fixture)) !== childStamp ||
+          identity(fs.lstatSync(file)) !== childStamp
+        )
+          throw Error('Fixture directory changed');
+        return result;
+      });
+    });
+  }
+  diagnostic(
+    stage: PlanFixtureDiagnosticStage,
+    state: 'issued' | 'returned' | 'failed',
+    result?: PlanFixtureDiagnosticResult
+  ) {
+    const value = PlanFixtureDiagnostic.parse({
+      version: 1,
+      purpose: 'synthetic-plan-provider-diagnostic-v1',
+      namespacePid: process.pid,
+      stage,
+      state,
+      exitCode: null,
+      signal: null,
+      stdoutSha256: null,
+      stderrSha256: null,
+      ...result,
+    });
+    return this.#scope((_home, fixture) =>
+      write(
+        fixture,
+        `plan-diagnostic-${process.pid}-${this.#publicationId}-${this.#serial++}.json`,
+        Buffer.from(JSON.stringify(value) + '\n')
+      )
+    );
+  }
+  contract() {
+    return this.#scope((_home, fixture) =>
+      PlanProviderFixtureContract.parse(json(read(fixture, 'plan-provider.json')))
+    );
+  }
+  permissionProbe(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficePermissionProbe.parse(json(read(fixture, `plan-permission-probe-${id}.json`)));
+      if (value.id !== id) throw Error('Permission probe ID changed');
+      return value;
+    });
+  }
+  viewerCommand(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficeViewerCommandInput.parse(json(read(fixture, `viewer-command-input-${id}.json`)));
+      if (value.id !== id) throw Error('Viewer command ID changed');
+      return value;
+    });
+  }
+  viewerCommandRecord(kind: 'issued' | 'returned', value: unknown) {
+    const receipt =
+      kind === 'issued' ? PlanOfficeViewerCommandInput.parse(value) : PlanOfficeViewerCommandReceipt.parse(value);
+    this.#scope((_home, fixture) =>
+      write(fixture, `viewer-command-${kind}-${receipt.id}.json`, Buffer.from(JSON.stringify(receipt) + '\n'))
+    );
+  }
+  forceInput(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const value = PlanOfficeAgentForceInput.parse(json(read(fixture, `plan-agent-force-input-${id}.json`)));
+      if (value.id !== id) throw Error('Force input ID changed');
+      return value;
+    });
+  }
+  writeForceHandoff(id: string, text: string) {
+    z.string().uuid().parse(id);
+    if (!text || text.length > 12000 || Buffer.byteLength(text) > 48000) throw Error('Force handoff bound');
+    this.#scope((_home, fixture) => write(fixture, `plan-force-handoff-${id}.txt`, Buffer.from(text)));
+  }
+  readForceHandoff(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      const bytes = read(fixture, `plan-force-handoff-${id}.txt`),
+        text = bytes.toString('utf8');
+      if (!Buffer.from(text).equals(bytes) || text.length > 12000) throw Error('Force handoff encoding or bound');
+      return text;
+    });
+  }
+  forcePrepared(id: string) {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) =>
+      PlanOfficeAgentForceReceipt.parse(json(read(fixture, `plan-agent-force-prepared-${id}.json`)))
+    );
+  }
+  forceRecord(
+    kind: z.infer<typeof PlanOfficeAgentForceReceipt>['kind'],
+    value: z.infer<typeof PlanOfficeAgentForceReceipt>
+  ) {
+    const receipt = PlanOfficeAgentForceReceipt.parse(value);
+    if (receipt.kind !== kind) throw Error('Force receipt stage changed');
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-${kind}-${receipt.id}.json`, Buffer.from(JSON.stringify(receipt) + '\n'))
+    );
+  }
+  forceChild(value: z.infer<typeof PlanOfficeAgentForceSpawn>) {
+    const proof = PlanOfficeAgentForceSpawn.parse(value),
+      text = JSON.stringify(proof);
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-spawned-${proof.id}.json`, Buffer.from(text + '\n'))
+    );
+    // This second publication is only an execution witness of the preceding
+    // proof's consuming closes; its own close is never inferred from readable bytes.
+    const closed = PlanOfficeAgentForceClosed.parse({
+      version: 1,
+      purpose: 'sdk-force-child-proof-after-close-v1',
+      id: proof.id,
+      proofDigest: digest(text),
+    });
+    this.#scope((_home, fixture) =>
+      write(fixture, `plan-agent-force-child-closed-${proof.id}.json`, Buffer.from(JSON.stringify(closed) + '\n'))
+    );
+  }
+  allowApproval(id: string): boolean {
+    z.string().uuid().parse(id);
+    return this.#scope((_home, fixture) => {
+      try {
+        const value = z
+          .object({
+            version: z.literal(1),
+            purpose: z.literal('reverie-ci-team-positive-cooperation-v1'),
+            id: z.literal(id),
+          })
+          .strict()
+          .parse(json(read(fixture, `plan-team-cooperation-${id}.json`)));
+        return value.id === id;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw error;
+      }
+    });
+  }
+  permissionProbeRecord(kind: 'intent' | 'returned', value: unknown) {
+    const parsed =
+      kind === 'intent' ? PlanOfficePermissionProbe.parse(value) : PlanOfficePermissionReceipt.parse(value);
+    return this.#scope((_home, fixture) =>
+      write(fixture, `plan-permission-${kind}-${parsed.id}.json`, Buffer.from(JSON.stringify(parsed) + '\n'))
+    );
+  }
+  prepareApproval(id: string, handoff: string): 'prepared' | 'existing' {
+    PlanRequestId.parse(id);
+    return this.#scope((_home, fixture) => {
+      const intent = `plan-intent-${id}.json`;
+      try {
+        fs.lstatSync(at(fixture, intent));
+        return 'existing';
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      write(
+        fixture,
+        intent,
+        Buffer.from(JSON.stringify({ version: 1, purpose: 'synthetic-plan-approval-intent-v1', requestId: id }) + '\n')
+      );
+      write(fixture, `plan-handoff-${id}.txt`, Buffer.from(handoff));
+      return 'prepared';
+    });
+  }
+  record(report: Readonly<PlanProviderFixtureReport>) {
+    z.string().uuid().parse(report.sessionId);
+    z.string().uuid().parse(report.turnId);
+    if (!Number.isSafeInteger(report.namespacePid) || report.namespacePid <= 1)
+      throw Error('Fixture receipt identity refused');
+    return this.#scope((_home, fixture) =>
+      write(
+        fixture,
+        `plan-turn-${report.sessionId}-${report.namespacePid}-${this.#publicationId}-${this.#serial++}.json`,
+        Buffer.from(JSON.stringify(report) + '\n')
+      )
+    );
+  }
+  authStatus() {
+    const selected = this.claudeConfigDir ?? this.home + '/.claude';
+    const relative = selected.slice(this.home.length + 1);
+    if (
+      selected !== this.home + '/.claude' &&
+      (!selected.startsWith(this.home + '/') ||
+        !/^\.reverie\/plan-moves\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/generation-[a-f0-9]{64}\/claude$/.test(
+          relative
+        ))
+    )
+      throw Error('Synthetic auth selection refused');
+    return this.#scope((home) => {
+      const walk = (
+        parent: number,
+        parts: string[]
+      ): { loggedIn: true; authMethod: string; apiProvider: string; email: string } => {
+        if (parts.length) return owned(directory(at(parent, parts[0]!)), (fd) => walk(fd, parts.slice(1)));
+        const value = json(read(parent, '.credentials.json')) as { claudeAiOauth?: { accessToken?: unknown } };
+        if (
+          typeof value?.claudeAiOauth?.accessToken !== 'string' ||
+          !value.claudeAiOauth.accessToken.startsWith('synthetic-')
+        )
+          throw Error('Synthetic account required');
+        return {
+          loggedIn: true,
+          authMethod: 'claude.ai',
+          apiProvider: 'firstParty',
+          email: 'ci-plan-fixture@example.invalid',
+        };
+      };
+      return walk(home, relative.split('/'));
+    });
+  }
+  refreshAuthOnce(accountId: string) {
+    PlanRequestId.parse(accountId);
+    return this.#scope((home, fixture) => {
+      const contract = PlanProviderFixtureContract.parse(json(read(fixture, 'plan-provider.json')));
+      if (contract.refreshAccountId !== accountId) throw Error('Fixture refresh account refused');
+      const marker = `plan-refresh-${accountId}.json`;
+      try {
+        fs.lstatSync(at(fixture, marker));
+        return;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+      const prefix = this.home + '/.reverie/plan-moves/';
+      if (!this.claudeConfigDir?.startsWith(prefix)) throw Error('Fixture generation root refused');
+      const relative = this.claudeConfigDir.slice(this.home.length + 1);
+      if (
+        !/^\.reverie\/plan-moves\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/generation-[a-f0-9]{64}\/claude$/.test(
+          relative
+        )
+      )
+        throw Error('Fixture generation path refused');
+      const walk = (parent: number, parts: string[], operation: (leaf: number) => void): void => {
+        if (!parts.length) {
+          operation(parent);
+          return;
+        }
+        const name = parts[0]!,
+          fd = directory(at(parent, name));
+        owned(fd, () => {
+          walk(fd, parts.slice(1), operation);
+          if (identity(fs.fstatSync(fd)) !== identity(fs.lstatSync(at(parent, name))))
+            throw Error('Fixture generation changed');
+        });
+      };
+      walk(home, relative.split('/'), (leaf) => {
+        const before = read(leaf, '.credentials.json'),
+          value = json(before) as { claudeAiOauth?: Record<string, unknown> };
+        if (
+          !value ||
+          Array.isArray(value) ||
+          typeof value.claudeAiOauth?.accessToken !== 'string' ||
+          !value.claudeAiOauth.accessToken.startsWith('synthetic-')
+        )
+          throw Error('Only fake SDK credentials are accepted');
+        const token = value.claudeAiOauth.accessToken;
+        if (
+          contract.accounts.some(
+            (id) => id !== accountId && (token === 'synthetic-original-' + id || token === 'synthetic-refreshed-' + id)
+          )
+        )
+          return;
+        if (token !== 'synthetic-original-' + accountId && token !== 'synthetic-refreshed-' + accountId)
+          throw Error('Only exact synthetic selected account refresh is accepted');
+        value.claudeAiOauth.accessToken = 'synthetic-refreshed-' + accountId;
+        const after = Buffer.from(JSON.stringify(value) + '\n'),
+          stage = 'sdk-refresh-' + randomUUID() + '.json';
+        write(leaf, stage, after);
+        if (!read(leaf, stage).equals(after)) throw Error('Fixture refresh staging differs');
+        fs.renameSync(at(leaf, stage), at(leaf, '.credentials.json'));
+        fs.fsyncSync(leaf);
+        if (!read(leaf, '.credentials.json').equals(after)) throw Error('Fixture refresh differs');
+        write(
+          fixture,
+          marker,
+          Buffer.from(
+            JSON.stringify({
+              version: 1,
+              purpose: 'synthetic-sdk-refresh-v1',
+              accountId,
+              beforeDigest: digest(before),
+              afterDigest: digest(after),
+            }) + '\n'
+          )
+        );
+      });
+    });
+  }
+}
+
+/** Control account probes read ONLY the two build-only fake accounts; no vendor network or token output. */
+export function planFixtureAccountStatus(configDir: string | undefined) {
+  if (configDir !== '/fixture/accounts/plan-a' && configDir !== '/fixture/accounts/plan-b')
+    throw Error('Fixed synthetic control account required');
+  return owned(directory('/fixture'), (root) =>
+    owned(directory(at(root, 'accounts')), (accounts) =>
+      owned(directory(at(accounts, configDir.endsWith('/plan-a') ? 'plan-a' : 'plan-b')), (account) => {
+        const value = json(read(account, '.credentials.json')) as { claudeAiOauth?: { accessToken?: unknown } };
+        if (
+          typeof value?.claudeAiOauth?.accessToken !== 'string' ||
+          !value.claudeAiOauth.accessToken.startsWith('synthetic-')
+        )
+          throw Error('Synthetic account required');
+        return {
+          loggedIn: true,
+          authMethod: 'claude.ai',
+          apiProvider: 'firstParty',
+          email: 'ci-plan-fixture@example.invalid',
+        };
+      })
+    )
+  );
+}
+
+export const PlanOfficeWorkerHomeInput = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-ci-plan-worker-home-v1'),
+    sessionId: z.string().uuid(),
+    nativeThreadId: z.string().uuid(),
+    initialAccountId: PlanRequestId,
+    provider: PlanProviderFixtureContract,
+  })
+  .strict()
+  .refine((v) => v.provider.accounts.includes(v.initialAccountId));
+/** Unit cases map home to owned private directories. The baked command below fixes /home/agent. */
+export function preparePlanOfficeWorkerHome(home: string, input: unknown) {
+  const value = PlanOfficeWorkerHomeInput.parse(input);
+  if (!path.isAbsolute(home) || path.resolve(home) !== home || !process.getuid?.())
+    throw Error('Positive owned HOME required');
+  return owned(directory(home), (root) => {
+    const before = identity(fs.fstatSync(root));
+    for (const name of ['.fixture', '.claude']) {
+      try {
+        fs.lstatSync(at(root, name));
+        throw Error('Initial fixture already exists');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      }
+    }
+    const child = <T>(parent: number, name: string, operation: (fd: number) => T): T => {
+      fs.mkdirSync(at(parent, name), { mode: 0o700 });
+      fs.fsyncSync(parent);
+      return owned(directory(at(parent, name)), operation);
+    };
+    child(root, '.fixture', (fixture) =>
+      write(fixture, 'plan-provider.json', Buffer.from(JSON.stringify(value.provider) + '\n'))
+    );
+    child(root, '.claude', (claude) => {
+      write(
+        claude,
+        '.credentials.json',
+        Buffer.from(
+          JSON.stringify({
+            claudeAiOauth: {
+              accessToken: 'synthetic-original-' + value.initialAccountId,
+              refreshToken: 'synthetic-refresh-' + value.initialAccountId,
+              expiresAt: 4102444800000,
+            },
+          }) + '\n'
+        )
+      );
+      child(claude, 'projects', (projects) =>
+        child(projects, '-reverie-workspace-cases-boxed-canary', (project) => {
+          const user = randomUUID(),
+            assistant = randomUUID();
+          const lines = [
+            {
+              type: 'user',
+              sessionId: value.nativeThreadId,
+              uuid: user,
+              parentUuid: null,
+              cwd: '/reverie_workspace/cases/boxed-canary',
+              message: {
+                role: 'user',
+                content: 'Synthetic unpaid plan-office context; preserve this conversation across the move.',
+              },
+            },
+            {
+              type: 'assistant',
+              sessionId: value.nativeThreadId,
+              uuid: assistant,
+              parentUuid: user,
+              message: { role: 'assistant', content: [{ type: 'text', text: 'Synthetic context acknowledged.' }] },
+            },
+          ];
+          write(
+            project,
+            value.nativeThreadId + '.jsonl',
+            Buffer.from(lines.map((line) => JSON.stringify(line)).join('\n') + '\n')
+          );
+        })
+      );
+    });
+    fs.fsyncSync(root);
+    if (identity(fs.fstatSync(root)) !== before || identity(fs.lstatSync(home)) !== before)
+      throw Error('Initial HOME changed');
+    return {
+      version: 1,
+      purpose: 'synthetic-plan-worker-home-prepared-v1',
+      sessionId: value.sessionId,
+      nativeThreadId: value.nativeThreadId,
+      employeeId: value.provider.employeeId,
+      initialAccountId: value.initialAccountId,
+      home: {
+        uid: process.getuid!(),
+        gid: process.getgid!(),
+        dev: String(fs.fstatSync(root).dev),
+        ino: String(fs.fstatSync(root).ino),
+      },
+      limitation:
+        'Initial fake SDK files only; no binding, grant, native receipt, token, Ready state or paid dispatch.',
+    };
+  });
+}

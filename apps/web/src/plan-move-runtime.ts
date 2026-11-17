@@ -4,7 +4,14 @@ import type { PlanService } from './plan-accounts.js';
 import type { ChatroomService } from './chatroom-service.js';
 import type { SessionPort } from './web/ports/session-port.js';
 import type { TerminalMultiplexer } from './mux-interface.js';
-import { PlanMoveError, PlanMoveUnconfirmed, PlanMoveComposerNotReady, type PlanMoveExecutor, type PlanMoveInput, type PlanMoveRecord } from './plan-move.js';
+import {
+  PlanMoveError,
+  PlanMoveUnconfirmed,
+  PlanMoveComposerNotReady,
+  type PlanMoveExecutor,
+  type PlanMoveInput,
+  type PlanMoveRecord,
+} from './plan-move.js';
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { claudeComposerIsReady } from './plan-move-composer.js';
@@ -12,7 +19,10 @@ import { accountReplacementProfile, accountReplacementRefusal } from './utils/ac
 import { fullAccessAlertRoom } from './full-access-default.js';
 import { capturePlanProcesses, survivingPlanProcesses } from './plan-move-processes.js';
 import { submitRecoveryPrompt } from './company-recovery-prompt.js';
-import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
+import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
+import type { PlanMoveDockerActor } from './plan-move-docker.js';
+import type { DockerPlanMoveRequesterTarget } from './docker-plan-move-requester.js';
+import { dockerPlanMoveExecutor } from './plan-move-docker-executor.js';
 
 /** Fixed server-private resource actor. Request references and launchKey are not
  * authorization: each method must check the durable owner/capacity/profile claim.
@@ -42,7 +52,9 @@ export interface PlanMoveResourceRuntime {
 export interface PlanMoveRuntime {
   company: Pick<CompanyService, 'view' | 'rebind'>;
   plans: Pick<PlanService, 'allocations' | 'account'>;
-  chat: Pick<ChatroomService, 'rooms' | 'post' | 'auditEntry'> & {delivery?: Pick<ChatroomService['delivery'], 'pauseForMigration'>};
+  chat: Pick<ChatroomService, 'rooms' | 'post' | 'auditEntry'> & {
+    delivery?: Pick<ChatroomService['delivery'], 'pauseForMigration'>;
+  };
   sessions: SessionPort['sessions'];
   mux: Pick<TerminalMultiplexer, 'getSession' | 'isPaneDead'> & Partial<Pick<TerminalMultiplexer, 'capturePaneText'>>;
   cleanup: SessionPort['cleanupSession'];
@@ -51,27 +63,39 @@ export interface PlanMoveRuntime {
   request(method: 'GET' | 'POST', url: string, payload?: unknown): Promise<unknown>;
   /** Installer-owned dependency, never populated from route JSON/parent headers. */
   resourceReplacement?: PlanMoveResourceRuntime;
+  dockerReplacement?: PlanMoveDockerActor;
+  dockerRequester?: (target: DockerPlanMoveRequesterTarget) => unknown;
+  dockerOriginalRequester?: (moveId: string) => Promise<unknown>;
+  dockerDecision?: unknown;
   capture?: typeof capturePlanProcesses;
   survivors?: typeof survivingPlanProcesses;
 }
 
 /** Shared normal-API boundary. Recovery telemetry may only add a hold, never supply forward/cleanup authority. */
 export function planMoveSessionResponse(status: number, body: unknown): unknown {
-  const response = body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : undefined;
+  const response =
+    body && typeof body === 'object' && !Array.isArray(body) ? (body as Record<string, unknown>) : undefined;
   if (response?.recoveryRequired === true)
-    throw new PlanMoveUnconfirmed('The normal session operation requires recovery. Do not replay or clean up its candidate.');
+    throw new PlanMoveUnconfirmed(
+      'The normal session operation requires recovery. Do not replay or clean up its candidate.'
+    );
   if (status >= 400 || response?.success === false)
-    throw new PlanMoveError(typeof response?.error === 'string' ? response.error : 'The normal session launch path refused the move', status >= 400 ? status : 409);
+    throw new PlanMoveError(
+      typeof response?.error === 'string' ? response.error : 'The normal session launch path refused the move',
+      status >= 400 ? status : 409
+    );
   return body;
 }
 
 /** Preserve the configured marker; add only the strict native composer shape. */
 function nativeComposerReady(mode: string, text: string, mark: string): boolean {
-  return text.includes(mark) ||
-    accountReplacementProfile(mode)?.composerReadyFallback(text, claudeComposerIsReady) === true;
+  return (
+    text.includes(mark) || accountReplacementProfile(mode)?.composerReadyFallback(text, claudeComposerIsReady) === true
+  );
 }
 
 export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): PlanMoveExecutor {
+  const docker = dockerPlanMoveExecutor(runtime, owner);
   // Capture the fixed implementation once; later object mutation cannot replace
   // one method halfway through a resource operation.
   const supplied = runtime.resourceReplacement;
@@ -108,7 +132,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   const createdCandidates = new Set<string>();
   const releases: Array<() => void> = [];
   const refreshCandidates = new Map<string, { source: string; digest: string; account: string }>();
-  const releaseDelivery = () => { releases.splice(0).forEach(release => release()); };
+  const releaseDelivery = () => {
+    releases.splice(0).forEach((release) => release());
+  };
   const session = (id: string) => {
     const current = runtime.sessions.get(id);
     if (!current || current.owner !== owner) throw new PlanMoveError('The owned session is no longer available');
@@ -126,7 +152,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   const binding = (employeeId: string) =>
     runtime.company.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId;
   const policy = (current: ReturnType<typeof session>) => ({
-    claudeMode: current.claudeMode, allowedTools: current.allowedTools, niceConfig: current.niceConfig,
+    claudeMode: current.claudeMode,
+    allowedTools: current.allowedTools,
+    niceConfig: current.niceConfig,
     envOverrides: current.getEnvOverridesForPersist?.(),
   });
   const checkRefreshCandidate = async (id: string) => {
@@ -141,64 +169,88 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   };
 
   const verifyRecoveryBinding = async (record: Readonly<PlanMoveRecord>, requireViewer: boolean) => {
+    assertAuthorized();
+    if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
+      throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
+    const candidate = requireViewer ? assertAlive(record.newSession) : session(record.newSession);
+    const candidateState = candidate.toState();
+    if (candidateState.remote || candidateState.docker || candidateState.customModel)
+      throw new PlanMoveError(
+        'Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions'
+      );
+    const selected = () => {
+      const state = candidate.toState(),
+        env = candidate.getEnvOverridesForPersist?.() ?? {};
+      return JSON.stringify([
+        state.mode,
+        state.workingDir,
+        candidate.subscriptionProfile?.id,
+        env.CODEX_HOME,
+        env.CLAUDE_CONFIG_DIR,
+        state.remote,
+        state.docker,
+        state.customModel,
+      ]);
+    };
+    const selection = selected();
+    const employee = runtime.company.view(owner).employees.find((row) => row.id === record.employeeId);
+    const generation = employee?.sessionGeneration;
+    const currentBinding = () => {
       assertAuthorized();
-      if (!record.newSession || record.sourceCleanupVerified !== true || record.sourceStopRequested !== true)
-        throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
-      const candidate = requireViewer ? assertAlive(record.newSession) : session(record.newSession);
-      const candidateState = candidate.toState();
-      if (candidateState.remote || candidateState.docker || candidateState.customModel)
-        throw new PlanMoveError('Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions');
-      const selected = () => {
-        const state = candidate.toState(), env = candidate.getEnvOverridesForPersist?.() ?? {};
-        return JSON.stringify([state.mode, state.workingDir, candidate.subscriptionProfile?.id,
-          env.CODEX_HOME, env.CLAUDE_CONFIG_DIR, state.remote, state.docker, state.customModel]);
-      };
-      const selection = selected();
-      const employee = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
-      const generation = employee?.sessionGeneration;
-      const currentBinding = () => {
-        assertAuthorized();
-        const now = runtime.company.view(owner).employees.find(row => row.id === record.employeeId);
-        if (!now || now.sessionId !== record.newSession || now.sessionGeneration !== generation || now.desiredRunning === false || now.onVacation || now.bindingMigration)
-          throw new PlanMoveError('The employee binding or running intent changed during recovery');
-        const old = runtime.sessions.get(record.oldSession);
-        if (old && old.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
-          throw new PlanMoveError('The original source is still running; recovery will not stop it');
-        if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
-          throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
-      };
+      const now = runtime.company.view(owner).employees.find((row) => row.id === record.employeeId);
+      if (
+        !now ||
+        now.sessionId !== record.newSession ||
+        now.sessionGeneration !== generation ||
+        now.desiredRunning === false ||
+        now.onVacation ||
+        now.bindingMigration
+      )
+        throw new PlanMoveError('The employee binding or running intent changed during recovery');
+      const old = runtime.sessions.get(record.oldSession);
+      if (old && old.pid && old.muxName && !runtime.mux.isPaneDead(old.muxName))
+        throw new PlanMoveError('The original source is still running; recovery will not stop it');
+      if (runtime.sessions.get(record.newSession!) !== candidate || selected() !== selection)
+        throw new PlanMoveError('The candidate runtime or account selection changed during recovery');
+    };
+    currentBinding();
+    const account = await runtime.plans.account(record.toAccount);
+    currentBinding();
+    if (!account || candidate.mode !== planMoveHarness(account))
+      throw new PlanMoveError('The candidate harness or destination plan changed');
+    const allocations = await runtime.plans.allocations();
+    currentBinding();
+    if (!allocations.accounts.some((row) => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
+      throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
+    const mark = composerReadyMark(candidate.mode);
+    const fence = () => {
       currentBinding();
-      const account = await runtime.plans.account(record.toAccount);
-      currentBinding();
-      if (!account || candidate.mode !== planMoveHarness(account)) throw new PlanMoveError('The candidate harness or destination plan changed');
-      const allocations = await runtime.plans.allocations();
-      currentBinding();
-      if (!allocations.accounts.some(row => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
-        throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
-      const mark = composerReadyMark(candidate.mode);
-      const fence = () => {
-        currentBinding();
-        if (record.purpose === 'runtime-refresh' &&
-            (candidate.toState().resumeSessionId || candidate.toState().codexConfig?.resumeSessionId ||
-             runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest))
-          throw new PlanMoveError('The approved refresh runtime changed during recovery');
-        if (!requireViewer) return;
-        assertAlive(record.newSession!);
-        if (!mark || typeof runtime.mux.capturePaneText !== 'function')
-          throw new PlanMoveError('This runtime does not support verified composer observation');
-        if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
-        const text = runtime.mux.capturePaneText(candidate.muxName!);
-        if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
-        if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
-      };
-      fence();
-      return fence;
+      if (
+        record.purpose === 'runtime-refresh' &&
+        (candidate.toState().resumeSessionId ||
+          candidate.toState().codexConfig?.resumeSessionId ||
+          runtimeRefreshDigest(candidate.toState(), account, policy(candidate)) !== record.runtimeDigest)
+      )
+        throw new PlanMoveError('The approved refresh runtime changed during recovery');
+      if (!requireViewer) return;
+      assertAlive(record.newSession!);
+      if (!mark || typeof runtime.mux.capturePaneText !== 'function')
+        throw new PlanMoveError('This runtime does not support verified composer observation');
+      if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
+      const text = runtime.mux.capturePaneText(candidate.muxName!);
+      if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
+      if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
+    };
+    fence();
+    return fence;
   };
 
   const resourceTarget = (record: Readonly<PlanMoveRecord>) => {
     assertAuthorized();
-    if (record.resourceOwnerScope !== undefined && (!ownerAuthority ||
-        assertResourceOperation(ownerAuthority, owner, record) !== record.resourceOwnerScope))
+    if (
+      record.resourceOwnerScope !== undefined &&
+      (!ownerAuthority || assertResourceOperation(ownerAuthority, owner, record) !== record.resourceOwnerScope)
+    )
       throw new PlanMoveError('The current private resource owner context changed', 403);
     const state = record.newSession ? resourceCandidates.get(record.newSession) : undefined;
     const expected = state?.input,
@@ -228,6 +280,12 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   };
 
   return {
+    ...(docker
+      ? {
+          dockerReplacement: docker,
+          withDecisionAuthority: (proof: unknown) => planMoveExecutor({ ...runtime, dockerDecision: proof }, owner),
+        }
+      : {}),
     ...(resources
       ? {
           prepareResources: async (record: Readonly<PlanMoveRecord>) => {
@@ -252,26 +310,47 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
               return result;
             };
           },
-          ...(resources.finalize ? {completeResources: async (record: Readonly<PlanMoveRecord>) => {
-            const state = resourceTarget(record);
-            if (!state.verified || !state.started || record.phase !== 'completed' || record.resourcePhase !== 'verified')
-              throw new PlanMoveError('Resource verification must precede protected native settlement');
-            await resources.finalize!(state.launchKey, record);
-          }} : {}),
+          ...(resources.finalize
+            ? {
+                completeResources: async (record: Readonly<PlanMoveRecord>) => {
+                  const state = resourceTarget(record);
+                  if (
+                    !state.verified ||
+                    !state.started ||
+                    record.phase !== 'completed' ||
+                    record.resourcePhase !== 'verified'
+                  )
+                    throw new PlanMoveError('Resource verification must precede protected native settlement');
+                  await resources.finalize!(state.launchKey, record);
+                },
+              }
+            : {}),
         }
       : {}),
-    verifyRecovery: record => verifyRecoveryBinding(record, true),
-    verifyViewerRepair: record => verifyRecoveryBinding(record, false),
+    verifyRecovery: (record) => verifyRecoveryBinding(record, true),
+    verifyViewerRepair: (record) => verifyRecoveryBinding(record, false),
     snapshot: async (employeeId, _owner, purpose) => {
-      assertAuthorized();
-      if(runtime.company instanceof CompanyService)
-        CompanyService.prototype.assertEmployeeRecoveryAvailable.call(runtime.company,employeeId,owner);
+      const employee = runtime.company.view(owner).employees.find((row) => row.id === employeeId);
+      if (employee?.dockerBinding) {
+        if (!docker) throw new PlanMoveError('The Docker plan actor is unavailable', 503);
+        return docker.snapshot(employeeId, owner, purpose);
+      }
+      if (runtime.company instanceof CompanyService)
+        CompanyService.prototype.assertEmployeeRecoveryAvailable.call(runtime.company, employeeId, owner);
       const id = binding(employeeId);
       if (!id) throw new PlanMoveError('Unknown current employee', 404);
       const current = session(id);
       const saved = current.toState();
+      if (saved.docker) {
+        if (!docker) throw new PlanMoveError('The Docker plan actor is unavailable', 503);
+        return docker.snapshot(employeeId, owner, purpose);
+      }
+      assertAuthorized();
       const profile = accountReplacementProfile(saved.mode);
-      if (!profile) throw new PlanMoveError(accountReplacementRefusal(saved.mode) ?? 'Custom harnesses cannot move plans in this version');
+      if (!profile)
+        throw new PlanMoveError(
+          accountReplacementRefusal(saved.mode) ?? 'Custom harnesses cannot move plans in this version'
+        );
       if (saved.remote || saved.docker || saved.customModel)
         throw new PlanMoveError('This session type cannot move plans');
       if (!current.pid || !current.muxName || runtime.mux.isPaneDead(current.muxName))
@@ -311,8 +390,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (input.resourceIntent) {
         if (!resources) throw new PlanMoveError('The private resource reservation/launch actor is unavailable', 503);
         if (
-          (input.resourceOwnerScope === undefined ? !owner : !ownerAuthority ||
-            assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope) ||
+          (input.resourceOwnerScope === undefined
+            ? !owner
+            : !ownerAuthority || assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope) ||
           requestedOwner !== owner ||
           input.purpose !== 'runtime-refresh' ||
           input.fromAccount !== input.toAccount ||
@@ -331,57 +411,64 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       const holdSourceRetry = source.pauseCapacityRetry?.();
       if (holdSourceRetry) releases.push(holdSourceRetry);
       try {
-      let id: string;
-      if (input.resourceIntent) {
-        assertAuthorized();
-        if (
-          binding(input.employeeId) !== input.sessionId ||
-          runtime.sessions.get(input.sessionId) !== source ||
-          source.isWorking
-        )
-          throw new PlanMoveError('The checkpointed resource source changed before reservation');
-        const reserved = await resources!.reserve(input, owner, Object.freeze(payload));
-        assertAuthorized();
-        if (
-          !reserved ||
-          typeof reserved.sessionId !== 'string' ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reserved.sessionId) ||
-          reserved.sessionId === input.sessionId ||
-          !reserved.launchKey ||
-          typeof reserved.launchKey !== 'object' ||
-          Array.isArray(reserved.launchKey)
-        )
-          throw new PlanMoveError('The private resource reservation has no exact replacement identity');
-        id = reserved.sessionId;
-        const candidate = session(id);
-        if (
-          candidate.pid ||
-          (candidate.muxName && !runtime.mux.isPaneDead(candidate.muxName)) ||
-          binding(input.employeeId) !== id ||
-          resourceCandidates.has(id)
-        )
-          throw new PlanMoveError('Resource reservation must expose only fenced owned replacement metadata');
-        resourceCandidates.set(id, { launchKey: reserved.launchKey, input, candidate });
-      } else {
-        const response = (await runtime.request('POST', '/api/sessions', payload)) as {
-          session?: { id?: unknown };
-          data?: { session?: { id?: unknown } };
-        };
-        const selected = response?.data?.session?.id ?? response?.session?.id;
-        if (typeof selected !== 'string')
-          throw new PlanMoveError('The replacement response has no session identifier');
-        id = selected;
+        let id: string;
+        if (input.resourceIntent) {
+          assertAuthorized();
+          if (
+            binding(input.employeeId) !== input.sessionId ||
+            runtime.sessions.get(input.sessionId) !== source ||
+            source.isWorking
+          )
+            throw new PlanMoveError('The checkpointed resource source changed before reservation');
+          const reserved = await resources!.reserve(input, owner, Object.freeze(payload));
+          assertAuthorized();
+          if (
+            !reserved ||
+            typeof reserved.sessionId !== 'string' ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reserved.sessionId) ||
+            reserved.sessionId === input.sessionId ||
+            !reserved.launchKey ||
+            typeof reserved.launchKey !== 'object' ||
+            Array.isArray(reserved.launchKey)
+          )
+            throw new PlanMoveError('The private resource reservation has no exact replacement identity');
+          id = reserved.sessionId;
+          const candidate = session(id);
+          if (
+            candidate.pid ||
+            (candidate.muxName && !runtime.mux.isPaneDead(candidate.muxName)) ||
+            binding(input.employeeId) !== id ||
+            resourceCandidates.has(id)
+          )
+            throw new PlanMoveError('Resource reservation must expose only fenced owned replacement metadata');
+          resourceCandidates.set(id, { launchKey: reserved.launchKey, input, candidate });
+        } else {
+          const response = (await runtime.request('POST', '/api/sessions', payload)) as {
+            session?: { id?: unknown };
+            data?: { session?: { id?: unknown } };
+          };
+          const selected = response?.data?.session?.id ?? response?.session?.id;
+          if (typeof selected !== 'string')
+            throw new PlanMoveError('The replacement response has no session identifier');
+          id = selected;
+        }
+        candidates.set(id, input.handoff);
+        createdCandidates.add(id);
+        if (input.purpose === 'runtime-refresh')
+          refreshCandidates.set(id, {
+            source: input.sessionId,
+            digest: input.runtimeDigest!,
+            account: input.toAccount,
+          });
+        const pauseCandidate = runtime.chat.delivery?.pauseForMigration(id);
+        if (pauseCandidate) releases.push(pauseCandidate);
+        const holdCandidateRetry = runtime.sessions.get(id)?.pauseCapacityRetry?.();
+        if (holdCandidateRetry) releases.push(holdCandidateRetry);
+        return id;
+      } catch (error) {
+        releaseDelivery();
+        throw error;
       }
-      candidates.set(id, input.handoff);
-      createdCandidates.add(id);
-      if (input.purpose === 'runtime-refresh')
-        refreshCandidates.set(id, { source: input.sessionId, digest: input.runtimeDigest!, account: input.toAccount });
-      const pauseCandidate = runtime.chat.delivery?.pauseForMigration(id);
-      if (pauseCandidate) releases.push(pauseCandidate);
-      const holdCandidateRetry = runtime.sessions.get(id)?.pauseCapacityRetry?.();
-      if (holdCandidateRetry) releases.push(holdCandidateRetry);
-      return id;
-      } catch (error) { releaseDelivery(); throw error; }
     },
     start: async (id) => {
       assertAuthorized();
@@ -415,8 +502,11 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           // A worker-backed candidate's pane is only a disposable viewer of the laptop's own
           // terminal, so a dropped viewer is reattached rather than failing a move whose agent
           // is still starting. The automatic reconnector stays fenced while this move holds the employee.
-          if (current.workerViewerReconnect === true && Date.now() < deadline &&
-            (!current.pid || runtime.mux.isPaneDead(current.muxName))) {
+          if (
+            current.workerViewerReconnect === true &&
+            Date.now() < deadline &&
+            (!current.pid || runtime.mux.isPaneDead(current.muxName))
+          ) {
             await current.reconnectWorkerViewer(stillCurrent);
             // The repair may outlast the deadline or race a session replacement; never accept either.
             assertAuthorized();
@@ -431,17 +521,24 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
           }
           assertAlive(id);
           const text = runtime.mux.capturePaneText(current.muxName);
-          if (!current.isWorking && !current.paneDialog && typeof text === 'string' && nativeComposerReady(current.mode, text, mark)) break;
-          if (Date.now() >= deadline) throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+          if (
+            !current.isWorking &&
+            !current.paneDialog &&
+            typeof text === 'string' &&
+            nativeComposerReady(current.mode, text, mark)
+          )
+            break;
+          if (Date.now() >= deadline)
+            throw new PlanMoveError('The replacement did not reach its composer before the deadline');
           await delay(500);
         }
       } else {
-      const result = (await runtime.request(
-        'GET',
-        `/api/sessions/${encodeURIComponent(id)}/wait-output?from=buffer&timeout=90000&match=${encodeURIComponent(mark)}`
-      )) as { data?: { wait?: { matched?: boolean } } };
-      if (!result.data?.wait?.matched)
-        throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+        const result = (await runtime.request(
+          'GET',
+          `/api/sessions/${encodeURIComponent(id)}/wait-output?from=buffer&timeout=90000&match=${encodeURIComponent(mark)}`
+        )) as { data?: { wait?: { matched?: boolean } } };
+        if (!result.data?.wait?.matched)
+          throw new PlanMoveError('The replacement did not reach its composer before the deadline');
       }
       assertAuthorized();
       assertAlive(id);
@@ -451,8 +548,13 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!handoff) throw new PlanMoveError('The replacement has no handoff');
       assertAuthorized();
       await checkRefreshCandidate(id);
-      await submitRecoveryPrompt(current, handoff, () => runtime.authorized() && runtime.sessions.get(id) === current,
-        undefined, {fromUser: true});
+      await submitRecoveryPrompt(
+        current,
+        handoff,
+        () => runtime.authorized() && runtime.sessions.get(id) === current,
+        undefined,
+        { fromUser: true }
+      );
       assertAlive(id);
       candidates.delete(id);
       refreshCandidates.delete(id);
@@ -498,7 +600,7 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (!identities.length && !candidates.has(id))
         throw new PlanMoveError('Cannot verify the old process before cleanup');
       if (!createdCandidates.has(id)) assertAuthorized();
-      const resource = [...resourceCandidates.values()].find(state => state.input.sessionId === id);
+      const resource = [...resourceCandidates.values()].find((state) => state.input.sessionId === id);
       if (resource) {
         if (!resources?.stopSource || !resource.prepared || resource.stopRequested)
           throw new PlanMoveError('The protected resource source-stop operation is unavailable or already attempted');
@@ -509,8 +611,11 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
         if (runtime.sessions.get(id) !== current)
           throw new PlanMoveError('The original session incarnation changed during protected source stop');
       }
-      try { await runtime.cleanup(id, true, 'plan_move'); }
-      finally { if (createdCandidates.has(id)) releaseDelivery(); }
+      try {
+        await runtime.cleanup(id, true, 'plan_move');
+      } finally {
+        if (createdCandidates.has(id)) releaseDelivery();
+      }
       candidates.delete(id);
       createdCandidates.delete(id);
       refreshCandidates.delete(id);
@@ -520,9 +625,18 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       if (record.owner !== owner) throw new PlanMoveError('The move belongs to another owner', 403);
       // This private append is mandatory before stopping the source. Owner-scoped move history is also persisted by PlanMoves.
       await runtime.chat.auditEntry({
-        event: 'plan_move', owner, actor: runtime.actor ?? owner ?? 'owner', moveId: record.id, employeeId: record.employeeId,
-        name: record.name, oldSession: record.oldSession, newSession: record.newSession,
-        fromAccount: record.fromAccount, toAccount: record.toAccount, phase: record.phase, error: record.error,
+        event: 'plan_move',
+        owner,
+        actor: runtime.actor ?? owner ?? 'owner',
+        moveId: record.id,
+        employeeId: record.employeeId,
+        name: record.name,
+        oldSession: record.oldSession,
+        newSession: record.newSession,
+        fromAccount: record.fromAccount,
+        toAccount: record.toAccount,
+        phase: record.phase,
+        error: record.error,
         ...(record.purpose ? { purpose: record.purpose } : {}),
       });
       // A channel mirror is optional. Never pick another channel, another owner or a DM when the conventional room is absent.
@@ -538,7 +652,9 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
             ? `AUDIT runtime refresh ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} refreshed ${record.name} on ${from?.label ?? record.fromAccount}${record.error ? `; ${record.error}` : ''}`
             : `AUDIT plan move ${record.phase}: ${runtime.actor ?? owner ?? 'Owner'} moved ${record.name} from ${from?.label ?? record.fromAccount} to ${to?.label ?? record.toAccount}${record.error ? `; ${record.error}` : ''}`
         );
-      } catch { console.warn(`[plans] move ${record.id} was audited privately; its optional channel mirror was unavailable`); }
+      } catch {
+        console.warn(`[plans] move ${record.id} was audited privately; its optional channel mirror was unavailable`);
+      }
     },
   };
 }

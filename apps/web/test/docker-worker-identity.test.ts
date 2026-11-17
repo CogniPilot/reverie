@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   DockerWorkerIdentityAuthentication,
   DOCKER_WORKER_IDENTITY_HEADER,
@@ -45,6 +46,51 @@ function fixture() {
   };
 }
 describe('bound Docker callback identity', () => {
+  it('can verify the original credential digest before a viewer exists without authenticating a request', () => {
+    const f = fixture();
+    const digest = createHash('sha256').update(f.token).digest('hex');
+    f.select(undefined);
+    expect(f.auth.matchesIssuedDigest(binding, digest, () => true)).toBe(true);
+    expect(f.auth.capture(f.request)).toBeUndefined();
+    expect(f.auth.matchesIssuedDigest(binding, '0'.repeat(64), () => true)).toBe(false);
+    expect(f.auth.matchesIssuedDigest(binding, 'bad', () => true)).toBe(false);
+  });
+  it.each(['employeeId', 'sessionId', 'sessionGeneration', 'owner', 'containerId', 'credentialId'] as const)(
+    'does not accept an installed digest for a changed published %s',
+    (field) => {
+      const f = fixture();
+      const digest = createHash('sha256').update(f.token).digest('hex');
+      const changed = {
+        ...binding,
+        [field]:
+          field === 'sessionGeneration'
+            ? 5
+            : field === 'owner'
+              ? 'other'
+              : field === 'containerId'
+                ? 'b'.repeat(64)
+                : '55555555-5555-4555-8555-555555555555',
+      };
+      expect(f.auth.matchesIssuedDigest(changed, digest, () => true)).toBe(false);
+    }
+  );
+  it('refuses original credential verification on revoked action, key or authentication owner', () => {
+    const f = fixture();
+    const digest = createHash('sha256').update(f.token).digest('hex');
+    expect(() => f.auth.matchesIssuedDigest(binding, digest, () => false)).toThrow();
+    f.revokeKey();
+    expect(() => f.auth.matchesIssuedDigest(binding, digest, () => true)).toThrow();
+    f.restoreKey();
+    f.auth.close();
+    expect(() => f.auth.matchesIssuedDigest(binding, digest, () => true)).toThrow();
+  });
+  it('rechecks the original action after calculating the digest', () => {
+    const f = fixture();
+    const digest = createHash('sha256').update(f.token).digest('hex');
+    let reads = 0;
+    expect(() => f.auth.matchesIssuedDigest(binding, digest, () => ++reads < 3)).toThrow();
+    expect(reads).toBe(3);
+  });
   it('authenticates possession with exact live EID/SID/generation/CID and selected credential', () => {
     const f = fixture(),
       identity = f.auth.capture(f.request)!;

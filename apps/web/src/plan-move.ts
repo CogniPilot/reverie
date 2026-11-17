@@ -1,7 +1,13 @@
+import type { PlanMoveDockerActor, PlanMoveDockerJournalStore } from './plan-move-docker.js';
+import { dockerPlanMoveNotIssuedOf } from './plan-move-store.js';
+import { requireDockerPlanDisjointGeneration } from './docker-plan-disjoint-generation.js';
+import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
-import {assertResourceOperation, type ResourceOwnerBinding} from './resource-owner-authority.js';
-import {ResourceHistoricalSettlement} from './resource-native-client.js';
+import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
+import { ResourceHistoricalSettlement } from './resource-native-client.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { reserveDockerPlanMove, runDockerPlanMove } from './plan-move-docker-runner.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -29,21 +35,33 @@ export type PlanMoveResourcePhase = 'reserved' | 'preparing' | 'prepared' | 'ver
 function resourceIntent(value: PlanMoveResourceIntent): Readonly<PlanMoveResourceIntent> {
   const keys = ['operationId', 'reservationId', 'profileVersion', 'profileDigest', 'previewDigest'];
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-  if (!value || typeof value !== 'object' || Array.isArray(value) ||
-      Object.keys(value).length !== keys.length || Object.keys(value).some(key => !keys.includes(key)) ||
-      ![value.operationId, value.reservationId].every(id => typeof id === 'string' && uuid.test(id)) ||
-      typeof value.profileVersion !== 'string' || !/^(?:0|[1-9][0-9]{0,19})$/.test(value.profileVersion) ||
-      BigInt(value.profileVersion) > 18446744073709551615n ||
-      ![value.profileDigest, value.previewDigest].every(hash => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash)))
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    Object.keys(value).length !== keys.length ||
+    Object.keys(value).some((key) => !keys.includes(key)) ||
+    ![value.operationId, value.reservationId].every((id) => typeof id === 'string' && uuid.test(id)) ||
+    typeof value.profileVersion !== 'string' ||
+    !/^(?:0|[1-9][0-9]{0,19})$/.test(value.profileVersion) ||
+    BigInt(value.profileVersion) > 18446744073709551615n ||
+    ![value.profileDigest, value.previewDigest].every((hash) => typeof hash === 'string' && /^[a-f0-9]{64}$/.test(hash))
+  )
     throw new PlanMoveError('Invalid resource transaction references');
-  return Object.freeze({ operationId: value.operationId, reservationId: value.reservationId,
-    profileVersion: value.profileVersion, profileDigest: value.profileDigest, previewDigest: value.previewDigest });
+  return Object.freeze({
+    operationId: value.operationId,
+    reservationId: value.reservationId,
+    profileVersion: value.profileVersion,
+    profileDigest: value.profileDigest,
+    previewDigest: value.previewDigest,
+  });
 }
 
 export interface PlanMoveInput {
   id: string;
   employeeId: string;
   sessionId: string;
+  sessionGeneration?: number;
   fromAccount: string;
   toAccount: string;
   forceBusy: boolean;
@@ -59,6 +77,14 @@ export interface PlanMoveInput {
 }
 
 export interface PlanMoveRecord {
+  /** Public view DATA only. Never persisted as effect authority. */
+  backend?: 'docker';
+  allowedActions?: readonly 'continue-original'[];
+  /** Public diagnostic only; never stored as native effect credit. */
+  sourceViewRetirement?: PlanMoveSourceViewRetirement;
+  /** PRIVATE mutable native journal; never serialize through public views. */
+  dockerReplacement?: DockerPlanMoveJournalState;
+  dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
   id: string;
   owner?: string;
   employeeId: string;
@@ -81,8 +107,14 @@ export interface PlanMoveRecord {
   resourceOwnerScope?: string;
   resourcePhase?: PlanMoveResourcePhase;
 }
+export interface PlanMoveSourceViewRetirement {
+  state: 'pending' | 'completed' | 'unconfirmed';
+  error?: string;
+}
 
 export interface PlanMoveSnapshot {
+  backend?: 'docker';
+  sessionGeneration?: number;
   sessionId: string;
   name: string;
   account: string;
@@ -93,6 +125,13 @@ export interface PlanMoveSnapshot {
 }
 
 export interface PlanMovePort {
+  dockerReplacement?: PlanMoveDockerActor;
+  dockerJournal?: PlanMoveDockerJournalStore;
+  /** Checked local metadata acknowledgement, never native effect authority. */
+  sourceViewRetirementComplete?(record: Readonly<PlanMoveRecord>): boolean;
+  /** Server-private boxed actor consumes the genuine cooperation proof and must
+   * retain current permissions through its journal-scoped planned transition. */
+  withDecisionAuthority?(proof: unknown): PlanMoveExecutor;
   load(): Promise<PlanMoveRecord[]>;
   save(records: PlanMoveRecord[]): Promise<void>;
   snapshot(employeeId: string, owner?: string, purpose?: 'runtime-refresh'): Promise<PlanMoveSnapshot>;
@@ -128,7 +167,10 @@ export interface PlanMovePort {
   completeResources?(record: Readonly<PlanMoveRecord>): Promise<void>;
 }
 
-export type PlanMoveExecutor = Omit<PlanMovePort, 'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed'>;
+export type PlanMoveExecutor = Omit<
+  PlanMovePort,
+  'load' | 'save' | 'recoveryPending' | 'recoveryConfirmed' | 'dockerJournal'
+>;
 
 export interface PlanViewerReconnectLease {
   (): boolean;
@@ -165,20 +207,33 @@ export class PlanMoveComposerNotReady extends PlanMoveError {
 }
 
 export class PlanMoves {
-  readonly #recoveryOwner=true;
+  readonly #recoveryOwner = true;
   private records = new Map<string, PlanMoveRecord>();
   private locked = new Set<string>();
   private intents = new Set<string>();
+  private preparing = new Map<string, string>();
+  private coldLegacy = new Map<string, { raw: PlanMoveRecord; loaded: string }>();
   private aborts = new Map<string, AbortController>();
+  private sourceRetirements = new Map<string, PlanMoveSourceViewRetirement>();
   /** Actual original move owner only. This is a denial lease, never permission
    * to stop/start, complete a held move, or reconstruct a native owner. */
-  async employeeRecoveryGuard(employeeId:string,owner:string|undefined,access:'effect'|'observe'):Promise<PlanViewerReconnectLease> {
-    if(!this.#recoveryOwner)throw new PlanMoveError('Original move owner is unavailable');
-    if(access==='observe')return PlanMoves.prototype.viewerInspectionGuard.call(this,employeeId,owner);
+  async employeeRecoveryGuard(
+    employeeId: string,
+    owner: string | undefined,
+    access: 'effect' | 'observe'
+  ): Promise<PlanViewerReconnectLease> {
+    if (!this.#recoveryOwner) throw new PlanMoveError('Original move owner is unavailable');
+    if (access === 'observe') return PlanMoves.prototype.viewerInspectionGuard.call(this, employeeId, owner);
     await this.init();
-    const end=performance.now()+10_000;let closed=false;
-    const current=()=>!closed&&performance.now()<end&&!this.locked.has(employeeId);
-    return Object.assign(current,{revalidate:async()=>current(),close:()=>{closed=true;}});
+    const end = performance.now() + 10_000;
+    let closed = false;
+    const current = () => !closed && performance.now() < end && !this.locked.has(employeeId);
+    return Object.assign(current, {
+      revalidate: async () => current(),
+      close: () => {
+        closed = true;
+      },
+    });
   }
   private loaded: Promise<void> | undefined;
 
@@ -187,7 +242,10 @@ export class PlanMoves {
   private init(): Promise<void> {
     this.loaded ??= (async () => {
       for (const saved of await this.port.load()) {
-        const record = { ...saved, ...(saved.resourceIntent ? { resourceIntent: resourceIntent(saved.resourceIntent) } : {}) };
+        const record = {
+          ...saved,
+          ...(saved.resourceIntent ? { resourceIntent: resourceIntent(saved.resourceIntent) } : {}),
+        };
         if (record.resourceIntent || !['completed', 'failed'].includes(record.phase)) {
           record.phase = 'recovery-required';
           record.error ??= record.resourceIntent
@@ -195,6 +253,7 @@ export class PlanMoves {
             : 'The server restarted during this move; inspect both sessions before retrying';
           this.locked.add(record.employeeId);
         }
+        this.coldLegacy.set(record.id, { raw: structuredClone(saved), loaded: dockerContinuationDigest(record) });
         this.records.set(record.id, record);
       }
     })();
@@ -205,61 +264,147 @@ export class PlanMoves {
     return this.port.save([...this.records.values()].map((record) => ({ ...record })));
   }
 
-  private view(record: PlanMoveRecord): PlanMoveRecord {
+  private sourceRetirement(source: PlanMoveRecord): PlanMoveSourceViewRetirement | undefined {
+    if (!source.dockerReplacement || source.phase !== 'completed') return undefined;
+    const observed = this.sourceRetirements.get(source.id);
+    if (observed) return { ...observed };
+    if (!this.port.sourceViewRetirementComplete) return undefined;
+    try {
+      return { state: this.port.sourceViewRetirementComplete(source) ? 'completed' : 'pending' };
+    } catch {
+      return { state: 'unconfirmed', error: 'Previous terminal cleanup status is unavailable' };
+    }
+  }
+
+  private view(source: PlanMoveRecord): PlanMoveRecord {
+    const {
+      dockerReplacement: _privateDockerJournal,
+      dockerSettlementBudget: _privateSettlementBudget,
+      ...record
+    } = source;
+    delete record.sourceViewRetirement;
+    if (source.dockerReplacement) {
+      record.backend = 'docker';
+      const retirement = this.sourceRetirement(source);
+      if (retirement) record.sourceViewRetirement = retirement;
+      record.allowedActions =
+        (record.phase === 'recovery-required' ||
+          (record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed')) &&
+        !this.aborts.has(record.id) &&
+        !this.intents.has(record.id)
+          ? ['continue-original']
+          : [];
+    }
     // A completion journal write is provisional while final native/audit fences
     // are still pending. Readers must not turn that window into successful Apply.
     if (record.phase === 'completed' && (this.aborts.has(record.id) || this.intents.has(record.id))) {
+      if (source.dockerReplacement) return { ...record, phase: 'checking' };
       if (record.resourceIntent) return { ...record, phase: 'checking', resourcePhase: 'verifying' };
       if (record.recoveryAction === 'adopt-existing') return { ...record, phase: 'checking' };
     }
     // An adoption keeps the held phase while its inspection and audit run: report it as checking, so a status read
     // never offers a recovery that is already in flight.
-    if (record.phase === 'recovery-required' && !record.resourceIntent && (this.aborts.has(record.id) || this.intents.has(record.id)))
+    if (
+      record.phase === 'recovery-required' &&
+      !record.resourceIntent &&
+      (this.aborts.has(record.id) || this.intents.has(record.id))
+    )
       return { ...record, phase: 'checking' };
     return { ...record };
   }
 
   /** A viewer flight never completes/unlocks a move or permits provider creation. */
-  async viewerReconnectGuard(employeeId: string, destination?: { owner?: string; sessionId: string;
-    executor: Pick<PlanMoveExecutor, 'verifyViewerRepair'> }): Promise<PlanViewerReconnectLease> {
+  async viewerReconnectGuard(
+    employeeId: string,
+    destination?: { owner?: string; sessionId: string; executor: Pick<PlanMoveExecutor, 'verifyViewerRepair'> }
+  ): Promise<PlanViewerReconnectLease> {
     await this.init();
     let closed = false;
-    const simple = (check: () => boolean) => Object.assign(() => !closed && check(), {
-      revalidate: async () => !closed && check(), close: () => { closed = true; },
-    });
+    const simple = (check: () => boolean) =>
+      Object.assign(() => !closed && check(), {
+        revalidate: async () => !closed && check(),
+        close: () => {
+          closed = true;
+        },
+      });
     if (!this.locked.has(employeeId)) return simple(() => !this.locked.has(employeeId));
-    const unresolved = [...this.records.values()].filter(record => record.employeeId === employeeId &&
-      !['completed', 'failed'].includes(record.phase));
+    const unresolved = [...this.records.values()].filter(
+      (record) => record.employeeId === employeeId && !['completed', 'failed'].includes(record.phase)
+    );
     const record = unresolved[0];
-    if (!destination?.executor.verifyViewerRepair || unresolved.length !== 1 || !record ||
-        record.owner !== destination.owner || record.phase !== 'recovery-required' || record.resourceIntent ||
-        !record.newSession || record.newSession === record.oldSession || record.newSession !== destination.sessionId ||
-        record.sourceStopRequested !== true || record.sourceCleanupVerified !== true ||
-        this.intents.has(record.id) || this.aborts.has(record.id)) return simple(() => false);
-    const fingerprint = JSON.stringify(record), id = record.id;
-    const journalCurrent = () => !closed && this.intents.has(id) && !this.aborts.has(id) &&
-      this.records.get(id) === record && JSON.stringify(record) === fingerprint && this.locked.has(employeeId) &&
-      [...this.records.values()].filter(row => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)).length === 1;
+    if (
+      !destination?.executor.verifyViewerRepair ||
+      unresolved.length !== 1 ||
+      !record ||
+      record.owner !== destination.owner ||
+      record.phase !== 'recovery-required' ||
+      record.resourceIntent ||
+      !record.newSession ||
+      record.newSession === record.oldSession ||
+      record.newSession !== destination.sessionId ||
+      record.sourceStopRequested !== true ||
+      record.sourceCleanupVerified !== true ||
+      this.intents.has(record.id) ||
+      this.aborts.has(record.id)
+    )
+      return simple(() => false);
+    const fingerprint = JSON.stringify(record),
+      id = record.id;
+    const journalCurrent = () =>
+      !closed &&
+      this.intents.has(id) &&
+      !this.aborts.has(id) &&
+      this.records.get(id) === record &&
+      JSON.stringify(record) === fingerprint &&
+      this.locked.has(employeeId) &&
+      [...this.records.values()].filter(
+        (row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)
+      ).length === 1;
     // Existing transaction single-flight excludes adoption while the original journal remains held.
     this.intents.add(id);
-    let runtimeCurrent: () => void, invalid = false;
-    const close = () => { if (!closed) { closed = true; this.intents.delete(id); } };
+    let runtimeCurrent: () => void,
+      invalid = false;
+    const close = () => {
+      if (!closed) {
+        closed = true;
+        this.intents.delete(id);
+      }
+    };
     const current = () => {
       if (invalid || !journalCurrent()) return false;
-      try { runtimeCurrent(); return true; } catch { return false; }
+      try {
+        runtimeCurrent();
+        return true;
+      } catch {
+        return false;
+      }
     };
     try {
       runtimeCurrent = await destination.executor.verifyViewerRepair({ ...record });
-      if (!current()) { close(); return simple(() => false); }
-    } catch { close(); return simple(() => false); }
-    return Object.assign(current, { close, revalidate: async () => {
-      if (!current()) return false;
-      try {
-        const fresh = await destination.executor.verifyViewerRepair!({ ...record });
+      if (!current()) {
+        close();
+        return simple(() => false);
+      }
+    } catch {
+      close();
+      return simple(() => false);
+    }
+    return Object.assign(current, {
+      close,
+      revalidate: async () => {
         if (!current()) return false;
-        fresh(); runtimeCurrent = fresh; return current();
-      } catch { invalid = true; return false; }
-    } });
+        try {
+          const fresh = await destination.executor.verifyViewerRepair!({ ...record });
+          if (!current()) return false;
+          fresh();
+          runtimeCurrent = fresh;
+          return current();
+        } catch {
+          invalid = true;
+          return false;
+        }
+      },
+    });
   }
 
   /** Read-only terminal inspection excludes move effects without resolving a held journal. */
@@ -267,23 +412,51 @@ export class PlanMoves {
     const end = performance.now() + 10_000;
     await this.init();
     let closed = false;
-    const simple = (check: () => boolean) => Object.assign(() => !closed && performance.now() < end && check(), {
-      revalidate: async () => !closed && performance.now() < end && check(), close: () => { closed = true; },
-    });
+    const simple = (check: () => boolean) =>
+      Object.assign(() => !closed && performance.now() < end && check(), {
+        revalidate: async () => !closed && performance.now() < end && check(),
+        close: () => {
+          closed = true;
+        },
+      });
     if (!this.locked.has(employeeId)) return simple(() => !this.locked.has(employeeId));
-    const unresolved = () => [...this.records.values()].filter(record => record.employeeId === employeeId &&
-      !['completed', 'failed'].includes(record.phase));
-    const records = unresolved(), record = records[0];
-    if (records.length !== 1 || !record || record.owner !== owner || record.phase !== 'recovery-required' ||
-      this.intents.has(record.id) || this.aborts.has(record.id) || performance.now() >= end) return simple(() => false);
-    const fingerprint = JSON.stringify(record), id = record.id;
+    const unresolved = () =>
+      [...this.records.values()].filter(
+        (record) => record.employeeId === employeeId && !['completed', 'failed'].includes(record.phase)
+      );
+    const records = unresolved(),
+      record = records[0];
+    if (
+      records.length !== 1 ||
+      !record ||
+      record.owner !== owner ||
+      record.phase !== 'recovery-required' ||
+      this.intents.has(record.id) ||
+      this.aborts.has(record.id) ||
+      performance.now() >= end
+    )
+      return simple(() => false);
+    const fingerprint = JSON.stringify(record),
+      id = record.id;
     this.intents.add(id);
-    const current = () => !closed && performance.now() < end && this.intents.has(id) && !this.aborts.has(id) &&
-      this.locked.has(employeeId) && this.records.get(id) === record && JSON.stringify(record) === fingerprint &&
+    const current = () =>
+      !closed &&
+      performance.now() < end &&
+      this.intents.has(id) &&
+      !this.aborts.has(id) &&
+      this.locked.has(employeeId) &&
+      this.records.get(id) === record &&
+      JSON.stringify(record) === fingerprint &&
       unresolved().length === 1;
-    return Object.assign(current, { revalidate: async () => current(), close: () => {
-      if (!closed) { closed = true; this.intents.delete(id); }
-    } });
+    return Object.assign(current, {
+      revalidate: async () => current(),
+      close: () => {
+        if (!closed) {
+          closed = true;
+          this.intents.delete(id);
+        }
+      },
+    });
   }
 
   async get(id: string, owner?: string): Promise<PlanMoveRecord | undefined> {
@@ -301,58 +474,148 @@ export class PlanMoves {
   }
 
   /** Discovery never releases a journal hold or grants recovery authority. */
-  async assertAvailable(employeeId: string, owner?: string): Promise<void> {
+  async assertAvailable(employeeId: string, owner?: string, executor: PlanMoveExecutor = this.port): Promise<void> {
     await this.init();
-    this.assertUnlocked(employeeId, owner);
+    await this.disjointAdmission(employeeId, owner, executor);
+  }
+
+  private coldRows(employeeId: string, owner: string | undefined, ownId?: string): PlanMoveRecord[] {
+    if (
+      (this.preparing.has(employeeId) && this.preparing.get(employeeId) !== ownId) ||
+      [...this.aborts.keys()].some((id) => this.records.get(id)?.employeeId === employeeId)
+    )
+      this.assertUnlocked(employeeId, owner);
+    const rows = [...this.records.values()].filter(
+      (row) => row.employeeId === employeeId && row.id !== ownId && !['completed', 'failed'].includes(row.phase)
+    );
+    if (
+      !rows.length ||
+      rows.some(
+        (row) =>
+          !this.coldLegacy.has(row.id) ||
+          this.intents.has(row.id) ||
+          this.coldLegacy.get(row.id)!.loaded !== dockerContinuationDigest(row)
+      )
+    )
+      this.assertUnlocked(employeeId, owner);
+    return rows.map((row) => structuredClone(this.coldLegacy.get(row.id)!.raw));
+  }
+  private async disjointAdmission(
+    employeeId: string,
+    owner: string | undefined,
+    executor: PlanMoveExecutor,
+    ownId?: string
+  ): Promise<unknown> {
+    if (!this.locked.has(employeeId)) return undefined;
+    const rows = this.coldRows(employeeId, owner, ownId);
+    if (!executor.dockerReplacement?.admitDisjointGeneration) this.assertUnlocked(employeeId, owner);
+    const proof = await executor.dockerReplacement!.admitDisjointGeneration!(employeeId, owner, rows);
+    requireDockerPlanDisjointGeneration(proof, this.coldRows(employeeId, owner, ownId), employeeId, owner);
+    return proof;
+  }
+  private releaseLock(employeeId: string): void {
+    if (
+      ![...this.records.values()].some(
+        (row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)
+      )
+    )
+      this.locked.delete(employeeId);
   }
 
   private assertUnlocked(employeeId: string, owner?: string): void {
     if (!this.locked.has(employeeId)) return;
-    const open = [...this.records.values()].filter(row => row.employeeId === employeeId &&
-      !['completed', 'failed'].includes(row.phase));
-    const record = open.find(row => row.owner === owner);
+    const open = [...this.records.values()].filter(
+      (row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase)
+    );
+    const record = open.find((row) => row.owner === owner);
     if (record)
-      throw new PlanMoveError('This employee already has a move in progress or requiring recovery; inspect its existing move',
-        409, { id: record.id, action: 'inspect-existing' });
+      throw new PlanMoveError(
+        'This employee already has a move in progress or requiring recovery; inspect its existing move',
+        409,
+        { id: record.id, action: 'inspect-existing' }
+      );
     if (open.length)
-      throw new PlanMoveError('This employee already has a move in progress or requiring recovery under another owner; ' +
-        'that owner must inspect it', 409, { action: 'inspect-journal', scope: 'other-owner' });
+      throw new PlanMoveError(
+        'This employee already has a move in progress or requiring recovery under another owner; ' +
+          'that owner must inspect it',
+        409,
+        { action: 'inspect-journal', scope: 'other-owner' }
+      );
     // Also briefly true while a new move is being prepared, before its journal record exists.
-    throw new PlanMoveError('This employee has a move being prepared or a hold without an open journal record; ' +
-      'the owner must inspect the move journal before another move', 409, { action: 'inspect-journal', scope: 'unrecorded' });
+    throw new PlanMoveError(
+      'This employee has a move being prepared or a hold without an open journal record; ' +
+        'the owner must inspect the move journal before another move',
+      409,
+      { action: 'inspect-journal', scope: 'unrecorded' }
+    );
   }
 
-  async begin(input: PlanMoveInput, owner?: string, executor: PlanMoveExecutor = this.port,
-    ownerAuthority?: ResourceOwnerBinding): Promise<PlanMoveRecord> {
+  async begin(
+    input: PlanMoveInput,
+    owner?: string,
+    executor: PlanMoveExecutor = this.port,
+    ownerAuthority?: ResourceOwnerBinding
+  ): Promise<PlanMoveRecord> {
     // Capture references before the first await. No caller mutation may redirect
     // a queued transaction or silently turn a resource refresh into a plain one.
-    input = { ...input, ...(input.resourceIntent !== undefined ? { resourceIntent: resourceIntent(input.resourceIntent) } : {}) };
+    input = {
+      ...input,
+      ...(input.resourceIntent !== undefined ? { resourceIntent: resourceIntent(input.resourceIntent) } : {}),
+    };
     const checkOwnerScope = () => {
       if (input.resourceOwnerScope !== undefined) {
         try {
-          if (!input.resourceIntent || !/^[a-f0-9]{64}$/.test(input.resourceOwnerScope) || !ownerAuthority ||
-              assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope)
+          if (
+            !input.resourceIntent ||
+            !/^[a-f0-9]{64}$/.test(input.resourceOwnerScope) ||
+            !ownerAuthority ||
+            assertResourceOperation(ownerAuthority, owner, input) !== input.resourceOwnerScope
+          )
             throw new Error('missing private scope');
-        } catch { throw new PlanMoveError('Resource refresh requires its current private owner context', 403); }
+        } catch {
+          throw new PlanMoveError('Resource refresh requires its current private owner context', 403);
+        }
       } else if (input.resourceIntent && (typeof owner !== 'string' || !owner || owner.length > 200))
         throw new PlanMoveError('Resource refresh requires an explicit verified owner scope', 403);
     };
     checkOwnerScope();
-    if (input.resourceIntent && (input.purpose !== 'runtime-refresh' ||
-        typeof executor.prepareResources !== 'function' || typeof executor.verifyResources !== 'function' ||
-        input.resourceOwnerScope !== undefined && typeof executor.completeResources !== 'function'))
+    if (
+      input.resourceIntent &&
+      (input.purpose !== 'runtime-refresh' ||
+        typeof executor.prepareResources !== 'function' ||
+        typeof executor.verifyResources !== 'function' ||
+        (input.resourceOwnerScope !== undefined && typeof executor.completeResources !== 'function'))
+    )
       throw new PlanMoveError('Resource refresh requires its fixed preparation and native verification actor', 503);
-    if ((input.purpose !== undefined && input.purpose !== 'runtime-refresh') ||
-        (!input.purpose && input.runtimeDigest !== undefined))
+    if (
+      (input.purpose !== undefined && input.purpose !== 'runtime-refresh') ||
+      (!input.purpose && input.runtimeDigest !== undefined)
+    )
       throw new PlanMoveError('Unknown plan move purpose');
     await this.init();
     checkOwnerScope();
     const requestDigest = createHash('sha256')
-      .update(JSON.stringify([input.forceBusy, input.handoff, input.model ?? '', input.targetMode ?? '',
-        ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
-        ...(input.resourceIntent ? ['resources-v1', input.resourceIntent.operationId, input.resourceIntent.reservationId,
-          input.resourceIntent.profileVersion, input.resourceIntent.profileDigest, input.resourceIntent.previewDigest,
-          ...(input.resourceOwnerScope === undefined ? [] : [input.resourceOwnerScope])] : [])]))
+      .update(
+        JSON.stringify([
+          input.forceBusy,
+          input.handoff,
+          input.model ?? '',
+          input.targetMode ?? '',
+          ...(input.sessionGeneration === undefined ? [] : ['session-generation', input.sessionGeneration]),
+          ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
+          ...(input.resourceIntent
+            ? [
+                'resources-v1',
+                input.resourceIntent.operationId,
+                input.resourceIntent.reservationId,
+                input.resourceIntent.profileVersion,
+                input.resourceIntent.profileDigest,
+                input.resourceIntent.previewDigest,
+                ...(input.resourceOwnerScope === undefined ? [] : [input.resourceOwnerScope]),
+              ]
+            : []),
+        ])
+      )
       .digest('hex');
     const existing = this.records.get(input.id);
     if (existing) {
@@ -369,25 +632,46 @@ export class PlanMoves {
       return this.view(existing);
     }
     if (this.intents.has(input.id)) throw new PlanMoveError('That move identifier is already being prepared');
-    this.assertUnlocked(input.employeeId, owner);
+    let disjoint = await this.disjointAdmission(input.employeeId, owner, executor);
+    if (!disjoint) this.assertUnlocked(input.employeeId, owner);
+    if (disjoint)
+      requireDockerPlanDisjointGeneration(disjoint, this.coldRows(input.employeeId, owner), input.employeeId, owner);
     this.locked.add(input.employeeId);
+    this.preparing.set(input.employeeId, input.id);
     this.intents.add(input.id);
     try {
       const snapshot = await executor.snapshot(input.employeeId, owner, input.purpose);
       checkOwnerScope();
       if (snapshot.sessionId !== input.sessionId || snapshot.account !== input.fromAccount)
         throw new PlanMoveError('The employee or account changed; refresh before moving');
+      if (
+        snapshot.backend === 'docker' &&
+        input.sessionGeneration !== undefined &&
+        input.sessionGeneration !== snapshot.sessionGeneration
+      )
+        throw new PlanMoveError('The employee generation changed; refresh before moving');
       if (input.purpose === 'runtime-refresh') {
-        if (input.fromAccount !== input.toAccount || input.forceBusy || !input.handoff.trim() ||
-            !accountReplacementProfile(snapshot.mode) ||
-            (input.model !== undefined && input.model !== snapshot.model) ||
-            (input.targetMode !== undefined && input.targetMode !== snapshot.mode) ||
-            !input.runtimeDigest || !/^[a-f0-9]{64}$/.test(input.runtimeDigest) || snapshot.runtimeDigest !== input.runtimeDigest)
+        if (
+          input.fromAccount !== input.toAccount ||
+          input.forceBusy ||
+          !input.handoff.trim() ||
+          !accountReplacementProfile(snapshot.mode) ||
+          (input.model !== undefined && input.model !== snapshot.model) ||
+          (input.targetMode !== undefined && input.targetMode !== snapshot.mode) ||
+          !input.runtimeDigest ||
+          !/^[a-f0-9]{64}$/.test(input.runtimeDigest) ||
+          snapshot.runtimeDigest !== input.runtimeDigest
+        )
           throw new PlanMoveError('A runtime refresh requires the unchanged current plan, runtime and a safe handoff');
       } else if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
       if (this.records.size >= 100) {
-        const oldest = [...this.records.values()].find((record) => ['completed', 'failed'].includes(record.phase) &&
-          !this.intents.has(record.id) && !this.aborts.has(record.id));
+        const oldest = [...this.records.values()].find(
+          (record) =>
+            ['completed', 'failed'].includes(record.phase) &&
+            !record.dockerReplacement &&
+            !this.intents.has(record.id) &&
+            !this.aborts.has(record.id)
+        );
         if (!oldest) throw new PlanMoveError('The move registry is full; resolve outstanding moves first');
         this.records.delete(oldest.id);
       }
@@ -404,28 +688,68 @@ export class PlanMoves {
         requestDigest,
         ...(input.purpose ? { purpose: input.purpose, runtimeDigest: input.runtimeDigest } : {}),
         ...(input.resourceIntent ? { resourceIntent: input.resourceIntent } : {}),
-        ...(input.resourceOwnerScope === undefined ? {} : {resourceOwnerScope: input.resourceOwnerScope}),
+        ...(input.resourceOwnerScope === undefined ? {} : { resourceOwnerScope: input.resourceOwnerScope }),
       };
+      if (snapshot.backend === 'docker') await reserveDockerPlanMove(record, input, executor, this.port.dockerJournal);
+      if (disjoint) {
+        if (!record.dockerReplacement)
+          throw new PlanMoveError('Current native generation admission requires Docker', 409);
+        disjoint = await this.disjointAdmission(input.employeeId, owner, executor, input.id);
+      }
       this.records.set(record.id, record);
-      await this.save();
+      if (record.dockerReplacement) {
+        const saved = await this.port.dockerJournal!.reserve(
+          record,
+          () => {
+            executor.dockerReplacement!.current(record, record.dockerReplacement!);
+            if (disjoint)
+              requireDockerPlanDisjointGeneration(
+                disjoint,
+                this.coldRows(input.employeeId, owner, input.id),
+                input.employeeId,
+                owner
+              );
+          },
+          disjoint
+        );
+        Object.assign(record, structuredClone(saved));
+      } else await this.save();
       checkOwnerScope();
-      void this.run(record, input, executor);
-      return { ...record };
+      if (record.dockerReplacement) void this.runDocker(record, executor);
+      else void this.run(record, input, executor);
+      return this.view(record);
     } catch (error) {
-      const uncertain = this.records.get(input.id);
-      if (input.resourceIntent && uncertain) {
+      const uncertain = this.records.get(input.id),
+        notIssued = dockerPlanMoveNotIssuedOf(error);
+      const exactNotIssued =
+        !!notIssued &&
+        !!uncertain?.dockerReplacement &&
+        notIssued.id === uncertain.id &&
+        notIssued.employeeId === uncertain.employeeId &&
+        notIssued.sessionId === uncertain.oldSession &&
+        notIssued.sessionGeneration === uncertain.dockerReplacement.seed.source.binding.sessionGeneration &&
+        notIssued.toAccount === uncertain.toAccount &&
+        notIssued.requestDigest === uncertain.requestDigest;
+      if ((uncertain?.dockerReplacement && !exactNotIssued) || (input.resourceIntent && uncertain)) {
         // save() can lose its acknowledgement after durable rename/fsync. Keep
         // both the in-memory fence and any persisted intent for reconciliation.
-        uncertain.phase = 'recovery-required';
-        uncertain.error = 'Resource intent journal outcome requires inspection';
-        try { await this.save(); } catch { /* retain the lock even if storage stays unavailable */ }
+        uncertain!.phase = 'recovery-required';
+        uncertain!.error = uncertain!.dockerReplacement
+          ? 'Docker plan reservation outcome requires inspection'
+          : 'Resource intent journal outcome requires inspection';
+        try {
+          await this.save();
+        } catch {
+          /* retain the lock even if storage stays unavailable */
+        }
       } else {
         this.records.delete(input.id);
-        this.locked.delete(input.employeeId);
+        this.releaseLock(input.employeeId);
       }
       throw error;
     } finally {
       this.intents.delete(input.id);
+      if (this.preparing.get(input.employeeId) === input.id) this.preparing.delete(input.employeeId);
     }
   }
 
@@ -442,47 +766,88 @@ export class PlanMoves {
    * Metadata only: no executor, old handle, launch, stop, handoff or credit.
    * Every new website process still starts these records in recovery.
    */
-  async reconcileResourceCompletion(id: string, proof: ResourceHistoricalSettlement,
-    owner?: string): Promise<PlanMoveRecord> {
+  async reconcileResourceCompletion(
+    id: string,
+    proof: ResourceHistoricalSettlement,
+    owner?: string
+  ): Promise<PlanMoveRecord> {
     await this.init();
     const record = this.records.get(id);
     if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
-    if (!(proof instanceof ResourceHistoricalSettlement) || !record.resourceIntent ||
-      record.phase !== 'recovery-required' || this.intents.has(id) || this.aborts.has(id) ||
-      [...this.records.values()].some(row => row.id !== id && row.employeeId === record.employeeId &&
-        !['completed','failed'].includes(row.phase)))
+    if (
+      !(proof instanceof ResourceHistoricalSettlement) ||
+      !record.resourceIntent ||
+      record.phase !== 'recovery-required' ||
+      this.intents.has(id) ||
+      this.aborts.has(id) ||
+      [...this.records.values()].some(
+        (row) => row.id !== id && row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)
+      )
+    )
       throw new PlanMoveError('Resource completion requires unambiguous fresh native inspection', 503);
-    proof.assertRecord(record); this.intents.add(id);
-    const before = {...record};
+    proof.assertRecord(record);
+    this.intents.add(id);
+    const before = { ...record };
     try {
-      record.phase = 'completed'; delete record.error;
+      record.phase = 'completed';
+      delete record.error;
       await this.save();
-      await proof.recheck({...record});
+      await proof.recheck({ ...record });
       proof.assertRecord(record);
-      this.locked.delete(record.employeeId);
-      return {...record};
+      this.releaseLock(record.employeeId);
+      // Both native reads and the durable write are acknowledged. Finish this
+      // request's provisional view before returning its completed DTO.
+      this.intents.delete(id);
+      return this.view(record);
     } catch (error) {
-      Object.assign(record, before, {phase: 'recovery-required', error: 'Historical resource settlement remains unconfirmed'});
+      Object.assign(record, before, {
+        phase: 'recovery-required',
+        error: 'Historical resource settlement remains unconfirmed',
+      });
       this.locked.add(record.employeeId);
-      try {await this.save();} catch { /* Keep in-memory fence; restart also requalifies. */ }
+      try {
+        await this.save();
+      } catch {
+        /* Keep in-memory fence; restart also requalifies. */
+      }
       throw error;
-    } finally {this.intents.delete(id);}
+    } finally {
+      this.intents.delete(id);
+    }
   }
 
   /** Resolve a stopped-source move by adopting its existing verified destination. Never launches or replays a handoff. */
-  async resolve(id: string, expected: { oldSession: string; newSession: string; toAccount: string }, owner?: string,
-    executor: PlanMoveExecutor = this.port): Promise<PlanMoveRecord> {
+  async resolve(
+    id: string,
+    expected: { oldSession: string; newSession: string; toAccount: string },
+    owner?: string,
+    executor: PlanMoveExecutor = this.port
+  ): Promise<PlanMoveRecord> {
     await this.init();
     const record = this.records.get(id);
     if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
-    if (record.resourceIntent) throw new PlanMoveError('Resource transactions require their own verified recovery actor');
-    if (record.oldSession !== expected.oldSession || record.newSession !== expected.newSession || record.toAccount !== expected.toAccount)
+    if (record.resourceIntent)
+      throw new PlanMoveError('Resource transactions require their own verified recovery actor');
+    if (record.dockerReplacement)
+      throw new PlanMoveError('Use the original Docker recovery action; legacy adoption cannot recover this move');
+    if (
+      record.oldSession !== expected.oldSession ||
+      record.newSession !== expected.newSession ||
+      record.toAccount !== expected.toAccount
+    )
       throw new PlanMoveError('The recovery target changed; refresh its status');
-    if (this.intents.has(id) || this.aborts.has(id)) throw new PlanMoveError('The move is still active; wait before recovery');
-    if (record.phase === 'completed' && record.recoveryAction === 'adopt-existing') return { ...record };
+    if (this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError('The move is still active; wait before recovery');
+    if (record.phase === 'completed' && record.recoveryAction === 'adopt-existing') return this.view(record);
     if (record.phase !== 'recovery-required' || !record.sourceStopRequested || record.sourceCleanupVerified !== true)
-      throw new PlanMoveError('Recovery requires durable source-cleanup proof; inspect both sessions without clearing the journal');
-    if ([...this.records.values()].filter(row => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)).length !== 1)
+      throw new PlanMoveError(
+        'Recovery requires durable source-cleanup proof; inspect both sessions without clearing the journal'
+      );
+    if (
+      [...this.records.values()].filter(
+        (row) => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)
+      ).length !== 1
+    )
       throw new PlanMoveError('Multiple unresolved moves name this employee; inspect the journal before recovery');
     if (!executor.verifyRecovery || !this.port.recoveryPending || !this.port.recoveryConfirmed)
       throw new PlanMoveError('Native recovery inspection or durable acknowledgement storage is unavailable', 503);
@@ -494,7 +859,9 @@ export class PlanMoves {
       await executor.audit({ ...record, recoveryAction: 'adopt-existing' });
       const current = await executor.verifyRecovery({ ...record });
       current(); // Fresh authority and exact candidate binding after all slow inspection/audit work.
-      record.phase = 'completed'; record.recoveryAction = 'adopt-existing'; record.recoveredAt = Date.now();
+      record.phase = 'completed';
+      record.recoveryAction = 'adopt-existing';
+      record.recoveredAt = Date.now();
       try {
         await this.save();
         current();
@@ -503,13 +870,26 @@ export class PlanMoves {
         Object.assign(record, before, { phase: 'recovery-required' });
         if (before.recoveryAction === undefined) delete record.recoveryAction;
         if (before.recoveredAt === undefined) delete record.recoveredAt;
-        try { await this.save(); } catch { /* Keep the in-memory hold; durable outcome requires inspection. */ }
+        try {
+          await this.save();
+        } catch {
+          /* Keep the in-memory hold; durable outcome requires inspection. */
+        }
         throw error;
       }
-      if (![...this.records.values()].some(row => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)))
-        this.locked.delete(record.employeeId);
-      return { ...record };
-    } finally { this.intents.delete(id); }
+      if (
+        ![...this.records.values()].some(
+          (row) => row.employeeId === record.employeeId && !['completed', 'failed'].includes(row.phase)
+        )
+      )
+        this.releaseLock(record.employeeId);
+      // All final settlement acknowledgements succeeded. End this request's
+      // provisional view before rendering the completed, private-data-free DTO.
+      this.intents.delete(id);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
   }
 
   private async phase(record: PlanMoveRecord, phase: PlanMovePhase): Promise<void> {
@@ -540,7 +920,10 @@ export class PlanMoves {
         record.resourcePhase = 'reserved';
         await this.save();
         await executor.beforeStop(input);
-        if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.oldSession))
+        if (
+          executor.binding(record.employeeId, record.owner) !== record.newSession ||
+          !executor.exists(record.oldSession)
+        )
           throw new PlanMoveError('The resource target or source changed before preparation');
         record.resourcePhase = 'preparing';
         await this.save();
@@ -559,7 +942,10 @@ export class PlanMoves {
         throw new PlanMoveError('The employee binding or source session changed before stopping');
       await executor.audit({ ...record, phase: 'stopping' });
       await executor.beforeStop(input);
-      if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.oldSession))
+      if (
+        executor.binding(record.employeeId, record.owner) !== record.newSession ||
+        !executor.exists(record.oldSession)
+      )
         throw new PlanMoveError('The employee binding or source changed while recording the stop audit');
       // Publishing stopping also authorizes the broker to stop the detached old
       // laptop. Treat an uncertain save as past the rollback boundary.
@@ -590,7 +976,10 @@ export class PlanMoves {
         throw new PlanMoveError('The employee binding or replacement changed before commit');
       const recheckResources = () => {
         if (!record.resourceIntent) return;
-        if (executor.binding(record.employeeId, record.owner) !== record.newSession || !executor.exists(record.newSession!))
+        if (
+          executor.binding(record.employeeId, record.owner) !== record.newSession ||
+          !executor.exists(record.newSession!)
+        )
           throw new PlanMoveError('The resource replacement changed during completion');
         const outcome = resourceFence!();
         if (outcome !== undefined) {
@@ -609,14 +998,17 @@ export class PlanMoves {
       recheckResources();
       if (record.resourceOwnerScope !== undefined) {
         if (!executor.completeResources) throw new PlanMoveError('Protected native resource settlement is unavailable');
-        await executor.completeResources(Object.freeze({...record}));
+        await executor.completeResources(Object.freeze({ ...record }));
       }
     } catch (error) {
       record.error = error instanceof Error ? error.message : 'Move failed';
       const unconfirmed = error instanceof PlanMoveUnconfirmed;
-      let recovered = !unconfirmed && !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
+      let recovered =
+        !unconfirmed && !record.newSession && executor.binding(record.employeeId, record.owner) === record.oldSession;
       if (
-        !unconfirmed && !record.resourceIntent && !stopping &&
+        !unconfirmed &&
+        !record.resourceIntent &&
+        !stopping &&
         record.newSession &&
         executor.exists(record.oldSession) &&
         executor.binding(record.employeeId, record.owner) === record.newSession
@@ -655,7 +1047,102 @@ export class PlanMoves {
       }
     } finally {
       this.aborts.delete(record.id);
-      if (['completed', 'failed'].includes(record.phase)) this.locked.delete(record.employeeId);
+      if (['completed', 'failed'].includes(record.phase)) this.releaseLock(record.employeeId);
+    }
+  }
+  async continueDocker(
+    id: string,
+    expected: { oldSession: string; newSession: string; toAccount: string },
+    owner: string | undefined,
+    executor: PlanMoveExecutor
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    const retirement = this.sourceRetirement(record);
+    const completedRetirement =
+      record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed';
+    if (
+      !record.dockerReplacement ||
+      (record.phase !== 'recovery-required' && !completedRetirement) ||
+      !this.port.dockerJournal ||
+      !executor.dockerReplacement
+    )
+      throw new PlanMoveError('Original Docker recovery is unavailable', 409);
+    if (
+      record.oldSession !== expected.oldSession ||
+      record.newSession !== expected.newSession ||
+      record.toAccount !== expected.toAccount
+    )
+      throw new PlanMoveError('The original recovery target changed');
+    if (this.intents.has(id) || this.aborts.has(id)) throw new PlanMoveError('The move is still active');
+    this.intents.add(id);
+    try {
+      const actual = await this.port.dockerJournal.record(id);
+      if (
+        actual.owner !== owner ||
+        actual.id !== id ||
+        actual.oldSession !== record.oldSession ||
+        actual.newSession !== record.newSession ||
+        actual.requestDigest !== record.requestDigest ||
+        !actual.dockerReplacement
+      )
+        throw new PlanMoveError('The original Docker journal changed');
+      if (completedRetirement && actual.phase !== 'completed')
+        throw new PlanMoveError('Completed Docker history changed');
+      Object.assign(record, structuredClone(actual), {
+        phase: completedRetirement ? 'completed' : 'recovery-required',
+      });
+      void this.runDocker(
+        record,
+        executor,
+        actual.phase === 'completed' ? 'reconcile' : actual.dockerReplacement.paidDispatch ? 'adopt' : 'continue'
+      );
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
+  }
+  private async runDocker(
+    record: PlanMoveRecord,
+    executor: PlanMoveExecutor,
+    mode: 'new' | 'continue' | 'adopt' | 'reconcile' = 'new'
+  ): Promise<void> {
+    const abort = new AbortController();
+    const completedBefore = record.phase === 'completed';
+    this.aborts.set(record.id, abort);
+    try {
+      if (!this.port.dockerJournal) throw new PlanMoveError('The private Docker journal is unavailable', 503);
+      const retirement = await runDockerPlanMove(
+        record,
+        executor,
+        this.port.dockerJournal,
+        {
+          signal: abort.signal,
+          current: () => {
+            if (
+              this.records.get(record.id) !== record ||
+              (record.phase !== 'completed' && this.aborts.get(record.id) !== abort)
+            )
+              throw new PlanMoveError('The original Docker move flight changed');
+          },
+        },
+        mode
+      );
+      if (retirement) this.sourceRetirements.set(record.id, retirement);
+    } catch (error) {
+      if (completedBefore && mode === 'reconcile')
+        this.sourceRetirements.set(record.id, {
+          state: 'unconfirmed',
+          error: (error instanceof Error ? error.message : 'Previous terminal cleanup unavailable').slice(0, 4000),
+        });
+      else {
+        record.phase = 'recovery-required';
+        record.error = error instanceof Error ? error.message : 'Docker move unavailable';
+      }
+    } finally {
+      if (this.aborts.get(record.id) === abort) this.aborts.delete(record.id);
+      if (record.phase === 'completed' || record.phase === 'failed') this.releaseLock(record.employeeId);
     }
   }
 }

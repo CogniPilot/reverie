@@ -1,0 +1,14 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "DOM.AsyncIterable"],
+    "types": ["node", "jsdom"],
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": ["../test/company-resource-layout.browser.test.ts"]
+}

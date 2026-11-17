@@ -97,7 +97,7 @@ describe('private plan approval files and CLI', () => {
     expect(JSON.stringify([vi.mocked(deps.io.out).mock.calls, vi.mocked(deps.io.err).mock.calls])).not.toContain(
       h.value.nonce
     );
-    vi.mocked(deps.request).mockResolvedValue({ status: 403, json: { error: h.value.nonce }, text: h.value.nonce });
+    vi.mocked(deps.request).mockResolvedValue({ status: 403, json: { success:false,error: h.value.nonce }, text: h.value.nonce });
     expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' }, h.capabilities)).toBe(1);
     expect(JSON.stringify(vi.mocked(deps.io.err).mock.calls)).not.toContain(h.value.nonce);
     deps.ctx.selfId = 'other';
@@ -143,12 +143,11 @@ describe('private plan approval files and CLI', () => {
     await expect(fs.stat(join(h.root, 'separate-empty-laptop-store'))).rejects.toThrow();
   });
   it('keeps office failures sanitized and never retries a rejected or uncertain decision', async () => {
-    const h = await fixture();
     vi.stubEnv('REVERIE_WORKER', '1');
     const deps: AgentDeps = {
       ctx: { selfId: 'source', apiUrl: 'http://fixture' },
       json: true,
-      request: vi.fn(async () => ({ status: 403, json: { error: 'private response' }, text: 'private response' })),
+      request: vi.fn(async () => ({ status: 403, json: { success:false,error: 'private response' }, text: 'private response' })),
       io: { out: vi.fn(), err: vi.fn() },
     };
     expect(await agentPlanRequest(deps, { id: 'request', decision: 'reject' })).toBe(1);
@@ -166,6 +165,7 @@ describe('private plan approval files and CLI', () => {
     await fs.writeFile(handoffFile, 'bad\x00handoff');
     const deps: AgentDeps = {
       ctx: { selfId: 'source', apiUrl: 'http://fixture' },
+      json:false,
       request: vi.fn(),
       io: { out: vi.fn(), err: vi.fn() },
     };
@@ -210,4 +210,36 @@ it('lists own pending requests using no target override and strips credential-li
   vi.mocked(deps.request).mockRejectedValue(new Error('private'));
   expect(await agentPendingPlanMoves(deps)).toBe(1);
   expect(JSON.stringify(vi.mocked(deps.io.err).mock.calls)).not.toContain('private');
+});
+
+describe('boxed worker transport does not depend on stripped legacy environment', () => {
+  it('uses validated AgentContext.workerIdentity with no local capability lookup or environment flag', async () => {
+    const h = await fixture(),
+      handoffFile = join(h.root, 'handoff');
+    await fs.writeFile(handoffFile, 'Synthetic bounded handoff.');
+    vi.stubEnv('REVERIE_WORKER', '');
+    vi.stubEnv('REVERIE_DATA_DIR', join(h.root, 'not-a-control-store'));
+    const deps: AgentDeps = {
+      ctx: { selfId: 'source', apiUrl: 'http://fixture', workerIdentity: 'synthetic-transport-proof' },
+      json: true,
+      request: vi.fn(async () => ({ status: 202, text: '', json: { success: true, data: { phase: 'executing' } } })),
+      io: { out: vi.fn(), err: vi.fn() },
+    };
+    const read = vi.spyOn(PlanRequestCapabilities.prototype, 'read');
+    try {
+      expect(await agentPlanRequest(deps, { id: 'request', decision: 'approve', handoffFile })).toBe(0);
+      expect(read).not.toHaveBeenCalled();
+      expect(deps.request).toHaveBeenCalledExactlyOnceWith(deps.ctx, {
+        method: 'POST',
+        path: '/api/plans/requests/request/approve',
+        body: { handoff: 'Synthetic bounded handoff.' },
+      });
+      expect(JSON.stringify([vi.mocked(deps.io.out).mock.calls, vi.mocked(deps.io.err).mock.calls])).not.toContain(
+        'synthetic-transport-proof'
+      );
+      await expect(fs.stat(join(h.root, 'not-a-control-store'))).rejects.toThrow();
+    } finally {
+      read.mockRestore();
+    }
+  });
 });

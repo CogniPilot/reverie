@@ -14,6 +14,13 @@ use tokio::{net::UnixStream, runtime::Runtime};
 #[cfg(test)]
 mod tests;
 
+#[derive(Clone, Copy)]
+enum ReplyPolicy {
+    Json,
+    AbsentContainer,
+    ContainerOrAbsent,
+}
+
 pub(super) struct Engine {
     socket: PathBuf,
     runtime: Runtime,
@@ -54,11 +61,25 @@ impl Engine {
         timeout: Duration,
         expected_uid: u32,
     ) -> Result<Value> {
+        self.request_with_policy(method, path, body, timeout, expected_uid, ReplyPolicy::Json)
+    }
+    fn request_with_policy(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        timeout: Duration,
+        expected_uid: u32,
+        reply: ReplyPolicy,
+    ) -> Result<Value> {
         if self.initial_website_end.is_none() {
             return self.runtime.block_on(async {
-                tokio::time::timeout(timeout, self.exchange(method, path, body, expected_uid))
-                    .await
-                    .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?
+                tokio::time::timeout(
+                    timeout,
+                    self.exchange(method, path, body, expected_uid, reply),
+                )
+                .await
+                .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?
             });
         }
         let end = Instant::now() + timeout;
@@ -69,7 +90,7 @@ impl Engine {
         self.runtime.block_on(async {
             let result = tokio::time::timeout_at(
                 tokio::time::Instant::from_std(end),
-                self.exchange(method, path, body, expected_uid),
+                self.exchange(method, path, body, expected_uid, reply),
             )
             .await
             .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?;
@@ -83,6 +104,7 @@ impl Engine {
         path: &str,
         body: Option<&Value>,
         expected_uid: u32,
+        reply: ReplyPolicy,
     ) -> Result<Value> {
         let stream = UnixStream::connect(&self.socket).await?;
         let peer =
@@ -98,7 +120,7 @@ impl Engine {
         // Both futures belong to this scope. Timeout drops the socket driver
         // as well as the sender; no detached task survives to send later.
         tokio::pin!(connection);
-        let request = self.send(&mut sender, method, path, body);
+        let request = self.send(&mut sender, method, path, body, reply);
         tokio::pin!(request);
         tokio::select! {
             biased;
@@ -115,6 +137,7 @@ impl Engine {
         method: &str,
         path: &str,
         body: Option<&Value>,
+        reply: ReplyPolicy,
     ) -> Result<Value> {
         let raw = body
             .map(serde_json::to_vec)
@@ -131,6 +154,7 @@ impl Engine {
             .send_request(request)
             .await
             .map_err(|_| DeploymentError::new("DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN"))?;
+        let status = response.status();
         let success =
             if method == "GET" && matches!(path, "/containers/json?all=1" | "/version" | "/info") {
                 response.status() == hyper::StatusCode::OK
@@ -150,7 +174,33 @@ impl Engine {
                 bytes.extend_from_slice(&data);
             }
         }
+        if matches!(reply, ReplyPolicy::AbsentContainer)
+            || matches!(reply, ReplyPolicy::ContainerOrAbsent)
+                && status == hyper::StatusCode::NOT_FOUND
+        {
+            require(
+                status == hyper::StatusCode::NOT_FOUND,
+                "DEPLOYMENT_OLD_CONTAINER_ABSENCE_UNCONFIRMED",
+            )?;
+            #[derive(serde::Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Missing {
+                message: String,
+            }
+            let missing: Missing = serde_json::from_slice(&bytes)?;
+            require(
+                !missing.message.is_empty() && missing.message.len() <= 4096,
+                "DEPLOYMENT_OLD_CONTAINER_ABSENCE_UNCONFIRMED",
+            )?;
+            return Ok(Value::Null);
+        }
         require(success, "DEPLOYMENT_ENGINE_REFUSED")?;
+        if matches!(reply, ReplyPolicy::ContainerOrAbsent) {
+            require(status == hyper::StatusCode::OK, "DEPLOYMENT_ENGINE_REFUSED")?;
+            let value: Value = serde_json::from_slice(&bytes)?;
+            require(value.is_object(), "DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN")?;
+            return Ok(value);
+        }
         if bytes.is_empty() {
             Ok(Value::Null)
         } else {
@@ -159,6 +209,32 @@ impl Engine {
     }
     pub(super) fn container(&self, id: &str) -> Result<Value> {
         self.json("GET", &format!("/containers/{id}/json"), None)
+    }
+    pub(super) fn container_or_absent(&self, id: &str) -> Result<Option<Value>> {
+        model::cid(id)?;
+        let value = self.request_with_policy(
+            "GET",
+            &format!("/containers/{id}/json"),
+            None,
+            Duration::from_secs(75),
+            0,
+            ReplyPolicy::ContainerOrAbsent,
+        )?;
+        Ok((!value.is_null()).then_some(value))
+    }
+    /// Only an authenticated complete HTTP404 from this exact immutable CID.
+    /// No error text, empty inventory or transport failure implies absence.
+    pub(super) fn require_absent_container(&self, id: &str) -> Result<()> {
+        model::cid(id)?;
+        self.request_with_policy(
+            "GET",
+            &format!("/containers/{id}/json"),
+            None,
+            Duration::from_secs(75),
+            0,
+            ReplyPolicy::AbsentContainer,
+        )
+        .map(|_| ())
     }
     pub(super) fn image(&self, id: &str) -> Result<Value> {
         self.json("GET", &format!("/images/{id}/json"), None)

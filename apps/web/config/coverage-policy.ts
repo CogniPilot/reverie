@@ -23,6 +23,20 @@ export const webCoverage = {
     'src/company-wake.ts': { statements: 90, branches: 88, functions: 90, lines: 90 },
     'src/worker-provider-health.ts': { statements: 96, branches: 95, functions: 100, lines: 97 },
     'src/resource-fleet-native-data.ts': { statements: 100, branches: 100, functions: 100, lines: 100 },
+    // Docker plan authorities are independently gated: the global average cannot
+    // conceal lost intent, requester, installation or original-writer regressions.
+    // Initial floors use the complete hosted report and targeted Work fault tests.
+    'src/docker-plan-move-work.ts': { statements: 90, branches: 90, functions: 80, lines: 90 },
+    'src/docker-plan-move-requester.ts': { statements: 85, branches: 85, functions: 95, lines: 90 },
+    'src/plan-move-store.ts': { statements: 90, branches: 85, functions: 95, lines: 90 },
+    'src/docker-plan-installer.ts': { statements: 80, branches: 70, functions: 90, lines: 85 },
+    'src/docker-plan-source-holder.ts': { statements: 85, branches: 80, functions: 95, lines: 90 },
+    'src/docker-plan-local-client.ts': { statements: 85, branches: 80, functions: 95, lines: 90 },
+    'src/docker-plan-move-data.ts': { statements: 90, branches: 90, functions: 95, lines: 90 },
+    'src/docker-plan-source-retirement.ts': { statements: 80, branches: 85, functions: 85, lines: 85 },
+    // Original viewer process/socket authority must retain its own fault coverage.
+    'src/docker-viewer-pane.ts': { statements: 90, branches: 90, functions: 100, lines: 95 },
+    'src/docker-viewer-process.ts': { statements: 85, branches: 80, functions: 90, lines: 90 },
   },
 };
 

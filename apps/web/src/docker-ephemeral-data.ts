@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { posix } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { DockerEmployeeInspect } from './docker-employee-engine-data.js';
-import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
+import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
+import type { DockerEmployeeOriginal, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 const uuid = z
   .string()
   .uuid()
@@ -221,6 +222,63 @@ export function ephemeralProjection(
       throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_PERSISTENT_OVERLAP');
   }
   return { rootSource, layout, identity, scratchSource: selected, tmpSource: selected + '/tmp' };
+}
+
+/** A retained operator directory may predate several plan generations. Derive
+ * its closed UUID selector only from the exact original mount descriptor. This
+ * is projection DATA; the owner still earns actual fixed-root FD/inode custody. */
+export function ephemeralRetainedProjection(
+  source: DockerEmployeeInspect,
+  original: DockerEmployeeOriginal
+): EphemeralProjection | undefined {
+  const mounts = [...source.Mounts].sort((a, b) => a.Destination.localeCompare(b.Destination));
+  if (
+    source.Id !== original.containerId ||
+    source.Image !== original.imageId ||
+    dockerContinuationDigest(mounts) !== original.mountDigest
+  )
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  const scratch = source.Mounts.find((m) => m.Destination === '/scratch');
+  const match = scratch?.Source.match(/\/laptops\/(?:operator-recovery|operator-sessions)\/([^/]+)$/);
+  const selector = match ? uuid.parse(match[1]) : original.sessionId;
+  return ephemeralProjection(source, original.employeeId, selector);
+}
+export function ephemeralContinuationProjection(
+  source: DockerEmployeeInspect,
+  row: DockerEmployeeContinuationRecord
+): EphemeralProjection | undefined {
+  if (row.version !== 3) return ephemeralProjection(source, row.employeeId, row.request.sessionId);
+  const projection = ephemeralRetainedProjection(source, row.original);
+  if (
+    projection &&
+    projection.layout !== 'employees' &&
+    projection.identity !== (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+  )
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  return projection;
+}
+/** Projection only after independent complete published-destination checks.
+ * Original/effect projections remain strict. */
+export function ephemeralPublishedProjection(
+  source: DockerEmployeeInspect,
+  row: DockerEmployeeContinuationRecord
+): EphemeralProjection | undefined {
+  if (row.version !== 3 || source.Id === row.original.containerId) return ephemeralContinuationProjection(source, row);
+  if (row.phase !== 'ready' || !row.destination)
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  const projection = ephemeralRetainedProjection(source, row.destination);
+  if (
+    projection &&
+    projection.layout !== 'employees' &&
+    projection.identity !== (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+  )
+    throw new DockerEmployeeContinuationError('DOCKER_EPHEMERAL_ORIGINAL_CHANGED');
+  return projection;
+}
+export function ephemeralDirectorySessionId(row: DockerEmployeeContinuationRecord): string {
+  return row.version === 3
+    ? (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+    : row.request.sessionId;
 }
 
 export interface EphemeralJournal {

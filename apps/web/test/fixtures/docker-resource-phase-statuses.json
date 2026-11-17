@@ -180,7 +180,7 @@
       },
       {
         "employeeId": "22222222-2222-4222-8222-222222222222",
-        "code": "DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED",
+        "code": "DOCKER_RESOURCE_REVISION_UNCONFIRMED",
         "sessionId": "bbbbbbbb-2222-4222-8222-222222222222",
         "sessionGeneration": 9,
         "desiredMemoryHighBytes": 51539607552,

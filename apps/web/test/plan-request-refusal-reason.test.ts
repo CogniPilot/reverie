@@ -23,7 +23,7 @@ describe('plan-move refusals', () => {
   it('show the server reason for a refused request', async () => {
     const d = deps({ status: 403, json: { success: false, error: 'Destination account is not granted to this employee', errorCode: 'FORBIDDEN' } });
     expect(await agentRequestPlanMove(d, { id: 'request', toAccount: 'openai-ed0348c4' })).toBe(1);
-    expect(err(d)).toBe('Plan move request refused: Destination account is not granted to this employee. Check the destination ID and owner-granted plan permissions.');
+    expect(err(d)).toBe('Plan move request was not confirmed: Destination account is not granted to this employee. Check the destination ID and owner-granted plan permissions. Original request: request. Inspect with reverie agent plan-move status --json -- request. No retry was sent.');
   });
 
   it('read both error shapes, keep one bounded line, and fall back to the generic hint', () => {
@@ -42,7 +42,7 @@ describe('plan-move refusals', () => {
   it('keep the generic hint alone when the server gives no reason', async () => {
     const d = deps({ status: 500, json: { success: false } });
     expect(await agentRequestPlanMove(d, { id: 'request', toAccount: 'target' })).toBe(1);
-    expect(err(d)).toBe('Plan move request refused. Check the destination ID and owner-granted plan permissions.');
+    expect(err(d)).toBe('Plan move request was not confirmed. Check the destination ID and owner-granted plan permissions. Original request: request. Inspect with reverie agent plan-move status --json -- request. No retry was sent.');
   });
 
   it('name the refused action and its reason for status, cancel and reauthorize', async () => {

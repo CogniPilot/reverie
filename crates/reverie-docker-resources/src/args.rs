@@ -14,6 +14,8 @@ pub(crate) enum Command {
     Anchor,
     ProbePool(Common),
     ConfigurePool(PoolWrite),
+    /// Restore the declared pool policy with every current worker explicitly bound.
+    RestorePool(PoolWrite),
     ProbeWorker(Worker),
     ConfigureHigh(HighWrite),
     /// Write only memory.high, retaining all declared hard, CPU and cpuset limits.

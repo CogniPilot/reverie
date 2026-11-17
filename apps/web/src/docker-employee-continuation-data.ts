@@ -160,31 +160,125 @@ const currentContinuationRecord = z
     providerSourceDigest: digest,
   })
   .strict();
-export const DockerEmployeeContinuationRecord = z
-  .discriminatedUnion('version', [legacyContinuationRecord, currentContinuationRecord])
-  .refine(
-    (row) =>
-      (!row.ephemeralRestoration ||
-        row.ephemeralRestoration.attempts.every(
-          (attempt, index) =>
-            attempt.ordinal === index + 1 &&
-            attempt.request.operationId === row.request.operationId &&
-            attempt.request.employeeId === row.employeeId &&
-            attempt.request.sessionId === row.request.sessionId &&
-            attempt.request.sessionGeneration === row.request.sessionGeneration &&
-            attempt.imageId === row.workerImage.imageId
-        )) &&
-      row.employeeId === row.original.employeeId &&
+const planIdentifier = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+/** Correlation DATA for one explicit cross-SID replacement. Account/credential
+ * contents and effect authority never enter this read projection. */
+/** Exact Engine network membership DATA. Names, IPs and aliases are never copied. */
+export const DockerPlanReplacementNetworkIds = z
+  .array(digest)
+  .min(1)
+  .max(16)
+  .refine((ids) => ids.every((id, index) => index === 0 || ids[index - 1]! < id));
+export type DockerPlanReplacementNetworkIds = z.infer<typeof DockerPlanReplacementNetworkIds>;
+export const DockerEmployeePlanReplacementProvenance = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('docker-plan-replacement-provenance-v1'),
+    moveId: planIdentifier,
+    runtimeNamespace: z.literal('session-v1').optional(),
+    source: z
+      .object({
+        binding: DockerEmployeeBinding,
+        continuationDigest: digest,
+        providerSourceDigest: digest,
+        ephemeralSessionId: uuid.optional(),
+        networkIds: DockerPlanReplacementNetworkIds.optional(),
+      })
+      .strict(),
+    account: z
+      .object({
+        id: planIdentifier,
+        provider: z.enum(['anthropic', 'openai']),
+        projectionDigest: digest,
+        contextDigest: digest,
+      })
+      .strict(),
+  })
+  .strict();
+const planReplacementRecord = z
+  .object({
+    version: z.literal(3),
+    purpose: z.literal('docker-employee-plan-replacement-v3'),
+    ...continuationRecordFields,
+    providerSourceDigest: digest,
+    planReplacement: DockerEmployeePlanReplacementProvenance,
+  })
+  .strict();
+type CorrelatedRecord =
+  | z.infer<typeof legacyContinuationRecord>
+  | z.infer<typeof currentContinuationRecord>
+  | z.infer<typeof planReplacementRecord>;
+function correlatedRecord(row: CorrelatedRecord): boolean {
+  const common =
+    (!row.ephemeralRestoration ||
+      row.ephemeralRestoration.attempts.every(
+        (attempt, index) =>
+          attempt.ordinal === index + 1 &&
+          attempt.request.operationId === row.request.operationId &&
+          attempt.request.employeeId === row.employeeId &&
+          attempt.request.sessionId ===
+            (row.version === 3
+              ? (row.planReplacement.source.ephemeralSessionId ?? row.original.sessionId)
+              : row.request.sessionId) &&
+          attempt.request.sessionGeneration === row.request.sessionGeneration &&
+          attempt.imageId === row.workerImage.imageId
+      )) &&
+    row.employeeId === row.original.employeeId &&
+    row.request.containerId === row.original.containerId &&
+    row.request.imageId === row.original.imageId &&
+    row.workerImage.sourceImageId === row.original.imageId &&
+    row.request.expectedDestinationImageId === row.workerImage.imageId;
+  if (!common) return false;
+  if (row.version !== 3)
+    return (
       row.request.sessionId === row.original.sessionId &&
-      row.request.containerId === row.original.containerId &&
-      row.request.imageId === row.original.imageId &&
-      row.workerImage.sourceImageId === row.original.imageId &&
-      row.request.expectedDestinationImageId === row.workerImage.imageId &&
       (!row.destination ||
         (row.destination.employeeId === row.employeeId &&
           row.destination.sessionId === row.original.sessionId &&
           row.destination.imageId === row.workerImage.imageId &&
           row.destination.containerId !== row.original.containerId &&
           row.destination.storageDigest === row.original.storageDigest))
+    );
+  const source = row.planReplacement.source.binding;
+  return (
+    source.sessionId === row.original.sessionId &&
+    source.containerId === row.original.containerId &&
+    source.imageId === row.original.imageId &&
+    row.request.sessionId !== source.sessionId &&
+    row.request.sessionGeneration === source.sessionGeneration + 1 &&
+    row.request.operationId !== source.operationId &&
+    row.credentialId !== source.credentialId &&
+    (!row.destination ||
+      (row.destination.employeeId === row.employeeId &&
+        row.destination.sessionId === row.request.sessionId &&
+        row.destination.imageId === row.workerImage.imageId &&
+        row.destination.containerId !== row.original.containerId &&
+        JSON.stringify(row.destination.home) === JSON.stringify(row.original.home)))
   );
+}
+/** Mutable work exists only in the PlanMoves journal. It is not a Company
+ * provider projection and cannot authorize normal continuation dispatch. */
+export const DockerEmployeePlanReplacementWorkRecord = planReplacementRecord.refine(correlatedRecord);
+export type DockerEmployeePlanReplacementWorkRecord = z.infer<typeof DockerEmployeePlanReplacementWorkRecord>;
+function publishedPlanRecord(row: CorrelatedRecord): boolean {
+  if (row.version !== 3) return true;
+  if (!['provider-issued', 'ready'].includes(row.phase) || !row.pool || !row.destination || !row.tasks) return false;
+  const phases = new Map(row.tasks.map((task) => [task.role, task.phase]));
+  return (
+    phases.get('storage-holder') === 'running' &&
+    phases.get('identity-helper') === 'completed' &&
+    phases.get('leaf-helper') === 'completed' &&
+    row.tasks.every((task) =>
+      task.role === 'anchor' || task.role === 'storage-holder' ? task.phase === 'running' : task.phase === 'completed'
+    )
+  );
+}
+export const DockerEmployeeContinuationRecord = z
+  .discriminatedUnion('version', [legacyContinuationRecord, currentContinuationRecord, planReplacementRecord])
+  .refine(correlatedRecord)
+  .refine(publishedPlanRecord);
 export type DockerEmployeeContinuationRecord = z.infer<typeof DockerEmployeeContinuationRecord>;

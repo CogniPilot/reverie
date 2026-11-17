@@ -1129,12 +1129,18 @@ async function resourcePhaseFixture(phase: ResourcePhase) {
   const row = f.store.resourceInventory().find((value) => value.employeeId === target)!;
   if (phase === 'none') return f;
   if (phase === 'failure-before-intent') {
+    const unavailable = Error('Controlled current destination unavailable');
+    f.beforeResourceRead(async () => {
+      throw unavailable;
+    });
     await f.companyStore.update((state) => {
       const employee = state.employees.find((value) => value.id === target)!;
       employee.onVacation = false;
       employee.desiredRunning = true;
     });
-    await expect(f.resourceRevisionService.converge(target, () => {})).rejects.toThrow();
+    // Native I/O uncertainty earns no provider-health fact or resource-writer intent.
+    await expect(f.resourceRevisionService.converge(target, () => {})).rejects.toBe(unavailable);
+    expect(f.resourceReads()).toBe(1);
     return f;
   }
 

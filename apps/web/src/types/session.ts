@@ -371,7 +371,15 @@ export interface DockerCase {
  */
 export interface SessionDocker {
   /** Explicit boxed placement DATA; first launch needs a private process-local owner. */
-  continuation?: {operationId:string;employeeId:string;sessionGeneration:number;clientManifestDigest:string;apiUrl:string};
+  continuation?: {
+    operationId: string;
+    employeeId: string;
+    sessionGeneration: number;
+    clientManifestDigest: string;
+    apiUrl: string;
+    /** Fixed private account generation DATA, bound by the actual observer/launch owner. */
+    planReplacement?: { provider: 'anthropic' | 'openai'; projectionDigest: string; runtimeNamespace?: 'session-v1' };
+  };
   hostId: string;
   label: string;
   engine: DockerEngine;
@@ -818,6 +826,9 @@ export interface PromptCacheStatus {
 export type StatusLineExporter = 'injected' | 'collection-off' | 'workspace-statusline' | 'remote';
 
 export interface SessionState {
+  /** Effective Claude policy persisted only for managed plan generations. */
+  claudeMode?: ClaudeMode;
+  allowedTools?: string;
   /** Native conversation bindings by account/endpoint and harness; never credential values. */
   runtimeThreads?: Record<string, string>;
   /** Public account label; credential paths and tokens stay server-side. */
@@ -1037,8 +1048,13 @@ export interface SessionState {
   /** Read-only live diagnostics; ignored on reload and omitted from disk snapshots. */
   providerDispatchHoldKind?: 'loaded-intent' | 'intrinsic' | null;
   providerInputHeld?: boolean;
+  /** Computed retained private Docker Engine-view currency. Not native health or
+   * authority; absent outside boxed continuation, ignored on restore and never persisted. */
+  dockerProviderViewCurrent?: boolean;
   /** Deny-only input uncertainty, distinct from provider launch or viewer health. */
   terminalInputHeld?: boolean;
+  /** Local-view cleanup acknowledgement only; never provider authority. */
+  nativePlanRetiredBy?: string;
   /** Confirmed failure takes precedence over busy; missing evidence remains unknown. */
   runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   runtimeHealthScope?: 'provider' | 'terminal';

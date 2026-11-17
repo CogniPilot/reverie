@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Session } from './session.js';
+import type { SessionState } from './types.js';
 
 const CONFIG_KEYS = [
   'openCodeConfig',
@@ -76,7 +77,20 @@ export function resourceSessionSourceFacts(source: Session) {
 }
 /** A launch recipe carries references and switches only, never environment/config blobs or credentials. */
 export function expertRuntimeRecipe(session: Session): RuntimeRecipe {
-  const state = session.toState();
+  const state = session.toState(),
+    custom = session.getCustomModelForPersist();
+  return expertRuntimeRecipeData(state, {
+    mode: session.mode,
+    workingDir: session.workingDir,
+    subscriptionProfile: session.subscriptionProfile,
+    customModel: custom ? { endpointId: custom.endpointId, modelId: custom.modelId } : undefined,
+  });
+}
+/** Pure schema renderer; describes selected recipe DATA and grants no launch. */
+export function expertRuntimeRecipeData(
+  state: SessionState,
+  selected: Pick<RuntimeRecipe, 'mode' | 'workingDir' | 'subscriptionProfile' | 'customModel'>
+): RuntimeRecipe {
   const configs: RuntimeRecipe['configs'] = {};
   for (const name of CONFIG_KEYS) {
     const value = (state as unknown as Record<string, unknown>)[name];
@@ -89,15 +103,14 @@ export function expertRuntimeRecipe(session: Session): RuntimeRecipe {
         )
       );
   }
-  const custom = session.getCustomModelForPersist();
   return RuntimeRecipeSchema.parse({
-    mode: session.mode,
-    workingDir: session.workingDir,
+    mode: selected.mode,
+    workingDir: selected.workingDir,
     model: state.model,
     effort: state.effort,
-    subscriptionProfile: session.subscriptionProfile,
+    subscriptionProfile: selected.subscriptionProfile,
     runtimeThreads: state.runtimeThreads,
     configs,
-    customModel: custom ? { endpointId: custom.endpointId, modelId: custom.modelId } : undefined,
+    customModel: selected.customModel,
   });
 }

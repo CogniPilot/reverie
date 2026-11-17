@@ -12,14 +12,14 @@ pub(super) struct Failure {
     cleanup: Vec<Self>,
 }
 impl Failure {
-    fn new(phase: &'static str, cause: impl Error + Send + Sync + 'static) -> Self {
+    pub(super) fn new(phase: &'static str, cause: impl Error + Send + Sync + 'static) -> Self {
         Self {
             phase,
             cause: Box::new(cause),
             cleanup: Vec::new(),
         }
     }
-    fn refused(phase: &'static str) -> Self {
+    pub(super) fn refused(phase: &'static str) -> Self {
         Self::new(phase, std::io::Error::other(phase))
     }
 }
@@ -134,7 +134,7 @@ struct CapsuleReadback {
     node_major: u8,
     owner_uid: u32,
 }
-fn qualify(digest: &str) -> Result<()> {
+pub(super) fn qualify(digest: &str) -> Result<()> {
     let args = ["worker-client", "status", "--expected-digest", digest].map(OsString::from);
     let mut command = super::command(&args, []).map_err(Failure::refused)?;
     let output = command

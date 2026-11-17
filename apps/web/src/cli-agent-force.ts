@@ -163,6 +163,8 @@ export async function agentMoveJournal(
         newSession?: unknown;
         toAccount?: unknown;
         phase?: unknown;
+        backend?: unknown;
+        allowedActions?: unknown;
       }
     | undefined;
   if (record?.id !== options.id || record.employeeId !== options.employeeId || typeof record.phase !== 'string')
@@ -170,8 +172,13 @@ export async function agentMoveJournal(
   if (options.action !== 'status') {
     let body: Record<string, unknown> = { employeeId: options.employeeId };
     if (options.action === 'resolve') {
+      const retirement =
+        record.phase === 'completed' &&
+        record.backend === 'docker' &&
+        Array.isArray(record.allowedActions) &&
+        record.allowedActions.includes('continue-original');
       if (
-        record.phase !== 'recovery-required' ||
+        (record.phase !== 'recovery-required' && !retirement) ||
         typeof record.oldSession !== 'string' ||
         !UUID.test(record.oldSession) ||
         typeof record.newSession !== 'string' ||
@@ -180,12 +187,17 @@ export async function agentMoveJournal(
         !IDENTIFIER.test(record.toAccount)
       )
         return fail(
-          'Adoption requires a held journal with its exact existing source, destination and account. Nothing was changed.',
+          'Recovery requires an API-approved original operation with its exact source, destination and account. Nothing was changed.',
           EXIT.refused
         );
       body = {
         ...body,
-        action: 'adopt-existing',
+        action:
+          record.backend === 'docker' &&
+          Array.isArray(record.allowedActions) &&
+          record.allowedActions.includes('continue-original')
+            ? 'continue-original'
+            : 'adopt-existing',
         oldSession: record.oldSession,
         newSession: record.newSession,
         toAccount: record.toAccount,

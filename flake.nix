@@ -37,8 +37,14 @@
           };
         in packages // workerImageArtifacts // {
           default = packages.reverie;
+          workerClientCapsule = import ./nix/worker-client-capsule.nix {
+            inherit pkgs;
+            src = source;
+            console = packages.console;
+          };
           docker-memory-high-helper = import ./nix/docker-resource-helper.nix { inherit pkgs; src = source; };
           docker-memory-high-helper-image = import ./nix/docker-memory-high-helper-image.nix { inherit pkgs; src = source; };
+          docker-pool-restore-helper-image = import ./nix/docker-pool-restore-helper-image.nix { inherit pkgs; src = source; };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
@@ -142,6 +148,13 @@
           };
         };
     in {
+      lib.mkBoxedWebsiteImage = { system, runtimeConfiguration,
+        baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig }:
+        import ./nix/boxed-website-image.nix {
+          pkgs = pkgsFor system;
+          inherit baseImage baseConfig runtimeConfiguration;
+          clientCapsule = self.packages.${system}.workerClientCapsule;
+        };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
         baseConfig ? baseImage.reverieConfig }:
         import ./nix/container-gpu-image.nix {
@@ -245,6 +258,8 @@
             mutations = import ./tests/boxed_runtime_boundary_eval.nix;
           in assert checked.passed; pkgs.writeText "reverie-boxed-runtime-boundary.json"
             (builtins.toJSON { inherit (checked) checks; inherit mutations; });
+          boxedWebsiteImage = pkgs.writeText "reverie-boxed-website-image-checks.json"
+            (builtins.toJSON (import ./tests/boxed_website_image_eval.nix));
 
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";

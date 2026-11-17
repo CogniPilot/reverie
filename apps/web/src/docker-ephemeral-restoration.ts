@@ -11,7 +11,9 @@ import {
   EphemeralAck,
   EphemeralDirectory,
   EphemeralRequest,
-  ephemeralProjection,
+  ephemeralContinuationProjection,
+  ephemeralPublishedProjection,
+  ephemeralDirectorySessionId,
   type EphemeralAttempt,
   type EphemeralJournal,
   type EphemeralRestoration,
@@ -40,7 +42,8 @@ export class DockerEphemeralRestoration {
     private readonly target: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect | null>,
     private readonly forbidden: (
       row: DockerEmployeeContinuationRecord
-    ) => Promise<readonly { dev: string; ino: string }[]>
+    ) => Promise<readonly { dev: string; ino: string }[]>,
+    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source
   ) {
     if (!/^sha256:[a-f0-9]{64}$/.test(nativeImageId)) throw Error('Protected native image required');
   }
@@ -310,10 +313,10 @@ export class DockerEphemeralRestoration {
     if (!after?.State.Running || after.Id !== raw.Id) fail('DOCKER_EPHEMERAL_DESTINATION_CHANGED');
   }
   async observe(row: DockerEmployeeContinuationRecord): Promise<'ready' | 'unissued'> {
-    const source = await this.source(row),
-      projection = ephemeralProjection(source, row.employeeId, row.request.sessionId);
+    const source = await this.readSource(row),
+      projection = ephemeralPublishedProjection(source, row);
     if (!projection) return 'ready';
-    if (row.workerImage.imageId !== this.nativeImageId) fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
+    this.#readImage(row);
     const previous = this.#owners.get(row.request.operationId);
     if (previous) {
       previous.assertCurrent();
@@ -329,7 +332,7 @@ export class DockerEphemeralRestoration {
       owner.assertCurrent();
       owner.captureLeaves(projection, forbidden);
       await this.#readDestination(row, owner);
-      await this.source(row);
+      await this.readSource(row);
       owner.assertCurrent();
       this.#owners.set(row.request.operationId, owner);
       return 'ready';
@@ -345,7 +348,7 @@ export class DockerEphemeralRestoration {
   async prepare(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
     const source = await this.source(row);
     current();
-    const projection = ephemeralProjection(source, row.employeeId, row.request.sessionId);
+    const projection = ephemeralContinuationProjection(source, row);
     if (!projection) return;
     if (row.workerImage.imageId !== this.nativeImageId) fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
     const previous = this.#owners.get(row.request.operationId);
@@ -378,7 +381,7 @@ export class DockerEphemeralRestoration {
         purpose: 'reverie-ephemeral-directory-restore-v1',
         operationId: row.request.operationId,
         employeeId: row.employeeId,
-        sessionId: row.request.sessionId,
+        sessionId: ephemeralDirectorySessionId(row),
         sessionGeneration: row.request.sessionGeneration,
         invocation: ordinal,
         layout: projection.layout,
@@ -474,7 +477,7 @@ export class DockerEphemeralRestoration {
       purpose: 'reverie-ephemeral-directory-restore-v1',
       operationId: row.request.operationId,
       employeeId: row.employeeId,
-      sessionId: row.request.sessionId,
+      sessionId: ephemeralDirectorySessionId(row),
       sessionGeneration: row.request.sessionGeneration,
       invocation,
       layout: projection.layout,
@@ -579,25 +582,31 @@ export class DockerEphemeralRestoration {
   }
   assertCurrent(row: DockerEmployeeContinuationRecord): void {
     const owner = this.#owners.get(row.request.operationId);
-    if (owner && row.workerImage.imageId !== this.nativeImageId) fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
+    if (owner) this.#readImage(row);
     owner?.assertCurrent();
   }
   async require(row: DockerEmployeeContinuationRecord): Promise<void> {
     const source = await this.source(row);
-    if (!ephemeralProjection(source, row.employeeId, row.request.sessionId)) return;
-    if (row.workerImage.imageId !== this.nativeImageId) fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
+    if (!ephemeralContinuationProjection(source, row)) return;
+    this.#readImage(row);
     const owner = this.#owners.get(row.request.operationId);
     if (!owner) fail();
     owner.assertCurrent();
   }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
-    const source = await this.source(row);
-    if (!ephemeralProjection(source, row.employeeId, row.request.sessionId)) return;
-    if (row.workerImage.imageId !== this.nativeImageId) fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
+    const source = await this.readSource(row);
+    if (!ephemeralPublishedProjection(source, row)) return;
+    this.#readImage(row);
     if (!this.#owners.has(row.request.operationId)) await this.observe(row);
     const owner = this.#owners.get(row.request.operationId);
     if (!owner) fail();
     await this.#readDestination(row, owner);
+  }
+  #readImage(row: DockerEmployeeContinuationRecord): void {
+    // Existing published providers retain their frozen image after a control
+    // upgrade. This read path never creates or starts a metadata helper.
+    if (row.workerImage.imageId !== this.nativeImageId && !['provider-issued', 'ready'].includes(row.phase))
+      fail('DOCKER_EPHEMERAL_IMAGE_CHANGED');
   }
   close(): void {
     const errors: unknown[] = [];

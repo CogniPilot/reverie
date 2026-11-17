@@ -42,6 +42,28 @@ export const DockerResourceObservation = z
   })
   .strict();
 export type DockerResourceObservation = z.infer<typeof DockerResourceObservation>;
+export const DockerPoolRestoreAcknowledgement = z
+  .object({
+    version: z.literal(1),
+    purpose: z.literal('reverie-boxed-restore-pool-ack-v1'),
+    observation: DockerResourceObservation,
+    members: z.array(processIdentity).min(1).max(64),
+  })
+  .strict()
+  .refine(
+    (value) =>
+      value.observation.worker === null &&
+      value.members.every(
+        (member) =>
+          member.startTicks !== '0' &&
+          member.pid > 1 &&
+          member.id !== value.observation.anchor.id &&
+          member.pid !== value.observation.anchor.pid &&
+          member.path === value.observation.parent.path + '/docker-' + member.id + '.scope'
+      ) &&
+      new Set(value.members.map((member) => member.id)).size === value.members.length &&
+      new Set(value.members.map((member) => member.pid)).size === value.members.length
+  );
 
 const runningAnchor = DockerContinuationTask.refine(
   (value) => value.role === 'anchor' && value.phase === 'running'
@@ -49,24 +71,28 @@ const runningAnchor = DockerContinuationTask.refine(
 const completedPool = DockerContinuationTask.refine(
   (value) => value.role === 'pool-helper' && value.phase === 'completed'
 ).transform((value) => value as Extract<DockerContinuationTask, { phase: 'completed' }>);
+const poolRecord = z.object({
+  purpose: z.literal('reverie-boxed-pool-observation-v1'),
+  boxId: cid,
+  deployment: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/),
+  helperImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  poolPolicy: DockerEmployeePoolPolicy,
+  epoch: DockerResourceObservation.pick({ boxId: true, parent: true, anchor: true }),
+  anchorTask: runningAnchor,
+  configuration: completedPool,
+});
 export const DockerPoolObservationRecord = z
-  .object({
-    version: z.literal(1),
-    purpose: z.literal('reverie-boxed-pool-observation-v1'),
-    boxId: cid,
-    deployment: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/),
-    helperImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/),
-    poolPolicy: DockerEmployeePoolPolicy,
-    epoch: DockerResourceObservation.pick({ boxId: true, parent: true, anchor: true }),
-    anchorTask: runningAnchor,
-    configuration: completedPool,
-  })
-  .strict()
+  .union([
+    poolRecord.extend({ version: z.literal(1) }).strict(),
+    poolRecord
+      .extend({ version: z.literal(2), poolRestoreHelperImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/) })
+      .strict(),
+  ])
   .refine(
     (value) =>
       value.boxId === value.epoch.boxId &&
       value.anchorTask.imageId === value.helperImageId &&
-      value.configuration.imageId === value.helperImageId &&
+      value.configuration.imageId === (value.version === 2 ? value.poolRestoreHelperImageId : value.helperImageId) &&
       value.anchorTask.name === 'reverie-boxed-anchor-' + value.boxId.slice(0, 32) &&
       value.anchorTask.containerId === value.epoch.anchor.id &&
       value.anchorTask.initPid === value.epoch.anchor.pid &&

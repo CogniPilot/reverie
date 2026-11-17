@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
+import { shellescape } from '../src/docker-hosts.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import { dockerEmployeeSourceDigest } from '../src/docker-employee-store.js';
 import {
   captureDockerEmployeeProviderLaunch,
   DockerEmployeeProviderLaunch,
 } from '../src/docker-employee-provider-launch.js';
-import { TmuxManager, buildDockerLaunchCommand, buildSpawnCommand } from '../src/tmux-manager.js';
+import {
+  TmuxManager,
+  buildDockerLaunchCommand,
+  buildSpawnCommand,
+  buildDockerKillCommand,
+} from '../src/tmux-manager.js';
+import { dockerProviderSocketLabel } from '../src/docker-employee-provider-view-native.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from '../src/utils/native-thread-profile.js';
 import type { SessionDocker, SessionState } from '../src/types.js';
 const eid = '10000000-0000-4000-8000-000000000001',
@@ -44,9 +51,9 @@ function docker(): SessionDocker {
     },
   };
 }
-function fixture() {
+function fixture(mode: 'claude' | 'codex' = 'claude') {
   const place = docker(),
-    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode: 'claude', docker: place });
+    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode, docker: place });
   sessions.push(session);
   const binding = {
     version: 1 as const,
@@ -60,7 +67,7 @@ function fixture() {
     policyDigest: digest,
   };
   const opts = {
-    mode: 'claude' as const,
+    mode,
     docker: place,
     sessionId: sid,
     createContext: {} as never,
@@ -71,6 +78,98 @@ function fixture() {
   return { place, session, binding, opts };
 }
 describe('boxed original provider publication', () => {
+  it.each([undefined, 'session-v1'] as const)(
+    'uses the same fixed %s namespace for one original launch and later kill',
+    (runtimeNamespace) => {
+      const f = fixture();
+      f.place.continuation!.planReplacement = {
+        provider: 'anthropic',
+        projectionDigest: '8'.repeat(64),
+        ...(runtimeNamespace ? { runtimeNamespace } : {}),
+      };
+      const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+      const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
+      const label = dockerProviderSocketLabel(sid, runtimeNamespace);
+      expect(command).toContain('start-server');
+      expect(command).toContain('attach-session');
+      expect(command.split(label)).toHaveLength(3);
+      expect(buildDockerKillCommand({ docker: f.place, sessionId: sid })).toContain(
+        '-L ' + shellescape(label) + ' kill-session'
+      );
+      expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    }
+  );
+  it('pins the namespace inside the genuine one-shot Session owner', () => {
+    const f = fixture();
+    f.place.continuation!.planReplacement = {
+      provider: 'anthropic',
+      projectionDigest: '8'.repeat(64),
+      runtimeNamespace: 'session-v1',
+    };
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    delete f.place.continuation!.planReplacement.runtimeNamespace;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'Original Docker Session changed'
+    );
+  });
+  it.each([
+    ['anthropic', 'claude', 'CLAUDE_CONFIG_DIR'],
+    ['openai', 'codex', 'CODEX_HOME'],
+  ] as const)(
+    'routes %s through the fixed target generation without inheriting account secrets',
+    (provider, mode, configKey) => {
+      const f = fixture(mode),
+        projectionDigest = '8'.repeat(64);
+      f.place.continuation!.planReplacement = { provider, projectionDigest };
+      const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+      const command = buildDockerLaunchCommand({
+        ...f.opts,
+        continuationLaunch: owner,
+        execEnv: {
+          ANTHROPIC_API_KEY: 'synthetic-wrong-key',
+          OPENAI_BASE_URL: 'https://wrong.invalid',
+          CLAUDE_CONFIG_DIR: '/old-source-home',
+          CODEX_HOME: '/old-source-home',
+          REVERIE_WORKER_IDENTITY_FILE: '/old-source-token',
+          REVERIE_HOOK_GENERATION: 'fresh-managed-epoch',
+          WORKSPACE_TOOL: 'keep',
+        },
+        execEnvNames: [
+          'ANTHROPIC_AUTH_TOKEN',
+          'OPENAI_API_KEY',
+          'CLAUDE_CONFIG_DIR',
+          'CODEX_HOME',
+          'REVERIE_HOOK_GENERATION',
+          'WORKSPACE_TOOL',
+        ],
+      });
+      const root = '/home/agent/.reverie/plan-moves/' + oid + '/generation-' + projectionDigest;
+      expect(command).toContain(configKey + '=' + root + (provider === 'anthropic' ? '/claude' : '/codex'));
+      expect(command).toContain('REVERIE_WORKER_IDENTITY_FILE=' + root + '/worker-identity-' + cid);
+      expect(command).toContain('REVERIE_HOOK_GENERATION=fresh-managed-epoch');
+      expect(command).toContain('WORKSPACE_TOOL=keep');
+      for (const forbidden of [
+        'synthetic-wrong-key',
+        'wrong.invalid',
+        '/old-source-home',
+        '/old-source-token',
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_AUTH_TOKEN',
+        'OPENAI_API_KEY',
+      ])
+        expect(command).not.toContain(forbidden);
+      expect(command).not.toContain('REVERIE_WORKER_IDENTITY_FILE=/home/agent/.reverie/docker-worker-identity');
+    }
+  );
+  it('refuses changing the account generation after capturing the real Session launch owner', () => {
+    const f = fixture();
+    f.place.continuation!.planReplacement = { provider: 'anthropic', projectionDigest: '8'.repeat(64) };
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    f.place.continuation!.planReplacement.projectionDigest = '9'.repeat(64);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'Original Docker Session changed'
+    );
+  });
   it.each([
     'CLAUDE_CODE_X;CONTROL_SENTINEL',
     'CLAUDE_CODE_X\nCONTROL_SENTINEL',
@@ -143,6 +242,74 @@ describe('boxed original provider publication', () => {
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
     expect(current).toHaveBeenCalled();
   });
+  it.each([
+    [
+      'daemon',
+      (value: SessionDocker): void => {
+        value.daemonHost = 'unix:///other.sock';
+      },
+    ],
+    [
+      'image',
+      (value: SessionDocker): void => {
+        value.image = 'sha256:' + 'd'.repeat(64);
+      },
+    ],
+    [
+      'container',
+      (value: SessionDocker): void => {
+        value.containerName = 'e'.repeat(64);
+      },
+    ],
+    [
+      'workspace',
+      (value: SessionDocker): void => {
+        value.containerWorkdir = '/different';
+      },
+    ],
+    [
+      'network',
+      (value: SessionDocker): void => {
+        value.network = 'none';
+      },
+    ],
+    [
+      'credentials',
+      (value: SessionDocker): void => {
+        value.mountCredentials = true;
+      },
+    ],
+    [
+      'generation',
+      (value: SessionDocker): void => {
+        value.continuation!.sessionGeneration = 8;
+      },
+    ],
+  ] as const)('rejects changed captured Docker %s without consuming the original owner', (_field, mutate) => {
+    const f = fixture(),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    const captured = structuredClone(f.place);
+    mutate(captured);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, docker: captured, continuationLaunch: owner })).toThrow();
+    expect(
+      buildDockerLaunchCommand({ ...f.opts, docker: structuredClone(f.place), continuationLaunch: owner })
+    ).toContain('source-file -');
+    expect(() =>
+      buildDockerLaunchCommand({ ...f.opts, docker: structuredClone(f.place), continuationLaunch: owner })
+    ).toThrow('already held');
+  });
+  it('requires current private authority even for an unchanged captured Docker snapshot', () => {
+    const f = fixture();
+    let current = true;
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {
+      if (!current) throw Error('owner revoked');
+    });
+    const captured = structuredClone(f.place);
+    current = false;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, docker: captured, continuationLaunch: owner })).toThrow(
+      'owner revoked'
+    );
+  });
   it('retains the actual private first-provider owner across public mux option capture', async () => {
     const f = fixture(),
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
@@ -156,7 +323,13 @@ describe('boxed original provider publication', () => {
       )
       .mockImplementation(async (options) => {
         expect(options.dockerContinuationLaunch).toBe(owner);
-        const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: options.dockerContinuationLaunch });
+        expect(options.docker).not.toBe(f.session.docker);
+        expect(options.docker).toEqual(f.session.docker);
+        const command = buildDockerLaunchCommand({
+          ...f.opts,
+          docker: options.docker!,
+          continuationLaunch: options.dockerContinuationLaunch,
+        });
         expect(command).toContain('new-session');
         throw Error('physical transport withheld');
       });
@@ -259,18 +432,41 @@ describe('boxed original provider publication', () => {
     expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('revoked');
     expect(() => Object.create(DockerEmployeeProviderLaunch.prototype).claim(sid, f.place)).toThrow();
   });
-  it('explicit Docker binding does not inherit a globally configured native viewer hold', () => {
-    vi.stubEnv('REVERIE_WORKER_SOCKET', '/synthetic/native.sock');
-    const session = new Session({
-      id: sid,
-      workingDir: '/synthetic/work',
-      mode: 'claude',
-      docker: docker(),
-      viewerInputHeld: true,
-    });
-    sessions.push(session);
-    expect(session.toState().viewerInputHeld).not.toBe(true);
-  });
+  it.each([
+    { placement: 'boxed', nativeEnvironment: true, requested: undefined, expected: false },
+    { placement: 'boxed', nativeEnvironment: true, requested: false, expected: false },
+    { placement: 'boxed', nativeEnvironment: true, requested: true, expected: true },
+    { placement: 'boxed', nativeEnvironment: false, requested: true, expected: true },
+    { placement: 'ordinary', nativeEnvironment: true, requested: undefined, expected: false },
+    { placement: 'ordinary', nativeEnvironment: true, requested: true, expected: false },
+    { placement: 'ordinary', nativeEnvironment: false, requested: true, expected: false },
+  ])(
+    'retains only an explicit boxed viewer fence ($placement, native=$nativeEnvironment, requested=$requested)',
+    ({ placement, nativeEnvironment, requested, expected }) => {
+      vi.stubEnv('REVERIE_WORKER_SOCKET', nativeEnvironment ? '/synthetic/native.sock' : undefined);
+      const place = docker();
+      if (placement === 'ordinary') delete place.continuation;
+      const session = new Session({
+        id: sid,
+        workingDir: '/synthetic/work',
+        mode: 'claude',
+        docker: place,
+        viewerInputHeld: requested,
+      });
+      sessions.push(session);
+      expect(session.viewerInputHeld).toBe(expected);
+      expect(session.toState().viewerInputHeld).toBe(expected);
+      const saved = session.toPersistedState();
+      expect(saved.viewerInputHeld).toBe(expected);
+      // Actual saved-state reconstruction must retain the boxed fence even when
+      // the controller no longer has a global native-worker deployment setting.
+      vi.stubEnv('REVERIE_WORKER_SOCKET', undefined);
+      const restored = new Session({ ...saved });
+      sessions.push(restored);
+      expect(restored.viewerInputHeld).toBe(expected);
+      expect(restored.toState().viewerInputHeld).toBe(expected);
+    }
+  );
   it('normal same-thread Session construction keeps the source recipe correlation stable', () => {
     const employee = EmployeeSchema.parse({
       id: eid,
@@ -315,15 +511,70 @@ describe('boxed original provider publication', () => {
 });
 
 describe('boxed provider command contract', () => {
-  it('pins the control Engine even when the provider environment selects a private nested daemon', () => {
-    vi.stubEnv('DOCKER_HOST', 'unix:///private-worker/docker.sock');
+  it('pins both actual control invocations and the captured exec vector despite a private provider daemon', () => {
+    const privateEndpoint = 'unix:///private-worker/docker.sock';
+    vi.stubEnv('DOCKER_HOST', privateEndpoint);
     const f = fixture(),
       owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}),
-      command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
-    expect(command.split('unix:///run/reverie-engine/docker.sock').slice(1)).toHaveLength(2);
-    expect(command.match(/-H /g)).toHaveLength(2);
-    expect(command).not.toContain('/private-worker');
+      captured = vi.fn<(command: import('../src/docker-viewer-pane.js').DockerViewerCommand) => void>(),
+      command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner, captureExecution: captured });
+    expect(captured).toHaveBeenCalledOnce();
+    const actual = captured.mock.calls[0]![0];
+    expect(actual.shellCommand).toBe(command);
+    expect(actual.argv.slice(0, 7)).toEqual([
+      '/bin/docker',
+      '--host',
+      'unix:///run/reverie-engine/docker.sock',
+      'exec',
+      '-it',
+      '--workdir',
+      f.place.containerWorkdir,
+    ]);
+    const target = actual.argv.indexOf(cid);
+    expect(target).toBeGreaterThan(6);
+    expect(actual.argv.slice(target, target + 3)).toEqual([cid, 'sh', '-lc']);
+    expect(actual.argv.at(-1)).toContain(f.opts.canonicalCommand);
+    expect(Object.isFrozen(actual)).toBe(true);
+    expect(Object.isFrozen(actual.argv)).toBe(true);
+    // The shell's independent image/running/CID check must select the same
+    // control Engine and exact container as the actual captured exec request.
+    const inspect =
+      "'/bin/docker' '--host' 'unix:///run/reverie-engine/docker.sock' inspect -f '{{.Image}} {{.State.Running}} {{.Id}}' '" +
+      cid +
+      "' | grep -Fx '" +
+      image +
+      ' true ' +
+      cid +
+      "'";
+    expect(command).toBe(inspect + ' && exec ' + actual.argv.map(shellescape).join(' '));
+    expect(command).not.toContain(privateEndpoint);
+    expect(actual.argv).not.toContain(privateEndpoint);
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
   });
+  it.each(['daemon', 'context'] as const)(
+    'refuses a %s redirect before emitting or consuming a boxed command',
+    (selection) => {
+      const f = fixture(),
+        owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {}),
+        captured = vi.fn(),
+        redirected = structuredClone(f.place);
+      if (selection === 'daemon') redirected.daemonHost = 'unix:///private-worker/docker.sock';
+      else redirected.context = 'private-worker';
+      expect(() =>
+        buildDockerLaunchCommand({
+          ...f.opts,
+          docker: redirected,
+          continuationLaunch: owner,
+          captureExecution: captured,
+        })
+      ).toThrow('Fixed boxed Docker command required');
+      expect(captured).not.toHaveBeenCalled();
+      const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner, captureExecution: captured });
+      expect(command).toContain('source-file -');
+      expect(captured).toHaveBeenCalledOnce();
+      expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    }
+  );
   it('folds fixed capsule hooks into the same Claude settings value as advisor/effort without a HOME writer', () => {
     const command = buildSpawnCommand({
       mode: 'claude',

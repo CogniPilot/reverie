@@ -1,4 +1,5 @@
 import type { DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
+import { isDeepStrictEqual } from 'node:util';
 /** Private one-attempt builder authority over one actual Session. Persisted
  * Docker metadata can attach a viewer, never initiate a first provider.
  */
@@ -10,6 +11,9 @@ export class DockerEmployeeProviderLaunch {
   readonly #session: Session;
   readonly #binding: DockerEmployeeBinding;
   readonly #current: () => void;
+  readonly #planReplacement:
+    | Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string; runtimeNamespace?: 'session-v1' }>
+    | undefined;
   #claimed = false;
   #workspace: { kind: 'unobserved' } | { kind: 'held' } | { kind: 'observed'; value: Readonly<DockerCodexWorkspace> } =
     { kind: 'unobserved' };
@@ -25,12 +29,18 @@ export class DockerEmployeeProviderLaunch {
     this.#session = session;
     this.#binding = Object.freeze(structuredClone(binding));
     this.#current = current;
+    const plan = session.docker?.continuation?.planReplacement;
+    this.#planReplacement = plan ? Object.freeze({ ...plan }) : undefined;
     this.#workspaceReader = workspaceReader;
     Object.freeze(this);
   }
   requireFor(session: Session): void {
     this.#current();
-    if (this.#session !== session) throw Error('Original Docker Session changed');
+    if (
+      this.#session !== session ||
+      !isDeepStrictEqual(session.docker?.continuation?.planReplacement, this.#planReplacement)
+    )
+      throw Error('Original Docker Session changed');
   }
   async prepareCodexWorkspace(session: Session): Promise<Readonly<DockerCodexWorkspace>> {
     this.requireFor(session);
@@ -47,7 +57,8 @@ export class DockerEmployeeProviderLaunch {
   workspaceForCommand(sessionId: string, docker: SessionDocker): Readonly<DockerCodexWorkspace> | undefined {
     this.requireFor(this.#session);
     if (this.#claimed) throw Error('Original Docker provider launch already held');
-    if (this.#session.id !== sessionId || docker !== this.#session.docker)
+    // The mux snapshots launch DATA before awaits. Its equal copy is not a new owner.
+    if (this.#session.id !== sessionId || !isDeepStrictEqual(docker, this.#session.docker))
       throw Error('Original unopened Docker workspace required');
     if (this.#workspace.kind === 'held') throw Error('Original Docker workspace observation held');
     return this.#workspace.kind === 'observed' ? this.#workspace.value : undefined;

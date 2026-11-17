@@ -15,8 +15,9 @@ import { isChatRaster, localImageFiles } from './chat-image-paths.js';
  * preamble — has the same verbs from one line in its AGENTS.md.
  *
  * Invariants (each asserted in `test/cli-agent.test.ts`):
- * 1. Refuses outside a Reverie session (`REVERIE_MUX=1` + `REVERIE_API_URL`); it
- *    never guesses a URL — a server you are not part of is not yours to drive.
+ * 1. Requires a private Docker-worker credential or the legacy `REVERIE_MUX=1`
+ *    context, plus an explicit API URL and session. The server authenticates the
+ *    current worker and its grants; local credential readability grants neither.
  * 2. `send` transmits printable text plus `\r` only. ESC exists solely as
  *    `interrupt`, which never appends `\r`. A stray control byte is a dead session
  *    in the fullscreen TUIs (opencode's `Ctrl+C` is `app_exit`).
@@ -97,6 +98,8 @@ export class AgentGuardError extends Error {}
 
 /** Exit codes shared by every verb; a shell agent can branch on them. */
 export const EXIT = AGENT_EXIT;
+const MANAGED_SESSION_REFUSAL =
+  'Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.';
 
 /**
  * Resolve the context from the environment, or throw `AgentGuardError`.
@@ -110,8 +113,8 @@ export function resolveAgentContext(
   env: NodeJS.ProcessEnv = process.env,
   envFile: () => Record<string, string> = readReverieEnvFile
 ): AgentContext {
-  if (env.REVERIE_MUX !== '1') {
-    throw new AgentGuardError('Not inside a Reverie-managed session (REVERIE_MUX is not 1); refusing to act.');
+  if (env.REVERIE_MUX !== '1' && env.REVERIE_WORKER_IDENTITY_FILE === undefined) {
+    throw new AgentGuardError(MANAGED_SESSION_REFUSAL);
   }
   const apiUrl = env.REVERIE_API_URL?.trim();
   if (!apiUrl) {
@@ -123,6 +126,9 @@ export function resolveAgentContext(
   }
   const workerIdentity = readDockerWorkerIdentity(env, selfId);
   if (workerIdentity !== undefined) return { apiUrl, selfId, workerIdentity };
+  if (env.REVERIE_MUX !== '1') {
+    throw new AgentGuardError(MANAGED_SESSION_REFUSAL);
+  }
   const credentials = credentialsFrom(env, envFile());
   return { apiUrl, selfId, auth: credentials.password ? credentials : undefined };
 }
@@ -322,6 +328,9 @@ export function baseHeaders(ctx: AgentContext): Record<string, string> {
   return headers;
 }
 
+/** Default per-request bound, also used by real CLI subprocess qualification. */
+export const DEFAULT_AGENT_HTTP_TIMEOUT_MS = 30_000;
+
 /** The real transport. `rejectUnauthorized:false` because the HTTPS install uses a self-signed cert. */
 export const httpRequest: ApiRequest = (ctx, options) => {
   const url = new URL(options.path, ctx.apiUrl);
@@ -370,7 +379,7 @@ export const httpRequest: ApiRequest = (ctx, options) => {
         path: goalClientTarget(options) ?? `${url.pathname}${url.search}`,
         rejectUnauthorized: false,
         headers,
-        timeout: options.timeoutMs ?? 30_000,
+        timeout: options.timeoutMs ?? DEFAULT_AGENT_HTTP_TIMEOUT_MS,
         signal: options.signal,
       },
       (res) => {
@@ -428,7 +437,7 @@ export const httpRequest: ApiRequest = (ctx, options) => {
         });
       }
     );
-    req.on('timeout', () => req.destroy(new Error(`request timed out after ${options.timeoutMs ?? 30_000} ms`)));
+    req.on('timeout', () => req.destroy(new Error(`request timed out after ${options.timeoutMs ?? DEFAULT_AGENT_HTTP_TIMEOUT_MS} ms`)));
     req.on('error', failed);
     if (bounds) deadline = setTimeout(() => req.destroy(new Error('download deadline exceeded')), bounds.deadlineMs);
     if (options.rawBody !== undefined) req.write(options.rawBody);

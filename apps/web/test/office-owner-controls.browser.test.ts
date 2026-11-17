@@ -39,7 +39,9 @@ async function api<T = CompanyView>(path = '/api/company', method = 'GET', data?
   if (
     !hiringRead &&
     !hiringWrite &&
-    !/^\/api\/(?:company(?:\/settings|\/employees\/[^/]+(?:\/hiring-permission)?)?|sessions)$/.test(path)
+    !/^\/api\/(?:company(?:\/settings|\/employees\/[^/]+(?:\/(?:hiring-permission|permissions))?)?|sessions)$/.test(
+      path
+    )
   )
     throw new Error('The no-worker audit client refuses this endpoint');
   if (
@@ -60,6 +62,31 @@ async function api<T = CompanyView>(path = '/api/company', method = 'GET', data?
 const current = async () => (await api()).employees.find((employee) => employee.id === employees[0].id)!;
 const hiringPath = () => `/api/company/employees/${employees[0].id}/hiring-permission`;
 const budget = async () => (await api<ExpertView>('/api/experts')).settings;
+const generalGrants = [
+  ['recoverEmployees', 'Recovery permission'],
+  ['manageOffice', 'Manage office attendance and restarts'],
+  ['manageGoals', 'Manage team goals'],
+  ['moveOwnPlan', 'Move own plan'],
+  ['managePlans', 'Manage team plans'],
+] as const;
+async function currentPermissions() {
+  const value = await api<{
+    employeeId: string;
+    permissions: Record<(typeof generalGrants)[number][0], boolean>;
+  }>(`/api/company/employees/${employees[0].id}/permissions`);
+  expect(value.employeeId).toBe(employees[0].id);
+  return value;
+}
+async function diskPermissions() {
+  const [{ dataPath }, { CompanyStateSchema }] = await Promise.all([
+    import('../src/config/instance.js'),
+    import('../src/company-types.js'),
+  ]);
+  const saved = CompanyStateSchema.parse(JSON.parse(await readFile(dataPath('company.json'), 'utf8')));
+  const employee = saved.employees.find((value) => value.id === employees[0].id);
+  expect(employee).toBeDefined();
+  return employee!.permissions;
+}
 async function diskBudget(): Promise<ExpertSettings> {
   // Import only after createIsolatedOffice has established its owned data root.
   const [{ dataPath }, { ExpertStateSchema }] = await Promise.all([
@@ -183,7 +210,13 @@ beforeEach(async (testContext) => {
       reportsTo: 'owner',
       sleepEnabled: false,
       dreamEnabled: false,
-      permissions: { recoverEmployees: false },
+      permissions: {
+        recoverEmployees: false,
+        manageOffice: false,
+        manageGoals: false,
+        moveOwnPlan: false,
+        managePlans: false,
+      },
     });
   const hiring = await api<Hiring>(hiringPath());
   if (hiring.enabled)
@@ -1200,3 +1233,108 @@ for (const width of [320, 1280]) {
     expect(responses.filter((response) => /\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([]);
   });
 }
+
+for (const width of [320, 1280]) {
+  it(`persists and revokes all general profile grants through the real owner API at ${width}px`, async () => {
+    await page.setViewportSize({ width, height: width === 320 ? 640 : 900 });
+    const before = await current();
+    const dialog = await profile();
+    await dialog.getByLabel('Role title', { exact: true }).fill('Unsubmitted general permission draft');
+    await dialog.getByRole('tab', { name: 'Permissions', exact: true }).click();
+    for (const [key, label] of generalGrants) {
+      const control = dialog.getByLabel(`${label} for ${employees[0].name}`, { exact: true });
+      expect(await control.isChecked()).toBe(false);
+      await control.check();
+      await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(true);
+      await expect.poll(() => control.isEnabled()).toBe(true);
+      expect((await diskPermissions())[key]).toBe(true);
+    }
+    await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+    expect((await current()).position).toBe(before.position);
+    const reopened = await profile(true);
+    for (const [key, label] of generalGrants) {
+      const control = reopened.getByLabel(`${label} for ${employees[0].name}`, { exact: true });
+      expect(await control.isChecked()).toBe(true);
+      await control.uncheck();
+      await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(false);
+      await expect.poll(() => control.isEnabled()).toBe(true);
+      expect((await diskPermissions())[key]).toBe(false);
+    }
+    expect(responses.filter((response) => /\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([]);
+  });
+}
+
+// Phone office/goals, then desktop office/goals. Static cases keep this behavior
+// attributable by the same strict control-contract validator used in CI.
+it.each([0, 1, 2, 3])(
+  'retains a committed general profile grant after a lost reply without replay (case %i)',
+  async (caseIndex) => {
+    const width = caseIndex < 2 ? 320 : 1280;
+    const [key, label] =
+      caseIndex % 2 === 0
+        ? (['manageOffice', 'Manage office attendance and restarts'] as const)
+        : (['manageGoals', 'Manage team goals'] as const);
+    await page.setViewportSize({ width, height: width === 320 ? 640 : 900 });
+    const before = await current();
+    const dialog = await profile();
+    const draft = dialog.getByLabel('Role title', { exact: true });
+    await draft.fill('Unsubmitted permission lost-reply draft');
+    await dialog.getByRole('tab', { name: 'Permissions', exact: true }).click();
+    const endpoint = `/api/company/employees/${employees[0].id}`;
+    const writes: unknown[] = [];
+    let loseReply = true;
+    await page.route('**' + endpoint, async (route) => {
+      if (route.request().method() !== 'PUT') return route.continue();
+      writes.push(route.request().postDataJSON());
+      if (!loseReply) return route.continue();
+      loseReply = false;
+      await office.assertNoRunningIntent();
+      const reply = await route.fetch();
+      expect(reply.status()).toBe(200);
+      await office.assertNoRunningIntent();
+      expect((await currentPermissions()).permissions[key]).toBe(true);
+      await route.fulfill({ status: 503, json: { success: false, error: 'Synthetic reply unconfirmed' } });
+      await reply.dispose();
+    });
+    const control = dialog.getByLabel(`${label} for ${employees[0].name}`, { exact: true });
+    await control.check();
+    const error = dialog.locator('.ca-profile-permission-error');
+    await expect.poll(() => error.textContent()).toContain('It may already have saved');
+    await errorInViewport(error);
+    const refresh = dialog.getByRole('button', {
+      name: `Refresh permissions for ${employees[0].name}`,
+      exact: true,
+    });
+    await expect
+      .poll(async () => {
+        const bounds = await refresh.boundingBox(),
+          body = await dialog.locator('.ca-profile-editor-body').boundingBox();
+        return !!bounds && !!body && bounds.y >= body.y && bounds.y + bounds.height <= body.y + body.height;
+      })
+      .toBe(true); // The suggested recovery must be visible without an automatic click scroll.
+    for (const [, grantLabel] of generalGrants)
+      expect(await dialog.getByLabel(`${grantLabel} for ${employees[0].name}`, { exact: true }).isDisabled()).toBe(
+        true
+      );
+    expect(writes).toEqual([{ permissions: { [key]: true } }]);
+    expect((await diskPermissions())[key]).toBe(true);
+    if (artifacts) {
+      await mkdir(artifacts, { recursive: true });
+      await paint(page);
+      await page.screenshot({ path: join(artifacts, `${key}-lost-reply-${width}.png`) });
+    }
+    await refresh.click();
+    await expect.poll(() => control.isEnabled()).toBe(true);
+    expect(await control.isChecked()).toBe(true);
+    expect(writes).toHaveLength(1); // A readback cannot repeat the grant.
+    await control.uncheck();
+    await expect.poll(async () => (await currentPermissions()).permissions[key]).toBe(false);
+    await expect.poll(() => control.isEnabled()).toBe(true);
+    expect(writes).toEqual([{ permissions: { [key]: true } }, { permissions: { [key]: false } }]);
+    expect((await diskPermissions())[key]).toBe(false);
+    await dialog.getByRole('tab', { name: 'Profile', exact: true }).click();
+    expect(await draft.inputValue()).toBe('Unsubmitted permission lost-reply draft');
+    expect((await current()).position).toBe(before.position);
+    expect(responses.filter((response) => /\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([]);
+  }
+);

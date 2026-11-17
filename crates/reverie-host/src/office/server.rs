@@ -130,8 +130,17 @@ pub(super) fn cleanup_payload(payload: &SpawnPayload) -> Result<()> {
     prepared.close()
 }
 pub(super) fn close_listener(listener: NativeListener) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    // CLOEXEC does not close a descriptor inherited by a child before exec.
+    // Stop the shared accept queue before releasing our sole owned reference.
+    let shutdown =
+        nix::sys::socket::shutdown(listener.as_raw_fd(), nix::sys::socket::Shutdown::Both)
+            .map_err(|error| OfficeError::Io(error.into()));
     let descriptor: std::os::fd::OwnedFd = listener.into();
-    crate::native::close(std::fs::File::from(descriptor)).map_err(|_| OfficeError::Unconfirmed)
+    let closed =
+        crate::native::close(std::fs::File::from(descriptor)).map_err(|_| OfficeError::Unconfirmed);
+    // Always consume/check close, including when shutdown itself failed.
+    super::finalized(shutdown, closed)
 }
 async fn accept(readiness: &crate::native::OfficeListenerReady<'_>) -> Result<UnixStream> {
     let stream = readiness.accept().await?;

@@ -171,6 +171,17 @@ export function workerEnvironment(value: unknown): string[] {
       : entry,
   );
 }
+/** Only the actual inspected source identity may restore the build-only root
+ * switch. No caller-selected user, shell text or default-root fallback. */
+export function capsuleReplacementArguments(user: unknown): string[] {
+  assert(
+    typeof user === "string" &&
+      /^(0|[1-9][0-9]{0,9}):(0|[1-9][0-9]{0,9})$/.test(user) &&
+      user.split(":").every((part) => Number(part) < 0xffff_ffff),
+    "A canonical numeric source UID:GID is required for capsule replacement",
+  );
+  return ["--build-arg", "REVERIE_WORKER_USER=" + user];
+}
 export function toolsEnvironment(value: unknown): string[] {
   return [
     ...workerEnvironment(value).filter(
@@ -457,6 +468,9 @@ export async function build(argv: string[]): Promise<void> {
   }
   const base = await image(baseId);
   assert(base.Id === baseId);
+  // Qualify before tagging/building anything; COPY must replace the old capsule
+  // under build-only root, then restore these exact original Config.User bytes.
+  const replacementArgs = capsuleReplacementArguments(base.Config.User);
   assert(
     /^Driver:\s+docker\s*$/m.test(
       await command(["buildx", "inspect", "default"]),
@@ -492,6 +506,7 @@ export async function build(argv: string[]): Promise<void> {
     "REVERIE_WORKER_BASE=" + alias,
     "--build-arg",
     "REVERIE_CLIENT_MANIFEST=" + manifest,
+    ...replacementArgs,
     "--build-arg",
     "REVERIE_WORKER_PATH=" +
       workerEnvironment(base.Config.Env)

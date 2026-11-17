@@ -12,6 +12,7 @@
     "update"
   ],
   "lib": [
+    "mkBoxedWebsiteImage",
     "mkContainerGpuImage",
     "workerChildImageAnnex",
     "workerDockerImage",
@@ -40,6 +41,7 @@
     "deployment",
     "docker-memory-high-helper",
     "docker-memory-high-helper-image",
+    "docker-pool-restore-helper-image",
     "dockerImage",
     "dockerImageWithChatLanguages",
     "entrypoint",
@@ -85,6 +87,7 @@
     "voiceCiVerifier",
     "workerBrowserImage",
     "workerChild",
+    "workerClientCapsule",
     "workerDocker",
     "workerDockerSeccomp",
     "workerExec",
