@@ -308,8 +308,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const snapshot = await DockerPlanAccountSnapshot.capture(this.#d.plans, account.id, current);
     try {
       snapshot.selected(account);
-      const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy),
-        workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
+      // Immutable target eligibility is setup. Sample the final native source
+      // facts after it, retaining the same scope checks and five-second proof.
+      const workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
+      current();
+      const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
       // The final target recipe is composed by the shared schema renderer before
       // this seed can be returned. There is no effects-bearing placeholder seed.

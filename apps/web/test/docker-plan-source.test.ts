@@ -142,6 +142,70 @@ describe('native plan source observation independent of disposable viewer', () =
 describe('native source fact origin after image qualification', () => {
   afterEach(() => vi.restoreAllMocks());
 
+  it('logs one bounded static expiry stack without source or credential data', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    clock += 5000;
+    expect(() => proof.require(f.row, f.binding)).not.toThrow();
+    expect(warning).not.toHaveBeenCalled();
+    clock++;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+    const [message, detail] = warning.mock.calls[0]!;
+    expect(message).toBe('[docker-plan-source] proof expired');
+    expect(Object.keys(detail).sort()).toEqual(['ageMs', 'stack']);
+    expect(detail.ageMs).toBe(5001);
+    expect(Number.isFinite(detail.ageMs)).toBe(true);
+    expect(detail.stack).toContain('DockerPlanSourceProof.require');
+    expect(detail.stack.length).toBeLessThanOrEqual(4096);
+    expect(detail.stack.split('\n').length).toBeLessThanOrEqual(9);
+    const serialized = JSON.stringify(warning.mock.calls);
+    for (const value of [
+      f.binding.containerId,
+      f.binding.sessionId,
+      f.row.employeeId,
+      f.row.workerImage.clientManifestDigest,
+    ])
+      expect(serialized).not.toContain(value);
+    clock = 1000;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the original sticky refusal when the diagnostic sink fails', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {
+        throw Error('sink unavailable');
+      });
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    clock += 5001;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+  });
+
+  it('does not log arbitrary current-scope failures as proof expiry', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let current = true;
+    const proof = await f.reader.capture(
+      f.row,
+      f.binding,
+      () => {
+        if (!current) throw Error('private current-scope diagnostic sentinel');
+      },
+      true
+    );
+    current = false;
+    expect(() => proof.require(f.row, f.binding)).toThrow('private current-scope diagnostic sentinel');
+    expect(warning).not.toHaveBeenCalled();
+  });
+
   it.each([true, false])('samples fresh native facts after a long prerequisite (running=%s)', async (running) => {
     const f = fixture(running);
     let clock = 1000;

@@ -960,6 +960,65 @@ async function publishedTargetFixture(publication: 'issued' | 'published', hando
   };
 }
 describe('captured native plan actor before paid dispatch', () => {
+  it.each([true, false])('qualifies the target before fresh final source facts (running=%s)', async (running) => {
+    const f = await fixture(running);
+    let clock = performance.now();
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const targetImage = f.engine.replacementTargetImage.bind(f.engine);
+    vi.spyOn(f.engine, 'replacementTargetImage').mockImplementation(async (source, current) => {
+      const image = await targetImage(source, current);
+      clock += 6000; // Controlled slow immutable setup, not a real latency claim.
+      current();
+      return image;
+    });
+    const before = await f.moves.dockerRecord(f.record.id);
+    const seed = await f.freshActor().reserve(f.input, undefined, 'd'.repeat(64));
+    expect(seed.source.observation.kind).toBe(running ? 'running' : 'stopped');
+    expect(seed.target.workerImage).toEqual(f.seed.target.workerImage);
+    expect(await f.moves.dockerRecord(f.record.id)).toEqual(before);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.run.mock.calls.some(([a]) => a[0] === 'container' && ['start', 'stop'].includes(a[1]!))).toBe(false);
+  });
+
+  it.each(['target-image', 'runtime-current', 'recipe', 'binding', 'source-epoch'] as const)(
+    'retains target/source admission guards after reordered setup: %s',
+    async (change) => {
+      const f = await fixture();
+      let clock = performance.now();
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      const targetImage = f.engine.replacementTargetImage.bind(f.engine);
+      if (change === 'target-image') {
+        const run = f.run.getMockImplementation()!;
+        f.run.mockImplementation(async (args, input) => {
+          const text = await run(args, input);
+          if (args[0] !== 'image') return text;
+          const images = JSON.parse(text);
+          images[0].Config.Labels['org.reverie.worker-client.manifest'] = '0'.repeat(64);
+          return JSON.stringify(images);
+        });
+      }
+      vi.spyOn(f.engine, 'replacementTargetImage').mockImplementation(async (source, current) => {
+        const image = await targetImage(source, current);
+        clock += 6000;
+        if (change === 'runtime-current') f.keyLost();
+        if (change === 'recipe' || change === 'binding')
+          await f.companyStore.update((company) => {
+            const employee = company.employees[0]!;
+            if (change === 'recipe') employee.runtimeRecipe!.workingDir = '/changed';
+            else employee.sessionGeneration++;
+          });
+        if (change === 'source-epoch') f.afterInit(() => f.ticks('999'));
+        current();
+        return image;
+      });
+      const before = await f.moves.dockerRecord(f.record.id);
+      await expect(f.freshActor().reserve(f.input, undefined, 'd'.repeat(64))).rejects.toThrow();
+      expect(await f.moves.dockerRecord(f.record.id)).toEqual(before);
+      expect(f.nativeCreate).not.toHaveBeenCalled();
+      expect(f.run.mock.calls.some(([a]) => a[0] === 'container' && ['start', 'stop'].includes(a[1]!))).toBe(false);
+    }
+  );
+
   it('admits the genuine HMAC force route with the observed generation and refuses a stale generation before effects', async () => {
     const f = await fixture(),
       app = Fastify();
