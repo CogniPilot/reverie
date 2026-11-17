@@ -42,6 +42,7 @@
     "docker-memory-high-helper",
     "docker-memory-high-helper-image",
     "docker-pool-restore-helper-image",
+    "docker-recovery-helper-image",
     "dockerImage",
     "dockerImageWithChatLanguages",
     "entrypoint",

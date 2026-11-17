@@ -154,6 +154,7 @@ import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
 import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
@@ -649,6 +650,8 @@ export class Session extends EventEmitter {
   private _activityStreak: ActivityStreak | null = null; // Unbroken run of PTY repaints (working detection)
   private _lastPaneProbeAt = 0; // Throttle for the tmux screen probe
   private _lastPaneProbeWorking: boolean | null = null; // Its last verdict (null = could not read)
+  private _paneStatusRead: Promise<string | null | undefined> | undefined;
+  private _paneWorkProbe: Promise<boolean | null | undefined> | undefined;
   /**
    * Background work the pane's own footer reports, e.g. `1 monitor`; null for none.
    *
@@ -3166,10 +3169,11 @@ export class Session extends EventEmitter {
 
   /** Provider recipe DATA only, without runtime/view getters. Never an API serializer or a grant. */
   providerRecipeState() {
+    const persistentRecord = resolvedStockProtocol(this.mode)?.shipped.capabilities.rebootRestore === 'persistent-record';
     return {
       mode: this.mode,
-      claudeMode: this._claudeMode,
-      allowedTools: this._allowedTools,
+      claudeMode: persistentRecord ? undefined : this._claudeMode,
+      allowedTools: persistentRecord ? undefined : this._allowedTools,
       workingDir: this.workingDir,
       subscriptionProfile: this.subscriptionProfile,
       model: cliTakesSessionModel(this.mode) ? this._model : undefined,
@@ -4980,10 +4984,44 @@ export class Session extends EventEmitter {
       // also produces a steady stream of repaints. The screen settles it, and only
       // an explicit "no working line" vetoes; a probe that cannot read the pane
       // (null) leaves the streak in charge.
-      if (!this._isWorking && isSustainedActivity(this._activityStreak) && this._probePaneWorking() !== false) {
-        this._markWorking();
+      if (!this._isWorking && !this._paneWorkProbe && isSustainedActivity(this._activityStreak)) {
+        const status = this._probePaneWorking();
+        const mark = (working: boolean | null | undefined) => {
+          if (working !== undefined && working !== false &&
+              isSustainedActivity(this._activityStreak) && !isPaneQuiet(this._lastActivityAt, Date.now()))
+            this._markWorking();
+        };
+        if (status instanceof Promise) void status.then(mark);
+        else mark(status);
       }
     }
+  }
+
+  /** A status read may run across an input event, respawn, or viewer replacement. */
+  private _readPaneStatus(): string | null | Promise<string | null | undefined> {
+    const mux = this._mux;
+    const pane = this._muxSession;
+    if (!mux || !pane) return null;
+    if (!mux.capturePaneTextAsync) return mux.capturePaneText?.(pane.muxName) ?? null;
+    if (this._paneStatusRead) return this._paneStatusRead;
+    const pid = pane.pid;
+    const pty = this.ptyProcess;
+    const mode = this.mode;
+    const owner = this.owner;
+    const pending: Promise<string | null | undefined> = mux.capturePaneTextAsync(pane.muxName)
+      .catch(() => null)
+      .then((text) =>
+        this._paneStatusRead === pending && this._mux === mux && this._muxSession === pane &&
+        pane.pid === pid && this.ptyProcess === pty && this.mode === mode && this.owner === owner &&
+        !this._isStopped && !this._closing
+          ? text
+          : undefined
+      )
+      .finally(() => {
+        if (this._paneStatusRead === pending) this._paneStatusRead = undefined;
+      });
+    this._paneStatusRead = pending;
+    return pending;
   }
 
   /**
@@ -4999,16 +5037,29 @@ export class Session extends EventEmitter {
    * Costs one `capture-pane`, floored at PANE_PROBE_MIN_INTERVAL_MS per session
    * and only ever called at a transition, never on the output hot path.
    *
-   * @returns true/false when the screen could be read, null when it could not
+   * @returns true/false when the screen could be read, undefined when the pane
+   * changed during the read, or null when it could not be read
    *   (no mux, capture failed, tests). Callers must treat null as "no evidence"
    *   and fall back to their stream heuristics.
    */
-  private _probePaneWorking(): boolean | null {
+  private _probePaneWorking(): boolean | null | Promise<boolean | null | undefined> {
     if (!this._mux || !this._muxSession) return null;
+    if (this._paneWorkProbe) return this._paneWorkProbe;
     const now = Date.now();
     if (now - this._lastPaneProbeAt < PANE_PROBE_MIN_INTERVAL_MS) return this._lastPaneProbeWorking;
     this._lastPaneProbeAt = now;
-    const text = this._mux.capturePaneText?.(this._muxSession.muxName) ?? null;
+    const frame = this._readPaneStatus();
+    if (!(frame instanceof Promise)) return this._applyPaneWorkProbe(frame);
+    const pending: Promise<boolean | null | undefined> = frame
+      .then((text) => text === undefined || this._paneWorkProbe !== pending ? undefined : this._applyPaneWorkProbe(text))
+      .finally(() => {
+        if (this._paneWorkProbe === pending) this._paneWorkProbe = undefined;
+      });
+    this._paneWorkProbe = pending;
+    return pending;
+  }
+
+  private _applyPaneWorkProbe(text: string | null): boolean | null {
     // A turn that ended by handing off to workers the CLI waits for is work too: the
     // composer is up and the pane is quiet, but the next turn starts without the user.
     this._lastPaneProbeWorking =
@@ -5185,9 +5236,7 @@ export class Session extends EventEmitter {
     if (this._paneDialog === null || this._paneDialogRecheck || this._isStopped) return;
     this._paneDialogRecheck = setTimeout(() => {
       this._paneDialogRecheck = null;
-      if (!this._mux || !this._muxSession) return;
-      const text = this._mux.capturePaneText?.(this._muxSession.muxName) ?? null;
-      if (text !== null) this._readPaneDialog(text, this._isWorking || this._workingLinePattern().test(text));
+      this._refreshPaneDialog(false);
     }, PANE_DIALOG_RECHECK_MS);
     this._paneDialogRecheck.unref?.();
   }
@@ -5195,12 +5244,20 @@ export class Session extends EventEmitter {
   private _ensurePaneDialogScan(): void {
     if (this._paneDialogScanTimer || this._isStopped) return;
     this._paneDialogScanTimer = setInterval(() => {
-      if (this._isWorking || !this._mux || !this._muxSession) return;
-      const text = this._mux.capturePaneText?.(this._muxSession.muxName) ?? null;
-      if (text === null) return;
-      this._readPaneDialog(text, this._workingLinePattern().test(text));
+      this._refreshPaneDialog(true);
     }, PANE_DIALOG_SCAN_MS);
     this._paneDialogScanTimer.unref?.();
+  }
+
+  private _refreshPaneDialog(onlyIdle: boolean): void {
+    if (onlyIdle && this._isWorking) return;
+    const frame = this._readPaneStatus();
+    const apply = (text: string | null | undefined) => {
+      if (typeof text === 'string' && (!onlyIdle || !this._isWorking))
+        this._readPaneDialog(text, this._isWorking || this._workingLinePattern().test(text));
+    };
+    if (frame instanceof Promise) void frame.then(apply);
+    else apply(frame);
   }
 
   private _readWatching(paneText: string | null): void {
@@ -5316,7 +5373,22 @@ export class Session extends EventEmitter {
     }
     // Quiet is necessary but NOT sufficient: a turn can go silent mid-tool-call.
     // Ask the screen before concluding, and keep asking on a slow cadence.
-    if (this._probePaneWorking() === true) {
+    const timer = this.activityTimeout;
+    const probe = this._probePaneWorking();
+    const confirm = (working: boolean | null | undefined) => {
+      if (this._isStopped || this.activityTimeout !== timer) return;
+      if (working === undefined || !isPaneQuiet(this._lastActivityAt, Date.now())) {
+        this.activityTimeout = setTimeout(() => this._confirmIdle(), IDLE_RECHECK_MS);
+        return;
+      }
+      this._finishIdleConfirmation(working);
+    };
+    if (probe instanceof Promise) void probe.then(confirm);
+    else confirm(probe);
+  }
+
+  private _finishIdleConfirmation(working: boolean | null): void {
+    if (working === true) {
       this._markWorking();
       this.activityTimeout = setTimeout(() => this._confirmIdle(), PANE_PROBE_RECHECK_MS);
       return;
@@ -5864,6 +5936,10 @@ export class Session extends EventEmitter {
   }
 
   private _clearAllTimers(): void {
+    this._paneStatusRead = undefined;
+    this._paneWorkProbe = undefined;
+    this._lastPaneProbeAt = 0;
+    this._lastPaneProbeWorking = null;
     if (this._paneDialogScanTimer) {
       clearInterval(this._paneDialogScanTimer);
       this._paneDialogScanTimer = null;

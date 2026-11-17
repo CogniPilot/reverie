@@ -196,6 +196,24 @@ describe('owner plan request presentation', () => {
     expect(h.dom.window.document.querySelector('.plan-member-pending')).toBeNull();
     expect(h.dom.window.document.querySelectorAll('[data-member=alex]')).toHaveLength(1);
   });
+  it('shows a recovery badge only while the request still targets the current session', () => {
+    const h = harness();
+    const request = {
+      id: 'older-request',
+      employeeId: 'alex',
+      name: 'Alex',
+      toAccount: 'second',
+      phase: 'recovery-required',
+      sessionId: 'previous',
+    };
+    h.context.pendingPlanRequests = [request];
+    h.methods.renderPlanMembers();
+    expect(h.dom.window.document.querySelector('[data-plan-members=second] .plan-member-pending')).toBeNull();
+    expect(h.dom.window.document.querySelector('[data-plan-members=first] [data-member=alex]')).not.toBeNull();
+    request.sessionId = 'source';
+    h.methods.renderPlanMembers();
+    expect(h.dom.window.document.querySelector('[data-plan-members=second] .plan-member-pending')).not.toBeNull();
+  });
 });
 
 describe('plan request deadline display', () => {

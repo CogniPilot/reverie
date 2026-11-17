@@ -17,6 +17,7 @@ function fixture(boxId = '7'.repeat(64)) {
   const row = {
     employeeId: oid,
     request: { operationId: oid },
+    phase: 'ready',
     destination: { containerId: dest },
   } as DockerEmployeeContinuationRecord;
   const value = {
@@ -38,6 +39,11 @@ function fixture(boxId = '7'.repeat(64)) {
       { Type: 'bind', Source: '/fixture/nix', Destination: '/nix', RW: true },
     ],
   });
+  const existingDestination = DockerEmployeeInspect.parse({
+    ...source,
+    Id: dest,
+    State: { ...source.State, Running: true },
+  });
   const journal: DockerContinuationTaskJournal = {
     read: () => task,
     publish: async (_row, before, next, current) => {
@@ -49,15 +55,17 @@ function fixture(boxId = '7'.repeat(64)) {
     },
   };
   const command: DockerEngineCommand = {
-    create: vi.fn(async (_name, config, current) => {
+    create: vi.fn(async (name, config, current) => {
       current();
       const host = config.HostConfig as Record<string, unknown>;
       raw = {
         Id: cid,
+        Name: '/' + name,
         Image: image,
         Config: { User: config.User, Entrypoint: config.Entrypoint, Cmd: config.Cmd, Labels: config.Labels },
         HostConfig: structuredClone(host),
         Mounts: (host.Mounts as Array<{ Source: string; Target: string }>).map((m) => ({
+          Type: 'bind',
           Source: m.Source,
           Destination: m.Target,
           RW: false,
@@ -90,6 +98,19 @@ function fixture(boxId = '7'.repeat(64)) {
       return raw;
     },
     value,
+    destination,
+    existingDestination,
+    exitHolder() {
+      raw!.State = {
+        Running: false,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Status: 'exited',
+        Pid: 0,
+        FinishedAt: '2026-01-01T00:00:00.000000000Z',
+      };
+    },
     replaceDestination() {
       destination.home.ino = '99';
     },
@@ -126,6 +147,11 @@ describe('actual original read-only storage holder cursor', () => {
     await expect(f.service.prepare(f.row, () => {})).rejects.toThrow('lost reply');
     expect(f.task?.phase).toBe('start-issued');
     expect(await f.service.observe(f.row)).toBe('ready');
+    const verify = vi.fn();
+    await expect(
+      f.service.readExistingReference(f.row, f.existingDestination, verify, () => {})
+    ).resolves.toBeUndefined();
+    expect(verify).not.toHaveBeenCalled();
     await f.service.prepare(f.row, () => {});
     expect(f.task?.phase).toBe('running');
     expect(vi.mocked(f.command.run).mock.calls.filter(([a]) => a[1] === 'start')).toHaveLength(1);
@@ -170,6 +196,95 @@ describe('actual original read-only storage holder cursor', () => {
     await expect(f.service.observe(f.row)).rejects.toThrow();
     expect(f.command.create).toHaveBeenCalledOnce();
   });
+});
+
+describe('existing destination storage across an original holder exit', () => {
+  const current = () => {};
+  it('keeps live holder reads on the original path', async () => {
+    const f = fixture(),
+      verify = vi.fn();
+    await f.service.prepare(f.row, current);
+    await expect(
+      f.service.readExistingReference(f.row, f.existingDestination, verify, current)
+    ).resolves.toBeUndefined();
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('accepts a fresh device number only with a matching native reference and no old task mutation', async () => {
+    const f = fixture();
+    await f.service.prepare(f.row, current);
+    const task = structuredClone(f.task);
+    f.exitHolder();
+    f.destination.home.dev = '18';
+    f.destination.nix.dev = '19';
+    vi.mocked(f.command.run).mockClear();
+    const verify = vi.fn(async (_source, observed) => ({
+      ...observed,
+      purpose: 'reverie-boxed-storage-reference-v1',
+    }));
+    await expect(f.service.readExistingReference(f.row, f.existingDestination, verify, current)).resolves.toEqual({
+      source: '/fixture/home',
+      user: '1000:100',
+      dev: '18',
+      ino: '5',
+      originalHomeDev: '4',
+    });
+    expect(verify).toHaveBeenCalledWith(f.existingDestination, f.destination);
+    expect(f.task).toEqual(task);
+    expect(f.command.create).toHaveBeenCalledOnce();
+    expect(vi.mocked(f.command.run).mock.calls.map(([args]) => args)).toEqual([
+      ['container', 'inspect', cid],
+      ['logs', cid],
+      ['exec', dest, '/opt/reverie-worker-tools/reverie-docker-resources', 'probe-storage'],
+      ['container', 'inspect', cid],
+      ['logs', cid],
+      ['exec', dest, '/opt/reverie-worker-tools/reverie-docker-resources', 'probe-storage'],
+    ]);
+  });
+
+  it.each(['birth', 'duplicate log', 'inode', 'ownership', 'mode', 'bind'])(
+    'refuses changed %s evidence before invoking the independent reference',
+    async (changed) => {
+      const f = fixture(),
+        verify = vi.fn(),
+        base = vi.mocked(f.command.run).getMockImplementation()!;
+      await f.service.prepare(f.row, current);
+      f.exitHolder();
+      if (changed === 'birth') f.value.holderStartTicks = '456';
+      if (changed === 'duplicate log')
+        vi.mocked(f.command.run).mockImplementation(async (a, b) => {
+          const out = await base(a, b);
+          return a[0] === 'logs' ? out + out : out;
+        });
+      if (changed === 'inode') f.destination.nix.ino = '99';
+      if (changed === 'ownership') f.destination.home.uid = 999;
+      if (changed === 'mode') f.destination.home.mode = 16877;
+      if (changed === 'bind') f.existingDestination.Mounts[0]!.Source = '/fixture/replacement';
+      await expect(f.service.readExistingReference(f.row, f.existingDestination, verify, current)).rejects.toThrow();
+      expect(verify).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['purpose', 'metadata', 'holder reappears', 'destination changes'])(
+    'refuses %s across the independent reference',
+    async (changed) => {
+      const f = fixture();
+      await f.service.prepare(f.row, current);
+      f.exitHolder();
+      const verify = vi.fn(async (_source, observed) => {
+        if (changed === 'purpose') return observed;
+        if (changed === 'holder reappears') f.raw!.State = { Running: true, Status: 'running', Pid: 988 };
+        if (changed === 'destination changes') f.destination.home.dev = '20';
+        return {
+          ...observed,
+          ...(changed === 'metadata' ? { nix: { ...observed.nix, dev: '99' } } : {}),
+          purpose: 'reverie-boxed-storage-reference-v1',
+        };
+      });
+      await expect(f.service.readExistingReference(f.row, f.existingDestination, verify, current)).rejects.toThrow();
+      expect(verify).toHaveBeenCalledOnce();
+    }
+  );
 });
 
 describe('read-only recovery of a fragmented CREATE reply', () => {

@@ -810,6 +810,23 @@ it('renews a loaded v3 reader after READY metadata publication without retaining
   expect(f.session.providerInputHeld).toBe(true);
 });
 
+it('rechecks wake admission before publishing a read-only reattachment observation', async () => {
+  const f = await loadedPlanViewTransition();
+  let admitted = true;
+  const published = vi.fn();
+  await expect(renewExistingDockerProviderView({
+    ...f.deps,
+    observeRunningView: async (row, binding, current) => {
+      expect(binding.containerId).toBe(f.session.docker?.containerName);
+      const view = await f.deps.engine.captureProviderView(row, current);
+      admitted = false;
+      return view;
+    },
+  }, f.row, f.session, () => admitted, published)).rejects.toThrow('Original existing Docker reader changed');
+  expect(published).not.toHaveBeenCalled();
+  expect(f.session.providerInputHeld).toBe(true);
+});
+
 it.each(['operation', 'runtime', 'owner', 'binding', 'recipe', 'resources', 'native', 'hooks'] as const)(
   'refuses READY reader renewal after %s drift without provider, helper or input effects',
   async (kind) => {

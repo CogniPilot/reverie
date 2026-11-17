@@ -58,6 +58,59 @@ async function replacementLeafFixture(prepared?: ReturnType<typeof fixture>) {
   return { f, original, candidateId, candidate, calls, snapshot };
 }
 describe('fixed Docker resource orchestration', () => {
+  async function restartedResourceFixture() {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    await f.setPool();
+    f.makeWorker();
+    await f.controller.configure(f.row(), f.current);
+    f.ready();
+    for (const role of ['pool-helper', 'leaf-helper'] as const) {
+      const task = f.tasks.get(role);
+      if (!task || task.phase !== 'completed') throw Error('Completed fixture helper required');
+      f.containers.delete(task.containerId);
+      f.logs.delete(task.containerId);
+    }
+    f.driftEpoch();
+    return f;
+  }
+
+  it('reads fresh approved limits after a host restart without old writer ACKs or effects', async () => {
+    const f = await restartedResourceFixture(),
+      original = structuredClone([...f.tasks]),
+      calls: string[][] = [];
+    f.beforeRun((args) => { calls.push([...args]); });
+    await expect(f.controller.readExistingAfterHostRestart(f.row(), policy, f.current)).resolves.toEqual(policy);
+    expect([...f.tasks]).toEqual(original);
+    expect(calls.filter((args) => args.includes('probe-pool'))).toHaveLength(2);
+    expect(calls.filter((args) => args.includes('probe-worker'))).toHaveLength(2);
+    expect(
+      calls.every(
+        (args) =>
+          (args[0] === 'container' && args[1] === 'inspect') ||
+          (args[0] === 'exec' && (args[2] === '/bin/cat' || args.includes('probe-pool') || args.includes('probe-worker')))
+      )
+    ).toBe(true);
+  });
+
+  it('refuses wrong policy or changed proof scope after reboot', async () => {
+    const f = await restartedResourceFixture();
+    await expect(
+      f.controller.readExistingAfterHostRestart(f.row(), { ...policy, cpuWeight: 42 }, f.current)
+    ).rejects.toThrow('DOCKER_RESOURCE_REATTACH_SCOPE_CHANGED');
+    f.setHigh(24 * 1024 ** 3);
+    await expect(f.controller.readExistingAfterHostRestart(f.row(), policy, f.current)).rejects.toThrow(
+      'DOCKER_RESOURCE_REATTACH_POLICY_UNCONFIRMED'
+    );
+    await expect(
+      f.controller.readExistingAfterHostRestart(f.row(), { ...policy, memoryHighBytes: 24 * 1024 ** 3 }, f.current)
+    ).resolves.toHaveProperty('memoryHighBytes', 24 * 1024 ** 3);
+    f.beforeRun((args) => {
+      if (args.includes('probe-worker')) f.revoke();
+    });
+    await expect(f.controller.readExistingAfterHostRestart(f.row(), policy, f.current)).rejects.toThrow('revoked');
+  });
+
   it('re-earns a missing completed leaf ACK from a different exact terminal helper without rewriting its journal', async () => {
     const { f, calls, snapshot } = await replacementLeafFixture(),
       before = snapshot();

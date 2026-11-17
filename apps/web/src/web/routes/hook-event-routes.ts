@@ -237,7 +237,7 @@ export function registerHookEventRoutes(
           // the fallback for direct-PTY sessions and the no-op test mux.
           capture: () => {
             const muxName = session.muxName;
-            const frame = muxName ? (ctx.mux.capturePaneBuffer?.(muxName) ?? null) : null;
+            const frame = muxName ? ctx.mux.capturePaneText?.(muxName) : null;
             return frame ?? session.terminalBuffer.slice(-8192) ?? null;
           },
         });

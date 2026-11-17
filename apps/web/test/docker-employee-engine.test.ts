@@ -39,6 +39,7 @@ import {
 } from '../src/docker-employee-engine-data.js';
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
+import { DockerWorkerReattachHelper } from '../src/docker-worker-reattach-helper.js';
 import { allowedDockerTaskTransition, type DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
   dest = 'd'.repeat(64),
@@ -461,8 +462,8 @@ async function providerViewFixture(ephemeral = false, mode = 'claude') {
 }
 /** Earn the real retained Storage cursor before deleting the historical source.
  * Only Docker syscall replies are controlled; no Engine/Storage method is mocked. */
-async function retainedStoppedFixture(version: 1 | 2 = 2) {
-  const f = await providerViewFixture(),
+async function retainedStoppedFixture(version: 1 | 2 = 2, ephemeral = false) {
+  const f = await providerViewFixture(ephemeral),
     holderId = '6'.repeat(64),
     network = '5'.repeat(64);
   const storage = {
@@ -488,10 +489,12 @@ async function retainedStoppedFixture(version: 1 | 2 = 2) {
     const host = config.HostConfig as Record<string, unknown>;
     holder = {
       Id: holderId,
+      Name: '/' + _name,
       Image: config.Image,
       Config: { User: config.User, Entrypoint: config.Entrypoint, Cmd: config.Cmd, Labels: config.Labels },
       HostConfig: structuredClone(host),
       Mounts: (host.Mounts as Array<{ Source: string; Target: string }>).map((m) => ({
+        Type: 'bind',
         Source: m.Source,
         Destination: m.Target,
         RW: false,
@@ -536,6 +539,78 @@ async function retainedStoppedFixture(version: 1 | 2 = 2) {
   vi.mocked(f.command.create).mockClear();
   return { ...f, storage, holder: () => holder!, network };
 }
+describe('existing provider reattachment after Docker restart', () => {
+  it.each(['original', 'dns-override', 'credential', 'changed-epoch'] as const)(
+    'restores only the original current provider: %s',
+    async (state) => {
+      const f = await retainedStoppedFixture(2, true);
+      const tokenDigest = '6'.repeat(64), manifestDigest = f.row.workerImage.clientManifestDigest;
+      const home = { ...f.storage.home, dev: '7' }, nix = { ...f.storage.nix, dev: '7' };
+      f.holder().State = {
+        Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0,
+      };
+      Object.assign(f.observed.State, { Running: true, Status: 'running', Pid: 321 });
+      f.observed.HostConfig.Dns = null;
+      f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+      f.observed.HostConfig.Dns = state === 'dns-override' ? ['192.0.2.1'] : [];
+      const scope = '7'.repeat(64), name = 'reverie-boxed-identity-' + dockerContinuationDigest([scope, 'identity-helper', oid]);
+      f.row.tasks!.push({
+        phase: 'completed', role: 'identity-helper', name, imageId: target,
+        configurationDigest: '1'.repeat(64), containerId: '2'.repeat(64),
+        resultDigest: dockerContinuationDigest({
+          version: 1, purpose: 'reverie-worker-credential-installed-v1', manifestDigest, sessionId: sid,
+          tokenDigest, homeDev: f.storage.home.dev, homeIno: home.ino,
+        }),
+      }, {
+        phase: 'completed', role: 'leaf-helper', name: 'reverie-boxed-leaf-fixture', imageId: helper,
+        configurationDigest: '3'.repeat(64), containerId: '4'.repeat(64), resultDigest: '5'.repeat(64),
+      });
+      f.resources.readExistingAfterHostRestart = vi.fn(async (_row, policy, current) => {
+        current();
+        if (state === 'changed-epoch') f.observed.State.Pid = 456;
+        return policy;
+      });
+      const helperId = 'sha256:' + '8'.repeat(64);
+      const helperPort = new DockerWorkerReattachHelper(f.command, helperId, () => ({
+        instanceId: eid, key: 'a'.repeat(64),
+      }));
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        if (args[0] === 'image' && args.at(-1) === helperId) return JSON.stringify(helperId);
+        if (args[0] === 'run' && args.includes('verify-storage-reference'))
+          return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null, home, nix });
+        if (args[0] === 'run' && args.includes('verify-worker-credential')) {
+          expect(args).not.toContain('a'.repeat(64));
+          expect(args).toContain('--log-driver=none');
+          return JSON.stringify({
+            version: 1, purpose: 'reverie-boxed-worker-credential-verified-v1', binding: JSON.parse(input!).binding,
+          });
+        }
+        if (args[0] === 'exec' && args.includes('probe-storage'))
+          return JSON.stringify({ ...f.storage, holderStartTicks: null, home, nix });
+        if (args[0] === 'exec' && args.includes('credential-status'))
+          return JSON.stringify({
+            version: 1, purpose: 'reverie-worker-credential-readback-v1', manifestDigest, sessionId: sid,
+            tokenDigest: state === 'credential' ? '9'.repeat(64) : tokenDigest,
+          });
+        if (args[0] === 'exec' && args.includes('worker-client') && args.includes('status')) return '';
+        return original(args, input);
+      });
+      const saved = structuredClone(f.row);
+      const view = f.engine.captureReattachedProviderView(f.row, f.row.policy, helperPort, () => {});
+      if (state === 'original') {
+        const attached = await view;
+        expect(attached).toBeDefined();
+        requireDockerEmployeeProviderView(attached, sid, f.docker);
+      } else {
+        await expect(view).rejects.toThrow();
+      }
+      expect(f.row).toEqual(saved);
+      expect(f.command.create).not.toHaveBeenCalled();
+      expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args.includes('start') || args.includes('stop'))).toBe(false);
+    }
+  );
+});
 describe('retained published plan source after historical source deletion', () => {
   const read = (
     f: Awaited<ReturnType<typeof retainedStoppedFixture>>,

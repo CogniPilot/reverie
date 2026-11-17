@@ -67,6 +67,15 @@ let
       restored = make selected baseConfig;
     in restored.passthru.runtimeConfiguration == selected
       && restored.passthru.runtimeConfiguration.helperImageId == cfg.helperImageId;
+    recoveryHelperIsOptInAndIndependentlyPinned = let
+      distinctId = digit: "sha256:${builtins.concatStringsSep "" (builtins.genList (_: digit) 64)}";
+      existing = cfg // {
+        memoryHighHelperImageId = distinctId "b";
+        poolRestoreHelperImageId = distinctId "c";
+      };
+      selected = existing // { recoveryHelperImageId = distinctId "d"; };
+    in (make existing baseConfig).passthru.runtimeConfiguration == existing
+      && (make selected baseConfig).passthru.runtimeConfiguration == selected;
     backendNotDuplicated = (make cfg (baseConfig // {
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
     })).config == image.config;
@@ -82,6 +91,8 @@ let
       (cfg // { deployment = "../office"; }) (cfg // { workerImageId = "latest"; })
       (cfg // { helperImageId = "sha256:${id}x"; }) (cfg // { memoryHighHelperImageId = null; })
       (cfg // { poolRestoreHelperImageId = null; }) (cfg // { poolRestoreHelperImageId = "latest"; })
+      (cfg // { recoveryHelperImageId = null; }) (cfg // { recoveryHelperImageId = "latest"; })
+      (cfg // { recoveryHelperImageId = "sha256:${id}x"; })
       (cfg // { clientManifestDigest = "short"; }) (cfg // { sourceImageIds = []; })
       (cfg // { sourceImageIds = [ "latest" ]; })
       (cfg // { sourceImageIds = builtins.genList (_: "sha256:${id}") 33; })

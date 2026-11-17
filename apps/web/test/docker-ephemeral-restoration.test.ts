@@ -182,6 +182,7 @@ function source(f: ReturnType<typeof fixture>) {
       { Type: 'bind', Source: f.projection.scratchSource, Destination: '/scratch', RW: true },
       { Type: 'bind', Source: f.projection.tmpSource, Destination: '/tmp', RW: true },
       { Type: 'bind', Source: '/persistent/private-home', Destination: '/home/agent', RW: true },
+      { Type: 'bind', Source: '/persistent/private-nix', Destination: '/nix', RW: true },
     ],
   });
 }
@@ -500,7 +501,8 @@ function adapter(f: ReturnType<typeof fixture>) {
     lostStart = false,
     beforeCreate = false,
     staleAck = false,
-    revoked = false;
+    revoked = false,
+    privateAlias = false;
   const saved = new Map<
     string,
     {
@@ -621,6 +623,14 @@ function adapter(f: ReturnType<typeof fixture>) {
         }
         return value;
       }
+      if (args[0] === 'exec' && args.includes('probe-storage'))
+        return JSON.stringify({
+          version: 1,
+          purpose: 'reverie-boxed-storage-observation-v1',
+          holderStartTicks: null,
+          home: privateAlias ? f.fact : { ...f.fact, dev: '0', ino: '1' },
+          nix: { ...f.fact, dev: '0', ino: '2' },
+        });
       if (args[0] === 'exec') {
         const program = EPHEMERAL_DESTINATION_PROGRAM.replace("'/scratch'", JSON.stringify(f.scratch)).replace(
           "'/tmp'",
@@ -677,6 +687,12 @@ function adapter(f: ReturnType<typeof fixture>) {
     get cursor() {
       return cursor;
     },
+    get target() {
+      return target!;
+    },
+    aliasPrivateStorage() {
+      privateAlias = true;
+    },
     loseBeforeCreate() {
       beforeCreate = true;
     },
@@ -703,6 +719,33 @@ function adapter(f: ReturnType<typeof fixture>) {
   };
 }
 describe.runIf(process.platform === 'linux' && process.getuid!() > 0)('canonical metadata-attempt integration', () => {
+  it('checks exact provider-issued destination custody without the original or metadata effects', async () => {
+    const f = fixture('operator-sessions'),
+      a = adapter(f),
+      earlier = replacementRow(f, oid);
+    fs.mkdirSync(f.tmp, { recursive: true, mode: 0o700 });
+    a.runningTarget();
+    a.restart(image, true);
+    const r = DockerEmployeePlanReplacementWorkRecord.parse({
+      ...earlier,
+      phase: 'provider-issued',
+      destination: { ...earlier.original, containerId: a.target.Id, sessionId: earlier.request.sessionId },
+    });
+    await a.service.verifyExistingDestination(r, a.target, a.current);
+    expect(a.command.create).not.toHaveBeenCalled();
+    expect(a.cursor).toBeUndefined();
+    expect(vi.mocked(a.command.run).mock.calls.map(([args]) => args.at(-1))).toEqual([
+      'probe-storage',
+      EPHEMERAL_DESTINATION_PROGRAM,
+      'probe-storage',
+    ]);
+    const different = structuredClone(a.target);
+    different.Mounts[0]!.Source += '-replacement';
+    await expect(a.service.verifyExistingDestination(r, different, a.current)).rejects.toThrow('ORIGINAL_CHANGED');
+    a.aliasPrivateStorage();
+    await expect(a.service.verifyExistingDestination(r, a.target, a.current)).rejects.toThrow('DIRECTORY_CUSTODY');
+  });
+
   it.each(['operator-recovery', 'operator-sessions'] as const)(
     'retains %s directories through distinct target and repeated source session identities',
     async (layout) => {

@@ -44,8 +44,14 @@ export function registerTeammatePaneRoutes(app: FastifyInstance, ctx: SessionPor
       return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Not a teammate pane of this session');
     }
     const muxName = session.muxName;
-    const buffer = muxName ? (ctx.mux.capturePaneBuffer?.(muxName, paneTarget) ?? null) : null;
-    if (buffer === null) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Teammate pane could not be read');
+    const owner = session.owner;
+    const pid = session.pid;
+    const buffer = muxName ? await ctx.mux.capturePaneBuffer?.(muxName, paneTarget) : null;
+    if (findSessionOrFail(ctx, id, req) !== session || session.owner !== owner ||
+        session.muxName !== muxName || session.pid !== pid || !isTeammatePane(ctx, session.id, paneTarget)) {
+      return createErrorResponse(ApiErrorCode.NOT_FOUND, 'Not a teammate pane of this session');
+    }
+    if (buffer == null) return createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Teammate pane could not be read');
     return { success: true, data: { buffer } };
   });
 

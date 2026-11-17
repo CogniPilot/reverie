@@ -172,6 +172,14 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           terminalInputHeld: false,
         });
       original.candidate = candidate;
+      if (!reused) {
+        // Keep the saved recipe visible to admission. Endpoint values are
+        // still rebuilt by the normal before-spawn path after publication.
+        const selection = (saved as {
+          __customModel?: ReturnType<Session['getCustomModelForPersist']>;
+        }).__customModel;
+        if (selection) candidate.setCustomModel(selection);
+      }
       const providerSource =
         row.version === 1 ? dockerEmployeeProviderSourceDigest(employee, saved) : row.providerSourceDigest;
       const candidateRecipeCurrent = () =>

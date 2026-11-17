@@ -164,6 +164,7 @@ import { DEFAULT_TMUX_HISTORY_LIMIT, DEFAULT_TERMINAL_BUFFER_MAX_BYTES } from '.
  * capture must be allowed to exceed the final payload size.
  */
 const FULL_HISTORY_CAPTURE_SLACK_BYTES = 8 * 1024 * 1024;
+const MAX_CONCURRENT_PANE_CAPTURES = 4;
 
 /** Delay after tmux session creation — enough for detached tmux to be queryable */
 const TMUX_CREATION_WAIT_MS = 100;
@@ -2054,6 +2055,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
   private trueColorConfigured = false;
   /** tmux 3.7+ can resize pane history after creation; older releases cannot. */
   private liveHistoryResizeSupported: boolean | null = null;
+  private paneCapturesInFlight = 0;
 
   constructor() {
     super();
@@ -4586,7 +4588,20 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     }
   }
 
-  capturePaneBuffer(muxName: string, paneTarget?: string, opts?: PaneCaptureOptions): string | null {
+  async capturePaneTextAsync(muxName: string): Promise<string | null> {
+    if (IS_TEST_MODE || !isValidMuxName(muxName)) return null;
+    try {
+      const { stdout } = await execFileAsync('tmux', ['-L', this.tmuxSocket, 'capture-pane', '-p', '-t', muxName], {
+        encoding: 'utf-8',
+        timeout: EXEC_TIMEOUT_MS,
+      });
+      return stdout;
+    } catch {
+      return null;
+    }
+  }
+
+  async capturePaneBuffer(muxName: string, paneTarget?: string, opts?: PaneCaptureOptions): Promise<string | null> {
     if (IS_TEST_MODE) return '';
     const target = resolveTmuxPaneTarget(muxName, paneTarget);
     if (!target) {
@@ -4594,6 +4609,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       return null;
     }
 
+    if (this.paneCapturesInFlight >= MAX_CONCURRENT_PANE_CAPTURES) return null;
+    this.paneCapturesInFlight++;
     const fullHistory = opts?.fullHistory === true;
 
     try {
@@ -4608,12 +4625,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
       // With a scrollback override this pane's own history is not read at all:
       // `-S 0` starts at the top of the visible frame.
       const scrollbackOverride = fullHistory ? opts?.scrollbackOverride : undefined;
-      const captureFlags = !fullHistory
-        ? 'capture-pane -p -e'
-        : scrollbackOverride !== undefined
-          ? 'capture-pane -p -e -J -S 0'
-          : `capture-pane -p -e -J -S -${historyLines}`;
-      // execSync's default maxBuffer (1MB) kills multi-MB scrollback dumps
+      const historyArgs = fullHistory ? ['-J', '-S', scrollbackOverride !== undefined ? '0' : `-${historyLines}`] : [];
+      // The default maxBuffer (1MB) kills multi-MB scrollback dumps
       // (ENOBUFS) and would silently degrade full-history capture to the byte
       // buffer for exactly the long sessions it exists for — size it from the
       // consumer's byte cap plus ANSI-overhead slack instead.
@@ -4625,20 +4638,27 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         execOpts.maxBuffer =
           (opts?.maxCaptureBytes ?? DEFAULT_TERMINAL_BUFFER_MAX_BYTES) + FULL_HISTORY_CAPTURE_SLACK_BYTES;
       }
+      // tmux executes both commands as one list. The fixed geometry header
+      // precedes the arbitrary pane contents and the console can continue
+      // serving live I/O while tmux builds the snapshot.
+      const { stdout } = await execFileAsync(
+        'tmux',
+        [
+          '-L', this.tmuxSocket,
+          'display-message', '-p', '-t', target,
+          '#{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{history_size} #{alternate_on}',
+          ';',
+          'capture-pane', '-p', '-e', '-t', target, ...historyArgs,
+        ],
+        execOpts
+      );
+      const headerEnd = stdout.indexOf('\n');
+      if (headerEnd < 0) return null;
+      const geometry = queryPaneCursor(() => stdout.slice(0, headerEnd));
       const rawCapture = joinScrollbackAndFrame(
         scrollbackOverride,
-        execSync(`${this.tmux()} ${captureFlags} -t ${shellescape(target)}`, execOpts),
+        stdout.slice(headerEnd + 1),
         scrollbackOverride !== undefined ? opts?.scrollbackOverrideScreen : undefined
-      );
-      // Query the cursor BEFORE deciding anything else. On the full-history path
-      // it settles both how the capture is trimmed and whether a cursor move is
-      // appended, and those two have to agree: trailing blank rows are only safe
-      // to keep when a move follows to put the caret back above them.
-      const geometry = queryPaneCursor(() =>
-        execSync(
-          `${this.tmux()} display-message -p -t ${shellescape(target)} '#{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{history_size} #{alternate_on}'`,
-          { encoding: 'utf-8', timeout: EXEC_TIMEOUT_MS }
-        )
       );
       // Report the size the pane was really drawing at. The visible-frame path
       // below addresses every row absolutely, so a consumer whose terminal is
@@ -4689,12 +4709,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     } catch (err) {
       // ENOBUFS carries the truncated multi-MB stdout on the error object —
       // log a concise line instead of dumping it into the journal.
-      if ((err as NodeJS.ErrnoException)?.code === 'ENOBUFS') {
-        console.error('[TmuxManager] Pane capture exceeded maxBuffer (ENOBUFS); falling back to byte history');
-      } else {
-        console.error('[TmuxManager] Failed to capture pane buffer:', err);
-      }
+      if ((err as NodeJS.ErrnoException)?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER')
+        console.error('[TmuxManager] Pane capture exceeded maxBuffer; falling back to byte history');
       return null;
+    } finally {
+      this.paneCapturesInFlight--;
     }
   }
 
@@ -4704,24 +4723,8 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
    * Pane ids are not stable across respawns or restores, so callers should not
    * assume the first pane remains `%0`.
    */
-  captureActivePaneBuffer(muxName: string, opts?: PaneCaptureOptions): string | null {
-    if (IS_TEST_MODE) return '';
-    if (!isValidMuxName(muxName)) {
-      console.error('[TmuxManager] Invalid session name in captureActivePaneBuffer:', muxName);
-      return null;
-    }
-
-    try {
-      const output = execSync(`${this.tmux()} list-panes -t ${shellescape(muxName)} -F '#{pane_id}:#{pane_active}'`, {
-        encoding: 'utf-8',
-        timeout: EXEC_TIMEOUT_MS,
-      }).trim();
-      const target = resolveActivePaneTarget(output);
-      return target ? this.capturePaneBuffer(muxName, target, opts) : null;
-    } catch (err) {
-      console.error('[TmuxManager] Failed to resolve active pane for capture:', err);
-      return null;
-    }
+  captureActivePaneBuffer(muxName: string, opts?: PaneCaptureOptions): Promise<string | null> {
+    return this.capturePaneBuffer(muxName, undefined, opts);
   }
 
   /**

@@ -1,7 +1,7 @@
 /**
  * COD-47: full tmux scrollback replay on reload.
  *
- * Under VITEST, TmuxManager no-ops execSync (IS_TEST_MODE), so we can't drive
+ * Under VITEST, TmuxManager no-ops the child process (IS_TEST_MODE), so we can't drive
  * real tmux. Instead we assert the capture-arg construction directly from
  * source (same approach as tmux-capture-color.test.ts): a full-history capture
  * must use `capture-pane -p -e -J -S -<N>` (bounded to the configured history
@@ -33,14 +33,14 @@ describe('tmux full-history pane capture (COD-47)', () => {
     // `-S -<N>` (not unbounded `-S -`) keeps tmux from serializing more
     // scrollback than the configured history limit retains; `-J` re-joins
     // lines hard-wrapped at the capture-time pane width.
-    expect(source).toContain('capture-pane -p -e -J -S -${historyLines}');
+    expect(methodBody).toContain("['-J', '-S', scrollbackOverride !== undefined ? '0' : `-${historyLines}`]");
   });
 
   it('a full capture with a scrollbackOverride (remote history) reads the visible frame only (-J -S 0)', () => {
     // The remote tmux supplied the history; reading local history too would
     // splice two histories above one frame.
     expect(methodBody).toContain('scrollbackOverride !== undefined');
-    expect(methodBody).toContain("'capture-pane -p -e -J -S 0'");
+    expect(methodBody).toContain("scrollbackOverride !== undefined ? '0'");
     expect(methodBody).toContain('joinScrollbackAndFrame(');
   });
 
@@ -50,7 +50,9 @@ describe('tmux full-history pane capture (COD-47)', () => {
   });
 
   it('still offers the visible single-screen capture for fast tab switches', () => {
-    expect(source).toContain("'capture-pane -p -e'");
+    expect(methodBody).toContain("'capture-pane', '-p', '-e'");
+    expect(methodBody).toContain('await execFileAsync(');
+    expect(methodBody).not.toContain('execSync(');
   });
 
   it('returns full-history capture as raw scrollback (skips the single-screen repaint)', () => {
@@ -92,7 +94,7 @@ describe('tmux full-history pane capture (COD-47)', () => {
     expect(sig).toBeGreaterThan(-1);
     const body = source.slice(sig, sig + 800);
     expect(body).toContain('opts');
-    expect(body).toContain('this.capturePaneBuffer(muxName, target, opts)');
+    expect(body).toContain('this.capturePaneBuffer(muxName, undefined, opts)');
   });
 });
 
@@ -137,7 +139,7 @@ describe('the geometry a capture reports back', () => {
   const methodBody = source.slice(methodStart, methodEnd);
 
   it('writes the pane size onto the caller options before either replay path returns', () => {
-    // IS_TEST_MODE no-ops execSync, so assert from source (same approach as the
+    // IS_TEST_MODE no-ops the child process, so assert from source (same approach as the
     // capture-flag tests above). The write must precede the fullHistory branch:
     // both paths return from inside it, and a caller that got no geometry
     // cannot tell a mismatched frame from a matching one.
@@ -167,7 +169,7 @@ describe('the capture reports how much scrollback tmux holds (#{history_size})',
   const methodBody = source.slice(methodStart, source.indexOf('captureActivePaneBuffer(muxName: string', methodStart));
 
   it('reads it from the one cursor query the capture already makes', () => {
-    // No extra tmux call: every capture is a synchronous exec on the server.
+    // Cursor and history metadata share the same tmux command list as the capture.
     expect(methodBody).toContain(
       "'#{cursor_x} #{cursor_y} #{pane_width} #{pane_height} #{history_size} #{alternate_on}'"
     );

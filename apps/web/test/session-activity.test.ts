@@ -260,6 +260,33 @@ describe('Session interactive idle detection', () => {
     vi.useRealTimers();
   });
 
+  it('keeps processing output during a slow pane read and confirms idle only after the pane is quiet again', async () => {
+    vi.useFakeTimers();
+    let completeCapture!: (frame: string) => void;
+    const capturePaneTextAsync = vi.fn(() => new Promise<string>((resolve) => { completeCapture = resolve; }));
+    const session = new Session({
+      workingDir: '/tmp',
+      mode: 'claude',
+      mux: { isAvailable: () => true, capturePaneTextAsync },
+      muxSession: { muxName: 'reverie-test', sessionId: 'test', createdAt: Date.now() },
+    } as ConstructorParameters<typeof Session>[0]);
+    const idle = vi.fn();
+    session.on('idle', idle);
+    feed(session, COMPOSER_REPAINT);
+    await vi.advanceTimersByTimeAsync(IDLE_SILENCE_MS + 1000);
+    expect(capturePaneTextAsync).toHaveBeenCalledOnce();
+
+    feed(session, '\u280b');
+    completeCapture('❯ \n');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(session.isWorking).toBe(true);
+    expect(idle).not.toHaveBeenCalled();
+
+    capturePaneTextAsync.mockResolvedValue('❯ \n');
+    await vi.advanceTimersByTimeAsync(IDLE_SILENCE_MS + 500);
+    expect(idle).toHaveBeenCalledOnce();
+  });
+
   it('stays busy through a long turn of composer repaints', () => {
     vi.useFakeTimers();
     const session = new Session({ workingDir: '/tmp', mode: 'claude' });

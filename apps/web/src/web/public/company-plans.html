@@ -441,6 +441,10 @@
             (request) =>
               request.toAccount === plan.id &&
               ['pending', 'reauthorize-required', 'executing', 'recovery-required'].includes(request.phase) &&
+              (request.phase !== 'recovery-required' ||
+                planAllocations.employees.some(
+                  (employee) => employee.id === request.employeeId && employee.sessionId === request.sessionId
+                )) &&
               !members.some((member) => member.id === request.employeeId)
           )
           .map((request) => {

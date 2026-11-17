@@ -232,8 +232,9 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       if (args[0] === 'container' && args[1] === 'ls') {
         const filters = args.flatMap((value, index) => (value === '--filter' ? [args[index + 1]!] : []));
         return [...containers]
-          .filter(([, raw]) =>
+          .filter(([id, raw]) =>
             filters.every((filter) => {
+              if (filter.startsWith('id=')) return id === filter.slice(3);
               if (!filter.startsWith('label=')) throw Error('Unexpected fixture census');
               const [key, ...rest] = filter.slice(6).split('=');
               return (raw.Config as { Labels?: Record<string, string> }).Labels?.[key!] === rest.join('=');

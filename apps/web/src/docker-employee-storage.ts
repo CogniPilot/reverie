@@ -5,7 +5,8 @@ import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { dockerContinuationDigest, DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
-import type { DockerContinuationTaskJournal } from './docker-continuation-task.js';
+import type { DockerContinuationTask, DockerContinuationTaskJournal } from './docker-continuation-task.js';
+import type { DockerCredentialHome } from './docker-employee-credential-installer.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import { DockerEmployeeInspect } from './docker-employee-engine-data.js';
 const decimal = z.string().regex(/^(0|[1-9][0-9]{0,19})$/),
@@ -29,8 +30,43 @@ const storage = z
   })
   .strict();
 type Storage = z.infer<typeof storage>;
+const reference = storage.extend({
+  purpose: z.literal('reverie-boxed-storage-reference-v1'),
+  holderStartTicks: z.null(),
+});
+const endedHolder = z
+  .object({
+    Running: z.literal(false),
+    Paused: z.literal(false),
+    Restarting: z.literal(false),
+    Dead: z.literal(false),
+    Pid: z.literal(0),
+    Status: z.literal('exited'),
+  })
+  .passthrough();
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
+}
+function sameDirectoryAcrossRestart(older: Storage['home'], current: Storage['home']): boolean {
+  return (
+    older.ino !== '0' &&
+    older.ino === current.ino &&
+    older.uid === current.uid &&
+    older.gid === current.gid &&
+    older.mode === current.mode
+  );
+}
+export async function probeDockerEmployeeStorage(command: DockerEngineCommand, containerId: string): Promise<Storage> {
+  return storage.parse(
+    JSON.parse(
+      await command.run([
+        'exec',
+        cid.parse(containerId),
+        '/opt/reverie-worker-tools/reverie-docker-resources',
+        'probe-storage',
+      ])
+    )
+  );
 }
 export class DockerEmployeeStorage {
   constructor(
@@ -305,21 +341,121 @@ export class DockerEmployeeStorage {
     if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
     return [held.value.home, held.value.nix].map(({ dev, ino }) => ({ dev, ino }));
   }
+  #readEndedHolder(raw: Record<string, unknown>, name: string, config: Record<string, unknown>) {
+    const desired = config.HostConfig as { Mounts: Array<{ Source: string; Target: string }> };
+    const mounts = z
+      .array(z.object({ Type: z.literal('bind'), Source: z.string(), Destination: z.string(), RW: z.literal(false) }))
+      .length(2)
+      .parse(raw.Mounts);
+    if (
+      raw.Name !== '/' + name ||
+      !desired.Mounts.every((expected) =>
+        mounts.some((mount) => mount.Destination === expected.Target && mount.Source === expected.Source)
+      )
+    )
+      refuse('DOCKER_STORAGE_HOLDER_CHANGED');
+    return endedHolder.parse(raw.State);
+  }
+  async #originalReceipt(task: Extract<DockerContinuationTask, { phase: 'running' }>): Promise<Storage> {
+    const log = (await this.command.run(['logs', task.containerId])).replace(/\n$/, '');
+    if (!log || log.length > 4096 || /[\r\n]/.test(log)) refuse('DOCKER_STORAGE_ORIGINAL_HEADER_UNKNOWN');
+    const receipt = storage.parse(JSON.parse(log));
+    if (
+      !receipt.holderStartTicks ||
+      receipt.holderStartTicks === '0' ||
+      receipt.holderStartTicks !== task.initStartTicks
+    )
+      refuse('DOCKER_STORAGE_ORIGINAL_HEADER_UNKNOWN');
+    return receipt;
+  }
+  #checkExistingDestination(row: DockerEmployeeContinuationRecord, destination: DockerEmployeeInspect): void {
+    if (
+      (row.phase !== 'ready' && row.phase !== 'provider-issued') ||
+      destination.Id !== row.destination?.containerId ||
+      !destination.State.Running ||
+      destination.State.Paused ||
+      destination.State.Restarting ||
+      destination.State.Dead
+    )
+      refuse('DOCKER_STORAGE_DESTINATION_UNKNOWN');
+  }
+  /**
+   * Reobserve an existing placement after the original read-only holder has
+   * exited. This does not settle its journal or confer any new write authority.
+   */
+  async readExistingReference(
+    row: DockerEmployeeContinuationRecord,
+    destination: DockerEmployeeInspect,
+    verify: (destination: DockerEmployeeInspect, observation: Storage) => Promise<unknown>,
+    current: () => void
+  ): Promise<(DockerCredentialHome & { readonly originalHomeDev: string }) | undefined> {
+    current();
+    this.#checkExistingDestination(row, destination);
+    const config = this.#configuration(row, destination);
+    const retained = this.journal.read(row, 'storage-holder');
+    const name =
+      'reverie-boxed-storage-' + dockerContinuationDigest([this.boxId, 'storage-holder', row.request.operationId]);
+    if (
+      !retained ||
+      !('containerId' in retained) ||
+      retained.role !== 'storage-holder' ||
+      retained.name !== name ||
+      retained.imageId !== this.helperImageId ||
+      retained.configurationDigest !== dockerContinuationDigest(config)
+    )
+      refuse('DOCKER_STORAGE_ORIGINAL_CHANGED');
+    const task = { ...retained };
+    const holder = await this.#inspect(task.containerId, config);
+    current();
+    if (z.object({ Running: z.boolean() }).parse(holder.State).Running) return undefined;
+    if (task.phase !== 'running') refuse('DOCKER_STORAGE_ORIGINAL_CHANGED');
+
+    const ended = this.#readEndedHolder(holder, name, config);
+    const historical = await this.#originalReceipt(task);
+    current();
+    const seen = await probeDockerEmployeeStorage(this.command, destination.Id);
+    current();
+    if (
+      seen.holderStartTicks !== null ||
+      !sameDirectoryAcrossRestart(historical.home, seen.home) ||
+      !sameDirectoryAcrossRestart(historical.nix, seen.nix)
+    )
+      refuse('DOCKER_STORAGE_DESTINATION_REPLACED');
+    const independentlyObserved = reference.parse(await verify(destination, seen));
+    current();
+    if (
+      !isDeepStrictEqual(independentlyObserved.home, seen.home) ||
+      !isDeepStrictEqual(independentlyObserved.nix, seen.nix)
+    )
+      refuse('DOCKER_STORAGE_DESTINATION_REPLACED');
+
+    const after = await this.#inspect(task.containerId, config);
+    current();
+    if (!isDeepStrictEqual(this.#readEndedHolder(after, name, config), ended)) refuse('DOCKER_STORAGE_HOLDER_CHANGED');
+    const repeated = await this.#originalReceipt(task);
+    current();
+    const destinationAfter = await probeDockerEmployeeStorage(this.command, destination.Id);
+    current();
+    if (
+      !isDeepStrictEqual(repeated, historical) ||
+      !isDeepStrictEqual(destinationAfter, seen) ||
+      !isDeepStrictEqual(this.journal.read(row, 'storage-holder'), task)
+    )
+      refuse('DOCKER_STORAGE_DESTINATION_REPLACED');
+    return Object.freeze({
+      source: destination.Mounts.find((m) => m.Destination === '/home/agent')!.Source,
+      user: destination.Config.User,
+      dev: seen.home.dev,
+      ino: seen.home.ino,
+      originalHomeDev: historical.home.dev,
+    });
+  }
   async verifyDestination(row: DockerEmployeeContinuationRecord): Promise<void> {
     if (!row.destination) refuse('DOCKER_STORAGE_DESTINATION_UNKNOWN');
     const source = await this.readSource(row),
       held = await this.#held(row, this.#configuration(row, source));
     if (!held) refuse('DOCKER_STORAGE_HOLDER_UNCONFIRMED');
-    const seen = storage.parse(
-      JSON.parse(
-        await this.command.run([
-          'exec',
-          row.destination.containerId,
-          '/opt/reverie-worker-tools/reverie-docker-resources',
-          'probe-storage',
-        ])
-      )
-    );
+    const seen = await probeDockerEmployeeStorage(this.command, row.destination.containerId);
     if (
       seen.holderStartTicks !== null ||
       !isDeepStrictEqual(seen.home, held.value.home) ||

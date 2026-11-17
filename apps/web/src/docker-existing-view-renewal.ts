@@ -1,7 +1,7 @@
 /** Renew an existing website reader from actual canonical/native facts only. */
 import { Session } from './session.js';
-import { DockerEmployeeEngine } from './docker-employee-engine.js';
-import { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
+import { DockerEmployeeEngine, type DockerEmployeeProviderView } from './docker-employee-engine.js';
+import { DockerEmployeeContinuationRecord, type DockerEmployeeBinding } from './docker-employee-continuation-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import { dockerEmployeeProviderSourceDigest, type CompanyDockerContinuationStore } from './docker-employee-store.js';
 import type { CompanyService } from './company-service.js';
@@ -14,10 +14,36 @@ export interface ExistingDockerViewRenewal {
   readonly sessions: ReadonlyMap<string, Session>;
   readonly saved: (sessionId: string) => SessionState | null | undefined;
   readonly runtimeCurrent: () => void;
+  readonly observeRunningView?: (
+    row: DockerEmployeeContinuationRecord,
+    binding: DockerEmployeeBinding,
+    current: () => void
+  ) => Promise<DockerEmployeeProviderView | undefined>;
+}
+
+async function observeCanonicalView(
+  engine: DockerEmployeeEngine,
+  row: DockerEmployeeContinuationRecord,
+  binding: DockerEmployeeBinding,
+  current: () => void
+): Promise<DockerEmployeeProviderView | undefined> {
+  const seen = await DockerEmployeeEngine.prototype.observeDestination.call(engine, row);
+  current();
+  if (
+    !seen ||
+    seen.state !== 'running' ||
+    seen.provider.kind !== 'running' ||
+    seen.provider.operationId !== binding.operationId ||
+    seen.provider.sessionId !== binding.sessionId ||
+    !DockerEmployeeEngine.prototype.existingResourcePolicyCurrent.call(engine, row, seen.resources)
+  )
+    return undefined;
+  return DockerEmployeeEngine.prototype.captureProviderView.call(engine, row, current);
 }
 /** The operation grant is required until publication; the installed reader then
  * retains independent runtime, canonical binding, recipe and native-view currency.
- * No new provider, viewer transport, helper, resource mutation or input is issued. */
+ * The wake path can provide its approved read-only reattachment observation.
+ * Renewal does not launch a provider or viewer transport, change resources or send input. */
 export async function renewExistingDockerProviderView(
   deps: ExistingDockerViewRenewal,
   input: DockerEmployeeContinuationRecord,
@@ -72,19 +98,11 @@ export async function renewExistingDockerProviderView(
   };
   try {
     current();
-    const seen = await DockerEmployeeEngine.prototype.observeDestination.call(deps.engine, row);
+    const view = await (deps.observeRunningView
+      ? deps.observeRunningView(row, binding, current)
+      : observeCanonicalView(deps.engine, row, binding, current));
     current();
-    if (
-      !seen ||
-      seen.state !== 'running' ||
-      seen.provider.kind !== 'running' ||
-      seen.provider.operationId !== binding.operationId ||
-      seen.provider.sessionId !== binding.sessionId ||
-      !DockerEmployeeEngine.prototype.existingResourcePolicyCurrent.call(deps.engine, row, seen.resources)
-    )
-      throw Error('Original existing Docker provider is unconfirmed');
-    const view = await DockerEmployeeEngine.prototype.captureProviderView.call(deps.engine, row, current);
-    current();
+    if (!view) throw Error('Original existing Docker provider is unconfirmed');
     Session.prototype.renewDockerContinuationView.call(session, view, () => {
       current();
       return true;

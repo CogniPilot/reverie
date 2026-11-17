@@ -3749,6 +3749,15 @@ export function registerSessionRoutes(
     // overlap. `captureActivePaneBuffer` is a no-op ('') under test mode and
     // returns null when unavailable, in which case we fall back to history.
     const muxName = session.muxName;
+    const owner = session.owner;
+    const pane = ctx.mux.getSession(id);
+    const panePid = pane?.pid;
+    const sessionPid = session.pid;
+    const sessionIsCurrent = () =>
+      findSessionOrFail(ctx, id, req) === session && session.owner === owner;
+    const paneIsCurrent = () =>
+      session.muxName === muxName && session.pid === sessionPid &&
+      ctx.mux.getSession(id) === pane && pane?.pid === panePid;
     const captureStartedAt = performance.now();
     // The visible path used to pass no options at all. It passes one now for a
     // single reason: `capturedGeometry` comes BACK on it, and the response has
@@ -3779,11 +3788,12 @@ export function registerSessionRoutes(
         captureOpts.scrollbackOverrideScreen = remoteScrollback.screen;
       }
     }
-    const capture = (opts: PaneCaptureOptions): string | null =>
-      muxName && typeof ctx.mux.captureActivePaneBuffer === 'function'
-        ? ctx.mux.captureActivePaneBuffer(muxName, opts)
-        : null;
-    let liveMuxBuffer = capture(captureOpts);
+    const capture = async (opts: PaneCaptureOptions): Promise<string | null> => {
+      if (!sessionIsCurrent() || !paneIsCurrent() || !muxName) return null;
+      const buffer = await ctx.mux.captureActivePaneBuffer?.(muxName, opts);
+      return sessionIsCurrent() && paneIsCurrent() ? (buffer ?? null) : null;
+    };
+    let liveMuxBuffer = await capture(captureOpts);
     // tmux adds no history while a pane is in the alternate screen, and a
     // nested tmux client (a remote SSH or Docker case, or `tmux` run by hand
     // in a shell) holds its pane there for good, so the full capture above is
@@ -3804,7 +3814,10 @@ export function registerSessionRoutes(
     ) {
       isFullReload = false;
       captureOpts = {};
-      liveMuxBuffer = capture(captureOpts);
+      liveMuxBuffer = await capture(captureOpts);
+    }
+    if (!sessionIsCurrent()) {
+      return reply.code(404).send(createErrorResponse(ApiErrorCode.NOT_FOUND, 'Session not found'));
     }
     const captureFinishedAt = performance.now();
     const hasLiveMuxBuffer = liveMuxBuffer !== null && liveMuxBuffer.length > 0;
