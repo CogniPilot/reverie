@@ -1,6 +1,7 @@
 # Packaging data only. Runtime identity, authority and Engine observations are
 # independently checked by DockerEmployeeRuntime. No live instance is read.
-{ pkgs, baseImage, baseConfig, runtimeConfiguration, clientCapsule, name ? "reverie-boxed" }:
+{ pkgs, baseImage, baseConfig, runtimeConfiguration, clientCapsule, name ? "reverie-boxed"
+, privateAccessRuntime ? null }:
 let
   cfg = runtimeConfiguration;
   clientRoot = "${clientCapsule}/opt/reverie-worker-client";
@@ -44,12 +45,21 @@ let
     # The owning URL parser still validates the selected endpoint at startup.
     && apiUrl cfg.apiUrl;
   env = baseConfig.Env or [];
+  tailscale = import ./tailscale-serve.nix { inherit pkgs; };
+  gpuEntrypoint = baseConfig.Entrypoint or [];
+  runtimeIndex = 4;
+  newEntrypoint = builtins.genList
+    (i: if i == runtimeIndex then "${privateAccessRuntime}/bin/reverie-container-runtime" else builtins.elemAt gpuEntrypoint i)
+    (builtins.length gpuEntrypoint);
   prefix = "REVERIE_RUNTIME_BACKEND=";
   backend = builtins.filter (value: builtins.isString value
     && builtins.substring 0 (builtins.stringLength prefix) value == prefix) env;
   config = baseConfig // {
     Env = env ++ (if backend == [] then [ "${prefix}boxed-docker-v1" ] else []);
-  };
+  } // (if privateAccessRuntime == null then {} else {
+    Entrypoint = newEntrypoint;
+    Labels = (baseConfig.Labels or {}) // { "org.reverie.tailscale" = "1"; };
+  });
   configuration = pkgs.writeText "reverie-boxed-runtime.json" (builtins.toJSON cfg);
 in
 assert valid;
@@ -58,11 +68,18 @@ assert builtins.isAttrs baseConfig && builtins.isList (baseConfig.Entrypoint or 
   && baseConfig.Entrypoint != [] && builtins.all builtins.isString baseConfig.Entrypoint
   && builtins.isList env && builtins.all builtins.isString env
   && (backend == [] || backend == [ "${prefix}boxed-docker-v1" ]);
+assert privateAccessRuntime == null || (
+  builtins.length gpuEntrypoint == 6
+  && builtins.genList (builtins.elemAt gpuEntrypoint) 4 == [ "/bin/tini" "-g" "-s" "--" ]
+  && matches "/nix/store/[^/]+/bin/reverie-container-runtime" (builtins.elemAt gpuEntrypoint runtimeIndex)
+  && builtins.elemAt gpuEntrypoint 5 == "/usr/local/bin/reverie-start"
+);
 pkgs.dockerTools.buildLayeredImage {
   inherit name;
   tag = "latest";
   created = "1970-01-01T00:00:01Z";
   maxLayers = 125;
+  contents = if privateAccessRuntime == null then [] else [ privateAccessRuntime tailscale.package ];
   fromImage = baseImage;
   passthru = { reverieConfig = config; runtimeConfiguration = cfg; inherit clientManifestDigest; };
   extraCommands = ''
@@ -74,6 +91,7 @@ pkgs.dockerTools.buildLayeredImage {
     chmod -R a-w opt/reverie-worker-client
     cp ${configuration} etc/reverie/boxed-runtime.json
     chmod 0444 etc/reverie/boxed-runtime.json
+    ${if privateAccessRuntime == null then "" else tailscale.install}
   '';
   fakeRootCommands = ''
     chown 0:0 etc/reverie etc/reverie/boxed-runtime.json

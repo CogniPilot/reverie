@@ -17,6 +17,7 @@ required-features = ["test-fixtures"]
 getrandom.workspace = true
 nix = { workspace = true, features = ["signal", "process"] }
 reverie-local-model = { path = "../reverie-local-model" }
+serde_json.workspace = true
 tokio.workspace = true
 
 [lints]

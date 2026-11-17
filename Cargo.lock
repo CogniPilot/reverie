@@ -1072,6 +1072,7 @@ dependencies = [
  "getrandom",
  "nix",
  "reverie-local-model",
+ "serde_json",
  "tokio",
 ]
 
