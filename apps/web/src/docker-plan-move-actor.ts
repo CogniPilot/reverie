@@ -202,7 +202,6 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       !employee.dockerBinding ||
       employee.dockerBinding.containerId !== scope.containerId ||
       !row.destination ||
-      !this.#d.store.existingSubject(employeeId, row) ||
       employee.onVacation ||
       !employee.desiredRunning
     )

@@ -1056,6 +1056,59 @@ describe('immutable source row across legitimate readonly progress', () => {
   });
 });
 
+describe('fresh source selection within its native proof lifetime', () => {
+  it('retains the five-second native admission under bounded canonical correlation work', async () => {
+    const f = await fixture();
+    const started = performance.now();
+    let clock = started;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const existingSubject = f.sourceStore.existingSubject.bind(f.sourceStore);
+    vi.spyOn(f.sourceStore, 'existingSubject').mockImplementation((employeeId, row) => {
+      // Charge actual correlation work a controlled cost, independent of CPU
+      // load. The real Store, private requester, SourceReader and TTL remain.
+      const subject = existingSubject(employeeId, row);
+      clock += 100;
+      return subject;
+    });
+    f.run.mockClear();
+    const snapshot = await f.actor.snapshot(f.record.employeeId, f.record.owner);
+    expect(snapshot).toMatchObject({ backend: 'docker', sessionId: f.saved.id, sessionGeneration: 1 });
+    expect(clock - started).toBeLessThan(5000);
+    expect(f.run).toHaveBeenCalled();
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(
+      f.run.mock.calls.some(([args]) => args[0] === 'container' && ['start', 'stop', 'rename'].includes(args[1]!))
+    ).toBe(false);
+  });
+
+  it.each(['grant', 'binding', 'row', 'live-recipe'] as const)(
+    'rechecks %s after the original account read without native effects',
+    async (change) => {
+      const f = await fixture();
+      vi.mocked(f.plans.accountForSavedState).mockImplementationOnce(async () => {
+        if (change === 'live-recipe') {
+          f.sessions.set(f.saved.id, new Session({ ...f.saved, workingDir: '/changed-recipe', useMux: false }));
+        } else {
+          await f.companyStore.update((state) => {
+            if (change === 'grant') state.employees[0]!.permissions.moveOwnPlan = false;
+            else if (change === 'binding') state.employees[0]!.sessionGeneration++;
+            else {
+              const row = state.dockerEmployeeContinuations![0]!;
+              if (row.version === 1) throw Error('Versioned provider correlation required');
+              row.providerSourceDigest = 'e'.repeat(64);
+            }
+          });
+        }
+        return f.accounts.get('a');
+      });
+      f.run.mockClear();
+      await expect(f.actor.snapshot(f.record.employeeId, f.record.owner)).rejects.toThrow();
+      expect(f.run).not.toHaveBeenCalled();
+      expect(f.nativeCreate).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('canonical account selection until real refreshed-principal qualification', () => {
   it('reserves ordinary selected canonical credentials independently of source conversation history', async () => {
     const f = await fixture();
