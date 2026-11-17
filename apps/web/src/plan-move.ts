@@ -1,6 +1,9 @@
 import type { PlanMoveDockerActor, PlanMoveDockerJournalStore } from './plan-move-docker.js';
 import { dockerPlanMoveNotIssuedOf } from './plan-move-store.js';
-import { requireDockerPlanDisjointGeneration } from './docker-plan-disjoint-generation.js';
+import {
+  requireDockerPlanDisjointGeneration,
+  requireDockerPlanDisjointHistoryData,
+} from './docker-plan-disjoint-generation.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
@@ -703,7 +706,7 @@ export class PlanMoves {
           () => {
             executor.dockerReplacement!.current(record, record.dockerReplacement!);
             if (disjoint)
-              requireDockerPlanDisjointGeneration(
+              requireDockerPlanDisjointHistoryData(
                 disjoint,
                 this.coldRows(input.employeeId, owner, input.id),
                 input.employeeId,
