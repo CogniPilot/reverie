@@ -1,5 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { ChatDb } from '../src/chat-db.js';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChatroomService } from '../src/chatroom-service.js';
@@ -18,6 +19,28 @@ const UNKNOWN = '00000000-0000-4000-8000-000000000099';
 describe('replies beyond the recent-message window', () => {
   let service: ChatroomService;
   let directory: string;
+  let fixtureRoot: string, seedDirectory: string;
+  let seed: Awaited<ReturnType<typeof buildArchivedTargets>>;
+  let seedCounts: { rooms: number; messages: number };
+  const opened = new Set<string>();
+  const close = async () => {
+    await service.stop();
+    opened.delete(directory);
+  };
+  const open = async () => {
+    service = makeService();
+    opened.add(directory);
+    await service.init();
+    service.delivery.stop();
+  };
+  const closedDatabases = (root: string) => {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      const path = join(root, entry.name);
+      expect(lstatSync(path).isSymbolicLink()).toBe(false);
+      expect(/-(wal|shm)$/.test(entry.name)).toBe(false);
+      if (entry.isDirectory()) closedDatabases(path);
+    }
+  };
   const sessions = new Map([A, B, C].map((id) => [id, {
     id, name: id === B ? 'Bobby' : 'Alice', pid: 42, mode: 'opencode',
     status: 'idle', isWorking: true, writeViaMux: async () => true,
@@ -25,16 +48,83 @@ describe('replies beyond the recent-message window', () => {
   const makeService = () => new ChatroomService({ file: join(directory, 'rooms.json'),
     database: join(directory, 'chat.db'), getSession: id => sessions.get(id),
     employeeOf: id => `employee-${id}`, broadcast: () => {} });
+  // This setup used to share each case's 30s budget; do not reduce it to the 10s hook default.
+  beforeAll(async () => {
+    vi.stubEnv('REVERIE_ADMIN_PHONE_WAKE', 'enabled');
+    fixtureRoot = mkdtempSync(join(tmpdir(), 'archived-reply-suite-'));
+    seedDirectory = join(fixtureRoot, 'closed-real-seed');
+    mkdirSync(seedDirectory, { mode: 0o700 });
+    directory = seedDirectory;
+    await open();
+    try {
+      // Earn history once through ALL real durable posts and eviction checks.
+      seed = await buildArchivedTargets();
+    } finally {
+      // stop flushes pending state, waits archive gzip and closes every DB.
+      await close();
+    }
+    const db = ChatDb.open(join(seedDirectory, 'chat.db'));
+    try {
+      const checkpoint = db.db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();
+      expect(checkpoint?.busy).toBe(0);
+      seedCounts = db.counts();
+      expect(seedCounts.rooms).toBe(2);
+      // Membership events also legitimately occupy history rows.
+      expect(seedCounts.messages).toBeGreaterThan(MAX_MESSAGES_PER_ROOM + 3);
+    } finally {
+      db.close();
+    }
+    closedDatabases(seedDirectory);
+    vi.unstubAllEnvs();
+  }, 30_000);
   beforeEach(async () => {
     vi.stubEnv('REVERIE_ADMIN_PHONE_WAKE', 'enabled');
-    directory = mkdtempSync(join(tmpdir(), 'archived-reply-'));
-    service = makeService();
-    await service.init();
-    service.delivery.stop();
+    directory = mkdtempSync(join(fixtureRoot, 'empty-case-'));
+    await open();
   });
-  afterEach(async () => { await service.stop(); vi.unstubAllEnvs(); });
+  afterEach(async () => {
+    await close();
+    vi.unstubAllEnvs();
+  });
+  afterAll(() => {
+    // Never remove a fixture whose service did not confirm its DB closure.
+    expect(opened.size).toBe(0);
+    if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true });
+  });
 
   async function archivedTargets() {
+    await close();
+    directory = mkdtempSync(join(fixtureRoot, 'independent-archive-case-'));
+    closedDatabases(seedDirectory);
+    // The source is CLOSED and checkpointed, including its archive. Each case
+    // gets distinct inodes; no active SQLite/WAL file is ever copied.
+    for (const name of readdirSync(seedDirectory)) {
+      cpSync(join(seedDirectory, name), join(directory, name), { recursive: true, force: false, errorOnExist: true });
+    }
+    expect(statSync(join(directory, 'chat.db')).ino).not.toBe(statSync(join(seedDirectory, 'chat.db')).ino);
+    closedDatabases(directory);
+    expect(existsSync(join(directory, 'chat.db-wal'))).toBe(false);
+    const db = ChatDb.open(join(directory, 'chat.db'));
+    try {
+      expect(db.counts()).toEqual(seedCounts);
+    } finally {
+      db.close();
+    }
+    closedDatabases(directory);
+    await open();
+    const room = service.room(seed.room.id)!;
+    expect(room.messages.some((message) => message.id === seed.target.id || message.id === seed.deleted.id)).toBe(
+      false
+    );
+    expect(service.exactAgentRead(A, room.id, seed.target.id).message.text).toBe(seed.target.text);
+    return {
+      room,
+      target: structuredClone(seed.target),
+      deleted: structuredClone(seed.deleted),
+      foreign: structuredClone(seed.foreign),
+    };
+  }
+  async function buildArchivedTargets() {
     const room = service.createRoom('Shared', undefined);
     service.addMember(room.id, A);
     service.addMember(room.id, B);
@@ -70,11 +160,12 @@ describe('replies beyond the recent-message window', () => {
     expect(service.phoneAccepts(B, room.id, reply.id)).toBe(true);
     expect(room.messages.some(message => message.id === target.id)).toBe(false);
     expect(room.messages.length).toBeLessThanOrEqual(MAX_MESSAGES_PER_ROOM);
-    await service.stop();
+    await close();
 
     service = makeService();
     const recovered = vi.spyOn(service.delivery, 'enqueue');
     await service.init();
+    opened.add(directory);
     service.delivery.stop();
     const restored = recovered.mock.calls.find(call => call[0] === B && call[3]?.messageId === reply.id);
     expect(restored).toBeDefined();
