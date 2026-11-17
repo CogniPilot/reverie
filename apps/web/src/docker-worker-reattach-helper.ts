@@ -55,7 +55,10 @@ export class DockerWorkerReattachHelper {
       const mounts = destination.Mounts.filter(mount => mount.Destination === guest);
       const mount = mounts[0];
       if (mounts.length !== 1 || !mount || mount.Type !== 'bind' || !mount.Source.startsWith('/') ||
-        /[,"\x00-\x1f\x7f]/.test(mount.Source) || mount.Source === '/') return refuse();
+        mount.Source === '/') return refuse();
+      if (Array.from(mount.Source).some((character) =>
+        character === ',' || character === '"' || character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127
+      )) return refuse();
       return ['--mount', 'type=bind,source=' + mount.Source + ',target=' + target + ',readonly'];
     };
     const expected = (value: Directory) => [value.dev, value.ino, value.uid, value.gid, value.mode].join(':');
