@@ -79,7 +79,13 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function fixture(running = true, retainedAccount = false, preparedPool = false, owner?: string) {
+async function fixture(
+  running = true,
+  retainedAccount = false,
+  preparedPool = false,
+  owner?: string,
+  replacement?: { imageId: string; clientManifestDigest: string }
+) {
   if (owner !== undefined) vi.spyOn(multiuser, 'isMultiUserMode').mockReturnValue(true);
   const f = dockerPlanSourceFixture(running),
     directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-'));
@@ -189,12 +195,17 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     if (args[0] === 'image')
       return JSON.stringify([
         {
-          Id: f.raw.Image,
+          Id: replacement && args[2] === replacement.imageId ? replacement.imageId : f.raw.Image,
           RootFS: { Layers: ['sha256:synthetic'] },
           Config: {
             Entrypoint: ['/opt/reverie/perf/bin/reverie-worker-init'],
             Cmd: null,
-            Labels: { 'org.reverie.worker-client.manifest': f.row.workerImage.clientManifestDigest },
+            Labels: {
+              'org.reverie.worker-client.manifest':
+                replacement && args[2] === replacement.imageId
+                  ? replacement.clientManifestDigest
+                  : f.row.workerImage.clientManifestDigest,
+            },
           },
         },
       ]);
@@ -228,8 +239,8 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     'synthetic',
     resources,
     {
-      imageId: f.raw.Image,
-      clientManifestDigest: f.row.workerImage.clientManifestDigest,
+      imageId: replacement?.imageId ?? f.raw.Image,
+      clientManifestDigest: replacement?.clientManifestDigest ?? f.row.workerImage.clientManifestDigest,
       sourceImageIds: [f.raw.Image],
     },
     sourceStore,
@@ -381,8 +392,8 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     version: 1,
     purpose: 'reverie-boxed-runtime-v1',
     deployment: 'synthetic',
-    workerImageId: f.raw.Image,
-    clientManifestDigest: f.row.workerImage.clientManifestDigest,
+    workerImageId: replacement?.imageId ?? f.raw.Image,
+    clientManifestDigest: replacement?.clientManifestDigest ?? f.row.workerImage.clientManifestDigest,
     sourceImageIds: [f.raw.Image],
     helperImageId: 'sha256:' + 'f'.repeat(64),
     apiUrl: 'http://reverie:3000',
@@ -477,7 +488,8 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     provider,
     current,
     configuration,
-    actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration']) =>
+    resources,
+    actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration'], selectedEngine = engine) =>
       new DockerPlanMoveActor({
         company,
         ctx,
@@ -485,7 +497,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
         moves,
         chat: {} as DockerPlanMoveComposition['chat'],
         store: sourceStore,
-        engine,
+        engine: selectedEngine,
         provider,
         configuration: selected,
         boxId: '7'.repeat(64),
@@ -1744,6 +1756,152 @@ describe('cold legacy disjoint native admission', { timeout: 60_000 }, () => {
 /** Routing tests retain genuine requester/store/journal admission. Native protocol
  * read itself is separately exercised through the actual Engine below. */
 describe('prepaid installed original across website pair changes', () => {
+  it.each([
+    'unchanged',
+    'local-digest',
+    'default-label',
+    'default-image',
+    'saved-label',
+    'saved-image',
+    'saved-source',
+    'unsupported-source',
+    'unregistered-target',
+    'revoked',
+    'source-row',
+  ] as const)('qualifies an actual cold unissued seed independently of the current website pair: %s', async (mode) => {
+    const f = await fixture(true, false, true, undefined, {
+      imageId: 'sha256:' + '4'.repeat(64),
+      clientManifestDigest: '5'.repeat(64),
+    });
+    const before = await f.moves.dockerRecord(f.record.id);
+    await f.moves.save([{ ...before, phase: 'recovery-required', error: 'original pre-effect refusal' }]);
+    const reopened = new PlanMoveStore(join(f.directory, 'moves.json'));
+    const original = await reopened.dockerRecord(f.record.id),
+      state = original.dockerReplacement!;
+    expect(state.sourceStop).toBeUndefined();
+    expect(state.sourceReader).toBeUndefined();
+    expect(state.work).toBeUndefined();
+    expect(state.paidDispatch).toBeUndefined();
+    expect(state.seed.target.workerImage.imageId).not.toBe(state.seed.source.binding.imageId);
+    const currentPair = {
+      imageId: 'sha256:' + '2'.repeat(64),
+      sourceImageId: state.seed.target.workerImage.sourceImageId,
+      clientManifestDigest: '3'.repeat(64),
+    };
+    const run = f.run.getMockImplementation()!;
+    let savedReads = 0,
+      sourceReads = 0;
+    f.run.mockImplementation(async (args, input) => {
+      if (args[0] !== 'image') return run(args, input);
+      const images =
+        args[2] === currentPair.imageId
+          ? [
+              {
+                Id: currentPair.imageId,
+                RootFS: { Layers: ['sha256:synthetic'] },
+                Config: {
+                  Entrypoint: ['/opt/reverie/perf/bin/reverie-worker-init'],
+                  Cmd: null,
+                  Labels: { 'org.reverie.worker-client.manifest': currentPair.clientManifestDigest },
+                },
+              },
+            ]
+          : JSON.parse(await run(args, input));
+      if (args[2] === currentPair.imageId) {
+        if (mode === 'default-label') images[0].Config.Labels['org.reverie.worker-client.manifest'] = '0'.repeat(64);
+        if (mode === 'default-image') images[0].Id = 'sha256:' + '0'.repeat(64);
+      } else if (args[2] === state.seed.target.workerImage.imageId) {
+        savedReads++;
+        if (mode === 'saved-label') images[0].Config.Labels['org.reverie.worker-client.manifest'] = '0'.repeat(64);
+        if (mode === 'saved-image') images[0].Id = 'sha256:' + '0'.repeat(64);
+        if (savedReads === 1) {
+          if (mode === 'revoked') f.keyLost();
+          if (mode === 'source-row')
+            await f.companyStore.update((s) => {
+              s.employees[0]!.sessionGeneration++;
+            });
+        }
+      } else if (args[2] === state.seed.source.binding.imageId) {
+        sourceReads++;
+        if (mode === 'saved-source' && sourceReads === 2) images[0].Id = 'sha256:' + '0'.repeat(64);
+      }
+      return JSON.stringify(images);
+    });
+    const sourceImageIds =
+      mode === 'unsupported-source'
+        ? []
+        : mode === 'unregistered-target'
+          ? [state.seed.source.binding.imageId]
+          : [state.seed.source.binding.imageId, state.seed.target.workerImage.imageId];
+    const currentEngine = new DockerEmployeeEngine(
+      f.command,
+      'synthetic',
+      f.resources,
+      {
+        imageId: currentPair.imageId,
+        clientManifestDigest: currentPair.clientManifestDigest,
+        sourceImageIds,
+      },
+      f.sourceStore,
+      f.configuration.helperImageId,
+      '7'.repeat(64)
+    );
+    cleanup.push(() => currentEngine.close());
+    const actor = f.actorWithConfiguration(
+      {
+        ...f.configuration,
+        workerImageId: currentPair.imageId,
+        clientManifestDigest: currentPair.clientManifestDigest,
+        sourceImageIds,
+      },
+      currentEngine
+    );
+    const local = vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((digest, current) => {
+      current();
+      expect(digest).toBe(currentPair.clientManifestDigest);
+      if (mode === 'local-digest') throw Error('installed current capsule mismatch');
+    });
+    vi.spyOn(currentEngine, 'observePool').mockResolvedValue(state.seed.source.record.pool!);
+    const native = vi.spyOn(DockerEmployeeEngine.prototype, 'inspectPlanReplacementProtocol');
+    const journal: PlanMoveDockerJournal = {
+      ...f.journal,
+      read: () => structuredClone(state),
+      current: () => {
+        reopened.dockerCurrent(original.id, state.epoch, digest(state.seed));
+        requireDockerPlanMoveRequesterCurrent(f.requester, original, state);
+      },
+      publish: async () => {
+        throw Error('Unissued compatibility must not publish');
+      },
+    };
+    if (mode === 'unchanged') {
+      await actor.prepare(original, journal);
+      expect(savedReads).toBe(1);
+      await expect(
+        currentEngine.qualifyPlanReplacementImage(
+          state.seed.source.record.destination!,
+          { ...state.seed.target.workerImage, sourceImageId: 'sha256:' + '0'.repeat(64) },
+          journal.current
+        )
+      ).rejects.toThrow('SOURCE_IMAGE_UNSUPPORTED');
+    } else
+      await expect(actor.prepare(original, journal)).rejects.toThrow(
+        mode === 'local-digest'
+          ? 'installed current capsule mismatch'
+          : mode === 'unsupported-source' || mode === 'unregistered-target'
+            ? 'DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED'
+            : mode === 'revoked' || mode === 'source-row'
+              ? 'The Docker plan requester or permission changed'
+              : 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED'
+      );
+    expect(local).toHaveBeenCalledOnce();
+    expect(native).not.toHaveBeenCalled();
+    expect(await reopened.dockerRecord(original.id)).toEqual(original);
+    expect(state.seed.target.workerImage).toEqual(f.seed.target.workerImage);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(f.run.mock.calls.some(([a]) => a[0] === 'container' && ['start', 'stop'].includes(a[1]!))).toBe(false);
+  });
+
   it('validates current local/default pair and reads the immutable old target without changing any cursor', async () => {
     const f = await fixture(true, false, true);
     await issuedCheckpoint(f, undefined, 'published', true);
@@ -1819,12 +1977,13 @@ describe('prepaid installed original across website pair changes', () => {
       expect(f.nativeCreate).not.toHaveBeenCalled();
     }
   );
-  it.each(['paid', 'reader-open', 'before-identity', 'missing-target'] as const)(
+  it.each(['paid', 'reader-open', 'before-identity', 'closed-source-without-target'] as const)(
     'keeps strict old-pair admission for %s',
     async (mode) => {
       const f = await fixture(true, false, true);
       if (mode === 'paid') await issuedCheckpoint(f);
-      else if (mode !== 'missing-target') await issuedCheckpoint(f, undefined, 'published', true);
+      else if (mode === 'closed-source-without-target') await f.actor.stopSource(f.record, f.journal);
+      else await issuedCheckpoint(f, undefined, 'published', true);
       const state = f.journal.read();
       // A denial-only journal projection cannot manufacture a native capability.
       const changed = {

@@ -420,8 +420,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       state.sourceReader?.phase === 'closed' &&
       state.work?.phase === 'identity-ready' &&
       state.work.destination !== undefined;
+    // A retained reservation with no issued native cursor also keeps its exact
+    // saved target. Validate it read-only, independently of the current website.
+    const unissuedOriginal = !state.paidDispatch && !state.sourceStop && !state.sourceReader && !state.work;
     requireDockerPlanProtocol(
-      installedOriginal
+      installedOriginal || unissuedOriginal
         ? this.#d.configuration.clientManifestDigest
         : state.seed.target.workerImage.clientManifestDigest,
       () => journal.current()
@@ -442,16 +445,23 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         journal.current()
       );
       journal.current();
-      if (installedOriginal) {
+      if (installedOriginal || unissuedOriginal) {
         if (
           selected.sourceImageId !== state.seed.target.workerImage.sourceImageId ||
           selected.imageId !== this.#d.configuration.workerImageId ||
           selected.clientManifestDigest !== this.#d.configuration.clientManifestDigest
         )
           throw new PlanMoveError('The current default worker/client pair changed', 409);
-        await this.#workFor(record, journal).engine.inspectPlanReplacementProtocol(state.work!, () =>
-          journal.current()
-        );
+        if (installedOriginal)
+          await this.#workFor(record, journal).engine.inspectPlanReplacementProtocol(state.work!, () =>
+            journal.current()
+          );
+        else
+          await this.#d.engine.qualifyPlanReplacementImage(
+            state.seed.source.record.destination!,
+            state.seed.target.workerImage,
+            () => journal.current()
+          );
         journal.current();
       } else if (!same(selected, state.seed.target.workerImage))
         throw new PlanMoveError('The selected target image changed', 409);
