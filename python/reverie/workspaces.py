@@ -13,7 +13,6 @@ prune, the /tmp wipe and LAUNCH all see the same state:
 Separately, each workspace keeps an exclusive OPERATION lock (.ops/<name>.lock) so two operations on one workspace never
 interleave; that is a local mutex, not a lease. Default root /tmp/reverie/tasks (disposable drive), configurable."""
 from __future__ import annotations
-import argparse
 from contextlib import contextmanager
 import fcntl
 import importlib.util
@@ -223,27 +222,3 @@ class Workspaces:
                 for sig, handler in previous.items():
                     signal.signal(sig, handler)
             return code if cleaned else CLEANUP_UNKNOWN_EXIT
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
-    sub = parser.add_subparsers(dest="action", required=True)
-    sub.add_parser("create").add_argument("name")
-    run = sub.add_parser("run"); run.add_argument("name"); run.add_argument("command", nargs=argparse.REMAINDER)
-    finish = sub.add_parser("finish"); finish.add_argument("name"); finish.add_argument("--handoff", required=True)
-    clean = sub.add_parser("clean"); clean.add_argument("name"); clean.add_argument("--apply", action="store_true")
-    sub.add_parser("renew-all")
-    args = parser.parse_args(argv); manager = Workspaces(args.root)
-    if args.action == "create": print(manager.create(args.name))
-    elif args.action == "finish": manager.finish(args.name, args.handoff)
-    elif args.action == "clean": print(json.dumps(manager.clean(args.name, args.apply)))
-    elif args.action == "renew-all": print(json.dumps(manager.renew_all()))
-    else:
-        command = args.command[1:] if args.command[:1] == ["--"] else args.command
-        if not command: parser.error("run requires a command")
-        return manager.run(args.name, command)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

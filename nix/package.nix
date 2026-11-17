@@ -703,6 +703,7 @@ let
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   backendNativeCli = import ./backend-cli.nix { inherit pkgs src; };
+  leaseCli = import ./lease-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   muxNative = import ./mux.nix { inherit pkgs src; };
@@ -723,7 +724,7 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -804,6 +805,7 @@ let
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     ln -s ${backendNativeCli}/bin/reverie-backend "$out/bin/reverie-backend"
+    ln -s ${leaseCli}/bin/reverie-workspaces "$out/bin/reverie-workspaces"
     # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
     makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
     # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.

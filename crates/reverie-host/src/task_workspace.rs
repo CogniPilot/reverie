@@ -10,9 +10,12 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+mod run;
 #[cfg(test)]
 mod tests;
 mod workflow;
+
+pub use run::RunOutcome;
 
 /// The marker that makes a root this module's own.
 pub const OWNED_MARKER: &str = ".reverie-owned";
@@ -37,6 +40,8 @@ pub enum WorkspaceError {
     Unsettled,
     /// Cleanup requires an explicit record of preserved work.
     Handoff,
+    /// A checkout is present and needs to be preserved before cleanup.
+    Checkout(PathBuf),
     Io(io::Error),
     Lease(LeaseError),
 }
@@ -56,6 +61,7 @@ impl std::fmt::Display for WorkspaceError {
             Self::Record => f.write_str("invalid workspace record"),
             Self::Unsettled => f.write_str("workspace has no verified terminal state"),
             Self::Handoff => f.write_str("save a handoff receipt before cleanup"),
+            Self::Checkout(path) => write!(f, "source checkout found: {}", path.display()),
             Self::Io(error) => error.fmt(f),
             Self::Lease(error) => error.fmt(f),
         }

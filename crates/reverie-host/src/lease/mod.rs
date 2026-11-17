@@ -15,6 +15,7 @@ mod hold;
 mod janitor;
 mod maintenance;
 mod retirement;
+mod supervision;
 #[cfg(test)]
 mod tests;
 
@@ -33,6 +34,7 @@ pub use janitor::{Janitor, WalkBound, check, janitor};
 pub use maintenance::{GcReport, LeaseListing, Listing, gc, ls};
 pub use retirement::{DirectPaths, Retirement, RetirementPaths, RetirementSummary, retirement};
 pub use reverie_contracts::lease_records::ReservationState;
+pub use supervision::{Signals, end_by, exit_status};
 
 /// The CLI exit code and library class of a refusal (`code` in Python).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -105,6 +107,21 @@ pub struct LeaseBase {
     path: PathBuf,
 }
 impl LeaseBase {
+    /// Use the configured lease directory or the current user's default.
+    pub fn current_user() -> Result<Self> {
+        let path = std::env::var_os("REVERIE_LEASE_DIR")
+            .filter(|value| !value.is_empty())
+            .map_or_else(
+                || {
+                    std::env::home_dir()
+                        .unwrap_or_default()
+                        .join(".local/state/reverie/leases")
+                },
+                PathBuf::from,
+            );
+        Self::own(&path)
+    }
+
     /// `leases_dir()` for a holder's own directory: refuse a symlink, then
     /// create it (mode 0700; missing parents get the default mode).
     pub fn own(path: &Path) -> Result<Self> {
