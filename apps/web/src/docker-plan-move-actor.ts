@@ -409,7 +409,21 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     requireCanonicalAccountSource(journal.read());
     this.current(record, journal.read());
     const state = journal.read();
-    requireDockerPlanProtocol(state.seed.target.workerImage.clientManifestDigest, () => journal.current());
+    // An already installed, unpaid original keeps its immutable target pair.
+    // The current website must validate its own pair, then read that original's
+    // actual fixed CLI. This observation grants no paid/effect capability.
+    const installedOriginal =
+      !state.paidDispatch &&
+      state.sourceStop?.phase === 'closed' &&
+      state.sourceReader?.phase === 'closed' &&
+      state.work?.phase === 'identity-ready' &&
+      state.work.destination !== undefined;
+    requireDockerPlanProtocol(
+      installedOriginal
+        ? this.#d.configuration.clientManifestDigest
+        : state.seed.target.workerImage.clientManifestDigest,
+      () => journal.current()
+    );
     if (!nativeThreadProfile(state.seed.target.provider === 'anthropic' ? 'claude' : 'codex'))
       throw new PlanMoveError('The selected target protocol changed', 409);
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
@@ -426,7 +440,18 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         journal.current()
       );
       journal.current();
-      if (!same(selected, state.seed.target.workerImage))
+      if (installedOriginal) {
+        if (
+          selected.sourceImageId !== state.seed.target.workerImage.sourceImageId ||
+          selected.imageId !== this.#d.configuration.workerImageId ||
+          selected.clientManifestDigest !== this.#d.configuration.clientManifestDigest
+        )
+          throw new PlanMoveError('The current default worker/client pair changed', 409);
+        await this.#workFor(record, journal).engine.inspectPlanReplacementProtocol(state.work!, () =>
+          journal.current()
+        );
+        journal.current();
+      } else if (!same(selected, state.seed.target.workerImage))
         throw new PlanMoveError('The selected target image changed', 409);
     } finally {
       target.snapshot.close();

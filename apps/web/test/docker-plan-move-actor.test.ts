@@ -1,3 +1,4 @@
+import * as planProtocol from '../src/docker-plan-protocol.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
 import { dockerPlanSourceRecordCurrent } from '../src/docker-plan-move-actor.js';
@@ -72,7 +73,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function fixture(running = true, retainedAccount = false) {
+async function fixture(running = true, retainedAccount = false, preparedPool = false) {
   const f = dockerPlanSourceFixture(running),
     directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-'));
   fs.chmodSync(directory, 0o700);
@@ -140,6 +141,16 @@ async function fixture(running = true, retainedAccount = false) {
     ...f.row,
     original,
     policy,
+    ...(preparedPool
+      ? {
+          pool: {
+            containerId: '1'.repeat(64),
+            cgroupParent: '/synthetic-pool',
+            policyDigest: digest(policy.pool),
+            physicalDigest: '2'.repeat(64),
+          },
+        }
+      : {}),
     sourceDigest: dockerEmployeeSourceDigest(employee, saved),
     providerSourceDigest: dockerEmployeeProviderSourceDigest(employee, saved),
   });
@@ -334,6 +345,16 @@ async function fixture(running = true, retainedAccount = false) {
       })
     ).statusCode
   ).toBe(200);
+  const configuration: DockerPlanMoveComposition['configuration'] = {
+    version: 1,
+    purpose: 'reverie-boxed-runtime-v1',
+    deployment: 'synthetic',
+    workerImageId: f.raw.Image,
+    clientManifestDigest: f.row.workerImage.clientManifestDigest,
+    sourceImageIds: [f.raw.Image],
+    helperImageId: 'sha256:' + 'f'.repeat(64),
+    apiUrl: 'http://reverie:3000',
+  };
   const retain = vi.fn(),
     baseActor = new DockerPlanMoveActor({
       company,
@@ -344,16 +365,7 @@ async function fixture(running = true, retainedAccount = false) {
       store: sourceStore,
       engine,
       provider,
-      configuration: {
-        version: 1,
-        purpose: 'reverie-boxed-runtime-v1',
-        deployment: 'synthetic',
-        workerImageId: f.raw.Image,
-        clientManifestDigest: f.row.workerImage.clientManifestDigest,
-        sourceImageIds: [f.raw.Image],
-        helperImageId: 'sha256:' + 'f'.repeat(64),
-        apiUrl: 'http://reverie:3000',
-      },
+      configuration,
       boxId: '7'.repeat(64),
       authentication: auth,
       revisions,
@@ -426,6 +438,25 @@ async function fixture(running = true, retainedAccount = false) {
     sourceStore,
     run,
     nativeCreate,
+    engine,
+    configuration,
+    actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration']) =>
+      new DockerPlanMoveActor({
+        company,
+        ctx,
+        plans,
+        moves,
+        chat: {} as DockerPlanMoveComposition['chat'],
+        store: sourceStore,
+        engine,
+        provider,
+        configuration: selected,
+        boxId: '7'.repeat(64),
+        authentication: auth,
+        revisions,
+        current,
+        retain,
+      }).withRequesterAuthority(proof),
     retain,
     sessions,
     plans,
@@ -443,14 +474,14 @@ async function fixture(running = true, retainedAccount = false) {
     },
   };
 }
-
 /** Historical cursor DATA, published through the real journal CAS. This fixture
  * deliberately supplies no target Session, installed material or native proof;
  * recovering actors must not confuse these entries with effect authority. */
 async function issuedCheckpoint(
   f: Awaited<ReturnType<typeof fixture>>,
   handoff?: 'issued' | 'submitted',
-  publication: 'issued' | 'published' = 'published'
+  publication: 'issued' | 'published' = 'published',
+  prepaid = false
 ) {
   await f.actor.stopSource(f.record, f.journal);
   const before = f.journal.read(),
@@ -490,7 +521,7 @@ async function issuedCheckpoint(
       workerImage: seed.target.workerImage,
       policy: seed.source.record.policy,
       credentialId: seed.target.credentialId,
-      phase: 'ready',
+      phase: prepaid ? 'identity-ready' : 'ready',
       pool: {
         containerId: '1'.repeat(64),
         cgroupParent: '/synthetic-pool',
@@ -536,38 +567,64 @@ async function issuedCheckpoint(
         },
       },
     };
+  let checkpoint = before;
+  if (prepaid) {
+    const reader = {
+      version: 1 as const,
+      purpose: 'docker-plan-source-reader-v1' as const,
+      name: 'reverie-boxed-reader-synthetic',
+      imageId: seed.target.workerImage.imageId,
+      configurationDigest: '8'.repeat(64),
+      containerId: '9'.repeat(64),
+    };
+    await f.journal.publish(checkpoint, { ...checkpoint, sourceReader: { ...reader, phase: 'create-issued' } });
+    checkpoint = f.journal.read();
+    await f.journal.publish(checkpoint, {
+      ...checkpoint,
+      sourceReader: {
+        ...reader,
+        phase: 'closed',
+        terminalStateDigest: '8'.repeat(64),
+      },
+    });
+    checkpoint = f.journal.read();
+  }
   await f.journal.publish(
-    before,
+    checkpoint,
     DockerPlanMoveJournalState.parse({
-      ...before,
+      ...checkpoint,
       material,
       work,
-      paidDispatch: {
-        phase: 'issued',
-        epoch: before.epoch,
-        operationId: seed.target.operationId,
-        sessionId: seed.target.sessionId,
-        containerId: destination.containerId,
-        recipeDigest: work.sourceDigest,
-      },
-      companyPublication: {
-        phase: publication,
-        digest: digest({
-          row: { ...work, phase: 'provider-issued' },
-          binding: {
-            version: 1,
-            operationId: work.request.operationId,
-            sessionId: work.request.sessionId,
-            sessionGeneration: work.request.sessionGeneration,
-            credentialId: work.credentialId,
-            containerId: destination.containerId,
-            imageId: destination.imageId,
-            originalDigest: digest(destination),
-            policyDigest: digest(work.policy),
-          },
-          templateDigest: seed.target.templateDigest,
-        }),
-      },
+      ...(!prepaid
+        ? {
+            paidDispatch: {
+              phase: 'issued',
+              epoch: before.epoch,
+              operationId: seed.target.operationId,
+              sessionId: seed.target.sessionId,
+              containerId: destination.containerId,
+              recipeDigest: work.sourceDigest,
+            },
+            companyPublication: {
+              phase: publication,
+              digest: digest({
+                row: { ...work, phase: 'provider-issued' },
+                binding: {
+                  version: 1,
+                  operationId: work.request.operationId,
+                  sessionId: work.request.sessionId,
+                  sessionGeneration: work.request.sessionGeneration,
+                  credentialId: work.credentialId,
+                  containerId: destination.containerId,
+                  imageId: destination.imageId,
+                  originalDigest: digest(destination),
+                  policyDigest: digest(work.policy),
+                },
+                templateDigest: seed.target.templateDigest,
+              }),
+            },
+          }
+        : {}),
       ...(handoff ? { handoff: { phase: 'issued', digest: dockerPlanMoveHandoffDigest(seed.handoff) } } : {}),
     })
   );
@@ -577,7 +634,6 @@ async function issuedCheckpoint(
   }
   return f.journal.read();
 }
-
 /** A retained, installed target checkpoint. The shared fixture supplies only
  * controlled syscall replies: actual Storage/Installer/Engine methods earn each
  * new private view. Canonical Company/Session/PlanMove stores and protected HTTP
@@ -1527,6 +1583,124 @@ describe('cold legacy disjoint native admission', { timeout: 60_000 }, () => {
       const moves = new PlanMoves({ ...port, load: async () => [row] });
       await expect(moves.assertAvailable(f.input.employeeId, undefined, port)).rejects.toThrow();
       expect(await store.load()).toEqual([old]);
+    }
+  );
+});
+
+/** Routing tests retain genuine requester/store/journal admission. Native protocol
+ * read itself is separately exercised through the actual Engine below. */
+describe('prepaid installed original across website pair changes', () => {
+  it('validates current local/default pair and reads the immutable old target without changing any cursor', async () => {
+    const f = await fixture(true, false, true);
+    await issuedCheckpoint(f, undefined, 'published', true);
+    const original = f.journal.read();
+    const currentPair = {
+      imageId: 'sha256:' + '2'.repeat(64),
+      sourceImageId: original.seed.target.workerImage.sourceImageId,
+      clientManifestDigest: '3'.repeat(64),
+    };
+    const actor = f.actorWithConfiguration({
+      ...f.configuration,
+      workerImageId: currentPair.imageId,
+      clientManifestDigest: currentPair.clientManifestDigest,
+    });
+    const local = vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((digest, current) => {
+      current();
+      expect(digest).toBe(currentPair.clientManifestDigest);
+    });
+    vi.spyOn(f.engine, 'observePool').mockResolvedValue(original.seed.source.record.pool!);
+    vi.spyOn(f.engine, 'replacementTargetImage').mockResolvedValue(currentPair);
+    const native = vi
+      .spyOn(DockerEmployeeEngine.prototype, 'inspectPlanReplacementProtocol')
+      .mockImplementation(async (row, current) => {
+        current();
+        expect(row).toEqual(original.work);
+        expect(row.workerImage).toEqual(original.seed.target.workerImage);
+      });
+    await actor.prepare(f.record, f.journal);
+    expect(local).toHaveBeenCalledOnce();
+    expect(native).toHaveBeenCalledOnce();
+    expect(f.journal.read()).toEqual(original);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+  });
+  it.each(['default-image', 'default-digest', 'default-source', 'local-protocol', 'original-protocol', 'revoked'])(
+    'refuses %s while retaining the exact original',
+    async (mode) => {
+      const f = await fixture(true, false, true);
+      await issuedCheckpoint(f, undefined, 'published', true);
+      const original = f.journal.read();
+      const pair = {
+        imageId: 'sha256:' + '2'.repeat(64),
+        sourceImageId: original.seed.target.workerImage.sourceImageId,
+        clientManifestDigest: '3'.repeat(64),
+      };
+      const actor = f.actorWithConfiguration({
+        ...f.configuration,
+        workerImageId: pair.imageId,
+        clientManifestDigest: pair.clientManifestDigest,
+      });
+      vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((digest, current) => {
+        current();
+        expect(digest).toBe(pair.clientManifestDigest);
+        if (mode === 'local-protocol') throw Error('local protocol unavailable');
+      });
+      vi.spyOn(f.engine, 'observePool').mockResolvedValue(original.seed.source.record.pool!);
+      vi.spyOn(f.engine, 'replacementTargetImage').mockResolvedValue({
+        ...pair,
+        ...(mode === 'default-image' ? { imageId: 'sha256:' + '4'.repeat(64) } : {}),
+        ...(mode === 'default-digest' ? { clientManifestDigest: '4'.repeat(64) } : {}),
+        ...(mode === 'default-source' ? { sourceImageId: 'sha256:' + '4'.repeat(64) } : {}),
+      });
+      const native = vi
+        .spyOn(DockerEmployeeEngine.prototype, 'inspectPlanReplacementProtocol')
+        .mockImplementation(async (_row, current) => {
+          current();
+          if (mode === 'revoked') f.keyLost();
+          else throw Error('original protocol unavailable');
+        });
+      await expect(actor.prepare(f.record, f.journal)).rejects.toThrow();
+      if (mode.startsWith('default-') || mode === 'local-protocol') expect(native).not.toHaveBeenCalled();
+      else expect(native).toHaveBeenCalledOnce();
+      expect(f.journal.read()).toEqual(original);
+      expect(f.nativeCreate).not.toHaveBeenCalled();
+    }
+  );
+  it.each(['paid', 'reader-open', 'before-identity', 'missing-target'] as const)(
+    'keeps strict old-pair admission for %s',
+    async (mode) => {
+      const f = await fixture(true, false, true);
+      if (mode === 'paid') await issuedCheckpoint(f);
+      else if (mode !== 'missing-target') await issuedCheckpoint(f, undefined, 'published', true);
+      const state = f.journal.read();
+      // A denial-only journal projection cannot manufacture a native capability.
+      const changed = {
+        ...state,
+        ...(mode === 'reader-open'
+          ? {
+              sourceReader: {
+                version: 1,
+                purpose: 'docker-plan-source-reader-v1',
+                name: state.sourceReader!.name,
+                imageId: state.sourceReader!.imageId,
+                configurationDigest: state.sourceReader!.configurationDigest,
+                containerId: state.sourceReader!.containerId,
+                phase: 'close-issued' as const,
+                init: { pid: 42, startTicks: '1234' },
+              },
+            }
+          : {}),
+        ...(mode === 'before-identity' ? { work: { ...state.work!, phase: 'identity-issued' as const } } : {}),
+      };
+      const read = { ...f.journal, read: () => DockerPlanMoveJournalState.parse(changed) };
+      const actor = f.actorWithConfiguration({ ...f.configuration, clientManifestDigest: '3'.repeat(64) });
+      const local = vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((digest) => {
+        expect(digest).toBe(state.seed.target.workerImage.clientManifestDigest);
+        throw Error('strict old pair refused');
+      });
+      const native = vi.spyOn(DockerEmployeeEngine.prototype, 'inspectPlanReplacementProtocol');
+      await expect(actor.prepare(f.record, read)).rejects.toThrow('strict old pair refused');
+      expect(local).toHaveBeenCalledOnce();
+      expect(native).not.toHaveBeenCalled();
     }
   );
 });

@@ -1,3 +1,4 @@
+import { DockerPlanInitialReceipt } from '../src/docker-plan-install-data.js';
 import { DockerEphemeralRestoration } from '../src/docker-ephemeral-restoration.js';
 import { dockerPlanDestinationEnvironment } from '../src/docker-plan-install-data.js';
 import type { EphemeralJournal } from '../src/docker-ephemeral-data.js';
@@ -2348,4 +2349,197 @@ describe('resource revision observation boundary', () => {
     expect(called).toBe(false);
     expect(f.engine.existingResourcePolicyCurrent(f.row, null)).toBe(false);
   });
+});
+
+describe('installed original protocol observation', () => {
+  const protocol = JSON.stringify({
+    version: 1,
+    purpose: 'reverie-plan-protocol-v1',
+    protocol: 1,
+    receiptFields: Object.keys(DockerPlanInitialReceipt.shape),
+  });
+  async function installed() {
+    const f = await dockerPlanRetirementFixture();
+    const row = DockerEmployeePlanReplacementWorkRecord.parse({ ...f.state.work, phase: 'identity-ready' });
+    const command = vi.mocked(f.command.run),
+      run = command.getMockImplementation()!;
+    let reply = protocol,
+      after: ((raw: Record<string, unknown>) => void) | undefined;
+    let issued = false,
+      before = false;
+    command.mockImplementation(async (args, input) => {
+      if (args.includes('plan-protocol')) {
+        expect(args).toEqual([
+          'exec',
+          row.destination!.containerId,
+          '/opt/reverie-worker-client/bin/reverie',
+          'worker-client',
+          'plan-protocol',
+          '--expected-digest',
+          row.workerImage.clientManifestDigest,
+        ]);
+        issued = true;
+        return reply;
+      }
+      const value = await run(args, input);
+      if (
+        (issued || before) &&
+        args[0] === 'container' &&
+        args[1] === 'inspect' &&
+        args[2] === row.destination!.containerId &&
+        after
+      ) {
+        const raw = JSON.parse(value) as Array<Record<string, unknown>>;
+        after(raw[0]!);
+        return JSON.stringify(raw);
+      }
+      return value;
+    });
+    vi.mocked(f.command.create).mockClear();
+    command.mockClear();
+    return {
+      ...f,
+      row,
+      reply: (value: string) => {
+        reply = value;
+      },
+      after: (change: typeof after) => {
+        after = change;
+      },
+      before: () => {
+        before = true;
+      },
+    };
+  }
+  it('reads the exact original fixed CLI 19-field protocol without resource/helper/provider writes', async () => {
+    const f = await installed();
+    try {
+      await expect(f.strictEngine.inspectPlanReplacementProtocol(f.row, () => {})).resolves.toBeUndefined();
+      expect(f.command.create).not.toHaveBeenCalled();
+      expect(
+        vi
+          .mocked(f.command.run)
+          .mock.calls.every(
+            ([a]) =>
+              a[0] === 'image' ||
+              (a[0] === 'container' && ['inspect', 'ls'].includes(a[1]!)) ||
+              a.includes('plan-protocol')
+          )
+      ).toBe(true);
+    } finally {
+      f.engine.close();
+      f.strictEngine.close();
+    }
+  });
+  it.each(['unknown-field', 'missing-field', 'duplicate-field', 'wrong-version', 'non-json'])(
+    'rejects %s protocol output',
+    async (mode) => {
+      const f = await installed(),
+        value = JSON.parse(protocol);
+      if (mode === 'unknown-field') value.extra = true;
+      if (mode === 'missing-field') value.receiptFields.pop();
+      if (mode === 'duplicate-field') value.receiptFields[0] = value.receiptFields[1];
+      if (mode === 'wrong-version') value.protocol = 2;
+      f.reply(mode === 'non-json' ? 'unknown' : JSON.stringify(value));
+      try {
+        await expect(f.strictEngine.inspectPlanReplacementProtocol(f.row, () => {})).rejects.toThrow();
+      } finally {
+        f.engine.close();
+        f.strictEngine.close();
+      }
+    }
+  );
+  it.each([
+    'pid',
+    'start',
+    'missing-pid',
+    'missing-start',
+    'malformed-pid',
+    'malformed-start',
+    'zero-start',
+    'paused',
+    'restarting',
+    'dead',
+    'cid',
+    'image',
+    'config',
+  ])('rejects original %s drift after the CLI read', async (mode) => {
+    const f = await installed();
+    f.after((raw) => {
+      const state = raw.State as Record<string, unknown>;
+      if (mode === 'pid') state.Pid = 223;
+      if (mode === 'start') state.StartedAt = '2026-11-16T00:01:00.000000000Z';
+      if (mode === 'missing-pid') delete state.Pid;
+      if (mode === 'missing-start') delete state.StartedAt;
+      if (mode === 'malformed-pid') state.Pid = '222';
+      if (mode === 'malformed-start') state.StartedAt = 'unknown';
+      if (mode === 'zero-start') state.StartedAt = '0001-01-01T00:00:00Z';
+      if (mode === 'paused') state.Paused = true;
+      if (mode === 'restarting') state.Restarting = true;
+      if (mode === 'dead') state.Dead = true;
+      if (mode === 'cid') raw.Id = 'e'.repeat(64);
+      if (mode === 'image') raw.Image = 'sha256:' + '0'.repeat(64);
+      if (mode === 'config') (raw.Config as Record<string, unknown>).Env = ['PATH=/foreign'];
+    });
+    try {
+      await expect(f.strictEngine.inspectPlanReplacementProtocol(f.row, () => {})).rejects.toThrow();
+    } finally {
+      f.engine.close();
+      f.strictEngine.close();
+    }
+  });
+  it.each(['missing-pid', 'zero-pid', 'zero-start', 'missing-start'])(
+    'refuses initial %s before the CLI read',
+    async (mode) => {
+      const f = await installed();
+      f.before();
+      f.after((raw) => {
+        const state = raw.State as Record<string, unknown>;
+        if (mode === 'missing-pid') delete state.Pid;
+        if (mode === 'zero-pid') state.Pid = 0;
+        if (mode === 'zero-start') state.StartedAt = '0001-01-01T00:00:00Z';
+        if (mode === 'missing-start') delete state.StartedAt;
+      });
+      try {
+        await expect(f.strictEngine.inspectPlanReplacementProtocol(f.row, () => {})).rejects.toThrow();
+        expect(vi.mocked(f.command.run).mock.calls.some(([a]) => a.includes('plan-protocol'))).toBe(false);
+      } finally {
+        f.engine.close();
+        f.strictEngine.close();
+      }
+    }
+  );
+  it('rechecks revocation after original CLI await', async () => {
+    const f = await installed(),
+      run = vi.mocked(f.command.run).getMockImplementation()!;
+    let revoked = false;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const result = await run(args, input);
+      if (args.includes('plan-protocol')) revoked = true;
+      return result;
+    });
+    try {
+      await expect(
+        f.strictEngine.inspectPlanReplacementProtocol(f.row, () => {
+          if (revoked) throw Error('revoked');
+        })
+      ).rejects.toThrow('revoked');
+    } finally {
+      f.engine.close();
+      f.strictEngine.close();
+    }
+  });
+  it.each(['identity-issued', 'provider-issued', 'ready'] as const)(
+    'refuses %s without CLI dispatch',
+    async (phase) => {
+      const f = await installed();
+      try {
+        await expect(f.strictEngine.inspectPlanReplacementProtocol({ ...f.row, phase }, () => {})).rejects.toThrow();
+        expect(f.command.run).not.toHaveBeenCalled();
+      } finally {
+        f.engine.close();
+        f.strictEngine.close();
+      }
+    }
+  );
 });

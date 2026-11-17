@@ -844,6 +844,51 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const selected=await this.replacementTargetImage(row.original,current);current();if(!isDeepStrictEqual(selected,row.workerImage))refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');await this.resources.validate(row.original,row.policy);current();
   }
   async settlePlanReplacementStorage(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<void>{const row=DockerEmployeePlanReplacementWorkRecord.parse(input);await this.#storage.settleObserved(row,current);current();}
+  /** Read-only compatibility of one already installed original. The owning
+   * actor retains every grant/journal fence; this returns no launch authority. */
+  async inspectPlanReplacementProtocol(
+    input: DockerEmployeePlanReplacementWorkRecord,
+    current: () => void
+  ): Promise<void> {
+    const row = DockerEmployeePlanReplacementWorkRecord.parse(input);
+    current();
+    if (row.phase !== 'identity-ready' || !row.destination) refuse('DOCKER_PLAN_REPLACEMENT_ACTOR_REQUIRED');
+    const observe = async () => {
+      const raw = await this.#destination(row, current);
+      current();
+      if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+      const epoch = z
+        .object({
+          Pid: z.number().int().positive().max(2147483647),
+          StartedAt: z
+            .string()
+            .datetime()
+            .refine((value) => Date.parse(value) > 0),
+        })
+        .safeParse(raw.State);
+      if (!epoch.success) refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+      if (!isDeepStrictEqual(boxedOriginal(raw, rowSubject(row), this.deployment, true), row.destination))
+        refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+      return containerReadState(raw);
+    };
+    const before = await observe();
+    current();
+    parseDockerPlanProtocol(
+      await this.command.run([
+        'exec',
+        row.destination.containerId,
+        '/opt/reverie-worker-client/bin/reverie',
+        'worker-client',
+        'plan-protocol',
+        '--expected-digest',
+        row.workerImage.clientManifestDigest,
+      ])
+    );
+    current();
+    const after = await observe();
+    current();
+    if (!isDeepStrictEqual(before, after)) refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+  }
   /** Inert target observation never consults legacy global identity or claims
    * that a provider exists. Canonical paid views remain a separate reader. */
   async observePlanReplacementWork(input:DockerEmployeePlanReplacementWorkRecord,current:()=>void):Promise<DockerContainerObservation|null>{
