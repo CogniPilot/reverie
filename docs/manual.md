@@ -517,6 +517,10 @@ The Nix-built image contains the console and memory runtime. Provider CLIs are
 installed on first start into persistent private tool storage; they are not
 distributed in the image. Native and container installations use the same pinned
 installer. Provider sign-in and company state survive container replacement.
+Each image selects its own pinned Codex release under the persistent tools directory.
+This lets retained workers keep using their installed release when a newer website
+or worker image starts. An employee adopts a new client when it starts on an
+updated worker image. The signed-in provider account determines available models.
 Managed sessions wait for their provider installation to finish before launching,
 and suppress the provider's automatic update prompt. To retry an installation
 after a network failure, run `reverie-install-clis` in a Reverie terminal.

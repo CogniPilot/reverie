@@ -6,6 +6,9 @@ import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 
+const codexVersion = '0.169.0';
+const codexPrefix = root => join(root, 'data/tools/codex', codexVersion);
+
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'reverie-clis-'));
   const bin = join(root, 'fake-bin'); mkdirSync(bin);
@@ -43,8 +46,8 @@ test('first start installs exact pins on persistent storage and matching version
   try {
     const first = f.run();
     assert.equal(first.status, 0, first.stderr);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.163.0', 'opencode-ai@1.19.3']);
-    assert.ok(f.calls().every(args => args.includes(join(f.root,'data/tools'))));
+    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.169.0', 'opencode-ai@1.19.3']);
+    assert.deepEqual(f.calls().map(args => args[args.indexOf('--prefix') + 1]), [join(f.root, 'data/tools'), codexPrefix(f.root), join(f.root, 'data/tools')]);
     assert.ok(!first.stdout.includes('synthetic private diagnostic'));
     assert.equal(f.run().status, 0);
     assert.equal(f.calls().length, 3);
@@ -65,7 +68,7 @@ function completion(child) {
 function guarded(f, args = [], extra = {}) {
   const installer = join(f.root, 'installer');
   writeFileSync(installer, `#!${process.execPath}\nimport(${JSON.stringify('file://' + resolve('scripts/reverie-install-clis.mjs'))});\n`, { mode: 0o700 });
-  return spawn('bash', [resolve('scripts/reverie-provider-cli'), 'codex', installer, ...args], { env: { ...f.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+  return spawn('bash', [resolve('scripts/reverie-provider-cli'), 'codex', installer, codexVersion, ...args], { env: { ...f.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 test('provider launch waits behind a blocked real installer and executes only the completed reviewed version', async () => {
@@ -73,7 +76,7 @@ test('provider launch waits behind a blocked real installer and executes only th
   const barrier = join(f.root, 'barrier'), oldStarted = join(f.root, 'old-started');
   try {
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
-    const tools = join(f.root, 'data/tools');
+    const tools = codexPrefix(f.root);
     writeFileSync(join(tools, 'lib/node_modules/@openai/codex/package.json'), JSON.stringify({ version: '0.146.0' }));
     writeFileSync(join(tools, 'bin/codex'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(oldStarted)},'wrong old version executed');process.exit(43);\n`, { mode: 0o700 });
     installing = spawn(process.execPath, [resolve('scripts/reverie-install-clis.mjs')], { env: { ...f.env, REVERIE_INSTALL_CLIS: 'codex', INSTALL_BARRIER: barrier }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -82,7 +85,7 @@ test('provider launch waits behind a blocked real installer and executes only th
     await pause(150); assert.equal(launching.exitCode, null); assert.equal(existsSync(oldStarted), false);
     writeFileSync(barrier + '.release', 'continue');
     assert.equal((await installed).status, 0);
-    const result = await launched; assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), '0.163.0');
+    const result = await launched; assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), '0.169.0');
     assert.equal(existsSync(oldStarted), false); assert.equal(f.calls().length, 2);
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); launching?.kill(); f.clean(); }
 });
@@ -99,6 +102,26 @@ test('a busy installer timeout is an error for required launches, never permissi
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); f.clean(); }
 });
 
+test('a newer container leaves the retained container’s Codex binary and pin intact', async () => {
+  const f = fixture();
+  try {
+    const legacy = join(f.root, 'data/tools');
+    const metadata = join(legacy, 'lib/node_modules/@openai/codex/package.json');
+    mkdirSync(resolve(metadata, '..'), { recursive: true });
+    mkdirSync(join(legacy, 'bin'), { recursive: true });
+    writeFileSync(metadata, JSON.stringify({ version: '0.163.0' }));
+    const binary = join(legacy, 'bin/codex');
+    writeFileSync(binary, `#!${process.execPath}\nconsole.log('codex-cli 0.163.0');\n`, { mode: 0o700 });
+
+    assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
+    const current = await completion(guarded(f, ['--version']));
+    assert.equal(current.status, 0, current.stderr);
+    assert.equal(current.stdout.trim(), codexVersion);
+    assert.equal(JSON.parse(readFileSync(metadata, 'utf8')).version, '0.163.0');
+    assert.equal(spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim(), 'codex-cli 0.163.0');
+  } finally { f.clean(); }
+});
+
 test('version discovery never queues preparation behind an installer lock', async () => {
   const f = fixture(); let installing;
   const barrier = join(f.root, 'barrier');
@@ -108,7 +131,7 @@ test('version discovery never queues preparation behind an installer lock', asyn
     const installed = completion(installing); await until(() => existsSync(barrier + '.started'));
     const result = await completion(guarded(f, ['--version'], { REVERIE_CLI_INSTALL_WAIT_SECONDS: '0.05' }));
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), '0.163.0');
+    assert.equal(result.stdout.trim(), '0.169.0');
     writeFileSync(barrier + '.release', 'continue'); await installed;
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); f.clean(); }
 });
@@ -117,7 +140,7 @@ test('required launches refuse mismatched native versions while ordinary offline
   const f = fixture();
   try {
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex', WRONG_BINARY_VERSION: '0.146.0', REVERIE_CLI_INSTALL_REQUIRED: '1' }).status, 1);
-    assert.equal(JSON.parse(readFileSync(join(f.root, 'data/tools/.install-codex.json'), 'utf8')).state, 'unavailable');
+    assert.equal(JSON.parse(readFileSync(join(codexPrefix(f.root), '.install-codex.json'), 'utf8')).state, 'unavailable');
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex', WRONG_BINARY_VERSION: '0.146.0' }).status, 0);
   } finally { f.clean(); }
 });
@@ -125,7 +148,7 @@ test('required launches refuse mismatched native versions while ordinary offline
 test('guarded direct Codex commands suppress updates, retain arguments, and keep npm globals on persistent storage', async () => {
   const f = fixture();
   try {
-    const bin = join(f.root, 'data/tools/bin'); mkdirSync(bin, { recursive: true });
+    const bin = join(codexPrefix(f.root), 'bin'); mkdirSync(bin, { recursive: true });
     writeFileSync(join(bin, 'codex'), `#!${process.execPath}\nconsole.log(JSON.stringify({args:process.argv.slice(2),prefix:process.env.npm_config_prefix}));\n`, { mode: 0o700 });
     const result = await completion(guarded(f, ['--model', 'gpt-6.1-sol', 'resume', 'saved-thread'], { REVERIE_INSTALL_CLIS: 'none' }));
     assert.equal(result.status, 0, result.stderr);
@@ -140,7 +163,7 @@ test('offline install failure is nonfatal and retries only the missing provider 
   try {
     assert.equal(f.run({ FAIL_PACKAGE: '@anthropic-ai/claude-code' }).status, 0);
     assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'unavailable');
-    assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-codex.json'))).state, 'ready');
+    assert.equal(JSON.parse(readFileSync(join(codexPrefix(f.root), '.install-codex.json'))).state, 'ready');
     assert.equal(f.run().status, 0);
     assert.equal(f.calls().length, 4);
     assert.equal(f.calls().at(-1).at(-1), '@anthropic-ai/claude-code@2.1.308');
@@ -153,7 +176,7 @@ test('none disables downloads and explicit selection installs only the requested
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'none' }).status, 0);
     assert.equal(f.calls().length, 0);
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@openai/codex@0.163.0']);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@openai/codex@0.169.0']);
   } finally { f.clean(); }
 });
 
@@ -163,20 +186,20 @@ test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and
   try {
     assert.equal(f.run().status, 0);
     const tools = join(f.root, 'data/tools');
-    for (const [pkg, version] of [['@openai/codex', '0.146.0'], ['@anthropic-ai/claude-code', '2.1.284']])
-      writeFileSync(join(tools, 'lib/node_modules', pkg, 'package.json'), JSON.stringify({ version }));
+    for (const [prefix, pkg, version] of [[codexPrefix(f.root), '@openai/codex', '0.146.0'], [tools, '@anthropic-ai/claude-code', '2.1.284']])
+      writeFileSync(join(prefix, 'lib/node_modules', pkg, 'package.json'), JSON.stringify({ version }));
     const preserved = [join(f.env.HOME, '.codex/auth.json'), join(f.env.HOME, '.claude/.credentials.json'), join(f.root, 'data/subscription-profiles.json'), join(f.root, 'data/company.json')];
     for (const file of preserved) {
       mkdirSync(resolve(file, '..'), { recursive: true });
       writeFileSync(file, 'synthetic private fixture: retain unchanged\n', { mode: 0o600 });
     }
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex claude' }).status, 0);
-    assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.163.0']);
+    assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.169.0']);
     for (const [id, version, integrity] of [
-      ['codex', '0.163.0', 'sha512-HNd7vR9oTK6M2ikxFnvNDCdYUgAsyo9VVnd5KnEd2ON0GYI++7MiX9XNPUkhtdgGKFPsWS+CEppQ1UU63uVhUw=='],
+      ['codex', '0.169.0', 'sha512-KhzYlkKPxoNssR8CEm45IjqnFWn7UtlF4CiD3tOJPea51xBs7MaHy0UQG9GSbCqk6Lrjn5QdJDV0QD1/FgWlGw=='],
       ['claude', '2.1.308', 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA=='],
     ]) {
-      const status = JSON.parse(readFileSync(join(tools, `.install-${id}.json`), 'utf8'));
+      const status = JSON.parse(readFileSync(join(id === 'codex' ? codexPrefix(f.root) : tools, `.install-${id}.json`), 'utf8'));
       assert.equal(status.version, version); assert.equal(status.registryIntegrity, integrity); assert.equal(status.state, 'ready');
     }
     for (const file of preserved) assert.equal(readFileSync(file, 'utf8'), 'synthetic private fixture: retain unchanged\n');
@@ -189,7 +212,7 @@ test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and
 test('optional ELF compatibility patches owned dynamic binaries and ignores static files or symlink escapes', () => {
   const f = fixture();
   try {
-    const modules = join(f.root, 'data/tools/lib/node_modules/native'); mkdirSync(modules, { recursive: true });
+    const modules = join(codexPrefix(f.root), 'lib/node_modules/native'); mkdirSync(modules, { recursive: true });
     const dynamic = join(modules, 'dynamic'); const staticFile = join(modules, 'static');
     const outside = join(f.root, 'outside');
     for (const file of [dynamic, staticFile, outside]) writeFileSync(file, Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0]));
@@ -217,7 +240,7 @@ test('direct native installer uses the same portable root as the native launcher
   try {
     const result = f.run({ REVERIE_DATA: '', REVERIE_ROOT: join(f.root, 'portable'), REVERIE_CONTAINER: '0', REVERIE_INSTALL_CLIS: 'codex' });
     assert.equal(result.status, 0, result.stderr);
-    assert.ok(f.calls()[0].includes(join(f.root, 'portable/companies/default/data/tools')));
+    assert.ok(f.calls()[0].includes(join(f.root, 'portable/companies/default/data/tools/codex', codexVersion)));
   } finally { f.clean(); }
 });
 
