@@ -478,7 +478,7 @@ export interface TerminalMultiplexer extends EventEmitter {
    * Pass `{ fullHistory: true }` to capture the entire scrollback as linear
    * text instead of just the visible single-screen frame (COD-47).
    */
-  capturePaneBuffer?(muxName: string, paneTarget?: string, opts?: PaneCaptureOptions): string | null;
+  capturePaneBuffer?(muxName: string, paneTarget?: string, opts?: PaneCaptureOptions): Promise<string | null>;
   /** Type keystrokes into one pane of a session (a teammate's), literally, each carriage return as Enter. */
   sendInputToPane?(muxName: string, paneTarget: string, input: string): boolean;
 
@@ -486,7 +486,7 @@ export interface TerminalMultiplexer extends EventEmitter {
    * Capture the active pane's current tmux buffer with ANSI escape codes preserved.
    * Pass `{ fullHistory: true }` to capture the entire scrollback (COD-47).
    */
-  captureActivePaneBuffer?(muxName: string, opts?: PaneCaptureOptions): string | null;
+  captureActivePaneBuffer?(muxName: string, opts?: PaneCaptureOptions): Promise<string | null>;
 
   /**
    * Plain text of the visible frame: no styles, no cursor query, no repaint
@@ -497,4 +497,6 @@ export interface TerminalMultiplexer extends EventEmitter {
    */
   /** `escapes` keeps SGR codes (`capture-pane -e`), for readers that must see styling such as Codex's dim placeholder. */
   capturePaneText?(muxName: string, paneTarget?: string, options?: { escapes?: boolean }): string | null;
+  /** Read a visible frame for background status checks without blocking live terminal I/O. */
+  capturePaneTextAsync?(muxName: string): Promise<string | null>;
 }

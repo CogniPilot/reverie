@@ -1153,6 +1153,28 @@ describe('session-routes', () => {
   // ========== GET /api/sessions/:id/terminal ==========
 
   describe('GET /api/sessions/:id/terminal', () => {
+    it('serves another request during a slow pane capture and discards the frame after a respawn', async () => {
+      let resolveCapture!: (frame: string) => void;
+      const capture = vi.fn(() => new Promise<string>((resolve) => { resolveCapture = resolve; }));
+      harness.ctx.mux.captureActivePaneBuffer = capture;
+      const id = harness.ctx._sessionId;
+      const response = harness.app.inject({ method: 'GET', url: `/api/sessions/${id}/terminal?full=1` }).then((res) => res);
+      try {
+        await vi.waitFor(() => expect(capture).toHaveBeenCalledOnce());
+        const list = await harness.app.inject({ method: 'GET', url: '/api/sessions' });
+        expect(list.statusCode).toBe(200);
+        harness.ctx._session.pid = (harness.ctx._session.pid ?? 0) + 1;
+        harness.ctx._session.terminalBuffer = 'Replacement pane output';
+        resolveCapture('Expired pane frame');
+        const replay = await response;
+        expect(replay.statusCode).toBe(200);
+        expect(replay.json().data).toMatchObject({ source: 'history', terminalBuffer: 'Replacement pane output' });
+      } finally {
+        resolveCapture?.('');
+        await response;
+      }
+    });
+
     it('returns terminal buffer', async () => {
       harness.ctx._session.terminalBuffer = 'hello world';
       const res = await harness.app.inject({
