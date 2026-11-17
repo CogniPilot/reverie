@@ -521,6 +521,7 @@ async function issuedCheckpoint(
       ],
       planReplacement: {
         ...prior.work.planReplacement,
+        ...(seed.target.runtimeNamespace ? { runtimeNamespace: seed.target.runtimeNamespace } : {}),
         moveId: seed.moveId,
         source: {
           binding: seed.source.binding,
@@ -914,6 +915,7 @@ describe('captured native plan actor before paid dispatch', () => {
     expect(f.sessions.size).toBe(0);
     expect(f.seed.source.observation.kind).toBe('running');
     expect(f.seed.forceBusy).toBe(true);
+    expect(f.seed.target.runtimeNamespace).toBe('session-v1');
     expect(f.retain).not.toHaveBeenCalled();
     expect(f.run.mock.calls.some(([a]) => a[1] === 'stop' || a[1] === 'start')).toBe(false);
   });

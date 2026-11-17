@@ -378,7 +378,7 @@ export interface SessionDocker {
     clientManifestDigest: string;
     apiUrl: string;
     /** Fixed private account generation DATA, bound by the actual observer/launch owner. */
-    planReplacement?: { provider: 'anthropic' | 'openai'; projectionDigest: string };
+    planReplacement?: { provider: 'anthropic' | 'openai'; projectionDigest: string; runtimeNamespace?: 'session-v1' };
   };
   hostId: string;
   label: string;

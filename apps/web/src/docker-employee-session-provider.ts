@@ -1,5 +1,6 @@
 import {requireDockerPlanPaidDispatch}from'./docker-plan-move-actor.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
+import { dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 /** Existing Session/mux application services own the provider and viewer. No
  * raw docker-exec provider bypass or alternate recipe/account writer.
  */
@@ -66,10 +67,7 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
         apiUrl: this.apiUrl,
         ...(row.version === 3
           ? {
-              planReplacement: {
-                provider: row.planReplacement.account.provider,
-                projectionDigest: row.planReplacement.account.projectionDigest,
-              },
+              planReplacement: dockerPlanProviderSelection(row.planReplacement),
             }
           : {}),
       },

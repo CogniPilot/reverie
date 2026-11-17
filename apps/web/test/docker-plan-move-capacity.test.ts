@@ -136,6 +136,26 @@ async function publishMaximum(
   return s.dockerPublish(record.id, issued, maximum, () => {});
 }
 describe('whole-document native settlement capacity', () => {
+  it.each([undefined, 'session-v1'] as const)(
+    'retains reserved %s namespace through every maximum-state/reload and refuses retrofit',
+    (runtimeNamespace) => {
+      const f = dockerPlanJournalFixture(),
+        seed = structuredClone(f.state.seed);
+      if (runtimeNamespace) seed.target.runtimeNamespace = runtimeNamespace;
+      const states = dockerPlanMaximumStates(seed, f.epoch);
+      for (const state of states) {
+        const restored = DockerPlanMoveJournalState.parse(JSON.parse(JSON.stringify(state)));
+        expect(restored.seed.target.runtimeNamespace).toBe(runtimeNamespace);
+        if (restored.work) {
+          expect(restored.work.planReplacement.runtimeNamespace).toBe(runtimeNamespace);
+          const changed = structuredClone(restored);
+          if (runtimeNamespace) delete changed.work!.planReplacement.runtimeNamespace;
+          else changed.work!.planReplacement.runtimeNamespace = 'session-v1';
+          expect(DockerPlanMoveJournalState.safeParse(changed).success).toBe(false);
+        }
+      }
+    }
+  );
   it('retains a bounded selected model in the immutable seed and its reserved settlement states', () => {
     const f = dockerPlanJournalFixture();
     const next = DockerPlanMoveJournalState.parse({

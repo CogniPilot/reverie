@@ -16,7 +16,14 @@ import {
   requireDockerEmployeeProviderView,
   type DockerContainedResourceController,
 } from '../src/docker-employee-engine.js';
-import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
+import {
+  DOCKER_PROVIDER_VIEW_PROGRAM,
+  dockerProviderRuntimeArguments,
+  dockerProviderSocketLabel,
+  dockerPlanProviderSelection,
+} from '../src/docker-employee-provider-view-native.js';
+import { runInNewContext } from 'node:vm';
+import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
 import type { SessionDocker } from '../src/types.js';
 import {
   DockerEmployeePlanReplacementWorkRecord,
@@ -50,6 +57,137 @@ const subject = {
   onVacation: false,
   desiredRunning: true,
 };
+/** Execute the actual fixed native program over controlled read-only syscall
+ * ports. No tmux/Docker process is launched and no private proof is fabricated. */
+function namespaceNative(mode: 'presence' | 'observe' | 'attach', runtimeNamespace?: 'session-v1', badPrefix?: string) {
+  const legacy = '/tmp/tmux-1000/reverie-docker',
+    calls: string[][] = [],
+    paths: string[] = [];
+  let stdout = '',
+    exit: number | undefined;
+  const stopped = new Error('bounded native exit');
+  const directory = (uid: number) => ({
+    uid,
+    mode: 0o40700,
+    isDirectory: () => true,
+    isFile: () => false,
+    isSocket: () => false,
+  });
+  const fsPort = {
+    lstatSync(p: string) {
+      paths.push(p);
+      if (p === '/opt/reverie-worker-tools/bin/tmux') return { uid: 0, mode: 0o100555, isFile: () => true };
+      if (p === '/tmp/tmux-1000') return directory(1000);
+      if (p === legacy) return { uid: 1000, isSocket: () => true };
+      if (p.startsWith('/tmp/tmux-1000/')) throw Object.assign(new Error('not found'), { code: 'ENOENT' });
+      return directory(0);
+    },
+    statfsSync: () => ({ type: 0x9fa0 }),
+    statSync: () => ({ uid: 1000 }),
+    readFileSync(p: string) {
+      return p === '/proc/self/status'
+        ? 'NoNewPrivs: 1\nCapInh: 0\nCapPrm: 0\nCapEff: 0\nCapAmb: 0\n'
+        : '42 (fixed) S ' + Array(18).fill('0').join(' ') + ' 123';
+    },
+  };
+  const args = [badPrefix ?? dockerProviderRuntimeArguments(runtimeNamespace)[0], mode, sid, oid, 'none'].filter(
+    (x) => x !== undefined
+  );
+  if (mode === 'attach') args.push('%1', '42', '123', '');
+  const processPort = {
+    argv: ['node', ...args],
+    getuid: () => 1000,
+    env: {},
+    stdout: {
+      write: (s: string) => {
+        stdout += s;
+      },
+    },
+    exit: (code: number) => {
+      exit = code;
+      throw stopped;
+    },
+  };
+  const child = {
+    spawnSync(_program: string, argv: string[]) {
+      calls.push(argv);
+      const label = argv[argv.indexOf('-L') + 1];
+      if (label === 'reverie-docker') return { status: 1, stdout: '', stderr: 'no server running' };
+      if (argv.includes('display-message')) return { status: 0, stdout: '%1 0 42\n' };
+      if (argv.includes('show-environment'))
+        return {
+          status: 0,
+          stdout:
+            argv.at(-1) === 'REVERIE_SESSION_ID'
+              ? 'REVERIE_SESSION_ID=' + sid + '\n'
+              : 'REVERIE_DOCKER_OPERATION_ID=' + oid + '\n',
+        };
+      return { status: 0, stdout: '' };
+    },
+  };
+  try {
+    runInNewContext(
+      DOCKER_PROVIDER_VIEW_PROGRAM,
+      { require: (name: string) => (name === 'node:fs' ? fsPort : child), process: processPort },
+      { timeout: 1000 }
+    );
+  } catch (error) {
+    if (error !== stopped) throw error;
+  }
+  return { stdout, exit, calls, paths };
+}
+describe('fixed Docker provider runtime namespace', () => {
+  it('leaves a stale legacy socket untouched and proves only the new scoped socket absent', () => {
+    expect(() => namespaceNative('presence')).toThrow('Existing Docker provider view unavailable');
+    const result = namespaceNative('presence', 'session-v1');
+    expect(result.stdout).toBe('ABSENT\n');
+    expect(result.exit).toBe(0);
+    expect(result.calls).toEqual([]);
+    expect(result.paths).toContain('/tmp/tmux-1000/' + dockerProviderSocketLabel(sid, 'session-v1'));
+    expect(result.paths).not.toContain('/tmp/tmux-1000/reverie-docker');
+  });
+  it.each(['observe', 'attach'] as const)('uses only the exact new SID label for %s', (mode) => {
+    const result = namespaceNative(mode, 'session-v1');
+    expect(result.calls.length).toBeGreaterThan(1);
+    expect(
+      result.calls.every((args) => args[args.indexOf('-L') + 1] === dockerProviderSocketLabel(sid, 'session-v1'))
+    ).toBe(true);
+    if (mode === 'observe') expect(JSON.parse(result.stdout).paneStartTicks).toBe('123');
+    else expect(result.exit).toBe(0);
+  });
+  it('refuses unknown scope selectors and malformed SIDs without falling back', () => {
+    expect(() => namespaceNative('presence', undefined, '--runtime-namespace=unknown')).toThrow();
+    expect(() => dockerProviderSocketLabel('../arbitrary', 'session-v1')).toThrow();
+    expect(() => dockerProviderSocketLabel(sid, 'unknown' as never)).toThrow();
+    expect(() => dockerProviderRuntimeArguments('unknown' as never)).toThrow();
+  });
+  it('keeps old unmarked v3 projection byte shape after JSON reload', () => {
+    const selected = dockerPlanProviderSelection({
+      account: { provider: 'anthropic', projectionDigest: '8'.repeat(64) },
+    });
+    expect(Object.hasOwn(selected, 'runtimeNamespace')).toBe(false);
+    expect(JSON.parse(JSON.stringify(selected))).toEqual(selected);
+    expect(dockerProviderSocketLabel(sid)).toBe('reverie-docker');
+  });
+  it('binds scoped native reads and the genuine Engine view to the exact reloaded Session descriptor', async () => {
+    const f = await dockerPlanRetirementFixture({ runtimeNamespace: 'session-v1' }),
+      docker = f.target.docker!;
+    const view = await f.engine.captureProviderView(f.state.work!, () => {});
+    expect(view.descriptor.planReplacement?.runtimeNamespace).toBe('session-v1');
+    view.require(f.target.id, JSON.parse(JSON.stringify(docker)));
+    const changed = structuredClone(docker);
+    delete changed.continuation!.planReplacement!.runtimeNamespace;
+    expect(() => view.require(f.target.id, changed)).toThrow('PROVIDER_VIEW_CHANGED');
+    expect(() => view.require(oid, docker)).toThrow('PROVIDER_VIEW_CHANGED');
+    const reads = vi
+      .mocked(f.command.run)
+      .mock.calls.map(([args]) => args)
+      .filter((a) => a.includes(DOCKER_PROVIDER_VIEW_PROGRAM) && a.includes(f.target.id));
+    expect(reads.length).toBeGreaterThan(1);
+    expect(reads.every((a) => a.includes('--runtime-namespace=session-v1'))).toBe(true);
+    f.engine.close();
+  });
+});
 function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: 48 * 1024 ** 3,

@@ -393,6 +393,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         operationId: randomUUID(),
         credentialId: randomUUID(),
         accountId: account.id,
+        runtimeNamespace: 'session-v1',
         provider: account.provider,
         model: accountReplacementProfile(target.saved.mode)?.model(target.saved),
         accountSnapshotDigest: snapshot.descriptor.canonicalSnapshotDigest,
@@ -849,6 +850,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       planReplacement: {
         version: 1,
         purpose: 'docker-plan-replacement-provenance-v1',
+        ...(seed.target.runtimeNamespace ? { runtimeNamespace: seed.target.runtimeNamespace } : {}),
         moveId: record.id,
         source: {
           binding: seed.source.binding,

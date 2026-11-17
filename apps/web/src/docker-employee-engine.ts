@@ -45,7 +45,7 @@ import {
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import type { SessionDocker } from './types.js';
-import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM } from './docker-employee-provider-view-native.js';
+import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, dockerProviderRuntimeArguments, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 export { PackagedDockerEngineCommand, type DockerEngineCommand } from './docker-engine-command.js';
 export interface DockerContainedResourceController {
   validate(original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void>;
@@ -96,6 +96,7 @@ export interface DockerEmployeeProviderViewDescriptor {
   readonly planReplacement?: Readonly<{
     provider: 'anthropic' | 'openai';
     projectionDigest: string;
+    runtimeNamespace?: 'session-v1';
   }>;
 }
 /** A private observer admission. It grants no provider creation or relaunch. */
@@ -1248,6 +1249,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         '-e',
         DOCKER_PROVIDER_VIEW_PROGRAM,
         '--',
+        ...dockerProviderRuntimeArguments(checked.version === 3 ? checked.planReplacement.runtimeNamespace : undefined),
         'presence',
         b.sessionId,
         b.operationId,
@@ -1311,10 +1313,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         clientManifestDigest: checked.workerImage.clientManifestDigest,
         ...(checked.version === 3
           ? {
-              planReplacement: {
-                provider: checked.planReplacement.account.provider,
-                projectionDigest: checked.planReplacement.account.projectionDigest,
-              },
+              planReplacement: dockerPlanProviderSelection(checked.planReplacement),
             }
           : {}),
       },
@@ -1420,6 +1419,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         '-e',
         DOCKER_PROVIDER_VIEW_PROGRAM,
         '--',
+        ...dockerProviderRuntimeArguments(checked.version === 3 ? checked.planReplacement.runtimeNamespace : undefined),
         'observe',
         checked.request.sessionId,
         checked.request.operationId,
@@ -1455,10 +1455,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         clientManifestDigest: checked.workerImage.clientManifestDigest,
         ...(checked.version === 3
           ? {
-              planReplacement: {
-                provider: checked.planReplacement.account.provider,
-                projectionDigest: checked.planReplacement.account.projectionDigest,
-              },
+              planReplacement: dockerPlanProviderSelection(checked.planReplacement),
             }
           : {}),
       },
@@ -1493,6 +1490,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       '-e',
       DOCKER_PROVIDER_VIEW_PROGRAM,
       '--',
+      ...dockerProviderRuntimeArguments(row.version === 3 ? row.planReplacement.runtimeNamespace : undefined),
       'presence',
       original.sessionId,
       row.request.operationId,

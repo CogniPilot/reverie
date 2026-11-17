@@ -11,7 +11,9 @@ export class DockerEmployeeProviderLaunch {
   readonly #session: Session;
   readonly #binding: DockerEmployeeBinding;
   readonly #current: () => void;
-  readonly #planReplacement: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }> | undefined;
+  readonly #planReplacement:
+    | Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string; runtimeNamespace?: 'session-v1' }>
+    | undefined;
   #claimed = false;
   #workspace: { kind: 'unobserved' } | { kind: 'held' } | { kind: 'observed'; value: Readonly<DockerCodexWorkspace> } =
     { kind: 'unobserved' };

@@ -179,6 +179,7 @@ export const DockerEmployeePlanReplacementProvenance = z
     version: z.literal(1),
     purpose: z.literal('docker-plan-replacement-provenance-v1'),
     moveId: planIdentifier,
+    runtimeNamespace: z.literal('session-v1').optional(),
     source: z
       .object({
         binding: DockerEmployeeBinding,

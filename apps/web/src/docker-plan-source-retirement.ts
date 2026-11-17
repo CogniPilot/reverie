@@ -8,6 +8,7 @@ import { PlanMoveError } from './plan-move.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { DockerPlanSourceProof } from './docker-plan-source.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
+import { dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 export interface DockerPlanSourceRetirementScope {
   readonly moveId: string;
   readonly employeeId: string;
@@ -20,7 +21,11 @@ export interface DockerPlanSourceRetirementScope {
     containerId: string;
     imageId: string;
     clientManifestDigest: string;
-    planReplacement?: Readonly<{ provider: 'anthropic' | 'openai'; projectionDigest: string }>;
+    planReplacement?: Readonly<{
+      provider: 'anthropic' | 'openai';
+      projectionDigest: string;
+      runtimeNamespace?: 'session-v1';
+    }>;
   }>;
   readonly target: Readonly<{ sessionGeneration: number; operationId: string; containerId: string; imageId: string }>;
 }
@@ -144,10 +149,7 @@ export function captureDockerPlanSourceRetirement(
     descriptor.containerId !== destination.containerId ||
     descriptor.imageId !== destination.imageId ||
     descriptor.clientManifestDigest !== row.workerImage.clientManifestDigest ||
-    !isDeepStrictEqual(descriptor.planReplacement, {
-      provider: row.planReplacement.account.provider,
-      projectionDigest: row.planReplacement.account.projectionDigest,
-    }) ||
+    !isDeepStrictEqual(descriptor.planReplacement, dockerPlanProviderSelection(row.planReplacement)) ||
     (old && (old.id !== record.oldSession || old.owner !== record.owner))
   )
     throw new PlanMoveError('The source or target retirement tuple changed', 409);
@@ -179,10 +181,7 @@ export function captureDockerPlanSourceRetirement(
       clientManifestDigest: seed.source.record.workerImage.clientManifestDigest,
       ...(seed.source.record.version === 3
         ? {
-            planReplacement: {
-              provider: seed.source.record.planReplacement.account.provider,
-              projectionDigest: seed.source.record.planReplacement.account.projectionDigest,
-            },
+            planReplacement: dockerPlanProviderSelection(seed.source.record.planReplacement),
           }
         : {}),
     },

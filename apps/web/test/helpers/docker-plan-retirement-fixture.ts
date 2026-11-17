@@ -10,6 +10,10 @@ import { identityHelperConfiguration } from '../../src/docker-identity-helper.js
 import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../../src/docker-employee-provider-view-native.js';
 import { captureDockerPlanSourceRetirement } from '../../src/docker-plan-source-retirement.js';
 import type { DockerEngineCommand } from '../../src/docker-engine-command.js';
+import {
+  dockerPlanProviderSelection,
+  type DockerProviderRuntimeNamespace,
+} from '../../src/docker-employee-provider-view-native.js';
 import type { DockerContinuationTaskJournal } from '../../src/docker-continuation-task.js';
 import type { PlanMoveRecord } from '../../src/plan-move.js';
 import { Session } from '../../src/session.js';
@@ -19,7 +23,8 @@ import { dockerPlanSourceFixture } from './docker-plan-source-fixture.js';
 import { dockerPlanJournalFixture } from './docker-plan-move-fixture.js';
 const hex = (s: string) => s.repeat(64);
 export async function dockerPlanRetirementFixture(options?: {
-  canonicalRead(row: DockerEmployeePlanReplacementWorkRecord): Promise<{
+  runtimeNamespace?: DockerProviderRuntimeNamespace;
+  canonicalRead?(row: DockerEmployeePlanReplacementWorkRecord): Promise<{
     providerSourceDigest: string;
     publish(row: DockerEmployeePlanReplacementWorkRecord): Promise<void>;
     requireCurrent(
@@ -93,6 +98,7 @@ export async function dockerPlanRetirementFixture(options?: {
     pool,
     planReplacement: {
       ...f.work.planReplacement,
+      ...(options?.runtimeNamespace ? { runtimeNamespace: options.runtimeNamespace } : {}),
       source: {
         binding: src.binding,
         continuationDigest: digest(src.row),
@@ -102,7 +108,7 @@ export async function dockerPlanRetirementFixture(options?: {
     },
   });
   row = DockerEmployeePlanReplacementWorkRecord.parse(JSON.parse(JSON.stringify(row)));
-  const canonical = await options?.canonicalRead(row);
+  const canonical = await options?.canonicalRead?.(row);
   if (canonical)
     row = DockerEmployeePlanReplacementWorkRecord.parse({
       ...row,
@@ -389,10 +395,7 @@ export async function dockerPlanRetirementFixture(options?: {
       ...(source
         ? {}
         : {
-            planReplacement: {
-              provider: row.planReplacement.account.provider,
-              projectionDigest: row.planReplacement.account.projectionDigest,
-            },
+            planReplacement: dockerPlanProviderSelection(row.planReplacement),
           }),
     },
   });
@@ -407,7 +410,11 @@ export async function dockerPlanRetirementFixture(options?: {
       providerSourceDigest: src.row.sourceDigest,
       observation: { kind: 'stopped' as const, terminalStateDigest: digest(src.raw.State) },
     },
-    target: { ...f.state.seed.target, workerImage: row.workerImage },
+    target: {
+      ...f.state.seed.target,
+      workerImage: row.workerImage,
+      ...(options?.runtimeNamespace ? { runtimeNamespace: options.runtimeNamespace } : {}),
+    },
   };
   const state = DockerPlanMoveJournalState.parse({
     ...f.state,

@@ -1,7 +1,7 @@
 import { DOCKER_CODEX_WORKSPACE_PROGRAM } from './docker-employee-codex-workspace.js';
 import { dockerPlanDestinationEnvironment, dockerPlanGeneration } from './docker-plan-install-data.js';
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
-import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX } from './docker-employee-provider-view-native.js';
+import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX, dockerProviderSocketLabel, dockerProviderRuntimeArguments } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { DockerViewerPane, type DockerViewerCommand } from './docker-viewer-pane.js';
@@ -1614,6 +1614,7 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  if(docker.engine!=='docker'||docker.context!==undefined||docker.daemonHost!=='unix:///run/reverie-engine/docker.sock')throw Error('Fixed boxed Docker command required');
  const rawBase=['/bin/docker','--host','unix:///run/reverie-engine/docker.sock'];
  const base=rawBase.map(shellescape).join(' '),name=shellescape(docker.containerName),target='reverie-dkr-'+sessionId;
+ const runtimeNamespace=placement.planReplacement?.runtimeNamespace, socket=shellescape(dockerProviderSocketLabel(sessionId,runtimeNamespace));
  const env={...selectedEnvironment.env,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:selectedEnvironment.identityFile,REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',key+'='+value]);
@@ -1631,12 +1632,12 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
     ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],
     ['set', '-t', target, 'status', 'off'],
    ]);
-   inner='printf %s '+shellescape(source)+' | '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L reverie-docker start-server '+shellescape(';')+' source-file - && exec '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L reverie-docker attach-session -t '+shellescape(target);
+   inner='printf %s '+shellescape(source)+' | '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L '+socket+' start-server '+shellescape(';')+' source-file - && exec '+shellescape(DOCKER_PROVIDER_VIEW_TMUX)+' -u -L '+socket+' attach-session -t '+shellescape(target);
    innerArgs=['sh','-lc','export PATH=/opt/reverie-worker-client/bin:"$PATH"; '+inner];
  }else {
    const descriptor=opts.continuationView!.descriptor;
    flags.push(...DOCKER_PROVIDER_VIEW_ENV, '--env', 'ENV=', '--env', 'BASH_ENV=');
-   innerArgs=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'--','attach',sessionId,placement.operationId,descriptor.hooks.kind,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hooks.kind==='generation'?descriptor.hooks.generation:''];
+   innerArgs=['/opt/reverie-worker-client/bin/node','--input-type=commonjs','--no-warnings','-e',DOCKER_PROVIDER_VIEW_PROGRAM,'--',...dockerProviderRuntimeArguments(runtimeNamespace),'attach',sessionId,placement.operationId,descriptor.hooks.kind,descriptor.paneId,String(descriptor.panePid),descriptor.paneStartTicks,descriptor.hooks.kind==='generation'?descriptor.hooks.generation:''];
  }
  const expected=shellescape(docker.image+' true '+docker.containerName);
  const checked=base+' inspect -f '+shellescape('{{.Image}} {{.State.Running}} {{.Id}}')+' '+name+' | grep -Fx '+expected;
@@ -1658,7 +1659,8 @@ export function buildDockerKillCommand(options: { docker: SessionDocker; session
   const { docker, sessionId } = options;
   const base = buildDockerBaseArgs(docker).join(' ');
   const dkrName = docker.continuation?'reverie-dkr-'+sessionId:dockerTmuxSessionName(sessionId);
-  return `${base} exec ${shellescape(docker.containerName)} tmux -L ${DOCKER_TMUX_SOCKET} kill-session -t ${shellescape(dkrName)}`;
+  const socket = docker.continuation ? dockerProviderSocketLabel(sessionId, docker.continuation.planReplacement?.runtimeNamespace) : DOCKER_TMUX_SOCKET;
+  return `${base} exec ${shellescape(docker.containerName)} tmux -L ${shellescape(socket)} kill-session -t ${shellescape(dkrName)}`;
 }
 
 /**

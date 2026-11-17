@@ -158,6 +158,7 @@ export function dockerPlanMaximumStates(seed: DockerPlanMoveSeed, epoch: string)
     planReplacement: {
       version: 1,
       purpose: 'docker-plan-replacement-provenance-v1',
+      ...(target.runtimeNamespace ? { runtimeNamespace: target.runtimeNamespace } : {}),
       moveId: seed.moveId,
       source: {
         binding: seed.source.binding,

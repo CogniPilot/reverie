@@ -46,6 +46,8 @@ import {
 import {
   DOCKER_PROVIDER_VIEW_ENV,
   DOCKER_PROVIDER_VIEW_PROGRAM,
+  dockerProviderRuntimeArguments,
+  dockerProviderSocketLabel,
   DOCKER_PROVIDER_VIEW_TMUX,
 } from '../../src/docker-employee-provider-view-native.js';
 import { dockerEmployeeProviderSourceDigest } from '../../src/docker-employee-store.js';
@@ -1696,6 +1698,7 @@ async function runPlanOfficeTeamViewerRepair(p: {
           '-e',
           DOCKER_PROVIDER_VIEW_PROGRAM,
           '--',
+          ...dockerProviderRuntimeArguments(row.version === 3 ? row.planReplacement.runtimeNamespace : undefined),
           'observe',
           row.request.sessionId,
           row.request.operationId,
@@ -1714,7 +1717,10 @@ async function runPlanOfficeTeamViewerRepair(p: {
       '-f',
       '/dev/null',
       '-L',
-      'reverie-docker',
+      dockerProviderSocketLabel(
+        row.request.sessionId,
+        row.version === 3 ? row.planReplacement.runtimeNamespace : undefined
+      ),
       'capture-pane',
       '-p',
       '-J',

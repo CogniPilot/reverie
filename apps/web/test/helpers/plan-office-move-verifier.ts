@@ -17,6 +17,8 @@ import {
   DOCKER_PROVIDER_VIEW_ENV,
   DOCKER_PROVIDER_VIEW_PROGRAM,
   DOCKER_PROVIDER_VIEW_TMUX,
+  dockerProviderRuntimeArguments,
+  dockerProviderSocketLabel,
 } from '../../src/docker-employee-provider-view-native.js';
 import { planFixtureTurnBarrier, type PlanProviderFixtureReport } from './boxed-plan-provider.js';
 import { PlanOfficeMoveScenario } from './plan-office-move-driver.js';
@@ -258,6 +260,7 @@ function nodeRead(row: DockerEmployeeContinuationRecord) {
     '-e',
     DOCKER_PROVIDER_VIEW_PROGRAM,
     '--',
+    ...dockerProviderRuntimeArguments(row.version === 3 ? row.planReplacement.runtimeNamespace : undefined),
     'observe',
     row.request.sessionId,
     row.request.operationId,
@@ -455,7 +458,10 @@ export async function verifyPlanOfficeMovedProvider(
       '-f',
       '/dev/null',
       '-L',
-      'reverie-docker',
+      dockerProviderSocketLabel(
+        row.request.sessionId,
+        row.version === 3 ? row.planReplacement.runtimeNamespace : undefined
+      ),
       'capture-pane',
       '-p',
       '-J',
@@ -601,7 +607,10 @@ export async function verifyPlanOfficeReadyNative(
     '-f',
     '/dev/null',
     '-L',
-    'reverie-docker',
+    dockerProviderSocketLabel(
+      row.request.sessionId,
+      row.version === 3 ? row.planReplacement.runtimeNamespace : undefined
+    ),
     'capture-pane',
     '-p',
     '-J',

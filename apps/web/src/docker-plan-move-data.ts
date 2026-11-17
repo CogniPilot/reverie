@@ -89,6 +89,7 @@ export const DockerPlanMoveSeed = z
         operationId: uuid,
         credentialId: uuid,
         accountId: identifier,
+        runtimeNamespace: z.literal('session-v1').optional(),
         provider: z.enum(['anthropic', 'openai']),
         accountSnapshotDigest: digest,
         accountSource: z.discriminatedUnion('kind', [
@@ -236,6 +237,7 @@ export const DockerPlanMoveJournalState = z
         !isEqual(work.original, source) ||
         !isEqual(work.workerImage, target.workerImage) ||
         work.planReplacement.moveId !== seed.moveId ||
+        work.planReplacement.runtimeNamespace !== target.runtimeNamespace ||
         !isEqual(work.planReplacement.source.binding, seed.source.binding) ||
         work.planReplacement.source.continuationDigest !== dockerContinuationDigest(seed.source.record) ||
         work.planReplacement.source.providerSourceDigest !== seed.source.providerSourceDigest ||

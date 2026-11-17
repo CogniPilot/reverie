@@ -7,7 +7,13 @@ import {
   captureDockerEmployeeProviderLaunch,
   DockerEmployeeProviderLaunch,
 } from '../src/docker-employee-provider-launch.js';
-import { TmuxManager, buildDockerLaunchCommand, buildSpawnCommand } from '../src/tmux-manager.js';
+import {
+  TmuxManager,
+  buildDockerLaunchCommand,
+  buildSpawnCommand,
+  buildDockerKillCommand,
+} from '../src/tmux-manager.js';
+import { dockerProviderSocketLabel } from '../src/docker-employee-provider-view-native.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from '../src/utils/native-thread-profile.js';
 import type { SessionDocker, SessionState } from '../src/types.js';
 const eid = '10000000-0000-4000-8000-000000000001',
@@ -72,6 +78,40 @@ function fixture(mode: 'claude' | 'codex' = 'claude') {
   return { place, session, binding, opts };
 }
 describe('boxed original provider publication', () => {
+  it.each([undefined, 'session-v1'] as const)(
+    'uses the same fixed %s namespace for one original launch and later kill',
+    (runtimeNamespace) => {
+      const f = fixture();
+      f.place.continuation!.planReplacement = {
+        provider: 'anthropic',
+        projectionDigest: '8'.repeat(64),
+        ...(runtimeNamespace ? { runtimeNamespace } : {}),
+      };
+      const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+      const command = buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
+      const label = dockerProviderSocketLabel(sid, runtimeNamespace);
+      expect(command).toContain('start-server');
+      expect(command).toContain('attach-session');
+      expect(command.split(label)).toHaveLength(3);
+      expect(buildDockerKillCommand({ docker: f.place, sessionId: sid })).toContain(
+        '-L ' + shellescape(label) + ' kill-session'
+      );
+      expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow('already held');
+    }
+  );
+  it('pins the namespace inside the genuine one-shot Session owner', () => {
+    const f = fixture();
+    f.place.continuation!.planReplacement = {
+      provider: 'anthropic',
+      projectionDigest: '8'.repeat(64),
+      runtimeNamespace: 'session-v1',
+    };
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    delete f.place.continuation!.planReplacement.runtimeNamespace;
+    expect(() => buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toThrow(
+      'Original Docker Session changed'
+    );
+  });
   it.each([
     ['anthropic', 'claude', 'CLAUDE_CONFIG_DIR'],
     ['openai', 'codex', 'CODEX_HOME'],

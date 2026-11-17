@@ -6,7 +6,7 @@ import { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docke
 import { DockerEmployeeInspect, boxedOriginal } from './docker-employee-engine-data.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import { parseWorkerClientReadback } from './worker-client-manifest.js';
-import { DOCKER_PROVIDER_VIEW_ENV } from './docker-employee-provider-view-native.js';
+import { DOCKER_PROVIDER_VIEW_ENV, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 import { requireDockerEmployeeProviderView, type DockerEmployeeProviderView } from './docker-employee-engine.js';
 import type { SessionDocker } from './types/session.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
@@ -315,10 +315,7 @@ export class DockerPlanSourceReader {
           clientManifestDigest: row.workerImage.clientManifestDigest,
           ...(row.version === 3
             ? {
-                planReplacement: {
-                  provider: row.planReplacement.account.provider,
-                  projectionDigest: row.planReplacement.account.projectionDigest,
-                },
+                planReplacement: dockerPlanProviderSelection(row.planReplacement),
               }
             : {}),
         },
