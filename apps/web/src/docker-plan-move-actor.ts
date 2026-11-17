@@ -919,7 +919,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           initial.contextInputDigest !== dockerContinuationDigest(state.material.context)
         )
           throw new PlanMoveError('The installed original material changed', 409);
-        await this.#accountProbe(row, () => journal.current());
+        await this.#accountProbe(row, () => journal.current(), 'initial');
         journal.current();
         await transaction.engine.initialPlanReplacementInstallation(row, () => journal.current());
         journal.current();
@@ -982,7 +982,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       if (row.phase !== 'identity-ready') throw new PlanMoveError('The original target install is unconfirmed', 409);
       await holder.close(record, journal);
       journal.current();
-      await this.#accountProbe(row, () => journal.current());
+      await this.#accountProbe(row, () => journal.current(), 'initial');
       journal.current();
       await transaction.engine.observePlanReplacementInstallation(row, payload, selected.contextSource, () =>
         journal.current()
@@ -1039,7 +1039,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     );
     journal.current();
   }
-  async #accountProbe(row: WorkRecord, current: () => void): Promise<void> {
+  async #accountProbe(row: WorkRecord, current: () => void, readMode: 'initial' | 'live' = 'live'): Promise<void> {
     current();
     if (!row.destination) throw new PlanMoveError('The selected account target is unavailable', 409);
     const provider = row.planReplacement.account.provider;
@@ -1051,7 +1051,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           projectionDigest: row.planReplacement.account.projectionDigest,
           provider,
           containerId: row.destination.containerId,
-        })
+        }, readMode)
       );
     } catch {
       current();
