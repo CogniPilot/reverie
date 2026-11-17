@@ -1355,8 +1355,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     };
     const inputAdmission = Session.prototype.captureInputAdmission.call(held.session, inputCurrent),
       mark = getCli(held.session.mode)?.capabilities.composerReadyMark;
-    if (!mark || held.session.pid === null || !inputAdmission() || !recoveryComposerReady(held.session, mark) ||
-        !Session.prototype.canAcceptChatInput.call(held.session))
+    if (!mark || held.session.pid === null || !held.session.muxName || !inputAdmission() || !recoveryComposerReady(held.session, mark) ||
+        !Session.prototype.composerProvablyIdle.call(held.session))
       throw new PlanMoveComposerNotReady();
     await journal.publish(state, {
       ...state,
@@ -1366,7 +1366,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     await submitRecoveryPrompt(
       held.session,
       state.seed.handoff,
-      inputCurrent,
+      inputAdmission,
       undefined,
       { fromUser: true }
     );

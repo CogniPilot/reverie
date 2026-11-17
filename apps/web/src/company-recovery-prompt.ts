@@ -12,6 +12,7 @@ export interface RecoveryPromptSession {
     text: string,
     options: {
       opencodeGuard: boolean;
+      admitted?: () => boolean;
       requireEmptyComposer?: boolean;
       fromUser?: boolean;
       onOutcome(outcome: 'submitted' | 'stranded' | 'unverified'): void;
@@ -65,6 +66,7 @@ export async function submitRecoveryPrompt(
   const sent = await session.writeViaMux(text.replace(/[\r\n]+/g, ' ') + '\r', {
     ...options,
     opencodeGuard: true,
+    admitted: allowed,
     requireEmptyComposer: true,
     onOutcome: (value) => {
       outcome = value;

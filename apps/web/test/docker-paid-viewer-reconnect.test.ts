@@ -691,51 +691,109 @@ it('refuses revoked native proof before touching the lost paid viewer', async ()
 });
 
 async function loadedPlanViewTransition() {
-  const f = await paidFixture(true, true), row = f.native.state.work!;
+  const f = await paidFixture(true, true),
+    row = f.native.state.work!;
   // Explicit controlled read observation of the already configured policy.
   // This fixture port cannot create or start a resource helper.
   vi.mocked(f.native.resources.read).mockResolvedValue(row.policy);
   const directory = fs.mkdtempSync(join(tmpdir(), 'ready-view-renewal-'));
-  const path = join(directory, 'state.json'), writer = new StateStore(path);
-  const data = {id: row.request.sessionId, owner: row.owner, mode: 'claude', workingDir: '/workspace',
-    claudeMode: 'normal', allowedTools: 'Read', status: 'idle', pid: null, currentTaskId: null,
-    createdAt: 1, lastActivityAt: 1, docker: structuredClone(f.session.docker!)} as SessionState;
+  const path = join(directory, 'state.json'),
+    writer = new StateStore(path);
+  const data = {
+    id: row.request.sessionId,
+    owner: row.owner,
+    mode: 'claude',
+    workingDir: '/workspace',
+    claudeMode: 'normal',
+    allowedTools: 'Read',
+    status: 'idle',
+    pid: null,
+    currentTaskId: null,
+    createdAt: 1,
+    lastActivityAt: 1,
+    docker: structuredClone(f.session.docker!),
+  } as SessionState;
   writer.setSession(data.id, data);
-  const original = new Session({...data, publicationStore: writer});
-  const publication = writer.stageProviderLaunch(original, {transport: 'docker', current: () => true,
-    snapshot: () => original.toPersistedState()});
-  await publication.prepare(original, {kind: 'mux', sessionId: data.id, owner: null, mode: 'claude',
-    command: 'controlled-known-returned-plan-provider', cwd: '/workspace', environment: {}});
+  const original = new Session({ ...data, publicationStore: writer });
+  const publication = writer.stageProviderLaunch(original, {
+    transport: 'docker',
+    current: () => true,
+    snapshot: () => original.toPersistedState(),
+  });
+  await publication.prepare(original, {
+    kind: 'mux',
+    sessionId: data.id,
+    owner: null,
+    mode: 'claude',
+    command: 'controlled-known-returned-plan-provider',
+    cwd: '/workspace',
+    environment: {},
+  });
   publication.claim();
   const returned = vi.fn(() => true);
   publication.settle(returned());
   expect(returned).toHaveBeenCalledOnce();
-  await original.stop(false); writer.flush();
-  const loaded = new StateStore(path), mux = new TmuxManager();
-  const session = new Session({...loaded.getSession(data.id)!, publicationStore: loaded, useMux: true, mux});
-  cleanup.push(async () => {await session.stop(false); mux.destroy(); loaded.flush(); fs.rmSync(directory, {recursive:true,force:true});});
+  await original.stop(false);
+  writer.flush();
+  const loaded = new StateStore(path),
+    mux = new TmuxManager();
+  const session = new Session({ ...loaded.getSession(data.id)!, publicationStore: loaded, useMux: true, mux });
+  cleanup.push(async () => {
+    await session.stop(false);
+    mux.destroy();
+    loaded.flush();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   vi.spyOn(mux, 'isPaneDead').mockReturnValue(false);
   vi.spyOn(mux, 'capturePaneText').mockReturnValue('❯ \n  shift+tab to cycle');
-  vi.spyOn(mux, 'readPaneLiveness').mockImplementation(async () => ({state:'live',pid:mux.getSession(session.id)!.pid}));
-  const issued = {...row, phase:'provider-issued' as const};
-  await f.companyFile.update(state => {state.dockerEmployeeContinuations = [issued];});
-  const current = () => {if(digest(f.canonical.record(row.employeeId))!==digest(issued)) throw Error('Original view row changed');};
+  vi.spyOn(mux, 'readPaneLiveness').mockImplementation(async () => ({
+    state: 'live',
+    pid: mux.getSession(session.id)!.pid,
+  }));
+  const issued = { ...row, phase: 'provider-issued' as const };
+  await f.companyFile.update((state) => {
+    state.dockerEmployeeContinuations = [issued];
+  });
+  const current = () => {
+    if (digest(f.canonical.record(row.employeeId)) !== digest(issued)) throw Error('Original view row changed');
+  };
   session.bindDockerContinuationView(await f.native.engine.captureProviderView(issued, current));
   await session.startInteractive();
   expect(session.toState().providerDispatchHoldKind).toBe('loaded-intent');
   expect(session.providerInputHeld).toBe(false);
-  await f.companyFile.update(state => {state.dockerEmployeeContinuations = [row];});
+  await f.companyFile.update((state) => {
+    state.dockerEmployeeContinuations = [row];
+  });
   expect(session.providerInputHeld).toBe(true);
   expect(session.dockerContinuationViewCurrent).toBe(false);
-  const sessions = new Map([[session.id,session]]);
+  const sessions = new Map([[session.id, session]]);
   let runtime = true;
-  const deps = {company:f.canonicalCompany,store:f.canonical,engine:f.native.engine,sessions,
-    saved:(id:string)=>loaded.getSession(id),runtimeCurrent:()=>{if(!runtime)throw Error('Runtime changed');}};
-  return {...f,row,session,loaded,mux,deps,revokeRuntime:()=>{runtime=false;}};
+  const deps = {
+    company: f.canonicalCompany,
+    store: f.canonical,
+    engine: f.native.engine,
+    sessions,
+    saved: (id: string) => loaded.getSession(id),
+    runtimeCurrent: () => {
+      if (!runtime) throw Error('Runtime changed');
+    },
+  };
+  return {
+    ...f,
+    row,
+    session,
+    loaded,
+    mux,
+    deps,
+    revokeRuntime: () => {
+      runtime = false;
+    },
+  };
 }
 
 it('renews a loaded v3 reader after READY metadata publication without retaining its operation grant or replaying a provider', async () => {
-  const f = await loadedPlanViewTransition(), oldPid = f.session.pid;
+  const f = await loadedPlanViewTransition(),
+    oldPid = f.session.pid;
   let operation = true;
   const creates = vi.mocked(f.native.command.create).mock.calls.length,
     clients = transport.clients.length;
@@ -753,32 +811,60 @@ it('renews a loaded v3 reader after READY metadata publication without retaining
 });
 
 it.each(['operation', 'runtime', 'owner', 'binding', 'recipe', 'resources', 'native', 'hooks'] as const)(
-  'refuses READY reader renewal after %s drift without provider, helper or input effects', async kind => {
-    const f = await loadedPlanViewTransition(), before = transport.clients.length;
+  'refuses READY reader renewal after %s drift without provider, helper or input effects',
+  async (kind) => {
+    const f = await loadedPlanViewTransition(),
+      before = transport.clients.length;
     if (kind === 'runtime') f.revokeRuntime();
-    if (kind === 'owner') await f.companyFile.update(state => {state.employees[0]!.owner = 'another-owner';});
-    if (kind === 'binding') await f.companyFile.update(state => {state.employees[0]!.dockerBinding!.containerId = 'f'.repeat(64);});
-    if (kind === 'recipe') f.session.workingDir = '/changed';
+    if (kind === 'owner')
+      await f.companyFile.update((state) => {
+        state.employees[0]!.owner = 'another-owner';
+      });
+    if (kind === 'binding')
+      await f.companyFile.update((state) => {
+        state.employees[0]!.dockerBinding!.containerId = 'f'.repeat(64);
+      });
+    if (kind === 'recipe') expect(Reflect.set(f.session, 'workingDir', '/changed')).toBe(true);
     if (kind === 'resources') vi.mocked(f.native.resources.read).mockResolvedValue(null);
     if (kind === 'native' || kind === 'hooks') {
       const run = vi.mocked(f.native.command.run).getMockImplementation()!;
+      let inspected = 0;
       vi.mocked(f.native.command.run).mockImplementation(async (args, input) => {
         const text = await run(args, input);
-        if (kind === 'native' && args[0] === 'container' && args[1] === 'inspect' && args[2] === f.row.destination!.containerId) {
-          const value = JSON.parse(text); value[0].State.Pid += 1; return JSON.stringify(value);
+        if (
+          kind === 'native' &&
+          args[0] === 'container' &&
+          args[1] === 'inspect' &&
+          args[2] === f.row.destination!.containerId
+        ) {
+          if (++inspected > 1) {
+            const value = JSON.parse(text);
+            value[0].State.Pid += 1;
+            return JSON.stringify(value);
+          }
         }
         if (kind === 'hooks' && args.includes(DOCKER_PROVIDER_VIEW_PROGRAM)) {
-          const value = JSON.parse(text); value.hooks = {kind:'none'}; return JSON.stringify(value);
+          const value = JSON.parse(text);
+          value.hooks = { kind: 'none' };
+          return JSON.stringify(value);
         }
         return text;
       });
     }
-    await expect(renewExistingDockerProviderView(f.deps, f.row, f.session, () => kind !== 'operation')).rejects.toThrow();
+    await expect(renewExistingDockerProviderView(f.deps, f.row, f.session, () => kind !== 'operation')).rejects.toThrow(
+      kind === 'native' ? 'DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ' : undefined
+    );
     expect(f.session.providerInputHeld).toBe(true);
     expect(transport.clients).toHaveLength(before);
     expect(f.native.command.create).not.toHaveBeenCalled();
     expect(transport.writes).toEqual([]);
-    expect(vi.mocked(f.native.command.run).mock.calls.some(([args]) => args[0] === 'container' && ['start','stop','create','restart'].includes(args[1]!))).toBe(false);
+    expect(
+      vi
+        .mocked(f.native.command.run)
+        .mock.calls.some(
+          ([args]) => args[0] === 'container' && ['start', 'stop', 'create', 'restart'].includes(args[1]!)
+        )
+    ).toBe(false);
   }
 );
 
@@ -790,5 +876,16 @@ it('does not clear a local input hold or an unsent draft when renewing READY met
   expect(f.session.dockerContinuationViewCurrent).toBe(true);
   expect(f.session.captureInputAdmission()()).toBe(false);
   expect(f.session.canAcceptChatInput()).toBe(false);
+  expect(transport.writes).toEqual([]);
+});
+
+it('keeps the genuine styled composer draft check after READY view renewal', async () => {
+  const f = await loadedPlanViewTransition();
+  await renewExistingDockerProviderView(f.deps, f.row, f.session, () => true);
+  vi.mocked(f.mux.capturePaneText).mockReturnValue('❯\n────────\nshift+tab to cycle');
+  expect(f.session.composerProvablyIdle()).toBe(true);
+  vi.mocked(f.mux.capturePaneText).mockReturnValue('❯ retained draft\n────────\nshift+tab to cycle');
+  expect(f.session.captureInputAdmission()()).toBe(true);
+  expect(f.session.composerProvablyIdle()).toBe(false);
   expect(transport.writes).toEqual([]);
 });
