@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import type { SessionState } from '../src/types.js';
 import { getCli, registryFilePath, reloadCliRegistry } from '../src/config/cli-registry/registry.js';
 import { CliEntrySchema } from '../src/config/cli-registry/schema.js';
+import { STOCK_CLIS } from '../src/config/cli-registry/stock.js';
 import { THREAD_STATE_BINDINGS } from '../src/config/cli-registry/profiles.js';
 import {
   nativeThreadProfile,
@@ -179,4 +180,66 @@ it('rejects unimplemented, unbound and substituted thread contracts at schema lo
   expect(
     CliEntrySchema.safeParse({ ...original, launch: { ...original.launch, threadStateProfile: undefined } }).success
   ).toBe(false);
+});
+
+
+it('reuses validated protocol DATA across repeated current checks without reparsing or copying unchanged definitions', () => {
+  registry({});
+  getCli('codex');
+  const validate = vi.spyOn(CliEntrySchema, 'safeParse');
+  const copy = vi.spyOn(globalThis, 'structuredClone');
+  try {
+    expect(nativeThreadProfile('codex')?.kind).toBe('nested-resume');
+    const validations = validate.mock.calls.length,
+      copies = copy.mock.calls.length;
+    expect(validations).toBeGreaterThan(0);
+    for (let i = 0; i < 16; i++) expect(nativeThreadProfile('codex')?.kind).toBe('nested-resume');
+    expect(validate.mock.calls.length).toBe(validations);
+    expect(copy.mock.calls.length).toBe(copies);
+  } finally {
+    validate.mockRestore();
+    copy.mockRestore();
+  }
+});
+
+it('revalidates in-place effective and shipped protocol changes instead of trusting cached identifiers', () => {
+  registry({});
+  const entry = getCli('codex')!,
+    shipped = STOCK_CLIS.find((value) => value.id === 'codex')!;
+  expect(nativeThreadProfile('codex')).toBeDefined();
+  entry.launch.variants[0]!.args.push({ lit: '--foreign-runtime' });
+  expect(nativeThreadProfile('codex')).toBeUndefined();
+  entry.launch.variants[0]!.args.pop();
+  expect(nativeThreadProfile('codex')).toBeDefined();
+  const thread = entry.launch.threadStateProfile;
+  Reflect.set(entry.launch, 'threadStateProfile', 'unsupported-profile');
+  expect(nativeThreadProfile('codex')).toBeUndefined();
+  Reflect.set(entry.launch, 'threadStateProfile', thread);
+  expect(nativeThreadProfile('codex')).toBeDefined();
+  shipped.launch.variants[0]!.args.push({ lit: '--foreign-shipped-runtime' });
+  try {
+    expect(nativeThreadProfile('codex')).toBeUndefined();
+  } finally {
+    shipped.launch.variants[0]!.args.pop();
+  }
+  expect(nativeThreadProfile('codex')).toBeDefined();
+});
+
+it('cannot launder a changed raw protocol through toJSON after a successful cached read', () => {
+  registry({});
+  const entry = getCli('codex')!,
+    original = structuredClone(entry);
+  expect(nativeThreadProfile('codex')).toBeDefined();
+  Object.defineProperty(entry, 'toJSON', { value: () => original, enumerable: true, configurable: true });
+  entry.launch.variants[0]!.args.push({ lit: '--foreign-runtime' });
+  expect(nativeThreadProfile('codex')).toBeUndefined();
+});
+
+it('does not retain a positive protocol across a genuine registry reload', () => {
+  registry({});
+  expect(nativeThreadProfile('codex')).toBeDefined();
+  const launch = structuredClone(getCli('codex')!.launch);
+  launch.variants[0]!.args.push({ lit: '--reloaded-runtime' });
+  registry({ codex: { launch } });
+  expect(nativeThreadProfile('codex')).toBeUndefined();
 });
