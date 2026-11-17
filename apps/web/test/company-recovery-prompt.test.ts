@@ -160,3 +160,74 @@ it('keeps exact OSC and CSI stripping for fragmented visible composer markers', 
   session.terminalBuffer = escape + ']0;ready' + bell;
   expect(recoveryComposerReady(session, 'ready')).toBe(false);
 });
+
+
+it('recognizes the real Codex footer across a charset selection without granting busy or dialog readiness', () => {
+  const session = fixture();
+  session.mode = 'codex';
+  // Actual terminal history: tmux selects the default character set between the
+  // question mark and the following styled text; it displays no literal "(B".
+  session.terminalBuffer = '\x1b[1m?\x1b(B\x1b[m for shortcuts';
+  expect(recoveryComposerReady(session, '? for shortcuts')).toBe(true);
+  session.isWorking = true;
+  expect(recoveryComposerReady(session, '? for shortcuts')).toBe(false);
+  session.isWorking = false;
+  session.paneDialog = 'Approval required';
+  expect(recoveryComposerReady(session, '? for shortcuts')).toBe(false);
+});
+
+it.each([
+  '\x1b(B',
+  '\x1b)0',
+  '\x1b[31m',
+  '\x1b[1 q',
+  '\x1b]0;title\x07',
+  '\x1b]0;title\x1b\\',
+  '\x1bPpayload\x1b\\',
+  '\x1b^payload\x1b\\',
+])('ignores a complete presentation sequence inside the composer marker: %j', (control) => {
+  const session = fixture();
+  session.terminalBuffer = '?' + control + ' for shortcuts';
+  expect(recoveryComposerReady(session, '? for shortcuts')).toBe(true);
+});
+
+it.each([
+  '?\x1b( for shortcuts',
+  '?\x1b[31 for shortcuts',
+  '?\x1b\x01 for shortcuts',
+  '\x1b]0;? for shortcuts',
+  '\x1bP? for shortcuts',
+  '\x1b]0;title\x1b[31m? for shortcuts',
+  '? for shortcuts\x1b',
+  '? for shortcuts\x1b[31',
+  '? for shortcuts\x1b(',
+])('holds readiness for incomplete or unknown control bytes: %j', (terminalBuffer) => {
+  const session = fixture();
+  session.terminalBuffer = terminalBuffer;
+  expect(recoveryComposerReady(session, '? for shortcuts')).toBe(false);
+});
+
+it.each(['\x1b]0;? for shortcuts\x07', '\x1bP? for shortcuts\x1b\\'])(
+  'never treats a marker inside control-string contents as visible: %j',
+  (terminalBuffer) => {
+    const session = fixture();
+    session.terminalBuffer = terminalBuffer;
+    expect(recoveryComposerReady(session, '? for shortcuts')).toBe(false);
+  }
+);
+
+it('keeps the null-PID delivery boundary even with a normalized ready marker', async () => {
+  const session = fixture();
+  session.mode = 'codex';
+  session.pid = null;
+  session.terminalBuffer = '?\x1b(B\x1b[m for shortcuts';
+  await expect(
+    deliverRecoveryPrompt(
+      session,
+      'handoff',
+      () => true,
+      async () => {}
+    )
+  ).rejects.toThrow('canceled');
+  expect(session.writeViaMux).not.toHaveBeenCalled();
+});
