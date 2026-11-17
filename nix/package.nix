@@ -92,6 +92,7 @@ let
       npm test -- test/docker-memory-high-canary.test.ts \
         test/docker-resource-original-writer.test.ts \
         test/docker-contained-resource-controller.test.ts \
+        test/docker-resource-probe-retry.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
         test/docker-resource-revisions.test.ts \
