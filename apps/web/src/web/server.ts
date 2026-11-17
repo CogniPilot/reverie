@@ -367,7 +367,7 @@ import {
 import { PlanMoveRequests } from '../plan-request.js';
 import { PlanRequestStore } from '../plan-request-store.js';
 import { PlanRequestCapabilities } from '../plan-request-capability.js';
-import { deliverPlanRequest } from '../plan-request-prompt.js';
+import { deliverPlanRequest, planRequestWorkerRouting } from '../plan-request-prompt.js';
 import { registerPlanRequestRoutes } from './routes/plan-request-routes.js';
 import { planMoveExecutor, planMoveSessionResponse, type PlanMoveRuntime } from '../plan-move-runtime.js';
 import {ResourceReplacementController, registerResourceReplacementRoutes} from '../resource-replacement-controller.js';
@@ -2663,6 +2663,7 @@ export class WebServer extends EventEmitter {
         remove: (sessionId, requestId) => planRequestCapabilities.remove(sessionId, requestId),
       },
       notify: (record, _file, allowed, expiredUnseen) => deliverPlanRequest(record, this.chatroomService, allowed, undefined, {
+        workerRouting: planRequestWorkerRouting(record, this.companyService.registeredEmployees()),
         expiredUnseen,
         // Multi-user alerts reach every admin, so an expired request is reported only where one owner holds the plans.
         ownerAlert: (text) => isMultiUserMode() ? undefined

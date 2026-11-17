@@ -86,7 +86,7 @@ describe('expert-approved plan requests', () => {
     const h = requestHarness(), runtimeDigest = 'a'.repeat(64);
     h.executor.snapshot = vi.fn(async () => ({ sessionId: 'source', name: 'Alex', account: 'first', working: false,
       mode: 'codex', runtimeDigest }));
-    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' }));
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' as const }));
     const input = { ...h.input, toAccount: 'first', purpose: 'runtime-refresh' as const };
     const record = await h.service.create(input, undefined, h.execution);
     expect(record).toMatchObject({ purpose: 'runtime-refresh', fromAccount: 'first', toAccount: 'first', runtimeDigest });
@@ -101,7 +101,7 @@ describe('expert-approved plan requests', () => {
     const h = requestHarness(); let runtimeDigest = 'a'.repeat(64);
     h.executor.snapshot = vi.fn(async () => ({ sessionId: 'source', name: 'Alex', account: 'first', working: false,
       mode: 'codex', runtimeDigest }));
-    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' }));
+    h.port.validateTarget = vi.fn(async () => ({ mode: 'codex' as const }));
     await expect(h.service.create({ ...h.input, purpose: 'runtime-refresh' }, undefined, h.execution)).rejects.toThrow('plan changed');
     const record = await h.service.create({ ...h.input, toAccount: 'first', purpose: 'runtime-refresh' }, undefined, h.execution);
     runtimeDigest = 'b'.repeat(64);
