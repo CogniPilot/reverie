@@ -629,18 +629,36 @@ export class DockerContainedResources implements DockerContainedResourceControll
       this.#matches(result, policy, high)
     );
   }
-  async #poolWriterClosed(task: DockerContinuationTask): Promise<boolean> {
-    if (task.phase === 'create-issued' || task.phase === 'created') return true;
+  async #poolWriterState(task: DockerContinuationTask): Promise<'closed' | 'removed' | 'unconfirmed'> {
+    if (task.phase === 'create-issued' || task.phase === 'created') return 'closed';
     const restore = task.imageId === this.configuration.poolRestoreHelperImageId;
     if (
       task.role !== 'pool-helper' ||
       (!restore && task.imageId !== this.configuration.helperImageId) ||
       !('containerId' in task)
     )
-      return false;
+      return 'unconfirmed';
+    if (task.phase === 'completed') {
+      // An absent completed writer cannot supply an ACK. Use an unscoped
+      // exact-ID census so a changed label cannot hide a still-present writer.
+      const selected = (
+        await this.command.run([
+          'container',
+          'ls',
+          '--all',
+          '--no-trunc',
+          '--filter',
+          'id=' + task.containerId,
+          '--format',
+          '{{.ID}}',
+        ])
+      ).trim();
+      if (!selected) return 'removed';
+      if (selected !== task.containerId) return 'unconfirmed';
+    }
     const raw = await this.#inspect(task.containerId);
     const args = z.array(z.string()).min(1).max(512).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Cmd);
-    if (args[0] !== (restore ? 'restore-pool' : 'configure-pool')) return false;
+    if (args[0] !== (restore ? 'restore-pool' : 'configure-pool')) return 'unconfirmed';
     if (restore) await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
     const expected = this.#configuration(
       'pool-helper',
@@ -652,7 +670,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       },
       restore ? task.imageId : undefined
     );
-    if (dockerContinuationDigest(expected) !== task.configurationDigest) return false;
+    if (dockerContinuationDigest(expected) !== task.configurationDigest) return 'unconfirmed';
     await this.#fixed(task.containerId, expected);
     const state = z
       .object({
@@ -668,7 +686,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       .parse(raw.State);
     // Terminal failure can close a possible writer, but can NEVER acknowledge
     // resource configuration. Only #ack below supplies that independent proof.
-    return (
+    const closed =
       state.Status === 'exited' &&
       !state.Running &&
       !state.Paused &&
@@ -676,12 +694,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
       !state.Dead &&
       state.ExitCode >= 0 &&
       state.ExitCode <= 255 &&
-      (state.Error ?? '') === ''
-    );
+      (state.Error ?? '') === '';
+    return closed ? 'closed' : 'unconfirmed';
   }
-  async #poolWritersClosed(except?: DockerContinuationTask): Promise<void> {
+  async #poolWritersClosed(except?: DockerContinuationTask): Promise<DockerContinuationTask[]> {
     const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
     if (prior.length > 128) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
+    const retained: DockerContinuationTask[] = [];
     for (const task of prior) {
       if (
         except &&
@@ -692,16 +711,17 @@ export class DockerContainedResources implements DockerContainedResourceControll
           ('containerId' in except ? except.containerId : undefined)
       )
         continue;
-      if (!(await this.#poolWriterClosed(task))) refuse('DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED');
+      const state = await this.#poolWriterState(task);
+      if (state === 'unconfirmed') refuse('DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED');
+      if (state === 'closed') retained.push(task);
     }
+    return retained;
   }
   async #poolAck(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<void> {
     const own = this.journal.read(row, 'pool-helper');
-    const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
-    if (prior.length > 128) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
     // A delayed earlier configure must not race this fresh probe. Its persisted
     // START fence remains unknown until the ORIGINAL fixed container is terminal.
-    await this.#poolWritersClosed();
+    const prior = await this.#poolWritersClosed();
     if (own) {
       if (!(await this.#ack(own, fresh, row.policy.pool, null, false)))
         refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');

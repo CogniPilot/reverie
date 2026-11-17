@@ -158,6 +158,51 @@ async function restoredPoolFixture(pin = true, revisions?: DockerResourceRevisio
 }
 
 describe('separately pinned populated-pool restore ACK adoption', () => {
+  it.each(['completed', 'start-issued', 'ambiguous'] as const)(
+    'checks another valid pool receipt when an older writer is absent and %s',
+    async (state) => {
+      const f = await restoredPoolFixture();
+      const current = (await f.controller.capturePoolObservation(policy.pool, f.physical.current)).snapshot(
+        f.physical.current
+      ).configuration;
+      const removed = 'be'.repeat(32);
+      const old: DockerContinuationTask =
+        state === 'start-issued'
+          ? {
+              role: current.role,
+              name: current.name,
+              imageId: current.imageId,
+              configurationDigest: current.configurationDigest,
+              phase: 'start-issued',
+              containerId: removed,
+            }
+          : { ...current, containerId: removed };
+      f.retainPool([old, current]);
+      f.physical.beforeRun((args) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === removed)
+          throw Error('Pool writer inspection failed');
+        if (state === 'ambiguous' && args[0] === 'container' && args[1] === 'ls' && args.includes('id=' + removed))
+          throw Error('Pool writer census unavailable');
+      });
+      if (state === 'completed') {
+        await expect(f.controller.observePool(f.physical.row())).resolves.toMatchObject({
+          policyDigest: expect.any(String),
+        });
+        f.retainPool([old]);
+        await expect(f.controller.observePool(f.physical.row())).rejects.toThrow(
+          'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED'
+        );
+        const receipt = await f.controller.capturePoolObservation(policy.pool, f.physical.current);
+        expect(receipt.snapshot(f.physical.current).configuration).toEqual(current);
+      } else {
+        const reason = state === 'ambiguous' ? 'Pool writer census unavailable' : 'Pool writer inspection failed';
+        await expect(f.controller.observePool(f.physical.row())).rejects.toThrow(reason);
+        await expect(f.controller.capturePoolObservation(policy.pool, f.physical.current)).rejects.toThrow(reason);
+      }
+      expect({ creates: f.physical.creates, starts: f.physical.starts }).toEqual(f.before);
+    }
+  );
+
   it.each(['retired', 'replaced', 'new-current', 'same-cid-new-pid'] as const)(
     'keeps a genuine historical restore ACK after a member is %s while probing only the current complete scope',
     async (change) => {
