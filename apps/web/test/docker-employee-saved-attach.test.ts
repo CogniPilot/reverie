@@ -25,7 +25,7 @@ import { PROVIDER_LAUNCH_DISK_KEY } from '../src/provider-launch-publication.js'
 import { Session } from '../src/session.js';
 import { TmuxManager, buildDockerLaunchCommand } from '../src/tmux-manager.js';
 import type { CreateSessionOptions, MuxSession } from '../src/mux-interface.js';
-import type { SessionDocker, SessionState } from '../src/types.js';
+import type { SessionDocker, SessionMode, SessionState } from '../src/types.js';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -357,7 +357,7 @@ it('admits a restored Hands session with the original local model before spawnin
   const states = new StateStore(join(directory, 'state.json'));
   const mux = new TmuxManager();
   const sessions = new Map<string, Session>();
-  cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+  cleanup.push(async () => rmSync(directory, { recursive: true, force: true }));
   await companyFile.init();
   const employee = EmployeeSchema.parse({
     id: eid,
@@ -375,7 +375,7 @@ it('admits a restored Hands session with the original local model before spawnin
     state.employees = [employee];
   });
   const customModel = { endpointId: 'local-test', modelId: 'synthetic-model', label: 'Local' };
-  const original = new Session({ id: sid, workingDir: '/workspace', mode: 'hands', resumeSessionId: sid });
+  const original = new Session({ id: sid, workingDir: '/workspace', mode: 'hands' as SessionMode, resumeSessionId: sid });
   cleanup.push(() => original.stop(false));
   original.setCustomModel({ ...customModel, envKeys: ['REVERIE_HANDS_MODEL'] });
   const saved = original.toPersistedState();
