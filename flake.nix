@@ -51,6 +51,7 @@
             name = "reverie-boxed-recovery-helper";
           };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
+          imageCheck = import ./nix/image-check.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
           deployment = import ./nix/deployment.nix { inherit pkgs; src = source; };
@@ -168,9 +169,6 @@
           src = source;
           inherit baseImage baseConfig;
           inherit (self.packages.${system}) containerRuntime;
-          gpuTelemetry = import ./nix/container-gpu-telemetry.nix {
-            pkgs = pkgsFor system; src = source;
-          };
           inferenceRuntime = import ./nix/local-model-runtime.nix {
             nixpkgs = toString llama-nixpkgs;
             inherit system capability;
@@ -393,7 +391,7 @@
           default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
             "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
             pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.

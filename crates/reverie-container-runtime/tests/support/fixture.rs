@@ -6,7 +6,13 @@ use std::time::Duration;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let role = if std::env::var("REVERIE_CONTAINER_RELAY").as_deref() == Ok("1") {
+    if args
+        .first()
+        .is_some_and(|arg| arg.starts_with("--query-gpu="))
+    {
+        return gpu_provider(&args);
+    }
+    let role = if std::env::var_os("REVERIE_MODEL_PORT").is_some() {
         "relay"
     } else if args.first().is_some_and(|arg| arg == "--output") {
         "telemetry"
@@ -37,4 +43,25 @@ fn main() -> ExitCode {
     loop {
         std::thread::sleep(Duration::from_millis(25));
     }
+}
+
+fn gpu_provider(args: &[String]) -> ExitCode {
+    use std::io::Write;
+    assert_eq!(
+        args,
+        [
+            "--query-gpu=name,utilization.gpu,memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ]
+    );
+    let program = std::env::current_exe().unwrap();
+    if program.with_extension("hang").exists() {
+        std::thread::sleep(Duration::from_secs(30));
+    }
+    if program.with_extension("fail").exists() {
+        return ExitCode::from(9);
+    }
+    let csv = fs::read(program.with_extension("csv")).unwrap();
+    std::io::stdout().write_all(&csv).unwrap();
+    ExitCode::SUCCESS
 }

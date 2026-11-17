@@ -17,7 +17,6 @@ class InteractionRoleTest(unittest.TestCase):
         import json
         from reverie.instance import load_instance, primary_agent
         from reverie.opencode import install
-        from reverie.backend import argv_for
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "instance.json"
@@ -30,8 +29,6 @@ class InteractionRoleTest(unittest.TestCase):
             self.assertIn("Only the owner controls your permissions", charter)
             self.assertNotIn("The CTO controls model selection", charter)
             self.assertEqual(primary_agent(instance), "chat")
-            self.assertEqual(argv_for("opencode", "local/model", primary_agent(instance)),
-                ["opencode", "--agent", "chat", "--model", "local/model"])
             import io
             from types import SimpleNamespace
             from unittest.mock import patch

@@ -39,6 +39,13 @@ dependencies, and build-time dependencies separately from Reverie's first-party
 implementation. Removing first-party Python must not silently remove an owner's
 ability to use scientific Python inside an employee laptop.
 
+At `dcf331d29` the tracked tree contains 453 `.py` files. Of those, 204 are
+under `python/`, 226 are under `tests/`, and 23 are distributed across
+`scripts/`, `apps/`, `nix/` and `.github/`. The worker image still selects
+the compatibility interpreter in `nix/worker-python.nix`. Removing a console
+script registration alone leaves the interpreter and its other consumers in
+that image.
+
 ## Replacement cohorts
 
 | Cohort | Existing code and boundary | Required acceptance |
@@ -47,6 +54,7 @@ ability to use scientific Python inside an employee laptop.
 | Shared host primitives | Linux file/descriptor custody, process identities, bounded observers and engine metadata | Typed native interfaces, narrowly reviewed unsafe wrappers, race/failure tests; reuse across services without weakening checks |
 | Broker and service lifecycle | `worker.py`, `worker_service.py`, transport upgrade/maintenance, resume and watchdog paths | Same admission and desired-running behavior, retained provider continuity, explicit upgrade and rollback/reconciliation; no generic command API |
 | Resource operations and storage | `worker_resource_*`, `employee_resource_profiles.py`, `laptop_resource_operations.py`, home/Nix migration | Existing store schema/CAS/locks/leases/reservations, crash recovery, no replay of uncertain effects, no competing source of truth |
+| Leased task workspaces | Native `TaskWorkspaces` now allocates and records handoffs through the same lease format used by `workspaces.py` | Port command supervision, reservation renewal and guarded cleanup before changing the CLI and the browser-job or acceptance consumers |
 | Terminals, devices and scoped Office transport | `owner_terminal_*`, `worker_*` launch/Office/device paths, GPU/browser components | Same scoped grants, peer provenance, terminal/session identity and device selection; no engine socket in clients |
 | Memory and agent runtime | `memory.py`, `project_memory.py`, `runtime.py`, `sleep.py`, context/identity/governance and plugin/CLI adapters | Existing SQLite data remains readable, tested write/migration semantics, conversation/account/model behavior preserved, CLI/plugin compatibility |
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GPU_STALE_MS, HOST_PUBLISHED_GPU_FILE, gpuStatusFiles, readHostGpu, readHostGpuFrom } from '../src/host-gpu.js';
+import { GPU_STALE_MS, readConfiguredGpu, readHostGpu } from '../src/host-gpu.js';
 import { createRouteTestHarness, type RouteTestHarness } from './routes/_route-test-utils.js';
 import { registerSystemRoutes } from '../src/web/routes/system-routes.js';
 
@@ -94,25 +94,13 @@ describe('reading the host GPU file', () => {
     expect((await readHostGpu(link, NOW)).available).toBe(false);
   });
 
-  it('looks at the host mount first, then host/gpu.json beside the data directory, or only at REVERIE_GPU_STATUS_FILE when set', () => {
-    expect(gpuStatusFiles({ REVERIE_GPU_STATUS_FILE: '/x/gpu.json' })).toEqual(['/x/gpu.json']);
-    const files = gpuStatusFiles({});
-    expect(files[0]).toBe(HOST_PUBLISHED_GPU_FILE);
-    expect(HOST_PUBLISHED_GPU_FILE).toBe('/host-published/gpu.json');
-    expect(files[1]).toMatch(/\/host\/gpu\.json$/);
-    expect(files).toHaveLength(2);
+  it('reads only the telemetry file selected by the container runtime', async () => {
+    write({ updatedAt: NOW, gpus: [gpu({ utilization: 42 })] });
+    expect((await readConfiguredGpu({ REVERIE_GPU_STATUS_FILE: file }, NOW)).utilization).toBe(42);
+    expect((await readConfiguredGpu({ REVERIE_GPU_STATUS_FILE: join(dir, 'missing.json') }, NOW)).available).toBe(false);
+    expect((await readConfiguredGpu({}, NOW)).available).toBe(false);
   });
 
-  it('the first place with a fresh reading wins: a missing or stale first file falls through to the next', async () => {
-    const second = join(dir, 'second.json');
-    writeFileSync(second, JSON.stringify({ updatedAt: NOW, gpus: [gpu({ utilization: 11 })] }));
-    expect((await readHostGpuFrom([join(dir, 'nope.json'), second], NOW)).utilization).toBe(11);
-    write({ updatedAt: NOW - GPU_STALE_MS - 1, gpus: [gpu({ utilization: 99 })] });
-    expect((await readHostGpuFrom([file, second], NOW)).utilization).toBe(11);
-    write({ updatedAt: NOW, gpus: [gpu({ utilization: 42 })] });
-    expect((await readHostGpuFrom([file, second], NOW)).utilization).toBe(42);
-    expect((await readHostGpuFrom([join(dir, 'a.json'), join(dir, 'b.json')], NOW)).available).toBe(false);
-  });
 });
 
 describe('GET /api/system/gpu', () => {

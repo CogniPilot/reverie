@@ -37,14 +37,12 @@ nothing. A changed window takes effect from the next night.
    - It runs in batches that fit the model's context. A huge episode is clipped and can never block every batch.
    - Before each later batch, the cycle checks the GPU gate again and the pause files. A stop after the first batch leaves the rest pending for the next night.
    - Each batch's insights commit together with the reflection cursor (`MemoryStore.atomic()`). That covers the store's own reflection, belief and state writes. It has no savepoints, so a nested block's error must not be caught and ignored, and writes through `Reverie` documents are separate transactions.
-   - An insight that echoes a credential (`python/reverie/secret_scan.py`) is not stored.
 4. **One dream**, only when `REVERIE_DREAMS_PER_SLEEP` is above 0 (the default is 0).
    Set `REVERIE_DREAMS_PER_SLEEP=1` to enable it, and enable `dreaming` on the selected agent profile. The cycle's agent policy entry can veto dreams with
    `dreaming: false`; even `dreaming: true` does not override a global zero quota.
    Disabled scheduled dreams record `skipped` with detail `dreams disabled`, without
    a model call or usage reservation. An explicit owner-requested `reverie-chat --dream`
    remains separate and can run once with background dreaming disabled.
-   A dream is not stored if it echoes a credential.
 5. **Sleep.**
 
 **The GPU gate** runs before every model phase. If any of these holds, the phase is deferred and retried next tick:

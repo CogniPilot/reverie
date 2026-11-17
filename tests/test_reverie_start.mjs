@@ -380,14 +380,23 @@ test('--scratch rejects missing arguments and invalid mount paths before engine 
   }
 });
 
-test('--force leaves the old container alone if image build, load or mount validation fails', t => {
-  for (const failure of ['FAIL_BUILD', 'FAIL_LOAD', 'REVERIE_GPU_PUBLISHED_DIR']) {
+test('--force leaves the old container alone if the image build or load fails', t => {
+  for (const failure of ['FAIL_BUILD', 'FAIL_LOAD']) {
     const f = fixture(t);
     const prior = { Id: 'b'.repeat(64), Config: {}, State: { Running: false } };
     const result = f.run(['--force'], { INSPECT: JSON.stringify(prior), [failure]: '/missing-fixture-path' });
     assert.equal(result.status, 1);
     assert.ok(!f.calls().some(([tool, a]) => tool === 'docker' && ['rm', 'run', 'start', 'stop'].includes(a[0])));
   }
+});
+
+test('start ignores the retired host GPU telemetry directory', t => {
+  const f = fixture(t);
+  const result = f.run([], { REVERIE_GPU_PUBLISHED_DIR: '/missing-fixture-path' });
+  assert.equal(result.status, 0, result.stderr);
+  const run = f.calls().find(([tool, args]) => tool === 'docker' && args[0] === 'run');
+  assert.ok(run);
+  assert.ok(!run[1].some(arg => arg.includes('/host-published')));
 });
 
 test('--force refuses running containers and coordinated runtimes before building or removing', t => {
@@ -405,6 +414,20 @@ test('--force refuses running containers and coordinated runtimes before buildin
   const f = fixture(t), hEnv = f.enableH('terminal'), before = f.calls().length;
   assert.match(f.run(['--force'], hEnv).stderr, /coordinated update/);
   assert.equal(f.calls().length, before);
+});
+
+test('--force preserves stopped GPU and device-passthrough containers', t => {
+  const stopped = { Id: 'b'.repeat(64), Config: {}, State: { Running: false } };
+  for (const prior of [
+    { ...stopped, HostConfig: { DeviceRequests: [{ Driver: 'cdi' }] } },
+    { ...stopped, HostConfig: { Devices: [{ PathOnHost: '/dev/fixture' }] } },
+    { ...stopped, Config: { Env: ['REVERIE_GPU_PUBLISHER=/bin/fixture'] } },
+  ]) {
+    const f = fixture(t), result = f.run(['--force'], { INSPECT: JSON.stringify(prior) });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /existing Docker deployment definition/);
+    assert.equal(f.calls().length, 1);
+  }
 });
 
 test('--force rechecks identity, running state and settings after the build', t => {

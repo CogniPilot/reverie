@@ -10,6 +10,7 @@ reverie-ops --help
 reverie-ops status website
 reverie-ops inspect website operation-id
 reverie-ops submit < reviewed-command.json
+reverie-ops browser-job inspect request-message-uuid
 ```
 
 The installation supplies `REVERIE_API_URL`, a local HTTP Office phone on
@@ -18,6 +19,11 @@ identity. Client environment variables and command data cannot select an actor
 or confer owner permissions. Submit accepts at most 16 KiB and requires every
 existing grant, artifact, generation and idempotency field; it creates none.
 The server validates current authorization and owns all effects.
+
+`browser-job` uses the same loopback transport and sends only the fixed
+operation and message reference to `/api/browser-jobs`. Its response uses
+the browser-job error codes, and a successful reply must echo the submitted
+reference. The host still selects and authorizes the capture.
 
 Stdout contains one canonical JSON object followed by a newline. Exit 0 means
 the original Python truth test accepted the response's `success` field; exit 3

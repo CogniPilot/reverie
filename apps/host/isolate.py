@@ -96,7 +96,8 @@ def prepare(args, root, state):
         print('Building the server image, worker image and host broker with Nix.', flush=True)
         # Native flake references preserve Git filtering and archive fallback.
         results = json.loads(run(['nix', 'build', '--out-link', str(state/'build'), '--json', '--option', 'build-dir', str(build.resolve()),
-            str(repo) + '#dockerImage', str(repo) + '#workerImage', str(repo) + '#workerBroker', str(repo) + '#workerService']))
+            str(repo) + '#dockerImage', str(repo) + '#workerImage', str(repo) + '#workerBroker',
+            str(repo) + '#workerService', str(repo) + '#imageCheck']))
     finally:
         if previous_link is not None and not link.exists() and not link.is_symlink():
             link.symlink_to(previous_link)
@@ -104,12 +105,13 @@ def prepare(args, root, state):
     archives = [path for path in outputs if Path(path).is_file()]
     broker = next(path for path in outputs if (Path(path)/'bin/reverie-worker-broker').exists())
     unit = next(path for path in outputs if (Path(path)/'share/systemd/user/reverie-worker-broker.service').exists())
+    scanner = next(Path(path)/'bin/reverie-image-check' for path in outputs if (Path(path)/'bin/reverie-image-check').is_file())
     sys.path.insert(0, str(repo/'python'))
     from reverie.workspaces import Workspaces
     scans = Workspaces(scratch/'image-scans')
     # Image scanners report detector names, never credential contents.
     for archive in archives:
-        # Python tarfile seeks between layers; decompress once on the scratch
+        # The scanner seeks between layers. Decompress once on the scratch
         # drive to avoid repeatedly inflating gigabytes from a compressed tar.
         task = 'scan-'+str(time.time_ns())
         folder = scans.create(task)
@@ -121,7 +123,7 @@ def prepare(args, root, state):
             with gzip.open(archive, 'rb') as source, unpacked.open('wb') as destination:
                 shutil.copyfileobj(source, destination, length=1024*1024)
             print('Scanning uncompressed image on the scratch drive.', flush=True)
-            report = run(['nix', 'develop', str(repo), '--command', 'python3', '-m', 'reverie.image_check', str(unpacked), '--allow', str(repo/'docker/image-check-allow.tsv')], cwd=repo)
+            report = run([str(scanner), str(unpacked), '--allow', str(repo/'docker/image-check-allow.tsv')], cwd=repo)
             (state/(Path(archive).name+'.scan.json')).write_text(report+'\n')
         scans.finish(task, 'Image validation passed; durable report saved in worker-isolation state.')
         scans.clean(task, apply=True)

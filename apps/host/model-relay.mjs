@@ -2,7 +2,7 @@
 import http from 'node:http';
 import { lstat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-export function modelRelay(socketPath, port = 8092, unavailableMessage = 'Local model service is unavailable. Start reverie-local-model on the host.') {
+export function modelRelay(socketPath, port = 8092, unavailableMessage = 'The Docker local model service is starting or unavailable.') {
   const server = http.createServer(async (request, response) => {
     try {
       const info = await lstat(socketPath);
@@ -37,8 +37,6 @@ export function modelRelay(socketPath, port = 8092, unavailableMessage = 'Local 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.REVERIE_MODEL_PORT ?? '8092');
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid model relay port');
-  const message = process.env.REVERIE_CONTAINER_RELAY === '1'
-    ? 'The container local model is starting or unavailable. Check the container logs.' : undefined;
-  const server = modelRelay(process.env.REVERIE_MODEL_SOCKET ?? '/run/reverie-control/models/default.sock', port, message);
+  const server = modelRelay(process.env.REVERIE_MODEL_SOCKET ?? '/run/reverie-control/models/default.sock', port);
   server.on('error', () => { process.stderr.write('Local model relay could not start\n'); process.exitCode = 1; });
 }

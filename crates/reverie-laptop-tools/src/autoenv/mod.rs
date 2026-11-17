@@ -1,6 +1,7 @@
 //! Native laptop development environment cache and argv0 launcher.
 //! This is an owner-selected local development tool, not a host deployment API.
 mod cache;
+mod cargo_target;
 mod launcher;
 use clap::{Parser, Subcommand};
 use reverie_contracts::{autoenv::AutoenvApproval, autoenv_environment::AutoenvEnvironment};
@@ -20,7 +21,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
     version,
     about = "Cache an owner-approved Nix development environment for laptop tool launchers",
     long_about = "Cache an owner-approved Nix development environment for laptop tool launchers.\n\nApproval lines contain a canonical repository glob, flake attribute and comma-separated tool names. The first matching line wins. Both the builder and native launcher use Python-compatible fnmatch patterns. Only exported variables are cached; home, temporary-directory and identity variables are preserved from the caller.",
-    after_help = "Examples:\n  reverie-autoenv key ~/git/project\n  reverie-autoenv build ~/git/project\n  reverie-autoenv build ~/git/project --from-json dev-env.json\n\nConfiguration:\n  REVERIE_AUTOENV_CONFIG overrides $XDG_CONFIG_HOME/reverie/autoenv/approved\n  REVERIE_AUTOENV_CACHE overrides $XDG_CACHE_HOME/reverie/autoenv\n  XDG defaults are $HOME/.config and $HOME/.cache.\n\nThe build runs nix print-dev-env --json --offline with an explicit argument list. It never evaluates a shell hook. Set REVERIE_NO_AUTOENV=1 for a launcher passthrough without the jobs policy."
+    after_help = "Examples:\n  reverie-autoenv key ~/git/project\n  reverie-autoenv build ~/git/project\n  reverie-autoenv build ~/git/project --from-json dev-env.json\n\nConfiguration:\n  REVERIE_AUTOENV_CONFIG overrides $XDG_CONFIG_HOME/reverie/autoenv/approved\n  REVERIE_AUTOENV_CACHE overrides $XDG_CACHE_HOME/reverie/autoenv\n  XDG defaults are $HOME/.config and $HOME/.cache.\n\nThe build runs nix print-dev-env --json --offline with an explicit argument list. It never evaluates a shell hook. Set REVERIE_NO_AUTOENV=1 for a launcher passthrough without the jobs or scratch defaults."
 )]
 struct Cli {
     #[command(subcommand)]

@@ -1066,6 +1066,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-backend-cli"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "http",
+ "reverie-contracts",
+ "reverie-host",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-commit-policy"
 version = "0.1.0"
 dependencies = [
@@ -1078,9 +1091,11 @@ dependencies = [
 name = "reverie-container-runtime"
 version = "0.1.0"
 dependencies = [
+ "clap",
  "getrandom",
  "nix",
  "reverie-local-model",
+ "serde",
  "serde_json",
  "tokio",
 ]
@@ -1235,6 +1250,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-image-check"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "flate2",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "tar",
+]
+
+[[package]]
 name = "reverie-job-gate"
 version = "0.1.0"
 dependencies = [
@@ -1276,9 +1303,7 @@ name = "reverie-local-model"
 version = "0.1.0"
 dependencies = [
  "getrandom",
- "libc",
  "nix",
- "serde_json",
  "socket2",
 ]
 

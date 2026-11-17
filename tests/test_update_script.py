@@ -71,12 +71,12 @@ if args[0] == 'inspect':
     elif os.environ.get('H_TEST')and target=='a'*64 and(root/'created.json').exists():print('['+(root/'created.json').read_text()+']')
     elif (root/'metadata.json').exists(): print((root/'metadata.json').read_text())
     else:
-        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': ({} if os.environ.get('NO_SIGNATURE') else {'reverie.deployment': 'a'*64}), 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept'] + (['REVERIE_ADMIN_PHONE_WAKE='+os.environ['OLD_PHONE']] if os.environ.get('OLD_PHONE') else [])}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
+        print(json.dumps([{'Image': 'old-image', 'Config': {'User': '1001:100', 'WorkingDir': '/workspace/task', 'Labels': ({} if os.environ.get('NO_SIGNATURE') else {'reverie.deployment': 'a'*64}), 'Env': ['REVERIE_VERSION=old', 'CUSTOM_INSTANCE=kept'] + (['REVERIE_ADMIN_PHONE_WAKE='+os.environ['OLD_PHONE']] if os.environ.get('OLD_PHONE') else []) + (['REVERIE_GPU_STATUS_FILE=/host-published/gpu.json'] if os.environ.get('OLD_GPU_MOUNT') else [])}, 'HostConfig': {'Memory': 8589934592, 'MemorySwap': 8589934592, 'PidsLimit': 512}, 'Mounts': [
             {'Type':'volume','Name':'instance-data','Destination':'/instances','RW':True},
             {'Type':'volume','Name':'private-home','Destination':'/home/agent','RW':True},
             {'Type':'bind','Source':str(root/'source'),'Destination':'/workspace','RW':True},
             {'Type':'bind','Source':str(root/'second disk'),'Destination':'/scratch2','RW':True},
-            {'Type':'bind','Source':str(root/'passwd'),'Destination':'/etc/passwd','RW':False}]}]))
+            {'Type':'bind','Source':str(root/'passwd'),'Destination':'/etc/passwd','RW':False}] + ([{'Type':'bind','Source':str(root/'gpu'),'Destination':'/host-published','RW':False}] if os.environ.get('OLD_GPU_MOUNT') else [])}]))
 elif args[:2] == ['image', 'inspect']:
     if os.environ.get('H_TEST')and '--format'not in args:
         runtime=json.loads((root/'deployment/deployment.json').read_text())['websiteRuntime']
@@ -220,13 +220,21 @@ class UpdateScriptTests(unittest.TestCase):
         self.assertFalse(any('--volumes' in call for call in self.calls()))
         self.assertEqual(json.loads((self.root/'state').read_text()), {'reverie': {'running': True, 'image': 'new'}})
 
-    def test_owner_adopts_unlabelled_deployment_and_adds_readonly_gpu_directory(self):
-        gpu = self.root/'gpu'; gpu.mkdir()
-        result = self.run_update(NO_SIGNATURE='1', REVERIE_DEPLOYMENT_SIGNATURE='b'*64, REVERIE_GPU_PUBLISHED_DIR=str(gpu))
+    def test_owner_adopts_unlabelled_deployment_and_drops_legacy_gpu_mount(self):
+        result = self.run_update(NO_SIGNATURE='1', REVERIE_DEPLOYMENT_SIGNATURE='b'*64, OLD_GPU_MOUNT='1')
         self.assertEqual(result.returncode, 0, result.stderr)
         run = next(call for call in self.calls() if call[:2] == ['docker', 'run'])
         self.assertIn('reverie.deployment='+'b'*64, run)
-        self.assertIn(f'type=bind,src={gpu},dst=/host-published,readonly', run)
+        self.assertIn('type=volume,src=instance-data,dst=/instances', run)
+        self.assertFalse(any('/host-published' in arg or arg.startswith('REVERIE_GPU_STATUS_FILE=') for arg in run))
+
+    def test_device_passthrough_uses_the_existing_docker_definition(self):
+        item = {'Config': {'Env': []}, 'HostConfig': {'DeviceRequests': [{'Driver': 'cdi'}]}}
+        (self.root/'metadata.json').write_text(json.dumps([item]))
+        result = self.run_update()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('existing Docker deployment definition', result.stderr)
+        self.assertFalse(any(call[0] == 'nix' or call[1] in ('stop', 'rename', 'run') for call in self.calls()))
 
     def test_build_scratch_is_traversable_but_metadata_remains_private(self):
         result = self.run_update(REVERIE_REPO=os.path.relpath(self.repo))

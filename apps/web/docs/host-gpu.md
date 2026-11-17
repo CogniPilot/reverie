@@ -1,11 +1,11 @@
-# GPU readout from the host
+# GPU readout from the Docker runtime
 
-The console runs where it cannot see the GPU, so the sidebar's GPU chip reads a small JSON file that a host-side publisher keeps
-fresh. The console only reads it (`GET /api/system/gpu`).
+The GPU image passes the selected device through to the container. The native GPU
+publisher writes a private runtime file every 15 seconds and the website reads
+the path supplied in `REVERIE_GPU_STATUS_FILE` for `GET /api/system/gpu`.
+The GPU readout stays hidden when the runtime supplies no path.
+[Container GPU setup](../../../docs/container-gpu.md)
 
-- **Where:** the console looks in `REVERIE_GPU_STATUS_FILE` alone when that is set; otherwise `/host-published/gpu.json` (the host's
-  read-only bind mount of one directory), then `host/gpu.json` next to the console's data directory (for example
-  `/instances/example/runtime/host/gpu.json`) until the mount exists. The first place with a fresh reading wins.
 - **Format:**
   ```json
   { "updatedAt": 1800000000000,
@@ -13,5 +13,5 @@ fresh. The console only reads it (`GET /api/system/gpu`).
   ```
   `updatedAt` is epoch milliseconds (seconds are accepted); without it the file's modification time is used. A single GPU may
   also be written as those fields at the top level. `name` is optional and is not passed on: the route answers numbers only. With several GPUs the chip shows the busiest and adds the memory up.
-- **Fresh means under 60 seconds old.** Publish about every 30 seconds. A missing, older, future-dated, malformed or over-64 KB file means "no reading", and the
-  chip is hidden. Write it atomically (temporary file, then rename). A link or FIFO at that path is ignored.
+- **Fresh means under 60 seconds old.** A missing, older, future-dated, malformed or over-64 KB file hides the chip.
+  The publisher writes atomically. The website ignores links and non-regular files.

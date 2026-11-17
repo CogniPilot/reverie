@@ -192,6 +192,7 @@ pkgs.dockerTools.buildLayeredImage rec {
     experimental-features = nix-command flakes
     build-users-group =
     sandbox = false
+    build-dir = /tmp/reverie-nix-builds
     max-jobs = 1
     cores = 4
     flake-registry = /etc/nix/registry.json

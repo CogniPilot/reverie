@@ -17,13 +17,14 @@ let
     pkgs = {
       writeShellScript = _: _: "/nix/store/controlled-entry";
       nodejs_22 = "/nix/store/controlled-node";
+      tailscale.overrideAttrs = _: "/nix/store/controlled-tailscale";
+      writeText = _: _: "/nix/store/controlled-model-relay";
       dockerTools.buildLayeredImage = value: value;
     };
     src = ../.;
     baseImage = "/nix/store/controlled-base";
     baseConfig = { Entrypoint = [ "/bin/tini" ]; Env = [ "KEPT=yes" ]; };
     containerRuntime = "/nix/store/controlled-runtime";
-    gpuTelemetry = "/nix/store/controlled-telemetry";
     inferenceRuntime = "/nix/store/controlled-inference";
   };
   checks = {
@@ -75,8 +76,10 @@ let
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"
     ];
-    gpuKeepsPrivateTelemetry = builtins.elem "/nix/store/controlled-telemetry" gpu.contents
-      && builtins.elem "REVERIE_GPU_PUBLISHER=/nix/store/controlled-telemetry/bin/reverie-container-gpu-telemetry" gpu.config.Env;
+    gpuKeepsPrivateTelemetry = builtins.elem "/nix/store/controlled-runtime" gpu.contents
+      && builtins.elem "REVERIE_GPU_PUBLISHER=/nix/store/controlled-runtime/bin/reverie-gpu-publisher" gpu.config.Env;
+    gpuKeepsPrivateAccess = builtins.elem "/nix/store/controlled-tailscale" gpu.contents;
+    gpuKeepsModelRelay = builtins.elem "REVERIE_MODEL_RELAY_SCRIPT=/nix/store/controlled-model-relay" gpu.config.Env;
     gpuKeepsInferenceAndBase = gpu.fromImage == "/nix/store/controlled-base"
       && builtins.elem "/nix/store/controlled-inference" gpu.contents
       && builtins.elem "KEPT=yes" gpu.config.Env;

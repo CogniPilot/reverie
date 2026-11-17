@@ -50,15 +50,15 @@ fn inference(model: &Model) -> Result<Child> {
     let mut server = Command::new(program("REVERIE_LLAMA_SERVER")?);
     server
         .arg("--model")
-        .arg(model.args.model.as_deref().ok_or("model is required")?)
+        .arg(&model.weights)
         .arg("--alias")
-        .arg(&model.args.alias)
+        .arg(&model.alias)
         .arg("--host")
         .arg(&model.socket)
         .arg("--port")
         .arg(model.port.to_string())
         .arg("--ctx-size")
-        .arg(model.args.context.to_string())
+        .arg(model.context.to_string())
         .args(["--parallel", "1", "--threads", "8", "--gpu-layers"])
         .arg(&model.layers)
         .args(["--flash-attn", "auto", "--cache-type-k"])
@@ -67,16 +67,14 @@ fn inference(model: &Model) -> Result<Child> {
         .arg(model.cache_type())
         .arg("--api-key-file")
         .arg(&model.key)
-        .args(reverie_local_model::sampling_args(
-            model.args.sampling_profile,
-        ))
+        .args(reverie_local_model::sampling_args(model.sampling_profile))
         .kill_on_drop(true);
-    if let Some(projector) = &model.args.mmproj {
+    if let Some(projector) = &model.projector {
         server
             .arg("--mmproj")
             .arg(projector)
             .arg("--image-max-tokens")
-            .arg(model.args.image_max_tokens.to_string());
+            .arg(model.image_max_tokens.to_string());
     }
     if let Some(driver) = std::env::var_os("NVIDIA_CTK_LIBCUDA_DIR") {
         let mut paths = vec![PathBuf::from(driver)];
@@ -93,7 +91,6 @@ fn model_relay(model: &Model) -> Result<Child> {
         .arg(program("REVERIE_MODEL_RELAY_SCRIPT")?)
         .env("REVERIE_MODEL_SOCKET", &model.socket)
         .env("REVERIE_MODEL_PORT", model.port.to_string())
-        .env("REVERIE_CONTAINER_RELAY", "1")
         .kill_on_drop(true)
         .spawn()?)
 }

@@ -9,7 +9,7 @@ use std::{
     process::{Command, Stdio},
 };
 
-type Environment = BTreeMap<OsString, OsString>;
+pub(super) type Environment = BTreeMap<OsString, OsString>;
 struct Invocation {
     name: OsString,
     arguments: Vec<OsString>,
@@ -99,7 +99,7 @@ impl Invocation {
             }
         }
     }
-    fn exec(&self, environment: &Environment) -> io::Result<()> {
+    fn exec(&self, environment: &Environment, apply_defaults: bool) -> io::Result<()> {
         let path = environment
             .get(OsStr::new("PATH"))
             .ok_or(io::ErrorKind::NotFound)?;
@@ -117,12 +117,20 @@ impl Invocation {
             if std::fs::canonicalize(&candidate).ok().as_ref() == Some(&self.executable) {
                 continue;
             }
-            let error = Command::new(candidate)
+            let mut command = Command::new(&candidate);
+            command
                 .arg0(&self.name)
                 .args(&self.arguments)
                 .env_clear()
-                .envs(environment)
-                .exec();
+                .envs(environment);
+            if apply_defaults
+                && self.name == "cargo"
+                && let Some(target) =
+                    super::cargo_target::select(&candidate, &self.arguments, environment)
+            {
+                command.env("CARGO_TARGET_DIR", target);
+            }
+            let error = command.exec();
             match error.kind() {
                 io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => {}
                 io::ErrorKind::PermissionDenied => permission_denied = true,
@@ -203,7 +211,7 @@ pub(super) fn launch() -> io::Result<()> {
         .get(OsStr::new("REVERIE_NO_AUTOENV"))
         .is_some_and(|value| value == "1")
     {
-        return invocation.exec(&environment);
+        return invocation.exec(&environment, false);
     }
     if !present(&environment, "IN_NIX_SHELL")
         && !present(&environment, "REVERIE_AUTOENV_ACTIVE")
@@ -213,5 +221,5 @@ pub(super) fn launch() -> io::Result<()> {
         eprintln!("reverie-autoenv: {error}; using plain tool");
     }
     invocation.jobs(&mut environment);
-    invocation.exec(&environment)
+    invocation.exec(&environment, true)
 }

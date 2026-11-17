@@ -14,9 +14,11 @@ path = "tests/support/fixture.rs"
 required-features = ["test-fixtures"]
 
 [dependencies]
+clap.workspace = true
 getrandom.workspace = true
-nix = { workspace = true, features = ["signal", "process"] }
+nix = { workspace = true, features = ["fs", "signal", "process", "user"] }
 reverie-local-model = { path = "../reverie-local-model" }
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 

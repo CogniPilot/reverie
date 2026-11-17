@@ -220,7 +220,8 @@ jobs:
           docker tag "reverie:$GITHUB_SHA" "$image:$version"
           docker tag "reverie:$GITHUB_SHA" "$image:latest"
           docker save "$image:latest" "$image:$version" --output "$image_archive"
-          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
+          scanner=$(nix build .#imageCheck --no-link --print-out-paths)
+          "$scanner/bin/reverie-image-check" "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           mkdir -p offline-bundle
           mv "$image_archive" offline-bundle/reverie-image.tar
           cp scripts/setup.sh offline-bundle/setup.sh

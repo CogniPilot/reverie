@@ -25,6 +25,7 @@
   ],
   "packages": [
     "adminHarnessAddon",
+    "backendNativeCli",
     "browserJobRuntime",
     "browserRuntime",
     "capabilitiesAddon",
@@ -49,6 +50,7 @@
     "hands",
     "handsTools",
     "humanTerminalToolkit",
+    "imageCheck",
     "kokoro",
     "laptopTools",
     "launchGuard",

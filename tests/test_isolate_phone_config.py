@@ -37,7 +37,7 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'coding evidence'):isolate.activate(SimpleNamespace(name='reverie'),root,state)
                 run.assert_not_called()
 
-    def test_scanner_develop_uses_the_same_ordinary_local_reference(self):
+    def test_run_uses_the_scanner_selected_by_the_local_build(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); repo = root/'exported source'; repo.mkdir()
             state = root/'state'; state.mkdir()
@@ -49,6 +49,8 @@ class IsolatePhoneConfigTests(unittest.TestCase):
             (broker/'bin/reverie-worker-broker').touch()
             unit = root/'unit'; (unit/'share/systemd/user').mkdir(parents=True)
             (unit/'share/systemd/user/reverie-worker-broker.service').touch()
+            scanner = root/'scanner'; (scanner/'bin').mkdir(parents=True)
+            (scanner/'bin/reverie-image-check').touch()
             class LeaseDouble:
                 def __call__(self, *args):
                     return nullcontext()
@@ -60,9 +62,9 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                 if command[:2] == ['docker', 'inspect']:
                     return json.dumps([old])
                 if command[:2] == ['nix', 'build']:
-                    return json.dumps([{'outputs': {'out': str(path)}} for path in (archive, broker, unit)])
-                self.assertEqual(command, ['nix', 'develop', str(repo.resolve()), '--command', 'python3', '-m',
-                    'reverie.image_check', str(folder/'image.tar'), '--allow', str(repo/'docker/image-check-allow.tsv')])
+                    return json.dumps([{'outputs': {'out': str(path)}} for path in (archive, broker, unit, scanner)])
+                self.assertEqual(command, [str(scanner/'bin/reverie-image-check'), str(folder/'image.tar'),
+                    '--allow', str(repo/'docker/image-check-allow.tsv')])
                 self.assertEqual(kwargs, {'cwd': repo.resolve()})
                 self.assertFalse(any(value.startswith('path:') for value in command))
                 raise RuntimeError('synthetic stop before scanner')
@@ -80,8 +82,8 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                 if command[:2] == ['docker', 'inspect']:
                     return json.dumps([old])
                 self.assertEqual(command[:2], ['nix', 'build'])
-                self.assertEqual(command[-4:], [str(repo.resolve())+'#'+name for name in
-                    ('dockerImage', 'workerImage', 'workerBroker', 'workerService')])
+                self.assertEqual(command[-5:], [str(repo.resolve())+'#'+name for name in
+                    ('dockerImage', 'workerImage', 'workerBroker', 'workerService', 'imageCheck')])
                 self.assertFalse(any(value.startswith('path:') for value in command))
                 raise RuntimeError('synthetic stop before build')
             with patch.object(isolate.Path, 'home', return_value=root/'home'), patch.object(isolate, 'run', side_effect=fake_run):
@@ -130,7 +132,7 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                 run.assert_not_called()
 
 
-    def test_prepare_uses_native_flake_reference_for_all_four_build_targets(self):
+    def test_prepare_uses_native_flake_reference_for_all_build_targets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); repo = root/'source'; repo.mkdir()
             state = root/'state'; state.mkdir()
@@ -146,6 +148,6 @@ class IsolatePhoneConfigTests(unittest.TestCase):
                     isolate.prepare(SimpleNamespace(name='reverie', repo=str(repo)), root, state)
             build = calls[-1]
             self.assertEqual(build[:2], ['nix', 'build'])
-            self.assertEqual(build[-4:], [str(repo.resolve())+'#'+name for name in
-                ['dockerImage', 'workerImage', 'workerBroker', 'workerService']])
+            self.assertEqual(build[-5:], [str(repo.resolve())+'#'+name for name in
+                ['dockerImage', 'workerImage', 'workerBroker', 'workerService', 'imageCheck']])
             self.assertFalse(any(value.startswith('path:') for value in build))

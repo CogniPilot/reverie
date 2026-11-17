@@ -669,7 +669,7 @@ let
     runtimeInputs = [ pkgs.python3 ];
     text = ''exec python3 -I -B ${handsToolsSource}/laptop_tools.py --tool-path ${handsToolchain}/bin "$@"'';
   };
-  modelRelaySource = pkgs.writeText "reverie-model-relay.mjs" (builtins.readFile (src + "/apps/host/model-relay.mjs"));
+  modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   modelRelay = pkgs.writeShellApplication {
     name = "reverie-model-relay";
     runtimeInputs = [ pkgs.nodejs_22 ];
@@ -702,6 +702,7 @@ let
   # The selected reverie-ops client (laptop runtime, console and opsCore).
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
+  backendNativeCli = import ./backend-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   muxNative = import ./mux.nix { inherit pkgs src; };
@@ -722,7 +723,7 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -802,6 +803,7 @@ let
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    ln -s ${backendNativeCli}/bin/reverie-backend "$out/bin/reverie-backend"
     # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
     makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
     # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
@@ -829,4 +831,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }

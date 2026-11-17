@@ -10,7 +10,7 @@ in pkgs.rustPlatform.buildRustPackage {
   src = workspace.source;
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-container-runtime" ];
-  cargoTestFlags = [ "-p" "reverie-container-runtime" ];
+  cargoTestFlags = [ "-p" "reverie-container-runtime" "--features" "test-fixtures" ];
   meta = {
     description = "Docker-owned Reverie website, inference and telemetry supervision";
     mainProgram = "reverie-container-runtime";

@@ -28,6 +28,13 @@ Default build/cache/download locations use `/tmp/reverie/projects/<cwd-hash>/...
 for separation between working directories. Set project-specific paths beneath
 `/tmp` when a tool needs another layout.
 
+The worker image puts Nix's temporary derivation builds under
+`/tmp/reverie-nix-builds`. The Cargo shim puts the default target directory
+under `/tmp/reverie/cargo-target` for each Cargo workspace. Explicit target
+settings and leased task workspaces can choose their own paths. Copy required
+artifacts back to durable storage before releasing the task. These are
+tool defaults. Disk quotas are a separate host enforcement mechanism.
+
 `/scratch` remains mounted for compatibility with existing paths. This is not
 permission to delete it: existing repositories, analysis, results, profiles or
 legacy stores must be preserved first. Source, unfinished work and retained
