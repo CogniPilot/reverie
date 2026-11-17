@@ -40,6 +40,9 @@ fn main() -> std::process::ExitCode {
         Command::HoldStorage => storage::hold(&mut files).map(|()| String::new()),
         Command::StorageStatus { holder_start } => storage::status(&mut files, holder_start),
         Command::ProbeStorage => storage::probe(&mut files),
+        Command::VerifyStorageReference { home, nix } => {
+            storage::verify_reference(&mut files, &home, &nix)
+        }
     };
     let result = error::finalized(result, files.close_all());
     match result {
