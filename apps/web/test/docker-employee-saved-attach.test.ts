@@ -350,6 +350,82 @@ afterEach(async () => {
   vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
+it('admits a restored Hands session with the original local model before spawning a pane', async () => {
+  const f = await dockerEncodedDestination();
+  const directory = mkdtempSync(join(tmpdir(), 'boxed-local-model-'));
+  const companyFile = new CompanyStore(join(directory, 'company.json'));
+  const states = new StateStore(join(directory, 'state.json'));
+  const mux = new TmuxManager();
+  const sessions = new Map<string, Session>();
+  cleanup.push(() => rmSync(directory, { recursive: true, force: true }));
+  await companyFile.init();
+  const employee = EmployeeSchema.parse({
+    id: eid,
+    sessionId: sid,
+    sessionGeneration: 3,
+    name: 'Synthetic',
+    icon: 'S',
+    position: 'Employee',
+    expertise: ['testing'],
+    createdAt: 1,
+    onVacation: false,
+    desiredRunning: true,
+  });
+  await companyFile.update((state) => {
+    state.employees = [employee];
+  });
+  const customModel = { endpointId: 'local-test', modelId: 'synthetic-model', label: 'Local' };
+  const original = new Session({ id: sid, workingDir: '/workspace', mode: 'hands', resumeSessionId: sid });
+  cleanup.push(() => original.stop(false));
+  original.setCustomModel({ ...customModel, envKeys: ['REVERIE_HANDS_MODEL'] });
+  const saved = original.toPersistedState();
+  states.setSession(sid, saved);
+  const company = new CompanyService(companyFile, {
+    getSession: (id: string) => sessions.get(id),
+    chatrooms: { rooms: () => [] },
+    research: {},
+  } as unknown as CompanyServiceDeps);
+  f.row.sourceDigest = dockerEmployeeSourceDigest(employee, saved);
+  f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);
+  f.row.phase = 'provider-issued';
+  const provider = new DockerEmployeeSessionProvider(
+    new CompanyDockerContinuationStore(company, (id) => states.getSession(id)),
+    {
+      store: states,
+      sessions,
+      mux,
+      async addSession(session: Session, _unused: undefined, admitted: () => boolean) {
+        expect(admitted()).toBe(true);
+        expect(session.customModel).toEqual(customModel);
+        sessions.set(session.id, session);
+        cleanup.push(() => session.stop(false));
+      },
+      reapplyPersistedSessionState: vi.fn(),
+      setupSessionListeners: vi.fn(),
+      persistSessionStateNow: vi.fn(),
+    } as unknown as SessionPort & ConfigPort & Pick<InfraPort, 'mux'>,
+    'http://boxed-office:3000'
+  );
+  const start = vi.spyOn(Session.prototype, 'startInteractive').mockResolvedValueOnce(undefined);
+  await provider.launch(
+    f.row,
+    {
+      version: 1,
+      operationId: oid,
+      credentialId: f.row.credentialId,
+      sessionId: sid,
+      sessionGeneration: 3,
+      containerId: dest,
+      imageId: target,
+      originalDigest: dockerContinuationDigest(f.row.destination),
+      policyDigest: dockerContinuationDigest(f.row.policy),
+    },
+    () => {}
+  );
+  expect(start).toHaveBeenCalledOnce();
+  expect(sessions.get(sid)?.customModel).toEqual(customModel);
+});
+
 async function savedFixture(
   explicitUnknown = false,
   savedInputUnknown = false,

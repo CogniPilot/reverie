@@ -154,6 +154,7 @@ import { DEFAULT_TMUX_HISTORY_LIMIT } from './config/terminal-history.js';
 import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
 import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
@@ -3165,10 +3166,11 @@ export class Session extends EventEmitter {
 
   /** Provider recipe DATA only, without runtime/view getters. Never an API serializer or a grant. */
   providerRecipeState() {
+    const persistentRecord = resolvedStockProtocol(this.mode)?.shipped.capabilities.rebootRestore === 'persistent-record';
     return {
       mode: this.mode,
-      claudeMode: this._claudeMode,
-      allowedTools: this._allowedTools,
+      claudeMode: persistentRecord ? undefined : this._claudeMode,
+      allowedTools: persistentRecord ? undefined : this._allowedTools,
       workingDir: this.workingDir,
       subscriptionProfile: this.subscriptionProfile,
       model: cliTakesSessionModel(this.mode) ? this._model : undefined,
