@@ -1,3 +1,4 @@
+import { renewExistingDockerProviderView } from '../src/docker-existing-view-renewal.js';
 /** Real paid-launch owner, Session lifecycle, StateStore and v3 Engine/Installer
  * proofs over bounded PTY/Docker reply ports. No Docker/provider/native effect
  * or physical local-client custody acceptance is claimed. */
@@ -687,4 +688,66 @@ it('refuses revoked native proof before touching the lost paid viewer', async ()
   // The retained paid owner shares native currency, so its require now refuses.
   expect(f.session.providerDispatchHeld).toBe(true);
   expect(f.session.pid).toBeNull();
+});
+
+async function loadedPlanViewTransition() {
+  const f = await paidFixture(true, true), row = f.native.state.work!;
+  // Explicit controlled read observation of the already configured policy.
+  // This fixture port cannot create or start a resource helper.
+  vi.mocked(f.native.resources.read).mockResolvedValue(row.policy);
+  const directory = fs.mkdtempSync(join(tmpdir(), 'ready-view-renewal-'));
+  const path = join(directory, 'state.json'), writer = new StateStore(path);
+  const data = {id: row.request.sessionId, owner: row.owner, mode: 'claude', workingDir: '/workspace',
+    claudeMode: 'normal', allowedTools: 'Read', status: 'idle', pid: null, currentTaskId: null,
+    createdAt: 1, lastActivityAt: 1, docker: structuredClone(f.session.docker!)} as SessionState;
+  writer.setSession(data.id, data);
+  const original = new Session({...data, publicationStore: writer});
+  const publication = writer.stageProviderLaunch(original, {transport: 'docker', current: () => true,
+    snapshot: () => original.toPersistedState()});
+  await publication.prepare(original, {kind: 'mux', sessionId: data.id, owner: null, mode: 'claude',
+    command: 'controlled-known-returned-plan-provider', cwd: '/workspace', environment: {}});
+  publication.claim();
+  const returned = vi.fn(() => true);
+  publication.settle(returned());
+  expect(returned).toHaveBeenCalledOnce();
+  await original.stop(false); writer.flush();
+  const loaded = new StateStore(path), mux = new TmuxManager();
+  const session = new Session({...loaded.getSession(data.id)!, publicationStore: loaded, useMux: true, mux});
+  cleanup.push(async () => {await session.stop(false); mux.destroy(); loaded.flush(); fs.rmSync(directory, {recursive:true,force:true});});
+  vi.spyOn(mux, 'isPaneDead').mockReturnValue(false);
+  vi.spyOn(mux, 'capturePaneText').mockReturnValue('❯ \n  shift+tab to cycle');
+  vi.spyOn(mux, 'readPaneLiveness').mockImplementation(async () => ({state:'live',pid:mux.getSession(session.id)!.pid}));
+  const issued = {...row, phase:'provider-issued' as const};
+  await f.companyFile.update(state => {state.dockerEmployeeContinuations = [issued];});
+  const current = () => {if(digest(f.canonical.record(row.employeeId))!==digest(issued)) throw Error('Original view row changed');};
+  session.bindDockerContinuationView(await f.native.engine.captureProviderView(issued, current));
+  await session.startInteractive();
+  expect(session.toState().providerDispatchHoldKind).toBe('loaded-intent');
+  expect(session.providerInputHeld).toBe(false);
+  await f.companyFile.update(state => {state.dockerEmployeeContinuations = [row];});
+  expect(session.providerInputHeld).toBe(true);
+  expect(session.dockerContinuationViewCurrent).toBe(false);
+  const sessions = new Map([[session.id,session]]);
+  let runtime = true;
+  const deps = {company:f.canonicalCompany,store:f.canonical,engine:f.native.engine,sessions,
+    saved:(id:string)=>loaded.getSession(id),runtimeCurrent:()=>{if(!runtime)throw Error('Runtime changed');}};
+  return {...f,row,session,loaded,mux,deps,revokeRuntime:()=>{runtime=false;}};
+}
+
+it('renews a loaded v3 reader after READY metadata publication without retaining its operation grant or replaying a provider', async () => {
+  const f = await loadedPlanViewTransition(), oldPid = f.session.pid;
+  let operation = true;
+  const creates = vi.mocked(f.native.command.create).mock.calls.length,
+    clients = transport.clients.length;
+  await renewExistingDockerProviderView(f.deps, f.row, f.session, () => operation);
+  expect(f.session.providerInputHeld).toBe(false);
+  expect(f.session.dockerContinuationViewCurrent).toBe(true);
+  operation = false;
+  expect(f.session.providerInputHeld).toBe(false);
+  expect(f.session.pid).toBe(oldPid);
+  expect(transport.clients).toHaveLength(clients);
+  expect(f.native.command.create).toHaveBeenCalledTimes(creates);
+  expect(transport.writes).toEqual([]);
+  f.revokeRuntime();
+  expect(f.session.providerInputHeld).toBe(true);
 });

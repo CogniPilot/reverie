@@ -1109,6 +1109,7 @@ export class Session extends EventEmitter {
   }
   get providerDispatchHeld(): boolean {return this.#providerDispatchUncertainty !== undefined;}
   /** Input to a freshly verified existing provider is separate from a new-provider dispatch. */
+  get providerDispatchHoldKind(): 'loaded-intent' | 'intrinsic' | undefined { return this.#providerDenial?.kind; }
   get providerInputHeld(): boolean { return !this._existingProviderObservationAdmitted(); }
   private _holdUnconfirmedProvider(
     cause?: unknown,
