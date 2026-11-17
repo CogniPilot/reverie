@@ -2,6 +2,8 @@
 #[cfg(target_os = "linux")]
 mod args;
 #[cfg(target_os = "linux")]
+mod credential;
+#[cfg(target_os = "linux")]
 mod data;
 #[cfg(target_os = "linux")]
 mod error;
@@ -43,6 +45,7 @@ fn main() -> std::process::ExitCode {
         Command::VerifyStorageReference { home, nix } => {
             storage::verify_reference(&mut files, &home, &nix)
         }
+        Command::VerifyWorkerCredential => credential::verify(std::io::stdin().lock()),
     };
     let result = error::finalized(result, files.close_all());
     match result {
