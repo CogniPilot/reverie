@@ -1,5 +1,6 @@
 import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import * as planProtocol from '../src/docker-plan-protocol.js';
+import * as multiuser from '../src/config/multiuser.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
 import { dockerPlanSourceRecordCurrent } from '../src/docker-plan-move-actor.js';
@@ -52,6 +53,9 @@ import {
   dockerPlanMoveHandoffDigest,
 } from '../src/docker-plan-move-data.js';
 import { dockerPlanMaterial } from '../src/docker-plan-material.js';
+import { dockerPlanMoveTargetRecipe } from '../src/docker-plan-move-recipe.js';
+import { DockerPlanMoveWork } from '../src/docker-plan-move-work.js';
+import { DockerPlanSourceHolder } from '../src/docker-plan-source-holder.js';
 import { dockerProviderRuntimeRecipeDigest } from '../src/docker-employee-source-correlation.js';
 import { DOCKER_PLAN_ACCOUNT_STATUS_PROGRAM } from '../src/docker-plan-account-status.js';
 import { DOCKER_PROVIDER_VIEW_PROGRAM } from '../src/docker-employee-provider-view-native.js';
@@ -64,7 +68,8 @@ import {
   captureDockerPlanDisjointGeneration,
   requireDockerPlanDisjointGeneration,
 } from '../src/docker-plan-disjoint-generation.js';
-import { DockerPlanSourceProof } from '../src/docker-plan-source.js';
+import { DockerPlanSourceProof, DockerPlanSourceReader, DOCKER_PLAN_INIT_PROGRAM } from '../src/docker-plan-source.js';
+import { DOCKER_PLAN_SOURCE_READ_PROGRAM } from '../src/docker-plan-source-native.js';
 import { dockerPlanMaximumStates } from '../src/docker-plan-move-capacity.js';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
 import type { PlanMoveDockerJournal } from '../src/plan-move-docker.js';
@@ -74,7 +79,8 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanup.splice(0).reverse()) await close();
 });
-async function fixture(running = true, retainedAccount = false, preparedPool = false) {
+async function fixture(running = true, retainedAccount = false, preparedPool = false, owner?: string) {
+  if (owner !== undefined) vi.spyOn(multiuser, 'isMultiUserMode').mockReturnValue(true);
   const f = dockerPlanSourceFixture(running),
     directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-'));
   fs.chmodSync(directory, 0o700);
@@ -87,6 +93,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     createdAt: 1,
     lastActivityAt: 1,
     mode: 'claude',
+    ...(owner === undefined ? {} : { owner }),
     workingDir: '/workspace',
     resumeSessionId: '90000000-0000-4000-8000-000000000009',
     claudeMode: 'normal',
@@ -97,6 +104,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     binding = { ...f.binding, policyDigest: digest(policy) };
   const employee = EmployeeSchema.parse({
     id: f.row.employeeId,
+    ...(owner === undefined ? {} : { owner }),
     name: 'Synthetic',
     icon: 'X',
     position: 'Engineer',
@@ -140,6 +148,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
   );
   const row = DockerEmployeeContinuationRecord.parse({
     ...f.row,
+    ...(owner === undefined ? {} : { owner }),
     original,
     policy,
     ...(preparedPool
@@ -306,6 +315,25 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     app = Fastify();
   await app.register(cookie);
   registerDockerWorkerIdentity(app, auth);
+  if (owner !== undefined)
+    app.addHook('preHandler', async (request) => {
+      request.authUser = { username: owner, role: 'admin' };
+    });
+  const ownerSessions =
+    owner === undefined
+      ? null
+      : new Map([
+          [
+            'fixture-owner',
+            {
+              username: owner,
+              ip: '127.0.0.1',
+              ua: 'test',
+              createdAt: 1,
+              method: 'basic' as const,
+            },
+          ],
+        ]);
   let proof: unknown;
   const input: PlanMoveInput = {
     id: 'synthetic-actor-move',
@@ -329,7 +357,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
         choice: { moveId: input.id, toAccount: input.toAccount, forceBusy: true },
       },
       company,
-      { authSessions: null },
+      { authSessions: ownerSessions as never },
       undefined,
       current
     );
@@ -342,7 +370,10 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
       await app.inject({
         method: 'POST',
         url: '/api/capture',
-        headers: { [DOCKER_WORKER_IDENTITY_HEADER]: token, 'x-reverie-parent-session': saved.id },
+        headers:
+          owner === undefined
+            ? { [DOCKER_WORKER_IDENTITY_HEADER]: token, 'x-reverie-parent-session': saved.id }
+            : { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=fixture-owner' },
       })
     ).statusCode
   ).toBe(200);
@@ -374,7 +405,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
       retain,
     });
   const actor = baseActor.withRequesterAuthority(proof);
-  const selectedSeed = await actor.reserve(input, undefined, 'd'.repeat(64)),
+  const selectedSeed = await actor.reserve(input, owner, 'd'.repeat(64)),
     seed = retainedAccount
       ? DockerPlanMoveSeed.parse({
           ...selectedSeed,
@@ -395,6 +426,7 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
   let state = DockerPlanMoveJournalState.parse({ version: 1, purpose: 'docker-plan-replacement-v1', epoch, seed });
   const record: PlanMoveRecord = {
     id: input.id,
+    ...(owner === undefined ? {} : { owner }),
     employeeId: employee.id,
     name: employee.name,
     oldSession: saved.id,
@@ -486,7 +518,11 @@ async function issuedCheckpoint(
   f: Awaited<ReturnType<typeof fixture>>,
   handoff?: 'issued' | 'submitted',
   publication: 'issued' | 'published' = 'published',
-  prepaid = false
+  prepaid = false,
+  amend?: (
+    work: NonNullable<DockerPlanMoveJournalState['work']>,
+    material: NonNullable<DockerPlanMoveJournalState['material']>
+  ) => void
 ) {
   await f.actor.stopSource(f.record, f.journal);
   const before = f.journal.read(),
@@ -508,7 +544,7 @@ async function issuedCheckpoint(
       containerId: 'f'.repeat(64),
       sessionId: seed.target.sessionId,
     },
-    work = {
+    work: NonNullable<DockerPlanMoveJournalState['work']> = {
       ...prior.work,
       employeeId: f.record.employeeId,
       owner: f.record.owner,
@@ -522,7 +558,7 @@ async function issuedCheckpoint(
         expectedPolicyDigest: digest(seed.source.record.policy),
         expectedDestinationImageId: seed.target.workerImage.imageId,
       },
-      original: seed.source.record.destination,
+      original: seed.source.record.destination!,
       workerImage: seed.target.workerImage,
       policy: seed.source.record.policy,
       credentialId: seed.target.credentialId,
@@ -551,7 +587,7 @@ async function issuedCheckpoint(
           imageId: seed.target.workerImage.imageId,
           configurationDigest: '5'.repeat(64),
           containerId: (role === 'identity-helper' ? '6' : '7').repeat(64),
-          phase: 'completed',
+          phase: 'completed' as const,
           resultDigest: '8'.repeat(64),
         })),
       ],
@@ -572,8 +608,9 @@ async function issuedCheckpoint(
         },
       },
     };
+  amend?.(work, material);
   let checkpoint = before;
-  if (prepaid) {
+  if (prepaid && !before.sourceReader) {
     const reader = {
       version: 1 as const,
       purpose: 'docker-plan-source-reader-v1' as const,
@@ -1767,6 +1804,377 @@ describe('prepaid installed original across website pair changes', () => {
  * protected stores + genuine original requester. Native I/O is controlled;
  * the deliberately refused next boundary grants no effect/paid completion. */
 describe('fresh owner original-recovery composition', () => {
+  it.each([
+    ['ownerless', undefined, undefined],
+    ['named owner', 'synthetic-owner', undefined],
+    ['changed owner', 'synthetic-owner', 'owner'],
+    ['changed material', undefined, 'material'],
+  ] as const)('retains exact work through a cold disk reload: %s', async (_label, owner, change) => {
+    const f = await fixture(true, false, true, owner);
+    const seed = f.seed;
+    const context = {
+      source: { kind: 'intake' as const, dev: '11', ino: '12' },
+      roles: ['claude-projects' as const],
+      conversation: {
+        nativeId: f.saved.resumeSessionId!,
+        relative: ['projects', f.saved.resumeSessionId! + '.jsonl'],
+        sha256: 'a'.repeat(64),
+      },
+    };
+    const material = { ...dockerPlanJournalFixture().material, context };
+    const selected = dockerPlanMaterial(
+      {
+        operationId: seed.target.operationId,
+        sessionId: seed.target.sessionId,
+        provider: seed.target.provider,
+        accountId: seed.target.accountId,
+        context,
+      },
+      material.authDigest
+    );
+    const target = dockerPlanMoveTargetRecipe(
+      f.saved,
+      f.accounts.get('b')!,
+      f.input,
+      { sessionId: seed.target.sessionId, owner, at: f.record.at },
+      { claudeMode: 'normal', allowedTools: 'Read' },
+      { kind: 'resolved', nativeId: context.conversation.nativeId }
+    );
+    expect(target.templateDigest).toBe(seed.target.templateDigest);
+    const employee = f.companyStore.snapshot().employees[0]!;
+    const targetEmployee = {
+      ...employee,
+      sessionId: seed.target.sessionId,
+      sessionGeneration: seed.target.sessionGeneration,
+      runtimeRecipe: target.recipe,
+    };
+    const policy = f.sourceStore.newOperationPolicy(employee.id);
+    const home = { source: seed.source.record.destination!.home.source, user: '1000:100', dev: '11', ino: '12' };
+    vi.spyOn(f.engine, 'planReplacementHome').mockImplementation(async (_r, current) => {
+      current();
+      return home;
+    });
+    // Earn the actual closed SourceHolder cursor over a fixed synthetic Engine
+    // port. Frozen native guards stay intact, including configuration and birth.
+    let helper: (Record<string, unknown> & { State: Record<string, unknown> }) | undefined;
+    const helperId = '9'.repeat(64),
+      baseRun = f.run.getMockImplementation()!;
+    f.nativeCreate.mockImplementation(async (_name, config, current) => {
+      current();
+      const { Image, HostConfig, ...rest } = structuredClone(config);
+      const host = HostConfig as {
+        Mounts: Array<{ Type: string; Source: string; Target: string; ReadOnly?: boolean }>;
+      };
+      helper = {
+        Id: helperId,
+        Image,
+        Config: { ...rest, Volumes: null },
+        HostConfig: { ...host, RestartPolicy: { Name: 'no', MaximumRetryCount: 0 } },
+        Mounts: host.Mounts.map((m) => ({
+          Type: m.Type,
+          Source: m.Source,
+          Destination: m.Target,
+          RW: !m.ReadOnly,
+        })),
+        State: {
+          Running: false,
+          Status: 'created',
+          Pid: 0,
+          Paused: false,
+          Restarting: false,
+          Dead: false,
+          ExitCode: 0,
+        },
+      };
+      return helperId;
+    });
+    f.run.mockImplementation(async (args, input) => {
+      if (args[0] === 'image') {
+        const images = JSON.parse(await baseRun(args, input));
+        images[0].Config.Env = ['PATH=/bin'];
+        images[0].Config.Volumes = null;
+        return JSON.stringify(images);
+      }
+      if (args[0] === 'container' && args[1] === 'ls') return helper ? helperId : '';
+      if (args[0] === 'container' && args.includes(helperId) && helper) {
+        if (args[1] === 'inspect') return JSON.stringify([helper]);
+        if (args[1] === 'start' || args[1] === 'stop') {
+          helper.State = {
+            Running: args[1] === 'start',
+            Status: args[1] === 'start' ? 'running' : 'exited',
+            Pid: args[1] === 'start' ? 500 : 0,
+            Paused: false,
+            Restarting: false,
+            Dead: false,
+            ExitCode: args[1] === 'start' ? 0 : 143,
+          };
+          return helperId;
+        }
+      }
+      if (args.includes(helperId) && args.includes(DOCKER_PLAN_INIT_PROGRAM))
+        return JSON.stringify({ startTicks: '5000' });
+      if (args.includes(DOCKER_PLAN_SOURCE_READ_PROGRAM))
+        return JSON.stringify({
+          version: 1,
+          purpose: 'reverie-plan-source-home-v1',
+          homeDev: home.dev,
+          homeIno: home.ino,
+          uid: 1000,
+          gid: 100,
+        });
+      return baseRun(args, input);
+    });
+    await f.actor.stopSource(f.record, f.journal);
+    const holderCommand = new PackagedDockerEngineCommand();
+    const holder = new DockerPlanSourceHolder(
+      holderCommand,
+      '7'.repeat(64),
+      new DockerPlanSourceReader(
+        holderCommand,
+        'synthetic',
+        '7'.repeat(64),
+        'http://reverie:3000',
+        (row, current) => f.engine.captureProviderView(row, current),
+        async (row, current) => {
+          await f.engine.existingImage(row, current);
+        }
+      ),
+      async (_row, current) => {
+        current();
+        return home;
+      }
+    );
+    await holder.open(f.record, f.journal);
+    await holder.close(f.record, f.journal);
+    expect(f.journal.read().sourceReader?.phase).toBe('closed');
+    f.nativeCreate.mockClear();
+    const sourceDigest = dockerEmployeeSourceDigest(targetEmployee, target.saved);
+    await issuedCheckpoint(f, undefined, 'published', true, (work, retainedMaterial) => {
+      Object.assign(retainedMaterial, material);
+      Object.assign(work, {
+        policy,
+        request: { ...work.request, expectedPolicyDigest: digest(policy), enterOffice: false },
+        sourceDigest,
+        providerSourceDigest: dockerEmployeeProviderSourceDigest(targetEmployee, target.saved),
+        planReplacement: {
+          ...work.planReplacement,
+          source: { ...work.planReplacement.source, networkIds: ['5'.repeat(64)] },
+          account: {
+            id: 'b',
+            provider: 'anthropic' as const,
+            projectionDigest: selected.projectionDigest,
+            contextDigest: selected.contextInputDigest,
+          },
+        },
+      });
+      if (change === 'material') work.sourceDigest = '0'.repeat(64);
+    });
+    const checkpoint = f.journal.read(),
+      work = checkpoint.work!;
+    const original = { ...f.record, phase: 'recovery-required' as const, dockerReplacement: checkpoint };
+    await f.moves.save([original]);
+    // The original must really cross JSON persistence, not stay in the actor's
+    // in-memory reservation. This is the ownerless production failure boundary.
+    const reopened = new PlanMoveStore(join(f.directory, 'moves.json'));
+    const disk = await reopened.dockerRecord(original.id);
+    expect(Object.hasOwn(disk.dockerReplacement!.work!, 'owner')).toBe(owner !== undefined);
+    if (change === 'owner')
+      await f.companyStore.update((s) => {
+        s.employees[0]!.owner = 'different-owner';
+      });
+    const credentials = new Map([
+      [
+        'owner',
+        {
+          ip: '127.0.0.1',
+          ua: 'test',
+          createdAt: 1,
+          method: 'basic' as const,
+          ...(owner === undefined ? {} : { username: owner }),
+        },
+      ],
+    ]);
+    // Controlled native phase/receipt ports deliberately do not establish
+    // Docker/provider acceptance. Real requester/current, runner, strict work
+    // comparison and durable paid-intent CAS remain the subject of this test.
+    vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((_d, current) => current());
+    vi.spyOn(DockerEmployeeEngine.prototype, 'inspectPlanReplacementProtocol').mockImplementation(async (_r, current) =>
+      current()
+    );
+    vi.spyOn(f.engine, 'observePool').mockResolvedValue(seed.source.record.pool!);
+    vi.spyOn(f.engine, 'planReplacementNetworkIds').mockImplementation(async (_r, current) => {
+      current();
+      return ['5'.repeat(64)];
+    });
+    vi.spyOn(DockerPlanMoveWork.prototype, 'inspect').mockImplementation(async function (this: DockerPlanMoveWork) {
+      this.row();
+    });
+    vi.spyOn(DockerPlanMoveWork.prototype, 'prepareNative').mockImplementation(async function (
+      this: DockerPlanMoveWork
+    ) {
+      this.row();
+    });
+    vi.spyOn(DockerEmployeeEngine.prototype, 'initialPlanReplacementInstallation').mockImplementation(
+      async (row, current) => {
+        current();
+        return {
+          version: 1,
+          purpose: 'reverie-plan-installed-v1',
+          readMode: 'initial',
+          operationId: row.request.operationId,
+          sessionId: row.request.sessionId,
+          containerId: row.destination!.containerId,
+          projectionDigest: selected.projectionDigest,
+          accountId: 'b',
+          provider: 'anthropic',
+          contextInputDigest: digest(context),
+          installedAuthDigest: material.authDigest,
+          observedAuthDigest: material.authDigest,
+          tokenDigest: 'a'.repeat(64),
+          contextDigest: 'b'.repeat(64),
+          observedContextDigest: 'b'.repeat(64),
+          homeDev: '11',
+          homeIno: '12',
+          configDev: '11',
+          configIno: '13',
+        };
+      }
+    );
+    vi.spyOn(DockerEmployeeEngine.prototype, 'observePlanReplacementWork').mockImplementation(async (row, current) => {
+      current();
+      return {
+        original: row.destination!,
+        state: 'running',
+        resources: row.policy,
+        provider: { kind: 'absent' as const },
+        credentialDigest: null,
+      };
+    });
+    const rawRun = f.run.getMockImplementation()!;
+    f.run.mockImplementation(async (args, input) =>
+      args.includes(DOCKER_PLAN_ACCOUNT_STATUS_PROGRAM)
+        ? JSON.stringify({
+            version: 1,
+            purpose: 'reverie-plan-account-status-v1',
+            provider: 'anthropic',
+            authenticated: true,
+          })
+        : rawRun(args, input)
+    );
+    const publish = vi.spyOn(reopened, 'dockerPublish');
+    const no = async () => {
+      throw Error('Unexpected legacy/effect call');
+    };
+    const port: PlanMovePort = {
+      load: () => reopened.load(),
+      save: (rows) => reopened.save(rows),
+      dockerReplacement: f.baseActor,
+      dockerJournal: {
+        reserve: (...a) => reopened.dockerReserve(...a),
+        record: (id) => reopened.dockerRecord(id),
+        readCurrent: (...a) => reopened.dockerReadCurrent(...a),
+        current: (...a) => reopened.dockerCurrent(...a),
+        publish: (...a) => reopened.dockerPublish(...a),
+        claim: (...a) => reopened.dockerClaim(...a),
+        phase: (...a) => reopened.dockerPhase(...a),
+      },
+      snapshot: no,
+      idle: no,
+      create: no,
+      start: no,
+      ready: no,
+      beforeStop: no,
+      stop: no,
+      rebind: no,
+      binding: () => f.saved.id,
+      exists: () => true,
+      audit: async () => {},
+    };
+    const moves = new PlanMoves(port),
+      app = Fastify();
+    cleanup.push(() => app.close());
+    await app.register(cookie);
+    if (owner !== undefined)
+      app.addHook('preHandler', async (request) => {
+        request.authUser = { username: owner, role: 'admin' };
+      });
+    registerPlanMoveRoutes(app, moves, { authSessions: credentials as never }, undefined, (request) =>
+      planMoveExecutor(
+        {
+          company: f.company,
+          plans: f.plans,
+          chat: {
+            rooms: () => [],
+            post: () => {
+              throw Error('Unexpected post');
+            },
+            auditEntry: async () => {},
+          },
+          sessions: f.sessions,
+          mux: f.ctx.mux,
+          cleanup: no,
+          authorized: () => true,
+          request: no,
+          dockerReplacement: f.baseActor,
+          dockerRequester: () => {
+            throw Error('New request forbidden');
+          },
+          dockerOriginalRequester: (id) =>
+            captureDockerPlanMoveOriginalRequester(
+              request,
+              id,
+              reopened,
+              f.company,
+              { authSessions: credentials as never },
+              undefined,
+              f.current
+            ),
+        },
+        owner
+      )
+    );
+    const reply = await app.inject({
+      method: 'POST',
+      url: '/api/plans/moves/' + original.id + '/resolve',
+      headers: { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' },
+      payload: {
+        action: 'continue-original',
+        oldSession: original.oldSession,
+        newSession: original.newSession,
+        toAccount: original.toAccount,
+      },
+    });
+    expect(reply.statusCode).toBe(202);
+    await expect
+      .poll(
+        async () => {
+          const current = await moves.get(original.id, owner);
+          return current?.phase === 'recovery-required' ? current.error : undefined;
+        },
+        { timeout: 5000 }
+      )
+      .toBeTruthy();
+    const after = await reopened.dockerRecord(original.id);
+    const issued = publish.mock.calls.filter(([, before, next]) => !before.paidDispatch && !!next.paidDispatch);
+    if (change) {
+      expect(issued).toHaveLength(0);
+      expect(after.dockerReplacement!.paidDispatch).toBeUndefined();
+      if (change === 'material') expect(after.error).toBe('The held target material changed');
+    } else {
+      expect(after.error).not.toBe('The held target material changed');
+      expect(issued, after.error).toHaveLength(1);
+      expect(after.dockerReplacement!.paidDispatch).toMatchObject({
+        phase: 'issued',
+        operationId: seed.target.operationId,
+        containerId: work.destination!.containerId,
+      });
+      // Publication intentionally stops at the fixture's unavailable saved-state
+      // writer; no provider launch/effect capability is claimed from these ports.
+      expect(after.error).toContain('setSession');
+    }
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+  });
+
   it.each([
     'closed-source',
     'revoked-owner',

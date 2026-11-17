@@ -853,7 +853,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       version: 3,
       purpose: 'docker-employee-plan-replacement-v3',
       employeeId: record.employeeId,
-      owner: record.owner,
+      ...(record.owner === undefined ? {} : { owner: record.owner }),
       request: {
         operationId: seed.target.operationId,
         sessionId: seed.target.sessionId,
