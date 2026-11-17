@@ -33,6 +33,8 @@ pub(crate) enum Command {
         #[arg(long)]
         nix: crate::storage::Directory,
     },
+    /// Check an existing worker credential digest from one bounded private stdin record.
+    VerifyWorkerCredential,
 }
 #[derive(Args, Clone)]
 pub(crate) struct Common {
