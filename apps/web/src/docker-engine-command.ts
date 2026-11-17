@@ -84,7 +84,8 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
             error.signal === null &&
             input === undefined &&
             stdout === '' &&
-            stderr === 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n' &&
+            (stderr === 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n' ||
+              stderr === 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n') &&
             probeArgs(args)
           )
             reject(new ResourceProbeReadRace(probeOrigin, args));
