@@ -41,6 +41,21 @@ fn legacy_then_native_update_preserves_front_and_mounts() {
 }
 
 #[test]
+fn preview_pins_image_labels_and_keeps_instance_overrides() {
+    let old = image(json!([]));
+    let mut candidate = image(json!(["REVERIE_NATIVE_FRONT=1"]));
+    candidate["Config"]["Labels"] = json!({"instance":"default","new-feature":"enabled"});
+    let mut original = source(json!([]));
+    original["Config"]["Labels"] = json!({"instance":"my-office","existing":"keep"});
+    let (body, _) = create_body(&original, &old, &candidate).unwrap();
+    assert_eq!(
+        body["Labels"],
+        json!({"instance":"my-office","existing":"keep","new-feature":"enabled"})
+    );
+    assert_eq!(original["Config"]["Labels"].as_object().unwrap().len(), 2);
+}
+
+#[test]
 fn invalid_front_modes_and_internal_overrides_refuse() {
     let old = image(json!([]));
     let valid = image(json!(["REVERIE_NATIVE_FRONT=1"]));

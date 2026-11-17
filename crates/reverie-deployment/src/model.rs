@@ -228,6 +228,7 @@ pub(super) fn create_body_selection(
         .map(|e| e.split_once('=').expect("validated env").0.to_owned())
         .collect();
     let mut body = source["Config"].clone();
+    add_image_label_defaults(&mut body, &candidate["Config"])?;
     let fields = body
         .as_object_mut()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_CONFIG_REQUIRED"))?;
@@ -251,14 +252,30 @@ pub(super) fn create_body_selection(
     profile::validate_body(source, &body, selected_profile)?;
     Ok((body, refreshed))
 }
-pub(super) fn candidate_matches(
-    actual: &Value,
-    source: &Value,
-    body: &Value,
-    selected: DeploymentProfile,
-) -> Result<()> {
-    candidate_matches_selection(actual, source, body, selected, None)
+pub(super) fn add_image_label_defaults(config: &mut Value, image_config: &Value) -> Result<()> {
+    let labels = &image_config["Labels"];
+    if labels.is_null() {
+        return Ok(());
+    }
+    let invalid = "DEPLOYMENT_IMAGE_LABELS_INVALID";
+    let mut labels = labels
+        .as_object()
+        .cloned()
+        .ok_or_else(|| DeploymentError::new(invalid))?;
+    if labels.is_empty() {
+        return Ok(());
+    }
+    if !config["Labels"].is_null() {
+        let existing = config["Labels"]
+            .as_object()
+            .ok_or_else(|| DeploymentError::new(invalid))?;
+        labels.extend(existing.clone());
+    }
+    require(labels.values().all(Value::is_string), invalid)?;
+    config["Labels"] = Value::Object(labels);
+    Ok(())
 }
+pub(super) const CREATED_CONFIG_CHANGED: &str = "DEPLOYMENT_CREATED_CONFIG_CHANGED";
 pub(super) fn candidate_matches_selection(
     actual: &Value,
     source: &Value,
@@ -285,10 +302,7 @@ pub(super) fn candidate_matches_selection(
         .as_object_mut()
         .expect("create body")
         .remove("NetworkingConfig");
-    require(
-        actual["Config"] == expected,
-        "DEPLOYMENT_CREATED_CONFIG_CHANGED",
-    )?;
+    require(actual["Config"] == expected, CREATED_CONFIG_CHANGED)?;
     crate::binds::same_profile_grants(&actual["Mounts"], &source["Mounts"], selected)
 }
 pub(super) fn source_mounts(source: &Value, selected: DeploymentProfile) -> Result<()> {

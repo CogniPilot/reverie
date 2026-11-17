@@ -1,4 +1,5 @@
 use super::*;
+use crate::engine::Engine;
 use crate::installation::{exclusive_json, private, read_bounded};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -144,16 +145,34 @@ impl Plan {
         }
         Ok(())
     }
-    pub(super) fn candidate_matches(&self, actual: &Value) -> Result<()> {
-        match &self.network_topology {
-            Some(topology) => model::candidate_matches_selection(
-                actual,
-                &self.source,
-                &self.body,
-                self.profile(),
-                Some(topology),
-            ),
-            None => model::candidate_matches(actual, &self.source, &self.body, self.profile()),
+    pub(super) fn candidate_matches(&self, actual: &Value, engine: &Engine) -> Result<()> {
+        self.candidate_matches_topology(actual, self.network_topology.as_ref(), engine)
+    }
+    fn candidate_matches_topology(
+        &self,
+        actual: &Value,
+        topology: Option<&crate::networks::Topology>,
+        engine: &Engine,
+    ) -> Result<()> {
+        let matches = |body| {
+            model::candidate_matches_selection(actual, &self.source, body, self.profile(), topology)
+        };
+        match matches(&self.body) {
+            Err(error)
+                if error.code() == model::CREATED_CONFIG_CHANGED
+                    && actual["Config"]["Labels"] != self.body["Labels"] =>
+            {
+                // Docker applies image labels even for old plans that did not
+                // materialize their defaults in the request. Verify the exact
+                // immutable image and leave the recorded request unchanged.
+                let id = model::image_id(model::string(&self.body, "Image")?)?;
+                let image = engine.image(id)?;
+                require(image["Id"] == id, "DEPLOYMENT_CREATED_IMAGE_CHANGED")?;
+                let mut expected = self.body.clone();
+                model::add_image_label_defaults(&mut expected, &image["Config"])?;
+                matches(&expected)
+            }
+            result => result,
         }
     }
 }

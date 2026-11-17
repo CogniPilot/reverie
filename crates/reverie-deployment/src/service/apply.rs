@@ -56,7 +56,7 @@ impl DeploymentService {
         let result = (|| {
             let candidate = operation.candidate()?;
             let actual = self.engine.container(&candidate)?;
-            operation.plan.candidate_matches(&actual)?;
+            operation.plan.candidate_matches(&actual, &self.engine)?;
             require(
                 actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
                     && actual["State"]["Running"] == false
@@ -119,7 +119,7 @@ impl DeploymentService {
             )?;
             let candidate = operation.candidate()?;
             let actual = self.engine.container(&candidate)?;
-            operation.plan.candidate_matches(&actual)?;
+            operation.plan.candidate_matches(&actual, &self.engine)?;
             require(
                 actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
                     && actual["State"]["Running"] == false
@@ -143,16 +143,26 @@ impl DeploymentService {
     /// Execute the exact prepared release. The stopped-data copy and rehearsal
     /// must finish before the old container is renamed. No bulk employee wake.
     pub fn apply(&self, id: &str) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Ordinary)
+        self.apply_scoped(id, OperationDeadline::Ordinary, false)
+    }
+    /// Apply the prepared live-writer plan under its existing exact mount and
+    /// process pins, with explicit owner authorization to omit the data copy.
+    pub fn apply_live_without_backup(&self, id: &str) -> Result<DeploymentStatus> {
+        self.apply_scoped(id, OperationDeadline::Ordinary, true)
     }
     pub(crate) fn apply_before(&self, id: &str, end: Instant) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Initial(end))
+        self.apply_scoped(id, OperationDeadline::Initial(end), false)
     }
-    fn apply_scoped(&self, id: &str, deadline: OperationDeadline) -> Result<DeploymentStatus> {
+    fn apply_scoped(
+        &self,
+        id: &str,
+        deadline: OperationDeadline,
+        skip_live_backup: bool,
+    ) -> Result<DeploymentStatus> {
         deadline.check()?;
         let operation = self.effect_operation(id)?;
         let pins = self.pins(&operation)?;
-        let result = self.apply_pinned(&operation, &pins, deadline);
+        let result = self.apply_pinned(&operation, &pins, deadline, skip_live_backup);
         DeploymentError::finalized(result, pins.close()).map_err(|error| {
             if !error.has_snapshot() {
                 return error;
@@ -168,6 +178,7 @@ impl DeploymentService {
         operation: &Operation,
         pins: &crate::pins::Pins,
         deadline: OperationDeadline,
+        skip_live_backup: bool,
     ) -> Result<DeploymentStatus> {
         self.claimed(operation)?;
         operation.prepared()?;
@@ -178,7 +189,7 @@ impl DeploymentService {
         )?;
         let candidate = operation.candidate()?;
         let current = self.engine.container(&candidate)?;
-        operation.plan.candidate_matches(&current)?;
+        operation.plan.candidate_matches(&current, &self.engine)?;
         require(
             current["State"]["Running"] == false && current["State"]["Status"] == "created",
             "DEPLOYMENT_CANDIDATE_ALREADY_STARTED",
@@ -188,8 +199,16 @@ impl DeploymentService {
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
         )?;
         if operation.plan.live_account_writers.is_some() {
-            return self.apply_live_accounts(operation, &source, &candidate, pins, deadline);
+            return self.apply_live_accounts(
+                operation,
+                &source,
+                &candidate,
+                pins,
+                deadline,
+                skip_live_backup,
+            );
         }
+        require(!skip_live_backup, "DEPLOYMENT_LIVE_ACCOUNT_PLAN_REQUIRED")?;
         let source_root = self.data_source(operation)?;
         let tools = snapshot_tools()?;
         pins.running_mounts(&source)?;
@@ -253,7 +272,7 @@ impl DeploymentService {
         self.verify_effect_pins(operation, pins)?;
         operation
             .plan
-            .candidate_matches(&self.engine.container(candidate)?)?;
+            .candidate_matches(&self.engine.container(candidate)?, &self.engine)?;
         deadline.check()?;
         self.engine.start(candidate)?;
         operation.record("started", &json!({"id":candidate}))?;
@@ -278,7 +297,7 @@ impl DeploymentService {
             running["Id"] == candidate && running["State"]["Running"] == true,
             "DEPLOYMENT_CANDIDATE_CHANGED",
         )?;
-        operation.plan.candidate_matches(&running)?;
+        operation.plan.candidate_matches(&running, &self.engine)?;
         model::port_binding(&running, self.installation.port)?;
         require(
             running["Name"] == format!("/{}", operation.plan.container),

@@ -106,6 +106,43 @@ fn fixture() -> (Value, Vec<Value>) {
 }
 
 #[test]
+fn ready_claim_handover_accepts_only_recreation_of_the_default_bridge() {
+    let (mut source, mut facts) = fixture();
+    facts[0]["Options"]["com.docker.network.bridge.default_bridge"] = json!("true");
+    facts[0]["Created"] = json!("first");
+    let previous = Topology::observed(&source, facts.clone()).unwrap();
+
+    let new_bridge = json!("a".repeat(64));
+    source["NetworkSettings"]["Networks"]["bridge"]["NetworkID"] = new_bridge.clone();
+    facts[0]["Id"] = new_bridge;
+    facts[0]["Created"] = json!("second");
+    let current = Topology::observed(&source, facts.clone()).unwrap();
+    previous.require_claim_successor(&current).unwrap();
+    assert!(previous.require_container(&source).is_err());
+    current.require_container(&source).unwrap();
+
+    for (index, field, value) in [
+        (0, "Options", json!({})),
+        (0, "IPAM", json!({"Config":[{"Subnet":"198.51.100.0/24"}]})),
+        (1, "Internal", json!(false)),
+        (1, "Id", json!("b".repeat(64))),
+    ] {
+        let mut changed_facts = facts.clone();
+        let mut changed_source = source.clone();
+        changed_facts[index][field] = value.clone();
+        if field == "Id" {
+            changed_source["NetworkSettings"]["Networks"]["reverie-boxed-api-2"]["NetworkID"] =
+                value;
+        }
+        let changed = Topology::observed(&changed_source, changed_facts).unwrap();
+        assert!(
+            previous.require_claim_successor(&changed).is_err(),
+            "{field}"
+        );
+    }
+}
+
+#[test]
 fn preserves_seven_original_network_ids_and_aliases_without_allocated_endpoint_replay() {
     let (source, facts) = fixture();
     let topology = Topology::observed(&source, facts).unwrap();
