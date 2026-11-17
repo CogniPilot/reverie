@@ -23,7 +23,7 @@ import { submitRecoveryPrompt, recoveryComposerReady } from './company-recovery-
 import { getCli } from './config/cli-registry/registry.js';
 import type { DockerResourceRevisionStore } from './docker-resource-revisions.js';
 import type { RuntimeRecipe } from './expert-runtime-recipe.js';
-import type { Session } from './session.js';
+import { Session } from './session.js';
 import type { DockerPlanSourceContext } from './docker-plan-source-data.js';
 
 import { setTimeout as delay } from 'node:timers/promises';
@@ -87,6 +87,7 @@ export interface DockerPlanMoveComposition {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly current: () => void;
   readonly revisions: DockerResourceRevisionStore;
+  readonly renewPublishedView?: (row: DockerEmployeeContinuationRecord, session: Session, current: () => void) => Promise<void>;
   readonly retain: (actor: DockerPlanMoveActor) => void;
 }
 interface SourceSelection {
@@ -1312,6 +1313,17 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     }
     await this.#canonicalAccount(row, journal, current);
     view.require(session.id, session.docker);
+    if (session.providerInputHeld && session.providerDispatchHoldKind === 'loaded-intent') {
+      if (!this.#d.renewPublishedView) throw new PlanMoveError('The original published target reader cannot be renewed', 409);
+      await this.#d.renewPublishedView(publishedWork(journal.read().work), session, () => {
+        journal.current(); current();
+        if (this.#d.ctx.sessions.get(session.id) !== session || !session.docker)
+          throw new PlanMoveError('The original published target reader changed', 409);
+        view.require(session.id, session.docker);
+      });
+      journal.current(); current();
+      view.require(session.id, session.docker);
+    }
     this.#views.set(record.id, { view, session });
     return () => {
       current();
@@ -1333,6 +1345,19 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     held.view.require(held.session.id, held.session.docker);
     await this.#canonicalAccount(publishedWork(state.work), journal, current);
     held.view.require(held.session.id, held.session.docker);
+    const inputCurrent = () => {
+      try {
+        journal.current(); current();
+        if (this.#d.ctx.sessions.get(held.session.id) !== held.session || !held.session.docker) return false;
+        held.view.require(held.session.id, held.session.docker);
+        return true;
+      } catch { return false; }
+    };
+    const inputAdmission = Session.prototype.captureInputAdmission.call(held.session, inputCurrent),
+      mark = getCli(held.session.mode)?.capabilities.composerReadyMark;
+    if (!mark || held.session.pid === null || !inputAdmission() || !recoveryComposerReady(held.session, mark) ||
+        !Session.prototype.canAcceptChatInput.call(held.session))
+      throw new PlanMoveComposerNotReady();
     await journal.publish(state, {
       ...state,
       handoff: { phase: 'issued', digest: dockerPlanMoveHandoffDigest(state.seed.handoff) },
@@ -1341,17 +1366,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     await submitRecoveryPrompt(
       held.session,
       state.seed.handoff,
-      () => {
-        try {
-          journal.current();
-          current();
-          if (this.#d.ctx.sessions.get(held.session.id) !== held.session || !held.session.docker) return false;
-          held.view.require(held.session.id, held.session.docker);
-          return true;
-        } catch {
-          return false;
-        }
-      },
+      inputCurrent,
       undefined,
       { fromUser: true }
     );
