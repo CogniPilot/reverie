@@ -181,6 +181,11 @@ export async function runDockerPlanMove(
   };
   try {
     if (mode !== 'new') {
+      flight.current();
+      flight.signal.throwIfAborted();
+      await actor.bindOriginalRequester?.(record);
+      flight.current();
+      flight.signal.throwIfAborted();
       // A new HTTP request earns an actual original native proof before the
       // atomic epoch takeover. Issued paid work never enters this path.
       const proof = await readyRead(() => actor.inspectForContinuation(record, journal));

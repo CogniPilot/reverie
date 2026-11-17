@@ -1,3 +1,4 @@
+import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
 import * as planProtocol from '../src/docker-plan-protocol.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
 import { dockerPlanRetirementFixture } from './helpers/docker-plan-retirement-fixture.js';
@@ -439,6 +440,10 @@ async function fixture(running = true, retainedAccount = false, preparedPool = f
     run,
     nativeCreate,
     engine,
+    company,
+    ctx,
+    provider,
+    current,
     configuration,
     actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration']) =>
       new DockerPlanMoveActor({
@@ -1703,4 +1708,158 @@ describe('prepaid installed original across website pair changes', () => {
       expect(native).not.toHaveBeenCalled();
     }
   );
+});
+
+/** Actual public owner route + installed request-scoped adapter + runner +
+ * protected stores + genuine original requester. Native I/O is controlled;
+ * the deliberately refused next boundary grants no effect/paid completion. */
+describe('fresh owner original-recovery composition', () => {
+  it.each([
+    'closed-source',
+    'revoked-owner',
+    'changed-cursor',
+    'running-source',
+    'paid-unknown',
+    'forged-requester',
+  ] as const)('binds only fresh original authority before runner checks: %s', async (mode) => {
+    const f = await fixture(true, false, true);
+    if (mode === 'running-source') await f.actor.stopSource(f.record, f.journal);
+    else await issuedCheckpoint(f, undefined, 'published', mode !== 'paid-unknown');
+    const original = { ...(await f.moves.dockerRecord(f.record.id)), phase: 'recovery-required' as const };
+    await f.moves.save([original]);
+    const before = original.dockerReplacement!,
+      baselineCalls = f.run.mock.calls.length;
+    const credentials = new Map([['owner', { ip: '127.0.0.1', ua: 'test', createdAt: 1, method: 'basic' as const }]]);
+    const deny = async () => {
+      throw Error('Unexpected legacy/effect call');
+    };
+    const app = Fastify();
+    cleanup.push(() => app.close());
+    await app.register(cookie);
+    let compatibilityReads = 0;
+    // The local fixed CLI is a controlled compatibility DATA port. Actual
+    // Actor/current, SourceReader, native continuation and Store claim stay real.
+    const protocol = vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((_digest, current) => {
+      current();
+      compatibilityReads++;
+      if (mode === 'closed-source') throw Error('bound original reached exact protocol boundary');
+    });
+    vi.spyOn(f.engine, 'observePool').mockResolvedValue(original.dockerReplacement!.seed.source.record.pool!);
+    if (mode === 'running-source') Object.assign(f.raw.State, { Running: true, Status: 'running', Pid: 42 });
+    const claimed = vi.spyOn(f.moves, 'dockerClaim');
+    const port: PlanMovePort = {
+      load: () => f.moves.load(),
+      save: (rows) => f.moves.save(rows),
+      dockerReplacement: f.baseActor,
+      dockerJournal: {
+        reserve: (...args) => f.moves.dockerReserve(...args),
+        record: (id) => f.moves.dockerRecord(id),
+        readCurrent: (...args) => f.moves.dockerReadCurrent(...args),
+        current: (...args) => f.moves.dockerCurrent(...args),
+        publish: (...args) => f.moves.dockerPublish(...args),
+        claim: (...args) => f.moves.dockerClaim(...args),
+        phase: (...args) => f.moves.dockerPhase(...args),
+      },
+      snapshot: deny,
+      idle: deny,
+      create: deny,
+      start: deny,
+      ready: deny,
+      beforeStop: deny,
+      stop: deny,
+      rebind: deny,
+      binding: () => f.saved.id,
+      exists: () => true,
+      audit: async () => {},
+    };
+    const moves = new PlanMoves(port);
+    const factories = vi.fn();
+    registerPlanMoveRoutes(app, moves, { authSessions: credentials as never }, undefined, (request) => {
+      const runtime: PlanMoveRuntime = {
+        company: f.company,
+        plans: f.plans,
+        chat: {
+          rooms: () => [],
+          post: () => {
+            throw Error('Unexpected chat post');
+          },
+          auditEntry: async () => {},
+        },
+        sessions: f.sessions,
+        mux: f.ctx.mux,
+        cleanup: deny,
+        authorized: () => credentials.has('owner'),
+        request: deny,
+        dockerReplacement: f.baseActor,
+        dockerRequester: () => {
+          throw Error('A new choice cannot bind an original');
+        },
+        dockerOriginalRequester: async (id) => {
+          factories();
+          const proof = await captureDockerPlanMoveOriginalRequester(
+            request,
+            id,
+            f.moves,
+            f.company,
+            { authSessions: credentials as never },
+            undefined,
+            f.current
+          );
+          if (mode === 'revoked-owner') credentials.delete('owner');
+          if (mode === 'changed-cursor') {
+            // A competing original epoch is recording metadata only; it must
+            // invalidate this runner before any native inspection/dispatch.
+            await f.moves.dockerClaim(id, before, 'f0000000-0000-4000-8000-00000000000f', () => {}, f.current);
+          }
+          return mode === 'forged-requester' ? { ...original, purpose: 'original' } : proof;
+        },
+      };
+      return planMoveExecutor(runtime);
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/plans/moves/' + original.id + '/resolve',
+      headers: { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' },
+      payload: {
+        action: 'continue-original',
+        oldSession: original.oldSession,
+        newSession: original.newSession,
+        toAccount: original.toAccount,
+      },
+    });
+    expect(response.statusCode).toBe(202);
+    await expect
+      .poll(
+        async () => {
+          const value = await moves.get(original.id, original.owner);
+          return value?.phase === 'recovery-required' ? value.error : undefined;
+        },
+        { timeout: 5000 }
+      )
+      .toBeTruthy();
+    const after = await f.moves.dockerRecord(original.id),
+      view = (await moves.get(original.id, original.owner))!;
+    expect(view.error).not.toContain('original Docker move requester is unavailable');
+    expect(factories).toHaveBeenCalledOnce();
+    if (mode === 'closed-source') {
+      expect(after.error).toBe('bound original reached exact protocol boundary');
+      expect(protocol).toHaveBeenCalledOnce();
+    } else if (mode === 'paid-unknown') {
+      expect(protocol).not.toHaveBeenCalled();
+      expect(after.dockerReplacement?.paidDispatch).toEqual(before.paidDispatch);
+    } else if (mode !== 'running-source') expect(protocol).not.toHaveBeenCalled();
+    if (mode === 'changed-cursor') {
+      expect(claimed).toHaveBeenCalledOnce();
+      expect(after.dockerReplacement?.epoch, view.error).not.toBe(before.epoch);
+    } else {
+      expect(claimed).not.toHaveBeenCalled();
+      expect(after.dockerReplacement).toEqual(before);
+    }
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+    expect(
+      f.run.mock.calls
+        .slice(baselineCalls)
+        .some(([args]) => args[0] === 'container' && ['start', 'stop', 'rename'].includes(args[1]!))
+    ).toBe(false);
+  });
 });
