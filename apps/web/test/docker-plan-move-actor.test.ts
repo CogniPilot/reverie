@@ -7,7 +7,7 @@ import { dockerPlanSourceRecordCurrent } from '../src/docker-plan-move-actor.js'
 import fs from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import {
@@ -1344,7 +1344,30 @@ async function disjointFixture() {
   };
   return { f, store, old, port, moves: new PlanMoves({ ...port, dockerReplacement: f.baseActor }) };
 }
-describe('cold legacy disjoint native admission', () => {
+// Real Store/Company/native-port joins need a bounded instrumentation budget;
+// this changes no production proof lifetime or operation deadline.
+describe('cold legacy disjoint native admission', { timeout: 60_000 }, () => {
+  let sourceObservationTime: number;
+  beforeEach(() => {
+    // These native replies are controlled snapshots: coverage CPU time must not
+    // age them. Explicitly advance this clock to test the real freshness guard.
+    sourceObservationTime = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => sourceObservationTime);
+  });
+  it('expires an actual disjoint native proof after five seconds and never revives it', async () => {
+    const { f, old, store } = await disjointFixture();
+    const proof = await f.actor.admitDisjointGeneration!(f.input.employeeId, undefined, [old]);
+    const requireCurrent = () => requireDockerPlanDisjointGeneration(proof, [old], f.input.employeeId, undefined);
+    expect(requireCurrent).not.toThrow();
+    sourceObservationTime += 5000;
+    expect(requireCurrent).not.toThrow();
+    sourceObservationTime++;
+    expect(requireCurrent).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    sourceObservationTime = 1000;
+    expect(requireCurrent).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(await store.load()).toEqual([old]);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+  });
   it('retains aggregate old hold after a recording new native completion and after pre-reservation refusal', async () => {
     const { f, old, store, port, moves } = await disjointFixture();
     await expect(moves.begin({ ...f.input, toAccount: 'a' }, undefined, port)).rejects.toThrow('already on that plan');
