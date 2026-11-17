@@ -299,7 +299,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const input = structuredClone(originalInput);
     this.#d.current();
     if (!this.#requester) unavailable();
-    requireDockerPlanMoveRequesterReservation(this.#requester, input, owner);
+    const requester = requireDockerPlanMoveRequesterReservation(this.#requester, input, owner);
     const selected = this.#selection(input.employeeId, owner),
       current = this.#sourceCurrent(selected),
       account = await this.#d.plans.account(input.toAccount);
@@ -314,6 +314,15 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       current();
       const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
+      const observation = native.observation(selected.row, selected.binding);
+      if (
+        input.expectedWorkerImageId !== undefined &&
+        (requester.requester.kind !== 'owner' ||
+          observation.kind !== 'stopped' ||
+          workerImage.imageId !== input.expectedWorkerImageId ||
+          selected.row.destination!.imageId === workerImage.imageId)
+      )
+        throw new PlanMoveError('The stopped source or selected worker image changed', 409);
       // The final target recipe is composed by the shared schema renderer before
       // this seed can be returned. There is no effects-bearing placeholder seed.
       return await this.#reserveRecipe(
@@ -322,7 +331,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         selected,
         account,
         snapshot,
-        native.observation(selected.row, selected.binding),
+        observation,
         workerImage,
         current
       );

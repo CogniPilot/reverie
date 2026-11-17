@@ -26,7 +26,12 @@ const targetSchema = z
     employeeId: identifier,
     sessionId: z.string().uuid(),
     sessionGeneration: z.number().int().positive().safe().optional(),
-    choice: z.object({ moveId: identifier, toAccount: identifier, forceBusy: z.boolean() }).strict().optional(),
+    choice: z.object({
+      moveId: identifier,
+      toAccount: identifier,
+      forceBusy: z.boolean(),
+      expectedWorkerImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+    }).strict().optional(),
     purpose: z.enum(['choice', 'original']).default('choice'),
   })
   .strict();
@@ -48,7 +53,7 @@ export interface DockerPlanMoveRequesterScope {
   readonly sessionGeneration: number;
   readonly containerId: string;
   readonly purpose: 'choice' | 'original';
-  readonly choice?: Readonly<{ moveId: string; toAccount: string; forceBusy: boolean }>;
+  readonly choice?: Readonly<NonNullable<DockerPlanMoveRequesterTarget['choice']>>;
 }
 const origin = Symbol('actual Docker plan requester');
 export class DockerPlanMoveRequester {
@@ -86,6 +91,7 @@ export class DockerPlanMoveRequester {
       choice.moveId !== input.id ||
       choice.toAccount !== input.toAccount ||
       choice.forceBusy !== input.forceBusy ||
+      choice.expectedWorkerImageId !== input.expectedWorkerImageId ||
       input.sessionId !== scope.sessionId
     )
       throw new PlanMoveError('A new Docker plan choice requires its exact request', 403);
@@ -277,7 +283,8 @@ function captureRequester(
       (target.choice &&
         (record.id !== target.choice.moveId ||
           record.toAccount !== target.choice.toAccount ||
-          state.seed.forceBusy !== target.choice.forceBusy))
+          state.seed.forceBusy !== target.choice.forceBusy ||
+          record.expectedWorkerImageId !== target.choice.expectedWorkerImageId))
     )
       return refuse();
     common(state);
@@ -323,7 +330,12 @@ export async function captureDockerPlanMoveOriginalRequester(
       sessionId: record.oldSession,
       sessionGeneration: state.seed.source.binding.sessionGeneration,
       purpose: 'original',
-      choice: { moveId: record.id, toAccount: record.toAccount, forceBusy: state.seed.forceBusy },
+      choice: {
+        moveId: record.id,
+        toAccount: record.toAccount,
+        forceBusy: state.seed.forceBusy,
+        expectedWorkerImageId: record.expectedWorkerImageId,
+      },
     },
     company,
     auth,

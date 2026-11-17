@@ -68,7 +68,12 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
         employeeId: input.employeeId,
         sessionId: input.sessionId,
         sessionGeneration: input.sessionGeneration,
-        choice: { moveId: input.id, toAccount: input.toAccount, forceBusy: input.forceBusy },
+        choice: {
+          moveId: input.id,
+          toAccount: input.toAccount,
+          forceBusy: input.forceBusy,
+          expectedWorkerImageId: input.expectedWorkerImageId,
+        },
       });
       actors.set(input.id, value);
       return value.reserve(input, owner, requestDigest);

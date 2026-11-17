@@ -190,6 +190,7 @@ export function registerPlanMoveRoutes(
             sessionId: Identifier,
             sessionGeneration: z.number().int().positive().optional(),
             toAccount: Identifier,
+            expectedWorkerImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
             handoff: z.string().trim().min(1).max(12000),
           })
           .strict(),
@@ -200,6 +201,13 @@ export function registerPlanMoveRoutes(
           .code(503)
           .send(createErrorResponse(ApiErrorCode.OPERATION_FAILED, 'Owner force move is unavailable'));
       try {
+        if (
+          input.expectedWorkerImageId !== undefined &&
+          (dockerWorkerIdentityOf(request) ||
+            request.headers[RECOVERY_HEADER] !== undefined ||
+            !authenticatedPlanMover(request, auth.authSessions, ownerAuth))
+        )
+          throw new PlanMoveError('A worker image upgrade requires the signed-in owner browser', 403);
         const delegated =
           request.headers[RECOVERY_HEADER] === undefined ? undefined : await nativeForce?.(request, input);
         if (request.headers[RECOVERY_HEADER] !== undefined && (!delegated || !delegated.authorized()))

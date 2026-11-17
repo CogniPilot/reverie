@@ -240,7 +240,9 @@ export function dockerPlanMaximumStateBytes(seed: DockerPlanMoveSeed, epoch: str
 }
 /** Also reserve every later coarse status/finalizer field. Decoded by RecordSchema
  * at the store boundary; all native timestamps are safe integers in this version. */
-export function dockerPlanMaximumRecord<T extends { dockerReplacement?: DockerPlanMoveJournalState }>(record: T): T {
+export function dockerPlanMaximumRecord<
+  T extends { dockerReplacement?: DockerPlanMoveJournalState; expectedWorkerImageId?: string },
+>(record: T): T {
   if (!record.dockerReplacement) throw Error('Native settlement record required');
   const state = record.dockerReplacement;
   const maximum = dockerPlanMaximumStates(state.seed, state.epoch).sort(
@@ -250,7 +252,7 @@ export function dockerPlanMaximumRecord<T extends { dockerReplacement?: DockerPl
     ...record,
     dockerReplacement: maximum,
     name: '\0'.repeat(100),
-    fromAccount: '\0'.repeat(100),
+    fromAccount: record.expectedWorkerImageId === undefined ? '\0'.repeat(100) : maximum.seed.target.accountId,
     phase: 'recovery-required',
     at: MAX,
     error: '\0'.repeat(4000),

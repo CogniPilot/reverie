@@ -50,6 +50,7 @@ const RecordSchema = z
     sourceCleanupVerified: z.boolean().optional(),
     recoveryAction: z.literal('adopt-existing').optional(),
     recoveredAt: z.number().finite().nonnegative().optional(),
+    expectedWorkerImageId: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
     error: z.string().max(4000).optional(),
     requestDigest: z
       .string()
@@ -109,6 +110,16 @@ const RecordSchema = z
         record.newSession !== docker.seed.target.sessionId)
     )
       context.addIssue({ code: 'custom', message: 'Docker plan journal must bind its original request and target' });
+    if (
+      record.expectedWorkerImageId !== undefined &&
+      (!docker ||
+        !docker.seed.forceBusy ||
+        docker.seed.source.observation.kind !== 'stopped' ||
+        docker.seed.source.binding.imageId === record.expectedWorkerImageId ||
+        docker.seed.target.workerImage.imageId !== record.expectedWorkerImageId ||
+        record.fromAccount !== record.toAccount)
+    )
+      context.addIssue({ code: 'custom', message: 'A worker image upgrade must bind its stopped source and exact image' });
     if (docker && record.phase === 'failed' && (docker.sourceStop || docker.work || docker.paidDispatch))
       context.addIssue({ code: 'custom', message: 'Issued Docker plan work retains recovery' });
     if (

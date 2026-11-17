@@ -71,6 +71,8 @@ export interface PlanMoveInput {
   handoff: string;
   model?: string;
   targetMode?: 'codex' | 'claude';
+  /** Owner-confirmed replacement of a stopped Docker worker on its current account. */
+  expectedWorkerImageId?: string;
   /** Explicit same-account replacement, admitted through the ordinary request/approval flow. */
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
@@ -104,6 +106,7 @@ export interface PlanMoveRecord {
   sourceCleanupVerified?: boolean;
   recoveryAction?: 'adopt-existing';
   recoveredAt?: number;
+  expectedWorkerImageId?: string;
   purpose?: 'runtime-refresh';
   runtimeDigest?: string;
   resourceIntent?: PlanMoveResourceIntent;
@@ -595,6 +598,15 @@ export class PlanMoves {
       (!input.purpose && input.runtimeDigest !== undefined)
     )
       throw new PlanMoveError('Unknown plan move purpose');
+    if (
+      input.expectedWorkerImageId !== undefined &&
+      (!/^sha256:[a-f0-9]{64}$/.test(input.expectedWorkerImageId) ||
+        input.fromAccount !== input.toAccount ||
+        !input.forceBusy ||
+        input.purpose ||
+        input.sessionGeneration === undefined)
+    )
+      throw new PlanMoveError('A worker image upgrade requires the current plan and an exact image and generation');
     await this.init();
     checkOwnerScope();
     const requestDigest = createHash('sha256')
@@ -605,6 +617,7 @@ export class PlanMoves {
           input.model ?? '',
           input.targetMode ?? '',
           ...(input.sessionGeneration === undefined ? [] : ['session-generation', input.sessionGeneration]),
+          ...(input.expectedWorkerImageId === undefined ? [] : ['worker-image-upgrade', input.expectedWorkerImageId]),
           ...(input.purpose ? [input.purpose, input.runtimeDigest] : []),
           ...(input.resourceIntent
             ? [
@@ -666,6 +679,9 @@ export class PlanMoves {
           snapshot.runtimeDigest !== input.runtimeDigest
         )
           throw new PlanMoveError('A runtime refresh requires the unchanged current plan, runtime and a safe handoff');
+      } else if (input.expectedWorkerImageId) {
+        if (snapshot.backend !== 'docker' || snapshot.working)
+          throw new PlanMoveError('A worker image upgrade requires a stopped Docker worker', 409);
       } else if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
       if (this.records.size >= 100) {
         const oldest = [...this.records.values()].find(
@@ -689,6 +705,7 @@ export class PlanMoves {
         phase: 'waiting',
         at: Date.now(),
         requestDigest,
+        ...(input.expectedWorkerImageId === undefined ? {} : { expectedWorkerImageId: input.expectedWorkerImageId }),
         ...(input.purpose ? { purpose: input.purpose, runtimeDigest: input.runtimeDigest } : {}),
         ...(input.resourceIntent ? { resourceIntent: input.resourceIntent } : {}),
         ...(input.resourceOwnerScope === undefined ? {} : { resourceOwnerScope: input.resourceOwnerScope }),

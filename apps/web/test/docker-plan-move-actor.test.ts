@@ -84,7 +84,7 @@ async function fixture(
   retainedAccount = false,
   preparedPool = false,
   owner?: string,
-  replacement?: { imageId: string; clientManifestDigest: string }
+  replacement?: { imageId: string; clientManifestDigest: string; upgradeOnCurrentAccount?: boolean }
 ) {
   if (owner !== undefined) vi.spyOn(multiuser, 'isMultiUserMode').mockReturnValue(true);
   const f = dockerPlanSourceFixture(running),
@@ -351,7 +351,10 @@ async function fixture(
     employeeId: employee.id,
     sessionId: saved.id,
     fromAccount: 'a',
-    toAccount: 'b',
+    toAccount: replacement?.upgradeOnCurrentAccount ? 'a' : 'b',
+    ...(replacement?.upgradeOnCurrentAccount
+      ? { sessionGeneration: 1, expectedWorkerImageId: replacement.imageId }
+      : {}),
     forceBusy: true,
     handoff: 'Continue the synthetic work.',
   };
@@ -365,7 +368,12 @@ async function fixture(
         employeeId: employee.id,
         sessionId: saved.id,
         sessionGeneration: 1,
-        choice: { moveId: input.id, toAccount: input.toAccount, forceBusy: true },
+        choice: {
+          moveId: input.id,
+          toAccount: input.toAccount,
+          forceBusy: true,
+          expectedWorkerImageId: input.expectedWorkerImageId,
+        },
       },
       company,
       { authSessions: ownerSessions as never },
@@ -443,10 +451,11 @@ async function fixture(
     oldSession: saved.id,
     newSession: seed.target.sessionId,
     fromAccount: 'a',
-    toAccount: 'b',
+    toAccount: input.toAccount,
     phase: 'waiting',
     at: 1,
     requestDigest: seed.requestDigest,
+    ...(input.expectedWorkerImageId === undefined ? {} : { expectedWorkerImageId: input.expectedWorkerImageId }),
     dockerReplacement: state,
   };
   await moves.save([record]);
@@ -1094,6 +1103,23 @@ describe('captured native plan actor before paid dispatch', () => {
     await f.actor.stopSource(f.record, f.journal);
     expect(f.journal.read().sourceStop).toMatchObject({ phase: 'closed', sourceInit: null });
     expect(f.run.mock.calls.filter(([a]) => a[1] === 'stop')).toHaveLength(0);
+  });
+  it('binds an owner-selected replacement image without changing a stopped employee’s account', async () => {
+    const replacement = {
+      imageId: 'sha256:' + '4'.repeat(64),
+      clientManifestDigest: 'a'.repeat(64),
+      upgradeOnCurrentAccount: true,
+    };
+    const f = await fixture(false, false, false, 'operator', replacement);
+    expect(f.seed.source.observation.kind).toBe('stopped');
+    expect(f.seed.target.accountId).toBe(f.record.fromAccount);
+    expect(f.seed.target.workerImage.imageId).toBe(replacement.imageId);
+    await f.actor.stopSource(f.record, f.journal);
+    expect(f.journal.read().sourceStop).toMatchObject({ phase: 'closed', sourceInit: null });
+    expect(f.run.mock.calls.filter(([a]) => a[1] === 'stop')).toHaveLength(0);
+    await expect(fixture(true, false, false, 'operator', replacement)).rejects.toThrow(
+      'The stopped source or selected worker image changed'
+    );
   });
   it('records the original STOP before dispatch and settles a lost reply from fresh stopped proof without replay', async () => {
     const f = await fixture();
