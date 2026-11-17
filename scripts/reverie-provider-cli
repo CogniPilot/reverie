@@ -3,7 +3,8 @@
 set -euo pipefail
 provider=${1:?provider required}
 installer=${2:?installer required}
-shift 2
+release=${3:?release required}
+shift 3
 case "$provider" in claude|codex|opencode) ;; *) exit 2 ;; esac
 case "$installer" in /*) ;; *) exit 2 ;; esac
 
@@ -15,6 +16,9 @@ else
 fi
 provider_prefix=$provider_data/tools
 export npm_config_prefix="$provider_prefix"
+if [ "$provider" = codex ]; then
+  provider_prefix=$provider_prefix/codex/$release
+fi
 unset NPM_CONFIG_PREFIX REVERIE_CLI_INSTALL_LOCKED
 
 if [ "$provider" = codex ] && [ "${1:-}" = update ]; then

@@ -8,27 +8,28 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+const codexRelease = JSON.parse(readFileSync(new URL('./codex-release.json', import.meta.url), 'utf8'));
 const providers = [
   { id: 'claude', package: '@anthropic-ai/claude-code', version: '2.1.308', integrity: 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA==' },
-  { id: 'codex', package: '@openai/codex', version: '0.163.0', integrity: 'sha512-HNd7vR9oTK6M2ikxFnvNDCdYUgAsyo9VVnd5KnEd2ON0GYI++7MiX9XNPUkhtdgGKFPsWS+CEppQ1UU63uVhUw==' },
+  { id: 'codex', package: '@openai/codex', ...codexRelease },
   { id: 'opencode', package: 'opencode-ai', version: '1.19.3', integrity: 'sha512-wDRcUlMDibaLzecIGvVGUA9naghXVqzCWcUE7N3qagpGiLSUlU4VbixI+bpsErwJp+AAuSO2lhSr/XxJl7XbrQ==' },
 ];
 process.umask(0o077);
 const root = process.env.REVERIE_ROOT || join(homedir(), 'reverie');
 const data = process.env.REVERIE_DATA || (process.env.REVERIE_CONTAINER === '1' ? '/instances/default' : join(root, 'companies/default/data'));
-const prefix = join(data, 'tools');
+const tools = join(data, 'tools');
 const requested = (process.env.REVERIE_INSTALL_CLIS || 'claude codex opencode').trim().split(/\s+/);
 if (requested.length === 1 && requested[0] === 'none') process.exit(0);
 if (process.argv.length !== 2 || requested.some(id => !providers.some(provider => provider.id === id))) {
   console.error('reverie-install-clis: choose claude, codex, opencode, or none using REVERIE_INSTALL_CLIS.');
   process.exit(2);
 }
-mkdirSync(prefix, { recursive: true });
+mkdirSync(tools, { recursive: true });
 if (process.env.REVERIE_CLI_INSTALL_LOCKED !== '1') {
   const wait = process.env.REVERIE_CLI_INSTALL_WAIT === '1';
   const requestedWait = Number(process.env.REVERIE_CLI_INSTALL_WAIT_SECONDS || 180);
   const waitSeconds = Number.isFinite(requestedWait) && requestedWait >= 0.05 && requestedWait <= 180 ? requestedWait : 180;
-  const child = spawnSync('flock', [ ...(wait ? ['-w', String(waitSeconds)] : ['-n']), '-E', '75', join(prefix, '.install.lock'), process.execPath, fileURLToPath(import.meta.url)], {
+  const child = spawnSync('flock', [ ...(wait ? ['-w', String(waitSeconds)] : ['-n']), '-E', '75', join(tools, '.install.lock'), process.execPath, fileURLToPath(import.meta.url)], {
     env: { ...process.env, REVERIE_CLI_INSTALL_LOCKED: '1' }, stdio: 'inherit',
   });
   if (child.status === 75) console.log(wait ? 'reverie-install-clis: provider preparation timed out; retry when installation finishes.' : 'reverie-install-clis: an installer is already running.');
@@ -39,7 +40,7 @@ const timeoutSeconds = 120;
 const cache = process.env.npm_config_cache || join(process.env.TMPDIR || join(process.env.REVERIE_ROOT || join(homedir(), 'reverie'), 'scratch/tmp'), 'npm-provider-clis');
 mkdirSync(cache, { recursive: true });
 const env = { ...process.env, npm_config_cache: cache };
-const patchOwnedElfs = () => {
+const patchOwnedElfs = prefix => {
   const patcher = process.env.REVERIE_ELF_PATCHER;
   if (!patcher) return;
   const interpreter = process.env.REVERIE_ELF_INTERPRETER;
@@ -80,7 +81,7 @@ const patchOwnedElfs = () => {
   try { if (realpathSync(base) !== join(realpathSync(prefix), 'lib/node_modules')) return; } catch { return; }
   walk(base);
 };
-const prepareClaude = () => {
+const prepareClaude = prefix => {
   if (process.platform !== 'linux' || !process.env.REVERIE_ELF_INTERPRETER) return false;
   const binary = join(prefix, 'lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
   try {
@@ -113,7 +114,7 @@ process.exit(r.status ?? 1);
   symlinkSync('.reverie-claude.mjs', join(prefix, 'bin/claude'));
   return true;
 };
-const prepareOpenCode = () => {
+const prepareOpenCode = prefix => {
   if (process.platform !== 'linux' || !process.env.REVERIE_ELF_INTERPRETER) return false;
   const arch = process.arch;
   if (!['x64', 'arm64'].includes(arch)) return false;
@@ -129,32 +130,36 @@ const prepareOpenCode = () => {
   symlinkSync('.reverie-opencode.mjs', link);
   return true;
 };
-const runnable = provider => {
+const runnable = (prefix, provider) => {
   const binary = join(prefix, 'bin', provider.id);
   try { accessSync(binary, constants.X_OK); } catch { return false; }
   const result = spawnSync('timeout', ['--kill-after=2s', '10s', binary, '--version'], { env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16384 });
   const version = provider.version.replaceAll('.', '\\.');
   return result.status === 0 && new RegExp(`\\b${version}\\b`).test(result.stdout || '');
 };
-const status = (provider, state) => {
+const status = (prefix, provider, state) => {
   const path = join(prefix, `.install-${provider.id}.json`);
   const temporary = `${path}.${process.pid}`;
   writeFileSync(temporary, JSON.stringify({ provider: provider.id, package: provider.package, version: provider.version, registryIntegrity: provider.integrity, state, checkedAt: new Date().toISOString() })+'\n', { mode: 0o600 });
   renameSync(temporary, path);
 };
 for (const provider of providers.filter(provider => requested.includes(provider.id))) {
+  // Retained containers still use the legacy tools prefix and may repair their
+  // old pin. Keep the new Codex release separate across mixed deployments.
+  const prefix = provider.id === 'codex' ? join(tools, 'codex', provider.version) : tools;
+  mkdirSync(prefix, { recursive: true });
   let installed;
   try { installed = JSON.parse(readFileSync(join(prefix, 'lib/node_modules', provider.package, 'package.json'), 'utf8')).version; } catch {}
-  if (provider.id === 'claude' && installed === provider.version) prepareClaude();
-  if (provider.id === 'opencode' && installed === provider.version) prepareOpenCode();
-  let installedReady = installed === provider.version && runnable(provider);
+  if (provider.id === 'claude' && installed === provider.version) prepareClaude(prefix);
+  if (provider.id === 'opencode' && installed === provider.version) prepareOpenCode(prefix);
+  let installedReady = installed === provider.version && runnable(prefix, provider);
   // Healthy tools never need a scan of the shared npm tree on every invocation.
   if (installed === provider.version && !installedReady) {
-    patchOwnedElfs();
-    installedReady = runnable(provider);
+    patchOwnedElfs(prefix);
+    installedReady = runnable(prefix, provider);
   }
   if (installedReady) {
-    status(provider, 'ready');
+    status(prefix, provider, 'ready');
     console.log(`reverie-install-clis: ${provider.id} ${provider.version} ready.`);
     continue;
   }
@@ -163,14 +168,14 @@ for (const provider of providers.filter(provider => requested.includes(provider.
   // Subprocess output is deliberately not relayed: no account/token data enters logs.
   const result = spawnSync('timeout', ['--kill-after=5s', `${timeoutSeconds}s`, 'npm', 'install', '--global', '--prefix', prefix,
     '--registry=https://registry.npmjs.org', '--no-audit', '--no-fund', '--fetch-retries=0', '--fetch-timeout=30000', ...(provider.id === 'opencode' ? ['--ignore-scripts'] : []), `${provider.package}@${provider.version}`], { env, stdio: 'ignore' });
-  if (result.status === 0) { patchOwnedElfs(); if (provider.id === 'claude') prepareClaude(); }
+  if (result.status === 0) { patchOwnedElfs(prefix); if (provider.id === 'claude') prepareClaude(prefix); }
   // OpenCode's postinstall probes an ELF before Nix loader compatibility exists.
   // Use a loader wrapper on Nix; run the official platform setup elsewhere.
   const setup = result.status === 0 && provider.id === 'opencode'
-    ? (prepareOpenCode() ? { status: 0 } : spawnSync('timeout', ['--kill-after=5s', `${timeoutSeconds}s`, process.execPath, join(prefix, 'lib/node_modules/opencode-ai/postinstall.mjs')], { env, stdio: 'ignore' }))
+    ? (prepareOpenCode(prefix) ? { status: 0 } : spawnSync('timeout', ['--kill-after=5s', `${timeoutSeconds}s`, process.execPath, join(prefix, 'lib/node_modules/opencode-ai/postinstall.mjs')], { env, stdio: 'ignore' }))
     : result;
-  const ready = result.status === 0 && setup.status === 0 && runnable(provider);
-  status(provider, ready ? 'ready' : 'unavailable');
+  const ready = result.status === 0 && setup.status === 0 && runnable(prefix, provider);
+  status(prefix, provider, ready ? 'ready' : 'unavailable');
   if (!ready && process.env.REVERIE_CLI_INSTALL_REQUIRED === '1') process.exitCode = 1;
   console.log(`reverie-install-clis: ${provider.id} ${ready ? 'ready' : 'unavailable; retry with reverie-install-clis when the network/runtime is ready'}.`);
 }
