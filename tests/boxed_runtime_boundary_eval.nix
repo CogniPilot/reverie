@@ -5,6 +5,14 @@ let
   passes = actual: source: (builtins.tryEval ((verify actual source).passed)).success;
   without = group: name: expected // { ${group} = builtins.filter (v: v != name) expected.${group}; };
   add = group: name: expected // { ${group} = expected.${group} ++ [ name ]; };
+  makeHelper = options: import ../nix/docker-resource-helper-image.nix ({
+    pkgs = {
+      lib.optionalAttrs = condition: value: if condition then value else {};
+      writeText = _: bytes: "/fake/${(builtins.fromJSON bytes).name}";
+      dockerTools.buildLayeredImage = value: value;
+    };
+    helper = "/fake/helper";
+  } // options);
   gpu = import ../nix/container-gpu-image.nix {
     pkgs = {
       writeShellScript = _: _: "/nix/store/controlled-entry";
@@ -49,14 +57,20 @@ let
     gpuFactoryCannotDisappear = !(passes (without "lib" "mkContainerGpuImage") ../.);
     boxedClientCapsuleCannotDisappear = !(passes (without "packages" "workerClientCapsule") ../.);
     poolRestoreImageCannotDisappear = !(passes (without "packages" "docker-pool-restore-helper-image") ../.);
+    recoveryImageCannotDisappear = !(passes (without "packages" "docker-recovery-helper-image") ../.);
     poolRestoreDoesNotChangeOriginalHelper = let
-      pkgs = { lib.optionalAttrs = condition: value: if condition then value else {}; writeText = _: _: "/fake/identity"; dockerTools.buildLayeredImage = value: value; };
-      make = import ../nix/docker-resource-helper-image.nix;
-      baseline = make { inherit pkgs; helper = "/fake/helper"; };
-      restore = make { inherit pkgs; helper = "/fake/helper"; poolRestore = true; };
+      baseline = makeHelper {};
+      restore = makeHelper { poolRestore = true; };
     in baseline.config.Labels == { "org.reverie.purpose" = "boxed-resource-helper-v1"; }
       && restore.config.Labels == (baseline.config.Labels // { "org.reverie.resource.pool-restore" = "v1"; })
       && removeAttrs restore.config [ "Labels" ] == removeAttrs baseline.config [ "Labels" ];
+    recoveryImageIdentityDoesNotChangeHelperConfiguration = let
+      baseline = makeHelper {};
+      recovery = makeHelper { name = "reverie-boxed-recovery-helper"; };
+    in recovery.config == baseline.config && recovery.contents == baseline.contents
+      && builtins.match ".*cp /fake/reverie-boxed-recovery-helper share/reverie/helper-image-identity.json.*"
+        recovery.extraCommands != null
+      && baseline.extraCommands != recovery.extraCommands;
     gpuKeepsContainerSupervisor = gpu.config.Entrypoint == [
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"
