@@ -2667,7 +2667,14 @@ async function runPlanOfficeReadyMove(
     assert.equal(typeof limitation, 'string');
     const plan = PlanOfficeDriverInput.parse(recordedPlan);
     assert.deepEqual(plan, input);
-    for (const role of ['source', 'worker', 'helper', 'control'] as const) {
+    // The direct force case deliberately removes its obsolete inert source
+    // image. Only the actual current SDK/helper/control are used below; their
+    // immutable image and native/current-row proofs remain mandatory.
+    const roles =
+      kind === 'owner-force'
+        ? (['worker', 'helper', 'control'] as const)
+        : (['source', 'worker', 'helper', 'control'] as const);
+    for (const role of roles) {
       const image = input[(role + 'ImageId') as 'sourceImageId'];
       const rows = JSON.parse(driver.docker(['image', 'inspect', image]));
       assert.equal(rows.length, 1);
