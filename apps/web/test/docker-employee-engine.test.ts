@@ -1918,6 +1918,98 @@ describe('resource revision observation boundary', () => {
         expect(vi.mocked(f.command.run).mock.calls.some(([a]) => a[0] === 'network' && a[1] === 'inspect')).toBe(true);
       }
     );
+    async function createdResolutionFixture() {
+      const f = await planReplacementMetadata(),
+        row = select(f);
+      f.observed.State = { ...f.observed.State, Running: false, Status: 'created', Pid: 0 };
+      f.observed.NetworkSettings = {
+        Networks: {
+          'declared-one': { NetworkID: '' },
+          'declared-two': { NetworkID: '' },
+        },
+      };
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      let mutate = () => {};
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        if (args[0] !== 'network') return original(args, input);
+        mutate();
+        return JSON.stringify([
+          { Id: first, Name: 'declared-one' },
+          { Id: second, Name: 'declared-two' },
+        ]);
+      });
+      vi.mocked(f.command.create).mockClear();
+      vi.mocked(f.command.run).mockClear();
+      return {
+        ...f,
+        row,
+        change: (callback: () => void) => {
+          mutate = callback;
+        },
+      };
+    }
+    it.each(['destination-issued', 'destination-ready', 'start-issued'] as const)(
+      'accepts only a full-mount permutation during Created network resolution at %s',
+      async (phase) => {
+        const f = await createdResolutionFixture();
+        f.change(() => f.observed.Mounts.reverse());
+        await expect(f.engine.observeDestination({ ...f.row, phase, destination: undefined })).resolves.toMatchObject({
+          state: 'stopped',
+        });
+        expect(f.command.create).not.toHaveBeenCalled();
+        expect(
+          vi
+            .mocked(f.command.run)
+            .mock.calls.every(
+              ([a]) => a[0] === 'network' || (a[0] === 'container' && ['ls', 'inspect'].includes(a[1]!))
+            )
+        ).toBe(true);
+      }
+    );
+    it.each(['Source', 'Destination', 'Type', 'RW', 'Name', 'Mode', 'Propagation', 'opaque'] as const)(
+      'refuses changed full mount field %s across Created network resolution',
+      async (key) => {
+        const f = await createdResolutionFixture();
+        f.change(() => {
+          const mount = f.observed.Mounts.find((m) => m.Destination === '/workspace')!;
+          if (key === 'RW') mount.RW = !mount.RW;
+          else if (key === 'Type') mount.Type = 'volume';
+          else if (key === 'Destination') mount.Destination = '/foreign/workspace';
+          else mount[key] = 'changed';
+          f.observed.Mounts.reverse();
+        });
+        await expect(
+          f.engine.observeDestination({ ...f.row, phase: 'destination-issued', destination: undefined })
+        ).rejects.toThrow('NETWORK_DESTINATION_CHANGED');
+        expect(f.command.create).not.toHaveBeenCalled();
+      }
+    );
+    it.each(['before', 'during'] as const)('refuses duplicate mount destinations %s resolution', async (when) => {
+      const f = await createdResolutionFixture();
+      const duplicate = () =>
+        f.observed.Mounts.push(structuredClone(f.observed.Mounts.find((m) => m.Destination === '/workspace')!));
+      if (when === 'before') duplicate();
+      else f.change(duplicate);
+      await expect(
+        f.engine.observeDestination({ ...f.row, phase: 'destination-issued', destination: undefined })
+      ).rejects.toThrow('DUPLICATE_MOUNT_DESTINATION');
+      expect(f.command.create).not.toHaveBeenCalled();
+    });
+    it.each(['Config', 'HostConfig', 'State', 'NetworkSettings'] as const)(
+      'keeps the %s Created network bracket exact',
+      async (key) => {
+        const f = await createdResolutionFixture();
+        f.change(() => {
+          const part = f.observed[key];
+          if (!part || typeof part !== 'object' || Array.isArray(part)) throw Error('Expected fixture object');
+          (part as Record<string, unknown>).UnexpectedDrift = true;
+        });
+        await expect(
+          f.engine.observeDestination({ ...f.row, phase: 'destination-issued', destination: undefined })
+        ).rejects.toThrow('NETWORK_DESTINATION_CHANGED');
+        expect(f.command.create).not.toHaveBeenCalled();
+      }
+    );
     it('does not accept empty or foreign resolved network IDs after the target starts', async () => {
       const f = await planReplacementMetadata(),
         row = select(f);

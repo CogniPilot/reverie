@@ -950,7 +950,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         if (
           !isDeepStrictEqual(raw.Config, after.Config) ||
           !isDeepStrictEqual(raw.HostConfig, after.HostConfig) ||
-          !isDeepStrictEqual(raw.Mounts, after.Mounts) ||
+          // Inspect enumerates mounts from a map. Reuse the full canonical
+          // mount fingerprint, including duplicate-destination refusal.
+          boxedOriginal(raw, rowSubject(row), this.deployment, true).mountDigest !==
+            boxedOriginal(after, rowSubject(row), this.deployment, true).mountDigest ||
           !isDeepStrictEqual(raw.State, after.State) ||
           !isDeepStrictEqual(raw.NetworkSettings, after.NetworkSettings)
         )
