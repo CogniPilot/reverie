@@ -232,17 +232,22 @@ describe('bounded whole resource probe retries', () => {
       for (const exhausted of [false, true]) {
         const f = await prepared();
         let faults = 0;
-        const now = performance.now();
+        let now = performance.now();
+        // Establish one clock before read() creates its whole-probe deadline.
+        // Coverage may otherwise move that start beyond an earlier real timestamp.
+        vi.spyOn(performance, 'now').mockImplementation(() => now);
         f.beforeRun(async (args) => {
           if (args[0] === 'exec' && args.includes('probe-pool')) {
             faults++;
             if (!exhausted) throw Error(line);
             const receipt = await actualRace(args, 30000, line);
-            vi.spyOn(performance, 'now').mockReturnValue(now + 30001);
+            now += 30001;
             throw receipt;
           }
         });
-        await expect(f.controller.read(f.row())).rejects.toThrow();
+        await expect(f.controller.read(f.row())).rejects.toThrow(
+          exhausted ? 'DOCKER_RESOURCE_PROBE_DEADLINE' : line.trimEnd()
+        );
         expect(faults).toBe(1);
         vi.restoreAllMocks();
       }
