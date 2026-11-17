@@ -55,7 +55,12 @@ enum Action {
         accept_unverified_backup: bool,
     },
     /// Stop, verify backup/rehearsal, swap and check the Rust-front process tree.
-    Apply { operation: String },
+    Apply {
+        operation: String,
+        /// Activate a prepared live-account deployment without copying console data.
+        #[arg(long)]
+        skip_backup: bool,
+    },
     /// Read durable operation status without replaying an effect.
     Status { operation: String },
     /// Return to the exact retained old console; preserve all data and containers.
@@ -128,7 +133,14 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 operation,
                 accept_unverified_backup: _,
             } => serde_json::to_value(service.activate_retained(&operation)?)?,
-            Action::Apply { operation } => serde_json::to_value(service.apply(&operation)?)?,
+            Action::Apply {
+                operation,
+                skip_backup,
+            } => serde_json::to_value(if skip_backup {
+                service.apply_live_without_backup(&operation)?
+            } else {
+                service.apply(&operation)?
+            })?,
             Action::Status { operation } => serde_json::to_value(service.status(&operation)?)?,
             Action::Rollback { operation } => serde_json::to_value(service.rollback(&operation)?)?,
         };

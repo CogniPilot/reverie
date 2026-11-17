@@ -593,6 +593,53 @@ fn changed_writer_refuses_actual_prepare_before_create_attempt() {
 }
 
 #[test]
+fn no_backup_preserves_the_exact_live_writer_guard_and_stops_only_the_website() {
+    namespace(
+        "no_backup_preserves_the_exact_live_writer_guard_and_stops_only_the_website",
+        || {
+            let f = Fixture::live_accounts();
+            let mut worker = fixture::worker();
+            worker["Config"]["Cmd"] = json!(["changed"]);
+            let writer_path = format!("/containers/{}/json", "d".repeat(64));
+            f.port.set(writer_path.clone(), worker);
+            assert_eq!(
+                f.service
+                    .apply_live_without_backup(&f.operation.plan.operation)
+                    .err()
+                    .unwrap()
+                    .code(),
+                "DEPLOYMENT_LIVE_ACCOUNT_WRITERS_CHANGED"
+            );
+            assert!(!f.operation.exists("unverified-backup-accepted"));
+            assert!(!f.port.calls().iter().any(|call| call.starts_with("POST ")));
+
+            f.port.set(writer_path, fixture::worker());
+            assert_eq!(
+                f.service
+                    .apply_live_without_backup(&f.operation.plan.operation)
+                    .err()
+                    .unwrap()
+                    .code(),
+                "DEPLOYMENT_ENGINE_REFUSED"
+            );
+            assert_eq!(f.operation.status().unwrap().backup_verified, Some(false));
+            assert!(!f.operation.exists("retained-copy-attempt"));
+            assert!(!f.operation.directory.join("retained-copy").exists());
+            assert_eq!(
+                f.port
+                    .calls()
+                    .into_iter()
+                    .filter(|call| call.starts_with("POST "))
+                    .collect::<Vec<_>>(),
+                vec![format!("POST /containers/{}/stop?t=30", "a".repeat(64))]
+            );
+            assert!(!f.operation.exists("started"));
+            f.close();
+        },
+    );
+}
+
+#[test]
 fn changed_writer_refuses_actual_apply_before_copy_or_website_stop() {
     namespace(
         "changed_writer_refuses_actual_apply_before_copy_or_website_stop",
