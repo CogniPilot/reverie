@@ -439,7 +439,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_ANCHOR_REPLACED');
     return { ...init, startTicks: seen.anchor.startTicks };
   }
-  async #probe(anchor: Init, worker?: Init): Promise<Observation> {
+  async #probe(anchor: Init, worker?: Init, attempts = 3): Promise<Observation> {
     const end = performance.now() + 30000;
     const remaining = () => {
       const value = Math.floor(end - performance.now());
@@ -492,7 +492,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const initial = await scope();
     let result!: Observation,
       started = 0;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < attempts; attempt++) {
       if (attempt && !isDeepStrictEqual(await scope(), initial)) refuse('DOCKER_RESOURCE_OBSERVATION_CHANGED');
       const args = [
         worker ? 'probe-worker' : 'probe-pool',
@@ -513,7 +513,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         result = observation.parse(JSON.parse(await command.run(argv)));
         break;
       } catch (error) {
-        if (attempt === 2 || !dockerResourceProbeReadRace(error, argv)) throw error;
+        if (attempt === attempts - 1 || !dockerResourceProbeReadRace(error, argv)) throw error;
       }
     }
     remaining();
@@ -1187,12 +1187,13 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_REVISION_OBSERVATION_EXPIRED');
     return started;
   }
-  async #refresh(seen: Observation, current: () => void = () => {}): Promise<Observation> {
+  async #refresh(seen: Observation, current: () => void = () => {}, attempts = 3): Promise<Observation> {
     if (!seen.worker) refuse('DOCKER_RESOURCE_WORKER_READBACK');
     current();
     const latest = await this.#probe(
       { id: seen.anchor.id, pid: seen.anchor.pid, startTicks: seen.anchor.startTicks },
-      { id: seen.worker.id, pid: seen.worker.pid, startTicks: seen.worker.startTicks }
+      { id: seen.worker.id, pid: seen.worker.pid, startTicks: seen.worker.startTicks },
+      attempts
     );
     current();
     if (!isDeepStrictEqual(this.#identity(seen), this.#identity(latest)))
@@ -1942,15 +1943,18 @@ export class DockerContainedResources implements DockerContainedResourceControll
       anchor = await this.#init(task.containerId);
     check();
     if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
-    const parent = await this.#probe(anchor);
+    // Running providers can exit short-lived threads during a census. Repeat
+    // only confirmed read races within the existing per-probe deadline.
+    const attempts = 8;
+    const parent = await this.#probe(anchor, undefined, attempts);
     check();
     const worker = await this.#worker(row);
     check();
     const observedAnchor = { ...anchor, startTicks: parent.anchor.startTicks },
-      leaf = await this.#probe(observedAnchor, worker);
+      leaf = await this.#probe(observedAnchor, worker, attempts);
     check();
-    const after = await this.#probe(observedAnchor),
-      finalLeaf = await this.#refresh(leaf, check),
+    const after = await this.#probe(observedAnchor, undefined, attempts),
+      finalLeaf = await this.#refresh(leaf, check, attempts),
       finalAnchorState = await this.#fixed(task.containerId, config);
     check();
     if (
