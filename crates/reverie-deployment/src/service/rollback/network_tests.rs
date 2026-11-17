@@ -35,7 +35,10 @@ fn absent_candidate_before_any_lifecycle_attempt_closes_original_running_source(
                     .all(|call| call.starts_with("GET "))
             );
             assert_eq!(
-                fixture.operation.claim_terminal(&fixture.source).unwrap(),
+                fixture
+                    .operation
+                    .claim_terminal(&fixture.source, None, &fixture.service.engine)
+                    .unwrap(),
                 "RESTORED"
             );
             assert_eq!(
@@ -423,7 +426,10 @@ fn restored_claim_never_hands_over_a_changed_original_network() {
                 model::projection(&fixture.drifted()),
                 model::projection(&fixture.operation.plan.source)
             );
-            let result = fixture.operation.claim_terminal(&fixture.drifted());
+            let result =
+                fixture
+                    .operation
+                    .claim_terminal(&fixture.drifted(), None, &fixture.service.engine);
             assert_eq!(result.err().unwrap().code(), "DEPLOYMENT_NETWORK_CHANGED");
             assert!(!fixture.operation.exists("superseded"));
             fixture.close();

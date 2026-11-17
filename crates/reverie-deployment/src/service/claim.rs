@@ -40,9 +40,12 @@ impl PreparedClaim<'_> {
             self.service
                 .require_adoption_current(selection, current, true)?;
         } else {
-            successor
-                .previous
-                .assert_claim_source(successor.terminal, current)?;
+            successor.previous.assert_claim_source(
+                successor.terminal,
+                current,
+                operation.plan.network_topology.as_ref(),
+                &self.service.engine,
+            )?;
         }
         successor.replacement.assert_current()?;
         installation.current()?;
@@ -117,7 +120,11 @@ impl DeploymentService {
             operation.record("adoption-selected", &serde_json::to_value(selection)?)?;
             "STALE_READY_ADOPTION"
         } else {
-            previous.claim_terminal(current)?
+            previous.claim_terminal(
+                current,
+                operation.plan.network_topology.as_ref(),
+                &self.engine,
+            )?
         };
         let attempt = json!({"successor":operation.plan.operation,"claimDigest":installation::digest(&active.bytes)});
         // The active predecessor is latched BEFORE any archive/replacement work.

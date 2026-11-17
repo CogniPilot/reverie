@@ -329,7 +329,7 @@ impl DeploymentService {
             "DEPLOYMENT_CREATE_WARNING_REQUIRES_REVIEW",
         )?;
         let actual = self.engine.container(candidate)?;
-        operation.plan.candidate_matches(&actual)?;
+        operation.plan.candidate_matches(&actual, &self.engine)?;
         require(
             actual["Name"] == format!("/{name}"),
             "DEPLOYMENT_CANDIDATE_NAME_CHANGED",
@@ -351,7 +351,7 @@ impl DeploymentService {
         let result = (|| {
             let candidate = operation.candidate()?;
             let actual = self.engine.container(&candidate)?;
-            operation.plan.candidate_matches(&actual)?;
+            operation.plan.candidate_matches(&actual, &self.engine)?;
             require(
                 actual["Name"] == format!("/{}", temporary_name(&operation, "candidate"))
                     && actual["State"]["Running"] == false
@@ -399,7 +399,7 @@ impl DeploymentService {
         let result = (|| {
             let current = self.engine.container(&id)?;
             if candidate {
-                operation.plan.candidate_matches(&current)?;
+                operation.plan.candidate_matches(&current, &self.engine)?;
                 self.source_current(operation, false)?;
             } else {
                 self.original_source_selection(operation, &current)?;

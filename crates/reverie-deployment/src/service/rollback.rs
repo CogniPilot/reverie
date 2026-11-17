@@ -29,7 +29,7 @@ impl DeploymentService {
         let Some(current) = self.engine.container_or_absent(&candidate)? else {
             return self.rollback_missing_candidate(operation, pins, &candidate);
         };
-        operation.plan.candidate_matches(&current)?;
+        operation.plan.candidate_matches(&current, &self.engine)?;
         let original_name = format!("/{}", operation.plan.container);
         let backup_name = format!("/{}", temporary_name(operation, "before-front"));
         let candidate_name = format!("/{}", temporary_name(operation, "candidate"));
