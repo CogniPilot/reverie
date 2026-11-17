@@ -31,7 +31,7 @@ import {
 } from '../src/docker-employee-engine-data.js';
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
-import type { DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
+import { allowedDockerTaskTransition, type DockerContinuationTaskJournal } from '../src/docker-continuation-task.js';
 const cid = 'a'.repeat(64),
   dest = 'd'.repeat(64),
   image = 'sha256:' + 'b'.repeat(64),
@@ -320,6 +320,213 @@ async function providerViewFixture(ephemeral = false, mode = 'claude') {
   };
   return { ...f, pane, docker };
 }
+/** Earn the real retained Storage cursor before deleting the historical source.
+ * Only Docker syscall replies are controlled; no Engine/Storage method is mocked. */
+async function retainedStoppedFixture(version: 1 | 2 = 2) {
+  const f = await providerViewFixture(),
+    holderId = '6'.repeat(64),
+    network = '5'.repeat(64);
+  const storage = {
+    version: 1,
+    purpose: 'reverie-boxed-storage-observation-v1',
+    holderStartTicks: '123',
+    home: { dev: '4', ino: '5', uid: 1000, gid: 100, mode: 16832 },
+    nix: { dev: '4', ino: '6', uid: 1000, gid: 100, mode: 16832 },
+  };
+  let holder: Record<string, unknown> | undefined;
+  f.journal.read = (_row, role) => f.row.tasks?.find((t) => t.role === role);
+  f.journal.publish = async (_row, before, next, current) => {
+    current();
+    expect(f.row.tasks?.find((t) => t.role === next.role)).toEqual(before);
+    expect(allowedDockerTaskTransition(before, next)).toBe(true);
+    f.row.tasks = [...(f.row.tasks ?? []).filter((t) => t.role !== next.role), structuredClone(next)];
+    return f.row;
+  };
+  const original = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.create).mockImplementation(async (_name, config, current) => {
+    current();
+    expect(config.Cmd).toEqual(['hold-storage']);
+    const host = config.HostConfig as Record<string, unknown>;
+    holder = {
+      Id: holderId,
+      Image: config.Image,
+      Config: { User: config.User, Entrypoint: config.Entrypoint, Cmd: config.Cmd, Labels: config.Labels },
+      HostConfig: structuredClone(host),
+      Mounts: (host.Mounts as Array<{ Source: string; Target: string }>).map((m) => ({
+        Source: m.Source,
+        Destination: m.Target,
+        RW: false,
+      })),
+      State: { Running: false, Status: 'created', Pid: 0 },
+    };
+    return holderId;
+  });
+  vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+    if (args[0] === 'container' && args[1] === 'ls' && args.some((a) => a.startsWith('label=reverie.box.storage.')))
+      return holder ? holderId : '';
+    if (args[0] === 'container' && args[1] === 'inspect' && args[2] === holderId) return JSON.stringify([holder]);
+    if (args[0] === 'container' && args[1] === 'start' && args[2] === holderId) {
+      holder!.State = { Running: true, Status: 'running', Pid: 987 };
+      return holderId;
+    }
+    if (args[0] === 'logs' && args[1] === holderId) return JSON.stringify(storage);
+    if (args[0] === 'exec' && args[1] === holderId && args.includes('storage-status')) return JSON.stringify(storage);
+    return original(args, input);
+  });
+  await f.engine.prepareStorage(f.row, () => {});
+  expect(f.row.tasks?.[0]).toMatchObject({ phase: 'running', initPid: 987, initStartTicks: '123' });
+  if (version === 2)
+    Object.assign(f.row, {
+      version: 2,
+      purpose: 'docker-employee-continuation-v2',
+      providerSourceDigest: subject.providerSourceDigest,
+    });
+  DockerEmployeeContinuationRecord.parse(f.row);
+  f.observed.State = { ...f.observed.State, Running: false, Status: 'exited', Pid: 0 };
+  f.observed.NetworkSettings = { Networks: { 'retained-net': { NetworkID: network } } };
+  const retainedRun = vi.mocked(f.command.run).getMockImplementation()!;
+  vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+    if (
+      (args[0] === 'container' && args[1] === 'inspect' && args[2] === cid) ||
+      (args[0] === 'image' && args[2] === image)
+    )
+      throw Error('Historical source genuinely absent');
+    return retainedRun(args, input);
+  });
+  vi.mocked(f.command.run).mockClear();
+  vi.mocked(f.command.create).mockClear();
+  return { ...f, storage, holder: () => holder!, network };
+}
+describe('retained published plan source after historical source deletion', () => {
+  const read = (
+    f: Awaited<ReturnType<typeof retainedStoppedFixture>>,
+    kind: 'HOME' | 'networks',
+    current = () => {}
+  ) =>
+    kind === 'HOME' ? f.engine.planReplacementHome(f.row, current) : f.engine.planReplacementNetworkIds(f.row, current);
+  it.each([1, 2] as const)('reads v%s stopped HOME with genuine held storage and no ancestor', async (version) => {
+    const f = await retainedStoppedFixture(version);
+    await expect(f.engine.planReplacementHome(f.row, () => {})).resolves.toEqual({
+      source: '/synthetic/home',
+      user: '1000:100',
+      dev: '4',
+      ino: '5',
+    });
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(f.command.run).mock.calls.some(([a]) => a[2] === cid || a[0] === 'image' || a[1] === 'start')
+    ).toBe(false);
+  });
+  it.each([1, 2] as const)('reads v%s exact stopped networks without its historical source', async (version) => {
+    const f = await retainedStoppedFixture(version);
+    await expect(f.engine.planReplacementNetworkIds(f.row, () => {})).resolves.toEqual([f.network]);
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(
+      vi.mocked(f.command.run).mock.calls.every(([a]) => a[0] === 'container' && a[1] === 'inspect' && a[2] === dest)
+    ).toBe(true);
+  });
+  it.each(['HOME', 'networks'] as const)('refuses changed current %s fingerprint without effects', async (kind) => {
+    const f = await retainedStoppedFixture();
+    f.observed.Config.Env.push('FOREIGN_CONFIGURATION=1');
+    await expect(read(f, kind)).rejects.toThrow('DESTINATION_CHANGED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it.each(['HOME', 'networks'] as const)('brackets %s with the same stopped native incarnation', async (kind) => {
+    const f = await retainedStoppedFixture(),
+      original = vi.mocked(f.command.run).getMockImplementation()!;
+    let changed = false;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const reply = await original(args, input);
+      if (!changed && args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) {
+        changed = true;
+        f.observed.State.StartedAt = '2026-11-16T11:00:00.000000000Z';
+      }
+      return reply;
+    });
+    await expect(read(f, kind)).rejects.toThrow(kind === 'HOME' ? 'HOME_CHANGED' : 'NETWORK_SOURCE_CHANGED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it.each(['HOME', 'networks'] as const)('rechecks revoked requester after awaited %s native read', async (kind) => {
+    const f = await retainedStoppedFixture(),
+      original = vi.mocked(f.command.run).getMockImplementation()!;
+    let active = true;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const reply = await original(args, input);
+      active = false;
+      return reply;
+    });
+    await expect(
+      read(f, kind, () => {
+        if (!active) throw Error('requester revoked');
+      })
+    ).rejects.toThrow('requester revoked');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it.each(['HOME', 'networks'] as const)('rejects changing retained row during %s native read', async (kind) => {
+    const f = await retainedStoppedFixture(),
+      original = vi.mocked(f.command.run).getMockImplementation()!;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const reply = await original(args, input);
+      f.row.request.sessionGeneration++;
+      return reply;
+    });
+    await expect(read(f, kind)).rejects.toThrow(kind === 'HOME' ? 'HOME_CHANGED' : 'NETWORK_SOURCE_CHANGED');
+  });
+  it.each(['HOME', 'networks'] as const)(
+    'refuses prepublication %s instead of adopting current metadata',
+    async (kind) => {
+      const f = await retainedStoppedFixture();
+      f.row.phase = 'pool-ready';
+      await expect(read(f, kind)).rejects.toThrow();
+      expect(f.command.run).not.toHaveBeenCalled();
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+  it.each(['missing', 'PID', 'start', 'mount', 'native-FD'] as const)(
+    'refuses %s retained HOME holder',
+    async (kind) => {
+      const f = await retainedStoppedFixture();
+      if (kind === 'missing') f.row.tasks = [];
+      if (kind === 'PID') f.holder().State = { Running: true, Status: 'running', Pid: 988 };
+      if (kind === 'start') f.storage.holderStartTicks = '124';
+      if (kind === 'mount') (f.holder().Mounts as Array<{ Source: string }>)[0]!.Source = '/foreign/home';
+      if (kind === 'native-FD') {
+        const original = vi.mocked(f.command.run).getMockImplementation()!;
+        vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+          if (args[0] === 'exec' && args.includes('storage-status'))
+            return JSON.stringify({ ...f.storage, home: { ...f.storage.home, ino: '99' } });
+          return original(args, input);
+        });
+      }
+      await expect(read(f, 'HOME')).rejects.toThrow('STORAGE_');
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+  it('refuses changed current networks between exact stopped observations', async () => {
+    const f = await retainedStoppedFixture(),
+      original = vi.mocked(f.command.run).getMockImplementation()!;
+    let changed = false;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      const reply = await original(args, input);
+      if (!changed && args[0] === 'container' && args[1] === 'inspect' && args[2] === dest) {
+        changed = true;
+        f.observed.NetworkSettings = { Networks: { 'foreign-net': { NetworkID: '8'.repeat(64) } } };
+      }
+      return reply;
+    });
+    await expect(read(f, 'networks')).rejects.toThrow('NETWORK_SOURCE_CHANGED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+  it('keeps source-dependent preparation and CREATE strict after read-only success', async () => {
+    const f = await retainedStoppedFixture();
+    await read(f, 'HOME');
+    await read(f, 'networks');
+    await expect(f.engine.prepareStorage(f.row, () => {})).rejects.toThrow('Historical source genuinely absent');
+    await expect(f.engine.createDestination(f.row, () => {})).rejects.toThrow('Historical source genuinely absent');
+    expect(f.command.create).not.toHaveBeenCalled();
+    expect(vi.mocked(f.command.run).mock.calls.some(([a]) => a[1] === 'start')).toBe(false);
+  });
+});
 describe('Engine-owned existing Docker provider view', () => {
   it('accepts Docker 29.8 omitted empty Cmd with the same canonical old descriptor and image proof', async () => {
     const f = fixture();

@@ -577,12 +577,23 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   /** Retained HOME identity only. The actor must independently retain its
    * genuine source-stop/request grant; this read cannot authorize a new helper. */
-  async planReplacementHome(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerCredentialHome> {
-    current();
+  async planReplacementHome(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerCredentialHome> {
+    const row = DockerEmployeeContinuationRecord.parse(input),
+      key = dockerContinuationDigest(row);
+    const check = () => {
+      current();
+      if (dockerContinuationDigest(input) !== key) refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
+    };
+    check();
     if (!row.destination || !['provider-issued', 'ready'].includes(row.phase))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
-    const before = await this.#destination(row);
-    current();
+    // Published fingerprints qualify only this retained read. New Storage,
+    // credential and provider effects continue to require the original source.
+    const before = await this.#destination(row, check, true);
+    check();
     if (
       !before ||
       before.State.Running ||
@@ -593,11 +604,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         .safeParse(before.HostConfig.RestartPolicy).success
     )
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
-    const home = await this.#storage.credentialHome(row);
-    current();
-    const after = await this.#destination(row);
-    current();
-    if (!after || after.State.Running || !isDeepStrictEqual(before.State, after.State))
+    const home = await this.#storage.observedCredentialHome(row);
+    check();
+    const after = await this.#destination(row, check, true);
+    check();
+    if (!after || after.State.Running || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
   }
@@ -616,15 +627,15 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       current();
       if (dockerContinuationDigest(input) !== key) refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
     };
-    const first = networkStopped(await this.#destination(row, check));
+    const first = networkStopped(await this.#destination(row, check, true));
     check();
     const ids = await this.#networkIds(first, check, true);
     check();
-    const last = networkStopped(await this.#destination(row, check));
+    const last = networkStopped(await this.#destination(row, check, true));
     check();
     const afterIds = await this.#networkIds(last, check, true);
     check();
-    if (!isDeepStrictEqual(first.State, last.State) || !isDeepStrictEqual(ids, afterIds))
+    if (!isDeepStrictEqual(containerReadState(first), containerReadState(last)) || !isDeepStrictEqual(ids, afterIds))
       refuse('DOCKER_PLAN_NETWORK_SOURCE_CHANGED');
     check();
     return Object.freeze([...ids]);
