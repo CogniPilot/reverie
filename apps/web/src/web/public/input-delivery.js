@@ -609,7 +609,10 @@
           return;
         }
         try {
-          await this._verifyInputIdentity();
+          // This page verified its identity before accepting fresh input.
+          // Recovered or retried records still need a check before claiming.
+          if (record.issuer !== this._inputJournal.issuer || record.phase !== 'prepared')
+            await this._verifyInputIdentity();
           if (this._sessionInputHeld(sid) || this._inputGlobalHold || this._inputStorageUnavailable) return;
           const claimed = await this._inputJournal.claim(record);
           if (!claimed) return;

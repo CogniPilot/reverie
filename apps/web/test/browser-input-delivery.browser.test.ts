@@ -313,14 +313,20 @@ it('two actual primary WebSockets use distinct journal issuers and confirmed rec
       }, sid);
       await p.waitForFunction(() => (window as unknown as { app: { _wsReady: boolean } }).app._wsReady === true);
     }
-    expect(await send(left, sid, 'same explicit WS text')).toBe(true);
-    expect(await send(right, sid, 'same explicit WS text')).toBe(true);
+    let identityRequests = 0;
+    for (const p of [left, right]) {
+      p.on('request', (request) => {
+        if (new URL(request.url()).pathname === '/api/input-identity') identityRequests++;
+      });
+      expect(await send(p, sid, 'same explicit WS text')).toBe(true);
+    }
     await expect.poll(() => writes.get(sid)).toEqual(['same explicit WS text', 'same explicit WS text']);
     for (const p of [left, right])
       await expect
         .poll(() => p.evaluate((sid) => (window as unknown as Scope).app._pendingDeliveries.get(sid)?.length || 0, sid))
         .toBe(0);
     expect(posts.filter((row) => row.sid === sid)).toEqual([]);
+    expect(identityRequests).toBe(4);
   } finally {
     await c.close();
   }

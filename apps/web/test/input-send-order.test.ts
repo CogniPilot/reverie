@@ -10,6 +10,27 @@ const body = (options?: RequestInit) =>
   JSON.parse(String(options?.body)) as { input: string; seq: number; clientId: string };
 
 describe('committed ordering and original transport ownership', () => {
+  it('holds fresh input before the socket write when the sign-in changed after acceptance', async () => {
+    fixture = browserInputFixture();
+    const app = await fixture.page();
+    const send = vi.fn();
+    app._ws = { readyState: 1, send };
+    app._wsSessionId = 'session-1';
+    const accept = app._inputJournal.accept.bind(app._inputJournal);
+    vi.spyOn(app._inputJournal, 'accept').mockImplementation(async (...args) => {
+      const accepted = await accept(...args);
+      fixture.changeIdentity();
+      return accepted;
+    });
+
+    expect(await app._sendInputAsync('session-1', 'original')).toBe(true);
+    await expect.poll(() => app._inputRecoveryHolds?.has('session-1')).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect((await app._inputJournal.snapshot()).records).toMatchObject([
+      { data: 'original', phase: 'unconfirmed' },
+    ]);
+  });
+
   it('advances after a confirmed ACK received before the original dispatch task finishes', async () => {
     fixture = browserInputFixture();
     const app = await fixture.page();
