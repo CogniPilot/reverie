@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { deliverPlanRequest, type PlanRequestMessages } from '../src/plan-request-prompt.js';
+import { deliverPlanRequest, planRequestWorkerRouting, type PlanRequestMessages } from '../src/plan-request-prompt.js';
 import type { PlanRequestView } from '../src/plan-request.js';
 
 const record = { id: 'request', sessionId: 'source', fromAccount: 'first', toAccount: 'second', mode: 'codex', targetMode: 'claude', expiresAt: 1_800_000 } as PlanRequestView;
@@ -28,18 +28,31 @@ describe('queued expert plan approval messages', () => {
     await deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => true, async () => {
       expect(m.post).toHaveBeenCalledTimes(1);
       m.lastSeen.mockReturnValue({ messageId: 'notice', at: 100 });
-    });
+    }, { workerRouting: true });
     expect(m.openDm).toHaveBeenCalledWith('source', undefined);
     const [room, sender, text, to] = m.post.mock.calls[0] as unknown as [string, object, string, object[]];
     expect(room).toBe('dm'); expect(sender).toEqual({ kind: 'system', name: 'Plans' });
     expect(to).toEqual(['source']);
-    expect(text).toContain('reverie agent plan-move approve request --handoff-file');
-    expect(text).toContain('reverie agent plan-move list');
+    expect(text).toContain('REVERIE_WORKER=1 reverie agent plan-move approve request --handoff-file');
+    expect(text).toContain('REVERIE_WORKER=1 reverie agent plan-move reject request');
+    expect(text).toContain('REVERIE_WORKER=1 reverie agent plan-move list');
+    expect(text.match(/REVERIE_WORKER=1 reverie agent plan-move /g)).toHaveLength(3);
+    expect(text).toContain("Do not interrupt unfinished work or approve a different expert's request.");
     expect(text).toContain('Claude harness');
     expect(text).toContain('Jan 1, 1970');
     expect(text).toContain('12:30:00 AM UTC');
     expect(text).not.toMatch(/[a-f0-9]{64}|plan-request-capabilities/);
     expect(m.deleteMessage).not.toHaveBeenCalled();
+  });
+  it('keeps legacy non-worker approval instructions on the private nonce path by default', async () => {
+    const m = messages();
+    m.lastSeen.mockReturnValue({ messageId: 'notice', at: 100 });
+    await deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => true);
+    const text = (m.post.mock.calls[0] as unknown as [unknown, unknown, string])[2];
+    for (const command of ['approve request --handoff-file', 'reject request', 'list'])
+      expect(text).toContain('reverie agent plan-move ' + command);
+    expect(text).not.toContain('REVERIE_WORKER');
+    expect(text).not.toMatch(/[a-f0-9]{64}|plan-request-capabilities/);
   });
   it('withdraws only its queued notice on cancellation, expiry or lost authorization', async () => {
     const m = messages(); let allowed = true;
@@ -101,6 +114,69 @@ describe('queued expert plan approval messages', () => {
     let allowed = true; m.lastSeen.mockReturnValue({ messageId: 'older', at: 100 });
     await expect(deliverPlanRequest(record, m as unknown as PlanRequestMessages, () => allowed, async () => { allowed = false; })).rejects.toThrow();
     expect(m.deleteMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('canonical employee routing data for plan notices', () => {
+  const request = { employeeId: 'employee', owner: 'owner', sessionId: 'source' };
+  const employee = {
+    id: 'employee',
+    owner: 'owner',
+    sessionId: 'source',
+    sessionGeneration: 7,
+    dockerBinding: {
+      version: 1 as const,
+      sessionId: 'source',
+      sessionGeneration: 7,
+      operationId: '10000000-0000-4000-8000-000000000001',
+      credentialId: '20000000-0000-4000-8000-000000000002',
+      containerId: 'a'.repeat(64),
+      imageId: 'sha256:' + 'b'.repeat(64),
+      originalDigest: 'c'.repeat(64),
+      policyDigest: 'd'.repeat(64),
+    },
+  };
+  it('selects worker command spelling only from the coherent current employee binding', () => {
+    expect(planRequestWorkerRouting(request, [employee])).toBe(true);
+    expect(planRequestWorkerRouting({ ...request, owner: undefined }, [{ ...employee, owner: undefined }])).toBe(true);
+  });
+  it('does not select worker routing for a matching but invalid generation', () => {
+    for (const generation of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+      expect(
+        planRequestWorkerRouting(request, [
+          {
+            ...employee,
+            sessionGeneration: generation,
+            dockerBinding: { ...employee.dockerBinding, sessionGeneration: generation },
+          },
+        ])
+      ).toBe(false);
+  });
+  it.each([
+    'missing',
+    'duplicate',
+    'employee',
+    'owner',
+    'session',
+    'binding-session',
+    'generation',
+    'no-binding',
+  ] as const)('does not select worker routing for %s data', (change) => {
+    const other = structuredClone(employee);
+    if (change === 'employee') other.id = 'other';
+    if (change === 'owner') other.owner = 'other';
+    if (change === 'session') other.sessionId = 'other';
+    if (change === 'binding-session') other.dockerBinding.sessionId = 'other';
+    if (change === 'generation') other.dockerBinding.sessionGeneration++;
+    const employees =
+      change === 'missing'
+        ? []
+        : change === 'duplicate'
+          ? [other, other]
+          : change === 'no-binding'
+            ? [{ ...other, dockerBinding: undefined }]
+            : [other];
+    expect(planRequestWorkerRouting(request, employees)).toBe(false);
   });
 });
 

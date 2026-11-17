@@ -53,10 +53,14 @@ export class DockerPlanDisjointGeneration {
     current();
     Object.freeze(this);
   }
-  require(rows: readonly Readonly<PlanMoveRecord>[], employeeId: string, owner: string | undefined): void {
-    this.current();
+  /** Correlation DATA only: this check never validates native/current authority. */
+  requireHistoryData(rows: readonly Readonly<PlanMoveRecord>[], employeeId: string, owner: string | undefined): void {
     if (employeeId !== this.employeeId || owner !== this.owner || fingerprints(open(rows, employeeId)) !== this.#rows)
       refuse();
+  }
+  require(rows: readonly Readonly<PlanMoveRecord>[], employeeId: string, owner: string | undefined): void {
+    this.current();
+    DockerPlanDisjointGeneration.prototype.requireHistoryData.call(this, rows, employeeId, owner);
     this.current();
   }
   requireReservation(record: Readonly<PlanMoveRecord>, rows: readonly Readonly<PlanMoveRecord>[]): void {
@@ -114,6 +118,25 @@ export function requireDockerPlanDisjointGeneration(
   if (!(proof instanceof DockerPlanDisjointGeneration)) refuse();
   DockerPlanDisjointGeneration.prototype.require.call(proof, rows, employeeId, owner);
   return proof;
+}
+/** Denial-only caller-map correlation. Only requireReservation admits a journal. */
+export function requireDockerPlanDisjointHistoryData(
+  proof: unknown,
+  rows: readonly Readonly<PlanMoveRecord>[],
+  employeeId: string,
+  owner: string | undefined
+): void {
+  if (!(proof instanceof DockerPlanDisjointGeneration)) refuse();
+  DockerPlanDisjointGeneration.prototype.requireHistoryData.call(proof, rows, employeeId, owner);
+}
+/** One complete native/history/owner/source-tuple check at a writer boundary. */
+export function requireDockerPlanDisjointReservation(
+  proof: unknown,
+  record: Readonly<PlanMoveRecord>,
+  rows: readonly Readonly<PlanMoveRecord>[]
+): void {
+  if (!(proof instanceof DockerPlanDisjointGeneration)) refuse();
+  DockerPlanDisjointGeneration.prototype.requireReservation.call(proof, record, rows);
 }
 Object.freeze(DockerPlanDisjointGeneration.prototype);
 Object.freeze(DockerPlanDisjointGeneration);

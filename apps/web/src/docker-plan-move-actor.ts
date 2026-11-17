@@ -202,7 +202,6 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       !employee.dockerBinding ||
       employee.dockerBinding.containerId !== scope.containerId ||
       !row.destination ||
-      !this.#d.store.existingSubject(employeeId, row) ||
       employee.onVacation ||
       !employee.desiredRunning
     )
@@ -309,8 +308,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const snapshot = await DockerPlanAccountSnapshot.capture(this.#d.plans, account.id, current);
     try {
       snapshot.selected(account);
-      const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy),
-        workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
+      // Immutable target eligibility is setup. Sample the final native source
+      // facts after it, retaining the same scope checks and five-second proof.
+      const workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
+      current();
+      const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
       // The final target recipe is composed by the shared schema renderer before
       // this seed can be returned. There is no effects-bearing placeholder seed.
@@ -418,8 +420,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       state.sourceReader?.phase === 'closed' &&
       state.work?.phase === 'identity-ready' &&
       state.work.destination !== undefined;
+    // A retained reservation with no issued native cursor also keeps its exact
+    // saved target. Validate it read-only, independently of the current website.
+    const unissuedOriginal = !state.paidDispatch && !state.sourceStop && !state.sourceReader && !state.work;
     requireDockerPlanProtocol(
-      installedOriginal
+      installedOriginal || unissuedOriginal
         ? this.#d.configuration.clientManifestDigest
         : state.seed.target.workerImage.clientManifestDigest,
       () => journal.current()
@@ -440,16 +445,23 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         journal.current()
       );
       journal.current();
-      if (installedOriginal) {
+      if (installedOriginal || unissuedOriginal) {
         if (
           selected.sourceImageId !== state.seed.target.workerImage.sourceImageId ||
           selected.imageId !== this.#d.configuration.workerImageId ||
           selected.clientManifestDigest !== this.#d.configuration.clientManifestDigest
         )
           throw new PlanMoveError('The current default worker/client pair changed', 409);
-        await this.#workFor(record, journal).engine.inspectPlanReplacementProtocol(state.work!, () =>
-          journal.current()
-        );
+        if (installedOriginal)
+          await this.#workFor(record, journal).engine.inspectPlanReplacementProtocol(state.work!, () =>
+            journal.current()
+          );
+        else
+          await this.#d.engine.qualifyPlanReplacementImage(
+            state.seed.source.record.destination!,
+            state.seed.target.workerImage,
+            () => journal.current()
+          );
         journal.current();
       } else if (!same(selected, state.seed.target.workerImage))
         throw new PlanMoveError('The selected target image changed', 409);
@@ -854,7 +866,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       version: 3,
       purpose: 'docker-employee-plan-replacement-v3',
       employeeId: record.employeeId,
-      owner: record.owner,
+      ...(record.owner === undefined ? {} : { owner: record.owner }),
       request: {
         operationId: seed.target.operationId,
         sessionId: seed.target.sessionId,

@@ -43,6 +43,10 @@ export interface PlanMoveDockerJournalStore {
   ): Promise<Readonly<PlanMoveRecord>>;
 }
 export interface PlanMoveDockerActor {
+  /** Request-local admission only, before the runner's first current check.
+   * Installed adapters capture the genuine private original requester here;
+   * no native inspection, journal claim or effect is authorized by this call. */
+  bindOriginalRequester?(record: Readonly<PlanMoveRecord>): Promise<void>;
   /** Read-only native admission; opaque private proof, never JSON authority. */
   admitDisjointGeneration?(
     employeeId: string,

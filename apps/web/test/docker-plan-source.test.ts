@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { DOCKER_PLAN_INIT_PROGRAM } from '../src/docker-plan-source.js';
@@ -139,6 +139,167 @@ describe('native plan source observation independent of disposable viewer', () =
     expect(() => proof.require(f.row, f.binding)).toThrow();
   });
 });
+describe('native source fact origin after image qualification', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('logs one bounded static expiry stack without source or credential data', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    clock += 5000;
+    expect(() => proof.require(f.row, f.binding)).not.toThrow();
+    expect(warning).not.toHaveBeenCalled();
+    clock++;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+    const [message, detail] = warning.mock.calls[0]!;
+    expect(message).toBe('[docker-plan-source] proof expired');
+    expect(Object.keys(detail).sort()).toEqual(['ageMs', 'stack']);
+    expect(detail.ageMs).toBe(5001);
+    expect(Number.isFinite(detail.ageMs)).toBe(true);
+    expect(detail.stack).toContain('DockerPlanSourceProof.require');
+    expect(detail.stack.length).toBeLessThanOrEqual(4096);
+    expect(detail.stack.split('\n').length).toBeLessThanOrEqual(9);
+    const serialized = JSON.stringify(warning.mock.calls);
+    for (const value of [
+      f.binding.containerId,
+      f.binding.sessionId,
+      f.row.employeeId,
+      f.row.workerImage.clientManifestDigest,
+    ])
+      expect(serialized).not.toContain(value);
+    clock = 1000;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the original sticky refusal when the diagnostic sink fails', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {
+        throw Error('sink unavailable');
+      });
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    clock += 5001;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(warning).toHaveBeenCalledOnce();
+  });
+
+  it('does not log arbitrary current-scope failures as proof expiry', async () => {
+    const f = fixture(),
+      warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let current = true;
+    const proof = await f.reader.capture(
+      f.row,
+      f.binding,
+      () => {
+        if (!current) throw Error('private current-scope diagnostic sentinel');
+      },
+      true
+    );
+    current = false;
+    expect(() => proof.require(f.row, f.binding)).toThrow('private current-scope diagnostic sentinel');
+    expect(warning).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('samples fresh native facts after a long prerequisite (running=%s)', async (running) => {
+    const f = fixture(running);
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    f.qualifyImage.mockImplementation(async () => {
+      // Image qualification may make preliminary native reads. Returned facts
+      // still come from the subsequent fresh SourceReader first/last samples.
+      await f.command.run(['container', 'inspect', f.binding.containerId]);
+      clock += 6000;
+    });
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    expect(proof.observation(f.row, f.binding).kind).toBe(running ? 'running' : 'stopped');
+    clock += 5000;
+    expect(() => proof.require(f.row, f.binding)).not.toThrow();
+    clock++;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    clock = 7000;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'counts a slow first native sample inside the same five seconds (running=%s)',
+    async (running) => {
+      const f = fixture(running);
+      let clock = 1000;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      const read = vi.mocked(f.command.run).getMockImplementation()!;
+      let first = true;
+      vi.mocked(f.command.run).mockImplementation(async (args) => {
+        const reply = await read(args);
+        if (first && args[0] === 'container' && args[1] === 'inspect') {
+          first = false;
+          clock += 5001;
+        }
+        return reply;
+      });
+      await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow(
+        'DOCKER_PLAN_SOURCE_UNCONFIRMED'
+      );
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['installed-client', 'provider-read'] as const)('keeps %s within the native fact lifetime', async (phase) => {
+    const f = fixture();
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    if (phase === 'installed-client') {
+      const read = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args) => {
+        const reply = await read(args);
+        if (args.includes('status')) clock += 5001;
+        return reply;
+      });
+    } else {
+      f.view.mockImplementation(async () => {
+        clock += 5001;
+        throw Error('viewer absent');
+      });
+    }
+    await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['image-failure', 'revoked', 'row-changed'] as const)(
+    'refuses a prerequisite %s before fresh native sampling',
+    async (change) => {
+      const f = fixture();
+      let clock = 1000,
+        admitted = true;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      f.qualifyImage.mockImplementation(async () => {
+        clock += 6000;
+        if (change === 'image-failure') throw Error('image qualification refused');
+        if (change === 'revoked') admitted = false;
+        else f.row.sourceDigest = hex('0');
+      });
+      await expect(
+        f.reader.capture(
+          f.row,
+          f.binding,
+          () => {
+            if (!admitted) throw Error('revoked');
+          },
+          true
+        )
+      ).rejects.toThrow();
+      expect(f.command.run).not.toHaveBeenCalled();
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('fixed init read program', () => {
   function run(change?: string) {
     let reads = 0,

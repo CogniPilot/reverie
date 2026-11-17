@@ -24,7 +24,19 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
     if (!value) throw new PlanMoveError('The original Docker move requester is unavailable', 403);
     return value;
   };
+  const bindOriginalRequester = async (record: Readonly<PlanMoveRecord>) => {
+    if (!record.dockerReplacement) throw new PlanMoveError('The original Docker journal is unavailable', 403);
+    if (!actors.has(record.id)) {
+      if (!runtime.dockerOriginalRequester)
+        throw new PlanMoveError('Original Docker recovery authority is unavailable', 503);
+      const original = selected(await runtime.dockerOriginalRequester(record.id));
+      original.current(record, record.dockerReplacement);
+      actors.set(record.id, original);
+    }
+    actor(record).current(record, record.dockerReplacement);
+  };
   return Object.freeze({
+    bindOriginalRequester,
     admitDisjointGeneration: async (employeeId, requestedOwner, rows) => {
       if (requestedOwner !== owner || !base.admitDisjointGeneration)
         throw new PlanMoveError('Current native generation admission is unavailable', 409);
@@ -77,11 +89,7 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
         }
       : {}),
     inspectForContinuation: async (record, journal) => {
-      if (!actors.has(record.id)) {
-        if (!runtime.dockerOriginalRequester)
-          throw new PlanMoveError('Original Docker recovery authority is unavailable', 503);
-        actors.set(record.id, selected(await runtime.dockerOriginalRequester(record.id)));
-      }
+      await bindOriginalRequester(record);
       const original = actor(record);
       const proof = await original.inspectForContinuation(record, journal);
       continuations.set(proof, original);

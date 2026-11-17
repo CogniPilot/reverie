@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PlanMoveStore } from '../src/plan-move-store.js';
 import { CompanyStore } from '../src/company-store.js';
+import * as companyPublication from '../src/company-store.js';
+import { withCanonicalStateLock } from '../src/canonical-state-lock.js';
 import { CompanyService, type CompanyServiceDeps } from '../src/company-service.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import {
@@ -28,13 +30,38 @@ import { DockerPlanMoveJournalState } from '../src/docker-plan-move-data.js';
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { AuthSessionRecord } from '../src/web/ports/auth-port.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
+import { dockerPlanSourceFixture } from './helpers/docker-plan-source-fixture.js';
+import {
+  captureDockerPlanDisjointGeneration,
+  requireDockerPlanDisjointHistoryData,
+  requireDockerPlanDisjointReservation,
+} from '../src/docker-plan-disjoint-generation.js';
+import { PlanMoves, type PlanMovePort, type PlanMoveRecord } from '../src/plan-move.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) await close();
 });
-async function fixture() {
+async function fixture(native?: ReturnType<typeof dockerPlanSourceFixture>) {
   const f = dockerPlanJournalFixture();
+  if (native) {
+    f.record.employeeId = native.row.employeeId;
+    f.record.oldSession = native.binding.sessionId;
+    f.state.seed = {
+      ...f.state.seed,
+      forceBusy: true,
+      target: {
+        ...f.state.seed.target,
+        workerImage: { ...f.state.seed.target.workerImage, sourceImageId: native.binding.imageId },
+      },
+      source: {
+        ...f.state.seed.source,
+        record: native.row,
+        binding: native.binding,
+        providerSourceDigest: native.row.version === 1 ? native.row.sourceDigest : native.row.providerSourceDigest,
+      },
+    };
+  }
   const targetRecipe = {
     mode: 'claude',
     workingDir: '/synthetic-workspace',
@@ -104,7 +131,7 @@ async function fixture() {
     employeeId: f.record.employeeId,
     sessionId: f.record.oldSession,
     sessionGeneration: 1,
-    choice: { moveId: f.record.id, toAccount: f.record.toAccount, forceBusy: false },
+    choice: { moveId: f.record.id, toAccount: f.record.toAccount, forceBusy: f.state.seed.forceBusy },
   };
   const moveStore = new PlanMoveStore(join(directory, 'moves.json'));
   await moveStore.save([f.record]);
@@ -148,7 +175,7 @@ async function fixture() {
     sessionId: f.record.oldSession,
     fromAccount: f.record.fromAccount,
     toAccount: f.record.toAccount,
-    forceBusy: false,
+    forceBusy: f.state.seed.forceBusy,
     handoff: f.state.seed.handoff,
   };
   const capture = async (h = headers) => {
@@ -210,6 +237,7 @@ async function fixture() {
   };
   return {
     ...f,
+    directory,
     targetRecipe,
     issuerKeyLost: () => {
       issuerKey = false;
@@ -240,6 +268,270 @@ async function fixture() {
     authSessions,
   };
 }
+async function disjointAdmissionFixture(cost = 50) {
+  const native = dockerPlanSourceFixture(),
+    f = await fixture(native);
+  expect(await f.capture()).toBe(200);
+  const store = new PlanMoveStore(join(f.directory, 'disjoint.json'));
+  const old: PlanMoveRecord = {
+    id: 'historical-legacy',
+    employeeId: f.record.employeeId,
+    name: 'Synthetic',
+    oldSession: '10000000-0000-4000-8000-000000000011',
+    newSession: '10000000-0000-4000-8000-000000000012',
+    fromAccount: 'old-source',
+    toAccount: 'old-target',
+    phase: 'recovery-required',
+    at: 1,
+    sourceStopRequested: true,
+    sourceCleanupVerified: true,
+  };
+  await store.save([old]);
+  let clock = performance.now();
+  vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  const current = () => {
+    requireDockerPlanMoveRequesterSource(f.proof(), f.record.employeeId, undefined);
+    // Controlled canonical/requester work, not a production timing assertion.
+    clock += cost;
+  };
+  const forbidden = async () => {
+    throw Error('Native effect forbidden');
+  };
+  const prepare = vi.fn(async () => {
+    throw Error('admitted preparation boundary');
+  });
+  const snapshot = async () => ({
+    backend: 'docker' as const,
+    sessionId: f.record.oldSession,
+    sessionGeneration: 1,
+    name: 'Synthetic',
+    account: f.record.fromAccount,
+    working: true,
+  });
+  const admission = vi.fn(
+    async (employeeId: string, owner: string | undefined, rows: readonly Readonly<PlanMoveRecord>[]) => {
+      if (employeeId !== native.row.employeeId || owner !== native.row.owner)
+        throw Error('Changed native source scope');
+      const proof = await native.reader.capture(native.row, native.binding, current, true);
+      return captureDockerPlanDisjointGeneration(f.proof(), proof, native.row, native.binding, rows, current);
+    }
+  );
+  const port: PlanMovePort = {
+    load: () => store.load(),
+    save: (records) => store.save(records),
+    snapshot,
+    idle: forbidden,
+    create: forbidden,
+    start: forbidden,
+    ready: forbidden,
+    beforeStop: forbidden,
+    stop: forbidden,
+    rebind: forbidden,
+    binding: () => f.record.oldSession,
+    exists: () => true,
+    audit: async () => {},
+    dockerReplacement: {
+      admitDisjointGeneration: admission,
+      snapshot,
+      reserve: async (_input, _owner, requestDigest) => {
+        // The initial proof must not survive recipe work: the coordinator owns
+        // a separate genuine fresh capture after reserve and before locking.
+        clock += 6000;
+        return { ...f.state.seed, requestDigest };
+      },
+      current: (record, state) => requireDockerPlanMoveRequesterCurrent(f.proof(), record, state),
+      prepare,
+      idle: forbidden,
+      stopSource: forbidden,
+      start: forbidden,
+      verify: forbidden,
+      finalize: forbidden,
+      inspectForContinuation: forbidden,
+      requireContinuation: () => {
+        throw Error('No continuation');
+      },
+    },
+    dockerJournal: {
+      reserve: (...args) => store.dockerReserve(...args),
+      record: (id) => store.dockerRecord(id),
+      current: (...args) => store.dockerCurrent(...args),
+      readCurrent: (...args) => store.dockerReadCurrent(...args),
+      phase: (...args) => store.dockerPhase(...args),
+      publish: (...args) => store.dockerPublish(...args),
+      claim: (...args) => store.dockerClaim(...args),
+    },
+  };
+  return {
+    f,
+    native,
+    store,
+    old,
+    port,
+    prepare,
+    admission,
+    current,
+    advance: (ms: number) => {
+      clock += ms;
+    },
+    moves: new PlanMoves(port),
+  };
+}
+describe('bounded genuine disjoint journal admission', () => {
+  it('refreshes after reserve and validates each locked boundary without repeated native checks', async () => {
+    const f = await disjointAdmissionFixture();
+    await f.moves.begin(f.f.input, undefined, f.port);
+    await expect.poll(() => f.prepare.mock.calls.length).toBe(1);
+    expect(f.admission).toHaveBeenCalledTimes(2);
+    await expect.poll(async () => (await f.store.dockerRecord(f.f.record.id)).phase).toBe('recovery-required');
+    const record = await f.store.dockerRecord(f.f.record.id);
+    expect(record.error).toBe('admitted preparation boundary');
+    expect(record.dockerReplacement?.sourceStop).toBeUndefined();
+    expect(record.dockerReplacement?.paidDispatch).toBeUndefined();
+    expect((await f.store.load()).find((r) => r.id === f.old.id)).toEqual(f.old);
+    expect(f.native.command.create).not.toHaveBeenCalled();
+    expect(
+      vi
+        .mocked(f.native.command.run)
+        .mock.calls.every(([a]) => a[0] === 'exec' || (a[0] === 'container' && a[1] === 'inspect'))
+    ).toBe(true);
+  });
+
+  it.each(['grant', 'binding', 'history', 'history-removed'] as const)(
+    'refuses changed %s at actual locked admission without native effects',
+    async (change) => {
+      const f = await disjointAdmissionFixture(0),
+        reserve = f.port.dockerJournal!.reserve;
+      f.port.dockerJournal!.reserve = async (...args) => {
+        if (change === 'grant' || change === 'binding')
+          await f.f.store.update((state) => {
+            const employee = state.employees[0]!;
+            if (change === 'grant') employee.permissions.moveOwnPlan = false;
+            else employee.sessionGeneration++;
+          });
+        else await f.store.save(change === 'history' ? [{ ...f.old, toAccount: 'changed' }] : []);
+        return reserve(...args);
+      };
+      await expect(f.moves.begin(f.f.input, undefined, f.port)).rejects.toThrow();
+      expect(f.prepare).not.toHaveBeenCalled();
+      const record = await f.store.dockerRecord(f.f.record.id);
+      expect(record.phase).toBe('recovery-required');
+      expect(record.dockerReplacement?.sourceStop).toBeUndefined();
+      expect(record.dockerReplacement?.paidDispatch).toBeUndefined();
+      expect(f.native.command.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['grant', 'expired-native'] as const)('rechecks %s after an actual writer-lock await', async (change) => {
+    const f = await disjointAdmissionFixture(0);
+    let locked!: () => void, release!: () => void, atReserve!: () => void;
+    const entered = new Promise<void>((r) => {
+        locked = r;
+      }),
+      gate = new Promise<void>((r) => {
+        release = r;
+      });
+    const reached = new Promise<void>((r) => {
+      atReserve = r;
+    });
+    const held = withCanonicalStateLock(f.store.file, async () => {
+      locked();
+      await gate;
+    });
+    await entered;
+    const reserve = f.port.dockerJournal!.reserve;
+    f.port.dockerJournal!.reserve = (...args) => {
+      atReserve();
+      return reserve(...args);
+    };
+    const pending = f.moves.begin(f.f.input, undefined, f.port).then(
+      () => undefined,
+      (error) => error
+    );
+    try {
+      await reached;
+      if (change === 'grant') f.f.revokeKey();
+      else f.advance(5001);
+    } finally {
+      release();
+    }
+    await held;
+    expect(await pending).toBeInstanceOf(Error);
+    expect(f.prepare).not.toHaveBeenCalled();
+    expect((await f.store.dockerRecord(f.f.record.id)).dockerReplacement?.sourceStop).toBeUndefined();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['lost-ack', 'revoked-after-write', 'expired-after-write'] as const)(
+    'retains the exact original after %s',
+    async (change) => {
+      const f = await disjointAdmissionFixture(0),
+        write = companyPublication.writeCompanyStateFile;
+      vi.spyOn(companyPublication, 'writeCompanyStateFile').mockImplementationOnce(async (...args) => {
+        await write(...args);
+        if (change === 'lost-ack') throw Error('synthetic lost reservation ACK');
+        if (change === 'revoked-after-write') f.f.revokeKey();
+        else f.advance(5001);
+      });
+      await expect(f.moves.begin(f.f.input, undefined, f.port)).rejects.toThrow();
+      const retained = await new PlanMoveStore(f.store.file).dockerRecord(f.f.record.id);
+      expect(retained.phase).toBe('recovery-required');
+      expect(retained.dockerReplacement?.seed.moveId).toBe(f.f.input.id);
+      expect(retained.dockerReplacement?.sourceStop).toBeUndefined();
+      expect(retained.dockerReplacement?.paidDispatch).toBeUndefined();
+      expect(f.prepare).not.toHaveBeenCalled();
+      expect(f.native.command.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it('keeps historical correlation data separate from native authority and exact tuple admission', async () => {
+    const f = await disjointAdmissionFixture(0);
+    const proof = await f.admission(f.f.record.employeeId, undefined, [f.old]);
+    expect(() => requireDockerPlanDisjointHistoryData(proof, [f.old], f.f.record.employeeId, undefined)).not.toThrow();
+    expect(() =>
+      requireDockerPlanDisjointHistoryData(
+        proof,
+        [{ ...f.old, toAccount: 'changed' }],
+        f.f.record.employeeId,
+        undefined
+      )
+    ).toThrow();
+    expect(() =>
+      requireDockerPlanDisjointReservation(proof, { ...f.f.record, oldSession: f.old.oldSession }, [f.old])
+    ).toThrow();
+    expect(() => requireDockerPlanDisjointReservation(proof, { ...f.f.record, owner: 'foreign' }, [f.old])).toThrow();
+    f.advance(5001);
+    // Unchanged history is still only DATA. It cannot refresh or admit an
+    // expired private native proof at any Store publication boundary.
+    expect(() => requireDockerPlanDisjointHistoryData(proof, [f.old], f.f.record.employeeId, undefined)).not.toThrow();
+    expect(() => requireDockerPlanDisjointReservation(proof, f.f.record, [f.old])).toThrow(
+      'DOCKER_PLAN_SOURCE_UNCONFIRMED'
+    );
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['json', 'prototype'] as const)(
+    'denies a forged %s disjoint proof before journal publication',
+    async (kind) => {
+      const f = await disjointAdmissionFixture(0),
+        proof = await f.admission(f.f.record.employeeId, undefined, [f.old]);
+      const forged: unknown =
+        kind === 'json' ? JSON.parse(JSON.stringify(proof)) : Object.create(Object.getPrototypeOf(proof));
+      expect(() => requireDockerPlanDisjointHistoryData(forged, [f.old], f.f.record.employeeId, undefined)).toThrow();
+      await expect(f.store.dockerReserve(f.f.record, () => f.f.current(), forged)).rejects.toThrow();
+      expect((await f.store.load()).map((r) => r.id)).toEqual([f.old.id]);
+      expect(f.native.command.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses a changed native birth during genuine capture before creating a journal', async () => {
+    const f = await disjointAdmissionFixture(0);
+    f.native.afterInit(() => f.native.ticks('456'));
+    await expect(f.moves.begin(f.f.input, undefined, f.port)).rejects.toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect((await f.store.load()).map((r) => r.id)).toEqual([f.old.id]);
+    expect(f.prepare).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  });
+});
 describe('genuine requester grant for one Docker plan journal', () => {
   it('captures real HMAC scope without a Session/viewer and binds the exact new choice', async () => {
     const f = await fixture();

@@ -95,12 +95,25 @@ export class DockerPlanSourceProof {
     try {
       this.#current();
       const age = performance.now() - this.#at;
-      if (
-        age < 0 ||
-        age > 5000 ||
-        this.#rowDigest !== dockerContinuationDigest(row) ||
-        !isDeepStrictEqual(binding, this.#binding)
-      )
+      if (age > 5000) {
+        // Static, bounded provenance only: never log row/binding, command,
+        // environment, credentials or an arbitrary caught error. Revocation
+        // below makes this a once-per-proof diagnostic, not a retry signal.
+        try {
+          console.warn('[docker-plan-source] proof expired', {
+            ageMs: Math.min(Math.floor(age), Number.MAX_SAFE_INTEGER),
+            stack: (new Error('[docker-plan-source] proof expired').stack ?? '')
+              .split('\n')
+              .slice(0, 9)
+              .join('\n')
+              .slice(0, 4096),
+          });
+        } catch {
+          // Diagnostic transport failure must not replace the original refusal.
+        }
+        refuse();
+      }
+      if (age < 0 || this.#rowDigest !== dockerContinuationDigest(row) || !isDeepStrictEqual(binding, this.#binding))
         refuse();
       this.#current();
     } catch (error) {
@@ -252,14 +265,17 @@ export class DockerPlanSourceReader {
   ): Promise<DockerPlanSourceProof> {
     current();
     this.#checked(row, binding);
-    const rowDigest = dockerContinuationDigest(row),
-      at = performance.now();
+    const rowDigest = dockerContinuationDigest(row);
     const check = () => {
       current();
       if (dockerContinuationDigest(row) !== rowDigest) refuse();
     };
     await this.#image(row, check);
     check();
+    // Qualification may include preliminary native checks. All returned source
+    // facts are freshly sampled below, with the existing first/last bookends;
+    // their five-second lifetime begins before that first dynamic sample.
+    const at = performance.now();
     const first = await this.#inspect(row, binding, check);
     if (!first.State.Running) {
       const after = await this.#inspect(row, binding, check);

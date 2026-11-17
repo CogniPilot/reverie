@@ -1,8 +1,5 @@
 import { dockerPlanMaximumRecord } from './docker-plan-move-capacity.js';
-import {
-  DockerPlanDisjointGeneration,
-  requireDockerPlanDisjointGeneration,
-} from './docker-plan-disjoint-generation.js';
+import { requireDockerPlanDisjointReservation } from './docker-plan-disjoint-generation.js';
 import type { DockerEmployeePlanReplacementWorkRecord } from './docker-employee-continuation-data.js';
 import { DockerPlanMoveJournalState, assertDockerPlanMoveTransition } from './docker-plan-move-data.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
@@ -578,10 +575,9 @@ export class PlanMoveStore {
           );
           const requireAdmission = () => {
             current();
-            if (held) {
-              const proof = requireDockerPlanDisjointGeneration(disjoint, disk, record.employeeId, record.owner);
-              DockerPlanDisjointGeneration.prototype.requireReservation.call(proof, record, disk);
-            }
+            // A supplied historical admission must still match the disk rows
+            // even if their earlier hold disappeared while this call waited.
+            if (held || disjoint !== undefined) requireDockerPlanDisjointReservation(disjoint, record, disk);
           };
           requireAdmission();
           if (disk.length >= 100) {

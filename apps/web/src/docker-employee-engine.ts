@@ -480,6 +480,26 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     return result;
   }
+  /** Read-only compatibility of an immutable, already captured target pair.
+   * This supplies no source view, task admission or launch capability. */
+  async qualifyPlanReplacementImage(
+    original: DockerEmployeeOriginal,
+    expected: DockerEmployeeWorkerImage,
+    current: () => void
+  ): Promise<void> {
+    current();
+    const source = DockerEmployeeOriginal.parse(original),
+      saved = DockerEmployeeWorkerImage.parse(expected);
+    if (
+      saved.sourceImageId !== source.imageId ||
+      (!this.workerImage.sourceImageIds.includes(source.imageId) && source.imageId !== this.workerImage.imageId) ||
+      (!this.workerImage.sourceImageIds.includes(saved.imageId) && saved.imageId !== this.workerImage.imageId)
+    )
+      refuse('DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED');
+    const actual = await this.#imagePair(source, saved, false);
+    current();
+    if (!isDeepStrictEqual(actual, saved)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+  }
   /** Read DATA only. The owning core separately checks the exact canonical
    * published binding, source closure and native destination/provider facts. */
   async existingImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {

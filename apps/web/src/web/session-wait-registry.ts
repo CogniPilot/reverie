@@ -57,7 +57,7 @@
  * unit-testable in isolation.
  */
 
-import { stripAnsi } from '../utils/index.js';
+import { normalizeTerminalMatchText as normalizeForMatch } from '../utils/regex-patterns.js';
 import {
   MAX_WAITERS_PER_SESSION,
   MAX_WAITERS_PER_OWNER,
@@ -992,51 +992,6 @@ export class SessionWaitRegistry {
 }
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
-
-/**
- * Escape sequences `stripAnsi` leaves behind, removed so the text this module MATCHES
- * against is what the pane visually shows.
- *
- * `ANSI_ESCAPE_PATTERN_FULL` covers three families — `ESC [ … letter`,
- * `ESC ] … (BEL|ST)`, and `ESC =` / `ESC >` — and nothing else. The gap is not
- * theoretical: a stock bash prompt emits `arkon@tnode\x1b(B\x1b[m:`, the CSI is removed
- * and the charset-select `ESC ( B` is not, so `match=tnode:` **fails on a prompt that
- * plainly reads `tnode:`** while `match=(B` succeeds. That is the single most likely
- * thing an orchestrating agent tries, and the failure is silent (a full-length timeout).
- *
- * Two branches, in order:
- * - `ESC P|X|^|_ … (BEL|ST)` — DCS / SOS / PM / APC string sequences. The terminator is
- *   REQUIRED, exactly as `stripAnsi`'s OSC branch requires one: matching an unterminated
- *   string type with a greedy run would delete every byte after it to the end of the
- *   window, which is real output an agent is waiting for.
- * - `ESC <0x20-0x2f>* <0x30-0x7e>` — the ECMA-48 escape-sequence grammar (zero or more
- *   intermediate bytes then a final byte). This is what covers `ESC ( B`, `ESC ) 0`,
- *   `ESC c`, `ESC 7` / `ESC 8`, `ESC # 8` and a stray `ESC \`.
- *
- * Linear-time by the same argument that holds for `stripAnsi`: every starred class is
- * disjoint from what follows it, and `ESC` is excluded from all of them, so two
- * candidate runs can never overlap and there is no backtracking to exploit.
- *
- * ⚠️ This duplicates ANSI knowledge that would be better held once in
- * `src/utils/regex-patterns.ts`. It lives here deliberately: `stripAnsi` has many
- * consumers (respawn and usage-limit pattern matching, the terminal buffer, search) and
- * widening it changes all of them at once, which is not a change to make as a side
- * effect of fixing this endpoint. See the follow-up note in
- * `tmp/agent-wait-review/report-fix-registry.md`.
- */
-// eslint-disable-next-line no-control-regex -- matching raw terminal control bytes is the point
-const ANSI_ESCAPE_RESIDUE = /\x1b(?:[PX^_][^\x07\x1b]*(?:\x07|\x1b\\)|[\x20-\x2f]*[\x30-\x7e])/g;
-
-/**
- * The text this module matches against: ANSI-stripped, then residue-stripped.
- *
- * Everything downstream (the carry, the haystack, the snippet window) is derived from
- * the output of this function, so there is exactly one definition of "the matched
- * stream" and `findMatch` never sees an escape byte.
- */
-function normalizeForMatch(raw: string): string {
-  return stripAnsi(raw).replace(ANSI_ESCAPE_RESIDUE, '');
-}
 
 /**
  * C0 controls, DEL and the C1 block, minus tab / newline / carriage return. Removed
