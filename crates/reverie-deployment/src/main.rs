@@ -6,7 +6,7 @@ use std::{path::PathBuf, process::ExitCode};
 #[command(
     about = "Preview, prepare, apply or roll back the registered Reverie console release.",
     long_about = "Local owner bootstrap API for an existing ordinary Docker deployment. Reads the registered deployment.json and holds its existing update lock. It never changes the worker broker or bulk-wakes employees. Each effect attempt is durable and is never automatically retried. All output is structured JSON; private environment/configuration stays in the owner-only operation record.",
-    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Ordinary apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. The explicit live-account-writers-fix-forward preview instead selects an unverified live copy and no guaranteed code rollback compatibility. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission."
+    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Ordinary apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. A live-account-writers-fix-forward plan retains an unverified live copy by default. Apply with --skip-backup to omit that copy for a prepared live-account plan. Code rollback compatibility is not guaranteed in either live mode. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission."
 )]
 struct Arguments {
     /// Existing private installation root containing deployment.json.
@@ -55,7 +55,12 @@ enum Action {
         accept_unverified_backup: bool,
     },
     /// Stop, verify backup/rehearsal, swap and check the Rust-front process tree.
-    Apply { operation: String },
+    Apply {
+        operation: String,
+        /// Activate a prepared live-account deployment without copying console data.
+        #[arg(long)]
+        skip_backup: bool,
+    },
     /// Read durable operation status without replaying an effect.
     Status { operation: String },
     /// Return to the exact retained old console; preserve all data and containers.
@@ -128,7 +133,14 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 operation,
                 accept_unverified_backup: _,
             } => serde_json::to_value(service.activate_retained(&operation)?)?,
-            Action::Apply { operation } => serde_json::to_value(service.apply(&operation)?)?,
+            Action::Apply {
+                operation,
+                skip_backup,
+            } => serde_json::to_value(if skip_backup {
+                service.apply_live_without_backup(&operation)?
+            } else {
+                service.apply(&operation)?
+            })?,
             Action::Status { operation } => serde_json::to_value(service.status(&operation)?)?,
             Action::Rollback { operation } => serde_json::to_value(service.rollback(&operation)?)?,
         };

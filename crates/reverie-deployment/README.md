@@ -132,6 +132,14 @@ automatic data restore is promised. Its receipt and status report
 is not guaranteed: even a version-one to version-two company publication can
 make the retained old console unable to read current data. Both containers and
 the live source data remain retained for inspection and fixing forward. Normal
-preview/apply and the existing skip-backup path retain their writer refusal.
+preview/apply and the ordinary rollout skip-backup path retain their writer refusal.
+
+For an already prepared live-account plan, the owner can run
+`reverie-deployment --root ROOT apply OPERATION --skip-backup` to omit the live
+copy. The same writer, mount and container checks apply, and the previous
+console container and live data are retained. The activation receipt records
+`backupCreated: false` and `backupVerified: false`. This flag requires a
+live-account plan.
+
 Older plan readers refuse version-five effects rather than silently dropping
-this disposition. No successful local deployment is claimed by these source tests.
+this disposition.

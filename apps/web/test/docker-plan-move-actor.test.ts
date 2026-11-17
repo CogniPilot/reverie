@@ -2542,3 +2542,59 @@ describe('fresh owner original-recovery composition', () => {
     ).toBe(false);
   });
 });
+
+it.each(['unattached', 'busy', 'dialog', 'revoked-input'] as const)(
+  'keeps handoff unissued after a known %s input refusal at the final boundary',
+  async (kind) => {
+    const f = await publishedTargetFixture('published'),
+      journal = await f.loadJournal(),
+      actor = f.actor();
+    // Controlled local UI observations let the real Engine-earned target fence
+    // reach finalization. They are not a native provider/readiness acceptance.
+    vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+    vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockReturnValue('❯ \n shift+tab to cycle');
+    await actor.verify(f.record, journal);
+    if (kind !== 'unattached') vi.spyOn(f.native.target, 'muxName', 'get').mockReturnValue('controlled-existing-pane');
+    if (kind === 'busy') vi.spyOn(f.native.target, 'isWorking', 'get').mockReturnValue(true);
+    if (kind === 'dialog') vi.spyOn(f.native.target, 'paneDialog', 'get').mockReturnValue('Permission needed');
+    if (kind === 'revoked-input') f.native.target.holdUnconfirmedInput(Error('Prior input remains unknown'));
+    const before = journal.read(),
+      write = vi.spyOn(f.native.target, 'writeViaMux');
+    const refused = await actor.finalize(f.record, journal).catch((error: unknown) => error);
+    expect(journal.read()).toEqual(before);
+    expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
+    expect(before.handoff).toBeUndefined();
+    expect(refused).toBeInstanceOf(PlanMoveComposerNotReady);
+    expect(write).not.toHaveBeenCalled();
+    expect(f.launch).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  }
+);
+
+it('retains the exact input admission across the handoff publication await', async () => {
+  const f = await publishedTargetFixture('published'),
+    journal = await f.loadJournal(),
+    actor = f.actor();
+  // These local UI read ports only isolate the private input lease. They make
+  // no physical provider-readiness or successful handoff claim.
+  vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+  vi.spyOn(f.native.target, 'muxName', 'get').mockReturnValue('controlled-existing-pane');
+  vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockReturnValue('❯\n────\nshift+tab to cycle');
+  vi.spyOn(Session.prototype, 'composerProvablyIdle').mockReturnValue(true);
+  await actor.verify(f.record, journal);
+  const publish = journal.publish.bind(journal),
+    write = vi.spyOn(f.native.target, 'writeViaMux');
+  journal.publish = async (before, next) => {
+    await publish(before, next);
+    // Same public mode/recipe; genuine Session method invalidates the original
+    // workspace/input epoch while the async durable publication was pending.
+    f.native.target.setMode(f.native.target.mode);
+  };
+  const refused = await actor.finalize(f.record, journal).catch((error: unknown) => error);
+  expect(write).not.toHaveBeenCalled();
+  expect(refused).toBeInstanceOf(Error);
+  expect((refused as Error).message).toContain('canceled');
+  expect(journal.read().handoff?.phase).toBe('issued');
+  expect(f.launch).not.toHaveBeenCalled();
+  expect(f.native.command.create).not.toHaveBeenCalled();
+});

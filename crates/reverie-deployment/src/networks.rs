@@ -159,6 +159,19 @@ fn normalize_allocation_status(fields: &mut serde_json::Map<String, Value>) -> R
     Ok(())
 }
 
+fn default_bridge_settings(mut config: Value) -> Result<Value> {
+    require(
+        config["Options"]["com.docker.network.bridge.default_bridge"] == "true",
+        "DEPLOYMENT_NETWORK_CHANGED",
+    )?;
+    let fields = config
+        .as_object_mut()
+        .expect("validated network configuration");
+    fields.remove("Id");
+    fields.remove("Created");
+    Ok(config)
+}
+
 impl Topology {
     pub(super) fn preview(&self) -> BTreeMap<String, String> {
         self.endpoints
@@ -292,6 +305,34 @@ impl Topology {
                     && actual.network_id == expected.network_id,
                 "DEPLOYMENT_NETWORK_CHANGED",
             )?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn require_claim_successor(&self, current: &Self) -> Result<()> {
+        self.validate()?;
+        current.validate()?;
+        let changed = "DEPLOYMENT_NETWORK_CHANGED";
+        require(self.endpoints.len() == current.endpoints.len(), changed)?;
+        for (previous, current_endpoint) in self.endpoints.iter().zip(&current.endpoints) {
+            require(
+                previous.name == current_endpoint.name
+                    && previous.aliases == current_endpoint.aliases,
+                changed,
+            )?;
+            let mut before =
+                configuration(self.configurations[&previous.network_id].clone(), previous)?;
+            let mut after = configuration(
+                current.configurations[&current_endpoint.network_id].clone(),
+                current_endpoint,
+            )?;
+            if previous.name == "bridge" && previous.network_id != current_endpoint.network_id {
+                // Docker recreates the built-in bridge at daemon startup. The
+                // successor pins the new ID, while the predecessor stays intact.
+                before = default_bridge_settings(before)?;
+                after = default_bridge_settings(after)?;
+            }
+            require(before == after, changed)?;
         }
         Ok(())
     }

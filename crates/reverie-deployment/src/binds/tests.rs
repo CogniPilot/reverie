@@ -79,6 +79,20 @@ fn docker_omitted_false_defaults_compare_but_true_create_never_does() {
 }
 
 #[test]
+fn docker_dns_unset_and_empty_are_equivalent_but_explicit_resolvers_remain_pinned() {
+    let expected = json!({"Dns":null});
+    equivalent(&json!({"Dns":[]}), &expected).unwrap();
+    assert!(equivalent(&json!({"Dns":["192.0.2.53"]}), &expected).is_err());
+    assert!(
+        equivalent(
+            &json!({"Dns":["192.0.2.53"]}),
+            &json!({"Dns":["192.0.2.54"]})
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn docker_oom_unset_is_false_but_disabled_killer_stays_distinct() {
     let mut old = source();
     old["HostConfig"]["OomKillDisable"] = Value::Null;

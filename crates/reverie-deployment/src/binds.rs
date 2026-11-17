@@ -209,11 +209,16 @@ fn normalized_host(value: &Value) -> Result<Value> {
         .cloned()
         .ok_or_else(|| DeploymentError::new(INVALID))?;
     // Docker normalizes the unset optional boolean to false during create.
-    // A true value remains distinct; no other host field is normalized here.
+    // A true value remains distinct.
     fields.insert(
         "OomKillDisable".into(),
         json!(boolean(&value["OomKillDisable"])?),
     );
+    // A daemon restart can expose an unset DNS override as an empty array.
+    // Explicit resolvers are part of the host config and must match exactly.
+    if value["Dns"].is_null() || value["Dns"].as_array().is_some_and(Vec::is_empty) {
+        fields.insert("Dns".into(), Value::Null);
+    }
     check(list(&value["Binds"])?.is_empty())?;
     fields.remove("Binds");
     let mut mounts = list(&value["Mounts"])?

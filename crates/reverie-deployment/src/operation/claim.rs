@@ -26,7 +26,12 @@ impl Operation {
             "DEPLOYMENT_PREDECESSOR_NOT_TERMINAL",
         )
     }
-    pub(crate) fn claim_terminal(&self, current: &Value) -> Result<&'static str> {
+    pub(crate) fn claim_terminal(
+        &self,
+        current: &Value,
+        current_topology: Option<&crate::networks::Topology>,
+        engine: &Engine,
+    ) -> Result<&'static str> {
         require(
             !self.record_present("successor-attempt")? && !self.record_present("superseded")?,
             "DEPLOYMENT_CLAIM_HANDOVER_ALREADY_ATTEMPTED",
@@ -38,10 +43,16 @@ impl Operation {
         } else {
             "HYBRID_READY"
         };
-        self.assert_claim_source(terminal, current)?;
+        self.assert_claim_source(terminal, current, current_topology, engine)?;
         Ok(terminal)
     }
-    pub(crate) fn assert_claim_source(&self, terminal: &str, current: &Value) -> Result<()> {
+    pub(crate) fn assert_claim_source(
+        &self,
+        terminal: &str,
+        current: &Value,
+        current_topology: Option<&crate::networks::Topology>,
+        engine: &Engine,
+    ) -> Result<()> {
         if terminal == "INVALID_CREATE_REFUSED" {
             return self.assert_invalid_create_refused(current);
         }
@@ -59,7 +70,17 @@ impl Operation {
                     && current["Id"] == candidate,
                 "DEPLOYMENT_PREDECESSOR_SOURCE_CHANGED",
             )?;
-            self.plan.candidate_matches(current)
+            if let (Some(previous), Some(current_topology)) =
+                (&self.plan.network_topology, current_topology)
+            {
+                previous.require_claim_successor(current_topology)?;
+                return self.plan.candidate_matches_topology(
+                    current,
+                    Some(current_topology),
+                    engine,
+                );
+            }
+            self.plan.candidate_matches(current, engine)
         } else {
             require(
                 terminal == "RESTORED" && self.record_present("rollback-attempt")?,
