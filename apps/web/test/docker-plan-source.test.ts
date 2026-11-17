@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { DOCKER_PLAN_INIT_PROGRAM } from '../src/docker-plan-source.js';
@@ -139,6 +139,103 @@ describe('native plan source observation independent of disposable viewer', () =
     expect(() => proof.require(f.row, f.binding)).toThrow();
   });
 });
+describe('native source fact origin after image qualification', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([true, false])('samples fresh native facts after a long prerequisite (running=%s)', async (running) => {
+    const f = fixture(running);
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    f.qualifyImage.mockImplementation(async () => {
+      // Image qualification may make preliminary native reads. Returned facts
+      // still come from the subsequent fresh SourceReader first/last samples.
+      await f.command.run(['container', 'inspect', f.binding.containerId]);
+      clock += 6000;
+    });
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    expect(proof.observation(f.row, f.binding).kind).toBe(running ? 'running' : 'stopped');
+    clock += 5000;
+    expect(() => proof.require(f.row, f.binding)).not.toThrow();
+    clock++;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    clock = 7000;
+    expect(() => proof.require(f.row, f.binding)).toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    'counts a slow first native sample inside the same five seconds (running=%s)',
+    async (running) => {
+      const f = fixture(running);
+      let clock = 1000;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      const read = vi.mocked(f.command.run).getMockImplementation()!;
+      let first = true;
+      vi.mocked(f.command.run).mockImplementation(async (args) => {
+        const reply = await read(args);
+        if (first && args[0] === 'container' && args[1] === 'inspect') {
+          first = false;
+          clock += 5001;
+        }
+        return reply;
+      });
+      await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow(
+        'DOCKER_PLAN_SOURCE_UNCONFIRMED'
+      );
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['installed-client', 'provider-read'] as const)('keeps %s within the native fact lifetime', async (phase) => {
+    const f = fixture();
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    if (phase === 'installed-client') {
+      const read = vi.mocked(f.command.run).getMockImplementation()!;
+      vi.mocked(f.command.run).mockImplementation(async (args) => {
+        const reply = await read(args);
+        if (args.includes('status')) clock += 5001;
+        return reply;
+      });
+    } else {
+      f.view.mockImplementation(async () => {
+        clock += 5001;
+        throw Error('viewer absent');
+      });
+    }
+    await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    expect(f.command.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['image-failure', 'revoked', 'row-changed'] as const)(
+    'refuses a prerequisite %s before fresh native sampling',
+    async (change) => {
+      const f = fixture();
+      let clock = 1000,
+        admitted = true;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      f.qualifyImage.mockImplementation(async () => {
+        clock += 6000;
+        if (change === 'image-failure') throw Error('image qualification refused');
+        if (change === 'revoked') admitted = false;
+        else f.row.sourceDigest = hex('0');
+      });
+      await expect(
+        f.reader.capture(
+          f.row,
+          f.binding,
+          () => {
+            if (!admitted) throw Error('revoked');
+          },
+          true
+        )
+      ).rejects.toThrow();
+      expect(f.command.run).not.toHaveBeenCalled();
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('fixed init read program', () => {
   function run(change?: string) {
     let reads = 0,

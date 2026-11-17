@@ -252,14 +252,17 @@ export class DockerPlanSourceReader {
   ): Promise<DockerPlanSourceProof> {
     current();
     this.#checked(row, binding);
-    const rowDigest = dockerContinuationDigest(row),
-      at = performance.now();
+    const rowDigest = dockerContinuationDigest(row);
     const check = () => {
       current();
       if (dockerContinuationDigest(row) !== rowDigest) refuse();
     };
     await this.#image(row, check);
     check();
+    // Qualification may include preliminary native checks. All returned source
+    // facts are freshly sampled below, with the existing first/last bookends;
+    // their five-second lifetime begins before that first dynamic sample.
+    const at = performance.now();
     const first = await this.#inspect(row, binding, check);
     if (!first.State.Running) {
       const after = await this.#inspect(row, binding, check);
