@@ -191,6 +191,9 @@ impl CargoWorkspace {
             .env("CARGO_BUILD_JOBS", "1")
             .env("TMPDIR", root.join("scratch"))
             .env_remove("REVERIE_NO_AUTOENV")
+            // The build shell can set a package target triple. Exercise Cargo's
+            // ordinary host build layout for the independently owned fixture.
+            .env_remove("CARGO_BUILD_TARGET")
             .env_remove("CARGO_TARGET_DIR")
             .env_remove("CARGO_BUILD_TARGET_DIR")
             .env_remove("CARGO_BUILD_BUILD_DIR");
