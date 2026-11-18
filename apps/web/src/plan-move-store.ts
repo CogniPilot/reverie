@@ -10,6 +10,7 @@ import { constants, openSync, fstatSync, lstatSync, readSync, closeSync } from '
 import { z } from 'zod';
 import { writeCompanyStateFile } from './company-store.js';
 import type { PlanMoveRecord } from './plan-move.js';
+import { canSettleRestoredPlanSource } from './plan-move-docker.js';
 
 const RecordSchema = z
   .object({
@@ -48,6 +49,10 @@ const RecordSchema = z
     at: z.number().finite().nonnegative(),
     sourceStopRequested: z.boolean().optional(),
     sourceCleanupVerified: z.boolean().optional(),
+    restoredSource: z.object({
+      pid: z.number().int().positive().max(2147483647),
+      startTicks: z.string().regex(/^[1-9][0-9]{0,19}$/),
+    }).strict().optional(),
     recoveryAction: z.literal('adopt-existing').optional(),
     recoveredAt: z.number().finite().nonnegative().optional(),
     error: z.string().max(4000).optional(),
@@ -109,7 +114,10 @@ const RecordSchema = z
         record.newSession !== docker.seed.target.sessionId)
     )
       context.addIssue({ code: 'custom', message: 'Docker plan journal must bind its original request and target' });
-    if (docker && record.phase === 'failed' && (docker.sourceStop || docker.work || docker.paidDispatch))
+    if (record.restoredSource && (!docker || record.phase !== 'failed' ||
+        !canSettleRestoredPlanSource(docker, record.restoredSource)))
+      context.addIssue({ code: 'custom', message: 'Restored source settlement requires an untouched target' });
+    if (docker && record.phase === 'failed' && !record.restoredSource && (docker.sourceStop || docker.work || docker.paidDispatch))
       context.addIssue({ code: 'custom', message: 'Issued Docker plan work retains recovery' });
     if (
       docker &&
@@ -765,6 +773,20 @@ export class PlanMoveStore {
     });
   }
 
+  closeRestoredDockerMove(
+    id: string, before: Readonly<DockerPlanMoveJournalState>,
+    init: NonNullable<PlanMoveRecord['restoredSource']>, current: () => void
+  ): Promise<Readonly<PlanMoveRecord>> {
+    const captured = DockerPlanMoveJournalState.parse(before);
+    return this.dockerTransaction(id, captured, current, (record) => {
+      if (record.phase !== 'recovery-required' || !canSettleRestoredPlanSource(captured, init))
+        throw Error('Restored source settlement requires an untouched target');
+      record.phase = 'failed';
+      record.error = 'The original source was restored before any target work was issued';
+      record.restoredSource = { ...init };
+    });
+  }
+
   dockerPublish(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
@@ -829,7 +851,8 @@ export class PlanMoveStore {
     let maximum = this.settlementBounds.get(key);
     if (maximum === undefined) {
       const budget = { version: 1 as const, purpose: 'docker-plan-settlement-budget-v1' as const, maxRecordBytes: 1 };
-      const witness = dockerPlanMaximumRecord({ ...record, dockerSettlementBudget: budget });
+      const { restoredSource: _terminalRestoredSource, ...openRecord } = record;
+      const witness = dockerPlanMaximumRecord({ ...openRecord, dockerSettlementBudget: budget });
       for (let pass = 0; pass < 8; pass++) {
         const value = Buffer.byteLength(JSON.stringify(RecordSchema.parse(witness)));
         if (value === budget.maxRecordBytes) break;

@@ -28,6 +28,27 @@ function initialConfig(){
  const d=directory(p);if((Number(fs.fstatSync(d.fd).mode)&0o077)!==0||!absent(d,'tmp'))refuse();
  return {d,before:snapshot(d),executable:codexExecutable()};
 }
+function claudeProbeConfig(){
+ const p=process.env.CLAUDE_CONFIG_DIR;if(!p||!path.isAbsolute(p)||fs.realpathSync(p)!==p)refuse();
+ const d=directory(p);if((Number(fs.fstatSync(d.fd).mode)&0o077)!==0)refuse();
+ const file=named(d.fd,'.credentials.json');
+ const fd=fs.openSync(file,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);held.push(fd);
+ const stat=fs.fstatSync(fd,{bigint:true}), before=JSON.stringify(fileStamp(stat));
+ if(!stat.isFile()||Number(stat.uid)!==process.getuid()||stat.nlink!==1n||
+    stat.size<=0n||stat.size>65536n||(Number(stat.mode)&0o077)!==0)refuse();
+ const bytes=Buffer.alloc(Number(stat.size));
+ const check=()=>{current(d);if(JSON.stringify(fileStamp(fs.fstatSync(fd,{bigint:true})))!==before||
+    JSON.stringify(fileStamp(fs.lstatSync(file,{bigint:true})))!==before)refuse();};
+ try{
+  if(fs.readSync(fd,bytes,0,bytes.length,0)!==bytes.length)refuse();
+  check();
+  const scratch=directory(fs.mkdtempSync('/tmp/reverie-claude-auth-'));
+  try{
+   fs.writeFileSync(named(scratch.fd,'.credentials.json'),bytes,{flag:'wx',mode:0o600});
+   return {scratch,check};
+  }catch(e){current(scratch);fs.rmSync(scratch.path,{recursive:true});throw e;}
+ }finally{bytes.fill(0);}
+}
 function codexExecutable(){
  const root=(process.env.REVERIE_DATA||'/instances/default')+'/tools/lib/node_modules/@openai/';
  const suffix='codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex';
@@ -66,20 +87,28 @@ function removeOwnedBootstrap(scope){
  for(const dir of dirs.reverse()){current(dir);if(names(dir).length)refuse();fs.rmdirSync(dir.path);}
  current(d);if(!absent(d,'tmp')||JSON.stringify(snapshot(d))!==JSON.stringify(before))refuse();
 }
+let claudeScope;
 try{
  const provider=process.argv[1],initial=process.argv[2]==='initial';
  if(!['anthropic','openai'].includes(provider)||process.argv.length!==(initial?3:2))throw Error();
  const scope=provider==='openai'&&initial?initialConfig():undefined;
+ if(provider==='anthropic')claudeScope=claudeProbeConfig();
  const args=provider==='anthropic'?['auth','status','--json']:['login','status'];
- const result=cp.spawnSync(provider==='anthropic'?'claude':'codex',args,{env:process.env,encoding:'utf8',timeout:8000,maxBuffer:65536,windowsHide:true});
+ const env=claudeScope?{...process.env,CLAUDE_CONFIG_DIR:claudeScope.scratch.path}:process.env;
+ const result=cp.spawnSync(provider==='anthropic'?'claude':'codex',args,{env,encoding:'utf8',timeout:8000,maxBuffer:65536,windowsHide:true});
  if(result.error||result.signal||result.status!==0)throw Error();
  if(provider==='anthropic'){
   const value=JSON.parse(result.stdout);if(value?.loggedIn!==true||value.apiProvider!=='firstParty'||typeof value.authMethod!=='string'||!value.authMethod)throw Error();
+  claudeScope.check();
+  current(claudeScope.scratch);fs.rmSync(claudeScope.scratch.path,{recursive:true});claudeScope=undefined;
  }else if(!/^Logged in(?:\s|$)/i.test((result.stdout+'\n'+result.stderr).trim()))throw Error();
  if(scope)removeOwnedBootstrap(scope);
  process.stdout.write(JSON.stringify({version:1,purpose:'reverie-plan-account-status-v1',provider,authenticated:true})+'\n');
 }catch{process.stderr.write('Native selected account status unconfirmed\n');process.exitCode=1;}
-finally{for(const fd of held.reverse())try{fs.closeSync(fd);}catch{process.exitCode=1;}}
+finally{
+ if(claudeScope)try{current(claudeScope.scratch);fs.rmSync(claudeScope.scratch.path,{recursive:true});}catch{process.exitCode=1;}
+ for(const fd of held.reverse())try{fs.closeSync(fd);}catch{process.exitCode=1;}
+}
 `;
 export const DockerPlanAccountStatus = z
   .object({

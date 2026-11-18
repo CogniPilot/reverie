@@ -9,6 +9,7 @@ import {
   type DockerContinuationAuthority,
 } from './docker-employee-continuation.js';
 import { dockerPoolMetadataDigest, type DockerPoolObservationRecord } from './docker-pool-observation-data.js';
+import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 export interface DockerPoolStatus {
   readonly state: 'retained' | 'reconciliation-required' | 'held';
   readonly sessionId: string;
@@ -80,12 +81,7 @@ export class DockerPoolReconciliation {
     record: DockerPoolObservationRecord,
     metadataDigest: string
   ): DockerPoolStatus {
-    const retained =
-      this.company.store
-        .snapshot()
-        .dockerPoolObservations?.some(
-          (value) => dockerContinuationDigest(value) === dockerContinuationDigest(record)
-        ) === true;
+    const retained = this.#retained(record);
     return {
       state: retained ? 'retained' : 'reconciliation-required',
       sessionId: context.original.sessionId,
@@ -94,6 +90,42 @@ export class DockerPoolReconciliation {
       ...(retained ? {} : { code: 'DOCKER_POOL_ACK_NOT_RETAINED' }),
       allowedActions: retained ? [] : ['reconcile-pool'],
     };
+  }
+  #retained(record: DockerPoolObservationRecord): boolean {
+    const digest = dockerContinuationDigest(record);
+    return this.company.store.snapshot().dockerPoolObservations?.some(
+      (value) => dockerContinuationDigest(value) === digest
+    ) === true;
+  }
+
+  /** A plan move may read an already-reconciled source pool. The original
+   * anchor task and source record retain their historical process identity. */
+  async requirePlanSourcePool(
+    source: Pick<DockerEmployeeContinuationRecord, 'pool' | 'policy' | 'tasks'>,
+    current: () => void
+  ): Promise<void> {
+    const historic = source.tasks?.find((task) => task.role === 'anchor');
+    if (!source.pool || historic?.phase !== 'running' || historic.containerId !== source.pool.containerId ||
+        source.pool.policyDigest !== dockerContinuationDigest(source.policy.pool))
+      refuse('DOCKER_POOL_SOURCE_CHANGED');
+    const check = () => {
+      current();
+      this.runtimeCurrent();
+      if (this.company.store.publicationUnconfirmed) refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
+    };
+    check();
+    const receipt = await this.#capture(source.policy.pool, check);
+    const observed = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, check);
+    if (
+      observed.anchorTask.containerId !== historic.containerId ||
+      observed.anchorTask.imageId !== historic.imageId ||
+      observed.anchorTask.name !== historic.name ||
+      observed.anchorTask.configurationDigest !== historic.configurationDigest ||
+      observed.epoch.parent.path !== '/reverie.slice/reverie-box.slice/' + source.pool.cgroupParent ||
+      !this.#retained(observed)
+    ) refuse('DOCKER_POOL_SOURCE_RECONCILIATION_REQUIRED');
+    DockerPoolReconciliationReceipt.prototype.require.call(receipt);
+    check();
   }
   async #capture(
     policy: DockerPoolObservationRecord['poolPolicy'],

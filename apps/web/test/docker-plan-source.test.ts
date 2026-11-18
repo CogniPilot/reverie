@@ -73,6 +73,17 @@ describe('native plan source observation independent of disposable viewer', () =
     expect(f.view).not.toHaveBeenCalled();
     expect(vi.mocked(f.command.run).mock.calls.every(([a]) => a[0] === 'container' && a[1] === 'inspect')).toBe(true);
   });
+  it('accepts Docker re-encoding unset DNS on a stopped source without relaxing its binding', async () => {
+    const f = fixture(false, null);
+    f.raw.HostConfig.Dns = [];
+    const proof = await f.reader.capture(f.row, f.binding, () => {}, true);
+    expect(proof.observation(f.row, f.binding).kind).toBe('stopped');
+    f.raw.HostConfig.Dns = ['192.0.2.1'];
+    await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow('DOCKER_PLAN_SOURCE_UNCONFIRMED');
+    f.raw.HostConfig.Dns = [];
+    f.raw.HostConfig.Privileged = true;
+    await expect(f.reader.capture(f.row, f.binding, () => {}, true)).rejects.toThrow();
+  });
   it.each([true, false])(
     'refuses cooperative move when source has no genuine busy/idle provider proof (running=%s)',
     async (running) => {

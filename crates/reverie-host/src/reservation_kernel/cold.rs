@@ -109,7 +109,8 @@ impl ReservationKernel {
         )?;
         table_at(&Installed, pid, end)
     }
-    pub(crate) fn cold_host_aliases(
+    /// Refuse overlapping host mount coordinates, including nested bind aliases.
+    pub fn cold_host_aliases(
         &self,
         target: &PosixPath,
         selected: &PosixPath,

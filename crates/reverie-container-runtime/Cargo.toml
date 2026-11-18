@@ -19,6 +19,7 @@ chrono.workspace = true
 clap.workspace = true
 getrandom.workspace = true
 nix = { workspace = true, features = ["fs", "signal", "process", "user"] }
+reverie-core = { path = "../reverie-core" }
 reverie-local-model = { path = "../reverie-local-model" }
 serde.workspace = true
 serde_json.workspace = true

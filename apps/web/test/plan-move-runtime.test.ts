@@ -581,6 +581,27 @@ describe('read-only owner inspection of an interrupted move destination', () => 
     expect(test.runtime.cleanup).not.toHaveBeenCalled();
     expect(test.sessions.get('new')!.writeViaMux).not.toHaveBeenCalled();
   });
+  it('reobserves an installed boxed destination for legacy settlement without requiring idle or writing input', async () => {
+    const test = recovery();
+    const candidate = test.sessions.get('new')!;
+    const saved = candidate.toState();
+    candidate.toState = () => ({ ...saved, docker: { continuation: { operationId: 'current-operation' } } }) as never;
+    Object.assign(candidate, { isWorking: true });
+    const currentNative = vi.fn();
+    test.runtime.verifyBoxedLegacyTarget = vi.fn(async (_record, current) => {
+      current();
+      return currentNative;
+    });
+    const fence = await test.executor.verifyRecovery!(record);
+    expect(test.runtime.verifyBoxedLegacyTarget).toHaveBeenCalledWith(record, expect.any(Function));
+    expect(currentNative).toHaveBeenCalled();
+    expect(test.runtime.mux.capturePaneText).not.toHaveBeenCalled();
+    expect(candidate.writeViaMux).not.toHaveBeenCalled();
+    expect(test.runtime.cleanup).not.toHaveBeenCalled();
+    currentNative.mockImplementation(() => { throw Error('native view changed'); });
+    expect(fence).toThrow('native view changed');
+    await expect(test.executor.verifyViewerRepair!(record)).rejects.toThrow('cannot be adopted');
+  });
   it('validates the actual destination allocation for viewer repair without requiring its dead viewer or reading its composer', async () => {
     const test = recovery(),
       candidate = test.sessions.get('new')!;

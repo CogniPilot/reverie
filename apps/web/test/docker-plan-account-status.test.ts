@@ -56,7 +56,8 @@ describe.runIf(process.platform === 'linux')(
       fs.chmodSync(dir, 0o700);
       fs.mkdirSync(join(dir, 'bin'), { mode: 0o700 });
       fs.mkdirSync(join(dir, 'config'), { mode: 0o700 });
-      fs.writeFileSync(join(dir, 'config/auth.json'), 'SYNTHETIC_AUTH_UNCHANGED', { mode: 0o600 });
+      const credential = provider === 'anthropic' ? '.credentials.json' : 'auth.json';
+      fs.writeFileSync(join(dir, 'config', credential), 'SYNTHETIC_AUTH_UNCHANGED', { mode: 0o600 });
       const elf = join(
         dir,
         'tools/lib/node_modules/@openai/codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex'
@@ -80,6 +81,7 @@ describe.runIf(process.platform === 'linux')(
               PATH: join(dir, 'bin') + delimiter + (process.env.PATH ?? ''),
               HOME: dir,
               CODEX_HOME: join(dir, 'config'),
+              CLAUDE_CONFIG_DIR: join(dir, 'config'),
               REVERIE_DATA: dir,
             },
           }
@@ -159,6 +161,18 @@ for(const n of ['apply_patch','applypatch','codex-linux-sandbox'])fs.symlinkSync
       );
       expect(r.status, r.stderr).toBe(0);
       expect(DockerPlanAccountStatus.parse(JSON.parse(r.stdout)).provider).toBe('anthropic');
+    });
+    it('keeps Claude bootstrap writes out of the selected generation', () => {
+      const r = run('anthropic', `
+const fs=require('node:fs'), dir=process.env.CLAUDE_CONFIG_DIR;
+if(fs.readFileSync(dir+'/.credentials.json','utf8')!=='SYNTHETIC_AUTH_UNCHANGED') process.exit(3);
+fs.writeFileSync(dir+'/.claude.json','synthetic bootstrap settings');
+fs.writeFileSync(process.env.HOME+'/probe-path',dir);
+process.stdout.write(JSON.stringify({loggedIn:true,authMethod:'oauth_token',apiProvider:'firstParty'}));
+`, 'initial');
+      expect(r.status, r.stderr).toBe(0);
+      expect(fs.readdirSync(join(r.dir, 'config'))).toEqual(['.credentials.json']);
+      expect(fs.existsSync(fs.readFileSync(join(r.dir, 'probe-path'), 'utf8'))).toBe(false);
     });
     it('handles real Codex-style successful status on stderr', () => {
       const r = run('openai', `process.stderr.write('Logged in using ChatGPT\\n');`);

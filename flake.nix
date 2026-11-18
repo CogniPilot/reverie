@@ -161,6 +161,7 @@
           pkgs = pkgsFor system;
           inherit baseImage baseConfig runtimeConfiguration privateAccessRuntime;
           clientCapsule = self.packages.${system}.workerClientCapsule;
+          gpuProjectionCompiler = self.packages.${system}.containerRuntime;
         };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,
         baseConfig ? baseImage.reverieConfig }:

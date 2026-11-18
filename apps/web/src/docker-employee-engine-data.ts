@@ -1,11 +1,13 @@
 /** Bounded actual Engine data and explicit new boxed projection. */
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import {
   dockerContinuationDigest,
   DockerEmployeeContinuationError,
   type DockerContinuationSubject,
 } from './docker-employee-continuation.js';
 import { DockerEmployeeOriginal } from './docker-employee-continuation-data.js';
+import { gpuDriverMount, workerGpuLabel } from './docker-worker-gpu.js';
 const path = z
   .string()
   .min(1)
@@ -52,9 +54,11 @@ export function dockerEngineRefuse(code: string): never {
 }
 /** Native-only office/telemetry transport is deliberately absent in a new boxed placement. */
 export function boxedStorageMounts(row: DockerEmployeeInspect) {
+  const hasGpuProfile = /^[a-f0-9]{64}$/.test(row.Config.Labels?.[workerGpuLabel] ?? '');
   return row.Mounts.filter(
     (m) =>
       m.Type !== 'tmpfs' &&
+      !(hasGpuProfile && gpuDriverMount(m)) &&
       m.Destination !== '/run/reverie-office' &&
       m.Destination !== '/host-published' &&
       m.Destination !== '/instances/default/console/statusline-exporter.sh'
@@ -121,6 +125,22 @@ export function boxedOriginal(
   };
   return DockerEmployeeOriginal.parse(original);
 }
+
+/** Docker may re-encode unset DNS on an existing boxed container. Use the
+ * historical spelling only if it restores the complete retained fingerprint. */
+export function historicalBoxedInspect(
+  raw: DockerEmployeeInspect,
+  subject: DockerContinuationSubject,
+  deployment: string,
+  expected: DockerEmployeeOriginal
+): DockerEmployeeInspect {
+  if (!Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return raw;
+  const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
+  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), expected)
+    ? historical
+    : raw;
+}
+
 export function boxedMountConfiguration(row: DockerEmployeeInspect): Record<string, unknown>[] {
   const retained = boxedStorageMounts(row).map((m) => {
     if (m.type === 'volume' && !m.name) dockerEngineRefuse('DOCKER_CONTINUATION_VOLUME_IDENTITY_UNKNOWN');

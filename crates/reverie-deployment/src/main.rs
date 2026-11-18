@@ -63,16 +63,55 @@ enum Action {
     },
     /// Read durable operation status without replaying an effect.
     Status { operation: String },
+    /// Report or clear the contents of this office's employee /tmp mounts.
+    #[command(
+        long_about = "Report allocated bytes in the registered office's employee /tmp trees. With --apply, clear disposable entries after the office and overlapping Docker containers are stopped. Keep the mount directories. Stop host jobs that use these trees before applying."
+    )]
+    PruneScratch {
+        /// Permanently remove disposable contents. Without this, report only.
+        #[arg(long)]
+        apply: bool,
+        /// Include owned read-only directories in the preview or cleanup.
+        #[arg(long)]
+        force_read_only: bool,
+        /// Include an additional host task-lease directory in the apply guard.
+        #[arg(long = "lease-dir", requires = "apply")]
+        lease_dirs: Vec<PathBuf>,
+    },
+    /// Report or clear aged Cargo build caches on the company workspace disk.
+    PruneWorkspace {
+        /// Remove old verified caches after the office and their Docker users stop.
+        #[arg(long)]
+        apply: bool,
+        /// Keep build caches with newer file or directory changes.
+        #[arg(long, default_value_t = 4)]
+        min_age_days: u16,
+        /// Include an additional host task-lease directory in the apply guard.
+        #[arg(long = "lease-dir", requires = "apply")]
+        lease_dirs: Vec<PathBuf>,
+    },
     /// Return to the exact retained old console; preserve all data and containers.
     Rollback { operation: String },
 }
 fn main() -> ExitCode {
     let args = Arguments::parse();
+    let storage = matches!(
+        args.action,
+        Action::PruneScratch { .. } | Action::PruneWorkspace { .. }
+    );
     let result = run(args);
     match result {
-        Ok(value) => {
+        Ok(mut value) => {
+            let refused = storage && value["data"]["success"] == false;
+            if refused {
+                value["success"] = serde_json::Value::Bool(false);
+            }
             println!("{value}");
-            ExitCode::SUCCESS
+            if refused {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            }
         }
         Err(error) => {
             println!(
@@ -85,10 +124,20 @@ fn main() -> ExitCode {
     }
 }
 fn recovery_message(code: &str) -> &'static str {
-    if code == "DEPLOYMENT_SHARED_WRITABLE_MOUNT" {
-        "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
-    } else {
-        "Inspect the durable operation and actual containers before another effect."
+    match code {
+        "DEPLOYMENT_SHARED_WRITABLE_MOUNT" => {
+            "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
+        }
+        "SCRATCH_LEASE_IN_USE" => {
+            "Finish the task or wait for its reservation to expire before clearing scratch."
+        }
+        "SCRATCH_LEASE_INVENTORY_UNCONFIRMED" => {
+            "Check the office and worker lease directories and include any additional host lease directories."
+        }
+        "SCRATCH_FINALIZATION_UNCONFIRMED" => {
+            "Run a fresh scratch preview to inspect what remains before starting the office."
+        }
+        _ => "Inspect the durable operation and actual containers before another effect.",
     }
 }
 fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
@@ -142,6 +191,16 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 service.apply(&operation)?
             })?,
             Action::Status { operation } => serde_json::to_value(service.status(&operation)?)?,
+            Action::PruneScratch {
+                apply,
+                force_read_only,
+                lease_dirs,
+            } => service.prune_scratch(apply, force_read_only, &lease_dirs)?,
+            Action::PruneWorkspace {
+                apply,
+                min_age_days,
+                lease_dirs,
+            } => service.prune_workspace(apply, min_age_days, &lease_dirs)?,
             Action::Rollback { operation } => serde_json::to_value(service.rollback(&operation)?)?,
         };
         Ok(value)

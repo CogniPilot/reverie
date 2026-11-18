@@ -94,6 +94,33 @@ describe('same-journal Docker actor publication', () => {
     next.dockerCurrent(f.record.id, epoch, dockerContinuationDigest(f.state.seed));
   });
 
+  it('preserves the original stop when settling a restored source with no target effects', async () => {
+    const f = dockerPlanJournalFixture();
+    const store = new PlanMoveStore(join(dir, 'moves.json'));
+    const sourceInit = { pid: 20, startTicks: '70' };
+    const state = {
+      ...f.state,
+      seed: { ...f.state.seed, forceBusy: true, returnToOffice: true as const, source: { ...f.state.seed.source,
+        observation: { kind: 'running' as const, init: sourceInit, provider: { kind: 'unobserved' as const } } } },
+    };
+    const closed = {
+      ...state,
+      sourceStop: { ...f.closed.sourceStop!, phase: 'closed' as const, sourceInit,
+        terminalStateDigest: 'f'.repeat(64) },
+    };
+    await store.save([{ ...f.record, dockerReplacement: state }]);
+    await store.dockerPublish(f.record.id, state, closed, () => {});
+    await store.dockerPhase(f.record.id, closed, { phase: 'recovery-required' }, () => {});
+    await expect(store.closeRestoredDockerMove(f.record.id, closed, sourceInit, () => {})).rejects.toThrow(
+      'untouched target'
+    );
+    const init = { pid: 21, startTicks: '71' };
+    const reopened = new PlanMoveStore(store.file);
+    await reopened.closeRestoredDockerMove(f.record.id, closed, init, () => {});
+    const saved = await new PlanMoveStore(store.file).dockerRecord(f.record.id);
+    expect(saved).toMatchObject({ phase: 'failed', restoredSource: init, dockerReplacement: closed });
+  });
+
   it('captures original CAS DATA before waiting for the writer queue', async () => {
     const f = dockerPlanJournalFixture(),
       store = new PlanMoveStore(join(dir, 'moves.json'));

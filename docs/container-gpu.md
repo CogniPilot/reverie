@@ -56,6 +56,21 @@ It needs neither `/host-published` nor a host publisher.
 
 ## Existing offices and updates
 
+The boxed image builder accepts a deployment-wide `runtimeConfiguration.workerGpu`
+profile. Set `device` to the deployment's selected NVIDIA CDI UUID and
+`driverStorePaths` to the installed driver's exact runtime closure on NixOS.
+Each listed store output must exist on the Docker host. Reverie passes the
+selected card and mounts those outputs read-only when it creates or replaces
+an employee container. On platforms where CDI supplies the full driver runtime,
+use an empty list for `driverStorePaths`. An office without a worker GPU profile
+uses its existing device configuration.
+
+The website and existing employee containers have independent Docker device
+assignments. Deploying a new website image preserves existing worker containers.
+A worker receives the deployment profile when the managed lifecycle creates its
+replacement. GPU memory is shared among the model server and all assigned
+workers.
+
 The example Compose volumes describe a new office. An existing deployment must
 retain its accepted data/home volumes or binds, workspace, scratch, employee
 controller connections, identity and resource limits. Do not start a second

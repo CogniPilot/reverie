@@ -3,6 +3,7 @@ import { dockerPlanDestinationEnvironment, DockerPlanInitialReceipt, DockerPlanL
 import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
 import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
@@ -17,7 +18,7 @@ import {
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
  */
 import { parseWorkerCredentialReadback } from './worker-client-manifest.js';
-import { DockerEmployeeStorage } from './docker-employee-storage.js';
+import { DockerEmployeeStorage, type DockerEmployeeStorageObservation } from './docker-employee-storage.js';
 import type { DockerContinuationTaskJournal } from './docker-continuation-task.js';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -40,11 +41,13 @@ import {
 import {
   DockerEmployeeInspect,
   boxedOriginal,
+  historicalBoxedInspect,
   boxedMountConfiguration,
   boxedStorageMounts,
   dockerEngineRefuse as refuse,
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
+import { gpuHostConfig, gpuWorkerEnvironment, workerGpuLabel, type DockerWorkerGpu } from './docker-worker-gpu.js';
 import type { SessionDocker } from './types.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, dockerProviderRuntimeArguments, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 export { PackagedDockerEngineCommand, type DockerEngineCommand } from './docker-engine-command.js';
@@ -62,6 +65,7 @@ export interface DockerContainedResourceController {
   ): Promise<DockerEmployeeResourcePolicy>;
 }
 export interface DockerEmployeeImageConfiguration {
+  readonly workerGpu?: DockerWorkerGpu;
   readonly imageId: string;
   readonly clientManifestDigest: string;
   /** Accepted actual source base image IDs. No runtime request can add a base. */
@@ -284,12 +288,10 @@ function boundDestinationMatches(
   afterRestart = false
 ): boolean {
   const subject = rowSubject(row);
-  if (isDeepStrictEqual(boxedOriginal(raw, subject, deployment, true), row.destination)) return true;
-  if (!afterRestart || !Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return false;
-  // Docker 29.9 re-encodes an unset DNS override from null to an empty list.
-  // The complete historical fingerprint must match with that one field restored.
-  const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
-  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), row.destination);
+  const selected = afterRestart && row.destination
+    ? historicalBoxedInspect(raw, subject, deployment, row.destination)
+    : raw;
+  return isDeepStrictEqual(boxedOriginal(selected, subject, deployment, true), row.destination);
 }
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
@@ -406,7 +408,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     return row;
   }
   async #source(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
-    const raw = await this.#inspect(row.original.containerId);
+    const inspected = await this.#inspect(row.original.containerId);
+    const raw = row.version === 3
+      ? historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original)
+      : inspected;
     if (
       raw.State.Running ||
       (row.version === 3 &&
@@ -444,7 +449,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeInspect> {
     current();
     if (!this.#publishedRead(row) || !row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    return this.#boundDestination(row, this.#readCurrent(row, current));
+    return this.#boundDestination(row, this.#readCurrent(row, current), true);
   }
   /** The caller retains the canonical binding across each read. */
   async #boundDestination(
@@ -454,7 +459,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeInspect> {
     current();
     if (!row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    const raw = await this.#inspect(row.destination.containerId);
+    const inspected = await this.#inspect(row.destination.containerId);
+    const raw = afterRestart
+      ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
+      : inspected;
     current();
     const epoch = z
       .object({
@@ -631,7 +639,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
    * genuine source-stop/request grant; this read cannot authorize a new helper. */
   async planReplacementHome(
     input: DockerEmployeeContinuationRecord,
-    current: () => void
+    current: () => void,
+    placement: 'running' | 'stopped' = 'stopped',
+    retained?: {
+      readonly helper: DockerWorkerReattachHelper;
+      observed?: DockerEmployeeStorageObservation;
+    }
   ): Promise<DockerCredentialHome> {
     const row = DockerEmployeeContinuationRecord.parse(input),
       key = dockerContinuationDigest(row);
@@ -648,19 +661,39 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     check();
     if (
       !before ||
-      before.State.Running ||
-      before.State.Pid !== 0 ||
+      before.State.Running !== (placement === 'running') ||
+      (placement === 'running'
+        ? !z.number().int().positive().safeParse(before.State.Pid).success
+        : before.State.Pid !== 0) ||
+      before.State.Paused ||
+      before.State.Restarting ||
+      before.State.Dead ||
       !z
         .object({ Name: z.literal('no') })
         .passthrough()
         .safeParse(before.HostConfig.RestartPolicy).success
     )
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
-    const home = await this.#storage.observedCredentialHome(row);
+    let home: DockerCredentialHome | undefined;
+    try {
+      home = await this.#storage.observedCredentialHome(row);
+    } catch (error) {
+      check();
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_STORAGE_HOLDER_UNCONFIRMED' ||
+          !retained || (placement === 'stopped' && !retained.observed)) throw error;
+      let observed: DockerEmployeeStorageObservation | undefined;
+      home = await this.#storage.readExistingReference(row, before, (destination, seen) => {
+        observed = seen;
+        return retained.helper.storage(destination, seen, check);
+      }, check, placement === 'stopped' ? retained.observed : undefined);
+      check();
+      if (!home || !observed) throw error;
+      if (placement === 'running') retained.observed = observed;
+    }
     check();
     const after = await this.#destination(row, check, true);
     check();
-    if (!after || after.State.Running || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
+    if (!after || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
   }
@@ -776,7 +809,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     source: DockerEmployeeInspect,
     existingRead = false,
-    sourceNetworks?: readonly string[]
+    sourceNetworks?: readonly string[],
+    withGpuProfile = true
   ): Record<string, unknown> {
     this.#requireCapsuleMounts(source);
     if (!row.pool) refuse('DOCKER_CONTINUATION_POOL_UNCONFIRMED');
@@ -821,11 +855,21 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       ...sourceSecurity.filter((value) => !/^no-new-privileges(?:[=:].*)?$/.test(value)),
       'no-new-privileges',
     ];
+    const gpu = withGpuProfile ? this.workerImage.workerGpu : undefined;
+    const mounts = boxedMountConfiguration(source);
+    if (gpu) {
+      const projection = gpuHostConfig(gpu);
+      if (mounts.length + projection.Mounts.length > 128 ||
+        projection.Mounts.some((driver) => mounts.some((mount) => mount.Target === driver.Target)))
+        refuse('DOCKER_CONTINUATION_GPU_MOUNT_CONFLICT');
+      host.DeviceRequests = projection.DeviceRequests;
+      mounts.push(...projection.Mounts);
+    }
     Object.assign(host, {
       Privileged: false,
       AutoRemove: false,
       RestartPolicy: { Name: 'no' },
-      Mounts: boxedMountConfiguration(source),
+      Mounts: mounts,
       CgroupParent: row.pool.cgroupParent,
       Memory: row.policy.memoryMaxBytes,
       MemorySwap: row.policy.memoryMaxBytes + row.policy.swapMaxBytes,
@@ -857,6 +901,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       const name = entry.slice(0, entry.indexOf('=') + 1);
       if (!environment.some((value) => value.startsWith(name))) environment.push(entry);
     }
+    const runtimeEnvironment = gpu ? gpuWorkerEnvironment(environment, gpu) : environment;
     return {
       Image: row.workerImage.imageId,
       User: source.Config.User,
@@ -864,12 +909,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       Cmd: [],
       Env:
         row.version === 3
-          ? dockerPlanDestinationEnvironment(environment, {
+          ? dockerPlanDestinationEnvironment(runtimeEnvironment, {
               operationId: row.request.operationId,
               provider: row.planReplacement.account.provider,
               projectionDigest: row.planReplacement.account.projectionDigest,
             })
-          : environment,
+          : runtimeEnvironment,
       WorkingDir: source.Config.WorkingDir ?? '/',
       Hostname: source.Config.Hostname,
       Labels: {
@@ -881,6 +926,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'reverie.boxed.operation': row.request.operationId,
         'reverie.boxed.source': row.original.containerId,
         'org.reverie.worker-client.manifest': row.workerImage.clientManifestDigest,
+        ...(gpu ? { [workerGpuLabel]: dockerContinuationDigest(gpu) } : {}),
       },
       ...(networks ? { NetworkingConfig: { EndpointsConfig: networks } } : {}),
       HostConfig: host,
@@ -1027,11 +1073,19 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (selected.trim() === '') return null;
     if (!/^[a-f0-9]{64}$/.test(selected.trim())) refuse('DOCKER_CONTINUATION_DESTINATION_AMBIGUOUS');
-    const raw = await this.#inspect(selected.trim());
+    const inspected = await this.#inspect(selected.trim());
+    const raw = row.destination && ['provider-issued', 'ready'].includes(row.phase)
+      ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
+      : inspected;
     current();
     const source = await this.#source(row);
     current();
-    const desired = this.#configuration(row, source, true);
+    const labels = raw.Config.Labels;
+    const gpuProfile = labels?.[workerGpuLabel];
+    if (gpuProfile !== undefined &&
+      (!this.workerImage.workerGpu || gpuProfile !== dockerContinuationDigest(this.workerImage.workerGpu)))
+      refuse('DOCKER_CONTINUATION_GPU_PROFILE_CHANGED');
+    const desired = this.#configuration(row, source, true, undefined, gpuProfile !== undefined);
     if (row.version === 3 && row.planReplacement.source.networkIds) {
       const pending = ['destination-issued', 'destination-ready', 'start-issued'].includes(row.phase);
       const actual = await this.#networkIds(raw, current, pending);
@@ -1057,7 +1111,6 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           refuse('DOCKER_PLAN_NETWORK_DESTINATION_CHANGED');
       }
     }
-    const labels = raw.Config.Labels;
     this.#requireCapsuleMounts(raw);
     if (
       raw.Image !== row.workerImage.imageId ||
@@ -1072,6 +1125,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       raw.HostConfig.MemorySwap !== row.policy.memoryMaxBytes + row.policy.swapMaxBytes ||
       raw.HostConfig.PidsLimit !== row.policy.pidsMax ||
       raw.HostConfig.CgroupParent !== row.pool?.cgroupParent ||
+      (gpuProfile !== undefined &&
+        !isDeepStrictEqual(raw.HostConfig.DeviceRequests, (desired.HostConfig as Record<string, unknown>).DeviceRequests)) ||
       !isDeepStrictEqual(raw.HostConfig.Mounts, (desired.HostConfig as Record<string, unknown>).Mounts) ||
       dockerContinuationDigest(boxedStorageMounts(raw)) !== row.original.storageDigest
     )
@@ -1457,7 +1512,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async #reattachCredential(
     row: DockerEmployeeContinuationRecord,
     home: DockerCredentialHome & { readonly originalHomeDev: string },
-    current: () => void
+    current: () => void,
+    canonicalAuthDigest?: string
   ): Promise<string> {
     const task = this.journal.read(row, 'identity-helper');
     if (!row.destination || task?.phase !== 'completed' || task.imageId !== row.workerImage.imageId ||
@@ -1493,6 +1549,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       });
       if (task.resultDigest !== dockerContinuationDigest(initial))
         refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+      if (canonicalAuthDigest !== undefined &&
+          (live.installedAuthDigest !== canonicalAuthDigest || live.observedAuthDigest !== canonicalAuthDigest))
+        refuse('DOCKER_PLAN_ACCOUNT_AUTH_CHANGED');
       return live.tokenDigest;
     }
     const live = parseWorkerCredentialReadback(await this.command.run([
@@ -1514,7 +1573,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     policy: DockerEmployeeResourcePolicy,
     helper: DockerWorkerReattachHelper,
-    current: () => void
+    current: () => void,
+    canonicalAuthDigest?: string
   ): Promise<DockerEmployeeProviderView | undefined> {
     current();
     const checked = DockerEmployeeContinuationRecord.parse(row);
@@ -1528,7 +1588,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!this.resources.readExistingAfterHostRestart || !this.#ephemeral ||
       this.journal.read(checked, 'leaf-helper')?.phase !== 'completed')
       refuse('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
-    const tokenDigest = await this.#reattachCredential(checked, home, current);
+    const tokenDigest = await this.#reattachCredential(checked, home, current, canonicalAuthDigest);
     await helper.credential(checked, tokenDigest, current);
     await this.#ephemeral.verifyExistingDestination(checked, raw, current);
     current();

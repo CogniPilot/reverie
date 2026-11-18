@@ -3,7 +3,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
 import { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
-import { DockerEmployeeInspect, boxedOriginal } from './docker-employee-engine-data.js';
+import { DockerEmployeeInspect, boxedOriginal, historicalBoxedInspect } from './docker-employee-engine-data.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import { parseWorkerClientReadback } from './worker-client-manifest.js';
 import { DOCKER_PROVIDER_VIEW_ENV, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
@@ -177,7 +177,12 @@ export class DockerPlanSourceReader {
     }
     const labels = raw.Config.Labels,
       host = raw.HostConfig,
-      actual = boxedOriginal(raw, subject(row), this.#deployment, true);
+      actual = boxedOriginal(
+        historicalBoxedInspect(raw, subject(row), this.#deployment, row.destination!),
+        subject(row),
+        this.#deployment,
+        true
+      );
     if (
       raw.Id !== binding.containerId ||
       raw.Image !== binding.imageId ||

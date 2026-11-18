@@ -2,7 +2,7 @@
 let
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
-    members = [ "reverie-container-runtime" "reverie-local-model" ];
+    members = [ "reverie-container-runtime" "reverie-core" "reverie-local-model" ];
   };
 in pkgs.rustPlatform.buildRustPackage {
   pname = "reverie-container-runtime";

@@ -10,6 +10,7 @@ import { providerHealthBinding } from '../src/worker-provider-health.js';
 import { EmployeeSchema } from '../src/company-types.js';
 import type { CompanyEmployee } from '../src/company-types.js';
 import { DockerEmployeeProviderHealthProof } from '../src/docker-employee-engine.js';
+import type { DockerWorkerGpu } from '../src/docker-worker-gpu.js';
 import { describe, it, expect, vi } from 'vitest';
 import {
   DockerEmployeeEngine,
@@ -190,7 +191,7 @@ describe('fixed Docker provider runtime namespace', () => {
     f.engine.close();
   });
 });
-function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
+function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude', workerGpu?: DockerWorkerGpu) {
   const policy = DockerEmployeeResourcePolicy.parse({
     memoryMaxBytes: 48 * 1024 ** 3,
     memoryHighBytes: 16 * 1024 ** 3,
@@ -342,6 +343,7 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
       imageId: target,
       clientManifestDigest: '4'.repeat(64),
       sourceImageIds: [image],
+      ...(workerGpu ? { workerGpu } : {}),
     },
     journal,
     helper,
@@ -359,8 +361,8 @@ function fixture(boxId = '7'.repeat(64), ephemeral = false, mode = 'claude') {
     created: () => created,
   };
 }
-async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
-  const f = fixture('7'.repeat(64), ephemeral, mode);
+async function dockerEncodedDestination(ephemeral = false, mode = 'claude', workerGpu?: DockerWorkerGpu) {
+  const f = fixture('7'.repeat(64), ephemeral, mode, workerGpu);
   f.source.Mounts.push({
     Type: 'bind',
     Source: '/synthetic/workspace',
@@ -383,7 +385,12 @@ async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
       Entrypoint: desired.Entrypoint,
       Cmd: desired.Cmd,
     },
-    Mounts: f.source.Mounts.filter((m) => m.Destination !== '/instances/default/console/statusline-exporter.sh'),
+    Mounts: [
+      ...f.source.Mounts.filter((m) => m.Destination !== '/instances/default/console/statusline-exporter.sh'),
+      ...(workerGpu?.driverStorePaths.map((path) => ({
+        Type: 'bind', Source: path, Destination: path, RW: false, Propagation: 'rprivate',
+      })) ?? []),
+    ],
     HostConfig: {
       ...(desired.HostConfig as Record<string, unknown>),
       OomKillDisable: false,
@@ -407,6 +414,9 @@ async function dockerEncodedDestination(ephemeral = false, mode = 'claude') {
           ReadOnly: true,
           BindOptions: { Propagation: 'rprivate' },
         },
+        ...(workerGpu?.driverStorePaths.map((path) => ({
+          Type: 'bind', Source: path, Target: path, ReadOnly: true, BindOptions: { Propagation: 'rprivate' },
+        })) ?? []),
       ],
     },
   });
@@ -1143,6 +1153,24 @@ describe('Engine-owned existing Docker provider view', () => {
   );
 });
 describe('new boxed Docker destination', () => {
+  it('grants only the selected GPU and read-only driver closure to a new worker', async () => {
+    const device = 'nvidia.com/gpu=GPU-aaaaaaaa-1111-2222-3333-444444444444';
+    const driver = '/nix/store/00000000000000000000000000000000-nvidia-driver';
+    const f = await dockerEncodedDestination(false, 'claude', { device, driverStorePaths: [driver] });
+    const created = f.created()!;
+    expect(created.HostConfig).toMatchObject({
+      DeviceRequests: [{ Driver: 'cdi', Count: 0, DeviceIDs: [device] }],
+      Mounts: expect.arrayContaining([{ Type: 'bind', Source: driver, Target: driver, ReadOnly: true, BindOptions: { Propagation: 'rprivate' } }]),
+      Privileged: false,
+    });
+    expect(created.Env).toContain('VK_DRIVER_FILES=/etc/vulkan/icd.d/nvidia_icd.json');
+    expect(created.Labels).toMatchObject({ 'reverie.boxed.gpu': expect.stringMatching(/^[a-f0-9]{64}$/) });
+    await expect(f.engine.observeDestination(f.row)).resolves.toMatchObject({ state: 'stopped' });
+    f.observed.HostConfig.DeviceRequests = null;
+    await expect(f.engine.observeDestination(f.row)).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_DESTINATION_CHANGED',
+    });
+  });
   it('rechecks current grant after the preparation await before issuing destination START', async () => {
     const f = await dockerEncodedDestination();
     f.row.destination = boxedOriginal(f.observed, subject, 'fixture', true);

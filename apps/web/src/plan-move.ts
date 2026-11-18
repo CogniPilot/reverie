@@ -68,6 +68,7 @@ export interface PlanMoveInput {
   fromAccount: string;
   toAccount: string;
   forceBusy: boolean;
+  returnToOffice?: true;
   handoff: string;
   model?: string;
   targetMode?: 'codex' | 'claude';
@@ -102,6 +103,7 @@ export interface PlanMoveRecord {
   requestDigest?: string;
   sourceStopRequested?: boolean;
   sourceCleanupVerified?: boolean;
+  restoredSource?: { pid: number; startTicks: string };
   recoveryAction?: 'adopt-existing';
   recoveredAt?: number;
   purpose?: 'runtime-refresh';
@@ -283,6 +285,7 @@ export class PlanMoves {
     const {
       dockerReplacement: _privateDockerJournal,
       dockerSettlementBudget: _privateSettlementBudget,
+      restoredSource: _privateRestoredSource,
       ...record
     } = source;
     delete record.sourceViewRetirement;
@@ -601,6 +604,7 @@ export class PlanMoves {
       .update(
         JSON.stringify([
           input.forceBusy,
+          ...(input.returnToOffice ? ['return-to-office'] : []),
           input.handoff,
           input.model ?? '',
           input.targetMode ?? '',
@@ -666,7 +670,12 @@ export class PlanMoves {
           snapshot.runtimeDigest !== input.runtimeDigest
         )
           throw new PlanMoveError('A runtime refresh requires the unchanged current plan, runtime and a safe handoff');
-      } else if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
+      } else if (
+        input.fromAccount === input.toAccount &&
+        !(input.forceBusy && snapshot.backend === 'docker' && !snapshot.working)
+      ) {
+        throw new PlanMoveError('The employee is already on that plan');
+      }
       if (this.records.size >= 100) {
         const oldest = [...this.records.values()].find(
           (record) =>
@@ -763,6 +772,33 @@ export class PlanMoves {
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');
     this.aborts.get(id)!.abort(new PlanMoveError('Move cancelled by the owner'));
+  }
+
+  async closeRestoredDockerMove(id: string, owner: string | undefined, executor: PlanMoveExecutor) {
+    await this.init();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner) throw new PlanMoveError('Unknown move', 404);
+    const actor = executor.dockerReplacement;
+    const store = this.port.dockerJournal;
+    const before = record.dockerReplacement;
+    if (!actor?.verifyRestoredSource || !store?.closeRestored || !before || record.phase !== 'recovery-required' ||
+        this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError('The held move is unavailable for restored-source settlement');
+    this.intents.add(id);
+    try {
+      const proof = await actor.verifyRestoredSource(record);
+      const current = () => {
+        if (this.records.get(id) !== record || !this.intents.has(id))
+          throw new PlanMoveError('The held move changed');
+        proof.current();
+      };
+      const saved = await store.closeRestored(id, before, proof.init, current);
+      Object.assign(record, saved);
+      this.releaseLock(record.employeeId);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
   }
 
   /** Recognize a historical settlement through the fixed live host producer.
