@@ -1,7 +1,7 @@
 # Packaging data only. Runtime identity, authority and Engine observations are
 # independently checked by DockerEmployeeRuntime. No live instance is read.
 { pkgs, baseImage, baseConfig, runtimeConfiguration, clientCapsule, name ? "reverie-boxed"
-, privateAccessRuntime ? null }:
+, privateAccessRuntime ? null, gpuProjectionCompiler ? null }:
 let
   cfg = runtimeConfiguration;
   clientRoot = "${clientCapsule}/opt/reverie-worker-client";
@@ -32,7 +32,7 @@ let
       && (ipv4 || dns);
   valid = builtins.isAttrs cfg
     && builtins.all (key: builtins.hasAttr key cfg) required
-    && builtins.all (key: builtins.elem key (required ++ optional)) (builtins.attrNames cfg)
+    && builtins.all (key: builtins.elem key (required ++ optional ++ [ "workerGpu" ])) (builtins.attrNames cfg)
     && cfg.version == 1 && cfg.purpose == "reverie-boxed-runtime-v1"
     && matches "[A-Za-z0-9][A-Za-z0-9_.-]{0,99}" cfg.deployment
     && imageId cfg.workerImageId && imageId cfg.helperImageId
@@ -59,9 +59,19 @@ let
     Entrypoint = newEntrypoint;
     Labels = (baseConfig.Labels or {}) // { "org.reverie.tailscale" = "1"; };
   });
-  configuration = pkgs.writeText "reverie-boxed-runtime.json" (builtins.toJSON cfg);
+  gpu = cfg.workerGpu or null;
+  baseConfiguration = pkgs.writeText "reverie-boxed-runtime.json"
+    (builtins.toJSON (builtins.removeAttrs cfg [ "workerGpu" ]));
+  configuration = if gpu == null then baseConfiguration else
+    pkgs.runCommand "reverie-boxed-gpu-runtime.json" { } ''
+      ${gpuProjectionCompiler}/bin/reverie-container-runtime --worker-gpu-projection ${baseConfiguration} \
+        ${pkgs.lib.escapeShellArgs ([ gpu.device ] ++ gpu.driverStorePaths)} > "$out"
+    '';
 in
 assert valid;
+assert gpu == null || (gpuProjectionCompiler != null
+  && builtins.attrNames gpu == [ "device" "driverStorePaths" ]
+  && builtins.isString gpu.device && builtins.isList gpu.driverStorePaths);
 assert cfg.clientManifestDigest == clientManifestDigest;
 assert builtins.isAttrs baseConfig && builtins.isList (baseConfig.Entrypoint or null)
   && baseConfig.Entrypoint != [] && builtins.all builtins.isString baseConfig.Entrypoint

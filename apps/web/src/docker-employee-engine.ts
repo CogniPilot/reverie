@@ -45,6 +45,7 @@ import {
   dockerEngineRefuse as refuse,
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
+import { gpuHostConfig, gpuWorkerEnvironment, workerGpuLabel, type DockerWorkerGpu } from './docker-worker-gpu.js';
 import type { SessionDocker } from './types.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, dockerProviderRuntimeArguments, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
 export { PackagedDockerEngineCommand, type DockerEngineCommand } from './docker-engine-command.js';
@@ -62,6 +63,7 @@ export interface DockerContainedResourceController {
   ): Promise<DockerEmployeeResourcePolicy>;
 }
 export interface DockerEmployeeImageConfiguration {
+  readonly workerGpu?: DockerWorkerGpu;
   readonly imageId: string;
   readonly clientManifestDigest: string;
   /** Accepted actual source base image IDs. No runtime request can add a base. */
@@ -776,7 +778,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     source: DockerEmployeeInspect,
     existingRead = false,
-    sourceNetworks?: readonly string[]
+    sourceNetworks?: readonly string[],
+    withGpuProfile = true
   ): Record<string, unknown> {
     this.#requireCapsuleMounts(source);
     if (!row.pool) refuse('DOCKER_CONTINUATION_POOL_UNCONFIRMED');
@@ -821,11 +824,21 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       ...sourceSecurity.filter((value) => !/^no-new-privileges(?:[=:].*)?$/.test(value)),
       'no-new-privileges',
     ];
+    const gpu = withGpuProfile ? this.workerImage.workerGpu : undefined;
+    const mounts = boxedMountConfiguration(source);
+    if (gpu) {
+      const projection = gpuHostConfig(gpu);
+      if (mounts.length + projection.Mounts.length > 128 ||
+        projection.Mounts.some((driver) => mounts.some((mount) => mount.Target === driver.Target)))
+        refuse('DOCKER_CONTINUATION_GPU_MOUNT_CONFLICT');
+      host.DeviceRequests = projection.DeviceRequests;
+      mounts.push(...projection.Mounts);
+    }
     Object.assign(host, {
       Privileged: false,
       AutoRemove: false,
       RestartPolicy: { Name: 'no' },
-      Mounts: boxedMountConfiguration(source),
+      Mounts: mounts,
       CgroupParent: row.pool.cgroupParent,
       Memory: row.policy.memoryMaxBytes,
       MemorySwap: row.policy.memoryMaxBytes + row.policy.swapMaxBytes,
@@ -857,6 +870,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       const name = entry.slice(0, entry.indexOf('=') + 1);
       if (!environment.some((value) => value.startsWith(name))) environment.push(entry);
     }
+    const runtimeEnvironment = gpu ? gpuWorkerEnvironment(environment, gpu) : environment;
     return {
       Image: row.workerImage.imageId,
       User: source.Config.User,
@@ -864,12 +878,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       Cmd: [],
       Env:
         row.version === 3
-          ? dockerPlanDestinationEnvironment(environment, {
+          ? dockerPlanDestinationEnvironment(runtimeEnvironment, {
               operationId: row.request.operationId,
               provider: row.planReplacement.account.provider,
               projectionDigest: row.planReplacement.account.projectionDigest,
             })
-          : environment,
+          : runtimeEnvironment,
       WorkingDir: source.Config.WorkingDir ?? '/',
       Hostname: source.Config.Hostname,
       Labels: {
@@ -881,6 +895,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         'reverie.boxed.operation': row.request.operationId,
         'reverie.boxed.source': row.original.containerId,
         'org.reverie.worker-client.manifest': row.workerImage.clientManifestDigest,
+        ...(gpu ? { [workerGpuLabel]: dockerContinuationDigest(gpu) } : {}),
       },
       ...(networks ? { NetworkingConfig: { EndpointsConfig: networks } } : {}),
       HostConfig: host,
@@ -1031,7 +1046,12 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     const source = await this.#source(row);
     current();
-    const desired = this.#configuration(row, source, true);
+    const labels = raw.Config.Labels;
+    const gpuProfile = labels?.[workerGpuLabel];
+    if (gpuProfile !== undefined &&
+      (!this.workerImage.workerGpu || gpuProfile !== dockerContinuationDigest(this.workerImage.workerGpu)))
+      refuse('DOCKER_CONTINUATION_GPU_PROFILE_CHANGED');
+    const desired = this.#configuration(row, source, true, undefined, gpuProfile !== undefined);
     if (row.version === 3 && row.planReplacement.source.networkIds) {
       const pending = ['destination-issued', 'destination-ready', 'start-issued'].includes(row.phase);
       const actual = await this.#networkIds(raw, current, pending);
@@ -1057,7 +1077,6 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
           refuse('DOCKER_PLAN_NETWORK_DESTINATION_CHANGED');
       }
     }
-    const labels = raw.Config.Labels;
     this.#requireCapsuleMounts(raw);
     if (
       raw.Image !== row.workerImage.imageId ||
@@ -1072,6 +1091,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       raw.HostConfig.MemorySwap !== row.policy.memoryMaxBytes + row.policy.swapMaxBytes ||
       raw.HostConfig.PidsLimit !== row.policy.pidsMax ||
       raw.HostConfig.CgroupParent !== row.pool?.cgroupParent ||
+      (gpuProfile !== undefined &&
+        !isDeepStrictEqual(raw.HostConfig.DeviceRequests, (desired.HostConfig as Record<string, unknown>).DeviceRequests)) ||
       !isDeepStrictEqual(raw.HostConfig.Mounts, (desired.HostConfig as Record<string, unknown>).Mounts) ||
       dockerContinuationDigest(boxedStorageMounts(raw)) !== row.original.storageDigest
     )

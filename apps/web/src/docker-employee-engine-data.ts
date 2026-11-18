@@ -6,6 +6,7 @@ import {
   type DockerContinuationSubject,
 } from './docker-employee-continuation.js';
 import { DockerEmployeeOriginal } from './docker-employee-continuation-data.js';
+import { gpuDriverMount, workerGpuLabel } from './docker-worker-gpu.js';
 const path = z
   .string()
   .min(1)
@@ -52,9 +53,11 @@ export function dockerEngineRefuse(code: string): never {
 }
 /** Native-only office/telemetry transport is deliberately absent in a new boxed placement. */
 export function boxedStorageMounts(row: DockerEmployeeInspect) {
+  const hasGpuProfile = /^[a-f0-9]{64}$/.test(row.Config.Labels?.[workerGpuLabel] ?? '');
   return row.Mounts.filter(
     (m) =>
       m.Type !== 'tmpfs' &&
+      !(hasGpuProfile && gpuDriverMount(m)) &&
       m.Destination !== '/run/reverie-office' &&
       m.Destination !== '/host-published' &&
       m.Destination !== '/instances/default/console/statusline-exporter.sh'
