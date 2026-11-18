@@ -203,7 +203,10 @@ fn history(mut reply: Value) -> Result<Value, Error> {
             "Server did not verify current phone delivery; no automatic replies",
         ));
     }
-    Ok(json!({"messages": messages, "timeZone": data.remove("timeZone")}))
+    let zone = data
+        .remove("timeZone")
+        .and_then(crate::hands_prompt::reported_zone);
+    Ok(json!({"messages": messages, "timeZone": zone}))
 }
 
 fn exact(mut reply: Value, room: &str, id: &str) -> Result<Value, Error> {

@@ -10,7 +10,8 @@ name = "reverie-routines"
 path = "src/main.rs"
 
 [dependencies]
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff.workspace = true
+reverie-time-zone.workspace = true
 rusqlite.workspace = true
 libc.workspace = true
 

@@ -23,6 +23,7 @@ http-body-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 idna.workspace = true
+jiff.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
 regex-lite.workspace = true
 reverie-contracts.workspace = true
@@ -31,6 +32,7 @@ reverie-host.workspace = true
 reverie-http.workspace = true
 reverie-python-regex.workspace = true
 reverie-store.workspace = true
+reverie-time-zone.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true

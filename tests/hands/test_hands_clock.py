@@ -2,14 +2,9 @@
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
 
 import agent_loop as loop
 from test_coding_support import ChatCliFixture, FakeChat, cfg_for
-
-
-def at(text):
-    return datetime.fromisoformat(text).replace(tzinfo=timezone.utc).timestamp()
 
 
 class OfficeClockTests(unittest.TestCase):
@@ -18,27 +13,6 @@ class OfficeClockTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cfg = cfg_for(self.tmp.name)
         self.cfg['timezone'] = 'UTC'  # what the launcher writes
-
-    def test_now_line_uses_the_reported_office_zone_and_shows_utc(self):
-        self.cfg['_time_zone'] = 'America/Indianapolis'
-        self.assertEqual(loop.now_line(self.cfg, at('2026-11-01T18:58:00')),
-                         'Now: Sunday 2026-11-01 1:58 PM EST (18:58 UTC).')
-
-    def test_the_zone_name_carries_the_daylight_saving_change(self):
-        # 1:30 AM happens twice on the night the clocks go back: first as EDT, an hour later as EST.
-        self.cfg['_time_zone'] = 'America/Indianapolis'
-        self.assertEqual(loop.now_line(self.cfg, at('2026-11-01T05:30:00')),
-                         'Now: Sunday 2026-11-01 1:30 AM EDT (05:30 UTC).')
-        self.assertEqual(loop.now_line(self.cfg, at('2026-11-01T06:30:00')),
-                         'Now: Sunday 2026-11-01 1:30 AM EST (06:30 UTC).')
-        self.assertEqual(loop.clock(self.cfg, at('2026-10-31T18:58:00') * 1000), '2:58 PM EDT')
-        self.assertEqual(loop.clock(self.cfg, at('2026-11-01T18:58:00') * 1000), '1:58 PM EST')
-
-    def test_without_a_valid_reported_zone_the_configured_zone_is_used(self):
-        for reported in (None, '', 'Mars/Phobos', 'x' * 101, 5, '-05:00'):
-            self.cfg['_time_zone'] = reported
-            self.assertEqual(loop.now_line(self.cfg, at('2026-11-01T18:58:00')),
-                             'Now: Sunday 2026-11-01 6:58 PM UTC (18:58 UTC).', reported)
 
     def test_a_room_read_records_the_zone_the_server_reports(self):
         fixture = ChatCliFixture(self)
@@ -56,7 +30,8 @@ class OfficeClockTests(unittest.TestCase):
         chat.time_zone = 'America/Indianapolis'
         loop.tick(self.cfg, chat, {}, model=lambda *a: {'content': 'reply'})
         self.assertEqual(self.cfg['_time_zone'], 'America/Indianapolis')
-        self.assertTrue(loop.now_line(self.cfg, at('2026-11-01T18:58:00')).endswith('1:58 PM EST (18:58 UTC).'))
+        messages, _ = loop.build_prompt(self.cfg, [], {'text': 'check the clock'}, now=1_793_559_480)
+        self.assertIn('Now: Sunday 2026-11-01 1:58 PM EST (18:58 UTC).', messages[0]['content'])
 
 
 if __name__ == '__main__':

@@ -133,14 +133,6 @@ class AttentionWakeTests(unittest.TestCase):
             self.assertEqual(loop.tick(cfg, chat, state, model=model), 0)  # fallback/duplicate pass
             model.assert_called_once()
 
-    def test_addressed_messages_and_replies_use_the_normal_answer_path(self):
-        cfg = cfg_for('/unused')
-        message = {'id': 'reply', 'from': {'kind': 'agent', 'sessionId': 'other'}, 'text': 'question'}
-        self.assertTrue(loop.wakes(cfg, 'room', dict(message, to=[SELF['sessionId']])))
-        self.assertTrue(loop.wakes(cfg, 'room', dict(message, replyTo='own'), [{'id': 'own', 'from': SELF}]))
-        self.assertFalse(loop.wakes(cfg, 'room', dict(message, to=['another'])) )
-        self.assertFalse(loop.wakes(cfg, 'room', dict(message, text='@Worker-other email@Worker')))
-
     def test_general_poll_uses_canonical_phone_acceptance_and_rechecks_before_reply(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:

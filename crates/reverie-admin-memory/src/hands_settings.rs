@@ -69,6 +69,13 @@ fn startup_reply(overrides: Map<String, Value>) -> Value {
     if let Err(error) = check_memory(&config) {
         return json!({"error": error, "startup": true});
     }
+    if config["timezone"]
+        .as_str()
+        .and_then(reverie_time_zone::load_zone)
+        .is_none()
+    {
+        return json!({"error": "config: timezone is not a known time zone", "startup": true});
+    }
     json!({"settings": config})
 }
 

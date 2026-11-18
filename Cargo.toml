@@ -13,6 +13,7 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", default-features = false, features = ["std"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libc = "0.2"
 nix = { version = "0.31.3", default-features = false }
 rustix = { version = "=1.1.4", default-features = false, features = ["std"] }
@@ -52,6 +53,7 @@ uuid = { version = "=1.18.1", default-features = false }
 reverie-core = { path = "crates/reverie-core" }
 reverie-contracts = { path = "crates/reverie-contracts" }
 reverie-store = { path = "crates/reverie-store" }
+reverie-time-zone = { path = "crates/reverie-time-zone" }
 reverie-host = { path = "crates/reverie-host" }
 reverie-worker-client = { path = "crates/reverie-worker-client" }
 reverie-application = { path = "crates/reverie-application" }

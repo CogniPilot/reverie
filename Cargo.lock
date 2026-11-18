@@ -1410,6 +1410,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "idna",
+ "jiff",
  "nix",
  "regex-lite",
  "reverie-contracts",
@@ -1418,6 +1419,7 @@ dependencies = [
  "reverie-http",
  "reverie-python-regex",
  "reverie-store",
+ "reverie-time-zone",
  "rusqlite",
  "rustls",
  "rustls-platform-verifier",
@@ -1902,6 +1904,7 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "libc",
+ "reverie-time-zone",
  "rusqlite",
 ]
 
@@ -1935,6 +1938,13 @@ dependencies = [
  "nix",
  "serde_json",
  "sha2",
+]
+
+[[package]]
+name = "reverie-time-zone"
+version = "0.1.0"
+dependencies = [
+ "jiff",
 ]
 
 [[package]]

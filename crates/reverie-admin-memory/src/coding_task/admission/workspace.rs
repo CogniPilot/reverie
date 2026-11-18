@@ -1,7 +1,7 @@
 //! Natural workspace requests use the same configured owner and delegate grants as slash commands.
-use super::{includes, permitted, task_name};
-use reverie_core::{PythonTextRef, python_trim_text};
-use reverie_python_regex::CompiledPattern;
+use super::{permitted, task_name};
+use crate::hands_addressing::{addressed_to, mentioned, replied_to};
+use reverie_core::python_trim_text;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::io;
@@ -58,7 +58,7 @@ fn addressed_peer(scope: &Scope, message: &Value, history: &[Value]) -> bool {
         .session
         .as_deref()
         .filter(|session| !session.is_empty())
-        && (includes(&message["to"], session) || replied_to(history, &message["replyTo"], session))
+        && (addressed_to(message, session) || replied_to(history, &message["replyTo"], session))
     {
         return true;
     }
@@ -67,29 +67,6 @@ fn addressed_peer(scope: &Scope, message: &Value, history: &[Value]) -> bool {
         .as_deref()
         .zip(message["text"].as_str())
         .is_some_and(|(name, text)| mentioned(name, text))
-}
-
-fn replied_to(history: &[Value], reply: &Value, session: &str) -> bool {
-    history
-        .iter()
-        .find(|item| item["id"] == *reply && !crate::hands_settings::truthy(&item["deleted"]))
-        .is_some_and(|item| item["from"]["sessionId"].as_str() == Some(session))
-}
-
-fn mentioned(name: &str, text: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-    let mut pattern = String::from(r"(?<![\w@])@");
-    for character in name.chars() {
-        if r"\.^$|?*+()[]{}-".contains(character) {
-            pattern.push('\\');
-        }
-        pattern.push(character);
-    }
-    pattern.push_str(r"(?![\w-])");
-    CompiledPattern::compile(PythonTextRef::from_scalar_text(&pattern))
-        .is_ok_and(|regex| regex.is_match(PythonTextRef::from_scalar_text(text)))
 }
 
 pub(super) fn call(calls: &Value, bound: bool) -> Value {
