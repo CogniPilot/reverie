@@ -11,8 +11,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-const ROOM_LIST_BYTES: usize = 1_048_576;
-const HISTORY_BYTES: usize = 8_388_608;
+pub(super) const ROOM_LIST_BYTES: usize = 1_048_576;
+pub(super) const HISTORY_BYTES: usize = 8_388_608;
+
+pub(super) fn read_args<'a>(room: &'a str, [selector, value]: [&'a str; 2]) -> [&'a str; 6] {
+    ["read", "--room", room, selector, value, "--json"]
+}
 
 #[derive(Deserialize)]
 pub(crate) struct Office {
@@ -51,14 +55,7 @@ impl Office {
 
     pub(crate) fn history(&self, room: &ChatRoomId, count: i64) -> io::Result<Vec<u8>> {
         self.run(
-            &[
-                "read",
-                "--room",
-                room.as_str(),
-                "-n",
-                &count.to_string(),
-                "--json",
-            ],
+            &read_args(room.as_str(), ["-n", &count.to_string()]),
             HISTORY_BYTES,
         )
     }
@@ -68,14 +65,7 @@ impl Office {
         room: &ChatRoomId,
         id: &ChatMessageId,
     ) -> io::Result<Option<Vec<u8>>> {
-        let command = self.command(&[
-            "read",
-            "--room",
-            room.as_str(),
-            "--message",
-            id.as_str(),
-            "--json",
-        ]);
+        let command = self.command(&read_args(room.as_str(), ["--message", id.as_str()]));
         let output = capture::completed(command, None, self.limits(HISTORY_BYTES))?;
         if output.success {
             let response: ExactRead<'_> = serde_json::from_slice(&output.stdout)?;
@@ -110,7 +100,7 @@ struct ExactRead<'a> {
     message: Option<&'a serde_json::value::RawValue>,
 }
 
-fn not_found(stdout: &[u8]) -> bool {
+pub(super) fn not_found(stdout: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(stdout).is_ok_and(|reply| {
         reply["success"].as_bool() == Some(false)
             && reply["error"]

@@ -47,7 +47,6 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
-import admin_task
 from coding_manager import TaskManager
 from coding_process import WorkerSocket
 from debug_terminal import DebugTerminal
@@ -155,91 +154,54 @@ class ChatNotFound(RuntimeError, ValueError):
     call. It is still the RuntimeError or ValueError that callers already treat as an unreadable message."""
 
 
-def not_found(stdout):
-    """Whether a failed CLI call printed the server's NOT_FOUND answer."""
-    try:
-        data = json.loads(stdout)
-    except ValueError:
-        return False
-    return isinstance(data, dict) and data.get('success') is False and str(data.get('error', '')).startswith('NOT_FOUND')
-
-
 class Chat:
-    """The reverie chat CLI (or a stand-in with the same arguments)."""
+    """Client of the parent-bound native Office chat worker."""
 
     def __init__(self, argv, timeout):
         self.argv, self.timeout = list(argv), timeout
-        self.time_zone = None  # the office's display zone, as the server last reported it with a room read
+        self.time_zone = None
 
-    def _run(self, args):
-        r = subprocess.run(self.argv + args, capture_output=True, text=True, timeout=self.timeout)
-        if r.returncode != 0:
-            failed = ChatNotFound if not_found(r.stdout) else RuntimeError
-            raise failed(f'chat {args[0]} exit {r.returncode}: {r.stderr.strip()[:300]}')
-        return r.stdout
+    def _call(self, kind, **fields):
+        request = agent_journal.encode_memory_json({
+            'cli': self.argv, 'timeout_s': self.timeout, 'operation': {'kind': kind, **fields},
+        })
+        reply = agent_journal.native_memory_request(
+            'hands-office-chat-worker', request, 1048576, timeout=self.timeout + 2,
+        ) if request is not None else None
+        status = reply.get('status') if reply else None
+        if status == 'ok':
+            return reply['value']
+        if status == 'not_found':
+            raise ChatNotFound('no such message in this room')
+        if status == 'timeout':
+            raise subprocess.TimeoutExpired('chat ' + kind, self.timeout)
+        if status == 'invalid':
+            raise ValueError(reply['reason'])
+        raise RuntimeError('Office chat ' + kind + ' unavailable')
 
     def read(self, room, n):
-        data = json.loads(self._run(['read', '--room', room, '-n', str(n), '--json']))
-        if known_zone(data.get('timeZone')):
+        data = self._call('history', room=room, count=str(n))
+        if known_zone(data['timeZone']):
             self.time_zone = data['timeZone']
-        messages = [m for m in data.get('messages', []) if isinstance(m, dict) and m.get('id')]
-        if any(type(message.get('phoneWake')) is not bool for message in messages):
-            raise ValueError('Server did not verify current phone delivery; no automatic replies')
-        return messages
+        return data['messages']
 
     def turn_summary(self):
-        """Read-only pending context; the server owns membership and phone filtering."""
-        data = json.loads(self._run(['summary', '--json']))
-        if not isinstance(data, dict) or not isinstance(data.get('text'), str):
-            raise ValueError('Invalid turn summary')
-        return data['text']
+        return self._call('summary')
 
     def exact_message(self, room, message_id):
-        data = json.loads(self._run(['read', '--room', room, '--message', message_id, '--json']))
-        message = data.get('message')
-        if message is None:
-            raise ChatNotFound('no such message in this room')
-        if (not isinstance(message, dict) or message.get('id') != message_id or
-                message.get('roomId') != room or type(message.get('phoneWake')) is not bool):
-            raise ValueError('No exact current phone acceptance')
-        return message
+        return self._call('exact', room=room, id=message_id)
 
     def phone_allows(self, room, message_id):
         return self.exact_message(room, message_id)['phoneWake']
 
     def member_alert(self, room, session_id):
-        data = json.loads(self._run(['read', '--room', room, '-n', '1', '--json']))
-        if not isinstance(data, dict) or not isinstance(data.get('members'), list):
-            raise ValueError('room view has no members')
-        members = [member for member in data['members'] if isinstance(member, dict)]
-        selected = [member for member in members if member.get('sessionId') == session_id]
-        if len(selected) != 1:
-            raise ValueError('room view has no unique current session')
-        member = selected[0]
-        name = member.get('name')
-        unique = isinstance(name, str) and bool(name.strip()) and sum(
-            isinstance(other.get('name'), str) and other['name'].lower() == name.lower()
-            for other in members) == 1
-        return {'lease': member.get('alertMode'), 'name': name, 'unique': unique}
+        return self._call('member_alert', room=room, session=session_id)
 
     def say(self, room, text, reply_to=None):
-        args = ['say', '--room', room, '--json']
-        if reply_to is not None:
-            args += ['--reply-to', reply_to]
-        raw = self._run(args + ['--', text])
-        try:
-            data = json.loads(raw)
-            return data.get('message') if isinstance(data, dict) else None
-        except (ValueError, TypeError):
-            return None  # a successful but receipt-less POST is never a confirmed memory write
+        return self._call('say', room=room, text=text, reply_to=reply_to)
 
     def member_rooms(self):
-        """The rooms this session is a member of, as the server lists them. Anything but a JSON list raises, so the
-        caller reads no room that tick instead of reading it as "no rooms" (which would reset every room)."""
-        data = json.loads(self._run(['rooms', '--json']))
-        if not isinstance(data, list):
-            raise ValueError(f'rooms --json is not a list: {type(data).__name__}')
-        return [r for r in data if isinstance(r, dict)]
+        return self._call('rooms')
 
 
 def chat_model(cfg, messages, tools=None):
@@ -306,7 +268,7 @@ def write_turn_trace(cfg, record):
 
 # Every persisted field is one of these closed vocabularies, else 'other' (None stays None). No free text is kept.
 TRACE_TOOLS = ('web_search', 'web_fetch', 'journal', 'journal_commit', 'journal_recall', 'journal_receipt',
-               'journal_source', 'journal_map', 'journal_view', admin_task.TOOL_NAME)
+               'journal_source', 'journal_map', 'journal_view', coding_chat.WORKSPACE_TASK_NAME)
 TRACE_FINISH = ('stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'end_turn', 'max_tokens', 'eos')
 TRACE_STATUS = ('available', 'committed', 'conflict', 'not_found', 'ok', 'refused', 'unavailable', 'unknown')
 TRACE_FAILURE = ('timeout', 'worker_error')
@@ -804,10 +766,12 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
                                 failures=failures, evidence={'text': recalled, 'max_chars': cap})
     recalled = journal.merged_recall if journal.merged_recall is not None else journal.merge_recalled(recalled, cap)
     start_task = cfg.get('_admin_start_task')
-    task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOLS)) if start_task is not None else 0
-    # The callback narrows the tools for a message that does not address this harness: it may cancel, not start.
+    task_controls = coding_chat.workspace_controls() if start_task is not None else None
     offered = getattr(start_task, 'tools', None)
-    task_tools = (offered if isinstance(offered, list) else admin_task.TOOLS) if start_task is not None else []
+    task_tools = task_controls['tools'] if task_controls else []
+    if isinstance(offered, list):
+        task_tools = offered
+    task_reserve = len(task_controls['rule']) + len(json.dumps(task_controls['tools'])) if task_controls else 0
     summary_reserve = min(SUMMARY_CAP, cfg['prompt_cap_chars'] // 10) if cfg.get('cli') or callable(cfg.get('_turn_summary')) else 0
     managed_reserve = min(20000, cfg['prompt_cap_chars'] // 3) if cfg.get('managed_context') else 0
     reserve = search_reserve(cfg) + task_reserve + (agent_journal.RESERVE if journal.context else 0)
@@ -816,8 +780,9 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
     except ValueError:
         # Optional pending context cannot displace required instructions or the current request.
         messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve, recalled=recalled)
-    if start_task is not None:
-        messages[0]['content'] += '\n' + admin_task.rule(task_tools)
+    if task_controls:
+        accepts_start = any(tool['function']['name'] == coding_chat.WORKSPACE_TASK_NAME for tool in task_tools)
+        messages[0]['content'] += '\n' + task_controls['rule' if accepts_start else 'cancel_rule']
     if journal.context:
         messages[0]['content'] += journal.context
     searches = largest = 0
@@ -851,7 +816,7 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
     while True:
         if not searching:
             out = ask(task_tools if start_task is not None else None)
-            task_reply = admin_task.invoke(out, start_task)
+            task_reply = coding_chat.invoke_workspace_tool(out, start_task)
             if task_reply is not None:return task_reply, largest, searches
             break
         if ((not web_enabled or searches >= cfg['search_max_calls']) and
@@ -860,7 +825,7 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
         tools = (([SEARCH_TOOL] if cfg.get('search') else []) + ([WEB_FETCH_TOOL] if cfg.get('web_fetch') else [])) if searches < cfg['search_max_calls'] else []
         tools += journal.tools if journal.calls < journal.call_limit else []
         out = ask(tools + task_tools)
-        task_reply = admin_task.invoke(out, start_task)
+        task_reply = coding_chat.invoke_workspace_tool(out, start_task)
         if task_reply is not None:return task_reply, largest, searches
         calls = out.get('tool_calls') or []
         if not calls:
@@ -1180,7 +1145,7 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
                     if cfg.get('_coding_manager'):
                         cfg['_coding_manager'].before_chat()
                     recalled = memory_op(cfg, room, 'recall', query=(msg.get('text') or '')[:cfg['message_cap_chars']])
-                    cfg['_admin_start_task'] = admin_task.callback(cfg, cfg.get('_coding_manager'), state, room, history, msg)
+                    cfg['_admin_start_task'] = coding_chat.workspace_callback(cfg, cfg.get('_coding_manager'), state, room, history, msg)
                     try:
                         reply, size, searches = answer(cfg, room, history, msg, model, search, timing,
                                                        recalled=(recalled or {}).get('text', ''))

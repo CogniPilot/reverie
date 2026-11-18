@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::io;
 
+mod workspace;
+
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
@@ -26,6 +28,22 @@ enum Request {
     },
     Interrupt {
         statuses: Map<String, Value>,
+    },
+    WorkspaceDefinitions,
+    WorkspaceOffer {
+        scope: workspace::Scope,
+        message: Value,
+        history: Vec<Value>,
+    },
+    WorkspaceCall {
+        calls: Value,
+        bound: bool,
+    },
+    WorkspacePlan {
+        task: String,
+        may_start: bool,
+        original: String,
+        brief: Value,
     },
 }
 
@@ -63,6 +81,21 @@ pub(crate) fn admit(parent: i32) -> io::Result<()> {
                 .collect();
             json!({"keys": keys})
         }
+        Request::WorkspaceDefinitions => workspace::definitions()?,
+        Request::WorkspaceOffer {
+            scope,
+            message,
+            history,
+        } => {
+            json!({"mode": workspace::offer(&scope, &message, &history)})
+        }
+        Request::WorkspaceCall { calls, bound } => workspace::call(&calls, bound),
+        Request::WorkspacePlan {
+            task,
+            may_start,
+            original,
+            brief,
+        } => workspace::plan(&task, may_start, &original, &brief),
     };
     crate::write_reply(&reply, crate::worker_channel::FRAME_BYTES)
 }

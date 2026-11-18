@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import agent_loop as loop
 from agent_loop import AttentionWake, OFFICE_DISABLED_STATUS, wait_for_scan
-from test_coding_support import FakeChat, SELF, cfg_for
+from test_coding_support import ChatCliFixture, FakeChat, SELF, cfg_for
 
 
 class AttentionWakeTests(unittest.TestCase):
@@ -165,13 +165,14 @@ class AttentionWakeTests(unittest.TestCase):
             self.assertEqual(len(chat.ours('room')), 1)  # Muted during inference: nothing posted.
 
     def test_production_phone_metadata_failure_is_closed_instead_of_a_local_policy_guess(self):
-        chat = loop.Chat(['unused'], 1)
-        chat._run = Mock(return_value='{"messages":[{"id":"message","text":"@Worker guessed"}]}')
+        fixture = ChatCliFixture(self)
+        chat = fixture.chat
+        fixture.respond('{"messages":[{"id":"message","text":"@Worker guessed"}]}')
         with self.assertRaises(ValueError): chat.read('room', 30)
         cfg = cfg_for('/unused')
         self.assertFalse(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
-        chat._run.return_value = '{"message":{"id":"message","roomId":"room","phoneWake":false}}'
+        fixture.respond('{"message":{"id":"message","roomId":"room","phoneWake":false}}')
         self.assertFalse(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
-        chat._run.return_value = '{"message":{"id":"message","roomId":"room","phoneWake":true}}'
+        fixture.respond('{"message":{"id":"message","roomId":"room","phoneWake":true}}')
         self.assertTrue(loop.alert_allows(cfg, chat, 'room', {'id': 'message'}))
-        self.assertIn('--message', chat._run.call_args.args[0])
+        self.assertEqual(fixture.last_call(), ['read', '--room', 'room', '--message', 'message', '--json'])

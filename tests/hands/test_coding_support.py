@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import select
 import subprocess
+import tempfile
 import time
 from unittest.mock import patch
 
@@ -69,6 +70,22 @@ class ModelEndpoint:
             self.process.wait()
         finally:
             self.process.stdout.close()
+
+
+class ChatCliFixture:
+    def __init__(self, test, timeout=5):
+        directory = tempfile.TemporaryDirectory()
+        test.addCleanup(directory.cleanup)
+        self.settings = Path(directory.name) / 'response.json'
+        self.requests = Path(directory.name) / 'requests.jsonl'
+        fixture = Path(__file__).parent / 'fixtures' / 'chat_cli.mts'
+        self.chat = agent_loop.Chat(['node', '--experimental-strip-types', str(fixture), str(self.settings)], timeout)
+
+    def respond(self, stdout, status=0):
+        self.settings.write_text(json.dumps({'stdout': stdout, 'status': status, 'calls': str(self.requests)}))
+
+    def last_call(self):
+        return json.loads(self.requests.read_text().splitlines()[-1])
 
 
 def wait_model_reply(arbiter):

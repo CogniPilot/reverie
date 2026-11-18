@@ -163,7 +163,7 @@ fn absolute(value: &Value) -> bool {
         .is_some_and(|path| Path::new(path).is_absolute())
 }
 
-fn truthy(value: &Value) -> bool {
+pub(super) fn truthy(value: &Value) -> bool {
     match value {
         Value::Null => false,
         Value::Bool(value) => *value,

@@ -10,6 +10,14 @@ pub(super) const ARGUMENT_CHARS: usize = 24_000;
 pub(super) const FRAME_CHARS: usize = 24_000;
 const CALL_ID_CHARS: usize = 64;
 
+pub(super) fn valid_call_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= CALL_ID_CHARS
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Limits {
@@ -150,11 +158,7 @@ impl Call {
             .get("arguments")
             .and_then(Value::as_str)
             .ok_or_else(crate::refused)?;
-        if id.is_empty()
-            || id.len() > CALL_ID_CHARS
-            || !id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+        if !valid_call_id(id)
             || !permitted.contains(&tool)
             || arguments.chars().count() > limits.argument_chars
         {

@@ -7,6 +7,7 @@ mod context_cli;
 mod database;
 mod embedding_worker;
 mod hands_attention;
+mod hands_chat;
 mod hands_model;
 mod hands_office;
 mod hands_settings;
@@ -203,6 +204,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--scoped-image-worker" => scoped_image::run,
         "--hands-model-worker" => hands_model::run,
         "--hands-chat-worker" => hands_model::chat,
+        "--hands-office-chat-worker" => hands_chat::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,

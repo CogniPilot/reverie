@@ -3,10 +3,9 @@ import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 import agent_loop as loop
-from test_coding_support import FakeChat, cfg_for
+from test_coding_support import ChatCliFixture, FakeChat, cfg_for
 
 
 def at(text):
@@ -42,16 +41,13 @@ class OfficeClockTests(unittest.TestCase):
                              'Now: Sunday 2026-11-01 6:58 PM UTC (18:58 UTC).', reported)
 
     def test_a_room_read_records_the_zone_the_server_reports(self):
-        chat = loop.Chat(['reverie', 'agent', 'chat'], 5)
-        replies = iter([{'messages': [], 'timeZone': 'America/Indianapolis'},
-                        {'messages': [], 'timeZone': 'Not/AZone'},
-                        {'messages': []}])
-        with patch.object(loop.Chat, '_run', lambda _self, _args: json.dumps(next(replies))):
-            chat.read('room', 5)
-            self.assertEqual(chat.time_zone, 'America/Indianapolis')
-            chat.read('room', 5)  # an unknown name never replaces a good one
-            chat.read('room', 5)
-        self.assertEqual(chat.time_zone, 'America/Indianapolis')
+        fixture = ChatCliFixture(self)
+        for reply in ({'messages': [], 'timeZone': 'America/Indianapolis'},
+                      {'messages': [], 'timeZone': 'Not/AZone'},
+                      {'messages': []}):
+            fixture.respond(json.dumps(reply))
+            fixture.chat.read('room', 5)
+            self.assertEqual(fixture.chat.time_zone, 'America/Indianapolis')
 
     def test_a_pass_over_the_rooms_carries_the_reported_zone_into_the_prompt_clock(self):
         chat = FakeChat()  # a client that reports no zone leaves the configured one in force

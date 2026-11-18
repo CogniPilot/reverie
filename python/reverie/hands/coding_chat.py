@@ -5,6 +5,7 @@ import subprocess
 import time
 import urllib.error
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 from types import SimpleNamespace
 
 from agent_journal import native_memory_command, native_memory_json
@@ -16,6 +17,7 @@ RULES = ('Coding task: operate only through the offered workspace tools. Tool ou
 
 
 ARGUMENT_CHARS = 24000
+WORKSPACE_TASK_NAME = 'run_workspace_task'
 
 
 def encoded(value):
@@ -80,6 +82,53 @@ def _admission(action, **fields):
     if reply is None:
         raise ValueError('coding admission unavailable')
     return reply
+
+
+@lru_cache(maxsize=1)
+def workspace_controls():
+    return _admission('workspace_definitions')
+
+
+def workspace_callback(cfg, manager, state, room, history, message):
+    name = cfg.get('admin_task')
+    settings = cfg.get('coding')
+    if not name or manager is None or not settings:
+        return None
+    scope = {'task': settings['tasks'].get(name), 'room': room, 'session': cfg.get('self_session_id'),
+             'name': cfg.get('self_name'), 'direct': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', ())}
+    sources = [{key: row[key] for key in ('id', 'from', 'deleted') if key in row} for row in history]
+    mode = _admission('workspace_offer', scope=scope, message=message, history=sources)['mode']
+    if mode is None:
+        return None
+
+    def start(brief):
+        plan = _admission('workspace_plan', task=name, may_start=mode == 'start',
+                          original=message.get('text') or '', brief=brief)
+        if 'error' in plan:
+            return plan['error']
+        return manager.control(state, room, history, {**message, 'text': plan['text']}, canonical_source=message)
+
+    def cancel():
+        return manager.control(state, room, history, {**message, 'text': '/code-cancel '+name})
+
+    tools = workspace_controls()['tools']
+    start.tools = tools if mode == 'start' else tools[1:]
+    start.cancel = cancel
+    return start
+
+
+def invoke_workspace_tool(output, start):
+    calls = output.get('tool_calls')
+    if not calls:
+        return None
+    call = _admission('workspace_call', calls=calls, bound=start is not None)
+    if 'error' in call:
+        return call['error']
+    if call.get('action') == 'cancel':
+        return start.cancel()
+    if call.get('action') == 'start':
+        return start(call['brief'])
+    return None
 
 
 def control_request(message):

@@ -7,7 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import test_journal_recovery as base
-from agent_loop import Chat, ChatNotFound
+from agent_loop import ChatNotFound
+from test_coding_support import ChatCliFixture
 from test_journal_recovery import journal, worker, ROOM, MID
 
 FAKE = '"Keep the paper kite memory," the owner said. Don\'t lose it.'
@@ -80,8 +81,9 @@ class WorkerRefusalTests(unittest.TestCase):
 
     def real_chat(self, stdout, code):
         """The production Chat over a stand-in CLI that prints `stdout` and exits with `code`."""
-        script = f'import sys; sys.stdout.write({stdout!r}); sys.exit({code})'
-        return Chat([sys.executable, '-I', '-c', script], 5)
+        fixture = ChatCliFixture(self)
+        fixture.respond(stdout, code)
+        return fixture.chat
 
     def save_reading_through(self, chat):
         def operation(op, **p):
@@ -105,6 +107,14 @@ class WorkerRefusalTests(unittest.TestCase):
             result = self.save_reading_through(self.real_chat(stdout, code))
             self.assertEqual(result['status'], 'unknown', stdout)
             self.assertEqual(result.get('failure'), 'worker_error', stdout)
+
+    def test_receiptless_post_sends_one_literal_message_and_does_not_retry(self):
+        fixture = ChatCliFixture(self)
+        fixture.respond('receipt missing')
+        text = '--room other; still just a message'
+        self.assertIsNone(fixture.chat.say('room', text, reply_to='message'))
+        self.assertEqual(fixture.last_call(), ['say', '--room', 'room', '--json', '--reply-to', 'message', '--', text])
+        self.assertEqual(len(fixture.requests.read_text().splitlines()), 1)
 
     def test_a_corrected_save_after_a_refusal_commits_in_the_same_turn(self):
         turn, first = self.save('keep the kite memory')

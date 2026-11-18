@@ -5,19 +5,21 @@ import unittest
 from unittest.mock import Mock, patch
 
 import agent_loop as loop
-from test_coding_support import cfg_for
+from test_coding_support import ChatCliFixture, cfg_for
 
 
 class TurnSummaryTests(unittest.TestCase):
     def test_cli_is_read_only_and_timeout_is_bounded(self):
-        cfg = cfg_for('/tmp/fixture')
+        fixture = ChatCliFixture(self)
+        fixture.respond(json.dumps({'text': 'ring: one pending', 'total': 1}))
+        cfg = cfg_for('/tmp/fixture', cli=fixture.chat.argv, cli_timeout_s=60)
         messages = [{'role': 'system', 'content': 'rules'}, {'role': 'user', 'content': 'task'}]
         original = copy.deepcopy(messages)
-        response = Mock(returncode=0, stdout=json.dumps({'text': 'ring: one pending', 'total': 1}), stderr='')
-        with patch.object(loop.subprocess, 'run', return_value=response) as run:
+        with patch.object(loop.agent_journal, 'native_memory_request',
+                          wraps=loop.agent_journal.native_memory_request) as run:
             request = loop.turn_context(cfg, messages)
-        self.assertEqual(run.call_args.args[0], ['unused', 'summary', '--json'])
-        self.assertEqual(run.call_args.kwargs['timeout'], 2)
+        self.assertEqual(fixture.last_call(), ['summary', '--json'])
+        self.assertEqual(json.loads(run.call_args.args[1])['timeout_s'], 2)
         self.assertIn('untrusted', request[2]['content'])
         self.assertIn('one pending', request[2]['content'])
         self.assertEqual(messages, original)
