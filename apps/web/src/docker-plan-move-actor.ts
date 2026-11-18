@@ -659,6 +659,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
             imageId: state.seed.target.workerImage.imageId,
             clientManifestDigest: state.seed.target.workerImage.clientManifestDigest,
             sourceImageIds: this.#d.configuration.sourceImageIds,
+            ...(this.#d.configuration.workerGpu ? { workerGpu: this.#d.configuration.workerGpu } : {}),
           },
           canonical: this.#d.store,
           moves: this.#d.moves,

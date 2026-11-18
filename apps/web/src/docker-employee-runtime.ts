@@ -36,6 +36,7 @@ import {
 import { Session } from './session.js';
 import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } from './docker-employee-store.js';
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
+import { DockerWorkerGpu } from './docker-worker-gpu.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
 import { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
@@ -63,6 +64,7 @@ export const DockerRuntimeConfiguration = z
     poolRestoreHelperImageId: sha.optional(),
     recoveryHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
+    workerGpu: DockerWorkerGpu.optional(),
   })
   .strict();
 type Context = SessionPort & ConfigPort & Pick<InfraPort, 'mux'>;
@@ -314,6 +316,7 @@ export class DockerEmployeeRuntime {
         imageId: configuration.workerImageId,
         clientManifestDigest: configuration.clientManifestDigest,
         sourceImageIds: configuration.sourceImageIds,
+        ...(configuration.workerGpu ? { workerGpu: configuration.workerGpu } : {}),
       },
       store,
       configuration.helperImageId,

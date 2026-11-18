@@ -2,6 +2,7 @@
 //! The container never invokes Nix, Docker, systemctl or a host executable.
 mod config;
 mod tailscale;
+mod worker_gpu;
 
 use config::{Model, Result};
 use nix::sys::signal::{Signal, kill};
@@ -120,6 +121,9 @@ async fn stop(child: &mut Child) {
 async fn run() -> Result<i32> {
     let mut arguments = std::env::args_os().skip(1);
     let web_program = arguments.next().ok_or("a website entrypoint is required")?;
+    if web_program == "--worker-gpu-projection" {
+        return worker_gpu::project(arguments);
+    }
     if web_program == "--help" {
         println!(
             "reverie-container-runtime ENTRYPOINT [ARGS...]\nDocker supervises the website, optional local model and GPU telemetry. See docs/container-gpu.md."
