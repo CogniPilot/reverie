@@ -228,6 +228,7 @@ function captureRequester(
         current.dockerBinding.policyDigest === dockerContinuationDigest(state.work.policy) &&
         dockerProviderRuntimeRecipeDigest(current.runtimeRecipe) === state.seed.target.templateDigest;
       if (!source && !planned) return refuse();
+      if (target.choice?.returnToOffice && identity) return refuse();
       if (target.purpose === 'choice') {
         const off = current.onVacation === true && current.desiredRunning === false;
         const inOffice = !current.onVacation && current.desiredRunning === true;
@@ -332,7 +333,12 @@ export async function captureDockerPlanMoveOriginalRequester(
       sessionId: record.oldSession,
       sessionGeneration: state.seed.source.binding.sessionGeneration,
       purpose: 'original',
-      choice: { moveId: record.id, toAccount: record.toAccount, forceBusy: state.seed.forceBusy },
+      choice: {
+        moveId: record.id,
+        toAccount: record.toAccount,
+        forceBusy: state.seed.forceBusy,
+        ...(state.seed.returnToOffice ? { returnToOffice: true } : {}),
+      },
     },
     company,
     auth,

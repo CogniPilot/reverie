@@ -62,6 +62,7 @@ import { dockerProviderRuntimeRecipeDigest } from './docker-employee-source-corr
 import type { DockerEmployeeEngine } from './docker-employee-engine.js';
 import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import type { DockerEmployeeStorageObservation } from './docker-employee-storage.js';
+import { probeDockerEmployeeStorage } from './docker-employee-storage.js';
 import type { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
@@ -741,12 +742,12 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
   }
   #retainedStorage(journal: PlanMoveDockerJournal) {
     if (!this.#d.recoveryHelper) return;
-    const key = journal.moveId + ':' + journal.epoch;
+    const key = journal.moveId;
     const retained = this.#sourceStorage.get(key) ?? { helper: this.#d.recoveryHelper };
     this.#sourceStorage.set(key, retained);
     return retained;
   }
-  async #closed(row: DockerEmployeeContinuationRecord, journal: PlanMoveDockerJournal): Promise<void> {
+  async #closed(record: Readonly<PlanMoveRecord>, row: DockerEmployeeContinuationRecord, journal: PlanMoveDockerJournal): Promise<void> {
     const binding = this.#binding(row),
       proof = await this.#source.capture(row, binding, () => journal.current(), true);
     journal.current();
@@ -754,6 +755,18 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The retained account generation is not closed', 409);
     const actualRow = journal.read().seed.source.record;
     const retained = same(row, actualRow) ? this.#retainedStorage(journal) : undefined;
+    const work = journal.read().work;
+    if (retained && !retained.observed && work?.destination) {
+      // A resumed move may have lost the source's live observation. Only its
+      // own verified target can supply fresh facts for the independent bind check.
+      const target = await this.#workFor(record, journal).engine
+        .observePlanReplacementWork(work, () => journal.current());
+      journal.current();
+      if (target?.state === 'running') {
+        retained.observed = await probeDockerEmployeeStorage(this.#command, target.original.containerId);
+        journal.current();
+      }
+    }
     const home = await this.#d.engine.planReplacementHome(row, () => journal.current(), 'stopped', retained);
     journal.current();
     const actual = await this.#d.engine.planReplacementHome(actualRow, () => journal.current(), 'stopped', retained);
@@ -792,7 +805,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The retained account lineage changed', 409);
     const published = Published.parse(row);
     if (published.version !== 3) throw new PlanMoveError('The retained generation is unavailable', 409);
-    await this.#closed(published, journal);
+    await this.#closed(record, published, journal);
     const initial = await this.#d.engine.planReplacementOriginal(published, () => journal.current());
     journal.current();
     return { row: published, initial };
@@ -1464,7 +1477,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       journal.current();
       state = journal.read();
     }
-    if (state.sourceStop?.phase === 'closed') await this.#closed(state.seed.source.record, journal);
+    if (state.sourceStop?.phase === 'closed') await this.#closed(record, state.seed.source.record, journal);
     if (state.work) {
       await this.#workFor(record, journal).inspect();
       journal.current();
