@@ -315,6 +315,9 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       current();
       const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
+      const observation = native.observation(selected.row, selected.binding);
+      if (input.fromAccount === input.toAccount && (!input.forceBusy || observation.kind !== 'stopped'))
+        throw new PlanMoveError('A same-plan recovery requires a confirmed stopped Docker worker', 409);
       // The final target recipe is composed by the shared schema renderer before
       // this seed can be returned. There is no effects-bearing placeholder seed.
       return await this.#reserveRecipe(
@@ -323,7 +326,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         selected,
         account,
         snapshot,
-        native.observation(selected.row, selected.binding),
+        observation,
         workerImage,
         current
       );

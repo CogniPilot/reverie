@@ -40,6 +40,7 @@ import {
 import {
   DockerEmployeeInspect,
   boxedOriginal,
+  historicalBoxedInspect,
   boxedMountConfiguration,
   boxedStorageMounts,
   dockerEngineRefuse as refuse,
@@ -284,12 +285,10 @@ function boundDestinationMatches(
   afterRestart = false
 ): boolean {
   const subject = rowSubject(row);
-  if (isDeepStrictEqual(boxedOriginal(raw, subject, deployment, true), row.destination)) return true;
-  if (!afterRestart || !Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return false;
-  // Docker 29.9 re-encodes an unset DNS override from null to an empty list.
-  // The complete historical fingerprint must match with that one field restored.
-  const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
-  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), row.destination);
+  const selected = afterRestart && row.destination
+    ? historicalBoxedInspect(raw, subject, deployment, row.destination)
+    : raw;
+  return isDeepStrictEqual(boxedOriginal(selected, subject, deployment, true), row.destination);
 }
 export class DockerEmployeeEngine implements DockerContinuationEngine {
   readonly #storage: DockerEmployeeStorage;
@@ -406,7 +405,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     return row;
   }
   async #source(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
-    const raw = await this.#inspect(row.original.containerId);
+    const inspected = await this.#inspect(row.original.containerId);
+    const raw = row.version === 3
+      ? historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original)
+      : inspected;
     if (
       raw.State.Running ||
       (row.version === 3 &&
@@ -444,7 +446,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeInspect> {
     current();
     if (!this.#publishedRead(row) || !row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    return this.#boundDestination(row, this.#readCurrent(row, current));
+    return this.#boundDestination(row, this.#readCurrent(row, current), true);
   }
   /** The caller retains the canonical binding across each read. */
   async #boundDestination(
@@ -454,7 +456,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   ): Promise<DockerEmployeeInspect> {
     current();
     if (!row.destination) refuse('DOCKER_CONTINUATION_READY_PROVIDER_REQUIRED');
-    const raw = await this.#inspect(row.destination.containerId);
+    const inspected = await this.#inspect(row.destination.containerId);
+    const raw = afterRestart
+      ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
+      : inspected;
     current();
     const epoch = z
       .object({
@@ -1027,7 +1032,10 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (selected.trim() === '') return null;
     if (!/^[a-f0-9]{64}$/.test(selected.trim())) refuse('DOCKER_CONTINUATION_DESTINATION_AMBIGUOUS');
-    const raw = await this.#inspect(selected.trim());
+    const inspected = await this.#inspect(selected.trim());
+    const raw = row.destination && ['provider-issued', 'ready'].includes(row.phase)
+      ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
+      : inspected;
     current();
     const source = await this.#source(row);
     current();

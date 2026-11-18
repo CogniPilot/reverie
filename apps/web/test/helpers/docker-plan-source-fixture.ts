@@ -9,7 +9,7 @@ import { dockerContinuationDigest as digest } from '../../src/docker-employee-co
 import type { DockerEngineCommand } from '../../src/docker-engine-command.js';
 const hex = (c: string) => c.repeat(64),
   uuid = (n: number) => n.toString().padStart(8, '0') + '-0000-4000-8000-000000000001';
-export function dockerPlanSourceFixture(running = true) {
+export function dockerPlanSourceFixture(running = true, historicalDns?: null) {
   const box = hex('7'),
     image = 'sha256:' + hex('e'),
     subject = {
@@ -60,6 +60,7 @@ export function dockerPlanSourceFixture(running = true) {
       AutoRemove: false,
       RestartPolicy: { Name: 'no', MaximumRetryCount: 0 },
       Mounts: [],
+      ...(historicalDns === null ? { Dns: null } : {}),
     },
   });
   const destination = boxedOriginal(raw, subject, 'synthetic', true),

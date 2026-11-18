@@ -666,7 +666,12 @@ export class PlanMoves {
           snapshot.runtimeDigest !== input.runtimeDigest
         )
           throw new PlanMoveError('A runtime refresh requires the unchanged current plan, runtime and a safe handoff');
-      } else if (input.fromAccount === input.toAccount) throw new PlanMoveError('The employee is already on that plan');
+      } else if (
+        input.fromAccount === input.toAccount &&
+        !(input.forceBusy && snapshot.backend === 'docker' && !snapshot.working)
+      ) {
+        throw new PlanMoveError('The employee is already on that plan');
+      }
       if (this.records.size >= 100) {
         const oldest = [...this.records.values()].find(
           (record) =>
