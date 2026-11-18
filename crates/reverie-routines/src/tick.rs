@@ -6,6 +6,7 @@ use crate::ledger::{self, Ledger, Obs};
 use crate::policy::{Agent, Policy, Quota, Routines, is_agent_name};
 use jiff::civil::{Date, DateTime, Time, Weekday};
 use jiff::{Timestamp, Zoned};
+use reverie_core::plan_quota::{Limits, Reading, WindowName, WindowReading, assess};
 
 /// Two observations from the 5-minute ticks.
 const DOWN_OBSERVATIONS: i64 = 2;
@@ -158,56 +159,45 @@ fn callable_now(session: Option<&Json>, agent: &Agent, now: Timestamp) -> bool {
     quiet_seconds(session, now).is_some_and(|q| q >= QUIET_BEFORE_CALL)
 }
 
-fn finite_number(v: Option<&Json>) -> Option<f64> {
-    v?.number().filter(|f| f.is_finite())
-}
-
-/// True when the plan profile is readable, fresh and below 100 - reserve in every window. Anything else is false:
-/// the quota gate fails closed (skip the routine), never open.
 fn plan_open(value: &Json, quota: &Quota, now: Timestamp) -> bool {
     let Some(Json::List(accounts)) = value.get("accounts") else {
         return false;
     };
     let Some(reading) = accounts
         .iter()
-        .find(|a| matches!(a, Json::Obj(_)) && str_is(a.get("id"), &quota.profile))
+        .find(|account| str_is(account.get("id"), &quota.profile))
     else {
         return false;
     };
-    let now = seconds(now);
-    let Some(updated) = finite_number(reading.get("updatedAt")) else {
-        return false;
+    let windows = match reading.get("usage") {
+        Some(usage @ Json::Obj(_)) => {
+            Some(WindowName::ORDERED.map(|name| plan_window(usage.get(name.key()))))
+        }
+        _ => None,
+    };
+    let input = Reading {
+        ready: str_is(reading.get("status"), "ready"),
+        updated_ms: reading.get("updatedAt").and_then(Json::number),
+        windows,
     };
     #[allow(clippy::cast_precision_loss)]
-    let max_age = quota.max_age as f64;
-    if !str_is(reading.get("status"), "ready")
-        || !(0.0..=max_age).contains(&(now - updated / 1000.0))
-    {
-        return false;
-    }
-    let Some(usage @ Json::Obj(_)) = reading.get("usage") else {
-        return false;
+    let limits = Limits {
+        now: seconds(now),
+        reserve_percent: quota.reserve as f64,
+        max_age_seconds: quota.max_age as f64,
     };
-    let windows: Vec<&Json> = ["fiveHour", "sevenDay"]
-        .iter()
-        .filter_map(|k| usage.get(k))
-        .filter(|w| **w != Json::Null)
-        .collect();
-    if windows.is_empty() {
-        return false;
+    assess(input, &limits).available()
+}
+
+fn plan_window(value: Option<&Json>) -> WindowReading {
+    match value {
+        None | Some(Json::Null) => WindowReading::Absent,
+        Some(value @ Json::Obj(_)) => WindowReading::Fields {
+            used_percent: value.get("usedPercentage").and_then(Json::number),
+            reset_ms: value.get("resetAt").and_then(Json::number),
+        },
+        _ => WindowReading::Malformed,
     }
-    #[allow(clippy::cast_precision_loss)]
-    let ceiling = (100 - quota.reserve) as f64;
-    windows.iter().all(|w| {
-        matches!(w, Json::Obj(_))
-            && match (
-                finite_number(w.get("usedPercentage")),
-                finite_number(w.get("resetAt")),
-            ) {
-                (Some(used), Some(reset)) => reset / 1000.0 > now && used < ceiling,
-                _ => false,
-            }
-    })
 }
 
 /// Read an agent-writable file without following links, blocking or reading without bound (F3).

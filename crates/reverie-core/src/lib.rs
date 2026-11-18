@@ -17,6 +17,7 @@ pub mod office_relay;
 pub mod operations;
 pub mod ops;
 pub mod persona;
+pub mod plan_quota;
 pub mod posix_path;
 pub mod posix_text;
 pub mod privacy_floor;

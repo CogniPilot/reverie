@@ -4,6 +4,7 @@ mod capture;
 mod coding_task;
 mod configuration;
 mod context_cli;
+mod cycle_plan;
 mod database;
 mod embedding_worker;
 mod hands_addressing;
@@ -210,6 +211,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-office-chat-worker" => hands_chat::run,
         "--hands-prompt-worker" => hands_prompt::run,
         "--hands-poll-worker" => hands_poll::run,
+        "--cycle-plan-worker" => cycle_plan::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,

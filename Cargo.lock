@@ -1904,6 +1904,7 @@ version = "0.1.0"
 dependencies = [
  "jiff",
  "libc",
+ "reverie-core",
  "reverie-time-zone",
  "rusqlite",
 ]

@@ -12,7 +12,6 @@ from reverie.cycle import Cycle
 from reverie.cycle_budget import Ledger, BudgetExhausted, MeteredClient
 from reverie.cycle_runner import run_process
 from reverie.memory import MemoryStore
-from reverie.plan_usage import capacity
 
 
 class FakeRunner:
@@ -175,14 +174,26 @@ class CycleTests(unittest.TestCase):
         self.assertLess(result['seconds'],4)
 
     def test_plan_reset_requires_fresh_reading_and_checks_both_windows(self):
-        now=1000
-        reading={'id':'example','status':'ready','updatedAt':now*1000,'usage':{
+        reading={'id':'example','status':'ready','updatedAt':1000*1000,'usage':{
             'fiveHour':{'usedPercentage':100,'resetAt':1100*1000},
             'sevenDay':{'usedPercentage':99,'resetAt':2000*1000}}}
-        value=capacity(reading,now)
-        self.assertFalse(value['available']); self.assertEqual(value['retry_at'],2000)
-        reading['updatedAt']=1200*1000
-        self.assertFalse(capacity(reading,1200)['available'])
-        reading['usage']['fiveHour']={'usedPercentage':0,'resetAt':1600*1000}
-        reading['usage']['sevenDay']={'usedPercentage':0,'resetAt':3000*1000}
-        self.assertTrue(capacity(reading,1200)['available'])
+        source={'api_url':'http://unused'}
+        with patch('reverie.cycle.Office') as office, patch('reverie.cycle.time.time', return_value=1000) as clock:
+            call=office.return_value.call
+            call.return_value={'accounts':[reading]}
+            value=self.cycle.refresh_plans(source)['example']
+            self.assertFalse(value['available']); self.assertEqual(value['retry_at'],2000)
+            with self.cycle.ledger.db:
+                self.cycle.ledger.db.execute('INSERT INTO plan_samples VALUES (?,?,?)',
+                                             ('expired',1200-30*86400-1,'{}'))
+            clock.return_value=1200
+            reading['updatedAt']=1200*1000
+            self.assertFalse(self.cycle.refresh_plans(source)['example']['available'])
+            reading['usage']['fiveHour']={'usedPercentage':0,'resetAt':1600*1000}
+            reading['usage']['sevenDay']={'usedPercentage':0,'resetAt':3000*1000}
+            good=self.cycle.refresh_plans(source)['example']
+            self.assertTrue(good['available'])
+            call.assert_called_with('GET','/api/subscription-profiles/usage')
+        rows=self.cycle.ledger.db.execute('SELECT sampled_at, body FROM plan_samples ORDER BY rowid').fetchall()
+        self.assertEqual([row[0] for row in rows],[1000,1200,1200])
+        self.assertEqual(json.loads(rows[-1][1]),good)

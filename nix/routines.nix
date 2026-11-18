@@ -3,7 +3,7 @@ let
   # Only this package's crate closure, so an unrelated change keeps its cached build.
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
-    members = [ "reverie-routines" "reverie-time-zone" ];
+    members = [ "reverie-routines" "reverie-core" "reverie-time-zone" ];
   };
 in
 pkgs.rustPlatform.buildRustPackage {

@@ -5,6 +5,7 @@
 //! admission/authorization checks remain outside this crate.
 
 pub mod chat_images;
+pub mod cycle_plan;
 mod error;
 pub mod memory;
 pub mod operations;

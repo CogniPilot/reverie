@@ -23,7 +23,8 @@ from .chat import Brain
 from .project_memory import ProjectMemory
 from .reflection import Reflector
 from .room import Room
-from .plan_usage import PlanMonitor
+from .runtime import Reverie as Office
+from .hands.agent_journal import encode_memory_json, native_memory_request
 from reverie import env_names
 
 PHASES=('waking','planning','research','implementation','reporting','consolidation','dreaming','sleeping')
@@ -152,8 +153,7 @@ class Cycle:
         source=self.policy.get('plan_usage')
         if source:
             try:
-                plans=PlanMonitor(source['api_url'],self.ledger,source.get('reserve_percent',5),
-                                  source.get('max_age_seconds',600)).refresh()
+                plans=self.refresh_plans(source)
             except Exception:
                 plans={}
         self.plan_capacity=plans
@@ -174,6 +174,19 @@ class Cycle:
                 result[key]=model
             except (OSError,ValueError,TypeError): continue
         return result
+
+    def refresh_plans(self, source):
+        now=time.time()
+        response=Office(source['api_url']).call('GET','/api/subscription-profiles/usage')
+        frame=encode_memory_json({
+            'ledger':str(self.state/'cycle.sqlite'), 'now':now,
+            'accounts':response.get('accounts',[]),
+            'reserve_percent':source.get('reserve_percent',5), 'max_age_seconds':source.get('max_age_seconds',600),
+        })
+        result=native_memory_request('cycle-plan-worker',frame,4*1024*1024,timeout=35) if frame is not None else None
+        if result is None:
+            raise RuntimeError('the packaged cycle plan worker is unavailable')
+        return result['plans']
 
     def context(self, name, task):
         config=self.agents[name]
