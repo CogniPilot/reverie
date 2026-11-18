@@ -1811,11 +1811,15 @@ dependencies = [
 name = "reverie-observations"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "clap",
+ "getrandom",
  "libc",
  "nix",
  "reverie-contracts",
  "reverie-core",
+ "rustix",
+ "serde",
  "serde_json",
  "sha2",
 ]

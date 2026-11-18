@@ -181,6 +181,7 @@
             inherit config lib pkgs;
             pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
             prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
+            pruneReportPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
           })
           (import ./nix/prune-selftest-service.nix {
             inherit config lib pkgs;
@@ -295,6 +296,7 @@
               pruneHostPackage = packages.pruneDeclared;
               prunePackage = packages.pruneR12;
               legacyPrunePackage = packages.prune;
+              pruneReportPackage = packages.cleanupObservations;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
             checks = builtins.toJSON evaluated.checks;
@@ -320,6 +322,7 @@
               selftestPackage = packages.pruneSelftest;
               prunePackage = packages.pruneR12;
               pruneHostPackage = packages.pruneDeclared;
+              pruneReportPackage = packages.cleanupObservations;
               pruneModule = self.nixosModules.reveriePrune;
             };
           in pkgs.runCommand "reverie-prune-selftest-evaluation" {

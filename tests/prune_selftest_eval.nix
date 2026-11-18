@@ -1,10 +1,10 @@
-{ nixpkgs, selftestPackage, prunePackage, pruneHostPackage, pruneModule ? null, system ? builtins.currentSystem }:
+{ nixpkgs, selftestPackage, prunePackage, pruneHostPackage, pruneReportPackage, pruneModule ? null, system ? builtins.currentSystem }:
 let
   lib = nixpkgs.lib;
   evaluate = extra: (import "${nixpkgs}/nixos/lib/eval-config.nix" {
     inherit system;
     modules = (if pruneModule != null then [ pruneModule ] else [
-      ({ config, lib, pkgs, ... }: import ../nix/prune-service.nix { inherit config lib pkgs prunePackage pruneHostPackage; })
+      ({ config, lib, pkgs, ... }: import ../nix/prune-service.nix { inherit config lib pkgs prunePackage pruneHostPackage pruneReportPackage; })
       ({ config, lib, pkgs, ... }: import ../nix/prune-selftest-service.nix { inherit config lib pkgs selftestPackage prunePackage; })
     ]) ++ [
       { system.stateVersion = "26.05"; }

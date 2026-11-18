@@ -2,7 +2,7 @@
 # Every switch is opt-in; every executable and inventory command is fixed.
 # Live deletion is a third, separate switch: it needs the digest of an accepted clean dry-run report and a named
 # reviewer sign-off, and it is refused at evaluation unless the package is the pinned r12 live-capable candidate.
-{ config, lib, pkgs, pruneHostPackage, prunePackage }:
+{ config, lib, pkgs, pruneHostPackage, prunePackage, pruneReportPackage }:
 let
   cfg = config.services.reverie.prune;
   inherit (lib) mkOption types;
@@ -58,7 +58,6 @@ let
       selftest_receipt_sha256 = live.selfTestReceiptSha256;
     };
   }));
-  reportExport = ../python/reverie/cleanup/report_export.py;
   leases = map (eid: "${d.laptopHomeRoot}/${eid}/home/${d.leaseSubdirectory}") d.employeeIds;
 in {
   options.services.reverie.prune = {
@@ -181,7 +180,7 @@ in {
         } // lib.optionalAttrs (cfg.report.directory != null) {
           # After success or failure, outside the sandbox like the initializer: reads only the newest run summary and
           # writes its aggregate as report.uid.
-          ExecStopPost = "+" + arguments [ "${pkgs.python3}/bin/python3" "-I" "-B" reportExport "--state" cfg.stateDirectory
+          ExecStopPost = "+" + arguments [ "${pruneReportPackage}/bin/reverie-prune-report-export" "--state" cfg.stateDirectory
             "--out" cfg.report.directory "--uid" cfg.report.uid "--gid" cfg.report.gid ];
         } // {
           MemoryMax = "1G";
