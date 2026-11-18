@@ -249,6 +249,12 @@ async function fixture(
   );
   // Engine receives the same controlled actual OS reply port as the packaged actor.
   vi.mocked(f.command.run).mockImplementation(run);
+  const readReplacementHome = engine.planReplacementHome.bind(engine);
+  const liveHome = vi.spyOn(engine, 'planReplacementHome').mockImplementation(async (row, current, placement) => {
+    if (placement !== 'running') return readReplacementHome(row, current, placement);
+    current();
+    return { source: row.destination!.home.source, user: '1000:100', dev: '11', ino: '12' };
+  });
   const sessions = new Map(),
     ctx = {
       sessions,
@@ -483,6 +489,7 @@ async function fixture(
     run,
     nativeCreate,
     engine,
+    liveHome,
     company,
     ctx,
     provider,
@@ -1103,6 +1110,16 @@ describe('captured native plan actor before paid dispatch', () => {
     await f.actor.stopSource(f.record, f.journal);
     expect(f.journal.read().sourceStop?.phase).toBe('closed');
     expect(f.run.mock.calls.filter(([a]) => a[1] === 'stop')).toHaveLength(1);
+  });
+  it('keeps the source running when its retained storage cannot be verified', async () => {
+    const f = await fixture();
+    f.liveHome.mockRestore();
+    await expect(f.actor.stopSource(f.record, f.journal)).rejects.toMatchObject({
+      code: 'DOCKER_STORAGE_PRIVATE_BIND_REQUIRED',
+    });
+    expect(f.journal.read().sourceStop).toBeUndefined();
+    expect(f.raw.State.Running).toBe(true);
+    expect(f.run.mock.calls.some(([a]) => a[1] === 'stop')).toBe(false);
   });
   it('refuses a source incarnation change before publishing or sending STOP', async () => {
     const f = await fixture();

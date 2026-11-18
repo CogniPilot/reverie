@@ -636,7 +636,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
    * genuine source-stop/request grant; this read cannot authorize a new helper. */
   async planReplacementHome(
     input: DockerEmployeeContinuationRecord,
-    current: () => void
+    current: () => void,
+    placement: 'running' | 'stopped' = 'stopped'
   ): Promise<DockerCredentialHome> {
     const row = DockerEmployeeContinuationRecord.parse(input),
       key = dockerContinuationDigest(row);
@@ -653,8 +654,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     check();
     if (
       !before ||
-      before.State.Running ||
-      before.State.Pid !== 0 ||
+      before.State.Running !== (placement === 'running') ||
+      (placement === 'running'
+        ? !z.number().int().positive().safeParse(before.State.Pid).success
+        : before.State.Pid !== 0) ||
+      before.State.Paused ||
+      before.State.Restarting ||
+      before.State.Dead ||
       !z
         .object({ Name: z.literal('no') })
         .passthrough()
@@ -665,7 +671,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     check();
     const after = await this.#destination(row, check, true);
     check();
-    if (!after || after.State.Running || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
+    if (!after || !isDeepStrictEqual(containerReadState(before), containerReadState(after)))
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
     return Object.freeze({ ...home });
   }

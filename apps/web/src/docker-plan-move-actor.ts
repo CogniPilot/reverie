@@ -546,6 +546,12 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     } else if (seen.kind === 'running') {
       if (seed.source.observation.kind !== 'running' || !same(seen.init, seed.source.observation.init))
         throw new PlanMoveError('The source init incarnation changed', 409);
+      // The replacement needs this holder after STOP. Establish its proof while
+      // the source can still work and before publishing an irreversible cursor.
+      await this.#d.engine.planReplacementHome(source, () => journal.current(), 'running');
+      seen = await observe();
+      if (seen.kind !== 'running' || !same(seen.init, seed.source.observation.init))
+        throw new PlanMoveError('The source init incarnation changed', 409);
       const next = {
         ...state,
         sourceStop: {
