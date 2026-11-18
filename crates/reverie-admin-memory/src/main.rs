@@ -203,6 +203,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--token-meter-worker" => token_meter::run,
         "--hands-model-worker" => hands_model::run,
         "--hands-chat-worker" => hands_model::chat,
+        "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,
         "--hands-coding-admission-worker" => coding_task::admit,

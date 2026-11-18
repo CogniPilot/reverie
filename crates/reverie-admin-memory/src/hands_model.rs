@@ -1,9 +1,11 @@
 //! One native model request shared by Hands chat and the coding arbiter.
 mod delta;
+mod slot;
 mod stream;
 #[cfg(test)]
 mod tests;
 mod trace;
+pub(super) use slot::supervise;
 pub(super) use trace::trace_worker;
 
 use crate::token_meter::{self, KeyName, Meter, Stats, credential};

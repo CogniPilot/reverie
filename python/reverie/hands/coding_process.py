@@ -116,16 +116,18 @@ class BoundedProcess:
 
 
 class WorkerSocket:
-    def __init__(self, worker, initial):
+    def __init__(self, worker, initial, *, environment=None):
         self.closed = False
         self.input = bytearray()
         self.output = self.packet(initial)
         self.connection, child = socket.socketpair()
         self.connection.setblocking(False)
         try:
+            env = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
+            env.update(environment or {})
             self.process = subprocess.Popen(native_memory_command(worker, resolve=True),
                 stdin=child, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True, env={'PATH': os.defpath, 'LANG': 'C.UTF-8'})
+                start_new_session=True, env=env)
         except BaseException:
             self.connection.close()
             raise
@@ -198,6 +200,84 @@ class WorkerSocket:
         if self.process.poll() is None:
             self.process.kill()
         self.process.wait()
+
+
+class ModelArbiter(WorkerSocket):
+    def __init__(self, api_base, *, key_env=None, timeout_s=300, max_response_bytes=262144,
+                 token_meter=None, events_file=None, prepare_request=None):
+        self.prepare_request = prepare_request
+        self.payload = None
+        self.resume_pending = False
+        self.preemptions = 0
+        self.requests_started = 0
+        self.watchdog_events = []
+        settings = {'api_base': api_base, 'key_env': key_env, 'timeout_s': timeout_s,
+                    'max_response_bytes': max_response_bytes, 'token_meter': token_meter, 'events_file': events_file}
+        environment = {key_env: os.environ[key_env]} if key_env is not None and key_env in os.environ else None
+        super().__init__('hands-model-slot-worker', settings, environment=environment)
+        try:
+            if self.wait(2) != {'kind': 'idle'}:
+                raise ValueError('model slot refused initialization')
+        except BaseException:
+            self.close()
+            raise
+
+    def _request(self, action, **fields):
+        self.send({'action': action, **fields})
+        return self.wait(2)
+
+    def _prepare(self, reply):
+        if reply['kind'] != 'prepare':
+            return
+        payload = self.payload
+        if self.prepare_request is not None:
+            try:
+                payload = self.prepare_request(payload)
+                if not isinstance(payload, dict):
+                    raise ValueError('Invalid prepared request')
+            except Exception:
+                payload = None
+        self._request('prepared', payload=payload)
+
+    def submit(self, payload, remaining):
+        reply = self._request('submit', seconds=remaining)
+        if reply['kind'] == 'busy':
+            raise RuntimeError('model slot already has a coding request')
+        self.payload = payload
+        self._prepare(reply)
+
+    def pause_for_chat(self):
+        if not self.resume_pending:
+            self._request('pause')
+            self.resume_pending = True
+
+    def resume(self):
+        if self.resume_pending:
+            self.resume_pending = False
+            self._prepare(self._request('resume'))
+
+    def poll(self):
+        if self.payload is None:
+            return None
+        reply = self._request('poll')
+        if reply['kind'] == 'answer':
+            self.payload = None
+            return reply['answer']
+        return None
+
+    def cancel(self):
+        if self.closed:
+            return
+        try:
+            stats = self._request('finish')['stats']
+            self.preemptions = stats['preemptions']
+            self.requests_started = stats['requests_started']
+            self.watchdog_events = stats['watchdog_events']
+        except (EOFError, OSError, ValueError):
+            pass
+        finally:
+            self.payload = None
+            self.close()
 
 
 class CodingWorker(WorkerSocket):

@@ -6,8 +6,8 @@ import time
 import unittest
 import urllib.error
 
-from coding_arbiter import ModelArbiter
 from coding_chat import model_completion
+from coding_process import ModelArbiter
 
 
 class ChatTokenizerTimeoutTests(unittest.TestCase):

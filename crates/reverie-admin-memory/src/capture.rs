@@ -14,6 +14,7 @@ use std::{
     io::{self, ErrorKind, Read, Write},
     os::{fd::AsFd, unix::process::CommandExt},
     process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -46,6 +47,7 @@ pub(crate) struct Limits<'a> {
     deadline: Instant,
     stdout: usize,
     signals: Option<&'a Signals>,
+    cancelled: Option<&'a AtomicBool>,
     group: bool,
 }
 
@@ -55,6 +57,7 @@ impl<'a> Limits<'a> {
             deadline,
             stdout,
             signals: Some(signals),
+            cancelled: None,
             group: true,
         }
     }
@@ -63,6 +66,7 @@ impl<'a> Limits<'a> {
             deadline,
             stdout,
             signals: None,
+            cancelled: None,
             group: false,
         }
     }
@@ -72,10 +76,22 @@ impl<'a> Limits<'a> {
             ..Self::office(deadline, stdout)
         }
     }
+    pub(crate) fn cancellable(deadline: Instant, stdout: usize, cancelled: &'a AtomicBool) -> Self {
+        Self {
+            cancelled: Some(cancelled),
+            ..Self::scoped(deadline, stdout)
+        }
+    }
     fn group(&self) -> bool {
         self.group
     }
     fn check(&self, pid: Pid) -> io::Result<()> {
+        if self
+            .cancelled
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+        {
+            return Err(ErrorKind::Interrupted.into());
+        }
         if Instant::now() >= self.deadline {
             return Err(io::Error::from(ErrorKind::TimedOut));
         }
@@ -205,7 +221,13 @@ impl<'a> Pipes<'a> {
     fn pump(&mut self, limit: usize) -> io::Result<bool> {
         let sent = write(&mut self.input, &mut self.pending)?;
         let out = read(&mut self.out, &mut self.output, limit)?;
-        let err = read(&mut self.err, &mut self.diagnostics, 4096)?;
+        let err = read(&mut self.err, &mut self.diagnostics, 4096).map_err(|error| {
+            if error.kind() == ErrorKind::FileTooLarge {
+                io::Error::new(ErrorKind::InvalidData, error)
+            } else {
+                error
+            }
+        })?;
         Ok(sent || out || err)
     }
     fn complete(&self) -> bool {
@@ -228,7 +250,8 @@ fn read<R: Read>(pipe: &mut Option<R>, output: &mut Vec<u8>, limit: usize) -> io
         Ok(0) => *pipe = None,
         Ok(n) if output.len() + n <= limit => output.extend_from_slice(&bytes[..n]),
         Ok(_) => {
-            return Err(io::Error::other(
+            return Err(io::Error::new(
+                ErrorKind::FileTooLarge,
                 "channel memory subprocess output exceeded its bound",
             ));
         }
@@ -274,10 +297,28 @@ pub(crate) struct Completed {
 }
 
 pub(crate) fn completed(
-    mut command: Command,
+    command: Command,
     request: Option<&[u8]>,
     limits: Limits<'_>,
 ) -> io::Result<Completed> {
+    supervised(command, request, limits)?
+}
+
+/// Separate an unsuccessful capture from failure to establish or settle child ownership.
+pub(crate) fn supervised(
+    mut command: Command,
+    request: Option<&[u8]>,
+    limits: Limits<'_>,
+) -> io::Result<io::Result<Completed>> {
+    if limits
+        .cancelled
+        .is_some_and(|flag| flag.load(Ordering::Acquire))
+    {
+        return Ok(Err(ErrorKind::Interrupted.into()));
+    }
+    if Instant::now() >= limits.deadline {
+        return Ok(Err(ErrorKind::TimedOut.into()));
+    }
     command
         .stdin(if request.is_some() {
             Stdio::piped()
@@ -287,6 +328,16 @@ pub(crate) fn completed(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = OwnedChild::spawn(command, limits.group())?;
+    let output = collect(&mut child, request, &limits);
+    let success = child.settle()?;
+    Ok(output.map(|stdout| Completed { success, stdout }))
+}
+
+fn collect(
+    child: &mut OwnedChild,
+    request: Option<&[u8]>,
+    limits: &Limits<'_>,
+) -> io::Result<Vec<u8>> {
     let mut pipes = Pipes::new(&mut child.child, request)?;
     loop {
         limits.check(child.pid)?;
@@ -298,10 +349,7 @@ pub(crate) fn completed(
             std::thread::sleep(TICK);
         }
     }
-    Ok(Completed {
-        success: child.settle()?,
-        stdout: pipes.output,
-    })
+    Ok(pipes.output)
 }
 
 pub(crate) fn quiet_group(

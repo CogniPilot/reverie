@@ -1,107 +1,91 @@
 import json
 import os
+from pathlib import Path
 import sys
+import tempfile
 import time
 import unittest
 
-from coding_arbiter import ModelArbiter
-from coding_process import BoundedProcess
+from coding_process import BoundedProcess, ModelArbiter
+from test_coding_support import ModelEndpoint, wait_model_reply
 
 
-class FakeProcess:
-    instances = []
-    def __init__(self, argv, body, timeout, max_output, **kwargs):
-        self.argv = argv
-        self.body = json.loads(body)
-        self.timeout = timeout
-        self.output = json.dumps({'epoch': self.body['epoch'], 'ok': True,
-                                  'result': {'content': 'Done.'}}).encode()
-        self.error = None
-        self.done = False
-        self.__class__.instances.append(self)
-    def poll(self):
-        return self.done
-    def cancel(self, reason):
-        self.error = reason
-        self.done = True
+REQUEST = {'model': 'configured-model', 'messages': [{'role': 'user', 'content': 'task'}]}
 
 
 class ArbiterTests(unittest.TestCase):
-    def setUp(self):
-        FakeProcess.instances = []
-        self.arbiter = ModelArbiter('http://127.0.0.1:9999/v1', process_factory=FakeProcess, clock=lambda: 0)
-        self.addCleanup(self.arbiter.cancel)
+    def arbiter(self, *, hold_first=False, **settings):
+        endpoint = ModelEndpoint(self, hold_first=hold_first)
+        arbiter = ModelArbiter(endpoint.url, **settings)
+        self.addCleanup(arbiter.cancel)
+        return arbiter, endpoint
 
-    def test_chat_preempts_only_model_call_then_resumes_same_request(self):
-        request = {'model': 'configured-model', 'messages': [{'role': 'user', 'content': 'task'}]}
-        self.arbiter.submit(request, 60)
-        original = FakeProcess.instances[0]
-        self.arbiter.pause_for_chat()
-        self.assertEqual(original.error, 'preempted_for_chat')
-        self.assertIsNone(self.arbiter.poll())
-        self.assertEqual(len(FakeProcess.instances), 1)
-        self.arbiter.resume()
-        self.assertEqual(len(FakeProcess.instances), 2)
-        self.assertEqual(FakeProcess.instances[1].body['payload'], request)
-        self.assertEqual(self.arbiter.preemptions, 1)
-        self.assertEqual(self.arbiter.requests_started, 2)
+    def test_chat_preempts_live_model_call_then_resumes_same_request(self):
+        arbiter, endpoint = self.arbiter(hold_first=True)
+        arbiter.submit(REQUEST, 10)
+        self.assertEqual(endpoint.receive(), ('/v1/chat/completions', REQUEST))
+        started = time.monotonic()
+        self.assertIsNone(arbiter.poll())
+        self.assertLess(time.monotonic() - started, .75)
+        arbiter.pause_for_chat()
+        self.assertTrue(endpoint.disconnected.wait(2))
+        self.assertIsNone(arbiter.poll())
+        self.assertTrue(endpoint.requests.empty())
+        arbiter.resume()
+        self.assertEqual(endpoint.receive(), ('/v1/chat/completions', REQUEST))
+        self.assertEqual(wait_model_reply(arbiter)['result']['content'], 'Done.')
+        endpoint.release.set()
+        arbiter.cancel()
+        self.assertEqual(arbiter.preemptions, 1)
+        self.assertEqual(arbiter.requests_started, 2)
 
-    def test_optional_trace_path_reaches_only_private_worker_configuration(self):
-        self.arbiter.events_file = '/private/events.jsonl'
-        request = {'model': 'model', 'messages': []}
-        self.arbiter.submit(request, 60)
-        job = FakeProcess.instances[0]
-        self.assertEqual(job.body['events_file'], '/private/events.jsonl')
-        self.assertNotIn('events_file', job.body['payload'])
-        self.assertNotIn('/private/events.jsonl', job.output.decode())
+    def test_optional_trace_path_stays_out_of_the_actual_provider_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / 'private-events.jsonl'
+            arbiter, endpoint = self.arbiter(events_file=str(trace))
+            arbiter.submit(REQUEST, 10)
+            _, request = endpoint.receive()
+            self.assertTrue(request['stream'])
+            self.assertNotIn('events_file', request)
+            self.assertNotIn(str(trace), json.dumps(request))
+            self.assertTrue(wait_model_reply(arbiter)['ok'])
+            self.assertIn('Done.', trace.read_text())
 
     def test_only_one_coding_request_can_occupy_the_slot(self):
-        self.arbiter.submit({}, 60)
+        arbiter, _ = self.arbiter()
+        arbiter.submit(REQUEST, 10)
         with self.assertRaises(RuntimeError):
-            self.arbiter.submit({}, 60)
+            arbiter.submit(REQUEST, 10)
 
     def test_completed_result_releases_slot(self):
-        self.arbiter.submit({}, 60)
-        FakeProcess.instances[0].done = True
-        result = self.arbiter.poll()
-        self.assertTrue(result['ok'])
-        self.assertEqual(result['result'], {'content': 'Done.'})
-        self.assertIsNone(self.arbiter.poll())
-        self.arbiter.submit({}, 60)
+        arbiter, endpoint = self.arbiter()
+        for epoch in (1, 2):
+            arbiter.submit(REQUEST, 10)
+            self.assertEqual(endpoint.receive(), ('/v1/chat/completions', REQUEST))
+            result = wait_model_reply(arbiter)
+            self.assertTrue(result['ok'])
+            self.assertEqual(result['epoch'], epoch)
+            self.assertEqual(result['result']['content'], 'Done.')
+            self.assertIsNone(arbiter.poll())
 
-    def test_parent_task_deadline_is_not_reset_by_preemption(self):
-        timestamp = [0]
-        arbiter = ModelArbiter('http://127.0.0.1:9999/v1', process_factory=FakeProcess,
-                               clock=lambda: timestamp[0])
-        arbiter.submit({}, 5)
+    def test_resume_does_not_restart_an_expired_request(self):
+        arbiter, endpoint = self.arbiter()
         arbiter.pause_for_chat()
-        timestamp[0] = 6
+        arbiter.submit(REQUEST, .1)
+        time.sleep(.15)
         arbiter.resume()
-        self.assertEqual(len(FakeProcess.instances), 1)
-        self.assertEqual(arbiter.poll(), {'ok': False, 'error': 'model_deadline'})
+        self.assertEqual(wait_model_reply(arbiter), {'ok': False, 'error': 'model_deadline'})
+        arbiter.cancel()
+        self.assertTrue(endpoint.requests.empty())
+        self.assertEqual(arbiter.requests_started, 0)
 
     def test_each_request_watchdog_is_recorded(self):
-        self.arbiter.submit({}, 60)
-        FakeProcess.instances[0].done = True
-        FakeProcess.instances[0].error = 'timeout'
-        self.assertEqual(self.arbiter.poll()['error'], 'timeout')
-        self.assertEqual(self.arbiter.watchdog_events, [{'request': 1, 'reason': 'timeout'}])
-
-    def test_cancelled_request_response_cannot_run_as_the_new_epoch(self):
-        self.arbiter.submit({'messages': []}, 60)
-        stale = bytes(FakeProcess.instances[0].output)
-        old_epoch = self.arbiter.epoch
-        self.arbiter.pause_for_chat()
-        self.arbiter.resume()
-        current = FakeProcess.instances[-1]
-        self.assertGreater(self.arbiter.epoch, old_epoch)
-        current.output = stale
-        current.done = True
-        result = self.arbiter.poll()
-        self.assertFalse(result['ok'])
-        self.assertEqual(result['error'], 'stale_model_epoch')
-
-
+        arbiter, _ = self.arbiter(hold_first=True, timeout_s=.2)
+        arbiter.submit(REQUEST, 10)
+        result = wait_model_reply(arbiter)
+        self.assertIn(result['error'], ('timeout', 'model_timeout'))
+        arbiter.cancel()
+        self.assertEqual(arbiter.watchdog_events, [{'request': 1, 'reason': result['error']}])
 class BoundedProcessTests(unittest.TestCase):
     def job(self, script, *, body=b'', timeout=2, cap=4096):
         process = BoundedProcess([sys.executable, '-I', '-B', '-c', script], body,

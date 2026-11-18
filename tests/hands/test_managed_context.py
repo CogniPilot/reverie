@@ -10,11 +10,10 @@ from unittest.mock import Mock
 
 import agent_loop as loop
 from coding_chat import report_managed_context
-from coding_arbiter import ModelArbiter
 from coding_manager import TaskManager
 from coding_chat import Limits
-from test_coding_arbiter import FakeProcess
-from test_coding_support import cfg_for
+from coding_process import ModelArbiter
+from test_coding_support import ModelEndpoint, cfg_for, wait_model_reply
 
 
 UNKNOWN = 'Managed context unavailable; current core/profile/startup context is unknown.'
@@ -39,7 +38,6 @@ class ManagedContextTests(unittest.TestCase):
         self.cfg['_turn_summary'] = lambda: ''
         self.set_response(issued())
         self.messages = [{'role': 'system', 'content': 'Required instructions'}, {'role': 'user', 'content': 'Private history sentinel'}]
-        FakeProcess.instances = []
 
     def set_response(self, response, *, refuse_receipt=False, hold_fetch_ms=0):
         (self.root / 'context-response.json').write_text(json.dumps({
@@ -149,12 +147,15 @@ class ManagedContextTests(unittest.TestCase):
     def test_coding_preemption_refreshes_each_actual_worker_start_without_accumulation(self):
         versions = iter(['first', 'second'])
         def prepare(payload): return dict(payload, messages=payload['messages'] + [{'role': 'system', 'content': next(versions)}])
-        arbiter = ModelArbiter('http://unused.invalid', prepare_request=prepare, process_factory=FakeProcess, clock=lambda: 0)
+        endpoint = ModelEndpoint(self, hold_first=True)
+        arbiter = ModelArbiter(endpoint.url, prepare_request=prepare)
         self.addCleanup(arbiter.cancel)
-        payload = {'messages': copy.deepcopy(self.messages)}
-        arbiter.submit(payload, 20); arbiter.pause_for_chat(); arbiter.resume()
-        self.assertEqual(FakeProcess.instances[0].body['payload']['messages'][-1]['content'], 'first')
-        self.assertEqual(FakeProcess.instances[1].body['payload']['messages'][-1]['content'], 'second')
+        payload = {'model': 'fixture', 'messages': copy.deepcopy(self.messages)}
+        arbiter.submit(payload, 20)
+        self.assertEqual(endpoint.receive()[1]['messages'][-1]['content'], 'first')
+        arbiter.pause_for_chat()
+        arbiter.resume()
+        self.assertEqual(endpoint.receive()[1]['messages'][-1]['content'], 'second')
         self.assertEqual(payload['messages'], self.messages)
 
     def test_coding_authorization_is_after_slow_context_and_receipt_io(self):
@@ -162,22 +163,31 @@ class ManagedContextTests(unittest.TestCase):
         manager = TaskManager(loop, self.cfg, Mock())
         manager.active = {'limits': Limits(prompt_chars=30000)}
         manager.authorization = lambda: observed.extend(event[0] for event in self.events()) or 'owner-revoked'
-        arbiter = ModelArbiter('http://unused.invalid', prepare_request=manager.prepare_model_request,
-                               process_factory=FakeProcess, clock=lambda: 0)
+        endpoint = ModelEndpoint(self)
+        arbiter = ModelArbiter(endpoint.url, prepare_request=manager.prepare_model_request)
         self.addCleanup(arbiter.cancel)
         arbiter.submit({'messages': self.messages, 'tools': []}, 20)
         self.assertEqual(observed, ['fetch', 'receipt'])
-        self.assertEqual(FakeProcess.instances, [])
         arbiter.resume()  # A failed preparation is terminal for this request, never an implicit retry.
         self.assertEqual([event[0] for event in self.events()], ['fetch', 'receipt'])
         self.assertEqual(observed, ['fetch', 'receipt'])
         self.assertEqual(arbiter.poll(), {'ok': False, 'error': 'model_context_unavailable'})
+        arbiter.cancel()
+        self.assertEqual(arbiter.requests_started, 0)
+        self.assertTrue(endpoint.requests.empty())
 
     def test_context_preparation_cannot_extend_parent_deadline(self):
-        now = [0]
-        def prepare(payload): now[0] = 30; return payload
-        arbiter = ModelArbiter('http://unused.invalid', prepare_request=prepare, process_factory=FakeProcess, clock=lambda: now[0])
+        def prepare(payload):
+            prepared.append(True)
+            time.sleep(.45)
+            return payload
+        prepared = []
+        endpoint = ModelEndpoint(self)
+        arbiter = ModelArbiter(endpoint.url, prepare_request=prepare)
         self.addCleanup(arbiter.cancel)
-        arbiter.submit({'messages': []}, 10)
-        self.assertFalse(FakeProcess.instances)
-        self.assertEqual(arbiter.poll(), {'ok': False, 'error': 'model_deadline'})
+        arbiter.submit({'model': 'fixture', 'messages': []}, .25)
+        self.assertEqual(wait_model_reply(arbiter), {'ok': False, 'error': 'model_deadline'})
+        self.assertEqual(prepared, [True])
+        arbiter.cancel()
+        self.assertEqual(arbiter.requests_started, 0)
+        self.assertTrue(endpoint.requests.empty())
