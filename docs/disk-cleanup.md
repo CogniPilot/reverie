@@ -141,3 +141,56 @@ these root bindings and acceptance gates. Publishing bounded metadata to a
 status page or chat is a separate unprivileged step; the host service carries
 no owner login or chat credential. Production live enablement requires a reviewed
 successor and its explicit acceptance, not another flag on this installer.
+
+## Clear disposable employee TMP contents during maintenance
+
+On the Docker host, the registered-deployment CLI can inventory or clear
+employee temporary storage. Pass the office installation root containing
+`deployment.json`. The command discovers the actual `/scratch` bind from that
+office, then selects `laptops/{employees,operator-recovery,operator-sessions}/<UUID>/tmp`.
+
+```sh
+nix run .#deployment -- --root /path/to/installation prune-scratch
+nix run .#deployment -- --root /path/to/installation prune-scratch --apply
+```
+
+The first command reports allocated and eligible bytes per mount and names
+the containers that block clearing. An incomplete size means an entry changed
+or could not be walked. Hard-linked files may appear more than once in the
+allocated total and are excluded from the eligible byte estimate.
+
+Before applying, finish or stop host jobs using these trees, move unique
+temporary work into durable storage, and stop the office and any overlapping
+containers. Keep them stopped until the command finishes. Pass `--lease-dir`
+for any additional host task-lease directory. The command checks the detected
+office and worker lease directories and holds their lease barriers during
+clearing. The command keeps the mount directories and retains top-level entries
+that contain repositories, preservation markers, special files, foreign-owned
+files, or unreadable content. An apply report marks any unconfirmed tree so it
+can be inspected before restarting workers. Clearing is permanent.
+
+`prune-scratch --force-read-only` includes otherwise eligible directories
+owned by the installation user that lack the owner write bit. During apply,
+the pruner temporarily adds that bit on the held directory descriptor and
+restores its original mode before returning from the directory. The same
+lease, preservation, ownership and mount checks apply.
+
+## Prune old Cargo builds on the company workspace disk
+
+```sh
+nix run .#deployment -- --root /path/to/installation prune-workspace
+nix run .#deployment -- --root /path/to/installation prune-workspace --apply
+```
+
+The workspace pruner discovers the registered `/reverie_workspace` bind and
+reports Cargo build targets under `cases/expert-*/work`. A candidate needs
+Cargo's `CACHEDIR.TAG` and a regular `.rustc_info.json`. The default age is four
+days from the newest modification or metadata change anywhere in the target.
+Use `--min-age-days` to choose a different retention period. A protected,
+unreadable, recently changed, leased or otherwise unconfirmed cache remains
+in place. Source, shared results and company state stay outside the selection.
+
+Apply requires the office, overlapping Docker containers and host jobs using
+these caches to be stopped. Keep them stopped through completion. The same
+lease inventory and `--lease-dir` option used by scratch cleanup apply here.
+A successful cleanup removes an eligible cache as a unit so Cargo can rebuild it.
