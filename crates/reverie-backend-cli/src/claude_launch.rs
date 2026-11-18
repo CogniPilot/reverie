@@ -39,7 +39,9 @@ impl Plan {
         if ids.len() > 3 || !ids.iter().all(|id| safe_id(id)) {
             return Err(Unavailable);
         }
-        let selected = within(SELECTION_BUDGET, move || metadata::select(&config_dir()?, &ids))??;
+        let selected = within(SELECTION_BUDGET, move || {
+            metadata::select(&config_dir()?, &ids)
+        })??;
         let command =
             selected.map_or_else(|| self.fresh, |index| self.resumes[index].command.clone());
         shlex::split(&command)
