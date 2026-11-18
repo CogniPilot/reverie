@@ -42,7 +42,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const close of cleanups.splice(0).reverse()) await close();
 });
-async function fixture(native?: ReturnType<typeof dockerPlanSourceFixture>) {
+async function fixture(native?: ReturnType<typeof dockerPlanSourceFixture>, returnToOffice = false) {
   const f = dockerPlanJournalFixture();
   if (native) {
     f.record.employeeId = native.row.employeeId;
@@ -72,6 +72,7 @@ async function fixture(native?: ReturnType<typeof dockerPlanSourceFixture>) {
   f.closed.seed.target.templateDigest = dockerProviderRuntimeRecipeDigest(targetRecipe);
   f.state.seed.source.record.owner = undefined;
   f.closed.seed.source.record.owner = undefined;
+  if (returnToOffice) f.state.seed = { ...f.state.seed, forceBusy: true, returnToOffice: true };
   f.record.owner = undefined;
   f.record.dockerReplacement = f.state;
   f.work.owner = undefined;
@@ -96,8 +97,8 @@ async function fixture(native?: ReturnType<typeof dockerPlanSourceFixture>) {
         createdAt: 1,
         sessionId: f.record.oldSession,
         sessionGeneration: 1,
-        onVacation: false,
-        desiredRunning: true,
+        onVacation: returnToOffice,
+        desiredRunning: !returnToOffice,
         permissions: { moveOwnPlan: true },
         dockerBinding: f.state.seed.source.binding,
       }),
@@ -635,6 +636,19 @@ describe('genuine requester grant for one Docker plan journal', () => {
     );
     expect(() => f.current(state)).not.toThrow();
     expect(() => requireDockerPlanMoveRequesterReservation(f.proof(), f.input, undefined)).toThrow();
+  });
+
+  it('retains an original return-to-office choice under owner recovery', async () => {
+    const f = await fixture(undefined, true);
+    f.authSessions.set('owner', { ip: '127.0.0.1', ua: 'test', createdAt: Date.now(), method: 'basic' });
+    f.setTarget({ employeeId: f.record.employeeId, sessionId: f.record.oldSession, purpose: 'original' });
+    expect(await f.capture()).toBe(403);
+    expect(await f.capture({
+      host: 'office.test',
+      origin: 'https://office.test',
+      cookie: 'reverie_session=owner',
+    } as unknown as typeof f.headers)).toBe(200);
+    expect(() => f.current()).not.toThrow();
   });
 
   it.each(['issuer-close', 'issuer-key', 'token', 'parent', 'mixed'] as const)(

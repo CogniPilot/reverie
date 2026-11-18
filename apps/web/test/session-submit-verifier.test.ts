@@ -9,7 +9,7 @@
  * composer, is capped, and is cancelled by a newer write or teardown.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { SubmitVerifier, promptStillInComposer, SUBMIT_VERIFY_DELAYS_MS } from '../src/session-submit-verifier.js';
+import { composerIsEmpty, SubmitVerifier, promptStillInComposer, SUBMIT_VERIFY_DELAYS_MS } from '../src/session-submit-verifier.js';
 
 const PROMPT =
   'Read /home/arkon/.reverie/pr-bot/jobs/pr-439/brief.md and carry out the review it describes. Do not ask questions.';
@@ -37,6 +37,15 @@ const TAKEN = [
 ].join('\n');
 
 describe('promptStillInComposer', () => {
+  it('reads Claude’s styled welcome suggestion as empty and preserves real drafts', () => {
+    const welcome = ' Claude Code v2.1.308\n';
+    const styled = '\x1b[39m❯ \x1b[7mT\x1b[0;2mry\x1b[0m \x1b[2m"create\x1b[0m \x1b[2ma test..."\x1b[0m';
+    const chrome = '\n──────────────────\n  ⏵⏵ bypass permissions on (shift+tab to cycle)';
+    expect(composerIsEmpty(welcome + styled + chrome, '❯')).toBe(true);
+    expect(composerIsEmpty(welcome + '❯ Try "create a test..."' + chrome, '❯')).toBe(false);
+    expect(composerIsEmpty(welcome + styled + '\nMore draft text' + chrome, '❯')).toBe(false);
+    expect(composerIsEmpty(styled + chrome, '❯')).toBe(false);
+  });
   it('sees the prompt sitting in the composer, no-break space and wrapping included', () => {
     expect(promptStillInComposer(STRANDED, PROMPT, '❯')).toBe(true);
   });

@@ -4,6 +4,16 @@
 import type { PlanMoveInput, PlanMoveRecord, PlanMoveSnapshot } from './plan-move.js';
 import type { DockerPlanMoveJournalState, DockerPlanMoveSeed } from './docker-plan-move-data.js';
 
+export function canSettleRestoredPlanSource(
+  state: Readonly<DockerPlanMoveJournalState>, init: NonNullable<PlanMoveRecord['restoredSource']>
+): boolean {
+  const stop = state.sourceStop;
+  return stop?.phase === 'closed' && !!stop.sourceInit &&
+    (init.pid !== stop.sourceInit.pid || init.startTicks !== stop.sourceInit.startTicks) &&
+    !state.sourceReader && !state.material && !state.work && !state.paidDispatch &&
+    !state.companyPublication && !state.handoff;
+}
+
 export interface PlanMoveDockerJournal {
   readonly moveId: string;
   readonly epoch: string;
@@ -25,6 +35,10 @@ export interface PlanMoveDockerJournalStore {
     current: () => void
   ): Promise<Readonly<PlanMoveRecord>>;
   record(id: string): Promise<Readonly<PlanMoveRecord>>;
+  closeRestored?(
+    id: string, before: Readonly<DockerPlanMoveJournalState>,
+    init: NonNullable<PlanMoveRecord['restoredSource']>, current: () => void
+  ): Promise<Readonly<PlanMoveRecord>>;
   current(id: string, epoch: string, seedDigest: string): void;
   /** Deny-only original file currency for a completed read. Never dispatch. */
   readCurrent(id: string, epoch: string, seedDigest: string): void;
@@ -47,6 +61,10 @@ export interface PlanMoveDockerActor {
    * Installed adapters capture the genuine private original requester here;
    * no native inspection, journal claim or effect is authorized by this call. */
   bindOriginalRequester?(record: Readonly<PlanMoveRecord>): Promise<void>;
+  verifyRestoredSource?(record: Readonly<PlanMoveRecord>): Promise<{
+    init: NonNullable<PlanMoveRecord['restoredSource']>;
+    current: () => void;
+  }>;
   /** Read-only native admission; opaque private proof, never JSON authority. */
   admitDisjointGeneration?(
     employeeId: string,

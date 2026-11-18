@@ -1,5 +1,6 @@
 /** Bounded actual Engine data and explicit new boxed projection. */
 import { z } from 'zod';
+import { isDeepStrictEqual } from 'node:util';
 import {
   dockerContinuationDigest,
   DockerEmployeeContinuationError,
@@ -124,6 +125,22 @@ export function boxedOriginal(
   };
   return DockerEmployeeOriginal.parse(original);
 }
+
+/** Docker may re-encode unset DNS on an existing boxed container. Use the
+ * historical spelling only if it restores the complete retained fingerprint. */
+export function historicalBoxedInspect(
+  raw: DockerEmployeeInspect,
+  subject: DockerContinuationSubject,
+  deployment: string,
+  expected: DockerEmployeeOriginal
+): DockerEmployeeInspect {
+  if (!Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return raw;
+  const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
+  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), expected)
+    ? historical
+    : raw;
+}
+
 export function boxedMountConfiguration(row: DockerEmployeeInspect): Record<string, unknown>[] {
   const retained = boxedStorageMounts(row).map((m) => {
     if (m.type === 'volume' && !m.name) dockerEngineRefuse('DOCKER_CONTINUATION_VOLUME_IDENTITY_UNKNOWN');

@@ -27,7 +27,7 @@ import {
 } from '../src/docker-contained-resource-controller.js';
 import { dockerResourceHelperConfiguration } from '../src/docker-resource-helper-inspection.js';
 import { dockerPoolMetadataDigest } from '../src/docker-pool-observation-data.js';
-import { DockerEmployeeContinuation, type DockerContinuationEngine } from '../src/docker-employee-continuation.js';
+import { DockerEmployeeContinuation, dockerContinuationDigest, type DockerContinuationEngine } from '../src/docker-employee-continuation.js';
 import { registerDockerEmployeeContinuationRoutes } from '../src/web/routes/docker-employee-continuation-routes.js';
 import { OwnerAuthStore } from '../src/owner-auth/store.js';
 import { OwnerAuthService } from '../src/owner-auth/service.js';
@@ -674,6 +674,20 @@ describe('supported metadata-only recovery of an already lost pool ACK', () => {
     const record = f.companyStore.snapshot().dockerPoolObservations![0]!;
     expect(record.configuration.containerId).toBe(id);
     expect(record).not.toHaveProperty('origin');
+    const source = {
+      policy,
+      pool: {
+        containerId: record.anchorTask.containerId,
+        cgroupParent: record.epoch.parent.path.split('/').at(-1)!,
+        policyDigest: dockerContinuationDigest(policy.pool),
+        physicalDigest: 'b'.repeat(64),
+      },
+      tasks: [{ ...record.anchorTask, initPid: record.anchorTask.initPid + 1 }],
+    };
+    await expect(f.service.requirePlanSourcePool(source, () => {})).resolves.toBeUndefined();
+    await expect(f.service.requirePlanSourcePool({
+      ...source, pool: { ...source.pool, cgroupParent: 'different-pool.slice' },
+    }, () => {})).rejects.toThrow('DOCKER_POOL_SOURCE_RECONCILIATION_REQUIRED');
     // A later matching closed helper must not cause proof churn just because
     // its full ID sorts first. Preference is DATA only: every ACK is re-earned.
     add('0'.repeat(64));

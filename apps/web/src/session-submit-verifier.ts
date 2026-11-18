@@ -78,6 +78,19 @@ const FINAL_LOOK_MS = 2_000;
 // eslint-disable-next-line no-control-regex
 const CODEX_DIM_PLACEHOLDER = /^((?:\x1b\[[0-9;]*m)*›(?:\x1b\[[0-9;]*m)* ?)\x1b\[2m[^\x1b\n]*\x1b\[(?:0|22)?m/gmu;
 
+/** Claude Code 2.1.308's welcome composer draws its example with an inverse
+ * cursor on the initial T and faint words. A plain or partly styled draft stays
+ * visible to the empty-composer guard. */
+// eslint-disable-next-line no-control-regex
+const CLAUDE_WELCOME_PLACEHOLDER = /^((?:\x1b\[[0-9;]*m)*❯[ \u00a0]+)\x1b\[7mT\x1b\[0;2mry\x1b\[0m(?:[ \t]|\x1b\[2m[^\x1b\r\n]+\x1b\[0m)+$/gmu;
+
+function stripClaudeWelcomePlaceholder(screen: string): string {
+  if (!/Claude Code v\d+\.\d+\.\d+/u.test(stripAnsi(screen))) return screen;
+  return screen.replace(CLAUDE_WELCOME_PLACEHOLDER, (row, prefix: string) =>
+    /^❯[ \u00a0]+Try "[^"\r\n]{1,180}"$/u.test(stripAnsi(row)) ? prefix : row
+  );
+}
+
 /** Text attributes in effect while reading a styled capture; `unknown` once a code this reader does not model is seen. */
 interface SgrState { on: Set<number>; fg: boolean; bg: boolean; underlineColour: boolean; unknown: boolean }
 /** The attributes each "off" code clears (25 clears both blinks); 26 is not an "off" code and is treated as unknown. */
@@ -136,7 +149,9 @@ function glyphStyles(screen: string, glyph: string): Map<number, string | undefi
 /** The complete last composer, including wrapped text, ending before the CLI's chrome. */
 export function composerBody(screen: string, glyph: string): string | undefined {
   if (!glyph || screen.length > 1_048_576) return undefined;
-  const lines = stripAnsi(glyph === '›' ? screen.replace(CODEX_DIM_PLACEHOLDER, '$1') : screen).split('\n');
+  const marked = glyph === '›' ? screen.replace(CODEX_DIM_PLACEHOLDER, '$1') :
+    glyph === '❯' ? stripClaudeWelcomePlaceholder(screen) : screen;
+  const lines = stripAnsi(marked).split('\n');
   // Any model name, as the registry's codex modelDetect reads it: `GPT-6.1-Sol high · /…`, but also a custom provider's
   // `qwen3-coder:30b default · /…`. A GPT-only pattern never found a footer there, so such a composer never read as empty
   // and chat to the session waited forever.

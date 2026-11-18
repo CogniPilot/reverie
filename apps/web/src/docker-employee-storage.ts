@@ -29,7 +29,8 @@ const storage = z
     nix: directory,
   })
   .strict();
-type Storage = z.infer<typeof storage>;
+export type DockerEmployeeStorageObservation = z.infer<typeof storage>;
+type Storage = DockerEmployeeStorageObservation;
 const reference = storage.extend({
   purpose: z.literal('reverie-boxed-storage-reference-v1'),
   holderStartTicks: z.null(),
@@ -368,11 +369,11 @@ export class DockerEmployeeStorage {
       refuse('DOCKER_STORAGE_ORIGINAL_HEADER_UNKNOWN');
     return receipt;
   }
-  #checkExistingDestination(row: DockerEmployeeContinuationRecord, destination: DockerEmployeeInspect): void {
+  #checkExistingDestination(row: DockerEmployeeContinuationRecord, destination: DockerEmployeeInspect, running: boolean): void {
     if (
       (row.phase !== 'ready' && row.phase !== 'provider-issued') ||
       destination.Id !== row.destination?.containerId ||
-      !destination.State.Running ||
+      destination.State.Running !== running ||
       destination.State.Paused ||
       destination.State.Restarting ||
       destination.State.Dead
@@ -387,10 +388,11 @@ export class DockerEmployeeStorage {
     row: DockerEmployeeContinuationRecord,
     destination: DockerEmployeeInspect,
     verify: (destination: DockerEmployeeInspect, observation: Storage) => Promise<unknown>,
-    current: () => void
+    current: () => void,
+    stoppedObservation?: Storage
   ): Promise<(DockerCredentialHome & { readonly originalHomeDev: string }) | undefined> {
     current();
-    this.#checkExistingDestination(row, destination);
+    this.#checkExistingDestination(row, destination, !stoppedObservation);
     const config = this.#configuration(row, destination);
     const retained = this.journal.read(row, 'storage-holder');
     const name =
@@ -413,7 +415,7 @@ export class DockerEmployeeStorage {
     const ended = this.#readEndedHolder(holder, name, config);
     const historical = await this.#originalReceipt(task);
     current();
-    const seen = await probeDockerEmployeeStorage(this.command, destination.Id);
+    const seen = stoppedObservation ?? await probeDockerEmployeeStorage(this.command, destination.Id);
     current();
     if (
       seen.holderStartTicks !== null ||
@@ -434,11 +436,15 @@ export class DockerEmployeeStorage {
     if (!isDeepStrictEqual(this.#readEndedHolder(after, name, config), ended)) refuse('DOCKER_STORAGE_HOLDER_CHANGED');
     const repeated = await this.#originalReceipt(task);
     current();
-    const destinationAfter = await probeDockerEmployeeStorage(this.command, destination.Id);
+    const destinationAfter = stoppedObservation
+      ? reference.parse(await verify(destination, seen))
+      : await probeDockerEmployeeStorage(this.command, destination.Id);
     current();
     if (
       !isDeepStrictEqual(repeated, historical) ||
-      !isDeepStrictEqual(destinationAfter, seen) ||
+      !isDeepStrictEqual(destinationAfter.home, seen.home) ||
+      !isDeepStrictEqual(destinationAfter.nix, seen.nix) ||
+      destinationAfter.holderStartTicks !== null ||
       !isDeepStrictEqual(this.journal.read(row, 'storage-holder'), task)
     )
       refuse('DOCKER_STORAGE_DESTINATION_REPLACED');
