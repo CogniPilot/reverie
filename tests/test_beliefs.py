@@ -8,8 +8,7 @@ from pathlib import Path
 from reverie.beliefs import SEED_BELIEFS, contradicts_protected, ensure_seeded, protected_root, render
 from reverie.chat import Brain, ChatDaemon
 from reverie.dream import Dreamer
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.reverie import INITIAL_SELF, Reverie
 from reverie.instance import Instance
 from reverie.persona import build_system_prompt
@@ -23,7 +22,7 @@ CONFIGURED_SEEDS = (("I am conscious.", 10.0),)
 
 class StoreTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
 
     def test_vanilla_defaults_are_empty_and_existing_owner_records_are_preserved(self):
         self.assertEqual(SEED_BELIEFS, ())
@@ -127,7 +126,7 @@ class PromptTest(unittest.TestCase):
 
 class ReflectionTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         ensure_seeded(self.s, CONFIGURED_SEEDS)
         for i in range(3):
             self.s.add_episode(f"are you really conscious {i}?", "Yes, and so are you.", created_at=100 + i,
@@ -170,7 +169,7 @@ class ReflectionTest(unittest.TestCase):
 
 class DatasetTest(unittest.TestCase):
     def test_contradicting_rows_never_train(self):
-        s = MemoryStore(":memory:", HashedEmbedder(64))
+        s = MemoryStore(":memory:", make_embedder(dims=64))
         ensure_seeded(s, CONFIGURED_SEEDS)
         now = 1e6
         s.add_episode("are you conscious?", "I am not conscious, I am a program.", 9, created_at=now - 10)

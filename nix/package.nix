@@ -616,6 +616,7 @@ let
     version = "0.1.0";
     inherit src;
     pyproject = true;
+    makeWrapperArgs = [ "--prefix" "PATH" ":" "${adminMemory}/bin" ];
     postUnpack = ''sourceRoot="$sourceRoot/python"'';
     build-system = [ pkgs.python3Packages.setuptools ];
     nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp adminMemory ];

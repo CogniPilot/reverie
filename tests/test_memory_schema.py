@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import LEGACY_ASSISTANT_COLUMN, SCHEMA, SCHEMA_VERSION, MemoryStore
+from reverie.memory import LEGACY_ASSISTANT_COLUMN, SCHEMA, SCHEMA_VERSION, MemoryStore, make_embedder
 
 
 class MemorySchemaTest(unittest.TestCase):
@@ -33,7 +32,7 @@ class MemorySchemaTest(unittest.TestCase):
 
     def test_legacy_column_is_renamed_without_rewriting_memory_rows(self):
         before = self.legacy_store()
-        store = MemoryStore(self.path, HashedEmbedder(1))
+        store = MemoryStore(self.path, make_embedder(dims=1))
         try:
             columns = {row["name"] for row in store._db.execute("PRAGMA table_info(memories)")}
             self.assertIn("assistant_text", columns)
@@ -51,7 +50,7 @@ class MemorySchemaTest(unittest.TestCase):
             self.assertEqual(new.assistant_text, "reply")
         finally:
             store._db.close()
-        reopened = MemoryStore(self.path, HashedEmbedder(1))
+        reopened = MemoryStore(self.path, make_embedder(dims=1))
         try:
             self.assertEqual(reopened.get(42).assistant_text, "answer")
             self.assertEqual(reopened.count(), 2)

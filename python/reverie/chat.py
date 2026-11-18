@@ -19,14 +19,13 @@ from typing import Sequence
 from .beliefs import ensure_seeded, render
 from .config import Config
 from .dream import Dreamer, waking_recall
-from .embeddings import make_embedder
 from .gpu import GpuLock
 from .importance import rate_episode
 from .instance import initial_self_for
 from .floors import violates
 from .llm import ChatClient, LLMError, limit_words
 from .log import get, setup
-from .memory import DREAM, EPISODE, Memory, MemoryStore
+from .memory import DREAM, EPISODE, Memory, MemoryStore, make_embedder
 from .migrate import migrate_history
 from .mood import load_mood
 from .persona import build_system_prompt, load_persona, read_profile

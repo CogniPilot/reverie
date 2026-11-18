@@ -4,9 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reverie.embeddings import HashedEmbedder
 from reverie.importance import parse_rating, rate_episode
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.reflection import Reflector, parse_insights
 from tests.helpers import fake_client
 
@@ -52,7 +51,7 @@ class CleanTest(unittest.TestCase):
 
 class RateTest(unittest.TestCase):
     def test_rate_episode(self):
-        s = MemoryStore(":memory:", HashedEmbedder(64))
+        s = MemoryStore(":memory:", make_embedder(dims=64))
         m = s.add_episode("I got the Lean proof through", "Knew you would.")
         client, t = fake_client("8")
         self.assertEqual(rate_episode(client, m), 8.0)
@@ -64,7 +63,7 @@ class RateTest(unittest.TestCase):
 
 class ReflectorTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         self.profile = Path(tempfile.mkdtemp()) / "profile.md"
 
     def reflector(self, responder, interval=1800, min_eps=3):

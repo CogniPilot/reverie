@@ -16,17 +16,19 @@ terms is available via ``combine="product"``.
 """
 from __future__ import annotations
 
+import array
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 import weakref
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
-
-from .embeddings import Embedder, HashedEmbedder, cosine, pack, unpack
+from typing import Iterable, Protocol, Sequence
 
 EPISODE = "episode"
 REFLECTION = "reflection"
@@ -34,6 +36,110 @@ DREAM = "dream"
 SCHEMA_VERSION = 1
 # The retired column name is retained only for existing-store interoperability.
 LEGACY_ASSISTANT_COLUMN = bytes.fromhex("6a696e785f74657874").decode("ascii")
+
+
+class Embedder(Protocol):
+    name: str
+    dims: int
+
+    def embed(self, text: str, kind: str = "document") -> list[float]: ...
+
+
+def _write_embedding_request(process: subprocess.Popen, request: dict) -> None:
+    process.stdin.write(json.dumps(request).encode("ascii") + b"\n")
+    process.stdin.flush()
+
+
+def _stop_embedding_worker(process: subprocess.Popen, owner: int) -> None:
+    if os.getpid() == owner:
+        process.kill()
+        process.wait()
+        with suppress(BrokenPipeError):
+            process.stdin.close()
+        process.stdout.close()
+
+
+class _NativeEmbedder:
+    """Keep one native worker per legacy embedder, opening it on first use."""
+
+    def __init__(self, dims: int = 1024):
+        self.dims = dims
+        self.name = f"hashed-v1-{dims}"
+        self._dimensions = str(dims)
+        self._owner = os.getpid()
+        self._lock = threading.Lock()
+        self._process = None
+
+    def _start(self, endpoint: dict | None = None) -> subprocess.Popen:
+        process = subprocess.Popen(
+            ["reverie-admin-memory", f"--embedding-worker={self._owner}"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True,
+        )
+        self._stop = weakref.finalize(self, _stop_embedding_worker, process, self._owner)
+        try:
+            _write_embedding_request(process, {"dimensions": self._dimensions, "endpoint": endpoint})
+            points, dimensions = json.loads(process.stdout.readline())
+            self.name = "".join(map(chr, points))
+            if self.name.startswith("llama:"):
+                self.dims = dimensions
+        except BaseException:
+            self._stop()
+            raise
+        self._process = process
+        return process
+
+    def embed(self, text: str, kind: str = "document") -> list[float]:
+        if os.getpid() != self._owner:
+            raise RuntimeError("embedding worker belongs to another process")
+        with self._lock:
+            process = self._process or self._start()
+            _write_embedding_request(process, {"text": list(map(ord, text)), "query": kind == "query"})
+            header = process.stdout.read(8)
+            if len(header) != 8:
+                raise RuntimeError("native embedding worker stopped")
+            count = int.from_bytes(header, "little")
+            if count == (1 << 64) - 1:
+                raise RuntimeError("embedding backend failed")
+            vector = array.array("d")
+            vector.fromfile(process.stdout, count)
+            if sys.byteorder == "big":
+                vector.byteswap()
+            if self.name.startswith("llama:"):
+                self.dims = count
+            return vector.tolist()
+
+
+def make_embedder(embed_url: str = "", embed_model: str = "", dims: int = 1024,
+                  doc_prefix: str = "search_document: ", query_prefix: str = "search_query: ") -> Embedder:
+    embedder = _NativeEmbedder(dims)
+    if embed_url:
+        embedder._start({
+            "url": list(map(ord, embed_url)),
+            "model": list(map(ord, embed_model)),
+            "document_prefix": list(map(ord, doc_prefix)),
+            "query_prefix": list(map(ord, query_prefix)),
+        })
+    return embedder
+
+
+# SQLite still uses float32 blobs while this legacy store owns its rows.
+def pack(vec: Iterable[float]) -> bytes:
+    return array.array("f", vec).tobytes()
+
+
+def unpack(blob: bytes | None) -> list[float]:
+    if not blob:
+        return []
+    vec = array.array("f")
+    vec.frombytes(blob)
+    return vec.tolist()
+
+
+def cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    if len(a) != len(b) or not a:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b))
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -158,7 +264,7 @@ class MemoryStore:
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.embedder: Embedder = embedder or HashedEmbedder()
+        self.embedder: Embedder = embedder or make_embedder()
         self.decay_per_hour = decay_per_hour
         self._lock = threading.RLock()
         self._atomic_depth = 0  # > 0 inside atomic(): writes join that one transaction

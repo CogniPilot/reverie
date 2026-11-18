@@ -59,7 +59,7 @@ that image.
 | Terminals, devices and scoped Office transport | `owner_terminal_*`, `worker_*` launch/Office/device paths, GPU/browser components | Same scoped grants, peer provenance, terminal/session identity and device selection; no engine socket in clients |
 | Memory and agent runtime | `memory.py`, `project_memory.py`, `runtime.py`, `sleep.py`, context/identity/governance and plugin/CLI adapters | Existing SQLite data remains readable, tested write/migration semantics, conversation/account/model behavior preserved, CLI/plugin compatibility |
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |
-| Numerical/model adapters and tooling | `embeddings.py`, training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
+| Numerical/model adapters and tooling | Native hash and HTTP(S) embeddings, legacy training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
 | Kokoro speech | Docker's `reverie-kokoro` and the instrumented Rust voice-CI fixture share the native ONNX Runtime and eSpeak NG engine. The fixture uses CPU-only Whisper.cpp for ASR | Keep real-model browser, timing, voice-ID, transcript and truncated-audio acceptance in the voice workflow |
 
 The narrow helper and active Cargo-default/build-job laptop tools now have Rust
@@ -92,11 +92,11 @@ service boundary and compatibility evidence.
 The memory persistence cohort adds native MemoryStore/ProjectMemory and history
 import libraries plus the configured HTTP(S)/hashed embedding adapters. Synthetic
 legacy databases, reverse-language writes, all-table backup/restore and model/
-vector/ranking fixtures qualify source compatibility. The active Python callers
-remain selected; employee namespaces, authorization, consistent live snapshots
-and single-writer cutover still belong to the coordinated service migration.
-Incidental non-HTTP urllib endpoint schemes need a supported-settings inventory
-and named adapter or explicit compatibility decision before that selection.
+vector/ranking fixtures qualify source compatibility. The legacy memory store
+uses the Rust embedding backends, including startup probing and hashed fallback.
+Configured endpoints use HTTP(S). The legacy caller still writes SQLite rows
+and ranks recall results. Employee namespaces, authorization, consistent live
+snapshots and single-writer cutover still belong to the service migration.
 
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here

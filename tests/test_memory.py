@@ -3,8 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import EPISODE, REFLECTION, MemoryStore, recency_score, score_memory
+from reverie.memory import EPISODE, REFLECTION, MemoryStore, recency_score, score_memory, make_embedder
 
 H = 3600.0
 
@@ -36,7 +35,7 @@ class ScoringTest(unittest.TestCase):
 
 class StoreTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(256))
+        self.s = MemoryStore(":memory:", make_embedder(dims=256))
 
     def test_add_get_count(self):
         m = self.s.add_episode("I love Modelica", "A fine taste, User.", 3.0)
@@ -88,7 +87,7 @@ class StoreTest(unittest.TestCase):
 
     def test_reembed_all(self):
         self.s.add_episode("hello", "world")
-        self.s.embedder = HashedEmbedder(64)
+        self.s.embedder = make_embedder(dims=64)
         self.assertEqual(self.s.reembed_all(), 1)
         self.assertEqual(len(self.s.get(1).embedding), 64)
         self.assertEqual(self.s.reembed_all(), 0)
@@ -96,7 +95,7 @@ class StoreTest(unittest.TestCase):
 
 class RetrievalTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(512))
+        self.s = MemoryStore(":memory:", make_embedder(dims=512))
         self.now = 10_000_000.0
 
     def test_relevance_wins(self):
@@ -142,7 +141,7 @@ if __name__ == "__main__":
 
 class AtomicTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(Path(tempfile.mkdtemp()) / "m.sqlite", HashedEmbedder(64))
+        self.s = MemoryStore(Path(tempfile.mkdtemp()) / "m.sqlite", make_embedder(dims=64))
 
     def test_all_or_nothing_and_reentrant(self):
         with self.assertRaises(RuntimeError):
@@ -158,6 +157,6 @@ class AtomicTest(unittest.TestCase):
         with self.s.atomic():
             self.s.add_reflection("two insight here", 5, [], "shared")
             self.s.set_state("k", "v")
-        other = MemoryStore(self.s.path, HashedEmbedder(64))  # committed: another connection sees it
+        other = MemoryStore(self.s.path, make_embedder(dims=64))  # committed: another connection sees it
         self.assertEqual(other.get_state("k"), "v")
         self.assertEqual(other.count("reflection"), 1)

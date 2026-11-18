@@ -5,8 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.train.config import TrainConfig
 from reverie.train.convert import prune
 from reverie.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
@@ -32,7 +31,7 @@ class ConfigTest(unittest.TestCase):
 
 class DatasetTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         self.now = 100 * DAY
         self.cfg = TrainConfig(sample_size=50, replay_size=5, min_importance=3, seed=1)
 

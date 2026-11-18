@@ -4,6 +4,7 @@ mod capture;
 mod configuration;
 mod context_cli;
 mod database;
+mod embedding_worker;
 mod journal;
 mod office;
 mod opencode_context;
@@ -91,14 +92,17 @@ fn parent(request: &Request) -> io::Result<()> {
     io::stdout().lock().write_all(&output)
 }
 
-fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
+fn check_worker_parent(expected_parent: i32) -> io::Result<()> {
     if getpgrp() != getpid() || getppid().as_raw() != expected_parent || expected_parent <= 0 {
         return Err(refused());
     }
+    Ok(())
+}
+
+fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
+    check_worker_parent(expected_parent)?;
     prctl::set_pdeathsig(Signal::SIGKILL)?;
-    if getppid().as_raw() != expected_parent {
-        return Err(refused());
-    }
+    check_worker_parent(expected_parent)?;
     let mut bytes = Vec::new();
     io::stdin()
         .take((bound + 1) as u64)
@@ -175,6 +179,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-capture-worker" => journal_capture_worker,
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
+        "--embedding-worker" => embedding_worker::run,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

@@ -3,8 +3,7 @@ import json
 import unittest
 
 from reverie.chat import Brain, ChatDaemon, IDLE_USER_TEXT
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.migrate import migrate_history
 from reverie.room import Room, is_for_me
 from tests.helpers import FakeRoom, fake_client, temp_config, output_policy_terms, synthetic_output_policy
@@ -58,7 +57,7 @@ class RoomTest(unittest.TestCase):
 
 def make_brain(responder="Hello User.", cfg=None):
     cfg = cfg or temp_config()
-    store = MemoryStore(cfg.db_path, HashedEmbedder(128))
+    store = MemoryStore(cfg.db_path, make_embedder(dims=128))
     client, transport = fake_client(responder)
     room = FakeRoom(cfg.session_id, cfg.hold_path)
     return Brain(cfg, store, client, room), transport, room
@@ -191,7 +190,7 @@ class DaemonTest(unittest.TestCase):
         room = FakeRoom(cfg.session_id, cfg.hold_path)
         daemons = []
         for _ in range(2):
-            store = MemoryStore(cfg.db_path, HashedEmbedder(64))        # separate connections, same file
+            store = MemoryStore(cfg.db_path, make_embedder(dims=64))        # separate connections, same file
             client, _t = fake_client("Hey.")
             daemons.append(ChatDaemon(cfg, Brain(cfg, store, client, room)))
         room.post("hello both of you", mid="m-shared")
@@ -199,7 +198,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(room.said, ["Hey."])
         self.assertTrue(daemons[1].brain.store.answered("m-shared"))
         # a restarted daemon with an empty seen-set still does not answer it again
-        store3 = MemoryStore(cfg.db_path, HashedEmbedder(64))
+        store3 = MemoryStore(cfg.db_path, make_embedder(dims=64))
         client3, _ = fake_client("Hey again.")
         d3 = ChatDaemon(cfg, Brain(cfg, store3, client3, room))
         self.assertEqual(d3.tick(), 0)

@@ -9,8 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from reverie.chat import Brain, ChatDaemon
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.voice import (AudioStore, Synthesizer, Transcriber, VoiceConfig, VoiceService, clean_transcript, download,
                         format_hint, parse_multipart, piper_voice_url, serve, silent_wav, wav_duration_ms)
 from tests.helpers import FakeRoom, fake_client, temp_config
@@ -129,7 +128,7 @@ class EnginesTest(unittest.TestCase):
 
 def make_service(tmp, transcript="hello CTO, how was your night?", reply="Restful, thank you for asking."):
     cfg = temp_config()
-    store = MemoryStore(cfg.db_path, HashedEmbedder(64))
+    store = MemoryStore(cfg.db_path, make_embedder(dims=64))
     client, transport = fake_client(reply)
     room = FakeRoom(cfg.session_id, cfg.hold_path)
     brain = Brain(cfg, store, client, room)
@@ -191,7 +190,7 @@ class ServiceTest(unittest.TestCase):
 
     def test_daemon_skips_voice_messages(self):
         cfg = temp_config()
-        store = MemoryStore(cfg.db_path, HashedEmbedder(64))
+        store = MemoryStore(cfg.db_path, make_embedder(dims=64))
         client, _ = fake_client("Hey.")
         room = FakeRoom(cfg.session_id, cfg.hold_path)
         d = ChatDaemon(cfg, Brain(cfg, store, client, room))

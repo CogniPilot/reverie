@@ -6,8 +6,7 @@ import unittest
 from pathlib import Path
 
 from reverie.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import DREAM, MemoryStore
+from reverie.memory import DREAM, MemoryStore, make_embedder
 from reverie.mood import Mood, load_mood, save_mood
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector
@@ -32,7 +31,7 @@ def fill(store, n_recent=10, n_old=10):
 
 class SamplingTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         self.ids = fill(self.s)
 
     def test_counts_and_mix(self):
@@ -103,7 +102,7 @@ class MoodTest(unittest.TestCase):
         self.assertEqual(Mood().describe(), "content and easy")
 
     def test_persist(self):
-        s = MemoryStore(":memory:", HashedEmbedder(64))
+        s = MemoryStore(":memory:", make_embedder(dims=64))
         self.assertEqual(load_mood(s, NOW).valence, 0.2)
         save_mood(s, Mood(-0.5, 0.0, NOW))
         self.assertAlmostEqual(load_mood(s, NOW).valence, -0.5)
@@ -112,7 +111,7 @@ class MoodTest(unittest.TestCase):
 
 class DreamerTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         fill(self.s)
         self.resp = json.dumps({"dream": "The scratch drive fills with warm sand and User laughs from somewhere above the build logs.",
                                 "recall": "I dreamed the scratch drive turned into a beach", "tone": "playful"})
@@ -183,7 +182,7 @@ class DreamerTest(unittest.TestCase):
 
 class NoFactsRuleTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         fill(self.s, 3, 3)
         self.d = self.s.add_dream("I dream that User owns a castle made of compilers and I am its moat.",
                                   "I dreamed User owned a castle", "strange", [1, 2], importance=10, created_at=NOW - 10)
