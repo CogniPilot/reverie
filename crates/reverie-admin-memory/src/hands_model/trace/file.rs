@@ -1,6 +1,6 @@
 use nix::{
     errno::Errno,
-    fcntl::{Flock, FlockArg, OFlag, open, openat},
+    fcntl::{Flock, FlockArg, OFlag, openat},
     sys::stat::Mode,
     unistd::getuid,
 };
@@ -10,7 +10,7 @@ use std::{
     fs::File,
     io::{self, Write},
     os::unix::fs::MetadataExt,
-    path::{Component, Path},
+    path::Path,
 };
 
 pub(super) const TRACE_BYTES: usize = 4 * 1024 * 1024;
@@ -29,11 +29,7 @@ impl TraceFile {
         if !path.is_absolute() || !(1024..=TRACE_BYTES).contains(&limit) {
             return Err(crate::refused());
         }
-        let directory = open_directory(parent)?;
-        let metadata = directory.metadata()?;
-        if metadata.uid() != getuid().as_raw() || metadata.mode() & 0o077 != 0 {
-            return Err(crate::refused());
-        }
+        let directory = crate::private_directory::open_private_directory(parent)?;
         let file = Self {
             directory,
             leaf,
@@ -90,19 +86,6 @@ impl TraceFile {
         }
         Ok(())
     }
-}
-
-fn open_directory(path: &Path) -> io::Result<File> {
-    let flags = OFlag::O_PATH | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
-    let mut directory = open(Path::new("/"), flags, Mode::empty())?;
-    for component in path.components() {
-        directory = match component {
-            Component::RootDir => continue,
-            Component::Normal(name) => openat(&directory, name, flags, Mode::empty())?,
-            _ => return Err(crate::refused()),
-        };
-    }
-    Ok(File::from(directory))
 }
 
 fn write_line(file: &mut File, mut raw: String, limit: usize) -> io::Result<()> {

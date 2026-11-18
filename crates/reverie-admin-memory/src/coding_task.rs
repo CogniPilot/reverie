@@ -1,6 +1,7 @@
 //! The isolated Hands task engine requests every model, authorization and
 //! tool effect from the existing controller. It has no network or tool client.
 mod channel;
+mod diagnostics;
 mod session;
 #[cfg(test)]
 mod tests;
@@ -48,18 +49,30 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
 struct PolicyRequest {
     limits: Limits,
     frame: Option<String>,
+    diagnostics: Option<String>,
 }
 
 pub(super) fn policy(parent: i32) -> io::Result<()> {
     let raw = crate::worker_input(parent, FRAME_BYTES)?;
     let input: PolicyRequest = serde_json::from_slice(&raw)?;
     input.limits.validate()?;
-    let value = match input.frame {
+    if input.frame.is_none() && input.diagnostics.is_none() {
+        return crate::write_reply(
+            &json!({"reserve_chars": input.limits.reserve_chars()}),
+            FRAME_BYTES,
+        );
+    }
+    let mut value = match input.frame {
         Some(frame) => match ToolReply::checked(Value::String(frame), &input.limits) {
-            Ok((reply, frame)) => json!({"result": reply, "frame": frame}),
+            Ok((reply, _)) => json!({"result": reply}),
             Err(reason) => json!({"error": reason}),
         },
-        None => json!({"reserve_chars": input.limits.reserve_chars()}),
+        None => json!({}),
     };
+    value["report"] = input
+        .diagnostics
+        .as_deref()
+        .and_then(diagnostics::report)
+        .unwrap_or(Value::Null);
     crate::write_reply(&value, FRAME_BYTES)
 }

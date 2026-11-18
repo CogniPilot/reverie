@@ -6,12 +6,11 @@ import time
 from dataclasses import asdict, replace
 
 from coding_arbiter import ModelArbiter
-from coding_chat import RULES, authorize_task, read_tool_specs, validate_settings
-from coding_diagnostics import runner_report
+from coding_chat import (RULES, authorize_task, inject_managed_context, read_tool_specs,
+                         report_managed_context, validate_settings)
 from coding_process import BoundedProcess, CodingWorker
-from coding_tasks import (Limits, begin_request, checked_result, control_request,
-                          encoded, permitted_sender, reserve_chars)
-import managed_context
+from coding_tasks import (Limits, begin_request, control_request, encoded, permitted_sender,
+                          reserve_chars, runner_outcome)
 
 
 class TaskManager:
@@ -177,10 +176,10 @@ class TaskManager:
         """Also runs on resume after preemption. Current authorization follows every context IO."""
         cfg = dict(self.cfg, prompt_cap_chars=min(self.cfg['prompt_cap_chars'], self.active['limits'].prompt_chars))
         request = dict(payload)
-        request['messages'] = managed_context.inject(cfg, payload['messages'],
-            len(json.dumps(payload.get('tools') or [])), self.loop.request_chars)
+        used = len(json.dumps(payload.get('tools') or [])) + self.loop.request_chars(payload['messages'])
+        request['messages'] = inject_managed_context(cfg, payload['messages'], used)
         self.cfg['_managed_context_started'] = cfg['_managed_context_started']
-        managed_context.report(cfg)
+        report_managed_context(cfg)
         if cfg.get('_managed_context_reported'): self.cfg['_managed_context_reported'] = True
         denied = self.authorization()
         if denied: raise ValueError('Current coding authorization refused')
@@ -193,10 +192,9 @@ class TaskManager:
             self.loop.log('coding controller failed')
             self.finish({'status': 'stopped', 'reason': 'controller_failed'})
 
-    def record_runner_report(self, process):
+    def record_runner_report(self, report):
         job = self.active
         row = job['journal'][job['key']]
-        report = runner_report(getattr(process, 'stderr_tail', b''))
         if report is None:
             row['runner_reports_unavailable'] = row.get('runner_reports_unavailable', 0) + 1
             self.loop.log('coding runner', job['task_id'], 'report_unavailable')
@@ -232,17 +230,13 @@ class TaskManager:
                 process = job['runner']
                 if not process.poll():
                     return
-                self.record_runner_report(process)
-                if process.error:
-                    reason = {'timeout': 'runner_timeout', 'output_limit': 'output_limit'}.get(process.error, 'runner_crash')
+                result, report = runner_outcome(process, job['limits'])
+                self.record_runner_report(report)
+                if process.error or result is None:
+                    reason = {'timeout': 'runner_timeout', 'output_limit': 'output_limit', None: 'invalid_output'}.get(
+                        process.error, 'runner_crash')
                     result = {'version': 1, 'ok': False, 'output': '', 'error': reason,
                               'truncated': False, 'exit_code': None}
-                else:
-                    try:
-                        result, _ = checked_result(bytes(process.output), job['limits'])
-                    except Exception:
-                        result = {'version': 1, 'ok': False, 'output': '', 'error': 'invalid_output',
-                                  'truncated': False, 'exit_code': None}
                 request = event['payload']['request']
                 entry = {'tool': request['name'], 'ok': result['ok'], 'exit_code': result['exit_code']}
                 path = request.get('args', {}).get('path')

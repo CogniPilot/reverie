@@ -49,18 +49,22 @@ def reserve_chars(limits):
     return reply['reserve_chars']
 
 
-def checked_result(value, limits):
-    if isinstance(value, bytes):
-        if len(value) > limits.wire_bytes:
-            raise ValueError('wire_limit')
-        value = value.decode('utf-8')
-    if not isinstance(value, str):
-        value = encoded(value)
-    reply = native_memory_json('hands-coding-policy-worker',
-                               {'limits': asdict(limits), 'frame': value}, 1048576)
-    if reply is None or 'result' not in reply:
-        raise ValueError(reply.get('error', 'invalid_result') if reply else 'invalid_result')
-    return reply['result'], reply['frame']
+def bounded_runner_text(value, limit):
+    if isinstance(value, (bytes, bytearray)) and len(value) <= limit:
+        try:
+            return value.decode('utf-8')
+        except UnicodeError:
+            pass
+    return ''
+
+
+def runner_outcome(process, limits):
+    reply = native_memory_json('hands-coding-policy-worker', {
+        'limits': asdict(limits),
+        'frame': None if process.error else bounded_runner_text(process.output, limits.wire_bytes),
+        'diagnostics': bounded_runner_text(getattr(process, 'stderr_tail', b''), 4096),
+    }, 1048576)
+    return (reply.get('result'), reply.get('report')) if reply else (None, None)
 
 
 def control_request(message):

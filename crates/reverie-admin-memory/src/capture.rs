@@ -46,6 +46,7 @@ pub(crate) struct Limits<'a> {
     deadline: Instant,
     stdout: usize,
     signals: Option<&'a Signals>,
+    group: bool,
 }
 
 impl<'a> Limits<'a> {
@@ -54,6 +55,7 @@ impl<'a> Limits<'a> {
             deadline,
             stdout,
             signals: Some(signals),
+            group: true,
         }
     }
     pub(crate) fn office(deadline: Instant, stdout: usize) -> Self {
@@ -61,10 +63,17 @@ impl<'a> Limits<'a> {
             deadline,
             stdout,
             signals: None,
+            group: false,
+        }
+    }
+    pub(crate) fn scoped(deadline: Instant, stdout: usize) -> Self {
+        Self {
+            group: true,
+            ..Self::office(deadline, stdout)
         }
     }
     fn group(&self) -> bool {
-        self.signals.is_some()
+        self.group
     }
     fn check(&self, pid: Pid) -> io::Result<()> {
         if Instant::now() >= self.deadline {

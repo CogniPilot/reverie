@@ -8,8 +8,10 @@ mod database;
 mod embedding_worker;
 mod hands_model;
 mod journal;
+mod managed_context;
 mod office;
 mod opencode_context;
+mod private_directory;
 mod read_turn;
 mod recall;
 mod save;
@@ -199,6 +201,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-chat-worker" => hands_model::chat,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,
+        "--hands-managed-context-worker" => managed_context::run,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

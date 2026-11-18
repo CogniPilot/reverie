@@ -172,8 +172,10 @@ class CodingTaskTests(unittest.TestCase):
                 self.assertEqual(result.reason, 'runner_protocol')
                 self.assertEqual(len(requests), 1)
                 self.assertEqual(len(effects), 1)
-        with self.assertRaises(UnicodeDecodeError):
-            tasks.checked_result(b'\xff', tasks.Limits())
+        result, report = tasks.runner_outcome(SimpleNamespace(error=None, output=b'\xff', stderr_tail=b'\xff'),
+                                              tasks.Limits())
+        self.assertIsNone(result)
+        self.assertIsNone(report)
 
     def test_total_output_cap_stops_before_more_model_calls(self):
         result, requests, effects = self.execute([call()], results=[response('x' * 1000)],

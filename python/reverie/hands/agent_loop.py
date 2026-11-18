@@ -54,7 +54,6 @@ from coding_manager import TaskManager
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
 import public_web
-import managed_context
 import agent_journal
 
 _terminal = None
@@ -242,7 +241,7 @@ def chat_model(cfg, messages, tools=None):
     meter = dict(cfg['token_meter']) if cfg.get('token_meter') else None
     if meter is not None and cfg.get('vision'):
         meter['image_tokens_per_image'] = cfg.get('image_tokens_per_image', 2048)
-    managed_context.report(cfg)
+    coding_chat.report_managed_context(cfg)
     return coding_chat.model_completion({
         'api_base': cfg['api_base'], 'key_env': cfg.get('model_key_env'), 'timeout_s': cfg['model_timeout_s'],
         'max_response_bytes': 262144, 'token_meter': meter, 'events_file': cfg.get('model_events_file'),
@@ -651,7 +650,9 @@ def pending_context(cfg, messages, tools_chars=0):
 
 def turn_context(cfg, messages, tools_chars=0):
     request = pending_context(cfg, messages, tools_chars)
-    return managed_context.inject(cfg, request, tools_chars, request_chars)
+    if not cfg.get('managed_context'):
+        return request
+    return coding_chat.inject_managed_context(cfg, request, request_chars(request) + tools_chars)
 
 
 def search_reserve(cfg):

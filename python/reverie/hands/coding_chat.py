@@ -49,6 +49,32 @@ def model_completion(config):
     raise ValueError('model request failed')
 
 
+def inject_managed_context(cfg, messages, used_chars):
+    if not cfg.get('managed_context'):
+        return messages
+    stage = 'model-request' if cfg.get('_managed_context_started') else 'startup'
+    reply = native_memory_json('hands-managed-context-worker', {
+        'action': 'prepare', 'cli': cfg.get('cli'),
+        'state_file': os.path.join(os.getcwd(), cfg['state_file']),
+        'session_id': cfg['self_session_id'], 'stage': stage,
+        'available_chars': cfg['prompt_cap_chars'] - used_chars,
+    }, 65536)
+    if reply is None or 'snapshot' not in reply:
+        raise ValueError('Managed context cannot fit the current prompt budget')
+    cfg['_managed_context_started'] = True
+    cfg['_managed_context_pending'] = reply.get('pending')
+    return messages[:1] + [reply['snapshot']] + messages[1:]
+
+
+def report_managed_context(cfg):
+    pending = cfg.pop('_managed_context_pending', None)
+    if pending:
+        reply = native_memory_json('hands-managed-context-worker',
+            {'action': 'receipt', 'cli': cfg.get('cli'), 'pending': pending}, 65536)
+        if reply is not None and reply.get('reported') is True:
+            cfg['_managed_context_reported'] = True
+
+
 def read_tool_specs(path):
     export = read_json(path, cap=16384)
     if (not isinstance(export, dict) or set(export) != {'version', 'args_cap', 'result_cap', 'tools'} or
