@@ -126,6 +126,16 @@ fn memories(mut rows: rusqlite::Rows<'_>) -> Result<Vec<Memory>> {
     }
     Ok(output)
 }
+pub(super) fn all_memories(db: &Connection, kind: Option<&str>) -> Result<Vec<Memory>> {
+    if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
+        let mut statement =
+            db.prepare("SELECT * FROM memories WHERE kind=? ORDER BY created_at, id")?;
+        memories(statement.query([kind])?)
+    } else {
+        let mut statement = db.prepare("SELECT * FROM memories ORDER BY created_at, id")?;
+        memories(statement.query([])?)
+    }
+}
 impl MemoryTransaction<'_> {
     pub fn get(&self, id: i64) -> Result<Memory> {
         let mut statement = self.db.prepare("SELECT * FROM memories WHERE id=?")?;
@@ -145,17 +155,7 @@ impl MemoryTransaction<'_> {
         })
     }
     pub fn all(&self, kind: Option<&str>) -> Result<Vec<Memory>> {
-        if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
-            let mut statement = self
-                .db
-                .prepare("SELECT * FROM memories WHERE kind=? ORDER BY created_at, id")?;
-            memories(statement.query([kind])?)
-        } else {
-            let mut statement = self
-                .db
-                .prepare("SELECT * FROM memories ORDER BY created_at, id")?;
-            memories(statement.query([])?)
-        }
+        all_memories(self.db, kind)
     }
     pub fn recent_episodes(&self, n: i64) -> Result<Vec<Memory>> {
         let mut statement = self.db.prepare(
@@ -230,6 +230,14 @@ pub(super) fn candidates(
     model: &MetadataText,
     options: &RetrievalOptions<'_>,
 ) -> Result<Vec<Memory>> {
+    candidates_where(db, model, options, |_| true)
+}
+pub(super) fn candidates_where(
+    db: &Connection,
+    model: &MetadataText,
+    options: &RetrievalOptions<'_>,
+    include: impl Fn(i64) -> bool,
+) -> Result<Vec<Memory>> {
     let model = model.scalar_text().ok_or(EmbeddingError::InvalidText)?;
     let placeholders = vec!["?"; options.kinds.len()].join(",");
     let sql = format!("SELECT * FROM memories WHERE kind IN ({placeholders}) AND embed_model=?");
@@ -239,7 +247,8 @@ pub(super) fn candidates(
     let mut rows = statement.query(params_from_iter(values))?;
     let mut candidates = Vec::new();
     while let Some(row) = rows.next()? {
-        if !options.exclude_ids.contains(&row.get::<_, i64>("id")?) {
+        let id = row.get::<_, i64>("id")?;
+        if !options.exclude_ids.contains(&id) && include(id) {
             candidates.push(memory(row)?);
         }
     }

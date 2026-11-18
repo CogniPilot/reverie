@@ -1,6 +1,8 @@
 //! Existing-memory observations. Opening never creates/migrates tables, selects
 //! another model, imports history, seeds beliefs, or touches access timestamps.
 use super::*;
+use reverie_contracts::memory::channel::{ChannelEvidence, ChannelRecords};
+use reverie_core::ids::ChatRoomId;
 use reverie_core::shutdown::ShutdownStatus;
 use rusqlite::OptionalExtension;
 mod native;
@@ -99,6 +101,35 @@ impl MemoryReader {
     }
     pub fn retrieve(&self, text: &str, options: RetrievalOptions<'_>) -> Result<Vec<Memory>> {
         self.retrieve_text(EmbeddingText::from_scalar_text(text), options)
+    }
+    /// Rank the unsuperseded evidence from one SQLite snapshot of this room.
+    /// The caller checks membership and selects the room's existing file.
+    pub fn recall_channel(
+        &self,
+        room: &ChatRoomId,
+        text: &str,
+        max_chars: usize,
+    ) -> Result<ChannelEvidence> {
+        let options = RetrievalOptions {
+            min_relevance: 0.15,
+            ..RetrievalOptions::default()
+        };
+        let query = query::prepare_query(
+            EmbeddingText::from_scalar_text(text),
+            &options,
+            self.embedder.as_ref(),
+        )?;
+        self.session(|db| {
+            let snapshot = db.unchecked_transaction()?;
+            let rows = query::all_memories(&snapshot, None)?;
+            let records = ChannelRecords::new(&rows, room);
+            let candidates = query::candidates_where(&snapshot, &query.model, &options, |id| {
+                records.includes(id)
+            })?;
+            snapshot.commit()?;
+            let ranked = query::score(candidates, &query, &options, self.decay_per_hour)?;
+            Ok(records.render(&ranked, max_chars))
+        })
     }
     pub fn get_state(&self, key: &str) -> Result<Option<String>> {
         self.session(|db| state(db, key))

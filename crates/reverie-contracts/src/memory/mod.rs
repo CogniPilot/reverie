@@ -1,5 +1,6 @@
 //! Named existing SQLite memory fields and outward memory records. Arbitrary
 //! legacy metadata remains data; there is no public general JSON editor.
+pub mod channel;
 mod embedding;
 mod fields;
 mod history;

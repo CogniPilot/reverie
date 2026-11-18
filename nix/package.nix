@@ -643,11 +643,7 @@ let
     runtimeInputs = [ memory ];
     text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
   };
-  adminMemory = pkgs.writeShellApplication {
-    name = "reverie-admin-memory";
-    runtimeInputs = [ memory ];
-    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/memory_access.py "$@"'';
-  };
+  adminMemory = import ./admin-memory.nix { inherit pkgs src; };
   handsTools = import ./hands-tools.nix { inherit pkgs src; };
   modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   modelRelay = pkgs.writeShellApplication {
@@ -711,7 +707,7 @@ let
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit cacert workerChild; };
+    passthru = { inherit adminMemory cacert workerChild; };
   };
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };

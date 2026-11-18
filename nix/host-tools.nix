@@ -1,5 +1,5 @@
 { pkgs, src }:
-# The four console-free host tools, built in one cargo invocation so reverie-host and its closure
+# The console-free tools, built in one cargo invocation so reverie-host and its closure
 # compile once for all of them. Each tool's own nix file links its binary from here. They resolve
 # the same features alone as together: reverie-host carries the lease tool's nix "signal", so the
 # other tools now also compile nix's signal and process modules.
@@ -9,11 +9,11 @@ let
     inherit pkgs src;
     members = [
       "reverie-contracts" "reverie-core" "reverie-diagnostics" "reverie-host" "reverie-worker-client" "reverie-http" "reverie-python-regex" "reverie-store"
-      "reverie-deployment" "reverie-lease-cli" "reverie-nix-store-prepare" "reverie-worker-child" "reverie-application"
+      "reverie-admin-memory" "reverie-deployment" "reverie-lease-cli" "reverie-nix-store-prepare" "reverie-worker-child" "reverie-application"
     ];
     vendors = [ "rustpython-sre-engine" "rustpython-wtf8" ];
   };
-  packages = [ "reverie-deployment" "reverie-lease-cli" "reverie-nix-store-prepare" "reverie-worker-child" ];
+  packages = [ "reverie-admin-memory" "reverie-deployment" "reverie-lease-cli" "reverie-nix-store-prepare" "reverie-worker-child" ];
   each = flag: builtins.concatMap (package: [ flag package ]) packages;
 in
 pkgs.rustPlatform.buildRustPackage {
@@ -22,7 +22,7 @@ pkgs.rustPlatform.buildRustPackage {
   src = workspace.source;
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = each "-p";
-  cargoTestFlags = each "-p";
+  cargoTestFlags = each "-p" ++ [ "--features" "reverie-admin-memory/test-fixtures" ];
   # reverie-deployment's fixed helper paths and test inputs; no other crate here reads them.
   nativeCheckInputs = [ pkgs.gnutar pkgs.attr pkgs.acl pkgs.bubblewrap ];
   NIX_REVERIE_TEST_DEPLOYMENT_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";

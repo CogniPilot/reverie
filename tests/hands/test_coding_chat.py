@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -10,11 +11,14 @@ import agent_loop as loop
 import coding_chat
 from reverie.hands.coding_tasks import control_request, permitted_sender
 from reverie.hands.launcher import runtime_settings
+from config_location import configuration_path
 from test_coding_support import FakeChat, cfg_for
 
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'mark': 'owner_typed', 'authenticatedOwner': True}
 DELEGATE = {'kind': 'agent', 'sessionId': 'session-operator', 'name': 'Operator'}
+MEMORY_SESSION = '10000000-0000-0000-0000-000000000001'
+MEMORY_ROOM = '20000000-0000-0000-0000-000000000002'
 
 
 class AuthorizationTests(unittest.TestCase):
@@ -152,6 +156,28 @@ class AuthorizationTests(unittest.TestCase):
 
 
 class HarnessConfigurationTests(unittest.TestCase):
+    def test_scoped_task_keeps_launcher_data_root_and_rejects_competing_config(self):
+        import coding_chat
+        with tempfile.TemporaryDirectory() as directory:
+            env={'REVERIE_SESSION_ID':MEMORY_SESSION,'REVERIE_DATA_DIR':str(Path(directory)/'selected'),
+                 'REVERIE_AGENT_HOME':str(Path(directory)/'home'),'HOME':directory,
+                 'REVERIE_API_URL':'http://127.0.0.1:12345'}
+            selected=configuration_path(env)
+            cfg={'self_session_id':MEMORY_SESSION,'_config_path':str(selected),'coding':{'tasks':{'fixture':{'office_access':True}}}}
+            with patch.dict(os.environ,env,clear=True):
+                scoped=coding_chat.office_environment(cfg,'fixture')
+                self.assertEqual(scoped['REVERIE_DATA_DIR'],env['REVERIE_DATA_DIR'])
+                self.assertEqual(scoped['REVERIE_AGENT_HOME'],env['REVERIE_AGENT_HOME'])
+                cfg['_config_path']=str(Path(directory)/'.reverie/hands'/MEMORY_SESSION/'agent.json')
+                with self.assertRaises(ValueError): coding_chat.office_environment(cfg,'fixture')
+
+    def test_config_alias_and_other_session_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env={'REVERIE_DATA_DIR':directory,'REVERIE_SESSION_ID':MEMORY_SESSION}
+            with self.assertRaises(ValueError): configuration_path(env, MEMORY_ROOM)
+            alias=Path(directory)/'alias'; alias.symlink_to(directory, target_is_directory=True)
+            with self.assertRaises(ValueError): configuration_path({**env,'REVERIE_DATA_DIR':str(alias)})
+
     def test_external_marker_does_not_grant_authority(self):
         message = {'text': '[external agent] /code example Fix it. @Jester',
                    'from': {'kind': 'agent', 'sessionId': 'external'}}

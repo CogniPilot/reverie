@@ -1,0 +1,31 @@
+//! Synthetic executable implementing the installed Office membership command.
+use std::{
+    env, fs,
+    io::{self, Write},
+    path::PathBuf,
+    process::ExitCode,
+    time::Duration,
+};
+
+fn main() -> ExitCode {
+    let mut args = env::args().skip(1);
+    let root = PathBuf::from(args.next().unwrap());
+    assert_eq!(args.collect::<Vec<_>>(), ["rooms", "--json"]);
+    let counter = root.join("calls");
+    let call = fs::read_to_string(&counter)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0_u32)
+        + 1;
+    fs::write(counter, call.to_string()).unwrap();
+    let mode = fs::read_to_string(root.join("mode")).unwrap_or_default();
+    match mode.as_str() {
+        "blocked" => std::thread::sleep(Duration::from_secs(20)),
+        "overflow" => io::stdout()
+            .write_all(&vec![b'x'; 1_100_000])
+            .unwrap_or_default(),
+        "revoked" if call >= 4 => println!("[]"),
+        _ => print!("{}", fs::read_to_string(root.join("rooms.json")).unwrap()),
+    }
+    ExitCode::SUCCESS
+}
