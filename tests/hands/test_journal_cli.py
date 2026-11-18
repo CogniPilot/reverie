@@ -139,15 +139,14 @@ class CliTests(unittest.TestCase):
             self.assertNotIn('entries', result)
 
     def test_replayed_call_shows_the_bounded_command(self):
-        call = {'function': {'name': 'journal', 'arguments': json.dumps({'command': 'save --text "crown" --tag lesson'})}}
-        self.assertEqual(json.loads(journal.replay_arguments(call)), {'command': 'save --text "crown" --tag lesson'})
-        long = {'function': {'name': 'journal', 'arguments': json.dumps({'command': 'recall ' + '雪' * 600})}}
-        replay = journal.replay_arguments(long)
-        self.assertLessEqual(len(replay.encode()), journal.REPLAY_BYTES + 64)
-        self.assertTrue(json.loads(replay)['command'].endswith('[truncated]'))
-        for bad in ({'function': {'name': 'journal', 'arguments': '<markup>'}},
-                    {'function': {'name': 'journal_commit', 'arguments': '{"text":"x"}'}}, {}):
-            self.assertEqual(journal.replay_arguments(bad), '{}')
+        turn = self.turn(1, 'What do you remember?')
+        self.run_cli(turn, 'save --text "crown" --tag lesson')
+        self.assertEqual(json.loads(turn.replay), {'command': 'save --text "crown" --tag lesson'})
+        self.run_cli(turn, 'recall ' + '雪' * 600)
+        self.assertLessEqual(len(turn.replay.encode()), 1024 + 64)
+        self.assertTrue(json.loads(turn.replay)['command'].endswith('[truncated]'))
+        turn.invoke({'function': {'name': 'journal', 'arguments': '<markup>'}})
+        self.assertEqual(turn.replay, '{}')
 
     def test_unprompted_save_needs_a_stored_reason(self):
         self.saved(1)  # first entry: the bootstrap turn needs no reason

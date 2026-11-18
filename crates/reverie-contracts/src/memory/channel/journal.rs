@@ -10,9 +10,12 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
+mod command;
+mod command_line;
 mod draft;
 mod read;
 mod write;
+pub use command::JournalCommand;
 pub use read::{JournalEntry, canonical_journal_output};
 pub use write::{JournalCommit, SourceCheck};
 

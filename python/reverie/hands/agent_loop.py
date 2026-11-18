@@ -878,11 +878,10 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
                 done = invoked if isinstance(invoked, dict) else {}
                 steps.append({'journal': verb, 'status': pick(done.get('status'), TRACE_STATUS),
                               'failure': pick(done.get('failure'), TRACE_FAILURE), 'reason': reason_code(done.get('reason'))})
-            # Rebuild the call with only its bounded command line (agent_journal.replay_arguments).
-            # Never retain arbitrary model markup or overlong tool payloads in context.
+            # Replay only the bounded arguments returned by the journal decoder.
             sent = {'id': str(call.get('id') or 'journal0')[:CALL_ID_CAP], 'type': 'function',
                     'function': {'name': call['function']['name'],
-                                 'arguments': agent_journal.replay_arguments(call)}}
+                                 'arguments': journal.replay}}
             messages.append({'role': 'assistant', 'content': '', 'tool_calls': [sent]})
             if len(result) > agent_journal.RESULT_CHARS:
                 result = '{"status":"unavailable","reason":"result_exceeds_budget"}'
@@ -1076,8 +1075,7 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
         script = os.path.join(directory, cfg.get('memory_worker_name', default_worker))
         command = [sys.executable, '-I', '-B', script]
         if os.path.realpath(script) == os.path.realpath(os.path.join(directory, default_worker)):
-            command = [os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory'),
-                       f'--automatic-worker={os.getpid()}']
+            command = agent_journal.native_memory_command('automatic-worker')
         process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)

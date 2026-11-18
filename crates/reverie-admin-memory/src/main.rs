@@ -12,6 +12,7 @@ use nix::{
     sys::{prctl, signal::Signal},
     unistd::{getpgrp, getpid, getppid},
 };
+use reverie_contracts::memory::channel::journal::JournalCommand;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -111,6 +112,11 @@ fn automatic_worker(expected_parent: i32) -> io::Result<()> {
     write_reply(&reply, AUTOMATIC_BOUND)
 }
 
+fn journal_command_worker(expected_parent: i32) -> io::Result<()> {
+    let arguments = worker_input(expected_parent, AUTOMATIC_BOUND)?;
+    write_reply(&JournalCommand::decode(&arguments), AUTOMATIC_BOUND)
+}
+
 fn write_reply(result: &impl Serialize, bound: usize) -> io::Result<()> {
     let output = serde_json::to_vec(result)?;
     if output.len() >= bound {
@@ -129,6 +135,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
     let worker = match option {
         "--recall-worker" => worker,
         "--automatic-worker" => automatic_worker,
+        "--journal-command-worker" => journal_command_worker,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))
