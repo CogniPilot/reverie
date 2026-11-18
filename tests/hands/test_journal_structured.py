@@ -16,7 +16,7 @@ HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
 import agent_journal as journal
 journal_schema = journal
-from agent_journal import digest, encoded, journal_payload, uuid, validate_draft
+from agent_journal import digest, encoded, uuid
 from agent_loop import ChatNotFound
 from reverie.instance import load_instance
 from reverie.memory import MemoryStore
@@ -83,11 +83,11 @@ class Journal:
         return original + (' ' + ' '.join(topics) if topics else '')
 
     def commit(self, draft, captured, previous_id, now_ms=None):
-        draft = validate_draft(draft, captured)
         now_ms = time.time() * 1000 if now_ms is None else now_ms
         if type(now_ms) not in (int, float) or not math.isfinite(now_ms) or now_ms < 0:
             raise ValueError('invalid commit clock')
-        payload = journal_payload(draft, captured)
+        payload = {'draft': draft, 'snapshot': captured,
+                   'classification': 'source-linked agent account; interpretation is not verified fact'}
         fingerprint = digest(payload)
         self.db.execute('BEGIN IMMEDIATE')
         try:
@@ -413,7 +413,11 @@ def perform(job, chat):
                 captured = job['captured']
                 if captured['room'] != room:
                     raise ValueError('journal room mismatch')
-                draft = journal_schema.validate_draft(job['draft'], captured)
+                draft = job['draft']
+                plan = journal_schema.journal_save_request('prepare', room=room, captured=captured,
+                    read_only=False, needs_reason=False, arguments=json.dumps(draft))
+                if not plan or plan['action'] != 'commit':
+                    raise ValueError('invalid journal fixture draft')
                 events = {e['id']: e for e in captured['events']}
                 # Verify current full source revisions and exact quotes. No model
                 # can nominate a different room, instance or coverage timestamp.
@@ -497,7 +501,12 @@ class StructuredTests(unittest.TestCase):
  def test_invalid_annotations_are_refused_before_write(self):
   for annotations in [dict(importance=True),dict(importance=5),dict(importance='huge'),dict(topics=['Kites']),dict(topics=['<script>alert(1)</script>']),dict(topics=['other']),dict(provenance='certain'),dict(confidence='low'),dict(topics=['']),dict(topics=['a','a']),dict(topics=['x'*49]),dict(topics=['a\nb']),dict(supersedes=[True]),dict(secret='x')]:
    msg=dict(id='30000000-0000-0000-0000-000000000001',roomId=ROOM,at=1,text='kite')
-   with self.subTest(annotations=annotations),self.assertRaises(ValueError):journal.validate_draft(dict(text='x',tags=['correction'],sources=[dict(id=msg['id'],quote='kite')],annotations=annotations),journal.snapshot(ROOM,[],msg))
+   with self.subTest(annotations=annotations):
+    draft=dict(text='x',tags=['correction'],sources=[dict(id=msg['id'],quote='kite')],annotations=annotations)
+    turn=journal.Turn(self.cfg,ROOM,[],msg,self.op)
+    reply=turn.invoke({'function':dict(name='journal_commit',arguments=json.dumps(draft))})
+    self.assertEqual(reply['status'],'refused')
+    self.assertIsNone(self.op('journal_status')['checkpoint'])
  def test_missing_target_rolls_back_entry_index_and_checkpoint(self):
   self.add();before=self.op('journal_status')['checkpoint']
   with self.assertRaises(ValueError):self.add('bad correction',supersedes=[999])

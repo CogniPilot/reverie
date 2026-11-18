@@ -75,6 +75,16 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(self.calls.count('journal_commit'),1)
         self.assertEqual(self.perform('journal_receipt',turn_id=MID)['status'],'committed')
 
+    def test_unavailable_settlement_worker_still_reads_once_and_leaves_outcome_unknown(self):
+        request = journal.journal_save_request
+        def fail_after_dispatch(phase, **payload):
+            return request(phase, **payload) if phase == 'prepare' else None
+        with patch.object(journal, 'journal_save_request', side_effect=fail_after_dispatch):
+            result = self.commit(self.turn(self.perform))
+        self.assertEqual(result['status'], 'unknown')
+        self.assertIn('do not retry', result['reason'])
+        self.assertEqual(self.calls, ['journal_status', 'journal_commit', 'journal_receipt'])
+
     def test_different_stored_payload_is_conflict_not_false_recovery(self):
         def operation(op,**p):
             if op=='journal_commit':

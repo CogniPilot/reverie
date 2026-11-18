@@ -17,6 +17,7 @@ def uuid(value):
     return value
 
 
+MEMORY_WORKER_BYTES = 50000
 TEXT_BYTES = 1024
 RESULT_CHARS = 2400
 CONTEXT_CHARS = 4800
@@ -48,11 +49,6 @@ def encoded(value):
 
 def digest(value):
     return hashlib.sha256(encoded(value).encode()).hexdigest()
-
-
-def journal_payload(draft, captured):
-    return {'draft': draft, 'snapshot': captured,
-            'classification': 'source-linked agent account; interpretation is not verified fact'}
 
 
 PROVENANCE = ('direct', 'relayed', 'reconstructed', 'unknown')
@@ -128,62 +124,6 @@ def snapshot(room, history, message):
             'coverage': 'bounded-visible-messages; gaps are not claimed covered'}
 
 
-def validate_draft(draft, captured):
-    if not isinstance(draft, dict) or not {'text', 'tags', 'sources'} <= set(draft) <= {'text', 'tags', 'sources', 'annotations'}:
-        raise ValueError('journal fields')
-    text, tags, sources = (draft[k] for k in ('text', 'tags', 'sources'))
-    if not isinstance(text, str) or not text.strip() or len(text.encode()) > TEXT_BYTES:
-        raise ValueError('journal text must fit 1024 UTF-8 bytes')
-    if (not isinstance(tags, list) or not 1 <= len(tags) <= 6 or
-            any(not isinstance(t, str) or t not in KINDS for t in tags) or len(set(tags)) != len(tags)):
-        raise ValueError('controlled journal tags')
-    if not isinstance(sources, list) or not 1 <= len(sources) <= 4:
-        raise ValueError('one to four source quotes required')
-    events = {e['id']: e for e in captured['events']}
-    seen = set()
-    for source in sources:
-        if not isinstance(source, dict) or set(source) != {'id', 'quote'}:
-            raise ValueError('source fields')
-        if source['id'] not in events or source['id'] in seen:
-            raise ValueError('source not in this bounded turn')
-        quote = source['quote']
-        if not isinstance(quote, str) or not quote.strip() or len(quote.encode()) > 256:
-            raise ValueError('bounded exact source quote required')
-        seen.add(source['id'])
-    result = {'text': text, 'tags': tags, 'sources': sources}
-    if 'annotations' in draft:
-        meta = draft['annotations']
-        if (not isinstance(meta, dict) or not meta or
-                set(meta) - {'topics', 'importance', 'provenance', 'supersedes', 'related', 'reason'}):
-            raise ValueError('bounded journal annotations required')
-        if 'topics' in meta:
-            topics = meta['topics']
-            if (not isinstance(topics, list) or not 1 <= len(topics) <= 6 or
-                    any(not isinstance(t, str) or not t.strip() or t != t.strip() or
-                        len(t.encode()) > 48 or any(ord(c) < 32 for c in t) for t in topics) or
-                    len(set(topics)) != len(topics) or any(t not in TOPICS for t in topics)):
-                raise ValueError('one to six distinct topics from the curated list required')
-        if 'importance' in meta and meta['importance'] not in IMPORTANCE:
-            raise ValueError('importance is notable, important or keystone')
-        if 'provenance' in meta and meta['provenance'] not in PROVENANCE:
-            raise ValueError('provenance is direct, relayed, reconstructed or unknown')
-        if 'supersedes' in meta:
-            targets = meta['supersedes']
-            if ('correction' not in tags or not isinstance(targets, list) or not 1 <= len(targets) <= 4 or
-                    any(type(t) is not int or t < 1 for t in targets) or len(set(targets)) != len(targets)):
-                raise ValueError('a correction names one to four prior journal entries')
-        if 'reason' in meta and (not isinstance(meta['reason'], str) or not meta['reason'].strip() or
-                                 len(meta['reason'].encode()) > 200):
-            raise ValueError('a save reason is one short line of text')
-        if 'related' in meta:
-            targets = meta['related']
-            if (not isinstance(targets, list) or not 1 <= len(targets) <= 4 or
-                    any(type(t) is not int or t < 1 for t in targets) or len(set(targets)) != len(targets)):
-                raise ValueError('related names one to four prior journal entries')
-        result['annotations'] = meta
-    return result
-
-
 HELP = {
     '': """journal: your source-linked journal for this room. One command per call.
 
@@ -241,13 +181,6 @@ No entry text. Counts cover the examined page only. Importance and provenance ar
 COMMANDS = ('save', 'recall', 'source', 'receipt', 'map')
 # What a worker that refused a save before writing reports, and what the model is told. Nothing was written, so a
 # corrected save may follow.
-SOURCE_REFUSALS = {
-    'quote_not_in_source': 'quote_not_in_source; nothing was saved. Copy each quote exactly from the cited message',
-    'source_changed': 'source_changed; nothing was saved. The cited message changed during this turn; read it again',
-    'source_unavailable': 'source_unavailable; nothing was saved. The cited message can no longer be read',
-}
-
-
 def help_text(topic, read_only):
     topic = topic.lower()
     if topic not in HELP:
@@ -306,22 +239,37 @@ def native_memory_command(worker):
             f'--{worker}={os.getpid()}']
 
 
+def native_memory_request(worker, arguments):
+    if len(arguments) > MEMORY_WORKER_BYTES:
+        return None
+    try:
+        reply = subprocess.run(native_memory_command(worker), input=arguments, capture_output=True,
+                               check=True, start_new_session=True, timeout=3)
+        result = json.loads(reply.stdout)
+        return result if isinstance(result, dict) else None
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def journal_command(raw):
-    """Send model arguments to the packaged Rust decoder."""
-    if not isinstance(raw, str) or len(raw) > 50000:
+    if not isinstance(raw, str) or len(raw) > MEMORY_WORKER_BYTES:
         return {'error': 'bounded JSON arguments required', 'replay': '{}'}
     try:
         arguments = raw.encode()
-        if len(arguments) > 50000:
-            return {'error': 'bounded JSON arguments required', 'replay': '{}'}
-        reply = subprocess.run(native_memory_command('journal-command-worker'),
-                               input=arguments, capture_output=True, check=True,
-                               start_new_session=True, timeout=3)
-        return json.loads(reply.stdout)
     except UnicodeError:
         return {'error': 'UTF-8 JSON arguments required', 'replay': '{}'}
-    except (OSError, subprocess.SubprocessError, ValueError):
+    if len(arguments) > MEMORY_WORKER_BYTES:
+        return {'error': 'bounded JSON arguments required', 'replay': '{}'}
+    return native_memory_request('journal-command-worker', arguments)
+
+
+def journal_save_request(phase, **payload):
+    try:
+        arguments = json.dumps({'phase': phase, 'payload': payload}, separators=(',', ':'),
+                               allow_nan=False).encode()
+    except (TypeError, ValueError):
         return None
+    return native_memory_request('journal-save-worker', arguments)
 
 
 class Turn:
@@ -448,15 +396,8 @@ class Turn:
         self.calls += 1
         try:
             fn = call['function']
-            if fn['name'] == 'journal_commit' and self.read_only:
-                return {'status': 'refused', 'reason': 'read_only_request'}
-            if fn['name'] == 'journal_commit' and self.needs_reason:
-                try:
-                    stated = json.loads(fn.get('arguments') or '{}').get('annotations', {}).get('reason')
-                except (ValueError, AttributeError):
-                    stated = None
-                if not isinstance(stated, str) or not stated.strip():
-                    return {'status': 'refused', 'reason': 'save_needs_reason_this_turn; add --reason WHY'}
+            if fn['name'] == 'journal_commit':
+                return self.save(fn.get('arguments'))
             raw = fn.get('arguments')
             if not isinstance(raw, str) or len(raw.encode()) > 8192:
                 raise ValueError('bounded JSON arguments required')
@@ -522,45 +463,40 @@ class Turn:
                     self.captured['coverage'] = 'bounded-visible-and-exact-sources; gaps are not claimed covered'
                 self.expanded_sources.add(source_id)
                 return result
-            if fn['name'] == 'journal_commit':
-                validate_draft(args, self.captured)
-                turn_id = self.captured['end']['id']
-                expected_hash = digest(journal_payload(args, self.captured))
-                result = self.operation('journal_commit', draft=args, captured=self.captured, previous_id=self.previous_id)
-                if (isinstance(result, dict) and result.get('status') == 'refused' and
-                        result.get('reason') in SOURCE_REFUSALS):
-                    return {'status': 'refused', 'reason': SOURCE_REFUSALS[result['reason']], 'turn_id': turn_id}
-                if not result or result.get('status') == 'unknown':
-                    # Read once after the existing worker boundary has settled.
-                    # This is never a second journal_commit call.
-                    try:
-                        recovered = self.operation('journal_receipt', turn_id=turn_id, expected_hash=expected_hash)
-                    except Exception:
-                        recovered = None
-                    if (isinstance(recovered, dict) and recovered.get('status') == 'committed' and
-                            recovered.get('turn_id') == turn_id and recovered.get('payload_sha256') == expected_hash and
-                            type(recovered.get('entry_id')) is int and recovered['entry_id'] > 0 and
-                            type(recovered.get('committed_ms')) in (int, float) and
-                            math.isfinite(recovered['committed_ms']) and recovered['committed_ms'] >= 0):
-                        result = {'status': 'committed', 'turn_id': turn_id,
-                                  'entry_id': recovered['entry_id'], 'committed_ms': recovered['committed_ms'],
-                                  'payload_sha256': expected_hash,
-                                  'evidence': 'durable receipt matched; no semantic or current-source verification',
-                                  'replayed': None, 'write_retried': False,
-                                  'recovered_after_unknown': True}
-                    elif isinstance(recovered, dict) and recovered.get('status') == 'conflict':
-                        return {'status': 'refused', 'reason': 'operation_payload_conflict', 'turn_id': turn_id}
-                    else:
-                        recent = self.failures[self.failure_mark:]
-                        return {'status': 'unknown', 'turn_id': turn_id,
-                                'reason': 'write outcome unresolved; do not retry the write',
-                                **({'failure': recent[-1]} if recent else {})}
-                if result and result.get('status') == 'committed':
-                    self.previous_id = result['entry_id']
-                    result = dict(result, turn_id=turn_id, check_with=f'receipt {turn_id}')
-                return result or {'status': 'unknown', 'reason': 'worker_unavailable; do not assume no write'}
             if not isinstance(args, dict) or set(args) != {'query'}:
                 raise ValueError('query field required')
             return self.operation('journal_recall', query=args['query']) or self.unavailable()
         except (ValueError, TypeError, KeyError):
             return {'status': 'refused', 'reason': 'invalid_arguments_or_source; compress text and use exact source IDs/quotes'}
+
+    def save(self, raw):
+        plan = journal_save_request('prepare', room=self.captured['room'], captured=self.captured,
+                                    read_only=self.read_only, needs_reason=self.needs_reason,
+                                    arguments=raw if isinstance(raw, str) and len(raw) <= MEMORY_WORKER_BYTES else None)
+        if plan is None:
+            return self.unavailable(reason='journal_save_worker_unavailable')
+        if plan.get('action') == 'reply':
+            return plan['reply']
+        if plan.get('action') != 'commit':
+            return self.unavailable(reason='journal_save_worker_unavailable')
+        key = plan['key']
+        result = self.save_effect('journal_commit', draft=plan['draft'], captured=self.captured,
+                                  previous_id=self.previous_id)
+        settled = journal_save_request('classify', key=key, result=result)
+        if not settled or settled.get('action') != 'reply':
+            result = self.save_effect('journal_receipt', **key)
+            recent = self.failures[self.failure_mark:]
+            settled = journal_save_request('recover', key=key, result=result,
+                                           failure=recent[-1] if recent else None)
+        if not settled or settled.get('action') != 'reply' or not isinstance(settled.get('reply'), dict):
+            return {'status': 'unknown', 'turn_id': key['turn_id'],
+                    'reason': 'write outcome unresolved; do not retry the write'}
+        if 'previous_id' in settled:
+            self.previous_id = settled['previous_id']
+        return settled['reply']
+
+    def save_effect(self, operation, **payload):
+        try:
+            return self.operation(operation, **payload)
+        except Exception:
+            return None
