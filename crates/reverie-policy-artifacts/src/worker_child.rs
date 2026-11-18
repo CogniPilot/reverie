@@ -219,7 +219,11 @@ fn derived_image(base: &Path) -> Result<Value> {
 }
 fn manifest_label(base: &Base) -> Result<&str> {
     need(
-        base.version == 1 && base.purpose == "worker-image-provenance-v1",
+        reverie_contracts::resource_actor::WorkerProvenanceVersion::parse(
+            u64::from(base.version),
+            &base.purpose,
+        )
+        .is_some(),
         "WORKER_CHILD_BASE_PROVENANCE_SCHEMA",
     )?;
     base.image_spec["Config"]["Labels"][LABEL]

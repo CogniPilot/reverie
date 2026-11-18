@@ -35,7 +35,7 @@ class StaticMonitorSourceTests(unittest.TestCase):
         shell=shutil.which('bash');compiler=shutil.which(os.environ.get('CC','cc'))
         if not shell or not compiler:
             cls.temp.cleanup();raise unittest.SkipTest('Native-flake C compiler and Bash required for owned source control')
-        source=Path(__file__).resolve().parents[1]/'python/reverie/human_terminal_static.c'
+        source=Path(__file__).resolve().parents[1]/'nix/human-terminal-static.c'
         cls.compiler,cls.source=compiler,source
         result=subprocess.run([compiler,'-std=c11','-O2','-Wall','-Wextra','-Werror',
             '-DHUMAN_SHELL='+json.dumps(str(Path(shell).resolve())),'-DHUMAN_HOME='+json.dumps(str(cls.root)),

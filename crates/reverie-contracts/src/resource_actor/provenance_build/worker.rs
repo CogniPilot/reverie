@@ -1,21 +1,34 @@
-//! Existing v1 worker factory DATA. Its legacy selected-file pins are not a
-//! complete Rust source proof or an authority grant. Qualification is external.
+//! Worker factory provenance data with native selected-file pins.
 use super::*;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
-pub const WORKER_IMAGE_V1_FACTORY_FILES: [&str; 11] = [
-    "flake.nix",
-    "nix/image.nix",
-    "nix/human-terminal-toolkit.nix",
-    "nix/worker-idmap.nix",
-    "nix/worker-idmap.py",
-    "nix/worker-base-tools.nix",
-    "python/reverie/human_terminal_static.c",
-    "python/reverie/worker_image_provenance.py",
-    "python/reverie/website_image_provenance.py",
-    "python/reverie/__init__.py",
-    "nix/worker-image-provenance.nix",
-];
+pub const WORKER_FACTORY_INVENTORY_PATH: &str =
+    "crates/reverie-contracts/src/resource_actor/provenance_build/worker-factory-v2.json";
+pub const WORKER_FACTORY_INVENTORY: &str = include_str!("worker-factory-v2.json");
+
+pub fn worker_factory_files() -> &'static [&'static str] {
+    static FILES: LazyLock<Vec<&str>> = LazyLock::new(|| {
+        serde_json::from_str(WORKER_FACTORY_INVENTORY).expect("compiled worker factory inventory")
+    });
+    &FILES
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkerProvenanceVersion {
+    Legacy,
+    Native,
+}
+
+impl WorkerProvenanceVersion {
+    pub fn parse(version: u64, purpose: &str) -> Option<Self> {
+        match (version, purpose) {
+            (1, "worker-image-provenance-v1") => Some(Self::Legacy),
+            (2, "worker-image-provenance-v2") => Some(Self::Native),
+            _ => None,
+        }
+    }
+}
 pub const HUMAN_TERMINAL_FILES: [&str; 2] = [
     "/opt/reverie/human/bin/bash",
     "/opt/reverie/human/bin/reverie-human-shell",
@@ -117,23 +130,24 @@ impl WorkerImageProvenanceBuild {
         source: &PythonText,
         files: &[CodeFile],
     ) -> Result<Vec<u8>> {
+        let expected_files = worker_factory_files();
         need(
-            files.len() == WORKER_IMAGE_V1_FACTORY_FILES.len(),
-            "WORKER_BUILD_V1_SOURCE_PINS",
+            files.len() == expected_files.len(),
+            "WORKER_BUILD_SOURCE_PINS",
         )?;
         let mut source_files = BTreeMap::new();
-        for (name, pin) in WORKER_IMAGE_V1_FACTORY_FILES.iter().zip(files) {
+        for (name, pin) in expected_files.iter().zip(files) {
             let mut expected = source.codepoints().to_vec();
             expected.extend(format!("/{name}").chars().map(u32::from));
             need(
                 pin.path.codepoints() == expected && (1..=1 << 20).contains(&pin.bytes),
-                "WORKER_BUILD_V1_SOURCE_PINS",
+                "WORKER_BUILD_SOURCE_PINS",
             )?;
             source_files.insert(key(name), pin_value(pin));
         }
         let value = fields([
-            ("version", integer(1)),
-            ("purpose", string("worker-image-provenance-v1")),
+            ("version", integer(2)),
+            ("purpose", string("worker-image-provenance-v2")),
             ("archiveConfigSHA256", string(self.image.digest.as_str())),
             ("imageSpec", self.image.image.deep_clone()),
             ("archive", code_value(archive)),

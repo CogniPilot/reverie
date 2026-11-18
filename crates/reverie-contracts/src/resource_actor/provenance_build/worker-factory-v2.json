@@ -1,0 +1,20 @@
+[
+  "Cargo.lock",
+  "Cargo.toml",
+  "crates/reverie-contracts/src/resource_actor/provenance_build/worker-factory-v2.json",
+  "crates/reverie-contracts/src/resource_actor/provenance_build/worker.rs",
+  "crates/reverie-elf-bundle/src/idmap.rs",
+  "crates/reverie-policy-artifacts/src/idmap.rs",
+  "crates/reverie-policy-artifacts/src/worker_provenance/archive.rs",
+  "crates/reverie-policy-artifacts/src/worker_provenance/layers.rs",
+  "crates/reverie-policy-artifacts/src/worker_provenance/mod.rs",
+  "flake.lock",
+  "flake.nix",
+  "nix/human-terminal-static.c",
+  "nix/human-terminal-toolkit.nix",
+  "nix/image.nix",
+  "nix/policy-artifacts.nix",
+  "nix/worker-base-tools.nix",
+  "nix/worker-idmap.nix",
+  "nix/worker-image-provenance.nix"
+]

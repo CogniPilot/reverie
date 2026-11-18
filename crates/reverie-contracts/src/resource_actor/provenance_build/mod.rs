@@ -7,7 +7,10 @@ mod worker;
 use super::*;
 pub use archive::{WebsiteArchiveConfiguration, WebsiteArchiveManifest};
 pub use startup::WebsiteStartupBuildGraph;
-pub use worker::{HUMAN_TERMINAL_FILES, WORKER_IMAGE_V1_FACTORY_FILES, WorkerImageProvenanceBuild};
+pub use worker::{
+    HUMAN_TERMINAL_FILES, WORKER_FACTORY_INVENTORY, WORKER_FACTORY_INVENTORY_PATH,
+    WorkerImageProvenanceBuild, WorkerProvenanceVersion, worker_factory_files,
+};
 
 pub struct WebsiteProvenanceBuild {
     archive: WebsiteArchiveConfiguration,

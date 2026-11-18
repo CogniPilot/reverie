@@ -28,6 +28,58 @@ fn inputs() -> (ArtifactReference, Vec<u8>, Json) {
 fn decode(base: &ArtifactReference, raw: &[u8], annex: &Json) -> Result<WorkerImageProvenance> {
     WorkerImageProvenance::decode(base, raw, &serde_json::to_vec(annex).unwrap())
 }
+fn decode_changed_base(
+    mut selected: ArtifactReference,
+    raw: &Json,
+    mut annex: Json,
+) -> Result<WorkerImageProvenance> {
+    let encoded = serde_json::to_vec(raw).unwrap();
+    selected.sha256 = JournalDigest::parse(&sha(&encoded)).unwrap();
+    annex["baseProvenance"]["sha256"] = json!(selected.sha256.as_str());
+    annex["baseProvenance"]["bytes"] = json!(encoded.len());
+    decode(&selected, &encoded, &annex)
+}
+
+#[test]
+fn worker_native_inventory_is_closed_while_original_base_still_decodes() {
+    let (selected, raw, annex) = inputs();
+    decode(&selected, &raw, &annex).unwrap();
+    let mut document: Json = serde_json::from_slice(&raw).unwrap();
+    document["version"] = json!(2);
+    document["purpose"] = json!("worker-image-provenance-v2");
+    let inventory: serde_json::Map<String, Json> = worker_factory_files()
+        .iter()
+        .map(|file| {
+            let bytes = if *file == WORKER_FACTORY_INVENTORY_PATH {
+                WORKER_FACTORY_INVENTORY.as_bytes()
+            } else {
+                file.as_bytes()
+            };
+            (
+                (*file).to_owned(),
+                json!({"sha256":sha(bytes),"bytes":bytes.len()}),
+            )
+        })
+        .collect();
+    document["source"]["factoryFiles"] = json!(inventory);
+    decode_changed_base(selected.clone(), &document, annex.clone()).unwrap();
+
+    let mut bad = document.clone();
+    bad["source"]["factoryFiles"][WORKER_FACTORY_INVENTORY_PATH]["sha256"] = json!("0".repeat(64));
+    assert!(decode_changed_base(selected.clone(), &bad, annex.clone()).is_err());
+    bad = document.clone();
+    bad["source"]["factoryFiles"]
+        .as_object_mut()
+        .unwrap()
+        .remove("nix/image.nix");
+    bad["source"]["factoryFiles"]["nix/worker-idmap.py"] =
+        json!({"sha256":"0".repeat(64),"bytes":1});
+    assert!(decode_changed_base(selected.clone(), &bad, annex.clone()).is_err());
+    bad = document.clone();
+    bad["purpose"] = json!("worker-image-provenance-v1");
+    assert!(decode_changed_base(selected, &bad, annex).is_err());
+}
+
 #[test]
 fn exact_worker_base_child_and_actual_full_image_join_is_data_only() {
     let (base, raw, annex) = inputs();

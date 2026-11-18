@@ -17,7 +17,7 @@ pub(super) struct Selection {
     /// Existing registered owner configuration under ~/reverie.
     #[arg(long, value_name = "FILE")]
     config: PathBuf,
-    /// Immutable worker-image-provenance-v1 JSON from the Nix image factory.
+    /// Immutable worker-image provenance JSON from the Nix image factory.
     #[arg(long, value_name = "NIX_FILE")]
     provenance: PathBuf,
     /// Exact SHA-256 of the original provenance file bytes.

@@ -2,24 +2,25 @@
 //! mapping, executable image member or publication authority is obtained here.
 mod archive;
 mod layers;
+#[cfg(test)]
+mod tests;
 use crate::{build_archive, build_input as input, output};
 use clap::Parser;
 use input::{Result, need};
 use reverie_contracts::resource_actor::{
-    CodeFile, WORKER_IMAGE_V1_FACTORY_FILES, WorkerImageProvenanceBuild,
+    CodeFile, WORKER_FACTORY_INVENTORY, WORKER_FACTORY_INVENTORY_PATH, WebsiteArchiveManifest,
+    WorkerImageProvenanceBuild, worker_factory_files,
 };
 use reverie_core::operations::JournalDigest;
 use sha2::{Digest, Sha256};
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 #[derive(Parser)]
-#[command(
-    about = "Build existing worker-image provenance v1 facts from fixed immutable Nix inputs; no runtime authority"
-)]
+#[command(about = "Build worker-image provenance v2 from fixed immutable Nix inputs")]
 struct Arguments {
     #[arg(long)]
     archive: PathBuf,
@@ -53,11 +54,7 @@ fn build(args: Arguments) -> Result<()> {
             && args.source.is_dir(),
         "WORKER_BUILD_CANONICAL_SOURCE",
     )?;
-    let mut sources = Vec::new();
-    for name in WORKER_IMAGE_V1_FACTORY_FILES {
-        let path = args.source.join(name);
-        sources.push(pin(&path, &input::read(&path, 1 << 20, end)?)?);
-    }
+    let sources = source_pins(&args.source, end)?;
     need(
         args.toolkit_manifest
             .ends_with("share/reverie-human-terminal/manifest.json"),
@@ -70,33 +67,60 @@ fn build(args: Arguments) -> Result<()> {
         let build =
             WorkerImageProvenanceBuild::new(metadata, &profile, &raw_toolkit, &toolkit_pin)?;
         toolkit(&args.toolkit_manifest, &build, end)?;
-        archive::preflight_layers(file, end)?;
-        let layers = archive::layers(file, &build, end)?;
-        let hashes = layers
-            .iter()
-            .map(|(name, layer)| {
-                Ok((
-                    build_archive::python_name(name),
-                    JournalDigest::parse(&layer.digest)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        build.require_layer_hashes(&selected, &hashes)?;
-        let mut ordered = Vec::new();
-        for name in selected.layer_members() {
-            let layer = layers
-                .iter()
-                .find(|(key, _)| build_archive::python_name(key) == *name)
-                .ok_or("WORKER_BUILD_LAYER_UNAVAILABLE")?;
-            ordered.push(layer.1);
-        }
-        layers::verify_final(&ordered, build.toolkit_files())?;
+        qualify_layers(file, &build, &selected, end)?;
         let archive_pin = archive::compressed_pin(file, &args.archive, end)?;
         Ok(build.encode(&archive_pin, &input::text(&args.source)?, &sources)?)
     })?;
     need(Instant::now() < end, "WORKER_BUILD_DEADLINE")?;
     fs::create_dir_all(args.output.parent().ok_or("WORKER_BUILD_OUTPUT_PARENT")?)?;
     Ok(output::write_new(&args.output, &encoded)?)
+}
+fn qualify_layers(
+    file: &mut File,
+    build: &WorkerImageProvenanceBuild,
+    selected: &WebsiteArchiveManifest,
+    end: Instant,
+) -> Result<()> {
+    archive::preflight_layers(file, end)?;
+    let layers = archive::layers(file, build, end)?;
+    let hashes = layers
+        .iter()
+        .map(|(name, layer)| {
+            Ok((
+                build_archive::python_name(name),
+                JournalDigest::parse(&layer.digest)?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    build.require_layer_hashes(selected, &hashes)?;
+    let ordered = selected
+        .layer_members()
+        .iter()
+        .map(|name| {
+            layers
+                .iter()
+                .find(|(key, _)| build_archive::python_name(key) == *name)
+                .map(|(_, layer)| layer)
+                .ok_or_else(|| "WORKER_BUILD_LAYER_UNAVAILABLE".into())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    layers::verify_final(&ordered, build.toolkit_files())
+}
+fn source_pins(source: &Path, end: Instant) -> Result<Vec<CodeFile>> {
+    worker_factory_files()
+        .iter()
+        .map(|name| {
+            let path = source.join(name);
+            let data = input::read(&path, 1 << 20, end)?;
+            if *name == WORKER_FACTORY_INVENTORY_PATH {
+                need(
+                    data == WORKER_FACTORY_INVENTORY.as_bytes(),
+                    "WORKER_BUILD_SOURCE_INVENTORY",
+                )?;
+            }
+            pin(&path, &data)
+        })
+        .collect()
 }
 fn toolkit(manifest: &Path, build: &WorkerImageProvenanceBuild, end: Instant) -> Result<()> {
     let root = manifest
@@ -107,13 +131,17 @@ fn toolkit(manifest: &Path, build: &WorkerImageProvenanceBuild, end: Instant) ->
         let guest = input::path(&expected.path)?;
         let file = root.join(guest.strip_prefix("/")?);
         let raw = input::read(&file, 16 << 20, end)?;
-        let actual = pin(&file, &raw)?;
-        need(
-            actual.sha256 == expected.sha256 && actual.bytes == expected.bytes,
-            "WORKER_BUILD_TOOLKIT_BYTES",
-        )?;
-        reverie_elf_bundle::require_static_elf64(&raw, build.elf_machine())?;
+        qualify_toolkit_binary(&raw, expected, build.elf_machine())?;
     }
+    Ok(())
+}
+fn qualify_toolkit_binary(raw: &[u8], expected: &CodeFile, machine: u16) -> Result<()> {
+    let actual = format!("{:x}", Sha256::digest(raw));
+    need(
+        actual == expected.sha256.as_str() && raw.len() as u64 == expected.bytes,
+        "WORKER_BUILD_TOOLKIT_BYTES",
+    )?;
+    reverie_elf_bundle::require_static_elf64(raw, machine)?;
     Ok(())
 }
 fn pin(path: &Path, raw: &[u8]) -> Result<CodeFile> {
