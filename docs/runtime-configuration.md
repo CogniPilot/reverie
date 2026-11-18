@@ -41,13 +41,10 @@ owner's `deployment.json` under the selected deployment root (normally `~/reveri
 The field is optional and defaults to `false`; strings and numbers are rejected.
 `reverie-start` passes the exact activation value only from this validated field;
 setting a similarly named variable in the calling host shell does not opt in.
-Changing this startup setting does not mutate a running container. For an existing
-isolated deployment, select it before the paired `reverie-isolate prepare` and
-`activate` workflow. The prepared plan records the choice and activation refuses a
-changed choice before stopping the console. The non-isolated `reverie-update`
-workflow also refreshes activation from the same durable setting and refuses a
-selection changed during its build. Both replace stale phone activation overrides
-while preserving the other instance settings. A missing deployment file or field
+The Docker container reads this setting at startup. The `reverie-update`
+workflow refreshes it from the same durable setting and refuses a selection
+changed during its build. It replaces stale phone activation overrides while
+preserving the other instance settings. A missing deployment file or field
 selects OFF, including when the old container had an enabled override.
 The bootstrap retains its existing refusal to silently replace a changed deployment;
 use the applicable reviewed update workflow for a running installation. Existing

@@ -16,7 +16,8 @@ The public flake no longer selects the legacy broker/service installers, host
 model launcher, host GPU publisher, isolation installer, standalone viewer or
 H/resource service installers. Their former nix run instructions in older
 manual sections are historical migration records. They are not a supported
-way to reinstall the retired stack. Existing private data, account homes,
+way to reinstall the retired stack. The old Python isolation installer and
+its tests have been removed. Existing private data, account homes,
 journals, unknown operation fences and installed services are not altered by
 this source change. Actual deactivation needs a separate reviewed operation.
 
