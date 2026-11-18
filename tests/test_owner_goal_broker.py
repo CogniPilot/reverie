@@ -244,9 +244,8 @@ class OwnerGoalBrokerTests(unittest.TestCase):
             self.write(self.worker_file, {**self.config, 'goalPrivateConfig': value})
             with self.subTest(value=value), self.assertRaises(ValueError): load_config(self.worker_file)
         self.assertEqual(self.config['maxWorkers'], 16)
-        for file in ('nix/native-worker-packages.nix', 'nix/worker-isolation.nix'):
-            text = (Path(__file__).resolve().parents[1]/file).read_text()
-            self.assertIn('TasksMax', text); self.assertNotIn('TasksMax=1024', text)
+        text = (Path(__file__).resolve().parents[1] / 'nix/worker-isolation.nix').read_text()
+        self.assertIn('TasksMax', text); self.assertNotIn('TasksMax=1024', text)
 
     def test_recover_max_population_passes_no_options_and_never_requests_signer_or_generation(self):
         ids = [f'{i:08x}-2222-3333-4444-555555555555' for i in range(16)]

@@ -8,9 +8,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
-from tests import test_worker_service_package as package_fixture
+from reverie.worker_perf import derivative
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -18,10 +19,22 @@ ROOT = Path(__file__).resolve().parents[1]
 @unittest.skipUnless(shutil.which('nix-instantiate'), 'normal Nix evaluator unavailable')
 class OwnerTerminalPythonPackageTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = package_fixture.WorkerServicePackageTests()
-        self.fixture.setUp(); self.addCleanup(self.fixture.doCleanups)
-        f = self.fixture
-        self.runtime = f.root / 'host-runtime'
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        self.perf = self.root / 'perf/share/reverie'
+        self.perf.mkdir(parents=True)
+        base_path = self.root / 'base.json'
+        profile = self.root / 'profile.json'
+        base = {'defaultAction': 'SCMP_ACT_ERRNO', 'syscalls': []}
+        base_path.write_text(json.dumps(base))
+        profile.write_text(json.dumps(derivative(base)))
+        system = {'x86_64': 'x86_64-linux', 'aarch64': 'aarch64-linux'}.get(os.uname().machine)
+        if system is None:
+            self.skipTest('task perf artifact supports x86_64/aarch64 Linux')
+        self.manifest = dict(version=1, purpose='worker-task-perf-profile-v1', system=system,
+                             baseProfile=str(base_path), baseSHA256=hashlib.sha256(base_path.read_bytes()).hexdigest(),
+                             profile=str(profile), profileSHA256=hashlib.sha256(profile.read_bytes()).hexdigest())
+        (self.perf / 'worker-perf-profile.json').write_text(json.dumps(self.manifest))
+        self.runtime = self.root / 'host-runtime'
         expression = '''let
           root = builtins.toPath SOURCE;
           python = { outPath = PYTHON; interpreter = PYTHON + "/bin/python3"; };
@@ -54,7 +67,7 @@ class OwnerTerminalPythonPackageTests(unittest.TestCase):
           lifecycle = lifecycle.script; website = website.script; }
         '''
         for key, value in {'SOURCE': str(ROOT), 'PYTHON': str(Path(sys.executable).parent.parent),
-                           'RUNTIME': str(self.runtime), 'PERF': str(f.perf.parents[1])}.items():
+                           'RUNTIME': str(self.runtime), 'PERF': str(self.perf.parents[1])}.items():
             expression = expression.replace(key, json.dumps(value))
         result = subprocess.run(['nix-instantiate', '--eval', '--strict', '--json', '--expr', expression],
                                 capture_output=True, text=True, timeout=20)
@@ -86,7 +99,7 @@ with patch.object(perf,'_read',side_effect=lambda path:Path(path).read_bytes()),
 print(json.dumps({'native':native.__file__,'perf':perf.__file__,'stage':stage.__file__,'policyDigest':value}))
 '''
         return subprocess.run([sys.executable, '-I', '-B', '-c', code, str(self.entry),
-                               str(self.fixture.perf / 'worker-perf-profile.json')],
+                               str(self.perf / 'worker-perf-profile.json')],
                               capture_output=True, text=True, timeout=20)
 
     def test_host_real_policy_digest_uses_its_produced_perf_runtime(self):
@@ -96,7 +109,7 @@ print(json.dumps({'native':native.__file__,'perf':perf.__file__,'stage':stage.__
         self.assertEqual(value['native'], str(self.runtime / 'python/reverie/owner_terminal_native.py'))
         self.assertEqual(value['perf'], str(self.runtime / 'python/reverie/worker_perf.py'))
         self.assertEqual(value['stage'], str(self.runtime / 'apps/host/website-update.py'))
-        manifest = self.fixture.manifest
+        manifest = self.manifest
         selected = {'rootlessDocker': {'enabled': True, 'seccompProfile': manifest['profile'],
                     'seccompSha256': manifest['profileSHA256']}, '_taskPerfPolicy': 'task-v1'}
         self.assertEqual(value['policyDigest'], hashlib.sha256(json.dumps(selected, sort_keys=True).encode()).hexdigest())
@@ -109,7 +122,7 @@ print(json.dumps({'native':native.__file__,'perf':perf.__file__,'stage':stage.__
                 self.assertNotIn(str(ROOT / 'python'), self.package[key])
         self.assertIn(str(self.runtime / 'scripts/reverie-owner-terminal-host'), self.package['lifecycle'])
         self.assertEqual((self.runtime / 'python/reverie/worker-perf-profile.json').read_bytes(),
-                         (self.fixture.perf / 'worker-perf-profile.json').read_bytes())
+                         (self.perf / 'worker-perf-profile.json').read_bytes())
 
     def test_all_fixed_root_relative_consumer_files_are_preserved(self):
         required = set()
@@ -139,8 +152,8 @@ print(json.dumps({'native':native.__file__,'perf':perf.__file__,'stage':stage.__
         self.assertEqual(result.returncode, 0, result.stderr)
         inputs = []
         for name in ('created', 'image', 'intent'):
-            path = self.fixture.root / (name + '.json'); path.write_text('{}'); path.chmod(0o600); inputs.append(str(path))
-        output = self.fixture.root / 'accepted.json'
+            path = self.root / (name + '.json'); path.write_text('{}'); path.chmod(0o600); inputs.append(str(path))
+        output = self.root / 'accepted.json'
         result = subprocess.run(['node', str(script), 'validate-created', *inputs, str(output)],
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 1)

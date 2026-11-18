@@ -125,17 +125,13 @@ ordinary Cold/Reuse launch handlers, detached supervision, and fixed C controls.
 The Rust client library uses the same checked exchange as the CLI. Its reply is
 data, not proof that a requested effect succeeded or its resources were released.
 
-Package selection is a separate migration boundary: `nativeWorkerBroker` is
-currently an explicit integration output, while `workerBroker` still selects
-the legacy implementation in `nix/native-worker-packages.nix`. Protected resume,
-launch and maintenance consumers must be paired with their correct program
-provenance before changing that default. An explicitly installed native service
-does not change what a fresh default installation selects. The rows below track
-the ownership boundaries to preserve, rather than a percentage-complete estimate.
-Their final column is the original integration contract, not a list of absent
-implementations: service startup, ordinary Cold/Reuse handlers and counted
-shutdown now connect several of those boundaries. Current missing dispatch and
-deployment capabilities are identified above and in the native broker README.
+The Docker flake exposes the worker image inputs from
+`nix/native-worker-packages.nix`. The host broker, service setup, resume and
+perf client packages are retired. The native broker build remains available to
+the integration check. The table records the original integration contracts for
+the broker and its consumers. Service startup, ordinary Cold/Reuse handlers and
+counted shutdown now connect several of those boundaries. See the native broker
+README for the remaining dispatch gaps.
 
 | Operation | Existing Rust owner | Integration contract |
 | --- | --- | --- |

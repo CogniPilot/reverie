@@ -28,6 +28,7 @@ let
     "nix/local-model.nix"
     "nix/ops-core.nix"
     "nix/owner-terminal-packages.nix"
+      "nix/worker-resume-program.nix"
   ];
   groups = [ "packages" "apps" "nixosModules" "lib" ];
   sorted = values: builtins.sort builtins.lessThan values;

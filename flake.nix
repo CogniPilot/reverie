@@ -14,8 +14,8 @@
         let
           pkgs = pkgsFor system;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
-          workerImageArtifacts = import ./nix/worker-image-artifacts.nix {
-            inherit pkgs; src = source; inherit (packages) console;
+          workerImageArtifacts = import ./nix/native-worker-packages.nix {
+            inherit pkgs; src = source;
           };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
