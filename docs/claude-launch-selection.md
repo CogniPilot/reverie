@@ -12,14 +12,12 @@ seed and session ID. The selector checks only metadata under
 An existing readable regular transcript selects resume, including a one-line
 transcript or one under a renamed project. Proven absence permits the existing
 fresh session ID. Inaccessible, malformed, dangling or uncertain metadata
-refuses with a static message and exit78. Traversal is bounded to4096 project
-entries and three candidates. A two-second monotonic/POSIX real-time guard
-covers selection only. Expiry is uncertain metadata (exit78), never absence.
-Cleanup blocks the alarm, disarms the timer, drains any queued alarm as expiry,
-and restores the previous signal handler and mask before the single provider exec. An inherited active timer or blocked alarm refuses rather
-than replacing caller state. Python must support POSIX timers in that runtime.
-Signals interrupt ordinary waits; uninterruptible kernel I/O can delay delivery,
-so this is not a hard filesystem I/O deadline or a kernel-stall guarantee.
+refuses with a static message and exit 78. The native selector checks up to
+4096 project entries and three candidates. It waits up to two seconds for its
+metadata thread, using a monotonic clock. Expiry withholds launch. The
+thread exits before a successful provider handoff, and selection leaves process
+signal handlers, masks and timers alone. Uninterruptible kernel I/O can delay
+process termination.
 
 For non-SSH native, worker and direct Docker launches, until an existing authenticated
 provider hook identifies the selected conversation, the website reports `claudeSessionId: null` and `claudeSessionIdPending: true`.
@@ -52,11 +50,10 @@ provider locking remains authoritative: a metadata race can still make that
 single launch fail, and its failure is retained rather than retried under a
 different identity. No locks are removed and no session IDs are rewritten.
 
-The native Reverie and worker runtime closures already include Python3. The
-fixed selector uses `python3 -I` and the standard library, without loading the
-Reverie CLI or a user's Python path. A remote host must provide Python3; its
-absence refuses before Claude rather than installing a package or guessing that
-a transcript is missing. Explicit remote command overrides retain their own
+The native Reverie and worker runtimes supply the selector through
+`reverie-backend --claude-launch`. A managed remote launch requires the same
+binary on the remote PATH. When the binary is missing, the launch exits 78
+before contacting Claude. Explicit remote command overrides retain their own
 semantics. Explicitly replaced custom registry variant arrays retain their
 legacy renderer unless they opt into the fixed `claude-transcript` selection
 profile. An explicit Docker base command retains its existing shell semantics

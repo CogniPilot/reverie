@@ -124,7 +124,7 @@ describe('buildDockerLaunchCommand', () => {
     const cmd = buildDockerLaunchCommand(launchOpts());
     expect(cmd).toContain('claude --dangerously-skip-permissions --session-id 1a2b3c4d5e6f');
     expect(cmd).toContain('claude --dangerously-skip-permissions --resume 1a2b3c4d5e6f');
-    expect(cmd).toContain('exec python3 -I -c');
+    expect(cmd).toContain('exec reverie-backend --claude-launch');
     expect(cmd).not.toContain('--session-id 1a2b3c4d5e6f || claude');
     expect(cmd).not.toContain('exec claude');
   });

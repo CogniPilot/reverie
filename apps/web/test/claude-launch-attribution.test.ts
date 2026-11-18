@@ -11,7 +11,7 @@ import fastifyCookie from '@fastify/cookie';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Session } from '../src/session.js';
 import {prepareWorkspaceHooks} from '../src/workspace-hook-policy.js';
-import { CLAUDE_METADATA_SELECTOR } from '../src/utils/claude-launch.js';
+import { renderClaudeLaunch } from '../src/utils/claude-launch.js';
 import { registerSessionRoutes, persistDockerLaunchConversation } from '../src/web/routes/session-routes.js';
 import { registerHookEventRoutes } from '../src/web/routes/hook-event-routes.js';
 import { registerAuthMiddleware } from '../src/web/middleware/auth.js';
@@ -96,9 +96,11 @@ afterEach(async () => {
 describe('actual runtime selection remains unknown until its existing authenticated hook', () => {
   it('does not attribute missing tail or existing SID when the actual selector chooses the seed', async () => {
     transcript(SEED, 'selected fixture seed'); transcript(SID, 'unselected fixture SID');
-    const selected = execFileSync('python3', ['-I', '-c',
-      "import sys,json;ns={'__name__':'owned_fixture'};exec(sys.argv[1],ns);print(ns['_select_bounded'](sys.argv[2],json.loads(sys.argv[3])))",
-      CLAUDE_METADATA_SELECTOR, config, JSON.stringify([TAIL, SEED, SID])], { encoding: 'utf8', timeout: 5000 }).trim();
+    const printChoice = (id: string) => `${process.execPath} -e 'process.stdout.write(process.argv[1])' ${id}`;
+    const command = renderClaudeLaunch([TAIL, SEED, SID].map((id) => ({ id, command: printChoice(id) })), printChoice('fresh'));
+    const selected = execFileSync('/bin/sh', ['-c', command], {
+      cwd, encoding: 'utf8', timeout: 5000, env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+    }).trim();
     expect(selected).toBe(SEED);
     const s = await session(); await s.startInteractive();
     expect(s.claudeSessionIdPending).toBe(true); expect(s.claudeSessionId).toBeNull();
@@ -261,7 +263,7 @@ describe('SSH transport lifecycle preserves remote attribution', () => {
     expect(s.claudeSessionIdPending).toBe(false); // existing intent, NOT actual remote selected-ID proof
     const command = buildRemoteLaunchCommand({ mode: 'claude', remote: r, sessionId: SID,
       resumeSessionId: SEED, claudeResumeCandidates: [TAIL, SEED, SID] });
-    expect(command).toContain('new-session -A'); expect(command).toContain('_select_bounded');
+    expect(command).toContain('new-session -A'); expect(command).toContain('reverie-backend --claude-launch');
     expect(command).toContain(SEED); // real remote creation still uses the actual-namespace selector
   });
 });

@@ -17,6 +17,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-backend-cli" ];
   cargoTestFlags = [ "-p" "reverie-backend-cli" ];
   env.REVERIE_FIXED_BACKEND_CURL = "${pkgs.curl}/bin/curl";
+  disallowedRequisites = [ pkgs.python3 ];
   doCheck = true;
   meta = {
     description = "Launch the harness and model selected by the current Reverie session";
