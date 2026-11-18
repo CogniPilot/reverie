@@ -17,6 +17,7 @@ hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
 nix = { workspace = true, features = ["fs", "user", "socket"] }
+rustix = { workspace = true, features = ["fs"] }
 reverie-host.workspace = true
 reverie-contracts.workspace = true
 reverie-application.workspace = true

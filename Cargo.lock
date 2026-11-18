@@ -1123,6 +1123,7 @@ dependencies = [
  "reverie-contracts",
  "reverie-core",
  "reverie-host",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",

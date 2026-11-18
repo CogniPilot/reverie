@@ -141,3 +141,30 @@ these root bindings and acceptance gates. Publishing bounded metadata to a
 status page or chat is a separate unprivileged step; the host service carries
 no owner login or chat credential. Production live enablement requires a reviewed
 successor and its explicit acceptance, not another flag on this installer.
+
+## Clear disposable employee TMP contents during maintenance
+
+On the Docker host, the registered-deployment CLI can inventory or clear
+employee temporary storage. Pass the office installation root containing
+`deployment.json`. The command discovers the actual `/scratch` bind from that
+office, then selects `laptops/{employees,operator-recovery,operator-sessions}/<UUID>/tmp`.
+
+```sh
+nix run .#deployment -- --root /path/to/installation prune-scratch
+nix run .#deployment -- --root /path/to/installation prune-scratch --apply
+```
+
+The first command reports allocated and eligible bytes per mount and names
+the containers that block clearing. An incomplete size means an entry changed
+or could not be walked. Hard-linked files may appear more than once in the
+allocated total and are excluded from the eligible byte estimate.
+
+Before applying, finish or stop host jobs using these trees, move unique
+temporary work into durable storage, and stop the office and any overlapping
+containers. Keep them stopped until the command finishes. Pass `--lease-dir`
+for any additional host task-lease directory. The command checks the detected
+office and worker lease directories and holds their lease barriers during
+clearing. The command keeps the mount directories and retains top-level entries
+that contain repositories, preservation markers, special files, foreign-owned
+files, or unreadable content. An apply report marks any unconfirmed tree so it
+can be inspected before restarting workers. Clearing is permanent.
