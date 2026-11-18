@@ -1,15 +1,10 @@
 """Kokoro service boundaries; real model/audio smoke checks run from the Nix package."""
 import hashlib
-from http.server import ThreadingHTTPServer
 import io
-import json
 from pathlib import Path
 import tempfile
-import threading
 import unittest
 from unittest.mock import patch
-import urllib.error
-import urllib.request
 
 from reverie import kokoro
 
@@ -52,52 +47,3 @@ class ModelTests(unittest.TestCase):
         self.assertEqual([v["id"] for v in result], ["af_heart", "bm_george"])
         self.assertEqual(result[0]["gender"], "feminine")
         self.assertEqual(result[1]["language"], "en-gb")
-
-
-class ServiceTests(unittest.TestCase):
-    def setUp(self):
-        class FakeEngine:
-            model = object()
-            error = False
-            voices = [{"id": "af_heart", "language": "en-us"}]
-
-            def synthesize(self, payload):
-                if payload.get("voice") != "af_heart":
-                    raise ValueError("Unknown or unsupported voice")
-                return b"RIFFtest-wave"
-
-        self.engine = FakeEngine()
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), kokoro.handler(self.engine))
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.base = f"http://127.0.0.1:{self.server.server_port}"
-
-    def tearDown(self):
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join()
-
-    def test_ready_catalog_and_raw_audio_match_console_contract(self):
-        with urllib.request.urlopen(self.base + "/voices") as response:
-            self.assertEqual(json.load(response)["voices"][0]["id"], "af_heart")
-        request = urllib.request.Request(self.base + "/tts", data=json.dumps({"voice": "af_heart", "text": "Hello"}).encode())
-        with urllib.request.urlopen(request) as response:
-            self.assertEqual(response.headers["Content-Type"], "audio/wav")
-            self.assertTrue(response.read().startswith(b"RIFF"))
-
-    def test_loading_service_does_not_advertise_available_voices(self):
-        self.engine.model = None
-        with self.assertRaises(urllib.error.HTTPError) as error:
-            urllib.request.urlopen(self.base + "/voices")
-        self.assertEqual(error.exception.code, 503)
-
-    def test_invalid_voice_and_non_object_body_are_rejected(self):
-        for body in [{"voice": "../../anything", "text": "Hello"}, []]:
-            request = urllib.request.Request(self.base + "/tts", data=json.dumps(body).encode())
-            with self.assertRaises(urllib.error.HTTPError) as error:
-                urllib.request.urlopen(request)
-            self.assertEqual(error.exception.code, 400)
-
-
-if __name__ == "__main__":
-    unittest.main()

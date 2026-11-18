@@ -1,45 +1,37 @@
-{ pkgs, memoryPackage }:
+{ pkgs, src }:
 let
-  ps = pkgs.python3Packages;
-  phonemizer = ps.phonemizer.overridePythonAttrs (_: {
-    version = "3.4.0";
-    # 3.4 incorporates custom data-path support; the older Nix patches no longer apply.
-    patches = [ ];
-    src = pkgs.fetchPypi {
-      pname = "phonemizer";
-      version = "3.4.0";
-      hash = "sha256-4TIxmAxQvGcewEZjeboCcmCtnWGSmVLYrpZls9DyUes=";
-    };
-  });
-  kokoro = ps.buildPythonPackage {
-    pname = "kokoro-onnx";
-    version = "0.6.1";
-    pyproject = true;
-    src = pkgs.fetchPypi {
-      pname = "kokoro_onnx";
-      version = "0.6.1";
-      hash = "sha256-e722bdU3dfcQiKmZmamu/a0kB0Da9UywlBDYux4pTjU=";
-    };
-    build-system = [ ps.hatchling ];
-    dependencies = [ ps.numpy ps.onnxruntime phonemizer ];
-    # Use Nix's espeak-ng instead of the loader wheel's bundled native library.
-    pythonRemoveDeps = [ "espeakng-loader" ];
-    postPatch = ''
-      substituteInPlace src/kokoro_onnx/tokenizer.py \
-        --replace-fail 'import espeakng_loader' "" \
-        --replace-fail 'espeakng_loader.get_data_path()' '"${pkgs.espeak-ng}/share/espeak-ng-data"' \
-        --replace-fail 'espeakng_loader.get_library_path()' '"${pkgs.espeak-ng}/lib/libespeak-ng.so"'
-    '';
-    pythonImportsCheck = [ "kokoro_onnx" ];
-    meta.license = pkgs.lib.licenses.asl20;
+  workspace = import ./rust-workspace-source.nix {
+    inherit pkgs src;
+    members = [ "reverie-kokoro" ];
   };
-  python = pkgs.python3.withPackages (_: [ memoryPackage kokoro ]);
-in pkgs.writeShellApplication {
-  name = "reverie-kokoro";
-  text = ''
-    export OMP_NUM_THREADS="''${OMP_NUM_THREADS:-2}"
-    export PHONEMIZER_ESPEAK_LIBRARY=${pkgs.espeak-ng}/lib/libespeak-ng.so
-    exec ${python}/bin/python3 -m reverie.kokoro "$@"
+  espeakAdapter = pkgs.runCommandCC "reverie-kokoro-phonemes" {
+    buildInputs = [ pkgs.espeak-ng ];
+  } ''
+    mkdir -p "$out/bin"
+    cc -std=c17 -O2 -Wall -Wextra -Werror ${builtins.path {
+      path = (src.origSrc or src) + "/crates/reverie-kokoro/espeak.c";
+      name = "reverie-kokoro-espeak.c";
+    }} -lespeak-ng -o "$out/bin/reverie-kokoro-phonemes"
   '';
-  derivationArgs.passthru = { inherit python kokoro; };
+in pkgs.rustPlatform.buildRustPackage {
+  pname = "reverie-kokoro";
+  version = "0.1.0";
+  src = workspace.source;
+  cargoLock.lockFile = workspace.lockFile;
+  cargoBuildFlags = [ "-p" "reverie-kokoro" ];
+  cargoTestFlags = [ "-p" "reverie-kokoro" ];
+  REVERIE_KOKORO_ONNX = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
+  REVERIE_KOKORO_ESPEAK = "${pkgs.espeak-ng}/bin/espeak-ng";
+  REVERIE_KOKORO_PHONEMES = "${espeakAdapter}/bin/reverie-kokoro-phonemes";
+  REVERIE_KOKORO_CURL = "${pkgs.curl}/bin/curl";
+  postInstall = ''
+    mkdir -p "$out/share/licenses/reverie-kokoro"
+    cp crates/reverie-kokoro/LICENSE-kokoro-onnx "$out/share/licenses/reverie-kokoro/"
+  '';
+  meta = {
+    description = "Local Kokoro speech service using native ONNX Runtime and eSpeak NG";
+    mainProgram = "reverie-kokoro";
+    license = pkgs.lib.licenses.mit;
+    platforms = pkgs.lib.platforms.linux;
+  };
 }

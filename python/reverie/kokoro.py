@@ -1,10 +1,8 @@
-"""Local Kokoro speech service; installed with Nix, models kept in instance storage."""
+"""Reference Kokoro synthesis for the instrumented voice CI adapter."""
 from __future__ import annotations
 
-import argparse
 import fcntl
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
 import logging
@@ -141,72 +139,3 @@ class Engine:
         finally:
             timing["finishedNs"] = time.monotonic_ns()
             self.lock.release()
-
-
-def handler(engine: Engine):
-    class Handler(BaseHTTPRequestHandler):
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(30)
-
-        def send(self, status: int, data: bytes | dict, content_type="application/json"):
-            body = data if isinstance(data, bytes) else json.dumps(data).encode()
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            if self.path == "/health":
-                ready = engine.model is not None
-                self.send(200 if ready else 503, {"status": "ready" if ready else "error" if engine.error else "loading"})
-            elif self.path == "/voices":
-                self.send(200 if engine.model is not None else 503, {"voices": engine.voices})
-            else:
-                self.send(404, {"error": "Not found"})
-
-        def do_POST(self):
-            if self.path != "/tts":
-                return self.send(404, {"error": "Not found"})
-            try:
-                length = int(self.headers.get("Content-Length", "0"))
-                if not 0 < length <= 8192:
-                    return self.send(413, {"error": "Speech request is too large or empty"})
-                payload = json.loads(self.rfile.read(length))
-                if not isinstance(payload, dict):
-                    raise ValueError("Expected a JSON object")
-                self.send(200, engine.synthesize(payload), "audio/wav")
-            except ValueError as error:
-                self.send(400, {"error": str(error)})
-            except RuntimeError as error:
-                self.send(503, {"error": str(error)})
-            except Exception:
-                LOG.exception("Speech synthesis failed")
-                self.send(500, {"error": "Speech synthesis failed"})
-
-        def log_message(self, *_):
-            pass
-    return Handler
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    root = Path(os.environ.get("REVERIE_ROOT", Path.home() / "reverie"))
-    data = Path(os.environ.get("REVERIE_DATA", root / "companies/default/data"))
-    parser.add_argument("--models", type=Path, default=Path(os.environ.get("REVERIE_KOKORO_MODELS", data / "voice/kokoro")))
-    parser.add_argument("--port", type=int, default=8091)
-    args = parser.parse_args()
-    os.umask(0o077)
-    logging.basicConfig(level=logging.INFO)
-    engine = Engine(args.models)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(engine))
-    threading.Thread(target=engine.warm, daemon=True).start()
-    try:
-        server.serve_forever()
-    finally:
-        server.server_close()
-
-
-if __name__ == "__main__":
-    main()

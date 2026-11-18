@@ -47,9 +47,12 @@ recognition are real. The CI-only adapter uses Kokoro for both route protocols;
 it does not qualify an operator's Piper service or deploy any speech service.
 Dependencies come from `flake.lock`. `nix/voice-ci.nix` pins each speech model by
 SHA256, including the upstream [Whisper tiny.en checkpoint](https://github.com/openai/whisper/blob/main/whisper/__init__.py).
-Kokoro uses the same model hashes and package as `reverie-kokoro`. Whisper is MIT
-licensed; Kokoro packaging retains its Apache-2.0 license metadata. These test
-models are separate from the production image.
+The workflow also starts the packaged Rust `reverie-kokoro` service with the
+same pinned ONNX graph and voice archive and checks its HTTP and WAV responses.
+The instrumented browser fixture retains its Python speech adapter while the
+timing and recognition paths migrate. Whisper uses the MIT license. Kokoro
+retains its upstream model and vocabulary attribution. These test models
+are separate from the production image.
 
 From a clean checkout, install the locked JavaScript dependencies without browser
 downloads, then run the guarded harness with a **new** artifact directory:

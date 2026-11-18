@@ -639,7 +639,7 @@ let
     '';
   };
   memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ps.pytest ]);
-  kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
+  kokoro = import ./kokoro.nix { inherit pkgs src; };
   hands = pkgs.writeShellApplication {
     name = "reverie-hands";
     runtimeInputs = [ memory ];

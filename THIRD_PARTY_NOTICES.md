@@ -93,3 +93,13 @@ its once_cell-derived code uses Apache-2.0/MIT notices. See ring's LICENSE,
 LICENSE-BoringSSL, LICENSE-other-bits and src/polyfill/once_cell license files;
 these upstream notices remain applicable. The front
 selects ring explicitly and does not include a second TLS implementation.
+
+## Kokoro speech
+
+The vocabulary in `crates/reverie-kokoro/src/vocab.json` is the vocabulary from
+`kokoro-onnx` 0.6.1's `config.json`. The upstream MIT license is retained
+in `crates/reverie-kokoro/LICENSE-kokoro-onnx`. Inference calls Microsoft ONNX
+Runtime through the Rust `ort` binding (MIT or Apache-2.0). Nix supplies the native
+ONNX Runtime (MIT) and eSpeak NG (GPL-3.0-or-later) from the pinned package set.
+The eSpeak NG adapter uses the published C phoneme API in a subprocess. The existing Kokoro model and
+voices remain versioned, checksum-pinned downloads.

@@ -38,9 +38,9 @@ The unreferenced `nix/local-model.nix`, `nix/ops-core.nix` and
 `nix/owner-terminal-packages.nix` host-entry factories have also been removed.
 The boundary check refuses their reintroduction. Their shared Rust libraries,
 container image producers and actively referenced component fixtures remain.
-This cleanup does not remove the Python runtime: current memory, hands, speech
-and workspace-tool packaging still depends on it. Those callers must migrate
-before the root `python/` tree can be retired.
+The workspace and Kokoro commands now use Rust. Memory and Hands still bring
+Python into the image. The remaining runtime and acceptance callers must
+migrate before the root `python/` tree can be retired.
 
 Remaining debt is explicit: unselected legacy broker/model implementation and
 its compatibility tests still exist, as do routine and cleanup host tools. The persistent OPS daemon installer is

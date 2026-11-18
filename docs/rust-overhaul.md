@@ -59,6 +59,7 @@ that image.
 | Memory and agent runtime | `memory.py`, `project_memory.py`, `runtime.py`, `sleep.py`, context/identity/governance and plugin/CLI adapters | Existing SQLite data remains readable, tested write/migration semantics, conversation/account/model behavior preserved, CLI/plugin compatibility |
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |
 | Numerical/model adapters and tooling | `embeddings.py`, `kokoro.py`, training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
+| Kokoro speech | Docker's `reverie-kokoro` selects the Rust HTTP service, native ONNX Runtime and eSpeak NG, using the existing model cache and voice IDs | Port the instrumented voice-CI speech adapter and remove the remaining Python synthesis oracle |
 
 The narrow helper and active Cargo-default/build-job laptop tools now have Rust
 source/package replacements. The workspace uses the shared xtask runner, strict

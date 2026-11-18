@@ -1,5 +1,6 @@
 { pkgs, kokoro, voiceVerifier, laptopTools }:
 let
+  kokoroOracle = import ./voice-ci-kokoro-oracle.nix { inherit pkgs; };
   whisperModel = pkgs.fetchurl {
     url = "https://openaipublic.azureedge.net/main/whisper/models/d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03/tiny.en.pt";
     sha256 = "d3dd57d32accea0b295c96e26691aa14d8822fac7d9d27d5dc00b4ca2826dd03";
@@ -14,9 +15,10 @@ let
   };
 in pkgs.mkShell {
   packages = [
+    kokoro
     voiceVerifier
     laptopTools
-    (pkgs.python3.withPackages (ps: [ ps.openai-whisper ps.numpy kokoro.kokoro ]))
+    (pkgs.python3.withPackages (ps: [ ps.openai-whisper ps.numpy kokoroOracle ]))
     pkgs.nodejs_22 pkgs.chromium pkgs.git pkgs.ffmpeg-headless pkgs.espeak-ng
     pkgs.coreutils pkgs.bash pkgs.gcc pkgs.gnumake (pkgs.lib.getBin pkgs.util-linux)
   ];
