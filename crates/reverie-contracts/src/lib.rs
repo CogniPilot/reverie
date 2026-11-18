@@ -15,6 +15,7 @@ mod digest;
 pub mod docker_profile;
 pub mod goal_custody;
 pub mod gpu_access;
+pub mod hands_web;
 pub mod host_jobs;
 pub mod human_protocol;
 pub mod js_json;

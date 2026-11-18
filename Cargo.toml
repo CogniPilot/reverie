@@ -35,6 +35,7 @@ http = "1.4"
 hyper = { version = "1.12", default-features = false, features = ["client", "server", "http1"] }
 hyper-util = { version = "0.1.21", default-features = false, features = ["tokio"] }
 http-body-util = "0.1.5"
+html5ever = "0.40.1"
 bytes = "1.11"
 tokio = { version = "1.50", default-features = false, features = ["rt", "rt-multi-thread", "time", "net", "io-util", "process", "signal", "sync", "macros"] }
 tokio-rustls = { version = "0.26.6", default-features = false, features = ["ring", "tls12"] }

@@ -17,9 +17,12 @@ required-features = ["test-fixtures"]
 bytes.workspace = true
 clap.workspace = true
 getrandom.workspace = true
+html5ever.workspace = true
 http.workspace = true
 http-body-util.workspace = true
+hyper.workspace = true
 hyper-util.workspace = true
+idna.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
 regex-lite.workspace = true
 reverie-contracts.workspace = true
@@ -28,10 +31,13 @@ reverie-host.workspace = true
 reverie-http.workspace = true
 reverie-python-regex.workspace = true
 reverie-store.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
+tokio-rustls.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true

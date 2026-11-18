@@ -1,4 +1,5 @@
 use super::files::Directory;
+use reverie_contracts::hands_web;
 use serde_json::{Map, Value};
 
 const ALLOWED: &[&str] = &[
@@ -30,11 +31,6 @@ const INTEGER_LIMITS: &[(&str, u64, u64)] = &[
     ("reply_max_tokens", 128, 32768),
     ("prompt_cap_chars", 1000, 120000),
     ("image_tokens_per_image", 128, 8192),
-    ("search_max_calls", 1, 4),
-    ("search_results", 1, 10),
-    ("search_result_chars", 256, 8000),
-    ("search_timeout_s", 1, 20),
-    ("search_max_bytes", 4096, 2_000_000),
 ];
 const NUMBER_LIMITS: &[(&str, f64, f64)] = &[
     ("temperature", 0.0, 2.0),
@@ -58,13 +54,7 @@ fn validate(overrides: &Map<String, Value>) -> crate::Result<()> {
     if overrides.keys().any(|key| !ALLOWED.contains(&key.as_str())) {
         return Err("Unsupported Hands runtime setting");
     }
-    for key in [
-        "vision",
-        "phone_wake",
-        "journal_enabled",
-        "search",
-        "web_fetch",
-    ] {
+    for key in ["vision", "phone_wake", "journal_enabled"] {
         if overrides.get(key).is_some_and(|item| !item.is_boolean()) {
             return Err("Invalid Hands boolean setting");
         }
@@ -85,70 +75,7 @@ fn validate(overrides: &Map<String, Value>) -> crate::Result<()> {
             return Err("Invalid Hands numeric limit");
         }
     }
-    validate_web(overrides)
-}
-
-fn validate_web(overrides: &Map<String, Value>) -> crate::Result<()> {
-    let url = overrides.get("search_url").filter(|item| !item.is_null());
-    if url.is_some_and(|url| url.as_str().is_none_or(|url| !search_url(url))) {
-        return Err("Invalid configured Hands search endpoint");
-    }
-    if overrides.get("search") == Some(&Value::Bool(true)) && url.is_none() {
-        return Err("Hands search requires an explicitly configured search_url");
-    }
-    if overrides
-        .get("web_log")
-        .filter(|item| !item.is_null())
-        .is_some_and(|item| {
-            item.as_str().is_none_or(|path| {
-                !path.starts_with('/') || path.split('/').any(|segment| segment == "..")
-            })
-        })
-    {
-        return Err("Private absolute Hands web_log required");
-    }
-    Ok(())
-}
-
-fn search_url(url: &str) -> bool {
-    if url.chars().count() > 2048
-        || url
-            .bytes()
-            .any(|byte| byte <= 0x20 || matches!(byte, b'\\' | 0x7f))
-    {
-        return false;
-    }
-    // Python's existing consumer also checks URL grammar before any network use.
-    let url = url.strip_suffix('#').unwrap_or(url);
-    let url = url.strip_suffix('?').unwrap_or(url);
-    let Some((scheme, rest)) = url.split_once("://") else {
-        return false;
-    };
-    if !(scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
-        || rest.contains(['?', '#'])
-    {
-        return false;
-    }
-    let authority = rest.split('/').next().unwrap_or_default();
-    if authority.contains('@') {
-        return false;
-    }
-    if let Some(ip) = authority.strip_prefix('[') {
-        return ip.split_once(']').is_some_and(|(host, suffix)| {
-            !host.is_empty()
-                && (suffix.is_empty() || suffix.strip_prefix(':').is_some_and(valid_port))
-        });
-    }
-    authority
-        .split_once(':')
-        .map_or(!authority.is_empty(), |(host, port)| {
-            !host.is_empty() && valid_port(port)
-        })
-}
-
-fn valid_port(port: &str) -> bool {
-    port.is_empty()
-        || (port.bytes().all(|byte| byte.is_ascii_digit()) && port.parse::<u16>().is_ok())
+    hands_web::validate_settings(overrides)
 }
 
 #[cfg(test)]
