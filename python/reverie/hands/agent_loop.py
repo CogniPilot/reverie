@@ -54,7 +54,6 @@ from coding_manager import TaskManager
 from coding_model_client import ModelClient
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
-import scoped_images
 import public_web
 import managed_context
 import agent_journal
@@ -489,6 +488,18 @@ def room_dir(room, msg):
     return room
 
 
+def fetch_scoped_image(cfg, room, attachment):
+    request = agent_journal.encode_memory_json({
+        'cli': cfg['cli'], 'session': cfg['self_session_id'], 'room': room,
+        'attachment': attachment, 'max_bytes': cfg['max_image_bytes'],
+        'timeout': cfg['cli_timeout_s'],
+    })
+    if request is None:
+        raise ValueError('invalid scoped image request')
+    return subprocess.run(agent_journal.native_memory_command('scoped-image-worker'), input=request,
+                          capture_output=True, check=True, start_new_session=True, timeout=14).stdout
+
+
 def load_images(cfg, room, msg):
     """Image attachments of msg as image_url parts. Returns (parts, notes); notes say what was skipped and why."""
     parts, notes = [], []
@@ -512,8 +523,7 @@ def load_images(cfg, room, msg):
             continue
         try:
             if scoped:
-                data = scoped_images.fetch(cfg['cli'], cfg['self_session_id'], room_dir(room, msg),
-                    a.get('id'), cfg['max_image_bytes'], cfg['cli_timeout_s'])
+                data = fetch_scoped_image(cfg, room_dir(room, msg), a.get('id'))
             else:
                 path = os.path.realpath(str(a.get('path') or ''))
                 if os.path.commonpath([path, root]) != root or path == root:

@@ -108,15 +108,11 @@ struct OwnedChild {
 }
 
 impl OwnedChild {
-    fn spawn(mut command: Command, input: bool, group: bool) -> io::Result<Self> {
+    fn spawn(mut command: Command, group: bool) -> io::Result<Self> {
         if group {
             command.process_group(0);
         }
-        let child = command
-            .stdin(if input { Stdio::piped() } else { Stdio::null() })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+        let child = command.spawn()?;
         let pid = Pid::from_raw(i32::try_from(child.id()).expect("Linux PID fits pid_t"));
         Ok(Self {
             child,
@@ -269,11 +265,19 @@ pub(crate) struct Completed {
 }
 
 pub(crate) fn completed(
-    command: Command,
+    mut command: Command,
     request: Option<&[u8]>,
     limits: Limits<'_>,
 ) -> io::Result<Completed> {
-    let mut child = OwnedChild::spawn(command, request.is_some(), limits.group())?;
+    command
+        .stdin(if request.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = OwnedChild::spawn(command, limits.group())?;
     let mut pipes = Pipes::new(&mut child.child, request)?;
     loop {
         limits.check(child.pid)?;
@@ -289,6 +293,29 @@ pub(crate) fn completed(
         success: child.settle()?,
         stdout: pipes.output,
     })
+}
+
+pub(crate) fn quiet_group(
+    mut command: Command,
+    deadline: Instant,
+    signals: &Signals,
+) -> io::Result<bool> {
+    signals.check()?;
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = OwnedChild::spawn(command, true)?;
+    loop {
+        signals.check()?;
+        if Instant::now() >= deadline {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        if child.exited()? {
+            return child.settle();
+        }
+        std::thread::sleep(TICK);
+    }
 }
 
 #[cfg(test)]

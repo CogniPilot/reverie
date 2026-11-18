@@ -1,11 +1,19 @@
 import base64
+import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import agent_loop as loop
 from test_coding_support import cfg_for, without_seat_environment
+
+SESSION = '11111111-2222-3333-4444-555555555555'
+ROOM = '12345678-1234-1234-1234-123456789abc'
+FILE = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+PNG = b'\x89PNG\r\n\x1a\nfixture'
 
 
 class FilesystemVisionTests(unittest.TestCase):
@@ -48,3 +56,55 @@ class FilesystemVisionTests(unittest.TestCase):
             for content in (b'not a PNG', b'\x89PNG\r\n\x1a\n' + b'x' * 200):
                 image.write_bytes(content)
                 self.assertEqual(loop.load_images(dict(cfg, max_image_bytes=100), 'room', {'attachments': [entry]})[0], [])
+
+
+class ScopedVisionTests(unittest.TestCase):
+    def setUp(self):
+        scope = patch.dict(os.environ, REVERIE_WORKER='1', REVERIE_SESSION_ID=SESSION)
+        scope.start()
+        self.addCleanup(scope.stop)
+        self.cfg = cfg_for('/unused', self_session_id=SESSION, vision=True, max_images=1, max_image_bytes=32)
+        self.attachment = {'id': FILE, 'type': 'image/png', 'path': '/unused/server-file'}
+
+    def test_worker_uses_native_download_and_preserves_full_room_identity(self):
+        message = {'roomId': ROOM, 'attachments': [self.attachment]}
+        with patch.object(loop.subprocess, 'run', return_value=SimpleNamespace(stdout=PNG)) as run, \
+                patch.object(loop, 'open', create=True, side_effect=AssertionError('no server filesystem')):
+            parts, notes = loop.load_images(self.cfg, ROOM[:8], message)
+        self.assertEqual(notes, [])
+        self.assertEqual(base64.b64decode(parts[0]['image_url']['url'].split(',', 1)[1]), PNG)
+        command, = run.call_args.args
+        options = run.call_args.kwargs
+        self.assertEqual(command[-1], f'--scoped-image-worker={os.getpid()}')
+        self.assertTrue(options['start_new_session'])
+        self.assertTrue(options['check'])
+        self.assertEqual(json.loads(options['input']), {
+            'cli': self.cfg['cli'], 'session': SESSION, 'room': ROOM,
+            'attachment': FILE, 'max_bytes': 32, 'timeout': self.cfg['cli_timeout_s'],
+        })
+
+    def test_download_refusal_does_not_fall_back_to_a_local_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root / ROOM / 'image.png'
+            image.parent.mkdir()
+            image.write_bytes(PNG)
+            self.attachment['path'] = str(image)
+            self.cfg['attachments_root'] = str(root)
+            message = {'roomId': ROOM, 'attachments': [self.attachment]}
+            with patch.object(loop, 'fetch_scoped_image', side_effect=ValueError('native refusal')):
+                parts, notes = loop.load_images(self.cfg, ROOM, message)
+            self.assertEqual(parts, [])
+            self.assertIn('could not be read', notes[0])
+            self.assertEqual(image.read_bytes(), PNG)
+
+    def test_native_download_still_obeys_prompt_image_limits(self):
+        message = {'roomId': ROOM, 'attachments': [self.attachment] * 2}
+        for data in (b'wrong image', PNG + b'x' * 40):
+            with patch.object(loop, 'fetch_scoped_image', return_value=data):
+                self.assertEqual(loop.load_images(self.cfg, ROOM, message)[0], [])
+        with patch.object(loop, 'fetch_scoped_image', return_value=PNG) as download:
+            parts, notes = loop.load_images(self.cfg, ROOM, message)
+        self.assertEqual(len(parts), 1)
+        download.assert_called_once()
+        self.assertIn('more than 1 images', notes[0])

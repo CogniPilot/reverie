@@ -11,6 +11,7 @@ mod opencode_context;
 mod read_turn;
 mod recall;
 mod save;
+mod scoped_image;
 mod turn_capture;
 mod turn_context;
 mod turn_tool;
@@ -103,6 +104,10 @@ fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
     check_worker_parent(expected_parent)?;
     prctl::set_pdeathsig(Signal::SIGKILL)?;
     check_worker_parent(expected_parent)?;
+    bounded_input(bound)
+}
+
+fn bounded_input(bound: usize) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     io::stdin()
         .take((bound + 1) as u64)
@@ -180,6 +185,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
         "--embedding-worker" => embedding_worker::run,
+        "--scoped-image-worker" => scoped_image::run,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))
