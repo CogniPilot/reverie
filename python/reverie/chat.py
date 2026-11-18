@@ -20,13 +20,10 @@ from .beliefs import ensure_seeded, render
 from .config import ChatClient, Config, LLMError, limit_words
 from .dream import Dreamer, waking_recall
 from .gpu import GpuLock
-from .importance import rate_episode
 from .instance import initial_self_for
 from .reverie import violates
 from .log import get, setup
-from .memory import DREAM, EPISODE, Memory, MemoryStore, make_embedder
-from .migrate import migrate_history
-from .mood import load_mood
+from .memory import DREAM, EPISODE, MOOD_STATE, Memory, MemoryStore, describe_mood, make_embedder
 from .persona import build_system_prompt, load_persona, read_profile
 from .reflection import Reflector
 from .room import Room, is_for_me
@@ -92,7 +89,7 @@ class Brain:
             from .reverie import Reverie
             persona = Reverie(self.store, initial_self_for(self.cfg.instance)).self_model()["body"]["persona"]
         system = build_system_prompt(persona, read_profile(self.cfg.profile_path), recalled,
-                                     mood=load_mood(self.store, now).describe(), last_dream=last_dream,
+                                     mood=describe_mood(self.store.get_state(MOOD_STATE), now), last_dream=last_dream,
                                      beliefs=render(self.store.beliefs()),
                                      beliefs_revisable=self.store.get_state("revisable_self_model") == "1")
         messages = [{"role": "system", "content": system}] + self.history_messages(recent)
@@ -187,7 +184,7 @@ class Brain:
                 self.store.set_importance(m.id, self.cfg.joke_importance, "fixed")
                 continue
             with self._llm_lock:
-                score = self._with_gpu(lambda: rate_episode(self.client, m, self.cfg.default_importance))
+                score = self._with_gpu(lambda: self.client.rate(m.text, self.cfg.default_importance))
             self.store.set_importance(m.id, score, "model")
             n += 1
             self.log.info("rated #%d importance %.0f", m.id, score)
@@ -252,7 +249,7 @@ class ChatDaemon:
                 reverie = Reverie(store, initial)
                 if reverie.self_model()["revision"] == 0 and fresh_beliefs:
                     reverie.save_self(initial, "Owner-selected initial instance identity", 0)
-            imported = migrate_history(store, self.cfg.legacy_history, self.cfg.default_importance)
+            imported = store.import_legacy_history(self.cfg.legacy_history, self.cfg.default_importance)
             if imported:
                 self.log.info("imported %d legacy exchanges from %s", imported, self.cfg.legacy_history)
             client = ChatClient(self.cfg.api_base, self.cfg.model, self.cfg.request_timeout)

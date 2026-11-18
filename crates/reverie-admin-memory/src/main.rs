@@ -17,6 +17,7 @@ mod hands_prompt;
 mod hands_settings;
 mod hands_web;
 mod journal;
+mod legacy_memory;
 mod managed_context;
 mod model_completion;
 mod office;
@@ -215,6 +216,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-poll-worker" => hands_poll::run,
         "--cycle-plan-worker" => cycle_plan::run,
         "--model-completion-worker" => model_completion::run,
+        "--legacy-memory-worker" => legacy_memory::run,
         "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,

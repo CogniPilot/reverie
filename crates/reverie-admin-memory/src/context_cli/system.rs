@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::memory::decode_mood;
 use reverie_core::{
     PythonTextRef,
     memory::{Belief, trim_text},
@@ -33,7 +34,7 @@ pub(super) fn prompt(
     let profile = profile.map_or_else(|| derived_profile(data), Ok)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
     let beliefs = render_beliefs(&data.beliefs);
-    let mood = mood(data.mood.as_deref(), now);
+    let mood = decode_mood(data.mood.as_deref()).decayed(now).describe();
     let dream = recent_dream(data, now)?;
     Ok(system(
         &persona, &profile, &beliefs, revisable, mood, &dream,
@@ -114,42 +115,4 @@ fn recent_dream(data: &PrivateContinuity, now: f64) -> Result<String> {
     } else {
         Ok(String::new())
     }
-}
-
-#[derive(serde::Deserialize)]
-struct Mood {
-    valence: f64,
-    arousal: f64,
-    #[serde(default)]
-    updated_at: f64,
-}
-
-fn mood(raw: Option<&str>, now: f64) -> &'static str {
-    let Some(Mood {
-        valence,
-        arousal,
-        updated_at,
-    }) = raw.and_then(|text| serde_json::from_str::<Mood>(text).ok())
-    else {
-        return "content and easy";
-    };
-    let decay = if updated_at > 0.0 {
-        0.5f64.powf((now - updated_at).max(0.0) / 21_600.0)
-    } else {
-        1.0
-    };
-    let v = 0.2 + (valence - 0.2) * decay;
-    let a = arousal * decay;
-    let tones = if v > 0.45 {
-        ("bright and happy", "warm and content")
-    } else if v > 0.1 {
-        ("playful", "content and easy")
-    } else if v > -0.1 {
-        ("restless", "quiet and even")
-    } else if v > -0.45 {
-        ("on edge", "a little wistful")
-    } else {
-        ("anxious", "low and tired")
-    };
-    if a > 0.2 { tones.0 } else { tones.1 }
 }

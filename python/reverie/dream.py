@@ -24,11 +24,10 @@ from typing import Callable, Sequence
 from .beliefs import render
 from .reverie import passes
 from .config import ChatClient, LLMError
-from .memory import DREAM, Memory, MemoryStore
-from .mood import TONE_NUDGE, load_mood, save_mood
+from .memory import DREAM, MOOD_STATE, Memory, MemoryStore, describe_mood
 
 STATE_LAST_DREAM_AT = "last_dream_at"
-TONES = tuple(TONE_NUDGE)
+TONES = ("warm", "playful", "calm", "strange", "anxious", "melancholy")
 OLD_AGE_HOURS = 48.0
 
 DREAM_SYSTEM = (
@@ -158,12 +157,13 @@ class Dreamer:
         self.store.set_state(STATE_LAST_DREAM_AT, str(now))
         if not episodes and not creative.strip():
             return None
-        mood = load_mood(self.store, now)
+        stored_mood = self.store.get_state(MOOD_STATE)
+        mood = describe_mood(stored_mood, now)
         beliefs = render(self.store.beliefs())
         user = (
             (f"Who you are, even asleep (stable, not questioned by dreams):\n{beliefs}\n\n" if beliefs else "")
             + "Memories drifting through your sleep:\n\n" + "\n\n".join(f"[{m.id}] {m.text}" for m in episodes)
-            + f"\n\nYou fell asleep feeling {mood.describe()}.\n\nJSON:"
+            + f"\n\nYou fell asleep feeling {mood}.\n\nJSON:"
         )
         if self.store.get_state("revisable_self_model") == "1":
             user = user.replace("Who you are, even asleep (stable, not questioned by dreams):",
@@ -184,6 +184,6 @@ class Dreamer:
             return None
         mem = self.store.add_dream(parsed.dream, parsed.recall, parsed.tone, [m.id for m in episodes],
                                    created_at=now, ideas=parsed.ideas)
-        save_mood(self.store, mood.nudge_tone(parsed.tone, self.mood_weight, now))
+        self.store.apply_dream_tone(stored_mood, parsed.tone, self.mood_weight, now)
         self.store.prune_dream_summaries(30)
         return mem

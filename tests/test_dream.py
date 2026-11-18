@@ -7,7 +7,6 @@ from pathlib import Path
 
 from reverie.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
 from reverie.memory import DREAM, MemoryStore, make_embedder
-from reverie.mood import Mood, load_mood, save_mood
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector
 from reverie.train.config import TrainConfig
@@ -87,28 +86,6 @@ class ParseTest(unittest.TestCase):
         self.assertIsNone(parse_dream(json.dumps({"dream": f"{first_marker} and {second_marker} appear as markers", "recall": "x"})))
 
 
-class MoodTest(unittest.TestCase):
-    def test_decay_and_nudge(self):
-        m = Mood(0.9, 0.9, updated_at=NOW)
-        m.decay(NOW + 6 * H)
-        self.assertAlmostEqual(m.valence, 0.2 + 0.7 / 2, places=6)
-        self.assertAlmostEqual(m.arousal, 0.45, places=6)
-        m.nudge_tone("anxious", 1.0, now=NOW + 6 * H)
-        self.assertAlmostEqual(m.valence, 0.55 - 0.15, places=6)
-        m.nudge(5, 5, now=NOW + 6 * H)
-        self.assertEqual((m.valence, m.arousal), (1.0, 1.0))
-        self.assertEqual(Mood(0.9, 0.5).describe(), "bright and happy")
-        self.assertEqual(Mood(-0.9, -0.5).describe(), "low and tired")
-        self.assertEqual(Mood().describe(), "content and easy")
-
-    def test_persist(self):
-        s = MemoryStore(":memory:", make_embedder(dims=64))
-        self.assertEqual(load_mood(s, NOW).valence, 0.2)
-        save_mood(s, Mood(-0.5, 0.0, NOW))
-        self.assertAlmostEqual(load_mood(s, NOW).valence, -0.5)
-        self.assertEqual(Mood.loads("garbage").valence, 0.2)
-
-
 class DreamerTest(unittest.TestCase):
     def setUp(self):
         self.s = MemoryStore(":memory:", make_embedder(dims=64))
@@ -144,7 +121,7 @@ class DreamerTest(unittest.TestCase):
 
     def test_dream_stores_and_nudges_mood(self):
         d, t = self.dreamer()
-        before = load_mood(self.s, NOW)
+        self.s.set_state("mood", json.dumps({"valence": "0.6", "arousal": "0.25", "updated_at": NOW}))
         m = d.dream(now=NOW)
         self.assertEqual(m.kind, DREAM)
         self.assertEqual(m.meta["tone"], "playful")
@@ -152,10 +129,9 @@ class DreamerTest(unittest.TestCase):
         self.assertTrue(m.recall.startswith("I dreamed"))
         self.assertGreaterEqual(len(m.source_ids), 4)
         prompt = t.calls[0]["messages"][1]["content"]
-        self.assertIn("fell asleep feeling", prompt)
+        self.assertIn("fell asleep feeling bright and happy.", prompt)
         self.assertIn(f"[{m.source_ids[0]}]", prompt)
-        after = load_mood(self.s, NOW)
-        self.assertGreater(after.valence, before.valence)
+        self.assertEqual(json.loads(self.s.get_state("mood")), {"valence": 0.7, "arousal": 0.35, "updated_at": NOW})
         self.assertEqual(self.s.latest_dream().id, m.id)
         # quota: one per sleep window, spaced
         self.assertFalse(d.due(last_activity=NOW - 2000, now=NOW + 10))         # quota for this sleep window used

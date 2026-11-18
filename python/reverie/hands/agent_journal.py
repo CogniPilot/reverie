@@ -64,9 +64,13 @@ def encode_memory_json(payload):
         return None
 
 
-def native_memory_json(worker, payload, bound=MEMORY_WORKER_BYTES):
+def native_memory_json(worker, payload, bound=MEMORY_WORKER_BYTES, *, timeout=3):
     arguments = encode_memory_json(payload)
-    return native_memory_request(worker, arguments, bound) if arguments is not None else None
+    return native_memory_request(worker, arguments, bound, timeout=timeout) if arguments is not None else None
+
+
+def legacy_memory_request(action, *, timeout=3, **payload):
+    return native_memory_json("legacy-memory-worker", {"action": action, **payload}, TURN_CAPTURE_BYTES, timeout=timeout)
 
 
 def journal_tool_request(phase, **payload):

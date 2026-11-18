@@ -4,21 +4,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reverie.importance import parse_rating, rate_episode
 from reverie.memory import MemoryStore, make_embedder
 from reverie.reflection import Reflector, parse_insights
 from tests.helpers import fake_client
 
 
 class ParseTest(unittest.TestCase):
-    def test_parse_rating(self):
-        self.assertEqual(parse_rating("7"), 7.0)
-        self.assertEqual(parse_rating("I would say 10 out of 10"), 10.0)
-        self.assertEqual(parse_rating("Importance: 3."), 3.0)
-        self.assertEqual(parse_rating("none"), 3.0)
-        self.assertEqual(parse_rating("", default=5.0), 5.0)
-        self.assertEqual(parse_rating("42"), 3.0)
-
     def test_parse_insights_tolerates_noise(self):
         raw = 'Sure! Here you go:\n[{"insight": "User builds **rumoca**", "importance": 12, "section": "User", "sources": [1, "2", "x", 9]},'\
               ' {"insight": "short"}, "junk", {"insight": "We joke about swap space constantly", "importance": "6", "section": "nothing"}]\nDone.'
@@ -54,11 +45,11 @@ class RateTest(unittest.TestCase):
         s = MemoryStore(":memory:", make_embedder(dims=64))
         m = s.add_episode("I got the Lean proof through", "Knew you would.")
         client, t = fake_client("8")
-        self.assertEqual(rate_episode(client, m), 8.0)
+        self.assertEqual(client.rate(m.text), 8.0)
         self.assertEqual(t.calls[0]["max_tokens"], 8)
         self.assertIn("Lean proof", t.calls[0]["messages"][1]["content"])
         bad, _ = fake_client(None)
-        self.assertEqual(rate_episode(bad, m, default=4.0), 4.0)
+        self.assertEqual(bad.rate(m.text, default=4.0), 4.0)
 
 
 class ReflectorTest(unittest.TestCase):

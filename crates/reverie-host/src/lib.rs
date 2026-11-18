@@ -19,6 +19,7 @@ pub mod lease_policy;
 mod memory_artifacts;
 pub mod memory_configuration;
 pub mod memory_context;
+pub mod memory_history;
 pub mod memory_instance;
 pub mod memory_journal;
 pub mod memory_lifecycle;

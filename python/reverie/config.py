@@ -5,7 +5,9 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from .hands.agent_journal import TURN_CAPTURE_BYTES, encode_memory_json, native_memory_json, native_memory_output
+from .hands.agent_journal import (
+    TURN_CAPTURE_BYTES, encode_memory_json, legacy_memory_request, native_memory_json, native_memory_output,
+)
 from .instance import Instance, load_instance
 from reverie import env_names
 
@@ -74,6 +76,22 @@ class ChatClient:
         except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
             raise LLMError("chat request returned an invalid completion") from error
         return _format_reply("clean", content, max_chars)
+
+    def rate(self, text, default=3.0):
+        prompt = legacy_memory_request("rating_prompt")
+        if prompt is None:
+            return default
+        messages = [
+            {"role": "system", "content": prompt["system"]},
+            {"role": "user", "content": text + prompt["suffix"]},
+        ]
+        try:
+            reply = self.chat(messages, max_tokens=prompt["max_tokens"],
+                              temperature=prompt["temperature"], max_chars=prompt["max_chars"])
+        except LLMError:
+            return default
+        result = legacy_memory_request("rating_score", points=list(map(ord, reply)))
+        return float(result["score"]) if result and result["score"] is not None else default
 
 
 def _path_fallback(env: str, new: Path, old: Path) -> Path:

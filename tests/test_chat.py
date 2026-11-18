@@ -4,7 +4,6 @@ import unittest
 
 from reverie.chat import Brain, ChatDaemon, IDLE_USER_TEXT
 from reverie.memory import MemoryStore, make_embedder
-from reverie.migrate import migrate_history
 from reverie.room import Room, is_for_me
 from tests.helpers import FakeRoom, fake_client, temp_config, output_policy_terms, synthetic_output_policy
 
@@ -209,7 +208,7 @@ class DaemonTest(unittest.TestCase):
     def test_daemon_bootstraps_store_and_migrates(self):
         cfg = temp_config()
         cfg.legacy_history.write_text(json.dumps([
-            {"role": "user", "content": "I see them now"},
+            {"role": "user", "content": "  I see them now  "},
             {"role": "assistant", "content": "The gremlins work."},
             {"role": "user", "content": "(idle moment; a joke was requested)"},
             {"role": "assistant", "content": "A joke."},
@@ -223,7 +222,7 @@ class DaemonTest(unittest.TestCase):
         self.assertEqual(eps[0].importance_source, "migrated")
         self.assertLess(eps[0].created_at, eps[1].created_at)
         self.assertTrue(cfg.profile_path.exists())
-        self.assertEqual(migrate_history(d.brain.store, cfg.legacy_history), 0)
+        self.assertEqual(d.brain.store.import_legacy_history(cfg.legacy_history), 0)
         d2 = ChatDaemon(cfg)
         self.assertEqual(d2.brain.store.count(), 2)
 

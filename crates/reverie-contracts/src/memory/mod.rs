@@ -4,6 +4,7 @@ pub mod channel;
 mod embedding;
 mod fields;
 mod history;
+mod mood;
 use crate::legacy_json::ordered::OrderedValue;
 use crate::legacy_json::{Node, Number, Text, Value};
 use crate::storage_identity::MetadataText;
@@ -13,6 +14,7 @@ pub use embedding::{
 };
 pub use fields::{MemoryMetadata, MemorySources};
 pub use history::{LegacyEpisode, LegacyHistory};
+pub use mood::{decode_mood, encode_mood};
 use std::fmt;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryJsonError {
@@ -109,4 +111,26 @@ fn object(fields: Vec<(&str, OrderedValue)>) -> OrderedValue {
             .map(|(name, value)| (text(name), value))
             .collect(),
     )
+}
+fn legacy_float(value: &Value) -> std::result::Result<f64, reverie_core::memory::EmbeddingError> {
+    use reverie_core::memory::{EmbeddingError, parse_embedding_float_text};
+    match &value.0 {
+        Node::Bool(value) => Ok(f64::from(u8::from(*value))),
+        Node::Number(Number::Float(value)) => Ok(*value),
+        Node::Number(Number::Nan) => Ok(f64::NAN),
+        Node::Number(Number::PositiveInfinity) => Ok(f64::INFINITY),
+        Node::Number(Number::NegativeInfinity) => Ok(f64::NEG_INFINITY),
+        Node::Number(Number::Integer(value)) => {
+            let value = value
+                .parse::<f64>()
+                .map_err(|_| EmbeddingError::InvalidNumber)?;
+            if value.is_infinite() {
+                Err(EmbeddingError::InvalidNumber)
+            } else {
+                Ok(value)
+            }
+        }
+        Node::String(value) => parse_embedding_float_text(&value.0),
+        _ => Err(EmbeddingError::InvalidNumber),
+    }
 }

@@ -30,10 +30,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol, Sequence
 
+from .hands.agent_journal import legacy_memory_request
+
 EPISODE = "episode"
 REFLECTION = "reflection"
 DREAM = "dream"
 SCHEMA_VERSION = 1
+MOOD_STATE = "mood"
+LEGACY_HISTORY_STATE = "migrated_legacy_history"
 # The retired column name is retained only for existing-store interoperability.
 LEGACY_ASSISTANT_COLUMN = bytes.fromhex("6a696e785f74657874").decode("ascii")
 
@@ -257,6 +261,13 @@ def score_memory(
     return (w_rel * rel + w_rec * rec + w_imp * imp) / total
 
 
+def describe_mood(raw: str | None, now: float) -> str:
+    reply = legacy_memory_request("mood_view", raw=raw, now=now)
+    if reply is None:
+        raise RuntimeError("native mood description is unavailable")
+    return reply["description"]
+
+
 class MemoryStore:
     """Thread-safe wrapper around one SQLite file."""
 
@@ -340,6 +351,35 @@ class MemoryStore:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO state(key, value) VALUES (?, ?)", (key, str(value)))
             self._commit()
+
+    def apply_dream_tone(self, raw: str | None, tone: str, weight: float, now: float) -> None:
+        reply = legacy_memory_request("mood_nudge", raw=raw, tone=tone, weight=weight, now=now)
+        if reply is None:
+            raise RuntimeError("native dream mood update is unavailable")
+        self.set_state(MOOD_STATE, reply["stored"])
+
+    def import_legacy_history(self, path: Path, importance: float = 3.0) -> int:
+        if self.get_state(LEGACY_HISTORY_STATE):
+            return 0
+        reply = legacy_memory_request("history", timeout=None, path=list(map(ord, os.fspath(path))))
+        if reply is None:
+            raise RuntimeError("native legacy history capture is unavailable")
+        episodes = reply["episodes"]
+        with self.atomic():
+            self._db.execute("BEGIN IMMEDIATE")
+            if self.get_state(LEGACY_HISTORY_STATE):
+                return 0
+            if self._db.execute("SELECT 1 FROM memories WHERE kind='episode' AND importance_source='migrated' LIMIT 1").fetchone():
+                raise RuntimeError("partial legacy history import requires recovery")
+            if episodes is None:
+                self.set_state(LEGACY_HISTORY_STATE, "missing")
+                return 0
+            for entry in episodes:
+                self.add_episode("".join(map(chr, entry["user"])), "".join(map(chr, entry["assistant"])),
+                                 importance, "migrated", created_at=entry["created_at"],
+                                 meta={"idle": entry["idle"], "legacy": True})
+            self.set_state(LEGACY_HISTORY_STATE, str(len(episodes)))
+            return len(episodes)
 
     # ---- idempotency per source message ------------------------------------
     def claim_message(self, source_id: str, now: float | None = None) -> bool:
