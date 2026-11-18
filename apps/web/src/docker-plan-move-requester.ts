@@ -26,7 +26,8 @@ const targetSchema = z
     employeeId: identifier,
     sessionId: z.string().uuid(),
     sessionGeneration: z.number().int().positive().safe().optional(),
-    choice: z.object({ moveId: identifier, toAccount: identifier, forceBusy: z.boolean() }).strict().optional(),
+    choice: z.object({ moveId: identifier, toAccount: identifier, forceBusy: z.boolean(),
+      returnToOffice: z.literal(true).optional() }).strict().optional(),
     purpose: z.enum(['choice', 'original']).default('choice'),
   })
   .strict();
@@ -48,7 +49,7 @@ export interface DockerPlanMoveRequesterScope {
   readonly sessionGeneration: number;
   readonly containerId: string;
   readonly purpose: 'choice' | 'original';
-  readonly choice?: Readonly<{ moveId: string; toAccount: string; forceBusy: boolean }>;
+  readonly choice?: NonNullable<DockerPlanMoveRequesterTarget['choice']>;
 }
 const origin = Symbol('actual Docker plan requester');
 export class DockerPlanMoveRequester {
@@ -86,6 +87,7 @@ export class DockerPlanMoveRequester {
       choice.moveId !== input.id ||
       choice.toAccount !== input.toAccount ||
       choice.forceBusy !== input.forceBusy ||
+      choice.returnToOffice !== input.returnToOffice ||
       input.sessionId !== scope.sessionId
     )
       throw new PlanMoveError('A new Docker plan choice requires its exact request', 403);
@@ -226,7 +228,13 @@ function captureRequester(
         current.dockerBinding.policyDigest === dockerContinuationDigest(state.work.policy) &&
         dockerProviderRuntimeRecipeDigest(current.runtimeRecipe) === state.seed.target.templateDigest;
       if (!source && !planned) return refuse();
-      if (target.purpose === 'choice' && (current.onVacation || current.desiredRunning !== true)) return refuse();
+      if (target.purpose === 'choice') {
+        const off = current.onVacation === true && current.desiredRunning === false;
+        const inOffice = !current.onVacation && current.desiredRunning === true;
+        if (target.choice?.returnToOffice) {
+          if (identity || !target.choice.forceBusy || (planned ? !inOffice : !off)) return refuse();
+        } else if (!inOffice && (identity || target.choice || !off)) return refuse();
+      }
       if (!identity) {
         if (!authenticatedPlanMover(request, auth.authSessions, ownerAuth)) return refuse();
         return;
@@ -277,7 +285,8 @@ function captureRequester(
       (target.choice &&
         (record.id !== target.choice.moveId ||
           record.toAccount !== target.choice.toAccount ||
-          state.seed.forceBusy !== target.choice.forceBusy))
+          state.seed.forceBusy !== target.choice.forceBusy ||
+          state.seed.returnToOffice !== target.choice.returnToOffice))
     )
       return refuse();
     common(state);

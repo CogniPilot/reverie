@@ -48,7 +48,8 @@ import {
   type PlanMoveSnapshot,
 } from './plan-move.js';
 import type { PlanMoveDockerActor, PlanMoveDockerJournal } from './plan-move-docker.js';
-import { DockerPlanMoveSeed, type DockerPlanMoveJournalState } from './docker-plan-move-data.js';
+import { canSettleRestoredPlanSource } from './plan-move-docker.js';
+import { DockerPlanMoveSeed, DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import {
   requireDockerPlanMoveRequesterSource,
   requireDockerPlanMoveRequesterReservation,
@@ -59,6 +60,8 @@ import { DockerPlanSourceReader } from './docker-plan-source.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
 import { dockerProviderRuntimeRecipeDigest } from './docker-employee-source-correlation.js';
 import type { DockerEmployeeEngine } from './docker-employee-engine.js';
+import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import type { DockerEmployeeStorageObservation } from './docker-employee-storage.js';
 import type { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
@@ -81,6 +84,7 @@ export interface DockerPlanMoveComposition {
   readonly chat: ChatroomService;
   readonly store: CompanyDockerContinuationStore;
   readonly engine: DockerEmployeeEngine;
+  readonly recoveryHelper?: DockerWorkerReattachHelper;
   readonly provider: DockerEmployeeSessionProvider;
   readonly configuration: Readonly<z.infer<typeof DockerRuntimeConfiguration>>;
   readonly boxId: string;
@@ -139,6 +143,10 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
   readonly #work = new Map<string, DockerPlanMoveWork>();
   readonly #views = new Map<string, { view: DockerEmployeeProviderView; session: Session }>();
   readonly #holders = new Map<string, DockerPlanSourceHolder>();
+  readonly #sourceStorage = new Map<string, {
+    helper: DockerWorkerReattachHelper;
+    observed?: DockerEmployeeStorageObservation;
+  }>();
   readonly #d: DockerPlanMoveComposition;
   readonly #requester: unknown;
   readonly #decision: unknown;
@@ -184,6 +192,35 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The original source continuation changed', 409);
     this.#d.current();
   }
+  async verifyRestoredSource(record: Readonly<PlanMoveRecord>) {
+    const state = DockerPlanMoveJournalState.parse(record.dockerReplacement);
+    const { record: source, binding } = state.seed.source;
+    const scope = requireDockerPlanMoveRequesterSource(this.#requester, record.employeeId, record.owner);
+    if (scope.requester.kind !== 'owner' || scope.purpose !== 'original')
+      throw new PlanMoveError('Restored source settlement requires the signed-in owner', 403);
+    const check = () => {
+      this.current(record, state);
+      const employee = this.#d.company.store.snapshot().employees.find((item) => item.id === record.employeeId);
+      if (!employee || !same(employee.dockerBinding, binding) ||
+          employee.onVacation !== true || employee.desiredRunning !== false)
+        throw new PlanMoveError('Restored source settlement requires the original out-of-office employee');
+    };
+    check();
+    const list = ['container', 'ls', '--all', '--quiet', '--no-trunc', '--filter'];
+    for (const label of [
+      'reverie.boxed.operation=' + state.seed.target.operationId,
+      'reverie.boxed.session=' + state.seed.target.sessionId,
+    ]) {
+      const containers = await this.#command.run([...list, 'label=' + label]);
+      check();
+      if (containers.trim()) throw new PlanMoveError('The original destination exists and requires recovery');
+    }
+    const proof = await this.#source.capture(source, binding, check, true);
+    const observed = proof.observation(source, binding);
+    if (observed.kind !== 'running' || !canSettleRestoredPlanSource(state, observed.init))
+      throw new PlanMoveError('The original live source was not restored before target work');
+    return { init: observed.init, current: () => proof.require(source, binding) };
+  }
   #selection(employeeId: string, owner: string | undefined): SourceSelection {
     this.#d.current();
     if (!this.#requester) unavailable();
@@ -203,9 +240,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       employee.sessionGeneration !== scope.sessionGeneration ||
       !employee.dockerBinding ||
       employee.dockerBinding.containerId !== scope.containerId ||
-      !row.destination ||
-      employee.onVacation ||
-      !employee.desiredRunning
+      !row.destination
     )
       throw new PlanMoveError('The current employee plan binding is unavailable', 409);
     const saved = this.#d.ctx.store.getSession(scope.sessionId);
@@ -387,6 +422,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       purpose: 'docker-plan-replacement-seed-v1',
       moveId: input.id,
       forceBusy: input.forceBusy,
+      ...(input.returnToOffice ? { returnToOffice: true } : {}),
       handoff: input.handoff,
       source: {
         record: source.row,
@@ -548,7 +584,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         throw new PlanMoveError('The source init incarnation changed', 409);
       // The replacement needs this holder after STOP. Establish its proof while
       // the source can still work and before publishing an irreversible cursor.
-      await this.#d.engine.planReplacementHome(source, () => journal.current(), 'running');
+      await this.#d.engine.planReplacementHome(source, () => journal.current(), 'running', this.#retainedStorage(journal));
       seen = await observe();
       if (seen.kind !== 'running' || !same(seen.init, seed.source.observation.init))
         throw new PlanMoveError('The source init incarnation changed', 409);
@@ -601,6 +637,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     this.#work.clear();
     this.#views.clear();
     this.#holders.clear();
+    this.#sourceStorage.clear();
   }
   #sourceSaved(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): SessionState {
     journal.current();
@@ -695,11 +732,19 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     if (!holder) {
       this.#retain();
       holder = new DockerPlanSourceHolder(this.#command, this.#d.boxId, this.#source, (row, current) =>
-        this.#d.engine.planReplacementHome(row, current)
+        this.#d.engine.planReplacementHome(row, current, 'stopped',
+          same(row, journal.read().seed.source.record) ? this.#retainedStorage(journal) : undefined)
       );
       this.#holders.set(key, holder);
     }
     return holder;
+  }
+  #retainedStorage(journal: PlanMoveDockerJournal) {
+    if (!this.#d.recoveryHelper) return;
+    const key = journal.moveId + ':' + journal.epoch;
+    const retained = this.#sourceStorage.get(key) ?? { helper: this.#d.recoveryHelper };
+    this.#sourceStorage.set(key, retained);
+    return retained;
   }
   async #closed(row: DockerEmployeeContinuationRecord, journal: PlanMoveDockerJournal): Promise<void> {
     const binding = this.#binding(row),
@@ -707,9 +752,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     journal.current();
     if (proof.observation(row, binding).kind !== 'stopped')
       throw new PlanMoveError('The retained account generation is not closed', 409);
-    const home = await this.#d.engine.planReplacementHome(row, () => journal.current());
+    const actualRow = journal.read().seed.source.record;
+    const retained = same(row, actualRow) ? this.#retainedStorage(journal) : undefined;
+    const home = await this.#d.engine.planReplacementHome(row, () => journal.current(), 'stopped', retained);
     journal.current();
-    const actual = await this.#d.engine.planReplacementHome(journal.read().seed.source.record, () => journal.current());
+    const actual = await this.#d.engine.planReplacementHome(actualRow, () => journal.current(), 'stopped', retained);
     journal.current();
     if (!same(home, actual)) throw new PlanMoveError('The retained account HOME changed', 409);
   }
@@ -869,6 +916,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         sessionId: seed.target.sessionId,
         sessionGeneration: seed.target.sessionGeneration,
         runtimeRecipe: target.recipe,
+      ...(seed.returnToOffice ? { onVacation: false, desiredRunning: true } : {}),
       },
       resourcePolicy = this.#d.store.newOperationPolicy(record.employeeId),
       raw = z
@@ -1225,6 +1273,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           !same(employee.dockerBinding, state.seed.source.binding) ||
           employee.sessionId !== state.seed.source.binding.sessionId ||
           employee.sessionGeneration !== state.seed.source.binding.sessionGeneration ||
+          (state.seed.returnToOffice && (!employee.onVacation || employee.desiredRunning !== false)) ||
           index < 0 ||
           !dockerPlanSourceRecordCurrent(state.seed.source.record, rows[index]) ||
           company.employees.some((e) => e.id !== record.employeeId && e.sessionId === saved.id)
@@ -1235,6 +1284,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         employee.runtimeRecipe = structuredClone(recipe);
         employee.dockerBinding = structuredClone(binding);
         employee.dockerResourcePolicy = structuredClone(row.policy);
+        if (state.seed.returnToOffice) {
+          employee.onVacation = false;
+          employee.desiredRunning = true;
+          employee.wakeAttempts = [];
+        }
         rows[index] = structuredClone(row);
       },
       () => journal.current()

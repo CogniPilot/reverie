@@ -57,6 +57,7 @@ export const DockerPlanMoveSeed = z
     purpose: z.literal('docker-plan-replacement-seed-v1'),
     moveId: identifier,
     forceBusy: z.boolean(),
+    returnToOffice: z.literal(true).optional(),
     handoff: z
       .string()
       .min(1)
@@ -122,6 +123,7 @@ export const DockerPlanMoveSeed = z
       destination = row.destination;
     return (
       ['provider-issued', 'ready'].includes(row.phase) &&
+      (!seed.returnToOffice || seed.forceBusy) &&
       (seed.forceBusy ||
         (seed.source.observation.kind === 'running' && seed.source.observation.provider.kind === 'observed')) &&
       (target.accountSource.kind === 'canonical' ||

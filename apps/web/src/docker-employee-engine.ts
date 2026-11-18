@@ -3,6 +3,7 @@ import { dockerPlanDestinationEnvironment, DockerPlanInitialReceipt, DockerPlanL
 import {parseDockerPlanProtocol}from'./docker-plan-protocol.js';
 import { parseBoxedConfigurationJson } from './docker-employee-policy-import.js';
 import type { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
+import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import { DockerPlanInstaller } from './docker-plan-installer.js';
 import { dockerProviderHookPolicy } from './docker-employee-provider-hooks.js';
 import { DOCKER_CODEX_WORKSPACE_PROGRAM, type DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
@@ -17,7 +18,7 @@ import {
  * Resource helpers earn fresh original FD/cgroup proof inside their owning port.
  */
 import { parseWorkerCredentialReadback } from './worker-client-manifest.js';
-import { DockerEmployeeStorage } from './docker-employee-storage.js';
+import { DockerEmployeeStorage, type DockerEmployeeStorageObservation } from './docker-employee-storage.js';
 import type { DockerContinuationTaskJournal } from './docker-continuation-task.js';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
@@ -637,7 +638,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async planReplacementHome(
     input: DockerEmployeeContinuationRecord,
     current: () => void,
-    placement: 'running' | 'stopped' = 'stopped'
+    placement: 'running' | 'stopped' = 'stopped',
+    retained?: {
+      readonly helper: DockerWorkerReattachHelper;
+      observed?: DockerEmployeeStorageObservation;
+    }
   ): Promise<DockerCredentialHome> {
     const row = DockerEmployeeContinuationRecord.parse(input),
       key = dockerContinuationDigest(row);
@@ -667,7 +672,22 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         .safeParse(before.HostConfig.RestartPolicy).success
     )
       refuse('DOCKER_PLAN_INSTALL_HOME_CHANGED');
-    const home = await this.#storage.observedCredentialHome(row);
+    let home: DockerCredentialHome | undefined;
+    try {
+      home = await this.#storage.observedCredentialHome(row);
+    } catch (error) {
+      check();
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_STORAGE_HOLDER_UNCONFIRMED' ||
+          !retained || (placement === 'stopped' && !retained.observed)) throw error;
+      let observed: DockerEmployeeStorageObservation | undefined;
+      home = await this.#storage.readExistingReference(row, before, (destination, seen) => {
+        observed = seen;
+        return retained.helper.storage(destination, seen, check);
+      }, check, placement === 'stopped' ? retained.observed : undefined);
+      check();
+      if (!home || !observed) throw error;
+      if (placement === 'running') retained.observed = observed;
+    }
     check();
     const after = await this.#destination(row, check, true);
     check();

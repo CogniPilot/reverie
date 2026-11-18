@@ -2516,6 +2516,7 @@ export class WebServer extends EventEmitter {
         publish: (...args) => planMoveStore.dockerPublish(...args),
         claim: (...args) => planMoveStore.dockerClaim(...args),
         phase: (...args) => planMoveStore.dockerPhase(...args),
+        closeRestored: (...args) => planMoveStore.closeRestoredDockerMove(...args),
       },
     });
     this.workerViewerReconnect = new WorkerViewerReconnect({

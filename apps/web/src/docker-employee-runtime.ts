@@ -427,6 +427,7 @@ export class DockerEmployeeRuntime {
     const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
     return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
       requireReconciledSourcePool: (row, admitted) => a.pool.requirePlanSourcePool(row, admitted),
+      recoveryHelper: a.recoveryHelper,
       retain:actor=>this.#planActors.add(actor)});
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */

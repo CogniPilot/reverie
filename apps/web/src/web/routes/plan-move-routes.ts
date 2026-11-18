@@ -190,6 +190,7 @@ export function registerPlanMoveRoutes(
             sessionId: Identifier,
             sessionGeneration: z.number().int().positive().optional(),
             toAccount: Identifier,
+            returnToOffice: z.literal(true).optional(),
             handoff: z.string().trim().min(1).max(12000),
           })
           .strict(),
@@ -206,7 +207,12 @@ export function registerPlanMoveRoutes(
           throw new PlanMoveError('Authenticated delegated plan recovery is unavailable or revoked', 403);
         const executor = delegated?.executor ?? execution(request),
           owner = ownerFor(request);
+        if (input.returnToOffice && (delegated || dockerWorkerIdentityOf(request) ||
+            request.headers['x-reverie-parent-session'] !== undefined))
+          throw new PlanMoveError('Returning an out-of-office employee with a move requires the owner', 403);
         const snapshot = await executor.snapshot(input.employeeId, owner);
+        if (input.returnToOffice && snapshot.backend !== 'docker')
+          throw new PlanMoveError('Returning with a move requires a boxed employee');
         if (snapshot.sessionId !== input.sessionId)
           throw new PlanMoveError('The expert changed; refresh before forcing a move');
         if (
@@ -356,6 +362,17 @@ export function registerPlanMoveRoutes(
           });
         else await moves.cancel(request.params.id, owner);
         return { success: true };
+      } catch (error) {
+        return failure(reply, error);
+      }
+    });
+    routes.post<{ Params: { id: string } }>('/api/plans/moves/:id/close-restored', async (request, reply) => {
+      if (!execution || request.headers[RECOVERY_HEADER] !== undefined || dockerWorkerIdentityOf(request) ||
+          request.headers['x-reverie-parent-session'] !== undefined)
+        return failure(reply, new PlanMoveError('Restored source settlement requires the signed-in owner', 403));
+      try {
+        const id = Identifier.parse(request.params.id);
+        return { success: true, data: await moves.closeRestoredDockerMove(id, ownerFor(request), execution(request)) };
       } catch (error) {
         return failure(reply, error);
       }

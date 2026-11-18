@@ -37,6 +37,12 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
   };
   return Object.freeze({
     bindOriginalRequester,
+    ...(base.verifyRestoredSource ? {
+      verifyRestoredSource: async (record: Readonly<PlanMoveRecord>) => {
+        await bindOriginalRequester(record);
+        return actor(record).verifyRestoredSource!(record);
+      },
+    } : {}),
     admitDisjointGeneration: async (employeeId, requestedOwner, rows) => {
       if (requestedOwner !== owner || !base.admitDisjointGeneration)
         throw new PlanMoveError('Current native generation admission is unavailable', 409);
@@ -68,7 +74,8 @@ export function dockerPlanMoveExecutor(runtime: PlanMoveRuntime, owner?: string)
         employeeId: input.employeeId,
         sessionId: input.sessionId,
         sessionGeneration: input.sessionGeneration,
-        choice: { moveId: input.id, toAccount: input.toAccount, forceBusy: input.forceBusy },
+        choice: { moveId: input.id, toAccount: input.toAccount, forceBusy: input.forceBusy,
+          ...(input.returnToOffice ? { returnToOffice: true } : {}) },
       });
       actors.set(input.id, value);
       return value.reserve(input, owner, requestDigest);

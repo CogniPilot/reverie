@@ -200,6 +200,33 @@ describe('actual original read-only storage holder cursor', () => {
 
 describe('existing destination storage across an original holder exit', () => {
   const current = () => {};
+  it('rechecks both protected directories after the source stops', async () => {
+    const f = fixture();
+    await f.service.prepare(f.row, current);
+    f.exitHolder();
+    const stopped = { ...f.existingDestination, State: { ...f.existingDestination.State, Running: false, Pid: 0 } };
+    const observed = structuredClone(f.destination);
+    observed.home.dev = '18';
+    observed.nix.dev = '19';
+    const verify = vi.fn(async (_destination, seen) => ({
+      ...seen,
+      purpose: 'reverie-boxed-storage-reference-v1',
+    }));
+    vi.mocked(f.command.run).mockClear();
+    await expect(f.service.readExistingReference(f.row, stopped, verify, current, observed)).resolves.toMatchObject({
+      dev: '18', ino: observed.home.ino,
+    });
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args.includes('probe-storage'))).toBe(false);
+    verify.mockImplementationOnce(async (_destination, seen) => ({
+      ...seen,
+      purpose: 'reverie-boxed-storage-reference-v1',
+      nix: { ...seen.nix, ino: '29' },
+    }));
+    await expect(f.service.readExistingReference(f.row, stopped, verify, current, observed)).rejects.toMatchObject({
+      code: 'DOCKER_STORAGE_DESTINATION_REPLACED',
+    });
+  });
   it('keeps live holder reads on the original path', async () => {
     const f = fixture(),
       verify = vi.fn();
