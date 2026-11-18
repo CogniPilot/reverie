@@ -428,6 +428,23 @@ export class DockerEmployeeRuntime {
     return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
       requireReconciledSourcePool: (row, admitted) => a.pool.requirePlanSourcePool(row, admitted),
       recoveryHelper: a.recoveryHelper,
+      recoverPublishedPlanView: async (row, authDigest, admitted) => {
+        const check = () => {
+          admitted();
+          current();
+          if (row.version !== 3 || !a.store.existingSubject(row.employeeId, row))
+            throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+        };
+        check();
+        if (!a.recoveryHelper) return;
+        const policy = a.store.policy(row.employeeId);
+        const policyDigest = dockerContinuationDigest(policy);
+        return a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, () => {
+          check();
+          if (dockerContinuationDigest(a.store.policy(row.employeeId)) !== policyDigest)
+            throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
+        }, authDigest);
+      },
       retain:actor=>this.#planActors.add(actor)});
   }
   /** Separate from wake/restore: only fixed metadata/kernel reads, never a viewer or launch. */
@@ -618,6 +635,8 @@ export class DockerEmployeeRuntime {
       runtimeCurrent: () => {
         if (!this.current() || this.#attached !== a) throw Error('Boxed runtime changed');
       },
+      observeRunningView: (observedRow, observedBinding, current) =>
+        this.#observeRunningProviderView(a, observedRow, observedBinding, current),
     }, row, session, () => {admitted(); return true;});
     admitted();
   }

@@ -20,6 +20,7 @@ import { dockerPlanMaterial, dockerPlanPayload, dockerPlanAuthDigest } from './d
 import { dockerPlanMoveHandoffDigest } from './docker-plan-move-data.js';
 import { nativeThreadProfile } from './utils/native-thread-profile.js';
 import { submitRecoveryPrompt, recoveryComposerReady } from './company-recovery-prompt.js';
+import { composerIsEmpty } from './session-submit-verifier.js';
 import { getCli } from './config/cli-registry/registry.js';
 import type { DockerResourceRevisionStore } from './docker-resource-revisions.js';
 import type { RuntimeRecipe } from './expert-runtime-recipe.js';
@@ -86,6 +87,9 @@ export interface DockerPlanMoveComposition {
   readonly store: CompanyDockerContinuationStore;
   readonly engine: DockerEmployeeEngine;
   readonly recoveryHelper?: DockerWorkerReattachHelper;
+  readonly recoverPublishedPlanView?: (
+    row: DockerEmployeeContinuationRecord, authDigest: string, current: () => void
+  ) => Promise<DockerEmployeeProviderView | undefined>;
   readonly provider: DockerEmployeeSessionProvider;
   readonly configuration: Readonly<z.infer<typeof DockerRuntimeConfiguration>>;
   readonly boxId: string;
@@ -1182,17 +1186,42 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The selected account is not authenticated', 409);
     }
   }
-  async #canonicalAccount(row: WorkRecord, journal: PlanMoveDockerJournal, current: () => void): Promise<void> {
+  async #canonicalAccount(journal: PlanMoveDockerJournal, current: () => void): Promise<void> {
     journal.current();
     const state = journal.read();
     requireCanonicalAccountSource(state);
     if (!state.material) throw new PlanMoveError('The installed canonical account digest is unavailable', 409);
-    await this.#d.engine.verifyPlanReplacementCanonicalAccount(publishedWork(row), state.material.authDigest, () => {
+    const row = publishedWork(state.work);
+    const check = () => {
       journal.current();
       current();
-    });
+    };
+    try {
+      await this.#d.engine.verifyPlanReplacementCanonicalAccount(row, state.material.authDigest, check);
+    } catch (cause) {
+      check();
+      if (!await this.#recoverPublishedPlanView(row, journal, check)) throw cause;
+    }
     journal.current();
     current();
+  }
+  async #recoverPublishedPlanView(row: WorkRecord, journal: PlanMoveDockerJournal, current: () => void) {
+    const state = journal.read();
+    if (!this.#d.recoverPublishedPlanView || state.sourceStop?.phase !== 'closed' ||
+        !state.paidDispatch || state.companyPublication?.phase !== 'published' || !state.material)
+      return undefined;
+    current();
+    return this.#d.recoverPublishedPlanView(publishedWork(row), state.material.authDigest, current);
+  }
+  async #publishedPlanView(row: WorkRecord, journal: PlanMoveDockerJournal, current: () => void) {
+    try {
+      return await this.#d.engine.captureProviderView(row, current);
+    } catch (cause) {
+      current();
+      const recovered = await this.#recoverPublishedPlanView(row, journal, current);
+      if (!recovered) throw cause;
+      return recovered;
+    }
   }
   #targetCurrent(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): () => void {
     const captured = journal.read().work;
@@ -1233,6 +1262,12 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       binding: this.#binding(row),
       templateDigest: state.seed.target.templateDigest,
     });
+  }
+  #composerReady(session: Session, mark: string): boolean {
+    if (recoveryComposerReady(session, mark)) return true;
+    if (session.mode !== 'codex' || session.isWorking || session.paneDialog || !session.muxName) return false;
+    const screen = this.#d.ctx.mux?.capturePaneText?.(session.muxName, undefined, { escapes: true });
+    return composerIsEmpty(screen, '›');
   }
   async #publish(
     record: Readonly<PlanMoveRecord>,
@@ -1363,7 +1398,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       throw new PlanMoveError('The target publication is incomplete', 409);
     const current = this.#targetCurrent(record, journal);
     current();
-    const view = await this.#d.engine.captureProviderView(row, current);
+    const view = await this.#publishedPlanView(row, journal, current);
     journal.current();
     current();
     const session = this.#d.ctx.sessions.get(row.request.sessionId);
@@ -1371,7 +1406,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     view.require(session.id, session.docker);
     const mark = getCli(session.mode)?.capabilities.composerReadyMark;
     if (!mark) throw new PlanMoveError('The target provider has no protected composer', 409);
-    if (!state.handoff && (!recoveryComposerReady(session, mark) || session.pid === null))
+    if (!state.handoff && (!this.#composerReady(session, mark) || session.pid === null))
       throw new PlanMoveComposerNotReady();
     await this.#accountProbe(row, () => {
       journal.current();
@@ -1396,7 +1431,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       );
       journal.current();
     }
-    await this.#canonicalAccount(row, journal, current);
+    await this.#canonicalAccount(journal, current);
     view.require(session.id, session.docker);
     if (session.providerInputHeld && session.providerDispatchHoldKind === 'loaded-intent') {
       if (!this.#d.renewPublishedView) throw new PlanMoveError('The original published target reader cannot be renewed', 409);
@@ -1428,7 +1463,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const current = this.#targetCurrent(record, journal);
     current();
     held.view.require(held.session.id, held.session.docker);
-    await this.#canonicalAccount(publishedWork(state.work), journal, current);
+    await this.#canonicalAccount(journal, current);
     held.view.require(held.session.id, held.session.docker);
     const inputCurrent = () => {
       try {
@@ -1440,7 +1475,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     };
     const inputAdmission = Session.prototype.captureInputAdmission.call(held.session, inputCurrent),
       mark = getCli(held.session.mode)?.capabilities.composerReadyMark;
-    if (!mark || held.session.pid === null || !held.session.muxName || !inputAdmission() || !recoveryComposerReady(held.session, mark) ||
+    if (!mark || held.session.pid === null || !held.session.muxName || !inputAdmission() || !this.#composerReady(held.session, mark) ||
         !Session.prototype.composerProvablyIdle.call(held.session))
       throw new PlanMoveComposerNotReady();
     await journal.publish(state, {

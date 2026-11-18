@@ -699,7 +699,11 @@ async function issuedCheckpoint(
  * controlled syscall replies: actual Storage/Installer/Engine methods earn each
  * new private view. Canonical Company/Session/PlanMove stores and protected HTTP
  * original-recovery capture are real. No composer readiness is synthesized. */
-async function publishedTargetFixture(publication: 'issued' | 'published', handoff?: 'issued' | 'submitted') {
+async function publishedTargetFixture(
+  publication: 'issued' | 'published',
+  handoff?: 'issued' | 'submitted',
+  recoverPublishedPlanView?: DockerPlanMoveComposition['recoverPublishedPlanView']
+) {
   const native = await dockerPlanRetirementFixture(),
     directory = fs.mkdtempSync(join(tmpdir(), 'plan-actor-target-'));
   fs.chmodSync(directory, 0o700);
@@ -907,6 +911,7 @@ async function publishedTargetFixture(publication: 'issued' | 'published', hando
       store: sourceStore,
       engine: native.engine,
       provider,
+      recoverPublishedPlanView,
       configuration: {
         version: 1,
         purpose: 'reverie-boxed-runtime-v1',
@@ -1476,6 +1481,29 @@ describe('original target recovery with engine-earned native views', () => {
     expect((await f.moves.dockerRecord(f.record.id)).dockerReplacement).toEqual(before);
     expect(f.launch).not.toHaveBeenCalled();
     expect(f.create).not.toHaveBeenCalled();
+    expect(f.native.command.create).not.toHaveBeenCalled();
+  });
+
+  it('adopts the already published target through the live reattachment proof after the original holder disappears', async () => {
+    const recover = vi.fn<NonNullable<DockerPlanMoveComposition['recoverPublishedPlanView']>>();
+    const f = await publishedTargetFixture('published', 'submitted', recover),
+      journal = await f.loadJournal(),
+      before = journal.read(),
+      ordinary = f.native.engine.captureProviderView.bind(f.native.engine);
+    vi.spyOn(f.native.engine, 'captureProviderView').mockRejectedValue(Error('Missing original holder'));
+    vi.spyOn(f.native.engine, 'verifyPlanReplacementCanonicalAccount').mockRejectedValue(Error('Missing original holder'));
+    recover.mockImplementation((row, digest, current) => {
+      expect(digest).toBe(before.material!.authDigest);
+      expect(row).toEqual(before.work);
+      current();
+      return ordinary(row, current);
+    });
+    const actor = f.actor(), fence = await actor.verify(f.record, journal);
+    expect(() => fence()).not.toThrow();
+    await actor.finalize(f.record, journal);
+    expect(recover).toHaveBeenCalledTimes(2);
+    expect(journal.read()).toEqual(before);
+    expect(f.launch).not.toHaveBeenCalled();
     expect(f.native.command.create).not.toHaveBeenCalled();
   });
 

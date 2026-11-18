@@ -1491,7 +1491,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async #reattachCredential(
     row: DockerEmployeeContinuationRecord,
     home: DockerCredentialHome & { readonly originalHomeDev: string },
-    current: () => void
+    current: () => void,
+    canonicalAuthDigest?: string
   ): Promise<string> {
     const task = this.journal.read(row, 'identity-helper');
     if (!row.destination || task?.phase !== 'completed' || task.imageId !== row.workerImage.imageId ||
@@ -1527,6 +1528,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       });
       if (task.resultDigest !== dockerContinuationDigest(initial))
         refuse('DOCKER_CONTINUATION_REATTACH_IDENTITY_UNCONFIRMED');
+      if (canonicalAuthDigest !== undefined &&
+          (live.installedAuthDigest !== canonicalAuthDigest || live.observedAuthDigest !== canonicalAuthDigest))
+        refuse('DOCKER_PLAN_ACCOUNT_AUTH_CHANGED');
       return live.tokenDigest;
     }
     const live = parseWorkerCredentialReadback(await this.command.run([
@@ -1548,7 +1552,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     policy: DockerEmployeeResourcePolicy,
     helper: DockerWorkerReattachHelper,
-    current: () => void
+    current: () => void,
+    canonicalAuthDigest?: string
   ): Promise<DockerEmployeeProviderView | undefined> {
     current();
     const checked = DockerEmployeeContinuationRecord.parse(row);
@@ -1562,7 +1567,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (!this.resources.readExistingAfterHostRestart || !this.#ephemeral ||
       this.journal.read(checked, 'leaf-helper')?.phase !== 'completed')
       refuse('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
-    const tokenDigest = await this.#reattachCredential(checked, home, current);
+    const tokenDigest = await this.#reattachCredential(checked, home, current, canonicalAuthDigest);
     await helper.credential(checked, tokenDigest, current);
     await this.#ephemeral.verifyExistingDestination(checked, raw, current);
     current();
