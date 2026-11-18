@@ -6,6 +6,7 @@ mod configuration;
 mod context_cli;
 mod database;
 mod embedding_worker;
+mod hands_attention;
 mod hands_model;
 mod journal;
 mod managed_context;
@@ -204,6 +205,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-coding-policy-worker" => coding_task::policy,
         "--hands-managed-context-worker" => managed_context::run,
         "--hands-trace-worker" => hands_model::trace_worker,
+        "--hands-attention-worker" => hands_attention::run,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

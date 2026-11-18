@@ -41,6 +41,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -51,12 +52,19 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
 import admin_task
 from coding_manager import TaskManager
+from coding_process import WorkerSocket
 from debug_terminal import DebugTerminal
-from attention_wake import AttentionWake, wait_for_scan
 import public_web
 import agent_journal
 
 _terminal = None
+OFFICE_DISABLED_STATUS = 'disabled by office configuration (all automatic room replies blocked)'
+PHONE_STATUS = {
+    'unscoped': 'unavailable (no scoped laptop phone)',
+    'active': 'active',
+    'office_disabled': OFFICE_DISABLED_STATUS,
+    'unavailable': 'unavailable; polling fallback',
+}
 
 SEEN_CAP = 500           # seen ids kept per room
 CLAIM_RETRIES = 1        # times an unconfirmed claim is answered again after a crash
@@ -1340,6 +1348,81 @@ def load_config(path):
                                   + search_reserve(cfg) + recall_reserve + journal_reserve):
         raise SystemExit('config: prompt_cap_chars too small for the identity, memory and message caps and search rounds')
     return cfg
+
+
+class AttentionWake:
+    def __init__(self, cfg, report=lambda text: None, *, env=None):
+        self.signal = threading.Event()
+        self.stopped = threading.Event()
+        self.worker_lock = threading.Lock()
+        self.thread = self.worker = None
+        self.report = report
+        self.status = 'disabled'
+        self.initial = None
+        if cfg.get('phone_wake'):
+            env = os.environ if env is None else env
+            self.initial = dict(endpoint=env.get('REVERIE_API_URL'), worker=env.get('REVERIE_WORKER'),
+                                parent_session=env.get('REVERIE_SESSION_ID'), session=cfg.get('self_session_id'))
+            self.status = 'connecting'
+
+    def start(self):
+        if self.initial is not None and self.thread is None:
+            try:
+                self.worker = WorkerSocket('hands-attention-worker', self.initial)
+            except (OSError, ValueError):
+                self.update_status('unavailable')
+                return self
+            self.thread = threading.Thread(target=self.listen, name='hands-phone-wake', daemon=True)
+            self.thread.start()
+        return self
+
+    def update_status(self, kind):
+        status = PHONE_STATUS[kind]
+        if status != self.status:
+            self.status = status
+            detail = ('. Manual reads and terminal prompts remain available.' if kind == 'office_disabled'
+                      else '; general messages use the normal scan.')
+            self.report('Phone wake: ' + status + detail)
+
+    def listen(self):
+        try:
+            while not self.stopped.is_set():
+                try:
+                    notice = self.worker.wait(0.1)
+                except TimeoutError:
+                    continue
+                status = notice['status']
+                if notice['wake'] is True:
+                    self.signal.set()
+                self.update_status(status)
+                if status == 'unscoped':
+                    break
+        except (EOFError, OSError, ValueError, KeyError, TypeError):
+            if not self.stopped.is_set():
+                self.update_status('unavailable')
+        finally:
+            self.close_worker()
+
+    def close_worker(self):
+        with self.worker_lock:
+            self.worker.close()
+
+    def close(self):
+        self.stopped.set()
+        if self.thread:
+            self.thread.join(2)
+            self.close_worker()
+
+
+def wait_for_scan(seconds, wake, view, manager=None):
+    """Accepted phone traffic wakes the serial loop; UI and coding work remain responsive."""
+    until = time.monotonic() + seconds
+    while time.monotonic() < until and not view.quit_requested:
+        if not view.inputs.empty() or wake.signal.is_set():
+            break
+        if manager and manager.active:
+            manager.pump()
+        wake.signal.wait(min(0.05, max(0, until - time.monotonic())))
 
 
 def main(argv):

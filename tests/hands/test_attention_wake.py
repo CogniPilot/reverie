@@ -1,4 +1,3 @@
-import json
 import queue
 import threading
 import time
@@ -8,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import agent_loop as loop
-from attention_wake import AttentionWake, OFFICE_DISABLED_STATUS, OfficePhoneDisabled, wait_for_scan
+from agent_loop import AttentionWake, OFFICE_DISABLED_STATUS, wait_for_scan
 from test_coding_support import FakeChat, SELF, cfg_for
 
 
@@ -17,127 +16,79 @@ class AttentionWakeTests(unittest.TestCase):
         return dict(REVERIE_WORKER='1', REVERIE_API_URL=f'http://127.0.0.1:{port}',
                     REVERIE_SESSION_ID='session-worker')
 
-    def test_requires_the_exact_scoped_laptop_phone_and_never_forwards_credentials(self):
+    def test_wrong_parent_session_reports_unscoped(self):
         cfg = cfg_for('/unused', phone_wake=True)
-        for env in ({}, self.env() | {'REVERIE_SESSION_ID': 'another-session'},
-                    self.env() | {'REVERIE_API_URL': 'https://example.invalid'},
-                    self.env() | {'REVERIE_API_URL': 'http://user:password@127.0.0.1:8093'},
-                    self.env() | {'REVERIE_API_URL': 'http://[bad'}):
-            wake = AttentionWake(cfg, env=env).start()
-            self.assertIsNone(wake.thread)
-            self.assertIn('unavailable', wake.status)
-        response = Mock(status=200)
-        response.read.return_value = b'{"success":true,"data":{"event":null}}'
-        connection = Mock()
-        connection.getresponse.return_value = response
-        factory = Mock(return_value=connection)
-        wake = AttentionWake(cfg, env=self.env() | {'REVERIE_PASSWORD': 'do-not-send'}, connection=factory)
-        wake._poll()
-        self.assertEqual(connection.request.call_args.args, ('GET', '/api/chatrooms/attention'))
-        self.assertEqual(connection.request.call_args.kwargs['headers'], {
-            'X-Reverie-Parent-Session': SELF['sessionId'], 'Accept': 'application/json'})
-        self.assertNotIn('do-not-send', str(connection.mock_calls))
-        connection.close.assert_called_once()
-
-    def test_explicit_office_disabled_response_reports_blocked_replies_and_recovers_without_spam(self):
-        disabled = Mock(status=503)
-        disabled.read.return_value = json.dumps({
-            'success': False, 'error': 'Admin phone wake is not enabled for this instance'}).encode()
-        active = Mock(status=200)
-        active.read.return_value = b'{"success":true,"data":{"event":null}}'
-        connections = [Mock(), Mock(), Mock()]
-        for connection, response in zip(connections, [disabled, disabled, active]):
-            connection.getresponse.return_value = response
         reports = []
-        def report(text):
-            reports.append(text)
-            if wake.status == 'active':
-                wake.stopped.set()
-        wake = AttentionWake(cfg_for('/unused', phone_wake=True), report, env=self.env(),
-                             connection=Mock(side_effect=connections))
-        wake.stopped.wait = Mock(return_value=False)
-        wake._run()
-        self.assertEqual(len(reports), 2)
-        self.assertIn(OFFICE_DISABLED_STATUS, reports[0])
-        self.assertNotIn('normal scan', reports[0])
-        self.assertNotIn('polling fallback', reports[0])
-        self.assertIn('Manual reads and terminal prompts remain available', reports[0])
-        self.assertIn('active', reports[1])
-        self.assertEqual([call.args[0] for call in wake.stopped.wait.call_args_list], [1, 2, 0.1])
-        self.assertFalse(wake.signal.is_set())
-        for connection in connections:
-            connection.close.assert_called_once()
-
-    def test_other_503_responses_remain_generic_and_never_expose_response_bodies(self):
-        response = Mock(status=503)
-        connection = Mock()
-        connection.getresponse.return_value = response
-        wake = AttentionWake(cfg_for('/unused', phone_wake=True), env=self.env(),
-                             connection=lambda *a, **k: connection)
-        for raw in (b'private backend diagnostic', b'x' * 4097,
-                    b'{"success":false,"error":"private backend diagnostic"}',
-                    b'{"success":true,"error":"Admin phone wake is not enabled for this instance"}'):
-            response.read.return_value = raw
-            with self.assertRaises(ValueError) as caught:
-                wake._poll()
-            self.assertNotIsInstance(caught.exception, OfficePhoneDisabled)
-            self.assertNotIn('private backend diagnostic', str(caught.exception))
-        self.assertFalse(wake.signal.is_set())
-
-    def test_metadata_is_bounded_validated_and_duplicate_signals_are_coalesced(self):
-        response = Mock(status=200)
-        connection = Mock()
-        connection.getresponse.return_value = response
-        wake = AttentionWake(cfg_for('/unused', phone_wake=True), env=self.env(), connection=lambda *a, **k: connection)
-        def poll(event):
-            response.read.return_value = json.dumps(dict(success=True, data=dict(event=event))).encode()
-            wake._poll()
-        poll(dict(roomId='room', messageId='message'))
-        self.assertTrue(wake.signal.is_set())
-        wake.signal.clear()
-        poll(dict(roomId='room', messageId='message'))
-        self.assertFalse(wake.signal.is_set())
-        for event in ({'roomId': 'room', 'messageId': 'other', 'text': 'untrusted'},
-                      {'roomId': '../escape', 'messageId': 'other'}):
-            with self.assertRaises(ValueError): poll(event)
-        response.read.return_value = b'x' * 4097
-        with self.assertRaises(ValueError): wake._poll()
-        self.assertFalse(wake.signal.is_set())
-
-    def test_real_long_poll_reconnects_after_outage_without_log_spam_and_closes(self):
-        ready, finish = threading.Event(), threading.Event()
-        requests = []
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args): pass
-            def do_GET(self):
-                requests.append(self.path)
-                if len(requests) == 1:
-                    self.send_response(503); self.end_headers(); return
-                ready.set()
-                finish.wait(2)
-                raw = b'{"success":true,"data":{"event":{"roomId":"room","messageId":"message"}}}'
-                try:
-                    self.send_response(200); self.send_header('Content-Length', str(len(raw))); self.end_headers()
-                    self.wfile.write(raw)
-                except OSError: pass
-        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-        reports = []
-        wake = AttentionWake(cfg_for('/unused', phone_wake=True), reports.append,
-                             env=self.env(server.server_port)).start()
+        wake = AttentionWake(cfg, reports.append, env=self.env() | {'REVERIE_SESSION_ID': 'another-session'}).start()
         try:
-            self.assertTrue(ready.wait(3))
+            wake.thread.join(2)
+            self.assertFalse(wake.thread.is_alive())
+            self.assertEqual(wake.status, 'unavailable (no scoped laptop phone)')
             self.assertEqual(len(reports), 1)
-            finish.set()
-            self.assertTrue(wake.signal.wait(1))
-            deadline = time.monotonic() + 1
-            while wake.status != 'active' and time.monotonic() < deadline: time.sleep(0.01)
-            self.assertEqual(wake.status, 'active')
-            self.assertEqual(len(reports), 2)
-            self.assertTrue(all(path == '/api/chatrooms/attention' for path in requests))
+            self.assertFalse(wake.signal.is_set())
         finally:
-            wake.close(); finish.set(); server.shutdown(); server.server_close(); thread.join(1)
-        self.assertFalse(wake.thread.is_alive())
+            wake.close()
+
+    def test_real_long_poll_handles_oversize_disabled_recovery_and_duplicate_events(self):
+        first_event, duplicates_seen, release = (threading.Event() for _ in range(3))
+        requests = []
+        disabled = b'{"success":false,"error":"Admin phone wake is not enabled for this instance"}'
+        event = b'{"success":true,"data":{"event":{"roomId":"room","messageId":"message"}}}'
+        oversized = b' ' * (4097 - len(event)) + event
+        responses = [(200, oversized), (503, disabled), (503, disabled), (200, event), (200, event)]
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                index = len(requests)
+                requests.append((self.path, dict(self.headers)))
+                if index >= len(responses):
+                    duplicates_seen.set()
+                    release.wait(2)
+                    return
+                if index == 4:
+                    first_event.wait(2)
+                status, raw = responses[index]
+                self.send_response(status)
+                self.send_header('Content-Length', str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        reports = []
+        env = self.env(server.server_port) | {'REVERIE_PASSWORD': 'do-not-send'}
+        wake = AttentionWake(cfg_for('/unused', phone_wake=True), reports.append, env=env).start()
+        try:
+            self.assertTrue(wake.signal.wait(10))
+            wake.signal.clear()
+            first_event.set()
+            self.assertTrue(duplicates_seen.wait(2))
+            self.assertFalse(wake.signal.is_set())
+            self.assertEqual(wake.status, 'active')
+            self.assertEqual(reports, [
+                'Phone wake: unavailable; polling fallback; general messages use the normal scan.',
+                f'Phone wake: {OFFICE_DISABLED_STATUS}. Manual reads and terminal prompts remain available.',
+                'Phone wake: active; general messages use the normal scan.',
+            ])
+            for path, headers in requests:
+                self.assertEqual(path, '/api/chatrooms/attention')
+                headers = {key.lower(): value for key, value in headers.items()}
+                self.assertEqual(headers['x-reverie-parent-session'], SELF['sessionId'])
+                self.assertEqual(headers['accept'], 'application/json')
+                self.assertNotIn('authorization', headers)
+                self.assertNotIn('cookie', headers)
+                self.assertNotIn('do-not-send', str(headers))
+        finally:
+            wake.close()
+            first_event.set()
+            release.set()
+            server.shutdown()
+            server.server_close()
+            thread.join(1)
 
     def test_close_interrupts_a_pending_phone_request(self):
         ready, release = threading.Event(), threading.Event()

@@ -1281,13 +1281,18 @@ checksum = "cab834c73d247e67f4fae452806d17d3c7501756d98c8808d7c9c7aa7d18f973"
 name = "reverie-admin-memory"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "clap",
  "getrandom",
+ "http",
+ "http-body-util",
+ "hyper-util",
  "nix",
  "regex-lite",
  "reverie-contracts",
  "reverie-core",
  "reverie-host",
+ "reverie-http",
  "reverie-python-regex",
  "reverie-store",
  "rusqlite",

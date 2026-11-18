@@ -14,13 +14,18 @@ path = "tests/support/office.rs"
 required-features = ["test-fixtures"]
 
 [dependencies]
+bytes.workspace = true
 clap.workspace = true
 getrandom.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper-util.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
 regex-lite.workspace = true
 reverie-contracts.workspace = true
 reverie-core.workspace = true
 reverie-host.workspace = true
+reverie-http.workspace = true
 reverie-python-regex.workspace = true
 reverie-store.workspace = true
 serde.workspace = true
