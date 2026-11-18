@@ -1,8 +1,7 @@
 # Optional operations service
 
 Normal Reverie startup needs no OPS service or privileged cleanup setup. OPS is an
-optional executor for explicitly delegated maintenance. Build its pinned tools
-with `nix build .#opsCore`; building installs no service or permission.
+optional executor for explicitly delegated maintenance.
 
 The current service supports restarting one configured website container on its
 existing image. It does not deploy a new image, roll back data, arm cleanup or run
@@ -11,11 +10,8 @@ until their separate, reviewed host adapter is installed and qualified.
 
 ## Setup and permissions
 
-An owner selects a private configuration, protected state and service credentials
-once, using `nix run .#ops-service -- --help` for the installer interface. The
-available installer uses a Linux user service; it does not require NixOS or edit
-the host OS configuration. Installation does not start the service or grant an
-expert permission to operate it.
+The legacy Linux user-service installer is retired. Existing OPS installations
+retain their private configuration, protected state and service credentials.
 
 Authorization uses the company's canonical service grants and current employee,
 session and policy bindings. The website needs its admitted private Goal bootstrap

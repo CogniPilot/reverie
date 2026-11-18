@@ -678,7 +678,7 @@ let
   # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
   # consumers qualify together. No Python fallback inside this native package.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
-  # The selected reverie-ops client (laptop runtime, console and opsCore).
+  # The selected reverie-ops client for the laptop runtime and console.
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
   backendNativeCli = import ./backend-cli.nix { inherit pkgs src; };

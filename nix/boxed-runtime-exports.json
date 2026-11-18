@@ -75,6 +75,7 @@
     "pruneHost",
     "pruneR12",
     "pruneSelftest",
+    "recoveryLedger",
     "resourceActorImage",
     "resourceActorImageProvenance",
     "resourceNativeQFixtureConsole",

@@ -42,10 +42,10 @@ The workspace and Kokoro commands now use Rust. Memory and Hands still bring
 Python into the image. The remaining runtime and acceptance callers must
 migrate before the root `python/` tree can be retired.
 
-Remaining debt is explicit: unselected legacy broker/model implementation and
-its compatibility tests still exist, as do routine and cleanup host tools. The persistent OPS daemon installer is
-retired from public selections; its distinct in-container headless client remains. The default package's unboxed development web launcher has not
-changed. Retiring those needs separate dependency and compatibility review.
+The persistent OPS host installer has been removed from the source. The Docker
+runtime still ships the native headless OPS client. Legacy broker and model
+implementations, their compatibility tests, routine and cleanup host tools, and
+the default package's unboxed development web launcher remain migration work.
 The old viewer component still has its actual isolated image acceptance through
 a checks-only fixture; its public production package is retired. Current Docker
 employee terminal acceptance must additionally use the mandatory synthetic office

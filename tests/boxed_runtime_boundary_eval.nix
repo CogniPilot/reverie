@@ -43,6 +43,7 @@ let
       "nix/local-model.nix"
       "nix/ops-core.nix"
       "nix/owner-terminal-packages.nix"
+      "python/reverie/ops_installer.py"
     ];
     brokerCannotReturn = !(passes (add "packages" "workerBroker") ../.);
     renamedHostAliasCannotSneakIn = !(passes (add "packages" "newHostDaemon") ../.);
