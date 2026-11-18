@@ -42,11 +42,11 @@ pub(crate) struct Parser {
     conditional_positions: Vec<(usize, usize)>,
 }
 impl Parser {
-    pub(crate) fn parse(source: Arc<[u32]>) -> Result<Parsed> {
+    pub(crate) fn parse(source: Arc<[u32]>, flags: u32) -> Result<Parsed> {
         let cursor = Cursor::new(source)?;
         let mut parser = Self {
             cursor,
-            parsed: Parsed::new(),
+            parsed: Parsed::new(flags),
             frames: vec![Frame {
                 kind: Kind::Root,
                 branches: vec![0],

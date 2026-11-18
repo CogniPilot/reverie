@@ -64,8 +64,7 @@ were found before freeze; their original failing evidence remains durable.
 
 Consumer work remains: InstallingBroker bootstrap must capture this real service;
 its actual final create, Office producer and protected T handler must consume it.
-No selector, endpoint, live engine probe or deployment changes here. The generic
-hands `execution_observer`/other harness adapters remain separately unported;
-this is the complete **broker CommandTelemetry** purpose. Shared iterative JSON
+The native Hands tool runner can send a command outcome to the existing
+loopback Office relay when its controller enables telemetry. Shared iterative JSON
 readers preserve actual grammar/number/text policies; CPython implementation
 stack-exhaustion behavior is not an invented new schema-depth cap.

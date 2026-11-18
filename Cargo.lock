@@ -1440,6 +1440,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-hands-tools"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "getrandom",
+ "nix",
+ "reverie-core",
+ "reverie-python-regex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "reverie-host"
 version = "0.1.0"
 dependencies = [

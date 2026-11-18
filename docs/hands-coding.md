@@ -2,8 +2,8 @@
 
 The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools
 read, list, search, edit and write workspace files, run commands and run a task's
-configured tests. The dispatcher comes from the pre-integration Hands tools r1
-implementation (SHA256 aec37a11815390dc7372d9e371838429ad1516dfe8cd37b9b05de3794c3d08cb).
+configured tests. The Rust dispatcher uses the existing version-one JSON request
+and result format, including file, time and output limits.
 
 The existing laptop container is the execution boundary. Commands have that
 laptop's ordinary filesystem grants and network access. File-tool path checks

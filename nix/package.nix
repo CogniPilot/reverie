@@ -648,25 +648,7 @@ let
     runtimeInputs = [ memory ];
     text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/memory_access.py "$@"'';
   };
-  handsToolchain = pkgs.buildEnv {
-    name = "reverie-hands-toolchain";
-    paths = [ pkgs.python3 pkgs.nodejs_22 pkgs.bashInteractive pkgs.coreutils
-      pkgs.git pkgs.ripgrep pkgs.findutils pkgs.gnused pkgs.gnugrep pkgs.gnumake ];
-    pathsToLink = [ "/bin" ];
-  };
-  handsToolsSource = pkgs.runCommand "reverie-hands-workspace-tools" { } ''
-    mkdir -p "$out"
-    cp ${src}/python/reverie/hands/laptop_tools.py "$out/laptop_tools.py"
-    cp ${src}/python/reverie/hands/workspace_dispatch.py "$out/workspace_dispatch.py"
-    cp ${src}/python/reverie/hands/coding_telemetry.py "$out/coding_telemetry.py"
-    cp ${src}/python/reverie/hands/command_telemetry.py "$out/command_telemetry.py"
-    cp ${src}/python/reverie/hands/command_catalog.py "$out/command_catalog.py"
-  '';
-  handsTools = pkgs.writeShellApplication {
-    name = "reverie-hands-tools";
-    runtimeInputs = [ pkgs.python3 ];
-    text = ''exec python3 -I -B ${handsToolsSource}/laptop_tools.py --tool-path ${handsToolchain}/bin "$@"'';
-  };
+  handsTools = import ./hands-tools.nix { inherit pkgs src; };
   modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   modelRelay = pkgs.writeShellApplication {
     name = "reverie-model-relay";
