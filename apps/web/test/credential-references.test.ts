@@ -17,11 +17,16 @@ async function fixture() {
   const token = join(dir, 'example.token'),
     metadata = join(dir, 'example.json');
   await fs.writeFile(token, 'synthetic-unread-marker', { mode: 0o600 });
-  await fs.writeFile(metadata, JSON.stringify({ repositories: ['ExampleOrg/project'] }), { mode: 0o600 });
+  const legacyMetadata = {
+    name: 'example',
+    repositories: ['ExampleOrg/project'],
+    scopeBasis: 'Owner-declared repository references; GitHub enforces actual token scopes',
+  };
+  await fs.writeFile(metadata, JSON.stringify(legacyMetadata, null, 2) + '\n', { mode: 0o600 });
   return { home, dir, token, metadata };
 }
 describe('stable bounded credential reference metadata', () => {
-  it('reads a bounded private metadata descriptor but never opens a token', async () => {
+  it('reads the legacy private metadata format without opening the token', async () => {
     const f = await fixture(),
       open = fs.open.bind(fs),
       paths: string[] = [];
