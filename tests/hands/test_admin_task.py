@@ -165,6 +165,7 @@ class NaturalAdminTaskTests(unittest.TestCase):
             context = coding_chat.office_environment(cfg, 'workspace')
             self.assertEqual(context['REVERIE_SESSION_ID'], cfg['self_session_id'])
             self.assertEqual(context['REVERIE_MUX'], '1')
-            self.assertNotIn('REVERIE_PASSWORD', context);self.assertNotIn('REVERIE_HANDS_API_KEY', context)
+            self.assertEqual(set(context), {'REVERIE_SCOPED_OFFICE', 'REVERIE_MUX', 'REVERIE_SESSION_ID',
+                                            'REVERIE_API_URL', 'REVERIE_AGENT_HOME', 'REVERIE_DATA_DIR'})
             with patch.dict(os.environ, {'REVERIE_API_URL': 'http://outside.example'}):
                 with self.assertRaises(ValueError):coding_chat.office_environment(cfg, 'workspace')

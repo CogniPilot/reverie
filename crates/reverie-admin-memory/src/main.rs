@@ -8,6 +8,7 @@ mod database;
 mod embedding_worker;
 mod hands_attention;
 mod hands_model;
+mod hands_office;
 mod hands_web;
 mod journal;
 mod managed_context;
@@ -207,6 +208,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-managed-context-worker" => managed_context::run,
         "--hands-trace-worker" => hands_model::trace_worker,
         "--hands-attention-worker" => hands_attention::run,
+        "--hands-office-worker" => hands_office::run,
         "--hands-web-worker" => hands_web::run,
         _ => return None,
     };

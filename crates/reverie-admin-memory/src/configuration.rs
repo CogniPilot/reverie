@@ -46,20 +46,30 @@ fn chosen_path(key: &str) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+pub(super) fn agent_home() -> io::Result<PathBuf> {
+    chosen_path("REVERIE_AGENT_HOME")
+        .or_else(|| chosen_path("HOME"))
+        .or_else(|| User::from_uid(getuid()).ok().flatten().map(|user| user.dir))
+        .ok_or_else(refused)
+}
+
+pub(super) fn data_root() -> io::Result<PathBuf> {
+    match chosen_path("REVERIE_DATA_DIR") {
+        Some(root) => Ok(root),
+        None => Ok(agent_home()?.join(".reverie")),
+    }
+}
+
+pub(super) fn session_file(root: &Path, session: &ProfileSessionId) -> PathBuf {
+    root.join("hands").join(session.as_str()).join("agent.json")
+}
+
 fn path(session: &ProfileSessionId) -> io::Result<PathBuf> {
-    let root = if let Some(root) = chosen_path("REVERIE_DATA_DIR") {
-        root
-    } else {
-        chosen_path("REVERIE_AGENT_HOME")
-            .or_else(|| chosen_path("HOME"))
-            .or_else(|| User::from_uid(getuid()).ok().flatten().map(|user| user.dir))
-            .ok_or_else(refused)?
-            .join(".reverie")
-    };
+    let root = data_root()?;
     if !root.is_absolute() || fs::canonicalize(&root)?.as_os_str() != root.as_os_str() {
         return Err(refused());
     }
-    let path = root.join("hands").join(session.as_str()).join("agent.json");
+    let path = session_file(&root, session);
     if fs::canonicalize(&path)?.as_os_str() != path.as_os_str() {
         return Err(refused());
     }

@@ -7,7 +7,7 @@ use crate::{
     telemetry,
 };
 use nix::sys::resource::{Resource, setrlimit};
-use reverie_core::ids::ProfileSessionId;
+use reverie_core::{ids::ProfileSessionId, office_relay::loopback_port};
 use serde::Deserialize;
 use std::{
     env,
@@ -98,26 +98,13 @@ impl Settings {
 fn scoped_office() -> Result<Vec<(&'static str, OsString)>> {
     let url = env::var("REVERIE_API_URL").unwrap_or_default();
     let session = env::var("REVERIE_SESSION_ID").unwrap_or_default();
-    if relay_port(&url).is_none() || ProfileSessionId::parse(&session).is_err() {
+    if loopback_port(&url).is_none() || ProfileSessionId::parse(&session).is_err() {
         return Err("Invalid scoped office relay".into());
     }
     Ok(OFFICE_ENV
         .into_iter()
         .filter_map(|name| env::var_os(name).map(|value| (name, value)))
         .collect())
-}
-
-fn relay_port(url: &str) -> Option<u16> {
-    let (scheme, address) = url.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("http") {
-        return None;
-    }
-    let port = address.strip_prefix("127.0.0.1:")?;
-    let port = port.strip_suffix('/').unwrap_or(port);
-    if !port.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    port.parse().ok().filter(|port| *port != 0)
 }
 
 #[derive(Deserialize)]

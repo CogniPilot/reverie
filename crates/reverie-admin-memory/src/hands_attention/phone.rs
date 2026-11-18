@@ -3,6 +3,7 @@ use bytes::Bytes;
 use http::{HeaderValue, Request, StatusCode, header};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper_util::rt::TokioIo;
+use reverie_core::office_relay::loopback_port;
 use reverie_http::{http1_builder, send_response};
 use serde::Deserialize;
 use serde_json::Value;
@@ -118,19 +119,6 @@ impl Phone {
         driver.abort();
         reply.ok().flatten()
     }
-}
-
-fn loopback_port(endpoint: &str) -> Option<NonZeroU16> {
-    let (scheme, address) = endpoint.split_once("://")?;
-    if !scheme.eq_ignore_ascii_case("http") {
-        return None;
-    }
-    let raw = address.strip_prefix("127.0.0.1:")?;
-    let port = raw.strip_suffix('/').unwrap_or(raw);
-    if !port.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    port.parse().ok()
 }
 
 fn decode(status: StatusCode, body: &[u8]) -> Option<Poll> {

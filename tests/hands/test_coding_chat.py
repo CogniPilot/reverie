@@ -10,7 +10,6 @@ from unittest.mock import patch
 import agent_loop as loop
 import coding_chat
 from reverie.hands.coding_tasks import control_request, permitted_sender
-from config_location import configuration_path
 from test_coding_support import FakeChat, cfg_for
 
 
@@ -160,8 +159,8 @@ class HarnessConfigurationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             env={'REVERIE_SESSION_ID':MEMORY_SESSION,'REVERIE_DATA_DIR':str(Path(directory)/'selected'),
                  'REVERIE_AGENT_HOME':str(Path(directory)/'home'),'HOME':directory,
-                 'REVERIE_API_URL':'http://127.0.0.1:12345'}
-            selected=configuration_path(env)
+                 'REVERIE_API_URL':'http://127.0.0.1:12345','PATH':os.environ.get('PATH', os.defpath)}
+            selected=Path(env['REVERIE_DATA_DIR'])/'hands'/MEMORY_SESSION/'agent.json'
             cfg={'self_session_id':MEMORY_SESSION,'_config_path':str(selected),'coding':{'tasks':{'fixture':{'office_access':True}}}}
             with patch.dict(os.environ,env,clear=True):
                 scoped=coding_chat.office_environment(cfg,'fixture')
@@ -172,10 +171,15 @@ class HarnessConfigurationTests(unittest.TestCase):
 
     def test_config_alias_and_other_session_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
-            env={'REVERIE_DATA_DIR':directory,'REVERIE_SESSION_ID':MEMORY_SESSION}
-            with self.assertRaises(ValueError): configuration_path(env, MEMORY_ROOM)
+            env={'REVERIE_DATA_DIR':directory,'REVERIE_SESSION_ID':MEMORY_ROOM,
+                 'REVERIE_API_URL':'http://127.0.0.1:12345','PATH':os.environ.get('PATH', os.defpath)}
+            cfg={'self_session_id':MEMORY_SESSION,'coding':{'tasks':{'fixture':{'office_access':True}}}}
+            with patch.dict(os.environ,env,clear=True), self.assertRaises(ValueError):
+                coding_chat.office_environment(cfg,'fixture')
             alias=Path(directory)/'alias'; alias.symlink_to(directory, target_is_directory=True)
-            with self.assertRaises(ValueError): configuration_path({**env,'REVERIE_DATA_DIR':str(alias)})
+            env.update(REVERIE_SESSION_ID=MEMORY_SESSION,REVERIE_DATA_DIR=str(alias))
+            with patch.dict(os.environ,env,clear=True), self.assertRaises(ValueError):
+                coding_chat.office_environment(cfg,'fixture')
 
     def test_external_marker_does_not_grant_authority(self):
         message = {'text': '[external agent] /code example Fix it. @Jester',

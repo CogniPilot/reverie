@@ -5,9 +5,7 @@ import re
 import subprocess
 import time
 import urllib.error
-import urllib.parse
 from types import SimpleNamespace
-from pathlib import Path
 
 from coding_tasks import ARGUMENT_CHARS, TOOL_NAMES, Limits, control_request, interrupt_requests, permitted_sender
 from agent_journal import native_memory_command, native_memory_json
@@ -146,25 +144,14 @@ def validate_settings(settings):
 def office_environment(cfg, task_id):
     """Only an explicitly enabled task gets its own loopback phone identity, never API/model passwords."""
     task = cfg['coding']['tasks'][task_id]
-    if not task.get('office_access', False):return {}
-    url = os.environ.get('REVERIE_API_URL', '')
-    try:
-        parsed = urllib.parse.urlparse(url)
-        if (parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.username or parsed.password or
-                parsed.path not in ('', '/') or parsed.query or parsed.fragment or not parsed.port or not 1 <= parsed.port <= 65535):
-            raise ValueError()
-    except ValueError:
-        raise ValueError('The configured local office relay is unavailable') from None
-    session = cfg['self_session_id']
-    if not re.fullmatch(r'[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}', session):
-        raise ValueError('Invalid scoped office identity')
-    from config_location import configuration_path
-    selected = configuration_path(os.environ, session)
-    if cfg.get('_config_path') and Path(cfg['_config_path']).resolve() != selected:
-        raise ValueError('The task configuration differs from the launcher selection')
-    return {'REVERIE_SCOPED_OFFICE': '1', 'REVERIE_MUX': '1', 'REVERIE_SESSION_ID': session,
-            'REVERIE_API_URL': url.rstrip('/'), 'REVERIE_AGENT_HOME': os.environ.get('REVERIE_AGENT_HOME') or os.path.expanduser('~'),
-            'REVERIE_DATA_DIR': str(selected.parents[2])}
+    if not task.get('office_access', False):
+        return {}
+    scoped = native_memory_json('hands-office-worker', {
+        'session': cfg['self_session_id'], 'config_path': cfg.get('_config_path') or None,
+    })
+    if not scoped:
+        raise ValueError('The configured local Office relay or session is unavailable')
+    return scoped
 
 
 def source_identity(message):

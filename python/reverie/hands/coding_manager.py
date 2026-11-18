@@ -275,10 +275,6 @@ class TaskManager:
                 job['worker'].reply(event['sequence'], error=denied)
                 return
             payload = event['payload']
-            timeout = int(min(payload['timeout'], job['deadline'] - self.clock()))
-            if timeout < 1:
-                self.finish({'status': 'stopped', 'reason': 'time_limit'})
-                return
             tool_request = dict(payload['request'])
             allowance = min(job['limits'].output_chars, (payload['cap'] - 1024) // 6)
             if allowance < 500:
@@ -286,14 +282,18 @@ class TaskManager:
                     'error': 'output_limit', 'truncated': False, 'exit_code': None})
                 return
             tool_request['max_output_chars'] = allowance
+            from coding_chat import office_environment
+            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
+            environment.update(office_environment(self.cfg, job['task_id']))
+            timeout = int(min(payload['timeout'], job['deadline'] - self.clock()))
+            if timeout < 1:
+                self.finish({'status': 'stopped', 'reason': 'time_limit'})
+                return
             argv = job['settings']['runner_argv'] + ['--task-dir',
                     os.path.join(job['settings']['root'], job['task_id']),
                     '--timeout-s', str(timeout), '--max-output-bytes', str(payload['cap'])]
             if job['settings'].get('failure_telemetry') is True:
                 argv += ['--command-telemetry']
-            from coding_chat import office_environment
-            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
-            environment.update(office_environment(self.cfg, job['task_id']))
             job['runner'] = self.process_factory(argv, encoded(tool_request).encode('utf-8'),
                 timeout, payload['cap'], environment=environment)
             job['pending'] = event
