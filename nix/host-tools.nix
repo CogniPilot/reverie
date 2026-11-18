@@ -23,7 +23,8 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = each "-p";
   cargoTestFlags = each "-p" ++ [ "--features" "reverie-admin-memory/test-fixtures" ];
-  # reverie-deployment's fixed helper paths and test inputs; no other crate here reads them.
+  # These fixed helper paths are compiled into their consumers.
+  REVERIE_FIXED_HANDS_SEARCH_CURL = "${pkgs.curl}/bin/curl";
   nativeCheckInputs = [ pkgs.gnutar pkgs.attr pkgs.acl pkgs.bubblewrap ];
   NIX_REVERIE_TEST_DEPLOYMENT_BWRAP = "${pkgs.bubblewrap}/bin/bwrap";
   REVERIE_DEPLOYMENT_TAR = "${pkgs.gnutar}/bin/tar";

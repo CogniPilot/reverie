@@ -10,6 +10,9 @@ API. No provider, API key or service is selected or installed automatically.
 The endpoint must have an HTTP(S) URL without embedded credentials, query or
 fragment. A configured internal endpoint is an owner choice; this setting is
 separate from the public-only fetch policy.
+The native search worker sends the query as a URL-encoded parameter to
+`/search` on the configured base. `search_timeout_s` limits the full request,
+and `search_max_bytes` limits the JSON response before result extraction.
 
 `web_fetch: true` offers the read-only `web_fetch({url})` chat tool. It does not
 require a workspace coding task or enable command execution. It accepts public
