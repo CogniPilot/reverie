@@ -3,6 +3,7 @@ use super::*;
 use reverie_host::lease::{DirectPaths, LeaseBase, RetirementPaths, retirement};
 use std::{collections::BTreeSet, fs, num::NonZeroUsize, os::unix::fs::MetadataExt};
 mod tree;
+mod workspace;
 mod writers;
 
 const GROUPS: [&str; 3] = ["employees", "operator-recovery", "operator-sessions"];
@@ -16,23 +17,28 @@ const LEASE_UNCONFIRMED: &str = "SCRATCH_LEASE_INVENTORY_UNCONFIRMED";
 
 impl DeploymentService {
     /// Preview or explicitly clear disposable entries in the registered scratch bind.
-    pub fn prune_scratch(&self, apply: bool, additional_leases: &[PathBuf]) -> Result<Value> {
-        let selection = self.scratch_selection()?;
+    pub fn prune_scratch(
+        &self,
+        apply: bool,
+        force_read_only: bool,
+        additional_leases: &[PathBuf],
+    ) -> Result<Value> {
+        let selection = self.storage_selection("/scratch")?;
         let layout = tree::Layout::open(selection.root.clone())?;
-        let blockers = self.scratch_blockers(&selection)?;
+        let blockers = self.storage_blockers(&selection, &layout.path)?;
         if apply && !blockers.is_empty() {
             let mut blocked = report(&selection.root, &blockers, &[], true, false);
             blocked["code"] = json!("SCRATCH_IN_USE");
             return Ok(blocked);
         }
         let leases = if apply {
-            Some(self.scratch_leases(&layout.path, additional_leases)?)
+            Some(self.storage_leases(&layout.path, additional_leases)?)
         } else {
             None
         };
         let mut rows = Vec::new();
         for target in layout.targets()? {
-            let mut inspection = target.inspect()?;
+            let mut inspection = target.inspect(force_read_only)?;
             if apply && inspection.has_eligible_entries() {
                 let result = self.clear_scratch_target(&selection, &layout, &target, &inspection);
                 record_apply(&mut inspection.row, result);
@@ -55,31 +61,35 @@ impl DeploymentService {
         target: &tree::Target,
         inspection: &tree::Inspection,
     ) -> Result<()> {
-        let current = self.scratch_selection()?;
+        let current = self.storage_selection("/scratch")?;
         require(*selection == current, "SCRATCH_BIND_CHANGED")?;
         require(
-            self.scratch_blockers(&current)?.is_empty(),
+            self.storage_blockers(&current, &layout.path)?.is_empty(),
             "SCRATCH_IN_USE",
         )?;
         layout.check(target)?;
         target.clear(inspection)
     }
 
-    fn scratch_selection(&self) -> Result<writers::Selection> {
+    fn storage_selection(&self, destination: &str) -> Result<writers::Selection> {
         self.installation.current()?;
         let office = self.engine.container(&self.installation.name)?;
         model::port_binding(&office, self.installation.port)?;
-        writers::Selection::from_office(&office)
+        writers::Selection::from_office(&office, destination)
     }
 
-    fn scratch_blockers(&self, selection: &writers::Selection) -> Result<Vec<String>> {
-        let inventory = self.engine.json("GET", "/containers/json?all=1", None)?;
-        writers::blockers(selection, &inventory)
-    }
-
-    fn scratch_leases(
+    fn storage_blockers(
         &self,
-        laptops: &Path,
+        selection: &writers::Selection,
+        target: &Path,
+    ) -> Result<Vec<String>> {
+        let inventory = self.engine.json("GET", "/containers/json?all=1", None)?;
+        writers::blockers(selection, target, &inventory)
+    }
+
+    fn storage_leases(
+        &self,
+        target: &Path,
         additional: &[PathBuf],
     ) -> Result<reverie_host::lease::Retirement> {
         let runtime = self.installation.root.join("runtime");
@@ -102,15 +112,17 @@ impl DeploymentService {
             .iter()
             .map(|base| LeaseBase::scan(base).map_err(|_| DeploymentError::new(LEASE_UNCONFIRMED)))
             .collect::<Result<Vec<_>>>()?;
-        let aliases = writers::AliasCheck::new(laptops)?;
+        let aliases = writers::AliasCheck::new(target)?;
         for base in &bases {
             aliases
                 .confirm_path_disjoint(base.path())
                 .map_err(|_| DeploymentError::new(LEASE_UNCONFIRMED))?;
         }
         retirement(
-            laptops,
-            laptops.parent().expect("laptops inside registered scratch"),
+            target,
+            target
+                .parent()
+                .expect("storage selection inside registered bind"),
             &bases,
             Instant::now() + Duration::from_secs(3600),
             NonZeroUsize::new(100_000).expect("positive record threshold"),

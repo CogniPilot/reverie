@@ -168,3 +168,29 @@ clearing. The command keeps the mount directories and retains top-level entries
 that contain repositories, preservation markers, special files, foreign-owned
 files, or unreadable content. An apply report marks any unconfirmed tree so it
 can be inspected before restarting workers. Clearing is permanent.
+
+`prune-scratch --force-read-only` includes otherwise eligible directories
+owned by the installation user that lack the owner write bit. During apply,
+the pruner temporarily adds that bit on the held directory descriptor and
+restores its original mode before returning from the directory. The same
+lease, preservation, ownership and mount checks apply.
+
+## Prune old Cargo builds on the company workspace disk
+
+```sh
+nix run .#deployment -- --root /path/to/installation prune-workspace
+nix run .#deployment -- --root /path/to/installation prune-workspace --apply
+```
+
+The workspace pruner discovers the registered `/reverie_workspace` bind and
+reports Cargo build targets under `cases/expert-*/work`. A candidate needs
+Cargo's `CACHEDIR.TAG` and a regular `.rustc_info.json`. The default age is four
+days from the newest modification or metadata change anywhere in the target.
+Use `--min-age-days` to choose a different retention period. A protected,
+unreadable, recently changed, leased or otherwise unconfirmed cache remains
+in place. Source, shared results and company state stay outside the selection.
+
+Apply requires the office, overlapping Docker containers and host jobs using
+these caches to be stopped. Keep them stopped through completion. The same
+lease inventory and `--lease-dir` option used by scratch cleanup apply here.
+A successful cleanup removes an eligible cache as a unit so Cargo can rebuild it.

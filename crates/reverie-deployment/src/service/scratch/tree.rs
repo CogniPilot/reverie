@@ -93,6 +93,7 @@ pub(super) struct Target {
 pub(super) struct Inspection {
     pub(super) row: Value,
     eligible: Vec<(CString, Stat)>,
+    force_read_only: bool,
 }
 
 impl Inspection {
@@ -102,7 +103,7 @@ impl Inspection {
 }
 
 impl Target {
-    pub(super) fn inspect(&self) -> Result<Inspection> {
+    pub(super) fn inspect(&self, force_read_only: bool) -> Result<Inspection> {
         let names = names(&self.directory)?;
         let protected_root = names.iter().any(|name| protected_name(name));
         let mut allocated = 0u64;
@@ -111,7 +112,7 @@ impl Target {
         let mut protected = Vec::new();
         let mut unknown = Vec::new();
         for name in names {
-            let Ok((info, usage)) = scan_entry(&self.directory, &name, 0) else {
+            let Ok((info, usage)) = scan_entry(&self.directory, &name, 0, force_read_only) else {
                 unknown.push(name.to_string_lossy().into_owned());
                 continue;
             };
@@ -134,12 +135,22 @@ impl Target {
             "protectedEntries": protected,
             "unreadableEntries": unknown,
         });
-        Ok(Inspection { row, eligible })
+        Ok(Inspection {
+            row,
+            eligible,
+            force_read_only,
+        })
     }
 
     pub(super) fn clear(&self, inspection: &Inspection) -> Result<()> {
         for (name, expected) in &inspection.eligible {
-            clear_entry(&self.directory, name, Some(expected), 0)?;
+            clear_entry(
+                &self.directory,
+                name,
+                Some(expected),
+                0,
+                inspection.force_read_only,
+            )?;
         }
         self.directory.sync_all()?;
         Ok(())
@@ -152,6 +163,7 @@ struct Usage {
     reclaimable: u64,
     protected: bool,
     unreadable: bool,
+    newest_change: i64,
 }
 
 impl Usage {
@@ -160,10 +172,16 @@ impl Usage {
         self.reclaimable = self.reclaimable.saturating_add(child.reclaimable);
         self.protected |= child.protected;
         self.unreadable |= child.unreadable;
+        self.newest_change = self.newest_change.max(child.newest_change);
     }
 }
 
-fn scan_entry(parent: &File, name: &CStr, depth: usize) -> Result<(Stat, Usage)> {
+fn scan_entry(
+    parent: &File,
+    name: &CStr,
+    depth: usize,
+    force_read_only: bool,
+) -> Result<(Stat, Usage)> {
     require(depth < MAX_DEPTH, TREE_CHANGED)?;
     let (entry, info) = open_entry(parent, name)?;
     let kind = native::FileType::from_raw_mode(info.st_mode);
@@ -177,11 +195,12 @@ fn scan_entry(parent: &File, name: &CStr, depth: usize) -> Result<(Stat, Usage)>
         } else {
             0
         },
-        protected: !can_remove(name, &info, kind),
+        protected: !can_remove(name, &info, kind, force_read_only),
         unreadable: false,
+        newest_change: info.st_mtime.max(info.st_ctime),
     };
     if kind == native::FileType::Directory {
-        scan_children(parent, name, &entry, depth, &mut usage)?;
+        scan_children(parent, name, &entry, depth, force_read_only, &mut usage)?;
     }
     Ok((info, usage))
 }
@@ -191,11 +210,12 @@ fn scan_children(
     name: &CStr,
     entry: &File,
     depth: usize,
+    force_read_only: bool,
     usage: &mut Usage,
 ) -> Result<()> {
     let directory = read_entry(parent, name, entry)?;
     for name in names(&directory)? {
-        match scan_entry(&directory, &name, depth + 1) {
+        match scan_entry(&directory, &name, depth + 1, force_read_only) {
             Ok((_, child)) => usage.include(child),
             Err(_) => usage.unreadable = true,
         }
@@ -203,11 +223,17 @@ fn scan_children(
     Ok(())
 }
 
-fn clear_entry(parent: &File, name: &CStr, expected: Option<&Stat>, depth: usize) -> Result<()> {
+fn clear_entry(
+    parent: &File,
+    name: &CStr,
+    expected: Option<&Stat>,
+    depth: usize,
+    force_read_only: bool,
+) -> Result<()> {
     require(depth < MAX_DEPTH, TREE_CHANGED)?;
     let (entry, info) = open_entry(parent, name)?;
     let kind = native::FileType::from_raw_mode(info.st_mode);
-    require(can_remove(name, &info, kind), TREE_CHANGED)?;
+    require(can_remove(name, &info, kind, force_read_only), TREE_CHANGED)?;
     if let Some(expected) = expected {
         require(
             identity(expected) == identity(&info)
@@ -219,10 +245,7 @@ fn clear_entry(parent: &File, name: &CStr, expected: Option<&Stat>, depth: usize
     }
     let flags = if kind == native::FileType::Directory {
         let directory = read_entry(parent, name, &entry)?;
-        // Collect names before unlinking so changes cannot alter the iteration cursor.
-        for name in names(&directory)? {
-            clear_entry(&directory, &name, None, depth + 1)?;
-        }
+        clear_children(&directory, info.st_mode, depth, force_read_only)?;
         AtFlags::REMOVEDIR
     } else {
         AtFlags::empty()
@@ -230,6 +253,31 @@ fn clear_entry(parent: &File, name: &CStr, expected: Option<&Stat>, depth: usize
     let (named, _) = open_entry(parent, name)?;
     same_file(&entry, &named)?;
     native::unlinkat(parent, name, flags).map_err(|_| DeploymentError::new(TREE_CHANGED))
+}
+
+fn clear_children(directory: &File, mode: u32, depth: usize, force_read_only: bool) -> Result<()> {
+    let mode = Mode::from_bits_truncate(mode);
+    let grant_write = !mode.contains(Mode::WUSR);
+    if grant_write {
+        require(force_read_only, TREE_CHANGED)?;
+        set_mode(directory, mode | Mode::WUSR)?;
+    }
+    let cleared = (|| {
+        for name in names(directory)? {
+            clear_entry(directory, &name, None, depth + 1, force_read_only)?;
+        }
+        Ok(())
+    })();
+    if grant_write {
+        DeploymentError::finalized(cleared, set_mode(directory, mode))
+    } else {
+        cleared
+    }
+}
+
+fn set_mode(directory: &File, mode: Mode) -> Result<()> {
+    native::fchmod(directory, mode)
+        .map_err(|_| DeploymentError::new("SCRATCH_DIRECTORY_MODE_UNCONFIRMED"))
 }
 
 fn open_entry(parent: &File, name: &CStr) -> Result<(File, Stat)> {
@@ -245,7 +293,7 @@ fn read_entry(parent: &File, name: &CStr, entry: &File) -> Result<File> {
     Ok(directory)
 }
 
-fn open_child(
+pub(super) fn open_child(
     parent: &File,
     name: impl rustix::path::Arg,
     directory: bool,
@@ -279,7 +327,7 @@ fn names(file: &File) -> Result<Vec<CString>> {
     Ok(names)
 }
 
-fn private(directory: &File) -> Result<()> {
+pub(super) fn private(directory: &File) -> Result<()> {
     let info = directory.metadata()?;
     require(
         info.uid() == nix::unistd::geteuid().as_raw() && info.mode() & 0o7777 == 0o700,
@@ -291,7 +339,7 @@ fn identity(info: &Stat) -> (u64, u64, u32) {
     (info.st_dev, info.st_ino, info.st_mode)
 }
 
-fn same_file(left: &File, right: &File) -> Result<()> {
+pub(super) fn same_file(left: &File, right: &File) -> Result<()> {
     let get = |file| native::fstat(file).map_err(|_| DeploymentError::new(TREE_CHANGED));
     require(
         identity(&get(left)?) == identity(&get(right)?),
@@ -303,9 +351,56 @@ fn protected_name(name: &CStr) -> bool {
     PROTECTED.contains(&name.to_bytes())
 }
 
-fn can_remove(name: &CStr, info: &Stat, kind: native::FileType) -> bool {
+pub(super) struct Cache {
+    stamp: Stat,
+    usage: Usage,
+}
+
+impl Cache {
+    pub(super) fn observe(parent: &File, name: &CStr) -> Result<Self> {
+        let (stamp, usage) = scan_entry(parent, name, 0, false)?;
+        require(
+            native::FileType::from_raw_mode(stamp.st_mode) == native::FileType::Directory,
+            TREE_CHANGED,
+        )?;
+        Ok(Self { stamp, usage })
+    }
+
+    pub(super) fn row(&self, path: &Path, cutoff: i64) -> Value {
+        let disposition = self.disposition(cutoff);
+        json!({
+            "path": path,
+            "status": disposition,
+            "allocatedBytes": self.usage.allocated,
+            "eligibleBytes": if disposition == "eligible" { self.usage.reclaimable } else { 0 },
+            "newestChangeUnixSeconds": self.usage.newest_change,
+        })
+    }
+
+    pub(super) fn disposition(&self, cutoff: i64) -> &'static str {
+        if self.usage.unreadable {
+            "unreadable"
+        } else if self.usage.protected {
+            "protected"
+        } else if self.usage.newest_change >= cutoff {
+            "recent"
+        } else {
+            "eligible"
+        }
+    }
+
+    pub(super) fn clear(&self, parent: &File, name: &CStr, cutoff: i64) -> Result<()> {
+        require(self.disposition(cutoff) == "eligible", TREE_CHANGED)?;
+        clear_entry(parent, name, Some(&self.stamp), 0, false)?;
+        parent.sync_all()?;
+        Ok(())
+    }
+}
+
+fn can_remove(name: &CStr, info: &Stat, kind: native::FileType, force_read_only: bool) -> bool {
     !protected_name(name)
         && info.st_uid == nix::unistd::geteuid().as_raw()
+        && (kind != native::FileType::Directory || (info.st_mode & 0o200 != 0) || force_read_only)
         && matches!(
             kind,
             native::FileType::RegularFile | native::FileType::Directory | native::FileType::Symlink

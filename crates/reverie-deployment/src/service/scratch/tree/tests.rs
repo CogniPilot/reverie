@@ -63,7 +63,7 @@ fn clears_disposable_entries_without_changing_mount_directories() {
     let targets = layout.targets().unwrap();
     assert_eq!(targets.len(), 3);
     for target in &targets {
-        let inspection = target.inspect().unwrap();
+        let inspection = target.inspect(false).unwrap();
         assert_eq!(inspection.row["eligibleEntries"], 2);
         assert!(inspection.row["eligibleBytes"].as_u64().unwrap() >= 4096);
         assert_eq!(inspection.row["allocatedBytesComplete"], true);
@@ -95,10 +95,10 @@ fn retains_protected_work_and_socket_subtrees() {
     fs::write(tmp.join("build"), "artifact").unwrap();
     let layout = fixture.layout();
     let target = layout.targets().unwrap().pop().unwrap();
-    assert_eq!(target.inspect().unwrap().row["eligibleEntries"], 0);
+    assert_eq!(target.inspect(false).unwrap().row["eligibleEntries"], 0);
 
     fs::remove_file(tmp.join(".reverie-task.json")).unwrap();
-    let inspection = target.inspect().unwrap();
+    let inspection = target.inspect(false).unwrap();
     assert_eq!(inspection.row["eligibleEntries"], 1);
     assert_eq!(
         inspection.row["protectedEntries"],
@@ -136,9 +136,48 @@ fn clearing_hard_links_preserves_the_durable_name() {
     fs::hard_link(&durable, tmp.join("link1")).unwrap();
     fs::hard_link(&durable, tmp.join("link2")).unwrap();
     let target = fixture.layout().targets().unwrap().pop().unwrap();
-    let inspection = target.inspect().unwrap();
+    let inspection = target.inspect(false).unwrap();
     assert_eq!(inspection.row["eligibleBytes"], 0);
     target.clear(&inspection).unwrap();
     assert_eq!(fs::read_to_string(durable).unwrap(), "keep me");
     assert_eq!(fs::read_dir(tmp).unwrap().count(), 0);
+}
+
+#[test]
+fn only_forced_cleanup_includes_owned_read_only_directories() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    let tmp = fixture.seat("employees");
+    let top = tmp.join("unpacked");
+    let nested = top.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    fs::write(nested.join("cache"), "generated").unwrap();
+    for dir in [&nested, &top] {
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o555)).unwrap();
+    }
+    let target = fixture.layout().targets().unwrap().pop().unwrap();
+    let preview = target.inspect(false).unwrap();
+    assert_eq!(preview.row["protectedEntries"], json!(["unpacked"]));
+    let forced = target.inspect(true).unwrap();
+    assert_eq!(forced.row["eligibleEntries"], 1);
+    target.clear(&forced).unwrap();
+    assert!(!top.exists());
+}
+
+#[test]
+fn force_restores_original_mode_when_a_new_preservation_marker_refuses_clear() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    let tmp = fixture.seat("employees");
+    let top = tmp.join("unpacked");
+    let nested = top.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    fs::set_permissions(&top, fs::Permissions::from_mode(0o555)).unwrap();
+    let target = fixture.layout().targets().unwrap().pop().unwrap();
+    let forced = target.inspect(true).unwrap();
+    fs::write(nested.join(".keep"), "unique").unwrap();
+    assert!(target.clear(&forced).is_err());
+    assert_eq!(top.metadata().unwrap().mode() & 0o7777, 0o555);
+    assert!(nested.join(".keep").exists());
+    fs::set_permissions(top, fs::Permissions::from_mode(0o755)).unwrap();
 }

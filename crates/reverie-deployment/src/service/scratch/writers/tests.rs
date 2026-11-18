@@ -19,15 +19,19 @@ fn office_and_worker_writers_must_be_quiescent_even_for_read_only_binds() {
         u128::from_ne_bytes(nonce)
     ));
     fs::create_dir_all(scratch.join("laptops")).unwrap();
-    let selection = Selection::from_office(&container(
-        'a',
-        "office",
-        "running",
-        json!([
-            { "Type": "bind", "Destination": "/scratch", "Source": scratch, "RW": true }
-        ]),
-    ))
+    let selection = Selection::from_office(
+        &container(
+            'a',
+            "office",
+            "running",
+            json!([
+                { "Type": "bind", "Destination": "/scratch", "Source": scratch, "RW": true }
+            ]),
+        ),
+        "/scratch",
+    )
     .unwrap();
+    let laptops = scratch.join("laptops");
     let rows = [
         container('a', "office", "running", json!([])),
         container(
@@ -48,12 +52,13 @@ fn office_and_worker_writers_must_be_quiescent_even_for_read_only_binds() {
         ),
     ];
     assert_eq!(
-        blockers(&selection, &json!(rows)).unwrap(),
+        blockers(&selection, &laptops, &json!(rows)).unwrap(),
         ["office", "worker"]
     );
     assert!(
         blockers(
             &selection,
+            &laptops,
             &json!([
                 container('a', "office", "exited", json!([])),
                 container('b', "worker", "exited", json!([])),
@@ -62,6 +67,6 @@ fn office_and_worker_writers_must_be_quiescent_even_for_read_only_binds() {
         .unwrap()
         .is_empty()
     );
-    assert!(blockers(&selection, &json!([&rows[1]])).is_err());
+    assert!(blockers(&selection, &laptops, &json!([&rows[1]])).is_err());
     fs::remove_dir_all(scratch).unwrap();
 }

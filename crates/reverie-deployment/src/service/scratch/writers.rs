@@ -13,11 +13,11 @@ pub(super) struct Selection {
 }
 
 impl Selection {
-    pub(super) fn from_office(office: &Value) -> Result<Self> {
+    pub(super) fn from_office(office: &Value, destination: &str) -> Result<Self> {
         let office_id = model::cid(model::string(office, "Id")?)?.to_owned();
         let mut mounts = mounts(office)?
             .iter()
-            .filter(|mount| mount["Destination"] == "/scratch");
+            .filter(|mount| mount["Destination"] == destination);
         let mount = mounts.next().ok_or_else(|| DeploymentError::new(BIND))?;
         require(
             mount["Type"] == "bind" && mount["RW"] == true && mounts.next().is_none(),
@@ -32,13 +32,16 @@ impl Selection {
     }
 }
 
-pub(super) fn blockers(selection: &Selection, inventory: &Value) -> Result<Vec<String>> {
+pub(super) fn blockers(
+    selection: &Selection,
+    target: &Path,
+    inventory: &Value,
+) -> Result<Vec<String>> {
     let rows = inventory
         .as_array()
         .ok_or_else(|| DeploymentError::new(INVENTORY))?;
     let mut identities = BTreeSet::new();
-    let target = selection.root.join("laptops");
-    let observation = AliasCheck::new(&target)?;
+    let observation = AliasCheck::new(target)?;
     let mut blocked = Vec::new();
     for row in rows {
         let id = model::cid(model::string(row, "Id")?)?;

@@ -71,6 +71,21 @@ enum Action {
         /// Permanently remove disposable contents. Without this, report only.
         #[arg(long)]
         apply: bool,
+        /// Include owned read-only directories in the preview or cleanup.
+        #[arg(long)]
+        force_read_only: bool,
+        /// Include an additional host task-lease directory in the apply guard.
+        #[arg(long = "lease-dir", requires = "apply")]
+        lease_dirs: Vec<PathBuf>,
+    },
+    /// Report or clear aged Cargo build caches on the company workspace disk.
+    PruneWorkspace {
+        /// Remove old verified caches after the office and their Docker users stop.
+        #[arg(long)]
+        apply: bool,
+        /// Keep build caches with newer file or directory changes.
+        #[arg(long, default_value_t = 4)]
+        min_age_days: u16,
         /// Include an additional host task-lease directory in the apply guard.
         #[arg(long = "lease-dir", requires = "apply")]
         lease_dirs: Vec<PathBuf>,
@@ -80,11 +95,14 @@ enum Action {
 }
 fn main() -> ExitCode {
     let args = Arguments::parse();
-    let scratch = matches!(args.action, Action::PruneScratch { .. });
+    let storage = matches!(
+        args.action,
+        Action::PruneScratch { .. } | Action::PruneWorkspace { .. }
+    );
     let result = run(args);
     match result {
         Ok(mut value) => {
-            let refused = scratch && value["data"]["success"] == false;
+            let refused = storage && value["data"]["success"] == false;
             if refused {
                 value["success"] = serde_json::Value::Bool(false);
             }
@@ -173,9 +191,16 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 service.apply(&operation)?
             })?,
             Action::Status { operation } => serde_json::to_value(service.status(&operation)?)?,
-            Action::PruneScratch { apply, lease_dirs } => {
-                service.prune_scratch(apply, &lease_dirs)?
-            }
+            Action::PruneScratch {
+                apply,
+                force_read_only,
+                lease_dirs,
+            } => service.prune_scratch(apply, force_read_only, &lease_dirs)?,
+            Action::PruneWorkspace {
+                apply,
+                min_age_days,
+                lease_dirs,
+            } => service.prune_workspace(apply, min_age_days, &lease_dirs)?,
             Action::Rollback { operation } => serde_json::to_value(service.rollback(&operation)?)?,
         };
         Ok(value)
