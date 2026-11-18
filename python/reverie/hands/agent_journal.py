@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 
@@ -29,9 +30,11 @@ def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
-def native_memory_command(worker):
-    return [os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory'),
-            f'--{worker}={os.getpid()}']
+def native_memory_command(worker, *, resolve=False):
+    executable = os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory')
+    if resolve and (found := shutil.which(executable)):
+        executable = os.path.abspath(found)
+    return [executable, f'--{worker}={os.getpid()}']
 
 
 def native_memory_request(worker, arguments, bound=MEMORY_WORKER_BYTES):

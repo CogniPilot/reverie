@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import time
 
 from coding_process import BoundedProcess
@@ -61,9 +60,7 @@ class ModelArbiter:
         environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
         if self.key_env is not None and self.key_env in os.environ:
             environment[self.key_env] = os.environ[self.key_env]
-        command = native_memory_command('hands-model-worker')
-        if helper := shutil.which(command[0]):
-            command[0] = os.path.abspath(helper)
+        command = native_memory_command('hands-model-worker', resolve=True)
         self.job = self.factory(command, json.dumps(config, ensure_ascii=False).encode('utf-8'),
                                 min(self.timeout_s, remaining), self.max_response_bytes,
                                 environment=environment, parent_bound=True)

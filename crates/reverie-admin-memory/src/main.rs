@@ -1,6 +1,7 @@
 //! Explicit recall of Hands channel evidence through the current Office session.
 mod automatic;
 mod capture;
+mod coding_task;
 mod configuration;
 mod context_cli;
 mod database;
@@ -24,6 +25,7 @@ use nix::{
     unistd::{getpgrp, getpid, getppid},
 };
 use serde::{Deserialize, Serialize};
+use std::os::unix::process::CommandExt;
 use std::{
     env,
     io::{self, Read, Write},
@@ -195,9 +197,29 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--token-meter-worker" => token_meter::run,
         "--hands-model-worker" => hands_model::run,
         "--hands-chat-worker" => hands_model::chat,
+        "--hands-coding-worker" => coding_task::run,
+        "--hands-coding-policy-worker" => coding_task::policy,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))
+}
+
+fn guarded_exec(
+    flag: &std::ffi::OsStr,
+    mut args: impl Iterator<Item = std::ffi::OsString>,
+) -> Option<ExitCode> {
+    let pid = flag.to_str()?.strip_prefix("--hands-guard=")?;
+    let Ok(parent) = pid.parse() else {
+        return Some(ExitCode::FAILURE);
+    };
+    let Some(program) = args.next() else {
+        return Some(ExitCode::FAILURE);
+    };
+    if !std::path::Path::new(&program).is_absolute() || bind_worker(parent).is_err() {
+        return Some(ExitCode::FAILURE);
+    }
+    let _ = Command::new(program).args(args).exec();
+    Some(ExitCode::FAILURE)
 }
 
 fn main() -> ExitCode {
@@ -213,7 +235,14 @@ fn main() -> ExitCode {
         return context_cli::entry();
     }
     let mut args = env::args_os().skip(1);
-    if let Some((worker, pid)) = args.next().as_deref().and_then(worker_argument) {
+    let flag = args.next();
+    if let Some(code) = flag
+        .as_deref()
+        .and_then(|flag| guarded_exec(flag, &mut args))
+    {
+        return code;
+    }
+    if let Some((worker, pid)) = flag.as_deref().and_then(worker_argument) {
         return if args.next().is_none() && worker(pid).is_ok() {
             ExitCode::SUCCESS
         } else {

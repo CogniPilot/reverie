@@ -8,10 +8,9 @@ from dataclasses import asdict, replace
 from coding_arbiter import ModelArbiter
 from coding_chat import RULES, authorize_task, read_tool_specs, validate_settings
 from coding_diagnostics import runner_report
-from coding_process import BoundedProcess
+from coding_process import BoundedProcess, CodingWorker
 from coding_tasks import (Limits, begin_request, checked_result, control_request,
                           encoded, permitted_sender, reserve_chars)
-from coding_worker import CodingWorker
 import managed_context
 
 
