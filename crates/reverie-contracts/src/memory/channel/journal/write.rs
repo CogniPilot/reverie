@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 const CLASSIFICATION: &str = "source-linked agent account; interpretation is not verified fact";
 
 #[derive(Clone, Copy, Deserialize)]
-enum Coverage {
+pub(super) enum Coverage {
     #[serde(rename = "bounded-visible-messages; gaps are not claimed covered")]
     Visible,
     #[serde(rename = "bounded-visible-and-exact-sources; gaps are not claimed covered")]
@@ -23,7 +23,7 @@ enum Coverage {
 }
 
 impl Coverage {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Visible => "bounded-visible-messages; gaps are not claimed covered",
             Self::Expanded => "bounded-visible-and-exact-sources; gaps are not claimed covered",
@@ -128,10 +128,7 @@ impl JournalCommit {
             && at >= 0.0
             && self
                 .end_revision()
-                .at
-                .compare(&Timestamp(Number::Float(at)))
-                .then_with(|| self.end.as_str().cmp(turn))
-                .is_gt()
+                .after(&Timestamp(Number::Float(at)), turn)
     }
 
     pub fn covers_target(&self, at: f64) -> bool {

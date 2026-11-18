@@ -19,6 +19,7 @@ nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"]
 reverie-contracts.workspace = true
 reverie-core.workspace = true
 reverie-host.workspace = true
+reverie-python-regex.workspace = true
 reverie-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true

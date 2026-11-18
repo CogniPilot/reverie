@@ -1,0 +1,691 @@
+{
+  "intent": [
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Read-only lookup"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "read—only lookup"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "READ    ONLY lookup"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Do not write a journal"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Don't commit this"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "DON’T create a journal entry"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Never save a journal"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "We discussed a “read-only” endpoint"
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "a_read-only tool"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Do not invent a quote."
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "remember this"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "Please remember to check it."
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "what do you remember about it?"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "Note this please"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "Log that asap"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "write that down"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "keep it in mind"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "don’t forget the next step"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "add this to your journal"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "put it in journal"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": "Keep ſave as literal text"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "SAVE THIS, please"
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": true,
+      "message": {
+        "text": "Do not write. Also, remember this."
+      },
+      "read_only": true
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": ""
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": null
+      },
+      "read_only": false
+    },
+    {
+      "asks_to_remember": false,
+      "message": {
+        "text": 2
+      },
+      "read_only": false
+    }
+  ],
+  "snapshots": [
+    {
+      "history": [
+        {
+          "at": 1,
+          "from": {
+            "flags": [
+              true,
+              3
+            ],
+            "id": "seat",
+            "name": "Íris"
+          },
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "Quoted source 🐦雪"
+        },
+        {
+          "at": -0.0,
+          "id": "30000000-0000-0000-0000-000000000002",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "The clock includes negative zero."
+        }
+      ],
+      "message": {
+        "at": 2.5,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "Please remember this, 🐦."
+      },
+      "name": "bind Unicode full sender and missing sender distinctly",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 2.5,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "sha256": "0c59d5463c99f352a9caaa020d9c42f94542c9b7126fd99fd87e42c935be8bcb"
+        },
+        "events": [
+          {
+            "at": -0.0,
+            "id": "30000000-0000-0000-0000-000000000002",
+            "sha256": "0983914723a95007681f52de0708fa2250870ec731e22e988deec2a815cd190b"
+          },
+          {
+            "at": 1,
+            "id": "30000000-0000-0000-0000-000000000001",
+            "sha256": "b68d60d0689c6f0a6f4df71a7bcdb518deca8d1bd8623a1a000f84c708039a03"
+          },
+          {
+            "at": 2.5,
+            "id": "30000000-0000-0000-0000-000000000003",
+            "sha256": "0c59d5463c99f352a9caaa020d9c42f94542c9b7126fd99fd87e42c935be8bcb"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": 1,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "stale copy"
+        },
+        {
+          "at": 2,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "winning source"
+        }
+      ],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "exact current turn"
+      },
+      "name": "source current turn replaces a previous copy of its own ID",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 3,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "sha256": "23a4b4757373214c4eb72a8df2e6dd481aca885deb4dde2df22f9fdc60f86f75"
+        },
+        "events": [
+          {
+            "at": 2,
+            "id": "30000000-0000-0000-0000-000000000001",
+            "sha256": "0e78f58dec5190443b1e39d72023bb1c693a7963353bf32b8a85290c6f291347"
+          },
+          {
+            "at": 3,
+            "id": "30000000-0000-0000-0000-000000000003",
+            "sha256": "23a4b4757373214c4eb72a8df2e6dd481aca885deb4dde2df22f9fdc60f86f75"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": 1,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000008",
+          "text": "foreign"
+        },
+        {
+          "at": 321,
+          "id": "30000000-0000-0000-0000-000000000002",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": null
+        },
+        "not a message",
+        {
+          "at": 1.4,
+          "id": "30000000-0000-0000-0000-000000000004",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "visible"
+        }
+      ],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "Read-only lookup"
+      },
+      "name": "foreign and future rows omitted before fingerprinting",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 3,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "sha256": "acce385a55807ec7e1d1e6c93a6562334f2325a6eb55de94265fb672f84f1bd7"
+        },
+        "events": [
+          {
+            "at": 1.4,
+            "id": "30000000-0000-0000-0000-000000000004",
+            "sha256": "3274f0bc9ef5e04fbd555e413c5b69726fb09b4abcd90a3b363aea027a16fc8a"
+          },
+          {
+            "at": 3,
+            "id": "30000000-0000-0000-0000-000000000003",
+            "sha256": "acce385a55807ec7e1d1e6c93a6562334f2325a6eb55de94265fb672f84f1bd7"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": 2,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "first"
+        },
+        {
+          "at": 1,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "last"
+        },
+        {
+          "at": 1,
+          "id": "30000000-0000-0000-0000-000000000002",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "tie"
+        }
+      ],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "Read-only lookup"
+      },
+      "name": "last observed duplicate replaces a newer timestamp before sort",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 3,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "sha256": "acce385a55807ec7e1d1e6c93a6562334f2325a6eb55de94265fb672f84f1bd7"
+        },
+        "events": [
+          {
+            "at": 1,
+            "id": "30000000-0000-0000-0000-000000000001",
+            "sha256": "162a1a0bc164e99489f9de84248a4603e61dbac24c1306021ed1e88d6a2cee10"
+          },
+          {
+            "at": 1,
+            "id": "30000000-0000-0000-0000-000000000002",
+            "sha256": "1109647fb52832f8ab98118d43b3e6775dabfc93aae642a7916a1b7dfd3e276c"
+          },
+          {
+            "at": 3,
+            "id": "30000000-0000-0000-0000-000000000003",
+            "sha256": "acce385a55807ec7e1d1e6c93a6562334f2325a6eb55de94265fb672f84f1bd7"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000002",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 2"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 3"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000004",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 4"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000005",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 5"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000006",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 6"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000007",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 7"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000008",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 8"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000009",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 9"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000010",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 10"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000011",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 11"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000012",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 12"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000013",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 13"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000014",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 14"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000015",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 15"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000016",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 16"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000017",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 17"
+        },
+        {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000018",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "line 18"
+        }
+      ],
+      "message": {
+        "at": 5,
+        "id": "30000000-0000-0000-0000-000000000001",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "exact triggering request"
+      },
+      "name": "end is separate when twelve same-time message IDs sort later",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 5,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "sha256": "a84b0923015a17049648345e26a2b877052cd661a122c1ed44095dc6e8e93e65"
+        },
+        "events": [
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000007",
+            "sha256": "c99bd2d9238f0996df68f38e14a055d1efc32c9755b651cde8c789da40796bdb"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000008",
+            "sha256": "85775d7c090d2499a09ac4aa0c1f9633d14d744334d68c74f96726de1ab7fdef"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000009",
+            "sha256": "a84123f892d71432b31bae66e0c542e8496820a448254d4c8b8e12ab4f00de53"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000010",
+            "sha256": "b76790ad2a22b96a19c3b6e990ea07e6b9a84608e3c357f2d6aae5bc7ba13703"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000011",
+            "sha256": "f2733342db4337a923904d21e111719437f36f57574fa0168c5938ca8f2f3b6d"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000012",
+            "sha256": "80134167c284debaaac4059746286aa23cbdba683a0dee6afe1c5994f97db25c"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000013",
+            "sha256": "1c6ef4ec54c20a48292d79c74c75d5c171a0402b94620c0effd9e94400165c8b"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000014",
+            "sha256": "60fa2fc1c8435a49aafff042b458837d5b1dc2c71e3f7ae0ee64ae1e4051613d"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000015",
+            "sha256": "e7cb8d1a2180222c56b9cdc254975ae13d9698b3f3b9e4dde51ef734a08bc4cf"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000016",
+            "sha256": "16b7d266e127dd1714f863a94f413bdfc51172716861178c04d2b6c855392e55"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000017",
+            "sha256": "7fcee5afe5cad7a310c34335a4990d27cc1a4ac2bde46295e0f63ac6a9e0ce35"
+          },
+          {
+            "at": 5,
+            "id": "30000000-0000-0000-0000-000000000018",
+            "sha256": "0456a663891addfe97784d064791e040abd245f6738594f70d90e1c7522b96da"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": 9007199254740993,
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "integer above current"
+        },
+        {
+          "at": 9007199254740992.0,
+          "id": "30000000-0000-0000-0000-000000000002",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "equal float"
+        }
+      ],
+      "message": {
+        "at": 9007199254740992,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "end"
+      },
+      "name": "integer and float timestamp ordering is exact across the f64 boundary",
+      "room": "20000000-0000-0000-0000-000000000002",
+      "snapshot": {
+        "coverage": "bounded-visible-messages; gaps are not claimed covered",
+        "end": {
+          "at": 9007199254740992,
+          "id": "30000000-0000-0000-0000-000000000003",
+          "sha256": "0a5039a5cabae57b360ae1cb45f73360213e24e32a8ae304b53cb89a3500e187"
+        },
+        "events": [
+          {
+            "at": 9007199254740992.0,
+            "id": "30000000-0000-0000-0000-000000000002",
+            "sha256": "afdcb55970b17aea0a848017921156b9039a99bc52302dc4aa223cffc0726081"
+          },
+          {
+            "at": 9007199254740992,
+            "id": "30000000-0000-0000-0000-000000000003",
+            "sha256": "0a5039a5cabae57b360ae1cb45f73360213e24e32a8ae304b53cb89a3500e187"
+          }
+        ],
+        "room": "20000000-0000-0000-0000-000000000002"
+      }
+    },
+    {
+      "history": [
+        {
+          "at": "historic",
+          "id": "30000000-0000-0000-0000-000000000001",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "invalid visible timestamp"
+        }
+      ],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "current"
+      },
+      "name": "invalid visible timestamp",
+      "refused": "TypeError",
+      "room": "20000000-0000-0000-0000-000000000002"
+    },
+    {
+      "history": [
+        {
+          "at": 1,
+          "id": "short",
+          "roomId": "20000000-0000-0000-0000-000000000002",
+          "text": "invalid source"
+        }
+      ],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": "current"
+      },
+      "name": "invalid visible UUID",
+      "refused": "ValueError",
+      "room": "20000000-0000-0000-0000-000000000002"
+    },
+    {
+      "history": [],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000008",
+        "text": "foreign"
+      },
+      "name": "invalid current membership",
+      "refused": "ValueError",
+      "room": "20000000-0000-0000-0000-000000000002"
+    },
+    {
+      "history": [],
+      "message": {
+        "at": 3,
+        "id": "30000000-0000-0000-0000-000000000003",
+        "roomId": "20000000-0000-0000-0000-000000000002",
+        "text": null
+      },
+      "name": "missing current text",
+      "refused": "ValueError",
+      "room": "20000000-0000-0000-0000-000000000002"
+    }
+  ]
+}

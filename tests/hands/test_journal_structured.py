@@ -16,10 +16,26 @@ HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
 import agent_journal as journal
 journal_schema = journal
-from agent_journal import digest, encoded, uuid
+from agent_journal import encoded, uuid
 from agent_loop import ChatNotFound
 from reverie.instance import load_instance
 from reverie.memory import MemoryStore
+
+
+def digest(value):
+    return hashlib.sha256(encoded(value).encode()).hexdigest()
+
+
+def revision(message, room):
+    """Legacy fingerprint for exercising the native capture against old SQLite data."""
+    uuid(message.get('id'))
+    at = message.get('at')
+    if (message.get('roomId') != room or type(at) not in (int, float) or
+            not math.isfinite(at) or at < 0 or not isinstance(message.get('text'), str)):
+        raise ValueError('invalid journal source')
+    return {'id': message['id'], 'at': at,
+            'sha256': digest({'id': message['id'], 'at': at, 'roomId': room,
+                              'text': message['text'], 'from': message.get('from')})}
 
 
 # Recall ranks a pool of text matches the way generative-agent memories do (Park et al. 2023): relevance + recency +
@@ -190,7 +206,7 @@ class ReadModel:
                     if self.source_reads >= MAX_SOURCE_READS:
                         self.omitted=True;return False
                     self.source_reads += 1
-                    try:self.sources[mid]=journal_schema.revision(self.chat.exact_message(self.room,mid),self.room)
+                    try:self.sources[mid]=revision(self.chat.exact_message(self.room,mid),self.room)
                     except Exception:self.sources[mid]=None
                 if self.sources[mid] != expected[mid]:return False
             return True
@@ -329,7 +345,7 @@ def source_refusal(chat, room, draft, captured, events):
         except ChatNotFound:  # the server says it is gone; a failed or timed-out read still raises
             return {'status': 'refused', 'reason': 'source_unavailable'}
         expected = captured['end'] if source_id == captured['end']['id'] else events[source_id]
-        if journal_schema.revision(actual, room) != expected:
+        if revision(actual, room) != expected:
             return {'status': 'refused', 'reason': 'source_changed'}
         if any(s['quote'] not in actual['text'] for s in draft['sources'] if s['id'] == source_id):
             return {'status': 'refused', 'reason': 'quote_not_in_source'}
@@ -380,10 +396,10 @@ def perform(job, chat):
             end = job['captured_end']
             journal_schema.uuid(end['id'])
             actual_end = chat.exact_message(room, end['id'])
-            if journal_schema.revision(actual_end, room) != end:
+            if revision(actual_end, room) != end:
                 raise ValueError('request source changed')
             actual = chat.exact_message(room, source_id)
-            event = journal_schema.revision(actual, room)
+            event = revision(actual, room)
             if event['at'] > end['at']:
                 raise ValueError('source is newer than this turn')
             text = actual['text'].encode()[:journal_schema.TEXT_BYTES].decode('utf-8', errors='ignore')
@@ -454,7 +470,7 @@ class StructuredTests(unittest.TestCase):
   draft=dict(text=text,tags=['correction']if supersedes else['relationship'],sources=[dict(id=mid,quote='kite')])
   meta={k:v for k,v in dict(topics=topics,importance=importance,provenance=provenance,supersedes=supersedes,related=related).items() if v is not None}
   if meta:draft['annotations']=meta
-  previous=self.op('journal_status')['checkpoint'];receipt=self.op('journal_commit',draft=draft,captured=journal.snapshot(ROOM,[],msg),previous_id=previous['id']if previous else None)
+  previous=self.op('journal_status')['checkpoint'];receipt=self.op('journal_commit',draft=draft,captured=journal.capture_turn(ROOM, [], msg)['captured'],previous_id=previous['id']if previous else None)
   return receipt['entry_id'],mid
  def view(self,**p):return self.op('journal_view',**p)
  def test_legacy_record_hash_and_index_bytes_unchanged(self):
@@ -464,7 +480,7 @@ class StructuredTests(unittest.TestCase):
   try:
    row=db.db.execute('SELECT payload,payload_hash FROM hands_journal').fetchone();p=json.loads(row['payload'])
    self.assertEqual(set(p['draft']),{'text','tags','sources'})
-   self.assertEqual(row['payload_hash'],journal.digest(p))
+   self.assertEqual(row['payload_hash'],digest(p))
    self.assertEqual(Journal.index_text(draft),'A legacy account. relationship kite')
   finally:db.close()
   item=self.view()['entries'][0];self.assertIsNone(item['importance']);self.assertEqual(item['provenance'],'unknown');self.assertNotIn('confidence',item)

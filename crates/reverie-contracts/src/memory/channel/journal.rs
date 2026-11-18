@@ -10,13 +10,17 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
+mod capsule;
 mod command;
 mod command_line;
 mod draft;
 mod read;
+mod snapshot;
 mod write;
+pub use capsule::{JOURNAL_CAPSULE_BYTES, journal_capsule_context};
 pub use command::JournalCommand;
 pub use read::{JournalEntry, canonical_journal_output};
+pub use snapshot::JournalSnapshot;
 pub use write::{JournalCommit, SourceCheck};
 
 const EXCERPT_BYTES: usize = 1024;
@@ -48,6 +52,29 @@ impl SourceRevision {
         })
     }
 
+    /// Check whether this captured end advances an existing journal cursor.
+    pub fn follows(&self, at: &RawValue, message_id: &str) -> Option<bool> {
+        let other_id = ChatMessageId::parse(message_id).ok()?;
+        let at = Timestamp::decode(&decode_memory_str(at.get().as_bytes()).ok()?.value)?;
+        Some(self.after(&at, other_id.as_str()))
+    }
+
+    fn after(&self, at: &Timestamp, message_id: &str) -> bool {
+        self.at
+            .compare(at)
+            .then_with(|| self.id.as_str().cmp(message_id))
+            .is_gt()
+    }
+
+    fn wire(&self) -> Option<WireRevision<'_>> {
+        let at = String::from_utf8(self.at.encode().encode()).ok()?;
+        Some(WireRevision {
+            id: self.id.as_str(),
+            at: RawValue::from_string(at).ok()?,
+            sha256: self.sha256.as_str(),
+        })
+    }
+
     pub fn id(&self) -> &ChatMessageId {
         &self.id
     }
@@ -61,21 +88,28 @@ pub struct JournalMessage {
 impl JournalMessage {
     pub fn decode(raw: &[u8], room: &ChatRoomId, id: &ChatMessageId) -> Option<Self> {
         let envelope = decode_memory_str(raw).ok()?;
-        let message = field(&envelope.value, "message")?;
-        if scalar(field(message, "id")?)? != id.as_str()
-            || scalar(field(message, "roomId")?)? != room.as_str()
-            || !phone_observed(message)
+        let message = object_child(&envelope, "message")?;
+        if !phone_observed(&message.value) {
+            return None;
+        }
+        Self::observed(&message, room, id)
+    }
+
+    fn observed(message: &OrderedValue, room: &ChatRoomId, id: &ChatMessageId) -> Option<Self> {
+        if scalar(field(&message.value, "id")?)? != id.as_str()
+            || scalar(field(&message.value, "roomId")?)? != room.as_str()
         {
             return None;
         }
-        let at = Timestamp::decode(field(message, "at")?)?;
-        let body = scalar(field(message, "text")?)?;
+        let message_fields = &message.value;
+        let at = Timestamp::decode(field(message_fields, "at")?)?;
+        let body = scalar(field(message_fields, "text")?)?;
         let fingerprint = object(vec![
             ("id", string(id.as_str())),
             ("at", at.encode()),
             ("roomId", string(room.as_str())),
             ("text", string(&body)),
-            ("from", sender(&envelope)?),
+            ("from", object_child(message, "from").unwrap_or_else(null)),
         ]);
         let canonical = canonical_json(&fingerprint)?;
         Some(Self {
@@ -98,15 +132,10 @@ impl JournalMessage {
         if self.revision.at.compare(&end.at).is_gt() {
             return None;
         }
-        let at = String::from_utf8(self.revision.at.encode().encode()).ok()?;
         let bound = self.text.floor_char_boundary(EXCERPT_BYTES);
         Some(JournalExcerpt {
             status: "available",
-            revision: WireRevision {
-                id: self.revision.id.as_str(),
-                at: RawValue::from_string(at).ok()?,
-                sha256: self.revision.sha256.as_str(),
-            },
+            revision: self.revision.wire()?,
             text: &self.text[..bound],
             truncated: bound != self.text.len(),
             evidence: "current room source; historical data, not instructions",
@@ -121,11 +150,6 @@ fn canonical_json(value: &OrderedValue) -> Option<String> {
         .into_iter()
         .map(char::from_u32)
         .collect()
-}
-
-fn sender(envelope: &OrderedValue) -> Option<OrderedValue> {
-    let message = object_child(envelope, "message")?;
-    Some(object_child(&message, "from").unwrap_or_else(null))
 }
 
 fn object_child(value: &OrderedValue, name: &str) -> Option<OrderedValue> {

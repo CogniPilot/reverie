@@ -84,7 +84,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual([(e['entry_id'], e['supersedes']) for e in found], [(fix['entry_id'], [old])])
         capsule = self.op('journal_status', query='Lantern Keeper')['recall']
         self.assertEqual(capsule['entries'][0]['supersedes'], [old])
-        self.assertIn('"supersedes":[%d]' % old, journal.capsule_context(capsule, ROOM).replace(' ', ''))
+        self.assertIn('"supersedes":[%d]' % old, journal.present_turn(ROOM, capsule)['recall'].replace(' ', ''))
 
     def test_related_links_keep_both_current_and_reach_recall_capsule_and_map(self):
         question = self.saved(1, ' --tag open-question')
@@ -99,7 +99,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual((view[question]['currentness'], view[answer['entry_id']]['currentness']), ('current', 'current'))
         self.assertEqual(view[answer['entry_id']]['related'], [question])
         capsule = self.op('journal_status', query='tin tithe')['recall']
-        self.assertTrue(journal.capsule_context(capsule, ROOM))
+        self.assertTrue(journal.present_turn(ROOM, capsule)['recall'])
         self.assertEqual(capsule['entries'][0]['related'], [question])
         mapped = self.run_cli(self.turn(7, 'map'), 'map')
         self.assertIn({'id': answer['entry_id'], 'related': [question]},

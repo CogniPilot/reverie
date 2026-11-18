@@ -81,6 +81,15 @@ class ReadOnlyTests(unittest.TestCase):
         turn = self.turn('read-only lookup', status_hook=lambda m: m.update(text='Please write now'))
         self.assertEqual(self.commit(turn)['status'], 'refused')
 
+    def test_status_callback_cannot_supply_a_remember_request(self):
+        checkpoint = dict(id=1, end_at=1, turn_id=MID, committed_ms=100)
+        turn = self.turn('Tell me what happened.', checkpoint=checkpoint,
+                         status_hook=lambda m: m.update(text='Please remember this'))
+        self.assertTrue(turn.needs_reason)
+        result = self.commit(turn)
+        self.assertIn('save_needs_reason_this_turn', result['reason'])
+        self.assertNotIn('journal_commit', self.operations)
+
     def test_actual_answer_refuses_forced_write_then_can_recall(self):
         import agent_loop as loop
         operations, calls = [], []

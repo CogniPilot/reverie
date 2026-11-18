@@ -1287,6 +1287,7 @@ dependencies = [
  "reverie-contracts",
  "reverie-core",
  "reverie-host",
+ "reverie-python-regex",
  "reverie-store",
  "rusqlite",
  "serde",

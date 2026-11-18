@@ -61,7 +61,7 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn(OLD, [e['id'] for e in turn.captured['events']])
         source = self.lookup(turn)
         self.assertEqual(source['text'], self.old['text'])
-        self.assertEqual(source['revision'], journal.revision(self.old, ROOM))
+        self.assertEqual(source['revision'], worker.revision(self.old, ROOM))
         self.assertEqual(self.commit(turn)['status'], 'committed')
         recalled = self.perform('journal_recall', query='freeform')
         self.assertEqual(len(recalled['entries']), 1)
@@ -123,7 +123,7 @@ class SourceTests(unittest.TestCase):
         self.assertTrue(result['truncated'])
         self.assertLessEqual(len(result['text'].encode()), journal.TEXT_BYTES)
         self.assertLessEqual(len(journal.encoded(result)), journal.RESULT_CHARS)
-        self.assertEqual(result['revision'], journal.revision(self.old, ROOM))
+        self.assertEqual(result['revision'], worker.revision(self.old, ROOM))
         self.assertIsNone(self.perform('journal_status')['checkpoint'])
 
     def test_model_cannot_select_room_or_path_and_turn_budget_stays_bounded(self):

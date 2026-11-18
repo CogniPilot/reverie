@@ -7,6 +7,8 @@ mod journal;
 mod office;
 mod recall;
 mod save;
+mod turn_capture;
+mod turn_context;
 
 use clap::Parser;
 use nix::{
@@ -24,6 +26,8 @@ use std::{
 
 const REQUEST_BOUND: usize = 32_768;
 const AUTOMATIC_BOUND: usize = 50_000;
+// The Office can return up to 1,000 rows of 8,000 UTF-16 units each.
+const TURN_CAPTURE_BOUND: usize = 32 * 1024 * 1024;
 const RESPONSE_BOUND: usize = 131_072;
 const MAX_CHARS: usize = 12_000;
 
@@ -118,6 +122,16 @@ fn journal_command_worker(expected_parent: i32) -> io::Result<()> {
     write_reply(&JournalCommand::decode(&arguments), AUTOMATIC_BOUND)
 }
 
+fn journal_capture_worker(expected_parent: i32) -> io::Result<()> {
+    let request = worker_input(expected_parent, TURN_CAPTURE_BOUND)?;
+    write_reply(&turn_capture::execute(&request)?, AUTOMATIC_BOUND)
+}
+
+fn journal_context_worker(expected_parent: i32) -> io::Result<()> {
+    let request = worker_input(expected_parent, AUTOMATIC_BOUND)?;
+    write_reply(&turn_context::execute(&request)?, AUTOMATIC_BOUND)
+}
+
 fn journal_save_worker(expected_parent: i32) -> io::Result<()> {
     let arguments = worker_input(expected_parent, AUTOMATIC_BOUND)?;
     write_reply(&save::execute(&arguments)?, AUTOMATIC_BOUND)
@@ -143,6 +157,8 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--automatic-worker" => automatic_worker,
         "--journal-command-worker" => journal_command_worker,
         "--journal-save-worker" => journal_save_worker,
+        "--journal-capture-worker" => journal_capture_worker,
+        "--journal-context-worker" => journal_context_worker,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

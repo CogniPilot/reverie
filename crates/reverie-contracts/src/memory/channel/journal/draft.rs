@@ -2,7 +2,7 @@ use super::EXCERPT_BYTES;
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeSet;
 
-const TAGS: &[&str] = &[
+pub(super) const TAGS: &[&str] = &[
     "decision",
     "promise",
     "correction",
@@ -67,7 +67,7 @@ enum Importance {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Provenance {
+pub(super) enum Provenance {
     Direct,
     Relayed,
     Reconstructed,
@@ -158,7 +158,7 @@ impl Annotations {
     }
 }
 
-fn selected(values: &[String], allowed: &[&str]) -> bool {
+pub(super) fn selected(values: &[String], allowed: &[&str]) -> bool {
     distinct(values.iter().map(String::as_str), 6)
         && values.iter().all(|value| allowed.contains(&value.as_str()))
 }
@@ -167,12 +167,12 @@ fn prior_ids(values: &[i64]) -> bool {
     distinct(values.iter().copied(), 4) && values.iter().all(|value| *value > 0)
 }
 
-fn distinct<I: ExactSizeIterator<Item: Ord>>(items: I, max: usize) -> bool {
+pub(super) fn distinct<I: ExactSizeIterator<Item: Ord>>(items: I, max: usize) -> bool {
     let count = items.len();
     (1..=max).contains(&count) && items.collect::<BTreeSet<_>>().len() == count
 }
 
-fn bounded_text(value: &str, max: usize) -> bool {
+pub(super) fn bounded_text(value: &str, max: usize) -> bool {
     value.len() <= max
         && !value
             .trim_matches(|ch: char| ch.is_whitespace() || ('\u{1c}'..='\u{1f}').contains(&ch))

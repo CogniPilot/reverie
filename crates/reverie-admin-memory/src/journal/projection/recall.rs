@@ -1,13 +1,13 @@
 use super::model::{Model, Record};
 use super::{expression, stripped, wire_size};
 use crate::office::Office;
+use reverie_contracts::memory::channel::journal::JOURNAL_CAPSULE_BYTES;
 use reverie_core::ids::ChatRoomId;
 use reverie_store::memory::{JournalReader, MemoryError, Result};
 use serde_json::{Value, json};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DAY_MS: f64 = 86_400_000.0;
-const CAPSULE_BYTES: usize = 1_536;
 const DETAIL_CHARS: usize = 2_200;
 
 pub(super) fn recall(
@@ -91,7 +91,7 @@ fn fits(room: &ChatRoomId, entries: &[Value], compact: bool) -> bool {
     };
     wire_size(&value).is_some_and(|(bytes, chars)| {
         if compact {
-            bytes <= CAPSULE_BYTES
+            bytes <= JOURNAL_CAPSULE_BYTES
         } else {
             chars <= DETAIL_CHARS
         }
