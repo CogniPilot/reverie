@@ -29,7 +29,7 @@ class FilesystemVisionTests(unittest.TestCase):
             message = {'id': 'message', 'roomId': room, 'attachments': [
                 {'path': str(image), 'type': 'image/png', 'name': 'image.png'}]}
             cfg = cfg_for(directory, vision=True, attachments_root=str(root))
-            with patch.object(loop.urllib.request, 'urlopen', side_effect=AssertionError('no attachment API')):
+            with patch.object(loop, 'fetch_scoped_image', side_effect=AssertionError('no attachment API')):
                 parts, notes = loop.load_images(cfg, room[:8], message)
             self.assertEqual(notes, [])
             self.assertEqual(base64.b64decode(parts[0]['image_url']['url'].split(',', 1)[1]), image.read_bytes())
