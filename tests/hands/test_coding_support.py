@@ -1,11 +1,9 @@
 import copy
-import http.server
-import itertools
 import json
 import os
-import queue
+from pathlib import Path
 import select
-import threading
+import subprocess
 import time
 from unittest.mock import patch
 
@@ -36,60 +34,41 @@ def cfg_for(root, **settings):
 
 class ModelEndpoint:
     def __init__(self, test, *, hold_first=False):
-        self.requests = queue.Queue()
-        self.release = threading.Event()
-        self.disconnected = threading.Event()
-        sequence = itertools.count()
-        fixture = self
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-
-            def do_POST(self):
-                request = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-                first = next(sequence) == 0
-                fixture.requests.put((self.path, request))
-                if hold_first and first:
-                    until = time.monotonic() + 5
-                    while time.monotonic() < until and not fixture.release.is_set():
-                        readable, _, _ = select.select([self.connection], [], [], .01)
-                        if not readable:
-                            continue
-                        try:
-                            closed = not self.connection.recv(1)
-                        except ConnectionResetError:
-                            closed = True
-                        if closed:
-                            fixture.disconnected.set()
-                            return
-                if request.get('stream'):
-                    event = {'choices': [{'index': 0, 'delta': {'content': 'Done.'}, 'finish_reason': 'stop'}]}
-                    body = ('data: ' + json.dumps(event) + '\n\ndata: [DONE]\n\n').encode()
-                else:
-                    body = json.dumps({'choices': [{'message': {'content': 'Done.'}}]}).encode()
-                try:
-                    self.send_response(200)
-                    self.send_header('Content-Length', str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                except (BrokenPipeError, ConnectionResetError):
-                    pass
-
-        self.server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
-        self.thread.start()
-        self.url = f'http://127.0.0.1:{self.server.server_port}/v1'
+        fixture = Path(__file__).parent / 'fixtures' / 'model_endpoint.mts'
+        self.process = subprocess.Popen(
+            ['node', '--experimental-strip-types', str(fixture), *(['--hold-first'] if hold_first else [])],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
         test.addCleanup(self.close)
+        self.url = self.read_event('ready')['url']
+
+    def read_event(self, kind, timeout=3):
+        pipe = self.process.stdout
+        if not select.select([pipe], [], [], timeout)[0]:
+            raise AssertionError(f'model fixture did not emit {kind}')
+        event = json.loads(pipe.readline())
+        if event['kind'] != kind:
+            raise AssertionError(f'model fixture emitted {event["kind"]} while waiting for {kind}')
+        return event
 
     def receive(self):
-        return self.requests.get(timeout=3)
+        event = self.read_event('request')
+        return event['path'], event['payload']
+
+    def wait_disconnected(self):
+        self.read_event('disconnected', 2)
+
+    def has_event(self):
+        return bool(select.select([self.process.stdout], [], [], 0)[0])
 
     def close(self):
-        self.release.set()
-        self.server.shutdown()
-        self.server.server_close()
-        self.thread.join(2)
+        self.process.stdin.close()
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        finally:
+            self.process.stdout.close()
 
 
 def wait_model_reply(arbiter):

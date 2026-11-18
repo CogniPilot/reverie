@@ -154,6 +154,7 @@ class ManagedContextTests(unittest.TestCase):
         arbiter.submit(payload, 20)
         self.assertEqual(endpoint.receive()[1]['messages'][-1]['content'], 'first')
         arbiter.pause_for_chat()
+        endpoint.wait_disconnected()
         arbiter.resume()
         self.assertEqual(endpoint.receive()[1]['messages'][-1]['content'], 'second')
         self.assertEqual(payload['messages'], self.messages)
@@ -174,7 +175,7 @@ class ManagedContextTests(unittest.TestCase):
         self.assertEqual(arbiter.poll(), {'ok': False, 'error': 'model_context_unavailable'})
         arbiter.cancel()
         self.assertEqual(arbiter.requests_started, 0)
-        self.assertTrue(endpoint.requests.empty())
+        self.assertFalse(endpoint.has_event())
 
     def test_context_preparation_cannot_extend_parent_deadline(self):
         def prepare(payload):
@@ -190,4 +191,4 @@ class ManagedContextTests(unittest.TestCase):
         self.assertEqual(prepared, [True])
         arbiter.cancel()
         self.assertEqual(arbiter.requests_started, 0)
-        self.assertTrue(endpoint.requests.empty())
+        self.assertFalse(endpoint.has_event())
