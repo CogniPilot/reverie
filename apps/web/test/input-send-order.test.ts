@@ -10,6 +10,27 @@ const body = (options?: RequestInit) =>
   JSON.parse(String(options?.body)) as { input: string; seq: number; clientId: string };
 
 describe('committed ordering and original transport ownership', () => {
+  it('holds fresh input before the socket write when the sign-in changed after acceptance', async () => {
+    fixture = browserInputFixture();
+    const app = await fixture.page();
+    const send = vi.fn();
+    app._ws = { readyState: 1, send };
+    app._wsSessionId = 'session-1';
+    const accept = app._inputJournal.accept.bind(app._inputJournal);
+    vi.spyOn(app._inputJournal, 'accept').mockImplementation(async (...args) => {
+      const accepted = await accept(...args);
+      fixture.changeIdentity();
+      return accepted;
+    });
+
+    expect(await app._sendInputAsync('session-1', 'original')).toBe(true);
+    await expect.poll(() => app._inputRecoveryHolds?.has('session-1')).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+    expect((await app._inputJournal.snapshot()).records).toMatchObject([
+      { data: 'original', phase: 'unconfirmed' },
+    ]);
+  });
+
   it('advances after a confirmed ACK received before the original dispatch task finishes', async () => {
     fixture = browserInputFixture();
     const app = await fixture.page();
@@ -30,9 +51,6 @@ describe('committed ordering and original transport ownership', () => {
       await Promise.all(['a', 'b'].map((text) => app._sendInputAsync('session-1', text)));
       await expect.poll(() => frames.length).toBe(1);
       await app._onWsInputAck(1, { t: 'ia', seq: 1, confirmed: true }, 'session-1');
-      // Drive the real settlement timer while the original dispatch is still
-      // pending, then release it. A recurring sweep must not be needed.
-      await new Promise((resolve) => setTimeout(resolve, 150));
       expect(app._inputDrainTasks.has('session-1')).toBe(true);
       expect(frames.map((row) => row.d)).toEqual(['a']);
       release();
@@ -46,7 +64,7 @@ describe('committed ordering and original transport ownership', () => {
     }
   });
   it.each(['websocket', 'http'])(
-    'reschedules an early final-ACK cooldown wake without a sweep (%s)',
+    'advances after final confirmation without waiting for the wall clock or a sweep (%s)',
     async (transport) => {
       fixture = browserInputFixture();
       const sent: string[] = [];
@@ -54,7 +72,7 @@ describe('committed ordering and original transport ownership', () => {
         sent.push(body(options).input);
         return response();
       });
-      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      vi.useFakeTimers({ toFake: ['Date'] });
       try {
         if (transport === 'websocket') {
           app._ws = { readyState: 1, send: (value) => sent.push(JSON.parse(value).d) };
@@ -64,17 +82,7 @@ describe('committed ordering and original transport ownership', () => {
         await app._inputDrainTasks.get('session-1');
         if (transport === 'websocket') await app._onWsInputAck(1, { t: 'ia', seq: 1, confirmed: true }, 'session-1');
         await app._inputOutcomes.get('session-1');
-        expect(sent).toEqual(['draft']);
-        const deadline = app._inputRetryAt.get('session-1')!;
-        // Timer clocks can reach their deadline while the wall clock is still1ms
-        // short. An early callback must keep a wake, without sending early.
-        vi.setSystemTime(deadline - 81);
-        await vi.advanceTimersByTimeAsync(80);
-        await app._inputDrainTasks.get('session-1');
-        expect(sent).toEqual(['draft']);
-        await vi.advanceTimersByTimeAsync(1);
-        await app._inputDrainTasks.get('session-1');
-        expect(sent).toEqual(['draft', '\x1b[A']);
+        await expect.poll(() => sent).toEqual(['draft', '\x1b[A']);
         if (transport === 'websocket') await app._onWsInputAck(2, { t: 'ia', seq: 2, confirmed: true }, 'session-1');
         await app._inputOutcomes.get('session-1');
         const stored = await app._inputJournal.snapshot();

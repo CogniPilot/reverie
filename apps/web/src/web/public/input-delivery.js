@@ -609,7 +609,10 @@
           return;
         }
         try {
-          await this._verifyInputIdentity();
+          // This page verified its identity before accepting fresh input.
+          // Recovered or retried records still need a check before claiming.
+          if (record.issuer !== this._inputJournal.issuer || record.phase !== 'prepared')
+            await this._verifyInputIdentity();
           if (this._sessionInputHeld(sid) || this._inputGlobalHold || this._inputStorageUnavailable) return;
           const claimed = await this._inputJournal.claim(record);
           if (!claimed) return;
@@ -713,23 +716,18 @@
       if (phase === 'confirmed') this.markIdleAlertSeen?.(sid);
       if (phase === 'typed-unsent')
         this.showToast?.('Text was typed but Enter was withheld. Check the terminal before submitting.', 'warning');
-      this._inputRetryAt.set(sid, Date.now() + (['pending', 'not-issued'].includes(phase) ? 1000 : 80));
+      if (phase === 'pending' || phase === 'not-issued') this._inputRetryAt.set(sid, Date.now() + 1000);
+      else this._inputRetryAt.delete(sid);
       await this._refreshInputJournal();
       if (final(phase)) {
-        const drainAfterCooldown = () => {
-          // An ACK can precede dispatch completion. Timer and wall clocks can
-          // also disagree at the cooldown boundary; neither may lose the wake.
-          const original = this._inputDrainTasks.get(sid) || Promise.resolve();
-          void original
-            .then(() => {
-              if (!this._pendingDeliveries.get(sid)?.length) return;
-              const remaining = (this._inputRetryAt.get(sid) || 0) - Date.now();
-              if (remaining > 0) setTimeout(drainAfterCooldown, Math.min(remaining, 1000));
-              else return this._drainSession(sid);
-            })
-            .catch(() => this._holdInputRecovery(sid));
-        };
-        setTimeout(drainAfterCooldown, 80);
+        // An ACK can arrive before the original drain finishes, including
+        // from inside that drain's HTTP response handler.
+        const original = this._inputDrainTasks.get(sid) || Promise.resolve();
+        void original
+          .then(() => {
+            if (this._pendingDeliveries.get(sid)?.length) return this._drainSession(sid);
+          })
+          .catch(() => this._holdInputRecovery(sid));
       }
     },
 
