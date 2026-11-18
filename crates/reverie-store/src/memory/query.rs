@@ -1,4 +1,6 @@
 use super::*;
+use reverie_contracts::memory::channel::{ChannelEvidence, ChannelRecords};
+use reverie_core::ids::ChatRoomId;
 use reverie_core::memory::{self, DREAM, EPISODE, EmbeddingKind, REFLECTION};
 use rusqlite::{params, params_from_iter};
 pub struct RetrievalOptions<'a> {
@@ -304,5 +306,56 @@ impl MemoryStore {
             )?;
         }
         Ok(scored)
+    }
+}
+
+pub(super) struct ChannelRecall {
+    pub(super) evidence: ChannelEvidence,
+    accessed: Vec<i64>,
+    at: f64,
+}
+
+pub(super) fn recall_channel(
+    db: &Connection,
+    room: &ChatRoomId,
+    text: &str,
+    max_chars: usize,
+    embedder: &dyn Embedder,
+    decay: f64,
+) -> Result<ChannelRecall> {
+    let options = RetrievalOptions {
+        min_relevance: 0.15,
+        ..RetrievalOptions::default()
+    };
+    let query = prepare_query(EmbeddingText::from_scalar_text(text), &options, embedder)?;
+    let snapshot = db.unchecked_transaction()?;
+    let rows = all_memories(&snapshot, None)?;
+    let records = ChannelRecords::new(&rows, room);
+    let candidates =
+        candidates_where(&snapshot, &query.model, &options, |id| records.includes(id))?;
+    snapshot.commit()?;
+    let ranked = score(candidates, &query, &options, decay)?;
+    Ok(ChannelRecall {
+        evidence: records.render(&ranked, max_chars),
+        accessed: ranked.into_iter().map(|memory| memory.id).collect(),
+        at: query.now,
+    })
+}
+
+impl MemoryStore {
+    /// Automatic Hands recall retains the existing access timestamps.
+    pub fn recall_channel(
+        &self,
+        room: &ChatRoomId,
+        text: &str,
+        max_chars: usize,
+    ) -> Result<ChannelEvidence> {
+        self.session(|tx| {
+            let recalled = recall_channel(tx.db, room, text, max_chars, tx.embedder, tx.decay)?;
+            if !recalled.accessed.is_empty() {
+                tx.touch(&recalled.accessed, Some(recalled.at))?;
+            }
+            Ok(recalled.evidence)
+        })
     }
 }

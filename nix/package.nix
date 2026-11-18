@@ -641,7 +641,10 @@ let
   hands = pkgs.writeShellApplication {
     name = "reverie-hands";
     runtimeInputs = [ memory ];
-    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
+    text = ''
+      export REVERIE_HANDS_MEMORY_COMMAND=${adminMemory}/bin/reverie-admin-memory
+      exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"
+    '';
   };
   adminMemory = import ./admin-memory.nix { inherit pkgs src; };
   handsTools = import ./hands-tools.nix { inherit pkgs src; };

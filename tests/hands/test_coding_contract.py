@@ -3,10 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import patch
 
-import agent_memory
 from coding_chat import read_tool_specs
 from coding_tasks import TOOL_NAMES
 
@@ -56,23 +53,6 @@ class ToolExportTests(unittest.TestCase):
         changed['tools'][0]['function']['description'] = 'x' * 17000
         with self.assertRaises(ValueError):
             self.load(changed)
-
-
-class MemoryContractTests(unittest.TestCase):
-    def test_recalled_exchange_uses_assistant_text_without_a_legacy_attribute(self):
-        room = '00000000-0000-4000-8000-000000000001'
-        source = '00000000-0000-4000-8000-000000000002'
-        row = SimpleNamespace(id='episode-one', assistant_text='confirmed answer',
-            user_text=json.dumps({'schema': 1, 'room': room, 'source': source,
-                                  'at': 1, 'kind': 'exchange'}) + '\nquestion')
-        store = SimpleNamespace(all=lambda: [row], retrieve=lambda *args, **kwargs: [row], close=lambda: None)
-        with tempfile.TemporaryDirectory() as root:
-            with patch.object(agent_memory, 'load_instance', return_value=SimpleNamespace(data_dir=Path(root))):
-                memory = agent_memory.RoomMemory(Path(root) / 'instance.json', lambda value: 'shared')
-            with patch.object(memory, '_open', return_value=store):
-                text, sources = memory.recall(room, 'question')
-        self.assertIn('confirmed answer', text)
-        self.assertEqual(sources, [source])
 
 
 if __name__ == '__main__':

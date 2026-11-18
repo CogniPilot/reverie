@@ -1,4 +1,4 @@
-use super::refused;
+use crate::{office::Office, refused};
 use nix::{
     libc,
     unistd::{User, getuid},
@@ -19,13 +19,8 @@ const CONFIG_BYTES: u64 = 65_536;
 pub(crate) struct Configuration {
     self_session_id: String,
     pub(crate) memory_instance: PathBuf,
-    pub(crate) cli: Vec<String>,
-    #[serde(default = "office_timeout")]
-    pub(crate) memory_timeout_s: f64,
-}
-
-fn office_timeout() -> f64 {
-    3.0
+    #[serde(flatten)]
+    pub(crate) office: Office,
 }
 
 impl Configuration {
@@ -37,14 +32,10 @@ impl Configuration {
         let session = ProfileSessionId::parse(&session).map_err(|_| refused())?;
         let path = path(&session)?;
         let value: Self = serde_json::from_slice(&read_private(&path)?)?;
-        if value.self_session_id != session.as_str()
-            || !value.memory_instance.is_absolute()
-            || value.cli.first().is_none_or(String::is_empty)
-            || !value.memory_timeout_s.is_finite()
-            || value.memory_timeout_s <= 0.0
-        {
+        if value.self_session_id != session.as_str() || !value.memory_instance.is_absolute() {
             return Err(refused());
         }
+        value.office.validate()?;
         Ok(value)
     }
 }

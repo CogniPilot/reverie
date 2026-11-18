@@ -1,7 +1,7 @@
 //! Existing-memory observations. Opening never creates/migrates tables, selects
 //! another model, imports history, seeds beliefs, or touches access timestamps.
 use super::*;
-use reverie_contracts::memory::channel::{ChannelEvidence, ChannelRecords};
+use reverie_contracts::memory::channel::ChannelEvidence;
 use reverie_core::ids::ChatRoomId;
 use reverie_core::shutdown::ShutdownStatus;
 use rusqlite::OptionalExtension;
@@ -110,25 +110,16 @@ impl MemoryReader {
         text: &str,
         max_chars: usize,
     ) -> Result<ChannelEvidence> {
-        let options = RetrievalOptions {
-            min_relevance: 0.15,
-            ..RetrievalOptions::default()
-        };
-        let query = query::prepare_query(
-            EmbeddingText::from_scalar_text(text),
-            &options,
-            self.embedder.as_ref(),
-        )?;
         self.session(|db| {
-            let snapshot = db.unchecked_transaction()?;
-            let rows = query::all_memories(&snapshot, None)?;
-            let records = ChannelRecords::new(&rows, room);
-            let candidates = query::candidates_where(&snapshot, &query.model, &options, |id| {
-                records.includes(id)
-            })?;
-            snapshot.commit()?;
-            let ranked = query::score(candidates, &query, &options, self.decay_per_hour)?;
-            Ok(records.render(&ranked, max_chars))
+            query::recall_channel(
+                db,
+                room,
+                text,
+                max_chars,
+                self.embedder.as_ref(),
+                self.decay_per_hour,
+            )
+            .map(|recalled| recalled.evidence)
         })
     }
     pub fn get_state(&self, key: &str) -> Result<Option<String>> {

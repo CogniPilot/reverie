@@ -1,6 +1,9 @@
 //! Explicit recall of Hands channel evidence through the current Office session.
+mod automatic;
 mod capture;
 mod configuration;
+mod database;
+mod office;
 mod recall;
 
 use clap::Parser;
@@ -17,8 +20,9 @@ use std::{
 };
 
 const REQUEST_BOUND: usize = 32_768;
+const AUTOMATIC_BOUND: usize = 50_000;
 const RESPONSE_BOUND: usize = 131_072;
-const MAX_CHARS: i64 = 12_000;
+const MAX_CHARS: usize = 12_000;
 
 #[derive(Parser, Deserialize, Serialize)]
 #[command(about = "Recall existing evidence from one current ordinary Office channel.")]
@@ -36,7 +40,7 @@ impl Request {
     fn validate(&self) -> io::Result<()> {
         if self.query.trim().is_empty()
             || self.query.chars().count() > 4000
-            || !(1..=MAX_CHARS).contains(&self.max_chars)
+            || !(1..=MAX_CHARS as i64).contains(&self.max_chars)
         {
             return Err(refused());
         }
@@ -76,7 +80,7 @@ fn parent(request: &Request) -> io::Result<()> {
     io::stdout().lock().write_all(&output)
 }
 
-fn worker(expected_parent: i32) -> io::Result<()> {
+fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
     if getpgrp() != getpid() || getppid().as_raw() != expected_parent || expected_parent <= 0 {
         return Err(refused());
     }
@@ -86,16 +90,29 @@ fn worker(expected_parent: i32) -> io::Result<()> {
     }
     let mut bytes = Vec::new();
     io::stdin()
-        .take((REQUEST_BOUND + 1) as u64)
+        .take((bound + 1) as u64)
         .read_to_end(&mut bytes)?;
-    if bytes.len() > REQUEST_BOUND {
+    if bytes.len() > bound {
         return Err(refused());
     }
-    let request: Request = serde_json::from_slice(&bytes)?;
+    Ok(bytes)
+}
+
+fn worker(expected_parent: i32) -> io::Result<()> {
+    let request: Request = serde_json::from_slice(&worker_input(expected_parent, REQUEST_BOUND)?)?;
     request.validate()?;
     let result = recall::execute(&request)?;
-    let output = serde_json::to_vec(&result)?;
-    if output.len() >= RESPONSE_BOUND {
+    write_reply(&result, RESPONSE_BOUND)
+}
+
+fn automatic_worker(expected_parent: i32) -> io::Result<()> {
+    let reply = automatic::execute(&worker_input(expected_parent, AUTOMATIC_BOUND)?)?;
+    write_reply(&reply, AUTOMATIC_BOUND)
+}
+
+fn write_reply(result: &impl Serialize, bound: usize) -> io::Result<()> {
+    let output = serde_json::to_vec(result)?;
+    if output.len() >= bound {
         return Err(refused());
     }
     let stdout = io::stdout();
@@ -104,15 +121,22 @@ fn worker(expected_parent: i32) -> io::Result<()> {
     stdout.write_all(b"\n")
 }
 
+type Worker = fn(i32) -> io::Result<()>;
+
+fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
+    let (option, pid) = value.to_str()?.split_once('=')?;
+    let worker = match option {
+        "--recall-worker" => worker,
+        "--automatic-worker" => automatic_worker,
+        _ => return None,
+    };
+    Some((worker, pid.parse().ok()?))
+}
+
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
-    if let Some(pid) = args
-        .next()
-        .as_deref()
-        .and_then(|value| value.to_str())
-        .and_then(|value| value.strip_prefix("--recall-worker="))
-    {
-        return if args.next().is_none() && pid.parse().ok().is_some_and(|pid| worker(pid).is_ok()) {
+    if let Some((worker, pid)) = args.next().as_deref().and_then(worker_argument) {
+        return if args.next().is_none() && worker(pid).is_ok() {
             ExitCode::SUCCESS
         } else {
             ExitCode::FAILURE

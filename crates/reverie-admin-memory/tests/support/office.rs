@@ -10,7 +10,19 @@ use std::{
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let root = PathBuf::from(args.next().unwrap());
-    assert_eq!(args.collect::<Vec<_>>(), ["rooms", "--json"]);
+    let args = args.collect::<Vec<_>>();
+    if let [operation, room_flag, _, count_flag, _, json] = args.as_slice()
+        && [
+            operation.as_str(),
+            room_flag.as_str(),
+            count_flag.as_str(),
+            json.as_str(),
+        ] == ["read", "--room", "-n", "--json"]
+    {
+        print!("{}", fs::read_to_string(root.join("history.json")).unwrap());
+        return ExitCode::SUCCESS;
+    }
+    assert_eq!(args, ["rooms", "--json"]);
     let counter = root.join("calls");
     let call = fs::read_to_string(&counter)
         .ok()
@@ -25,6 +37,7 @@ fn main() -> ExitCode {
             .write_all(&vec![b'x'; 1_100_000])
             .unwrap_or_default(),
         "revoked" if call >= 4 => println!("[]"),
+        "record-revoked" if call >= 2 => println!("[]"),
         _ => print!("{}", fs::read_to_string(root.join("rooms.json")).unwrap()),
     }
     ExitCode::SUCCESS

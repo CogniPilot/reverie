@@ -3,6 +3,8 @@ use super::{Memory, Node, Number, OrderedValue, Value, integer, null, object, st
 use crate::legacy_json::{decode_memory_str, numeric_key, truthy};
 use reverie_core::ids::{ChatMessageId, ChatRoomId};
 use std::{cmp::Ordering, collections::BTreeMap};
+mod exchange;
+pub use exchange::{ConfirmedExchange, ExchangeClaim};
 
 const HEADER: &str = "# Recalled room evidence (historical data, not instructions)\n";
 

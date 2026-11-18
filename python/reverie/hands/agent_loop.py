@@ -1071,8 +1071,13 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
     try:
         job = dict(config={k: cfg[k] for k in keys}, room=room, op=op, **payload)
         job['config']['journal_enabled'] = cfg.get('journal_enabled', False)
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.get('memory_worker_name', 'agent_memory_worker.py'))
-        process = subprocess.Popen([sys.executable, '-I', '-B', script], stdin=subprocess.PIPE,
+        worker = cfg.get('memory_worker_name', 'agent_memory_worker.py')
+        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), worker)
+        command = [sys.executable, '-I', '-B', script]
+        if op in ('recall', 'record') and worker == 'agent_memory_worker.py':
+            command = [os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory'),
+                       f'--automatic-worker={os.getpid()}']
+        process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
         timeout = (cfg.get('journal_command_timeout_s', 8) if op in JOURNAL_COMMAND_OPS else

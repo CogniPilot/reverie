@@ -3,9 +3,13 @@ use reverie_store::memory::MemoryStore;
 use serde_json::{Value, json};
 use std::{
     env, fs,
-    os::unix::fs::{DirBuilderExt, PermissionsExt, symlink},
+    io::Write,
+    os::unix::{
+        fs::{DirBuilderExt, PermissionsExt, symlink},
+        process::CommandExt,
+    },
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     time::{Duration, Instant},
 };
 
@@ -76,6 +80,41 @@ impl Fixture {
     }
     fn store(&self) -> MemoryStore {
         MemoryStore::open(self.database()).unwrap()
+    }
+    fn automatic(&self, op: &str, fields: Value) -> Output {
+        let mut config: Value =
+            serde_json::from_slice(&fs::read(self.settings()).unwrap()).unwrap();
+        config["recall_cap_chars"] = json!(3000);
+        config["history_n"] = json!(30);
+        config["message_cap_chars"] = json!(19);
+        let mut job = json!({"config": config, "op": op, "room": ROOM});
+        job.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        let mut command = Command::new(env!("CARGO_BIN_EXE_reverie-admin-memory"));
+        let mut child = command
+            .env_clear()
+            .arg(format!("--automatic-worker={}", std::process::id()))
+            .process_group(0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(job.to_string().as_bytes())
+            .unwrap();
+        child.wait_with_output().unwrap()
+    }
+    fn history(&self, source: Value, reply: Value) {
+        fs::write(
+            self.0.join("history.json"),
+            json!({"messages": [source, reply]}).to_string(),
+        )
+        .unwrap();
     }
     fn call(&self, room: &str, query: &str, bound: &str) -> Output {
         Command::new(env!("CARGO_BIN_EXE_reverie-admin-memory"))
@@ -229,4 +268,103 @@ fn nested_membership_deadline_and_output_overflow_fail_closed() {
     }
     refused(&fixture.call(ROOM, "", "3000"));
     refused(&fixture.call(ROOM, "compiler", "12001"));
+}
+
+fn readback() -> (Value, Value, Value) {
+    let source = json!({
+        "id": SOURCE, "roomId": ROOM, "at": 12, "text": "compiler baseline 😀 and follow-up",
+        "phoneWake": true,
+    });
+    let reply = json!({
+        "id": REPLY, "roomId": ROOM, "text": "confirmed answer", "phoneWake": false,
+        "from": {"sessionId": SESSION},
+    });
+    let job = json!({"event": {
+        "source": SOURCE, "at": 12.0, "text": "compiler baseline 😀",
+        "reply": "confirmed answer", "reply_id": REPLY,
+    }});
+    (source, reply, job)
+}
+
+#[test]
+fn automatic_reuses_manual_evidence_and_preserves_confirmed_exchange_identity() {
+    let fixture = Fixture::new();
+    let (source, reply, job) = readback();
+    fixture.history(source, reply);
+    let original = accepted(&fixture.automatic("record", job.clone()));
+    assert_eq!(accepted(&fixture.automatic("record", job)), original);
+    let store = fixture.store();
+    let id = original["id"].as_i64().unwrap();
+    let row = store.get(id).unwrap();
+    assert_eq!(store.count(None).unwrap(), 1);
+    assert!(row.last_accessed.is_none());
+    assert_eq!(
+        row.user_text,
+        format!(
+            "{{\"at\": 12.0, \"kind\": \"exchange\", \"reply_id\": \"{REPLY}\", \"room\": \"{ROOM}\", \"schema\": 1, \"source\": \"{SOURCE}\"}}\ncompiler baseline 😀"
+        )
+    );
+    add(
+        &store,
+        &json!({"schema":1,"room":ROOM,"source":OLD,"at":10,"kind":"exchange"}),
+        "compiler baseline legacy question",
+    );
+    store.close().unwrap();
+
+    let manual = accepted(&fixture.call(ROOM, "compiler baseline", "3000"));
+    let automatic = accepted(&fixture.automatic("recall", json!({"query": "compiler baseline"})));
+    assert_eq!(automatic["text"], manual["text"]);
+    assert_eq!(automatic["sources"], manual["sourceMessageIds"]);
+    assert!(
+        automatic["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"confirmed_reply_id\": null")
+    );
+    let store = fixture.store();
+    assert!(store.get(id).unwrap().last_accessed.is_some());
+    store.close().unwrap();
+    assert_eq!(
+        fs::metadata(fixture.database())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
+    );
+}
+
+#[test]
+fn automatic_refuses_unverified_history_and_removal_before_writing() {
+    let fixture = Fixture::new();
+    let (source, reply, job) = readback();
+    for (key, value) in [
+        ("phoneWake", json!(null)),
+        ("at", json!(13)),
+        ("roomId", json!(OTHER)),
+    ] {
+        let mut changed = source.clone();
+        changed[key] = value;
+        fixture.history(changed, reply.clone());
+        automatic_refused(&fixture.automatic("record", job.clone()));
+        assert!(!fixture.database().exists());
+    }
+    let mut wrong_author = reply.clone();
+    wrong_author["from"]["sessionId"] = json!(OTHER);
+    fixture.history(source.clone(), wrong_author);
+    automatic_refused(&fixture.automatic("record", job.clone()));
+    assert!(!fixture.database().exists());
+
+    fixture.history(source, reply);
+    fs::write(fixture.0.join("mode"), "record-revoked").unwrap();
+    automatic_refused(&fixture.automatic("record", job));
+    let store = fixture.store();
+    assert_eq!(store.count(None).unwrap(), 0);
+    store.close().unwrap();
+}
+
+fn automatic_refused(output: &Output) {
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
 }
