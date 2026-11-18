@@ -15,7 +15,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 import agent_loop as loop
-import launcher
 from debug_terminal import DebugTerminal
 from model_events import TraceWriter
 from test_coding_support import FakeChat, cfg_for
@@ -137,18 +136,6 @@ class TerminalTests(unittest.TestCase):
         loop.tick(self.cfg, chat, state)
         chat.add('room', {'kind': 'user', 'name': 'Owner'}, 'Please answer.')
         self.assertEqual(loop.tick(self.cfg, chat, state, model=lambda *a: 'Still answered.'), 1)
-
-    def test_launcher_forwards_terminal_options(self):
-        previous = os.umask(0o077)
-        try:
-            with patch.object(sys, 'argv', ['reverie-harness', '--no-tui', '--once']), \
-                    patch.object(launcher, 'prepare', return_value=Path('/fixture/agent.json')), \
-                    patch.object(loop, 'main', return_value=0) as run:
-                self.assertEqual(launcher.main(), 0)
-                run.assert_called_once_with(['hands', '/fixture/agent.json', '--no-tui', '--once'])
-        finally:
-            os.umask(previous)
-
 
 @unittest.skipUnless(os.name == 'posix', 'real PTY test needs POSIX')
 class TerminalPTYTests(unittest.TestCase):

@@ -10,7 +10,6 @@ from unittest.mock import patch
 import agent_loop as loop
 import coding_chat
 from reverie.hands.coding_tasks import control_request, permitted_sender
-from reverie.hands.launcher import runtime_settings
 from config_location import configuration_path
 from test_coding_support import FakeChat, cfg_for
 
@@ -186,15 +185,6 @@ class HarnessConfigurationTests(unittest.TestCase):
         self.assertFalse(permitted_sender(settings, 'room', 'example', message))
         settings['tasks']['example']['delegate_sessions'] = ['external']
         self.assertTrue(permitted_sender(settings, 'room', 'example', message))
-
-    def test_private_prompt_budget_is_bounded(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'settings.json'
-            path.write_text('{"prompt_cap_chars":120000}'); path.chmod(0o600)
-            self.assertEqual(runtime_settings(path)['prompt_cap_chars'], 120000)
-            path.write_text('{"prompt_cap_chars":120001}')
-            with self.assertRaises(ValueError): runtime_settings(path)
-
 
 if __name__ == '__main__':
     unittest.main()

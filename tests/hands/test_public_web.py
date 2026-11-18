@@ -1,15 +1,12 @@
 import json
-from pathlib import Path
 import socket
 import ssl
-import tempfile
 import time
 import unittest
 from unittest.mock import Mock, patch
 
 import agent_loop as loop
 import public_web as web
-from reverie.hands.launcher import runtime_settings
 from test_coding_support import cfg_for
 
 
@@ -98,18 +95,6 @@ class PublicWebTests(unittest.TestCase):
         args, kwargs = run.call_args
         self.assertEqual(args[0][-1], 'example.com'); self.assertEqual(args[0][1:4], ['-I', '-B', '-c'])
         self.assertEqual(set(kwargs['env']), {'PATH', 'LANG'}); self.assertEqual(kwargs['timeout'], web.TIMEOUT)
-
-    def test_managed_settings_persist_explicit_endpoint_and_default_off(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'runtime-settings.json'
-            settings = {'search': True, 'search_url': 'http://127.0.0.1:8080', 'web_fetch': True, 'search_max_calls': 2}
-            path.write_text(json.dumps(settings)); path.chmod(0o600)
-            self.assertEqual(runtime_settings(path), settings)
-            for invalid in [{'search': True}, {'web_fetch': 1}, {'search_url': 'https://user:secret@example.com'},
-                            {'search_max_calls': 100}, {'search_timeout_s': 0}, {'search_max_bytes': 99999999}]:
-                path.write_text(json.dumps(invalid))
-                with self.assertRaises(ValueError): runtime_settings(path)
-        self.assertFalse(loop.DEFAULTS['search']); self.assertFalse(loop.DEFAULTS['web_fetch'])
 
     def test_web_fetch_is_offered_without_workspace_authority_and_stops_at_budget(self):
         cfg = cfg_for('/unused', web_fetch=True, search=False, search_max_calls=1, cli=[])

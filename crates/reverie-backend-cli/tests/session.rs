@@ -1,4 +1,6 @@
 use serde_json::{Value, json};
+#[path = "support/hands.rs"]
+mod hands;
 use std::{
     fs,
     io::{BufRead, BufReader, Write},
@@ -48,30 +50,47 @@ impl Fixture {
         response: Value,
         configure: impl FnOnce(&mut Command),
     ) -> (Output, String) {
+        let (output, mut requests) =
+            self.run_sequence(vec![(status.to_owned(), response)], configure);
+        (output, requests.pop().unwrap())
+    }
+
+    fn run_sequence(
+        &self,
+        replies: Vec<(String, Value)>,
+        configure: impl FnOnce(&mut Command),
+    ) -> (Output, Vec<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/office///", listener.local_addr().unwrap());
-        let body = response.to_string();
-        let head = format!(
-            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nLocation: http://127.0.0.1:1/\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
+        let count = replies.len();
         let (send, receive) = mpsc::channel();
         thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            send.send(serve(stream, &head, &body)).unwrap();
+            for (status, response) in replies {
+                let body = response.to_string();
+                let head = format!(
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nLocation: http://127.0.0.1:1/\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let (stream, _) = listener.accept().unwrap();
+                send.send(serve(stream, &head, &body)).unwrap();
+            }
         });
         let mut cmd = self.command(&url);
         configure(&mut cmd);
         let output = cmd.output().unwrap();
-        let request = receive
-            .recv_timeout(Duration::from_secs(5))
-            .unwrap_or_else(|error| {
-                panic!(
-                    "API exchange did not finish: {error}: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                )
-            });
-        (output, request)
+        let requests = (0..count)
+            .map(|_| {
+                receive
+                    .recv_timeout(Duration::from_secs(5))
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "API exchange did not finish: {error}: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        )
+                    })
+            })
+            .collect();
+        (output, requests)
     }
 }
 

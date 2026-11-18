@@ -1,5 +1,6 @@
 //! Hand off to the harness and model already selected by the Office session.
 mod claude_launch;
+mod hands_launch;
 mod office;
 
 use clap::{Parser, ValueEnum};
@@ -145,9 +146,13 @@ fn launch(argv: &[String], marker: Option<&Path>) -> Result<()> {
 
 fn main() -> ExitCode {
     let mut raw = env::args_os().skip(1);
-    if raw.next().as_deref() == Some(std::ffi::OsStr::new("--claude-launch")) {
-        let plan = raw.next().filter(|_| raw.next().is_none());
-        return claude_launch::entry(plan.as_deref());
+    match raw.next().as_deref().and_then(std::ffi::OsStr::to_str) {
+        Some("--claude-launch") => {
+            let plan = raw.next().filter(|_| raw.next().is_none());
+            return claude_launch::entry(plan.as_deref());
+        }
+        Some("--hands-launch") => return hands_launch::entry(raw.collect()),
+        _ => {}
     }
     match run(Args::parse()) {
         Ok(()) => ExitCode::SUCCESS,

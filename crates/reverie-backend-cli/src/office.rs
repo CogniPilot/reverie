@@ -1,4 +1,4 @@
-//! Read the fixed session-list endpoint using the packaged HTTP/TLS client.
+//! Read the fixed Office launch endpoints using the packaged HTTP/TLS client.
 use crate::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use http::{HeaderValue, Uri};
@@ -47,20 +47,20 @@ fn origin_matches(original: &Uri, next: &Uri) -> bool {
             .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
-fn headers(id: &str) -> Result<String> {
+fn headers(id: &str, default_user: &str) -> Result<String> {
     HeaderValue::from_str(id).map_err(|_| "invalid Reverie session identity")?;
     let mut headers = format!("Content-Type: application/json\nX-Reverie-Parent-Session: {id}\n");
     if let Ok(password) = env::var("REVERIE_PASSWORD")
         && !password.is_empty()
     {
-        let username = env::var("REVERIE_USERNAME").unwrap_or_else(|_| "admin".into());
+        let username = env::var("REVERIE_USERNAME").unwrap_or_else(|_| default_user.into());
         let authorization = STANDARD.encode(format!("{username}:{password}"));
         headers.push_str(&format!("Authorization: Basic {authorization}\n"));
     }
     Ok(headers)
 }
 
-fn curl(url: &str) -> Result<Child> {
+fn curl(url: &str, timeout: &str) -> Result<Child> {
     Command::new(CURL)
         .args([
             "-q",
@@ -69,7 +69,7 @@ fn curl(url: &str) -> Result<Child> {
             "--proto",
             "=http,https",
             "--max-time",
-            "45",
+            timeout,
             "--header",
             "@-",
             "--write-out",
@@ -108,12 +108,36 @@ fn exchange(child: &mut Child, headers: &str) -> Result<Vec<u8>> {
 }
 
 enum Response {
-    Sessions(Value),
+    Data(Value),
     Redirect(String),
 }
 
-fn request(url: &str, headers: &str) -> Result<Response> {
-    let mut child = curl(url)?;
+pub(super) enum FetchError {
+    Protocol(&'static str),
+    Transport,
+    Http(u16),
+}
+
+impl From<&'static str> for FetchError {
+    fn from(error: &'static str) -> Self {
+        Self::Protocol(error)
+    }
+}
+
+impl FetchError {
+    pub(super) fn message(&self) -> &'static str {
+        match self {
+            Self::Protocol(message) => message,
+            Self::Transport => "Reverie API request failed",
+            Self::Http(_) => "Reverie API rejected the session lookup",
+        }
+    }
+}
+
+type FetchResult<T> = std::result::Result<T, FetchError>;
+
+fn request(url: &str, headers: &str, timeout: &str) -> FetchResult<Response> {
+    let mut child = curl(url, timeout)?;
     let response = exchange(&mut child, headers);
     if response.is_err() {
         let _ = child.kill();
@@ -123,44 +147,56 @@ fn request(url: &str, headers: &str) -> Result<Response> {
         .map_err(|_| "Reverie API client did not finish")?;
     let response = response?;
     if !status.success() {
-        return Err("Reverie API request failed");
+        return Err(FetchError::Transport);
     }
     let response = std::str::from_utf8(&response).map_err(|_| "invalid Reverie API response")?;
     let mut fields = response.rsplitn(3, '\n');
     match (fields.next(), fields.next(), fields.next()) {
         (Some(_), Some(status), Some(body)) if status.starts_with('2') => {
             let value = serde_json::from_str(body).map_err(|_| "invalid Reverie API response")?;
-            Ok(Response::Sessions(value))
+            Ok(Response::Data(value))
         }
         (Some(location), Some("301" | "302" | "303" | "307" | "308"), Some(_))
             if !location.is_empty() =>
         {
             Ok(Response::Redirect(location.to_owned()))
         }
-        _ => Err("Reverie API rejected the session lookup"),
+        (Some(_), Some(status), Some(_)) => {
+            let code = status.parse().map_err(|_| "invalid Reverie API status")?;
+            Err(FetchError::Http(code))
+        }
+        _ => Err("invalid Reverie API response".into()),
     }
 }
 
-pub(super) fn sessions(base: &str, id: &str) -> Result<Value> {
+fn get(base: &str, id: &str, path: &str, user: &str, timeout: &str) -> FetchResult<Value> {
     let base = base.trim_end_matches('/');
     let origin = http_uri(base)?;
     if origin.query().is_some() {
-        return Err("configure a Reverie API base URL without a query");
+        return Err("configure a Reverie API base URL without a query".into());
     }
-    let mut url = format!("{base}{SESSIONS}");
-    let headers = headers(id)?;
+    let mut url = format!("{base}{path}");
+    let headers = headers(id, user)?;
     for _ in 0..=MAX_REDIRECTS {
-        match request(&url, &headers)? {
-            Response::Sessions(value) => return Ok(value),
+        match request(&url, &headers, timeout)? {
+            Response::Data(value) => return Ok(value),
             Response::Redirect(next) => {
                 if !origin_matches(&origin, &http_uri(&next)?) {
-                    return Err("Reverie API redirected to a different origin");
+                    return Err("Reverie API redirected to a different origin".into());
                 }
                 url = next;
             }
         }
     }
-    Err("Reverie API redirect limit reached")
+    Err("Reverie API redirect limit reached".into())
+}
+
+pub(super) fn sessions(base: &str, id: &str) -> Result<Value> {
+    get(base, id, SESSIONS, "admin", "45").map_err(|error| error.message())
+}
+
+pub(super) fn company(base: &str, id: &str, timeout: &str) -> FetchResult<Value> {
+    get(base, id, "/api/company", "owner", timeout)
 }
 
 pub(super) fn resolve_session<'a>(value: &'a Value, prefix: &str) -> Result<&'a Value> {

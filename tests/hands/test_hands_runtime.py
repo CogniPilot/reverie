@@ -1,15 +1,12 @@
 import io
 import json
 import os
-from pathlib import Path
 import tempfile
 import unittest
-import urllib.error
 from unittest.mock import Mock, patch
 
 import agent_loop as loop
 from coding_tokens import TokenMeter
-from reverie.hands import launcher
 from test_coding_support import cfg_for
 
 
@@ -63,57 +60,6 @@ class HandsRuntimeTests(unittest.TestCase):
             result, _, _ = loop.answer(cfg, 'room', [], message,
                 lambda *args: {'content': 'partial', '_finish_reason': 'length'}, None)
             self.assertEqual(result, loop.CHAT_LIMIT_LINE)
-
-    def test_startup_retries_transient_office_errors_and_preserves_state_and_settings(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory);sid = 'fixture-session'
-            base = root/'hands'/sid;base.mkdir(parents=True)
-            state=base/'state.json';state.write_text('{"saved_cursor":"keep"}')
-            settings=base/'runtime-settings.json';settings.write_text(json.dumps({'reply_max_tokens':16384,'model_timeout_s':900}));settings.chmod(0o600)
-            env={'REVERIE_SESSION_ID':sid,'REVERIE_HANDS_MODEL':'selected-model','REVERIE_HANDS_BASE_URL':'http://127.0.0.1:8092/v1','REVERIE_DATA_DIR':str(root)}
-            employee={'name':'Selected employee','personality':'Owner-selected personality'}
-            with patch.object(launcher,'company_profile',side_effect=[urllib.error.URLError('temporary'),employee]),patch.object(launcher.time,'sleep'):
-                path=launcher.prepare(env)
-            cfg=json.loads(path.read_text())
-            self.assertEqual(cfg['self_name'],employee['name'])
-            self.assertEqual(cfg['reply_max_tokens'],16384)
-            self.assertEqual(cfg['poll_s'], 15)
-            self.assertTrue(cfg['phone_wake'])
-            self.assertTrue(Path(cfg['memory_instance']).is_file())
-            self.assertIsNone(cfg['coding'])
-            self.assertEqual(cfg['attachments_root'], '/reverie_workspace/attachments')
-            self.assertEqual(cfg['image_tokens_per_image'], 2048)
-            self.assertNotIn('attachments_source', cfg)
-            self.assertEqual(Path(cfg['model_events_file']).parent, base)
-            self.assertEqual(state.read_text(),'{"saved_cursor":"keep"}')
-            with patch.object(launcher,'company_profile',return_value=employee):launcher.prepare(env)
-            self.assertEqual(json.loads(path.read_text())['reply_max_tokens'],16384)
-            denied=urllib.error.HTTPError('http://local',403,'Denied',None,None)
-            with patch.object(launcher,'company_profile',side_effect=denied) as profile:
-                with self.assertRaises(urllib.error.HTTPError):launcher.prepare(env)
-                self.assertEqual(profile.call_count,1)
-
-    def test_runtime_settings_cannot_replace_identity_or_accept_invalid_limits(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path=Path(directory)/'settings.json'
-            for value in ({'self_session_id':'other'},{'reply_max_tokens':True},{'model_timeout_s':901},
-                          {'phone_wake': 1}, {'poll_s': 0}, {'poll_s': float('inf')}, {'poll_s': True}):
-                path.write_text(json.dumps(value));path.chmod(0o600)
-                with self.assertRaises(ValueError):launcher.runtime_settings(path)
-            path.write_text('{}');path.chmod(0o644)
-            with self.assertRaises(ValueError):launcher.runtime_settings(path)
-
-    def test_owner_vision_settings_validate_without_overriding_generation_defaults(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / 'settings.json'
-            path.write_text('{"vision":true,"image_tokens_per_image":2048}'); path.chmod(0o600)
-            settings = launcher.runtime_settings(path)
-            self.assertTrue(settings['vision'])
-            self.assertNotIn('temperature', settings)
-            self.assertNotIn('reply_max_tokens', settings)
-            for value in ({'vision': 1}, {'image_tokens_per_image': True}, {'image_tokens_per_image': 0}):
-                path.write_text(json.dumps(value))
-                with self.assertRaises(ValueError): launcher.runtime_settings(path)
 
     def test_token_counting_uses_the_selected_endpoint_credential_without_redirects(self):
         meter=TokenMeter('http://127.0.0.1:8092',context_ceiling=32768,key_env='TEST_MODEL_KEY')

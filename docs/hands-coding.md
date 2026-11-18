@@ -1,5 +1,10 @@
 # Coding with the Reverie Admin Harness
 
+The packaged `reverie-hands` starts in Rust. It binds the exact Office
+employee to the selected model, prepares the private runtime configuration,
+and hands off to the existing Hands loop. Restarts preserve the saved
+memory configuration and state file.
+
 The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools
 read, list, search, edit and write workspace files, run commands and run a task's
 configured tests. The Rust dispatcher uses the existing version-one JSON request
