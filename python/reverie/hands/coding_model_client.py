@@ -3,6 +3,7 @@ import math
 import os
 import re
 import signal
+import subprocess
 import sys
 import urllib.error
 import urllib.parse
@@ -10,8 +11,41 @@ import urllib.request
 from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from coding_tokens import NoRedirect, TokenMeter
+from agent_journal import native_memory_command
 from model_events import TraceWriter
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, stream, code, message, headers, new_url):
+        return None
+
+
+def tokenizer_request(action, settings, **arguments):
+    request = json.dumps(dict(action=action, settings=settings, **arguments),
+                         ensure_ascii=False, allow_nan=False).encode()
+    reply = subprocess.run(native_memory_command('token-meter-worker'), input=request,
+                           capture_output=True, check=True, start_new_session=True)
+    result = json.loads(reply.stdout)
+    status = result['status']
+    if status == 'ok':
+        return result['stats']
+    if status == 'timeout':
+        raise TimeoutError('tokenizer timed out')
+    if status == 'http':
+        raise urllib.error.HTTPError('', result['code'], 'tokenizer request refused', {}, None)
+    raise ValueError('invalid tokenizer configuration or response')
+
+
+def validate_token_meter(settings):
+    tokenizer_request('validate', settings)
+
+
+class TokenMeter:
+    def __init__(self, **settings):
+        self.settings = settings
+
+    def measure(self, payload):
+        return tokenizer_request('measure', self.settings, payload=payload)
 
 
 class ModelDeadline(TimeoutError):

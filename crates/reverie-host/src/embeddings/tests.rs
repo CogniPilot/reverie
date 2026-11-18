@@ -116,6 +116,82 @@ fn embedder(url: String) -> LlamaEmbedder {
     embedder.proxies = ProxySettings::default();
     embedder
 }
+
+#[tokio::test]
+async fn token_meter_keeps_the_base_path_and_sends_the_selected_credential() {
+    use tokenizer::Route;
+    let server = Server::new(vec![response("200 OK", "", b"{}"); 3]);
+    let client = tokenizer::local_fixture(format!("{}/model", server.url), 128);
+    assert_eq!(
+        client
+            .request(Route::Properties, None, Some("fixture-key"))
+            .await
+            .unwrap(),
+        b"{}"
+    );
+    let data = br#"{"messages":[{"role":"user","content":"fixture"}],"max_tokens":16}"#;
+    client
+        .request(
+            Route::ApplyTemplate,
+            Some(data.to_vec()),
+            Some("fixture-key"),
+        )
+        .await
+        .unwrap();
+    let tokens =
+        br#"{"content":"fixture","add_special":true,"parse_special":true,"with_pieces":false}"#;
+    client
+        .request(Route::Tokenize, Some(tokens.to_vec()), Some("fixture-key"))
+        .await
+        .unwrap();
+    let calls = [
+        ("GET /model/props HTTP/1.1", b"".as_slice()),
+        ("POST /model/apply-template HTTP/1.1", data.as_slice()),
+        ("POST /model/tokenize HTTP/1.1", tokens.as_slice()),
+    ];
+    for (line, body) in calls {
+        let seen = server.next();
+        assert_eq!(seen.first, line);
+        assert_eq!(seen.header("Authorization"), Some("Bearer fixture-key"));
+        assert_eq!(seen.header("Content-Type"), Some("application/json"));
+        assert_eq!(seen.body, body);
+    }
+}
+
+#[tokio::test]
+async fn token_meter_refuses_redirects_and_caps_successful_bodies() {
+    use tokenizer::{Failure, Route};
+    let trap = TcpListener::bind("127.0.0.1:0").unwrap();
+    trap.set_nonblocking(true).unwrap();
+    let location = format!(
+        "Location: http://{}/unselected\r\n",
+        trap.local_addr().unwrap()
+    );
+    let server = Server::new(vec![
+        response("302 Found", &location, b""),
+        response("200 OK", "", b"1234"),
+        response("200 OK", "", b"12345"),
+    ]);
+    let client = tokenizer::local_fixture(server.url.clone(), 4);
+    assert_eq!(
+        client
+            .request(Route::Properties, None, Some("fixture-key"))
+            .await,
+        Err(Failure::Http(302))
+    );
+    assert_eq!(
+        trap.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(
+        client.request(Route::Properties, None, None).await.unwrap(),
+        b"1234"
+    );
+    assert_eq!(
+        client.request(Route::Properties, None, None).await,
+        Err(Failure::Invalid)
+    );
+}
 #[test]
 fn raw_dot_paths_json_body_prefixes_and_dimensions() {
     let server = Server::new(vec![

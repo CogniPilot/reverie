@@ -51,7 +51,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
 import admin_task
 from coding_manager import TaskManager
-from coding_model_client import ModelClient
+from coding_model_client import ModelClient, validate_token_meter
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
 import public_web
@@ -1325,8 +1325,7 @@ def load_config(path):
     coding_chat.validate_settings(cfg.get('coding'))
     admin_task.validate(cfg)
     if cfg.get('token_meter') is not None:
-        from coding_tokens import TokenMeter
-        TokenMeter(**cfg['token_meter'])
+        validate_token_meter(cfg['token_meter'])
     if (type(cfg['recall_cap_chars']) is not int or not 0 <= cfg['recall_cap_chars'] <= 12000 or
             any(type(cfg[k]) not in (int, float) or not 0.1 <= cfg[k] <= 10
                 for k in ('memory_timeout_s', 'journal_command_timeout_s', 'journal_status_timeout_s'))):

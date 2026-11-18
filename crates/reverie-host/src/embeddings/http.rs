@@ -164,11 +164,14 @@ async fn connect(
         None => socket(target, timeout).await,
     }
 }
-async fn body(response: Response) -> Result<Vec<u8>> {
+async fn body(response: Response, limit: Option<usize>) -> Result<Vec<u8>> {
     let mut body = response.into_body();
     let mut output = Vec::new();
     while let Some(frame) = body.frame().await {
         if let Ok(data) = frame.map_err(transport)?.into_data() {
+            if limit.is_some_and(|limit| data.len() > limit.saturating_sub(output.len())) {
+                return Err(transport(std::io::Error::other("tokenizer response limit")));
+            }
             output.try_reserve(data.len()).map_err(transport)?;
             output.extend_from_slice(&data);
         }
@@ -179,6 +182,14 @@ struct Reply {
     next: Option<String>,
     body: Vec<u8>,
 }
+#[derive(Clone, Copy)]
+enum ResponsePolicy<'a> {
+    Embedding,
+    Tokenizer {
+        authorization: Option<&'a http::HeaderValue>,
+        limit: usize,
+    },
+}
 struct Exchange<'a> {
     target: &'a Origin,
     proxy: Option<&'a Endpoint>,
@@ -186,6 +197,7 @@ struct Exchange<'a> {
     url: &'a str,
     timeout: Duration,
     proxies: &'a ProxySettings,
+    policy: ResponsePolicy<'a>,
 }
 async fn exchange(
     exchange: Exchange<'_>,
@@ -195,10 +207,9 @@ async fn exchange(
     let Exchange {
         target,
         proxy,
-        method,
-        url,
         timeout,
         proxies,
+        ..
     } = exchange;
     if proxy.is_some() && !target.network.secure && target.forward.is_none() {
         return Err(LlamaError::InvalidEndpoint);
@@ -213,20 +224,7 @@ async fn exchange(
         .await
         .map_err(transport)?;
     let driver = tokio::spawn(connection);
-    let result = send(
-        &mut sender,
-        Exchange {
-            target,
-            proxy,
-            method,
-            url,
-            timeout,
-            proxies,
-        },
-        bytes,
-        visited,
-    )
-    .await;
+    let result = send(&mut sender, exchange, bytes, visited).await;
     driver.abort();
     let _ = driver.await;
     result
@@ -243,6 +241,7 @@ async fn send(
         method,
         url,
         proxies,
+        policy,
         ..
     } = exchange;
     let uri = if proxy.is_some() && !target.network.secure {
@@ -260,10 +259,18 @@ async fn send(
         .header("User-Agent", "Python-urllib/3.13")
         .header("Accept-Encoding", "identity")
         .header("Connection", "close");
+    if *method == Method::POST || matches!(policy, ResponsePolicy::Tokenizer { .. }) {
+        request = request.header("Content-Type", "application/json");
+    }
     if *method == Method::POST {
-        request = request
-            .header("Content-Type", "application/json")
-            .header("Content-Length", bytes.len());
+        request = request.header("Content-Length", bytes.len());
+    }
+    if let ResponsePolicy::Tokenizer {
+        authorization: Some(authorization),
+        ..
+    } = policy
+    {
+        request = request.header("Authorization", authorization);
     }
     let nested = proxy
         .filter(|proxy| !target.network.secure && proxy.secure)
@@ -287,13 +294,19 @@ async fn send(
         true,
     )
     .await?;
-    let next = next_location(&response, method, url, visited)?;
-    // A complete body is read before following a redirect, just as urllib's
-    // redirect handler drains the previous response. There is no JSON body cap
-    // or total-transfer timer silently narrowing existing large/slow responses.
+    let (next, limit) = match policy {
+        // Embeddings drain the previous response before following a redirect.
+        ResponsePolicy::Embedding => (next_location(&response, method, url, visited)?, None),
+        ResponsePolicy::Tokenizer { limit, .. } if response.status().is_success() => {
+            (None, Some(limit))
+        }
+        ResponsePolicy::Tokenizer { .. } => {
+            return Err(LlamaError::HttpStatus(response.status().as_u16()));
+        }
+    };
     Ok(Reply {
         next,
-        body: body(response).await?,
+        body: body(response, limit).await?,
     })
 }
 fn next_location(
@@ -344,6 +357,7 @@ pub(super) async fn request(
                 url: &url,
                 timeout,
                 proxies,
+                policy: ResponsePolicy::Embedding,
             },
             bytes.clone(),
             &mut visited,
@@ -355,6 +369,42 @@ pub(super) async fn request(
         target = Origin::parse(&selected)?;
         method = Method::GET;
         bytes.clear();
+    }
+}
+
+pub(super) struct TokenizerExchange<'a> {
+    pub target: &'a Origin,
+    pub timeout: Duration,
+    pub limit: usize,
+    pub authorization: Option<&'a http::HeaderValue>,
+    pub proxies: &'a ProxySettings,
+}
+
+impl TokenizerExchange<'_> {
+    pub(super) async fn request(self, data: Option<Vec<u8>>) -> Result<Vec<u8>> {
+        let proxy = self.proxies.selected(&self.target.network)?;
+        let reply = exchange(
+            Exchange {
+                target: self.target,
+                proxy: proxy.as_ref(),
+                method: if data.is_some() {
+                    &Method::POST
+                } else {
+                    &Method::GET
+                },
+                url: &self.target.full_url,
+                timeout: self.timeout,
+                proxies: self.proxies,
+                policy: ResponsePolicy::Tokenizer {
+                    authorization: self.authorization,
+                    limit: self.limit,
+                },
+            },
+            data.unwrap_or_default(),
+            &mut BTreeMap::new(),
+        )
+        .await?;
+        Ok(reply.body)
     }
 }
 

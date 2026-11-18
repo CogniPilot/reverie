@@ -1,12 +1,9 @@
-import io
 import json
-import os
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
 import agent_loop as loop
-from coding_tokens import TokenMeter
 from test_coding_support import cfg_for
 
 
@@ -60,17 +57,3 @@ class HandsRuntimeTests(unittest.TestCase):
             result, _, _ = loop.answer(cfg, 'room', [], message,
                 lambda *args: {'content': 'partial', '_finish_reason': 'length'}, None)
             self.assertEqual(result, loop.CHAT_LIMIT_LINE)
-
-    def test_token_counting_uses_the_selected_endpoint_credential_without_redirects(self):
-        meter=TokenMeter('http://127.0.0.1:8092',context_ceiling=32768,key_env='TEST_MODEL_KEY')
-        seen=[]
-        class Opener:
-            def open(self,request,timeout):
-                seen.append(request)
-                return io.BytesIO(b'{"tokens":[]}')
-        meter.opener=Opener()
-        with patch.dict(os.environ,{'TEST_MODEL_KEY':'synthetic-token'},clear=True):meter.request('/tokenize',{'content':'hello'})
-        self.assertEqual(seen[0].headers['Authorization'],'Bearer synthetic-token')
-        self.assertNotIn('synthetic-token',seen[0].full_url)
-        with patch.dict(os.environ,{},clear=True):
-            with self.assertRaises(ValueError):meter.request('/props')

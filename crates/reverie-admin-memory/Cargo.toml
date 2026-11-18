@@ -23,6 +23,7 @@ reverie-python-regex.workspace = true
 reverie-store.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true

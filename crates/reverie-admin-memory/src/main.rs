@@ -12,6 +12,7 @@ mod read_turn;
 mod recall;
 mod save;
 mod scoped_image;
+mod token_meter;
 mod turn_capture;
 mod turn_context;
 mod turn_tool;
@@ -100,10 +101,14 @@ fn check_worker_parent(expected_parent: i32) -> io::Result<()> {
     Ok(())
 }
 
-fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
+fn bind_worker(expected_parent: i32) -> io::Result<()> {
     check_worker_parent(expected_parent)?;
     prctl::set_pdeathsig(Signal::SIGKILL)?;
-    check_worker_parent(expected_parent)?;
+    check_worker_parent(expected_parent)
+}
+
+fn worker_input(expected_parent: i32, bound: usize) -> io::Result<Vec<u8>> {
+    bind_worker(expected_parent)?;
     bounded_input(bound)
 }
 
@@ -186,6 +191,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--opencode-context-worker" => opencode_context_worker,
         "--embedding-worker" => embedding_worker::run,
         "--scoped-image-worker" => scoped_image::run,
+        "--token-meter-worker" => token_meter::run,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

@@ -8,6 +8,7 @@ mod redirect;
 #[cfg(test)]
 mod tests;
 mod timed_io;
+pub mod tokenizer;
 use policy::ProxySettings;
 use reverie_contracts::memory::{
     EmbeddingContractError, EmbeddingResponse, embedding_model_name, embedding_text,

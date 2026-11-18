@@ -1,9 +1,11 @@
 import json
 import os
+import shutil
 import sys
 import time
 
 from coding_process import BoundedProcess
+from agent_journal import native_memory_command
 
 
 class ModelArbiter:
@@ -60,6 +62,10 @@ class ModelArbiter:
         environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
         if self.key_env is not None and self.key_env in os.environ:
             environment[self.key_env] = os.environ[self.key_env]
+        if self.token_meter is not None:
+            helper = shutil.which(native_memory_command('token-meter-worker')[0])
+            if helper is not None:
+                environment['REVERIE_HANDS_MEMORY_COMMAND'] = os.path.abspath(helper)
         worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'coding_model_client.py')
         self.job = self.factory([sys.executable, '-I', '-B', worker, '--worker'],
                                 json.dumps(config, ensure_ascii=False).encode('utf-8'),

@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 import urllib.error
+from coding_arbiter import ModelArbiter
 from coding_model_client import ModelClient, ModelDeadline
 
 class ChatTokenizerTimeoutTests(unittest.TestCase):
@@ -59,7 +60,21 @@ class ChatTokenizerTimeoutTests(unittest.TestCase):
         base,events=self.fixture(tokens=63)
         result=self.client(base,optional=True)(self.payload(),2)
         self.assertTrue(result['_context_overflow']);self.assertFalse(result['_context_stats']['admitted'])
-        self.assertNotIn('/v1/chat/completions',events)
+        self.assertEqual(events, ['/props', '/apply-template', '/tokenize'])
+    def test_isolated_coding_worker_reaches_the_native_meter(self):
+        base, events = self.fixture()
+        arbiter = ModelArbiter(base + '/v1', timeout_s=3, token_meter={
+            'base_url': base, 'context_ceiling': 64, 'margin': 0, 'timeout_s': 1,
+        })
+        self.addCleanup(arbiter.cancel)
+        arbiter.submit(self.payload(), 3)
+        result = arbiter.poll()
+        while result is None:
+            time.sleep(.01)
+            result = arbiter.poll()
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result']['_context_stats']['prompt_tokens'], 1)
+        self.assertEqual(events, ['/props', '/apply-template', '/tokenize', '/v1/chat/completions'])
     def test_authentication_error_is_not_an_optional_timeout(self):
         base,events=self.fixture(status=401)
         with self.assertRaises(urllib.error.HTTPError):self.client(base,optional=True)(self.payload(),2)
