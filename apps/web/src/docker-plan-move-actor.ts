@@ -60,7 +60,7 @@ import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
 import { dockerProviderRuntimeRecipeDigest } from './docker-employee-source-correlation.js';
 import type { DockerEmployeeEngine } from './docker-employee-engine.js';
 import type { CompanyDockerContinuationStore } from './docker-employee-store.js';
-import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerEmployeeSessionProvider } from './docker-employee-session-provider.js';
@@ -88,6 +88,7 @@ export interface DockerPlanMoveComposition {
   readonly current: () => void;
   readonly revisions: DockerResourceRevisionStore;
   readonly renewPublishedView?: (row: DockerEmployeeContinuationRecord, session: Session, current: () => void) => Promise<void>;
+  readonly requireReconciledSourcePool?: (row: DockerEmployeeContinuationRecord, current: () => void) => Promise<void>;
   readonly retain: (actor: DockerPlanMoveActor) => void;
 }
 interface SourceSelection {
@@ -438,10 +439,18 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
     if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
       throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
-    const pool = await this.#d.engine.observePool(state.seed.source.record);
-    journal.current();
-    if (!pool || !same(pool, state.seed.source.record.pool))
-      throw new PlanMoveError('The original shared pool must be reconciled first', 409);
+    try {
+      const pool = await this.#d.engine.observePool(state.seed.source.record);
+      journal.current();
+      if (!pool || !same(pool, state.seed.source.record.pool))
+        throw new PlanMoveError('The original shared pool must be reconciled first', 409);
+    } catch (error) {
+      journal.current();
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_ANCHOR_REPLACED' ||
+          !this.#d.requireReconciledSourcePool) throw error;
+      await this.#d.requireReconciledSourcePool(state.seed.source.record, () => journal.current());
+      journal.current();
+    }
     const target = await this.#snapshot(record, journal);
     try {
       target.snapshot.selected(target.account);
