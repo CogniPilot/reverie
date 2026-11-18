@@ -88,7 +88,10 @@ automatic room replies rather than falling back to a local guess.
   Section names never grant identity or authorization.
 - `reverie.beliefs` reads the optional `REVERIE_AGENT_ALIASES` list for historical
   self references. Its neutral default is empty; personal names stay in the overlay.
-- `reverie.cycle_demo` requires `--model`. `reverie.opencode` accepts `--model` or
+- `reverie-cycle-demo` takes `--directory`, `--api-base`, and `--model`. It
+  creates a synthetic trial in an empty owned directory. The sample task uses
+  the packaged Node runtime for verification.
+- `reverie.opencode` accepts `--model` or
   `REVERIE_MODEL`, with neutral fallback `local_agent/MODEL_ID`; configure a real
   provider/model identifier before installing. Bridge actions need no model flag.
 - Runtime policies select `backends.local.model` and `keep_alive.model_id`.

@@ -15,7 +15,6 @@ dependencies = []
 train = ["torch", "transformers", "peft", "bitsandbytes", "trl", "datasets", "accelerate"]
 
 [project.scripts]
-reverie-cycle-demo = "reverie.cycle_demo:main"
 reverie-cycle = "reverie.cycle:main"
 reverie-runtime = "reverie.runtime:main"
 reverie-opencode = "reverie.opencode:main"

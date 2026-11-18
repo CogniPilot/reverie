@@ -794,6 +794,7 @@ let
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     ln -s ${backendNativeCli}/bin/reverie-backend "$out/bin/reverie-backend"
+    ln -s ${backendNativeCli}/bin/reverie-cycle-demo "$out/bin/reverie-cycle-demo"
     ln -s ${leaseCli}/bin/reverie-workspaces "$out/bin/reverie-workspaces"
     # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
     makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
