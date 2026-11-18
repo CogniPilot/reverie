@@ -25,6 +25,7 @@ mod read_turn;
 mod recall;
 mod save;
 mod scoped_image;
+mod screen_output;
 mod token_meter;
 mod turn_capture;
 mod turn_context;
@@ -212,6 +213,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-prompt-worker" => hands_prompt::run,
         "--hands-poll-worker" => hands_poll::run,
         "--cycle-plan-worker" => cycle_plan::run,
+        "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .beliefs import contradicts_protected, protected_root, render
-from .floors import passes
+from .reverie import passes
 from .llm import ChatClient, LLMError
 from .memory import Memory, MemoryStore
 from .persona import normalize_section, render_profile, write_profile

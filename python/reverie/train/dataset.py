@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from ..beliefs import contradicts_protected
-from ..floors import passes
+from ..reverie import screen_outputs
 from ..memory import DREAM, EPISODE, REFLECTION, Memory, MemoryStore
 from .config import TrainConfig
 
@@ -86,9 +86,8 @@ def keeps_identity(example: dict, revisable: bool = False) -> bool:
         content = m.get("content", "")
         if m.get("role") == "assistant" and not revisable and contradicts_protected(content):
             return False
-        if m.get("role") != "system" and not passes(content):
-            return False
-    return True
+    texts = (m.get("content", "") for m in example["messages"] if m.get("role") != "system")
+    return not any(screen_outputs(texts))
 
 
 def build_examples(store: MemoryStore, system: str, cfg: TrainConfig, now: float | None = None) -> tuple[list[dict], list[dict]]:

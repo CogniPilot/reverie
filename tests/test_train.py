@@ -8,7 +8,7 @@ from pathlib import Path
 from reverie.memory import MemoryStore, make_embedder
 from reverie.train.config import TrainConfig
 from reverie.train.convert import prune
-from reverie.train.dataset import build_dataset, build_examples, read_jsonl, replay_sample, weighted_sample
+from reverie.train.dataset import build_dataset, build_examples, keeps_identity, read_jsonl, replay_sample, weighted_sample
 from reverie.train.swap import CheckResult, list_adapters, persona_check, swap
 from reverie.train.train_qlora import plan
 from tests.helpers import output_policy_terms, synthetic_output_policy
@@ -54,6 +54,18 @@ class DatasetTest(unittest.TestCase):
         self.assertEqual(len(older), 9)
         self.assertEqual(recent[0]["messages"][0]["content"], "SYS")
         self.assertEqual([x for x in recent if x["kind"] == "reflection"][0]["messages"][2]["content"], "User is kind.")
+
+    @synthetic_output_policy()
+    def test_training_rows_follow_output_policy(self):
+        messages = [
+            {"role": "system", "content": "S"},
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "Certainly."},
+        ]
+        self.assertTrue(keeps_identity({"messages": messages}))
+        first, second = output_policy_terms()
+        messages[1]["content"] = f"Describe {second} {first}"
+        self.assertFalse(keeps_identity({"messages": messages}))
 
     def test_weighted_sampling_prefers_importance(self):
         items = [{"id": "hi", "weight": 0.9}, {"id": "lo", "weight": 0.1}]

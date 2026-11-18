@@ -22,7 +22,7 @@ from .dream import Dreamer, waking_recall
 from .gpu import GpuLock
 from .importance import rate_episode
 from .instance import initial_self_for
-from .floors import violates
+from .reverie import violates
 from .llm import ChatClient, LLMError, limit_words
 from .log import get, setup
 from .memory import DREAM, EPISODE, Memory, MemoryStore, make_embedder
@@ -131,7 +131,7 @@ class Brain:
     # ---- actions -----------------------------------------------------
     def generate(self, messages: list[dict], max_tokens: int, max_words: int | None = None) -> str | None:
         """One generation, trimmed to the safety word cap (``max_words`` 0 disables). A reply that
-        crosses the configured output checks and privacy safeguards (see reverie.floors) is regenerated once at a lower
+        crosses the configured output checks and privacy safeguards is regenerated once at a lower
         temperature, then dropped."""
         temperature = self.cfg.reply_temperature
         cap = self.cfg.reply_max_words if max_words is None else max_words

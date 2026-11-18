@@ -88,9 +88,7 @@ def output_policy_terms() -> tuple[str, str]:
 def synthetic_output_policy():
     """Exercise output rejection without shipping a default topic policy."""
     import json
-    import re
     from unittest.mock import patch
     policy = json.dumps({"denied_patterns": [r"(?s)(?=.*\bpolicy_marker\b)(?=.*\brestricted_marker\b)"]})
-    with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": policy}), patch(
-            "reverie.floors._ABUSE", re.compile(r"\b(?:abuse_marker|lives at)\b", re.I)):
+    with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": policy}):
         yield

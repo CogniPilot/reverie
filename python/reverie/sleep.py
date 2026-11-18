@@ -240,7 +240,7 @@ def room_episodes(rooms: list, session_ids, since_ms: float) -> list[dict]:
 
     A context message that crosses a hard floor is left out, so another member's contact details never
     enter this agent's memory; the agent's own reply is screened by the caller."""
-    from .floors import violates
+    from .reverie import screen_outputs
     ids = {session_ids} if isinstance(session_ids, str) else set(session_ids)
     episodes = []
     for room in rooms:
@@ -254,8 +254,9 @@ def room_episodes(rooms: list, session_ids, since_ms: float) -> list[dict]:
             reply = str(message.get("text", "")).strip()
             if not reply:
                 continue
-            before = [m for m in messages[max(0, index - 12):index] if (m.get("from") or {}).get("sessionId") not in ids
-                      and not violates(str(m.get("text", "")))]
+            preceding = [m for m in messages[max(0, index - 12):index] if (m.get("from") or {}).get("sessionId") not in ids]
+            reasons = screen_outputs(str(m.get("text", "")) for m in preceding)
+            before = [m for m, reason in zip(preceding, reasons, strict=True) if not reason]
             context = "\n".join(f"{_speaker(m)}: {m.get('text', '')}" for m in before[-CONTEXT_MESSAGES:])
             episodes.append({"source": "room:" + str(message.get("id")), "at": float(message.get("at", 0)),
                              "room": str(room.get("name") or ""),
@@ -391,7 +392,7 @@ class Sleep:
                     self.line("error_" + type(error).__name__, agent["name"])
 
     def agent(self, agent: dict, started: float) -> None:
-        from .floors import violates
+        from .reverie import screen_outputs
         name = agent["name"]
         cfg = self.config_for(agent["instance"])
         if not (local_endpoint(getattr(cfg, "api_base", "")) and local_endpoint(getattr(cfg, "embed_url", ""))):
@@ -411,16 +412,18 @@ class Sleep:
                 while cut < len(episodes) and episodes[cut]["at"] == episodes[cut - 1]["at"]:
                     cut += 1  # never split posts with the same timestamp: the mark is "after this time"
                 if self.policy["dry_run"]:  # the whole pending backlog, not one tick's chunk (the mark never moves)
-                    self.line("would_consolidate", name, sum(not violates(e["reply"]) for e in episodes))
-                episodes = episodes[:cut]
-                kept = [e for e in episodes if not violates(e["reply"])]
-                if not self.policy["dry_run"]:
+                    reasons = screen_outputs(episode["reply"] for episode in episodes)
+                    self.line("would_consolidate", name, sum(not reason for reason in reasons))
+                else:
+                    episodes = episodes[:cut]
+                    reasons = screen_outputs(episode["reply"] for episode in episodes)
+                    kept = [episode for episode, reason in zip(episodes, reasons, strict=True) if not reason]
                     self.line("consolidated", name, len(kept))
-                if episodes and not self.policy["dry_run"]:
-                    for episode in kept:
-                        store.add_external_episode(episode["source"], episode["user"], episode["reply"], "private")
-                    store.set_state("sleep_consolidated_ms", str(episodes[-1]["at"]))
-                    store.set_state("reverie_last_activity", str(episodes[-1]["at"] / 1000))
+                    if episodes:
+                        for episode in kept:
+                            store.add_external_episode(episode["source"], episode["user"], episode["reply"], "private")
+                        store.set_state("sleep_consolidated_ms", str(episodes[-1]["at"]))
+                        store.set_state("reverie_last_activity", str(episodes[-1]["at"] / 1000))
             if self.policy["dry_run"]:
                 last = float(store.get_state("reverie_last_activity", str(self.now)))
                 due = [p for p, ok in (("reflect", brain.reflector.due(self.now)),

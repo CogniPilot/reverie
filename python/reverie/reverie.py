@@ -5,11 +5,12 @@ import json
 import hashlib
 import re
 import time
+from itertools import islice
 from typing import Callable
 
 from .memory import DREAM, MemoryStore
 from .persona import DEFAULT_PERSONA
-from .hands.agent_journal import native_memory_json
+from .hands.agent_journal import TURN_CAPTURE_BYTES, native_memory_json
 
 
 def native_context(action, payload):
@@ -19,6 +20,31 @@ def native_context(action, payload):
     if "error" in response:
         raise ValueError(response["error"])
     return response["value"]
+
+
+def screen_outputs(texts):
+    """Yield the native policy verdict for each text in order."""
+    source = iter(texts)
+    while batch := list(islice(source, 256)):
+        points = [list(map(ord, text or "")) for text in batch]
+        reply = native_memory_json("screen-output-worker", points, TURN_CAPTURE_BYTES)
+        reasons = reply.get("reasons") if reply else None
+        if (
+            not isinstance(reasons, list)
+            or len(reasons) != len(batch)
+            or any(reason not in ("", "configured output policy", "targeting a real private person")
+                   for reason in reasons)
+        ):
+            raise ValueError("native output screening could not be completed")
+        yield from reasons
+
+
+def violates(text):
+    return next(screen_outputs((text,)))
+
+
+def passes(text):
+    return not violates(text)
 
 
 def safeguards():

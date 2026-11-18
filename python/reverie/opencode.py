@@ -18,8 +18,7 @@ import urllib.parse
 import urllib.request
 
 from .chat import ChatDaemon
-from .reverie import Reverie, native_context, runtime_permissions, role_charter, safeguards
-from .floors import violates
+from .reverie import Reverie, native_context, runtime_permissions, role_charter, safeguards, violates
 from .project_memory import ProjectMemory
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent

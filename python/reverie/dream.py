@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, Sequence
 
 from .beliefs import render
-from .floors import passes
+from .reverie import passes
 from .llm import ChatClient, LLMError
 from .memory import DREAM, Memory, MemoryStore
 from .mood import TONE_NUDGE, load_mood, save_mood

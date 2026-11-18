@@ -1,7 +1,7 @@
 """Persona core (user-owned, never rewritten) and the evolving profile (derived from reflections).
 
 Tone is governed by the persona file alone; the package appends no guardrail text. The
-only screening is the configured output checks and privacy safeguards in :mod:`reverie.floors`.
+only screening is the configured output checks and private-person protection.
 
 The profile is rendered from stored reflections, grouped into three fixed sections,
 highest importance first, and bounded to ``max_chars``. When the rendering is too
