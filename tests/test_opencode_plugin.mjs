@@ -98,7 +98,9 @@ test("A configured OpenCode instance loads the native context without starting P
       id: "native-fixture", agent_name: "Synthetic context", owner_name: "Test owner",
       data_dir: "state", persona: "Check sources."
     }));
-    await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: join(dir, "unused-python"), source: dir, instance }));
+    await writeFile(join(dir, ".reverie-instance"), JSON.stringify({
+      python: join(dir, "unused-python"), source: join(dir, "unused-source"), instance
+    }));
     const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');

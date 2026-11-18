@@ -69,8 +69,8 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
     const command = native ? "reverie-context" : settings.python;
     const args = native ? contextArgs(settings.instance, request) : ["-m", "reverie.opencode"];
     const child = execFile(command, args, {
-      cwd: settings.source,
-      env: { ...process.env, PYTHONPATH: settings.source,
+      cwd: native ? directory : settings.source,
+      env: native ? process.env : { ...process.env, PYTHONPATH: settings.source,
         ...(settings.instance ? { REVERIE_INSTANCE_CONFIG: settings.instance } : {}) },
       timeout: request.action === "maintenance" ? 120000 : 60000,
       maxBuffer: 1024 * 1024,
