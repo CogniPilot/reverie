@@ -788,6 +788,7 @@ let
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+    ln -s ${adminMemory}/bin/reverie-context "$out/bin/reverie-context"
     ln -s ${memoryJournalCli}/bin/reverie-memory-journal "$out/bin/reverie-memory-journal"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"

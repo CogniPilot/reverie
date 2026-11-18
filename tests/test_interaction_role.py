@@ -3,8 +3,10 @@ from types import SimpleNamespace
 import tempfile
 from pathlib import Path
 
-from reverie.reverie import CHARTER, role_charter
+from reverie.reverie import role_charter
 from reverie.opencode import CHAT_TOOLS
+
+CHARTER = "You are a persistent AI agent and expert."
 
 
 class InteractionRoleTest(unittest.TestCase):

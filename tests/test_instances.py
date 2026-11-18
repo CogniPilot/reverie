@@ -74,7 +74,7 @@ class InstanceTests(unittest.TestCase):
         self.assertTrue((workspace/".agents/skills/reverie-memory/SKILL.md").is_file())
         self.assertTrue((workspace/".claude/skills/reverie-runtime/SKILL.md").is_file())
         instructions = (workspace/"AGENTS.md").read_text()
-        self.assertIn("reverie.context_cli", instructions)
+        self.assertIn("reverie-context --instance", instructions)
         self.assertEqual(instructions.count("<!-- reverie:begin -->"), 1)
 
     def test_invalid_or_missing_config_never_falls_back_to_personal_data(self):

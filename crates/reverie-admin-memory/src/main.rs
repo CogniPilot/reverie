@@ -2,6 +2,7 @@
 mod automatic;
 mod capture;
 mod configuration;
+mod context_cli;
 mod database;
 mod journal;
 mod office;
@@ -180,6 +181,17 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
 }
 
 fn main() -> ExitCode {
+    if std::env::args_os()
+        .next()
+        .and_then(|arg| {
+            std::path::PathBuf::from(arg)
+                .file_name()
+                .map(std::ffi::OsStr::to_owned)
+        })
+        .is_some_and(|name| name == "reverie-context")
+    {
+        return context_cli::entry();
+    }
     let mut args = env::args_os().skip(1);
     if let Some((worker, pid)) = args.next().as_deref().and_then(worker_argument) {
         return if args.next().is_none() && worker(pid).is_ok() {

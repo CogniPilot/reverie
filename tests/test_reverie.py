@@ -16,7 +16,7 @@ from reverie.reverie import Reverie, RevisionConflict
 from reverie.memory import MemoryStore
 from reverie.project_memory import ProjectMemory
 from reverie.opencode import dispatch, install, voice_reply
-from reverie.reverie import INITIAL_SELF, runtime_permissions, SAFEGUARDS
+from reverie.reverie import INITIAL_SELF, runtime_permissions, safeguards
 from reverie.beliefs import ensure_seeded
 from tests.helpers import FakeRoom, fake_client, temp_config
 
@@ -100,14 +100,13 @@ class ReverieTests(unittest.TestCase):
     def test_shared_room_tone_is_social_in_chat_and_professional_in_coding_when_selected(self):
         import json as _json
         from types import SimpleNamespace
-        from reverie.opencode import PROFESSIONAL_ROOM, SOCIAL_ROOM, active_mode, shared_room_rule
+        from reverie.opencode import active_mode, social_room
         social, plain = SimpleNamespace(shared_room_tone="social"), SimpleNamespace(shared_room_tone="professional")
-        self.assertEqual(shared_room_rule(social, "chat"), SOCIAL_ROOM)
-        self.assertEqual(shared_room_rule(social, "coding"), PROFESSIONAL_ROOM)
+        self.assertTrue(social_room(social, "chat"))
+        self.assertFalse(social_room(social, "coding"))
         for instance in (None, SimpleNamespace(), plain):
             for mode in ("chat", "coding"):
-                self.assertEqual(shared_room_rule(instance, mode), PROFESSIONAL_ROOM)   # generic and shared default
-        self.assertIn("Keep private memories and dream summaries out", SOCIAL_ROOM)
+                self.assertFalse(social_room(instance, mode))
         # The mode comes from the primary session's interaction state; anything unreadable means chat.
         self.assertEqual(active_mode(self.brain), "chat")
         directory = self.cfg.data_dir.parent / "runtime"
@@ -124,6 +123,7 @@ class ReverieTests(unittest.TestCase):
             (state / "ses_abc.json").write_text(_json.dumps({"mode": "chat"}))
             text = dispatch(self.brain, {"action": "context", "query": "q", "channel": "work"})
             self.assertIn("Be yourself", text)
+            self.assertIn("Keep private memories and dream summaries out", text)
             self.assertNotIn("Stay professional", text)
             (state / "ses_abc.json").write_text("{broken")
             self.assertEqual(active_mode(self.brain), "chat")
@@ -228,7 +228,7 @@ class ReverieTests(unittest.TestCase):
         self.assertNotIn("not up for daily re-evaluation", messages[0]["content"])
         self.assertEqual(self.store._db.execute("SELECT count(*) FROM reverie_document_history WHERE name='self'").fetchone()[0], 1)
         text = dispatch(self.brain, {"action": "context"})
-        self.assertTrue(text.endswith(SAFEGUARDS))
+        self.assertTrue(text.endswith(safeguards()))
 
     def test_vacation_archives_all_state_then_owner_confirmed_return_needs_handoff(self):
         self.store.add_episode("A project fact", "verified")

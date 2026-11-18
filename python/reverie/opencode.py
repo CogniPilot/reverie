@@ -18,19 +18,12 @@ import urllib.parse
 import urllib.request
 
 from .chat import ChatDaemon
-from .reverie import CHARTER, SAFEGUARDS, Reverie, native_context, runtime_permissions, role_charter
+from .reverie import Reverie, native_context, runtime_permissions, role_charter, safeguards
 from .floors import violates
 from .project_memory import ProjectMemory
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent
 from reverie import env_names
-
-
-PROFESSIONAL_ROOM = ("This is a shared work channel. Stay professional. Keep private anecdotes "
-                     "and private dream summaries out of shared rooms. Room-directed recipient labels are not private DMs.")
-SOCIAL_ROOM = ("This is a shared room: everyone in it reads every message. Be yourself; your wit, humour, opinions and "
-               "playfulness are welcome here. Keep private memories and dream summaries out of shared rooms. "
-               "Room-directed recipient labels are not private DMs.")
 
 
 def active_mode(brain) -> str:
@@ -46,12 +39,8 @@ def active_mode(brain) -> str:
         return "chat"
 
 
-def shared_room_rule(instance, mode: str = "chat") -> str:
-    """How to speak where others read every message. Professional unless the owner selected a social tone, and
-    professional in coding mode either way; private memories and dream summaries stay out of shared rooms always."""
-    if getattr(instance, "shared_room_tone", "professional") == "social" and mode != "coding":
-        return SOCIAL_ROOM
-    return PROFESSIONAL_ROOM
+def social_room(instance, mode: str) -> bool:
+    return getattr(instance, "shared_room_tone", "professional") == "social" and mode != "coding"
 
 
 def office_journal(request):
@@ -94,20 +83,13 @@ def dispatch(brain, request: dict):
         if work:
             messages = [{"role": "system", "content": build_system_prompt(
                 self_model["persona"], "", [])}]
-        details = ["Persistent reverie plan:\n" + reverie.plan()["body"],
-                   "Long-term memories are available only through explicit lookup. Share project findings through "
-                   "project-scoped memory; never copy private memories into a work reply or developer brief."]
-        if work:
-            details.append(shared_room_rule(brain.cfg.instance, active_mode(brain)))
         mode = reverie.read("lifecycle", {"mode": "active"})["body"]
-        if mode["mode"] == "vacation":
-            details.append("You are on vacation. Conversation, memories and dreams continue; take no project work, "
-                         "issue no worker instructions and spawn no agents. the owner chooses the interim admin. "
-                         "You may discuss returning; the return tool requires owner confirmation and a fresh handoff.")
         return native_context("context", {
-            "introduction": [identity_context(brain.cfg.instance), role_charter(brain.cfg.instance), messages[0]["content"]],
+            "identity": identity_context(brain.cfg.instance), "role": getattr(brain.cfg.instance, "role", "Expert"),
+            "system": messages[0]["content"], "plan": reverie.plan()["body"],
             "self_model": {key: self_model[key] for key in ("consciousness", "directives")},
-            "details": details, "messages": messages[1:-1], "safeguards": SAFEGUARDS,
+            "social_room": social_room(brain.cfg.instance, active_mode(brain)) if work else None,
+            "vacation": mode["mode"] == "vacation", "messages": messages[1:-1],
             "limits": {"window": int(request.get("context_window", 16384)),
                        "output": int(request.get("output_tokens", 4096)),
                        "occupied": int(request.get("occupied_tokens", 0))},
@@ -377,7 +359,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
                 "small_model": model,
                 "permission": permissions,
                 "agent": {agent: {"description": "Conversation and owner-authorized reverie maintenance" if agent == "chat" else "Persistent expert with owner-selected permissions",
-                                   "mode": "primary", "prompt": identity_context(instance) + "\n" + role_charter(instance) + "\n" + SAFEGUARDS,
+                                   "mode": "primary", "prompt": identity_context(instance) + "\n" + role_charter(instance) + "\n" + safeguards(),
                                    "permission": permissions}}}
     if agent == "chat":
         settings["agent"][agent]["steps"] = 10
@@ -415,7 +397,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(skill.read_text(), encoding="utf-8")
     if instance_config:
-        command = shlex.join([sys.executable, "-m", "reverie.context_cli", "--instance",
+        command = shlex.join(["reverie-context", "--instance",
                               str(instance_config.expanduser().resolve(strict=True)), "--channel", "work"])
         instructions = ("<!-- reverie:begin -->\n"
             "This workspace runs one configured persistent agent. The OpenCode plugin automatically loads identity and "

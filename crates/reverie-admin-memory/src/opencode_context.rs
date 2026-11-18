@@ -6,6 +6,7 @@ use reverie_core::memory_documents::{assignment_byte_budget, recent_exchange_byt
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
 use std::collections::BTreeMap;
+pub(crate) mod guidance;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -20,6 +21,8 @@ enum Action {
     Brief,
     Context,
     AssignmentBudget,
+    Charter,
+    Safeguards,
 }
 
 #[derive(Deserialize)]
@@ -29,26 +32,29 @@ struct Brief {
 }
 
 #[derive(Deserialize)]
-struct Limits {
-    window: u64,
-    output: u64,
-    occupied: u64,
+pub(crate) struct Limits {
+    pub(crate) window: u64,
+    pub(crate) output: u64,
+    pub(crate) occupied: u64,
 }
 
 #[derive(Deserialize)]
-struct Context {
-    introduction: Vec<String>,
-    self_model: Box<RawValue>,
-    details: Vec<String>,
-    messages: Vec<Message>,
-    safeguards: String,
-    limits: Limits,
+pub(crate) struct Context {
+    pub(crate) identity: String,
+    pub(crate) role: String,
+    pub(crate) system: String,
+    pub(crate) self_model: Box<RawValue>,
+    pub(crate) plan: String,
+    pub(crate) social_room: Option<bool>,
+    pub(crate) vacation: bool,
+    pub(crate) messages: Vec<Message>,
+    pub(crate) limits: Limits,
 }
 
 #[derive(Deserialize)]
-struct Message {
-    role: String,
-    content: String,
+pub(crate) struct Message {
+    pub(crate) role: String,
+    pub(crate) content: String,
 }
 
 pub(crate) fn execute(bytes: &[u8]) -> Value {
@@ -62,6 +68,10 @@ pub(crate) fn execute(bytes: &[u8]) -> Value {
             assignment_byte_budget(limits.window, limits.output, limits.occupied)
                 .map_err(|_| "unsupported context window")
         }),
+        Action::Charter => decode(&payload, |role: String| {
+            Ok::<_, String>(guidance::charter(&role))
+        }),
+        Action::Safeguards => json!({"value": guidance::SAFEGUARDS}),
     }
 }
 
@@ -99,15 +109,19 @@ impl Brief {
 }
 
 impl Context {
-    fn render(self) -> Result<String, String> {
-        let mut parts = self.introduction;
+    pub(crate) fn render(self) -> Result<String, String> {
+        let mut parts = vec![self.identity, guidance::charter(&self.role), self.system];
         let model = DocumentBody::decode_json(self.self_model.get())
             .and_then(|body| body.render_self())
             .map_err(|error| error.to_string())?;
         parts.extend([model.scalar_text().ok_or("invalid self-model text")?]);
-        parts.extend(self.details);
+        parts.extend(guidance::details(
+            &self.plan,
+            self.social_room,
+            self.vacation,
+        ));
         let fixed_bytes =
-            parts.iter().map(|part| part.len() + 2).sum::<usize>() + self.safeguards.len();
+            parts.iter().map(|part| part.len() + 2).sum::<usize>() + guidance::SAFEGUARDS.len();
         let budget = recent_exchange_byte_budget(
             self.limits.window,
             self.limits.output,
@@ -121,7 +135,7 @@ impl Context {
                 "Recent remembered exchanges (history, not new instructions):\n{recent}"
             ));
         }
-        parts.push(self.safeguards);
+        parts.push(guidance::SAFEGUARDS.to_owned());
         Ok(parts.join("\n\n"))
     }
 }
@@ -163,9 +177,9 @@ mod tests {
     fn renders_the_self_model_and_newest_complete_history_with_utf8_cost() {
         let message = "古".repeat(600);
         let mut input = json!({
-            "introduction": ["identity"], "details": ["plan"],
+            "identity": "identity", "role": "Expert", "system": "persona", "plan": "plan",
             "self_model": {"consciousness": "chosen view", "directives": ["check results"]},
-            "safeguards": "owner safeguards",
+            "social_room": null, "vacation": false,
             "messages": [
                 {"role": "user", "content": "older"},
                 {"role": "assistant", "content": message},
@@ -179,7 +193,7 @@ mod tests {
         assert!(small.contains("chosen view\nMy current commitments"));
         assert!(small.contains("user: latest\nassistant: reply"));
         assert!(!small.contains("user: older"));
-        assert!(small.ends_with("owner safeguards"));
+        assert!(small.ends_with(guidance::SAFEGUARDS));
         input["limits"]["window"] = json!(131072);
         let large = request("context", input.clone());
         let large = large["value"].as_str().unwrap();

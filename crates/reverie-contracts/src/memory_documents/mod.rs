@@ -103,6 +103,9 @@ impl DocumentBody {
             None
         }
     }
+    pub fn text_field(&self, name: &str) -> Result<MetadataText> {
+        required_text(fields(self)?, name)
+    }
     pub fn render_self(&self) -> Result<MetadataText> {
         let fields = fields(self)?;
         let consciousness = required_text(fields, "consciousness")?;

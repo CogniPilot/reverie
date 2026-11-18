@@ -155,9 +155,16 @@ fn read_on(
     name: &DocumentName,
     default: Option<DocumentBody>,
 ) -> Result<DocumentEnvelope> {
+    read_envelope(tx.db, name, default)
+}
+
+pub(super) fn read_envelope(
+    db: &Connection,
+    name: &DocumentName,
+    default: Option<DocumentBody>,
+) -> Result<DocumentEnvelope> {
     let name = name_text(name)?;
-    let row: Option<(i64, String, f64)> = tx
-        .db
+    let row: Option<(i64, String, f64)> = db
         .query_row(
             "SELECT revision,body,updated_at FROM reverie_documents WHERE name=?",
             [name],

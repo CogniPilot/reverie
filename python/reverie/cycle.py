@@ -15,7 +15,7 @@ from .config import Config
 from .cycle_budget import Ledger, MeteredClient, Deferred, BudgetExhausted
 from .cycle_runner import OpenCodeRunner
 from .dream import Dreamer
-from .reverie import Reverie, SAFEGUARDS
+from .reverie import Reverie, safeguards
 from .instance import initial_self_for
 from .memory import MemoryStore
 from .opencode import dispatch
@@ -309,7 +309,7 @@ class Cycle:
             prompt+='"task_ids":["approved-task-id"],"allow_subagents":true,"children":[{"task_id":"approved-task-id",'
             prompt+='"model":"model-key","role":"implementer"}]}],"notes":"why this allocation"}. '
             prompt+='Experts supervise coding children, may conduct research themselves, and report to you. '
-            prompt+='Use only configured agents, available authorized models and approved backlog IDs. Empty assignments are valid. '+SAFEGUARDS
+            prompt+='Use only configured agents, available authorized models and approved backlog IDs. Empty assignments are valid. '+safeguards()
             value=object_reply(client.chat([{'role':'system','content':'You are the configured coordinator allocating a reverie schedule. '+cfg.instance.persona},
                                             {'role':'user','content':prompt}],max_tokens=1800,max_chars=16000,temperature=.2))
             value['assignments']=self.validate_schedule(value,available)
@@ -388,7 +388,7 @@ class Cycle:
             text=self.context(name,'Review these approved tasks and prepare concise evidence-based context for implementers: '+
                 json.dumps([tasks[t] for t in assignment.get('task_ids',[]) if t in tasks]))
             return {'guidance':client.chat([{'role':'system','content':cfg.instance.persona+' Your role is '+self.agents[name]['role']},
-                {'role':'user','content':text+' State assumptions, relevant sources, acceptance checks and open questions. '+SAFEGUARDS}],
+                {'role':'user','content':text+' State assumptions, relevant sources, acceptance checks and open questions. '+safeguards()}],
                 max_tokens=900,max_chars=6000,temperature=.3)}
         if name!=self.coordinator: self.phase(name,'planning',model,day,analyze)
         children={c['task_id']:c for c in assignment.get('children',[])}

@@ -113,7 +113,37 @@ impl MemoryMetadata {
             .python_string(),
         ))
     }
+
+    pub fn waking_recall(&self, fallback: &str) -> Result<MetadataText> {
+        let mut result = self.recall(fallback)?.codepoints().to_vec();
+        let Node::Object(fields) = &self.0.value.0 else {
+            return Err(MemoryJsonError::ExpectedObject);
+        };
+        if let Some(Value(Node::Array(ideas))) = fields.get(&text("ideas")) {
+            for idea in ideas.iter().take(3) {
+                append_dream_idea(&mut result, idea)?;
+            }
+        }
+        Ok(MetadataText::from_text(Text(result)))
+    }
 }
+fn append_dream_idea(result: &mut Vec<u32>, idea: &Value) -> Result<()> {
+    let Node::Object(fields) = &idea.0 else {
+        return Err(MemoryJsonError::ExpectedObject);
+    };
+    for (label, field) in [
+        ("\nUnverified dream hypothesis: ", "hypothesis"),
+        (" Check before using: ", "check"),
+    ] {
+        let Some(Value(Node::String(value))) = fields.get(&text(field)) else {
+            return Err(MemoryJsonError::ExpectedObject);
+        };
+        result.extend(label.chars().map(u32::from));
+        result.extend_from_slice(&value.0);
+    }
+    Ok(())
+}
+
 impl MemorySources {
     /// Existing add_reflection/add_dream perform list(source_ids) before
     /// embedding. Preserve integer width and Python iteration of JSON data.

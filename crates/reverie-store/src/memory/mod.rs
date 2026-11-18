@@ -2,6 +2,8 @@
 mod backup;
 mod beliefs;
 mod claims;
+mod continuity;
+pub use continuity::{Continuity, ContinuityScope, Episode, PrivateContinuity};
 mod documents;
 mod error;
 mod journal;

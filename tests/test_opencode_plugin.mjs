@@ -89,6 +89,31 @@ test("OpenCode hooks restore context, persist complete turns once, and compose d
   }
 });
 
+test("A configured OpenCode instance loads the native context without starting Python", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "reverie-native-context-"));
+  try {
+    const root = resolve(import.meta.dirname, "..");
+    const instance = join(dir, "instance.json");
+    await writeFile(instance, JSON.stringify({
+      id: "native-fixture", agent_name: "Synthetic context", owner_name: "Test owner",
+      data_dir: "state", persona: "Check sources."
+    }));
+    await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: join(dir, "unused-python"), source: dir, instance }));
+    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+      'import { tool } from "@opencode-ai/plugin";',
+      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
+    const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+    const hooks = await ReveriePlugin({ directory: dir, serverUrl: new URL("http://127.0.0.1:1234"), client: {} });
+    const output = {system: []};
+    await hooks["experimental.chat.system.transform"]({sessionID: "native"}, output);
+    assert.match(output.system[0], /Synthetic context/);
+    assert.match(output.system[0], /Persistent reverie plan/);
+    await assert.rejects(stat(join(dir, "state")), {code: "ENOENT"});
+  } finally {
+    await rm(dir, {recursive: true, force: true});
+  }
+});
+
 test("Research cycles mark activity without registering a primary runtime, recording turns or maintaining memory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "reverie-research-plugin-"));
   const oldEnv = { ...process.env };

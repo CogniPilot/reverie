@@ -13,12 +13,7 @@ fn belief(row: &rusqlite::Row<'_>) -> rusqlite::Result<Belief> {
 }
 impl MemoryTransaction<'_> {
     pub fn beliefs(&self) -> Result<Vec<Belief>> {
-        let mut statement = self
-            .db
-            .prepare("SELECT * FROM beliefs ORDER BY weight DESC, id")?;
-        Ok(statement
-            .query_map([], belief)?
-            .collect::<rusqlite::Result<_>>()?)
+        read(self.db)
     }
     pub fn add_belief(
         &mut self,
@@ -69,6 +64,12 @@ impl MemoryTransaction<'_> {
         )?;
         self.commit()
     }
+}
+pub(super) fn read(db: &Connection) -> Result<Vec<Belief>> {
+    let mut statement = db.prepare("SELECT * FROM beliefs ORDER BY weight DESC, id")?;
+    Ok(statement
+        .query_map([], belief)?
+        .collect::<rusqlite::Result<_>>()?)
 }
 impl MemoryStore {
     pub fn beliefs(&self) -> Result<Vec<Belief>> {

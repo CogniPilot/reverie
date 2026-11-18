@@ -632,6 +632,14 @@ training tools are retained for compatibility but are outside the runtime workfl
 
 ## Agent context preparation
 
+Use `reverie-context --instance /path/to/instance.json` from the installed
+runtime to read an instance's identity, plan and continuity guidance.
+The command defaults to shared work context. Select `--channel private`
+inside a private conversation. It reads existing memory and history in place.
+If an older generated workspace instruction uses the Python module command,
+use `reverie-context` with the same instance and limits. The OpenCode workspace
+installer writes the updated command when it refreshes the workspace.
+
 An owner-appointed coordinator with explicit orchestration permission curates each
 worker's short-term context: task, acceptance checks, constraints,
 verified findings with sources, relevant files/tools and targeted memory queries.

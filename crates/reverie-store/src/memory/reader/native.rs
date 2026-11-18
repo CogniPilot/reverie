@@ -87,6 +87,18 @@ impl NativeMemoryRead {
         }
     }
 
+    pub fn read_continuity(path: &Path, scope: ContinuityScope) -> Result<Continuity> {
+        match Self::with_journal(path, |db| {
+            let snapshot = db.unchecked_transaction()?;
+            let result = continuity::read(&snapshot, scope)?;
+            snapshot.commit()?;
+            Ok(result)
+        }) {
+            Err(MemoryError::NotInitialized) => Ok(Continuity::empty(scope)),
+            result => result,
+        }
+    }
+
     fn with_journal<T>(path: &Path, run: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let owner = Self::capture(path)?;
         let receipt = match owner.observe_journal(run) {

@@ -7,4 +7,5 @@ in pkgs.runCommand "reverie-admin-memory" {
 } ''
   mkdir -p "$out/bin"
   ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+  ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-context"
 ''

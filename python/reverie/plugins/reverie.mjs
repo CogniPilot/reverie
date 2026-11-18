@@ -52,12 +52,23 @@ const clockLine = (now = new Date(), timeZone) => {
   return `Current time: ${local}${fmt("UTC")}.`;
 };
 
-// All requests go over stdin. Conversation text is never interpolated into a shell.
+// Context needs only the configured instance and model limits. Conversation
+// text goes over stdin for the remaining bridge operations.
+const contextArgs = (instance, request) => [
+  "--instance", instance, "--channel", request.channel ?? "private",
+  "--context-window", String(request.context_window ?? 16384),
+  "--output-tokens", String(request.output_tokens ?? 4096),
+  "--occupied-tokens", String(request.occupied_tokens ?? 0),
+];
+
 export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
   const researchCycle = envName("RESEARCH_CYCLE_ID");
   const settings = JSON.parse(await readFile(join(directory, ".reverie-instance"), "utf8"));
   const bridge = (request) => new Promise((resolve, reject) => {
-    const child = execFile(settings.python, ["-m", "reverie.opencode"], {
+    const native = request.action === "context" && settings.instance;
+    const command = native ? "reverie-context" : settings.python;
+    const args = native ? contextArgs(settings.instance, request) : ["-m", "reverie.opencode"];
+    const child = execFile(command, args, {
       cwd: settings.source,
       env: { ...process.env, PYTHONPATH: settings.source,
         ...(settings.instance ? { REVERIE_INSTANCE_CONFIG: settings.instance } : {}) },
@@ -65,10 +76,11 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (error) return reject(new Error(stderr.trim() || error.message));
+      if (native) return resolve(stdout.replace(/\n$/, ""));
       try { resolve(JSON.parse(stdout)); } catch (parseError) { reject(parseError); }
     });
     child.stdin.on("error", () => {});
-    child.stdin.end(JSON.stringify(request));
+    child.stdin.end(native ? undefined : JSON.stringify(request));
   });
   const log = async (message) => {
     await client.app.log({ body: { service: "reverie", level: "error", message: String(message) } });

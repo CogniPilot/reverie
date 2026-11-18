@@ -3,6 +3,7 @@
 use crate::PythonText;
 pub use crate::persona::DEFAULT_PERSONA;
 use std::fmt;
+pub const RECENT_EXCHANGE_CAP: usize = 32_000;
 pub const DEFAULT_PLAN: &str = "# Reverie plan\n\nAll experts are persistent AI agents. Roles and permissions are selected explicitly by the owner.\n\n## Priorities\n- Read the room and obtain the current project handoffs before changing assignments.\n- Curate a model-budgeted, task-specific context brief for each worker before dispatch.\n- Keep each project owner, working tree, next action and verification evidence current.\n- Use available subscription workers for bounded tasks; continue locally when exhausted.\n\n## Decisions and blockers\n- Preserve the existing memory database, dreams, reflections, mood and voice.\n- Coordinator appointment in Reverie requires the user's Lead action.\n";
 pub fn assignment_byte_budget(
     context_window: u64,
@@ -26,7 +27,7 @@ pub fn recent_exchange_byte_budget(
         .saturating_sub(fixed_bytes)
         .div_euclid(2)
         .min(context_window as usize / 5)
-        .min(32_000))
+        .min(RECENT_EXCHANGE_CAP))
 }
 
 fn remaining_prompt_bytes(

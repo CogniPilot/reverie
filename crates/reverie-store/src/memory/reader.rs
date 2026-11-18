@@ -205,7 +205,7 @@ fn open_existing(path: &Path) -> Result<Connection> {
     }
     Ok(db)
 }
-fn state(db: &Connection, key: &str) -> Result<Option<String>> {
+pub(super) fn state(db: &Connection, key: &str) -> Result<Option<String>> {
     Ok(db
         .query_row("SELECT value FROM state WHERE key=?", [key], |row| {
             row.get(0)

@@ -17,7 +17,6 @@ train = ["torch", "transformers", "peft", "bitsandbytes", "trl", "datasets", "ac
 [project.scripts]
 reverie-cycle-demo = "reverie.cycle_demo:main"
 reverie-cycle = "reverie.cycle:main"
-reverie-context = "reverie.context_cli:main"
 reverie-runtime = "reverie.runtime:main"
 reverie-credentials = "reverie.github_credentials:main"
 reverie-opencode = "reverie.opencode:main"
