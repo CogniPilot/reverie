@@ -79,19 +79,17 @@ fn fixture() -> &'static PathBuf {
         binary
     })
 }
-fn run(mut command: Command, request: &Value) -> Output {
+fn run(command: Command, request: &Value) -> Output {
+    run_input(command, serde_json::to_string(request).unwrap().as_bytes())
+}
+fn run_input(mut command: Command, input: &[u8]) -> Output {
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(serde_json::to_string(request).unwrap().as_bytes())
-        .unwrap();
+    child.stdin.take().unwrap().write_all(input).unwrap();
     child.wait_with_output().unwrap()
 }
 fn success(output: Output) -> Value {
@@ -164,6 +162,40 @@ fn missing_source_or_session_never_dispatches_and_retains_copyable_command() {
     assert!(error.contains("reverie agent journal save"));
     assert!(!tree.0.join("trace").exists());
     assert!(!tree.0.join("state").exists());
+}
+
+#[test]
+fn office_journal_ignores_instance_selection_and_never_creates_child_memory() {
+    let tree = Tree::new();
+    let command = || {
+        let mut command = tree.command();
+        command
+            .env_remove("REVERIE_INSTANCE_CONFIG")
+            .arg("--journal-only");
+        command
+    };
+    let recall = json!({"action":"recall","private":true,"query":"decision"});
+    assert_eq!(success(run(command(), &recall)), json!([]));
+    let error = failure(run(command(), &save_request()));
+    assert!(error.contains("Nothing was saved"));
+    assert!(error.contains("reverie agent journal save"));
+    assert!(error.contains("--source t --quote 'exact words'"));
+    let work = json!({"action":"recall","private":true,"channel":"work","query":"x"});
+    assert!(failure(run(command(), &work)).contains("private memory is unavailable"));
+    let mut save = save_request();
+    save["text"] = json!("Contact Fictional Person at person@example.org");
+    assert!(failure(run(command(), &save)).contains("hard floor"));
+    assert!(!tree.0.join("state").exists());
+}
+
+#[test]
+fn office_journal_checks_input_bound_even_when_the_prefix_is_complete_json() {
+    let tree = Tree::new();
+    let mut command = tree.command();
+    command.arg("--journal-only");
+    let mut input = br#"{"action":"recall","private":true,"query":"x"}"#.to_vec();
+    input.resize(1024 * 1024 + 1, b' ');
+    assert!(failure(run_input(command, &input)).contains("request is too large"));
 }
 #[test]
 fn missing_recall_is_not_initialized_and_explicit_startup_is_idempotent() {

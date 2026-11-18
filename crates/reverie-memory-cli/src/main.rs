@@ -32,6 +32,9 @@ struct Arguments {
     /// Project scope for explicit initialization; otherwise private memory.
     #[arg(long, requires = "initialize")]
     project: Option<String>,
+    /// Bridge the current Office session without opening an instance memory store.
+    #[arg(long, conflicts_with_all = ["instance", "initialize", "installed_context"])]
+    journal_only: bool,
 }
 struct Failure(MetadataText, u8);
 impl Failure {
@@ -76,7 +79,7 @@ fn main() -> ExitCode {
     }
 }
 fn selected(mut arguments: Arguments) -> Result<Arguments> {
-    if arguments.installed_context {
+    if arguments.installed_context || arguments.journal_only {
         return Ok(arguments);
     }
     if arguments.instance.is_none() {

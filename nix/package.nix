@@ -675,9 +675,15 @@ let
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
-  # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
-  # consumers qualify together. No Python fallback inside this native package.
+  # The full installed-instance mode requires explicit lifecycle selection.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
+  memoryJournalCli = pkgs.runCommand "reverie-memory-journal" {} ''
+    mkdir -p "$out/bin"
+    ln -s ${memoryNativeCli}/bin/reverie-memory "$out/bin/reverie-memory-journal"
+    result=$(printf '%s' '{"action":"recall","private":true,"query":"smoke"}' \
+      | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory-journal" --journal-only)
+    test "$result" = '[]'
+  '';
   # The selected reverie-ops client for the laptop runtime and console.
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
@@ -703,14 +709,14 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit adminMemory cacert workerChild; };
+    passthru = { inherit adminMemory cacert memoryJournalCli workerChild; };
   };
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
@@ -782,6 +788,7 @@ let
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+    ln -s ${memoryJournalCli}/bin/reverie-memory-journal "$out/bin/reverie-memory-journal"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
     ln -s ${backendNativeCli}/bin/reverie-backend "$out/bin/reverie-backend"

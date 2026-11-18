@@ -21,7 +21,6 @@ from .chat import ChatDaemon
 from .reverie import CHARTER, SAFEGUARDS, Reverie, runtime_permissions, role_charter
 from .floors import violates
 from .project_memory import ProjectMemory
-from . import journal_shim
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent
 from .context_budget import memory_byte_budget, recent_exchanges
@@ -56,9 +55,38 @@ def shared_room_rule(instance, mode: str = "chat") -> str:
     return PROFESSIONAL_ROOM
 
 
+def office_journal(request):
+    unconfirmed = ("journal save was not confirmed; inspect the journal before another save"
+                   if request["action"] == "remember" else "journal lookup was not confirmed")
+    try:
+        result = subprocess.run(["reverie-memory-journal", "--journal-only"], input=json.dumps(request),
+                                capture_output=True, encoding="utf-8", check=False)
+    except OSError as error:
+        raise RuntimeError("the packaged Office journal client is unavailable") from error
+    if result.returncode:
+        try:
+            reason = json.loads(result.stderr.splitlines()[-1])["error"]
+        except (IndexError, KeyError, TypeError, ValueError):
+            reason = unconfirmed
+        raise RuntimeError(reason)
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise RuntimeError(unconfirmed) from error
+
+
+def remember_on_office(request):
+    # The Office checks the actual room and source for saves.
+    fields = ("text", "project", "room", "turn", "tag", "quote", "source", "reason")
+    return office_journal({"action": "remember", "private": not request.get("project"),
+                           **{key: request[key] for key in fields if key in request}})
+
+
 def dispatch(brain, request: dict):
-    reverie = Reverie(brain.store, initial_self_for(brain.cfg.instance))
     action = request.get("action", "context")
+    if action == "remember":
+        return remember_on_office(request)
+    reverie = Reverie(brain.store, initial_self_for(brain.cfg.instance))
     if action == "context":
         query = str(request.get("query", "reverie priorities plans decisions"))
         messages, _ = brain.build_messages(query, recall_long_term=False)
@@ -184,25 +212,19 @@ def dispatch(brain, request: dict):
             raise ValueError("private recall is unavailable in a shared work channel; select a project")
         else:
             legacy = [m.as_dict() for m in brain.store.retrieve(str(request.get("query", "")), k=8)]
-        if not journal_shim.available():
+        if not env_names.get("SESSION_ID"):
             return legacy
-        # The office journal is the store of record; the old store is read here as history until it is imported.
+        query = str(request.get("query", ""))
+        if not query.strip():
+            raise ValueError("recall needs a query")
+        project = request.get("project") or None
         try:
-            entries = journal_shim.recall(str(request.get("query", "")), request.get("project") or None)
+            result = office_journal({"action": "recall", "query": query, "private": project is None,
+                                     "project": project, "channel": request.get("channel")})
         except RuntimeError as error:
-            # While the journal rolls out, a failed lookup still answers from the old store, and says so.
-            return {"journal": [], "legacy": legacy,
-                    "note": f"journal lookup failed ({error}); these are only older, read-only results from the old store"}
-        return {"journal": entries, "legacy": legacy,
-                "note": "journal entries are your store of record; legacy results are older, read-only history"}
-    if action == "remember":
-        text = str(request.get("text", "")).strip()
-        if not text or violates(text):
-            raise ValueError("memory is empty or crossed a hard floor")
-        if journal_shim.available():
-            return journal_shim.remember({**request, "text": text})
-        # The journal is the only store remember writes; outside a session, say so and show the command.
-        raise ValueError(journal_shim.NO_SESSION + journal_shim.save_command({**request, "text": text}))
+            result = {"journal": [],
+                      "note": f"journal lookup failed ({error}); these are only older, read-only results from the old store"}
+        return {**result, "legacy": legacy} if isinstance(result, dict) else legacy
     if action == "plan":
         if "text" in request:
             text = request["text"]
@@ -436,8 +458,11 @@ def main(argv=None) -> int:
             request = json.load(sys.stdin)
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
-            daemon = ChatDaemon()
-            result = dispatch(daemon.brain, request)
+            if request.get("action") == "remember":
+                result = remember_on_office(request)
+            else:
+                daemon = ChatDaemon()
+                result = dispatch(daemon.brain, request)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except Exception as error:
