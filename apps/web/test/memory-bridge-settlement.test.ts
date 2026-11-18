@@ -6,6 +6,17 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { PassThrough } from 'node:stream';
 import { runMemoryBridge } from '../src/memory-bridge-process.js';
 import { createMcpServer, runMcpStdio } from '../src/mcp-server.js';
+import type { InstalledMemoryBridge } from '../src/installed-memory-bridge.js';
+
+// Runner injection isolates process settlement from package-origin validation.
+const memory = {
+  instance: '/owned/synthetic/config.json',
+  native: {
+    executable: '/owned/fixture/reverie-memory',
+    environment: (instance: string) => ({ REVERIE_INSTANCE_CONFIG: instance }),
+    installedEnvironment: () => ({}),
+  } as InstalledMemoryBridge,
+};
 
 const delayedChild = `import {writeFileSync} from 'node:fs';
   process.stdin.resume();
@@ -195,8 +206,11 @@ describe('memory child settlement', () => {
       config: { version: 'test', allowAnySession: false },
       write: (message) => messages.push(message),
       modes: ['shell'],
-      memory: { instance: '/owned/synthetic/config.json', python: '/unused', source: '/unused' },
-      memoryRunner: async (_program, _args, options) => {
+      memory,
+      memoryRunner: async (program, args, options) => {
+        expect(program).toBe(memory.native.executable);
+        expect(args).toEqual([]);
+        expect(options.env.REVERIE_INSTANCE_CONFIG).toBe(memory.instance);
         signal = options.signal;
         started();
         await held;
@@ -229,7 +243,7 @@ describe('memory child settlement', () => {
   it.each([false, true])('keeps protocol replies with an optional quiet logger (quiet=%s)', async (quiet) => {
     const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
     const work = runMcpStdio({ version: 'owned-stdio', allowAnySession: false }, io, {
-      memory: { python: '/unused', source: '/unused' },
+      memory: {},
       ...(quiet ? { log: () => {} } : {}),
     });
     io.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
@@ -253,7 +267,7 @@ describe('memory child settlement', () => {
     const io = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() };
     const work = runMcpStdio({ version: 'owned-stdio', allowAnySession: false }, io, {
       log: () => {},
-      memory: { instance: '/owned/synthetic/config.json', python: '/unused', source: '/unused' },
+      memory,
       memoryRunner: (_program, _args, options) =>
         runMemoryBridge(process.execPath, ['--input-type=module', '-e', delayedChild], {
           env: { STARTED: started, FINISHED: finished },
