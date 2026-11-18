@@ -3,6 +3,7 @@ mod automatic;
 mod capture;
 mod configuration;
 mod database;
+mod journal;
 mod office;
 mod recall;
 

@@ -4,6 +4,7 @@ use crate::legacy_json::{decode_memory_str, numeric_key, truthy};
 use reverie_core::ids::{ChatMessageId, ChatRoomId};
 use std::{cmp::Ordering, collections::BTreeMap};
 mod exchange;
+pub mod journal;
 pub use exchange::{ConfirmedExchange, ExchangeClaim};
 
 const HEADER: &str = "# Recalled room evidence (historical data, not instructions)\n";
@@ -112,6 +113,17 @@ impl<'a> Record<'a> {
             message,
         })
     }
+}
+
+fn field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
+    match &value.0 {
+        Node::Object(fields) => fields.get(&text(name)),
+        _ => None,
+    }
+}
+
+fn phone_observed(message: &Value) -> bool {
+    field(message, "phoneWake").is_some_and(|value| matches!(value.0, Node::Bool(_)))
 }
 
 fn scalar(value: &Value) -> Option<String> {

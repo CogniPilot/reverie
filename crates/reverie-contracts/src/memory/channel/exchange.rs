@@ -1,7 +1,7 @@
 //! Verify a confirmed exchange using the authenticated Office room readback.
-use super::{Timestamp, scalar};
+use super::{Timestamp, field, phone_observed, scalar};
 use crate::legacy_json::{Node, Value, decode_memory_str, truthy};
-use crate::memory::{integer, object, string, text};
+use crate::memory::{integer, object, string};
 use reverie_core::ids::{ChatMessageId, ChatRoomId};
 
 pub struct ExchangeClaim<'a> {
@@ -85,20 +85,13 @@ fn bounded_text(value: &str) -> Option<&str> {
     (!value.trim().is_empty() && value.chars().count() <= 16_000).then_some(value)
 }
 
-fn field<'a>(value: &'a Value, name: &str) -> Option<&'a Value> {
-    match &value.0 {
-        Node::Object(fields) => fields.get(&text(name)),
-        _ => None,
-    }
-}
-
 fn messages(value: &Value) -> Option<Vec<&Value>> {
     let Node::Array(rows) = &field(value, "messages")?.0 else {
         return None;
     };
     rows.iter()
         .filter(|row| truthy(field(row, "id")))
-        .map(|row| matches!(field(row, "phoneWake")?.0, Node::Bool(_)).then_some(row))
+        .map(|row| phone_observed(row).then_some(row))
         .collect()
 }
 

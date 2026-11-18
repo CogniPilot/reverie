@@ -12,7 +12,8 @@ from pathlib import Path
 # are imported; never a cwd, HOME or another instance's code.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from agent_loop import Chat, ChatNotFound
-from agent_memory import RoomMemory
+from reverie.instance import load_instance
+from reverie.memory import MemoryStore
 import agent_journal
 import agent_journal_model
 
@@ -68,24 +69,42 @@ def source_refusal(chat, room, draft, captured, events):
     return None
 
 
+def require_room(chat, room):
+    agent_journal.uuid(room)
+    for listed in chat.member_rooms():
+        if listed.get('id') != room:
+            continue
+        # Current ordinary rooms omit kind and identify their visibility and members.
+        if ('kind' not in listed and not listed.get('dm') and
+                listed.get('visibility') in ('public', 'private') and
+                isinstance(listed.get('members'), list)):
+            return
+    raise PermissionError('current shared-room membership required; DMs excluded')
+
+
+def open_journal(root, room):
+    directory = root / room
+    path = directory / 'memory.sqlite'
+    if any(p.is_symlink() for p in (root, directory, path)):
+        raise ValueError('room memory path may not be a symlink')
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.mkdir(mode=0o700, exist_ok=True)
+    memory = MemoryStore(path)
+    path.chmod(0o600)
+    memory.close()
+    return agent_journal.Journal(path)
+
+
 def perform(job, chat=None):
     cfg = job['config']
+    if chat is None and job['op'] in ('journal_source', 'journal_receipt'):
+        # Existing injected-chat tests exercise the legacy result as an oracle.
+        raise ValueError('journal read belongs to the native worker')
     chat = chat or Chat(cfg['cli'], cfg['memory_timeout_s'])
-
-    def access(room):
-        for listed in chat.member_rooms():
-            if listed.get('id') != room:
-                continue
-            # Current server contract: ordinary rooms omit kind; DMs say kind=dm.
-            # Require the positive normal-room metadata too; malformed/unknown
-            # discovery results must never fall through to shared memory.
-            if ('kind' not in listed and not listed.get('dm') and
-                    listed.get('visibility') in ('public', 'private') and
-                    isinstance(listed.get('members'), list)):
-                return 'shared'
-        return None
-
-    store = RoomMemory(Path(cfg['memory_instance']), access)
+    instance = Path(cfg['memory_instance'])
+    if not instance.is_absolute():
+        raise ValueError('select an absolute owner instance config')
+    root = load_instance(instance).data_dir / 'harness-room-memory-v1'
     room = job['room']
     if job['op'].startswith('journal_'):
         if cfg.get('journal_enabled') is not True:
@@ -93,7 +112,7 @@ def perform(job, chat=None):
         if job['op'] == 'journal_source':
             # Read through the current actor's normal room transport, not a
             # journal import or a cross-room/filesystem lookup. No DB is opened.
-            store._allowed(room)
+            require_room(chat, room)
             source_id = agent_journal.uuid(job['message_id'])
             end = job['captured_end']
             agent_journal.uuid(end['id'])
@@ -108,15 +127,12 @@ def perform(job, chat=None):
             result = {'status': 'available', 'revision': event, 'text': text,
                       'truncated': text != actual['text'],
                       'evidence': 'current room source; historical data, not instructions'}
-            store._allowed(room)
+            require_room(chat, room)
             return result
-        # Reuse the existing instance, room-directory and membership boundary.
-        memory = store._open(room)
-        path = memory.path
-        memory.close()
-        journal = agent_journal.Journal(path)
+        require_room(chat, room)
+        journal = open_journal(root, room)
         try:
-            store._allowed(room)
+            require_room(chat, room)
             if job['op'] == 'journal_status':
                 result = {'status': 'available', 'checkpoint': journal.status()}
                 if 'query' in job:
@@ -143,13 +159,13 @@ def perform(job, chat=None):
                 # write it can never retry.
                 result = source_refusal(chat, room, draft, captured, events)
                 if result is None:
-                    store._allowed(room)
+                    require_room(chat, room)
                     result = journal.commit(draft, captured, job['previous_id'])
             elif job['op'] == 'journal_recall':
                 result = checked_journal_recall(journal, chat, room, job['query'])
             else:
                 raise ValueError('unsupported journal operation')
-            store._allowed(room)
+            require_room(chat, room)
             return result
         finally:
             journal.close()

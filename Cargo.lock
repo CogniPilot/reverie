@@ -1288,6 +1288,7 @@ dependencies = [
  "reverie-core",
  "reverie-host",
  "reverie-store",
+ "rusqlite",
  "serde",
  "serde_json",
 ]

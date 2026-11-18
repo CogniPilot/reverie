@@ -1071,10 +1071,12 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
     try:
         job = dict(config={k: cfg[k] for k in keys}, room=room, op=op, **payload)
         job['config']['journal_enabled'] = cfg.get('journal_enabled', False)
-        worker = cfg.get('memory_worker_name', 'agent_memory_worker.py')
-        script = os.path.join(os.path.dirname(os.path.abspath(__file__)), worker)
+        directory = os.path.dirname(os.path.abspath(__file__))
+        default_worker = 'agent_memory_worker.py'
+        script = os.path.join(directory, cfg.get('memory_worker_name', default_worker))
         command = [sys.executable, '-I', '-B', script]
-        if op in ('recall', 'record') and worker == 'agent_memory_worker.py':
+        if (op in ('recall', 'record', 'journal_source', 'journal_receipt') and
+                os.path.realpath(script) == os.path.realpath(os.path.join(directory, default_worker))):
             command = [os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory'),
                        f'--automatic-worker={os.getpid()}']
         process = subprocess.Popen(command, stdin=subprocess.PIPE,

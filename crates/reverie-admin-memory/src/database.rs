@@ -32,14 +32,20 @@ impl Database {
     }
 
     pub(crate) fn read_only(&self) -> io::Result<Option<MemoryReader>> {
-        if !existing(&self.rooms, true)? || !existing(&self.room, true)? || !self.check_files()? {
+        let Some(file) = self.existing_file()? else {
             return Ok(None);
-        }
-        let reader = MemoryReadProfile::open_native(&self.file)
+        };
+        let reader = MemoryReadProfile::open_native(file)
             .map_err(|_| refused())?
             .bind(Arc::new(HashedEmbedder::default()), 0.995)
             .map_err(|_| refused())?;
         Ok(Some(reader))
+    }
+
+    pub(crate) fn existing_file(&self) -> io::Result<Option<&Path>> {
+        let present =
+            existing(&self.rooms, true)? && existing(&self.room, true)? && self.check_files()?;
+        Ok(present.then_some(self.file.as_path()))
     }
 
     pub(crate) fn writable(&self) -> io::Result<MemoryStore> {

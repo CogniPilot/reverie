@@ -86,6 +86,7 @@ impl Fixture {
             serde_json::from_slice(&fs::read(self.settings()).unwrap()).unwrap();
         config["recall_cap_chars"] = json!(3000);
         config["history_n"] = json!(30);
+        config["journal_enabled"] = json!(true);
         config["message_cap_chars"] = json!(19);
         let mut job = json!({"config": config, "op": op, "room": ROOM});
         job.as_object_mut()
@@ -356,7 +357,7 @@ fn automatic_refuses_unverified_history_and_removal_before_writing() {
     assert!(!fixture.database().exists());
 
     fixture.history(source, reply);
-    fs::write(fixture.0.join("mode"), "record-revoked").unwrap();
+    fs::write(fixture.0.join("mode"), "second-membership-revoked").unwrap();
     automatic_refused(&fixture.automatic("record", job));
     let store = fixture.store();
     assert_eq!(store.count(None).unwrap(), 0);
@@ -367,4 +368,174 @@ fn automatic_refused(output: &Output) {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
+}
+
+const CAPTURE_DIGEST: &str = "a2e6c4e66a925a2c2e0e5bf2861fc91e436cd0ff9bda1f5c033787b09779663f";
+const SOURCE_DIGEST: &str = "e1e721e80a05aa5f97e6ee027e7815965d265c487e962ce239ceb6bfea8aeccc";
+const RECEIPT_DIGEST: &str = "f902d20a8dbff7740ee3b8bd624e6af0c03b841aab1063e5504d4ff69b9b8566";
+
+fn journal_source() -> (Value, Value) {
+    // Produced by the Python journal's revision function over these messages.
+    let mut messages = json!({});
+    messages[REPLY] = json!({
+        "id": REPLY, "roomId": ROOM, "at": 12.0,
+        "text": "Capture a source 🐦", "from": null, "phoneWake": true,
+    });
+    messages[SOURCE] = json!({
+        "id": SOURCE, "roomId": ROOM, "at": 1e-5, "text": "界".repeat(400),
+        "from": {"display": "Día 🐦", "meta": {"𐐀": 1.0, "\u{e000}": 2}},
+        "phoneWake": false,
+    });
+    let job = json!({"message_id": SOURCE,
+        "captured_end": {"id": REPLY, "at": 12.0, "sha256": CAPTURE_DIGEST}});
+    (messages, job)
+}
+
+fn set_messages(fixture: &Fixture, messages: &Value) {
+    fs::write(fixture.0.join("messages.json"), messages.to_string()).unwrap();
+}
+
+#[test]
+fn native_journal_source_reuses_legacy_digest_and_bounds_excerpt() {
+    let fixture = Fixture::new();
+    let (messages, job) = journal_source();
+    set_messages(&fixture, &messages);
+    let read = accepted(&fixture.automatic("journal_source", job));
+    assert_eq!(read["status"], "available");
+    assert_eq!(read["text"], "界".repeat(341));
+    assert_eq!(read["truncated"], true);
+    assert_eq!(
+        read["revision"],
+        json!({"id": SOURCE, "at": 1e-5, "sha256": SOURCE_DIGEST})
+    );
+    assert_eq!(fs::read_to_string(fixture.0.join("calls")).unwrap(), "2");
+    assert!(!fixture.database().exists());
+}
+
+#[test]
+fn native_journal_source_refuses_missing_or_changed_evidence_and_revocation() {
+    let fixture = Fixture::new();
+    let (messages, job) = journal_source();
+    for (id, key, value) in [
+        (REPLY, "text", json!("Edited request")),
+        (REPLY, "from", json!({"display": "Edited sender"})),
+        (SOURCE, "at", json!(13)),
+        (SOURCE, "roomId", json!(OTHER)),
+        (SOURCE, "phoneWake", Value::Null),
+    ] {
+        let mut changed = messages.clone();
+        changed[id][key] = value;
+        set_messages(&fixture, &changed);
+        automatic_refused(&fixture.automatic("journal_source", job.clone()));
+    }
+    set_messages(&fixture, &json!({}));
+    automatic_refused(&fixture.automatic("journal_source", job.clone()));
+
+    for rooms in [
+        json!([]),
+        json!([{"id": ROOM, "kind": "dm", "visibility": "private", "members": [SESSION]}]),
+    ] {
+        fixture.rooms(rooms);
+        automatic_refused(&fixture.automatic("journal_source", job.clone()));
+    }
+    fixture.rooms(json!([member()]));
+    set_messages(&fixture, &messages);
+    fs::write(fixture.0.join("calls"), "0").unwrap();
+    fs::write(fixture.0.join("mode"), "second-membership-revoked").unwrap();
+    automatic_refused(&fixture.automatic("journal_source", job));
+    assert_eq!(fs::read_to_string(fixture.0.join("calls")).unwrap(), "2");
+    assert!(!fixture.database().exists());
+}
+
+fn original_receipt(fixture: &Fixture) {
+    let db = fixture.database();
+    fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(db).unwrap();
+    connection.execute_batch(
+        "CREATE TABLE hands_journal (id INTEGER PRIMARY KEY, turn_id TEXT UNIQUE NOT NULL,
+             committed_ms REAL NOT NULL, payload_hash TEXT NOT NULL, payload TEXT NOT NULL, end_at REAL NOT NULL);"
+    ).unwrap();
+    connection
+        .execute(
+            "INSERT INTO hands_journal VALUES (7, ?1, 200.5, ?2, ?3, 12.0)",
+            (
+                SOURCE,
+                RECEIPT_DIGEST,
+                r#"{"draft":{"text":"receipt must never expose this 🐦"},"schema":1}"#,
+            ),
+        )
+        .unwrap();
+    connection.close().unwrap();
+}
+
+#[test]
+fn native_journal_receipt_checks_stored_digest_and_never_changes_database() {
+    let fixture = Fixture::new();
+    original_receipt(&fixture);
+    let before = fs::read(fixture.database()).unwrap();
+    let found = fixture.automatic(
+        "journal_receipt",
+        json!({"turn_id": SOURCE, "expected_hash": RECEIPT_DIGEST}),
+    );
+    assert_eq!(
+        accepted(&found),
+        accepted(&fixture.automatic("journal_receipt", json!({"turn_id": 7})))
+    );
+    let receipt = accepted(&found);
+    assert_eq!(receipt["status"], "committed");
+    assert_eq!(receipt["entry_id"], 7);
+    assert_eq!(receipt["turn_id"], SOURCE);
+    assert_eq!(receipt["committed_ms"], 200.5);
+    assert_eq!(receipt["payload_sha256"], RECEIPT_DIGEST);
+    assert!(!String::from_utf8_lossy(&found.stdout).contains("must never expose"));
+    assert_eq!(
+        accepted(&fixture.automatic(
+            "journal_receipt",
+            json!({
+                "turn_id": 7, "expected_hash": "0".repeat(64),
+            })
+        )),
+        json!({"status": "conflict", "entry_id": 7})
+    );
+    assert_eq!(fs::read(fixture.database()).unwrap(), before);
+
+    let connection = rusqlite::Connection::open(fixture.database()).unwrap();
+    connection
+        .execute("UPDATE hands_journal SET payload='corrupted'", [])
+        .unwrap();
+    connection.close().unwrap();
+    let corrupt = accepted(&fixture.automatic("journal_receipt", json!({"turn_id": SOURCE})));
+    assert_eq!(corrupt, json!({"status": "conflict", "turn_id": SOURCE}));
+}
+
+#[test]
+fn native_journal_receipt_distinguishes_absence_from_corruption_or_lost_access() {
+    let fixture = Fixture::new();
+    let job = json!({"turn_id": SOURCE});
+    let missing = accepted(&fixture.automatic("journal_receipt", job.clone()));
+    assert_eq!(missing["status"], "not_found");
+    assert!(missing["evidence"].as_str().unwrap().contains("not proof"));
+    assert!(!fixture.database().exists());
+
+    fixture.store().close().unwrap();
+    assert_eq!(
+        accepted(&fixture.automatic("journal_receipt", job.clone())),
+        missing
+    );
+    for value in [
+        json!(-1),
+        json!(1_000_000_000),
+        json!(true),
+        json!(1.0),
+        json!("arbitrary"),
+    ] {
+        automatic_refused(&fixture.automatic("journal_receipt", json!({"turn_id": value})));
+    }
+    automatic_refused(&fixture.automatic(
+        "journal_receipt",
+        json!({"turn_id": SOURCE, "expected_hash": "malformed"}),
+    ));
+    fs::write(fixture.0.join("calls"), "0").unwrap();
+    fs::write(fixture.0.join("mode"), "second-membership-revoked").unwrap();
+    automatic_refused(&fixture.automatic("journal_receipt", job));
 }

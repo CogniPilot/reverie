@@ -15,7 +15,13 @@ import shlex
 import sqlite3
 import time
 
-from agent_memory import uuid
+from uuid import UUID
+
+def uuid(value):
+    if not isinstance(value, str) or str(UUID(value)) != value:
+        raise ValueError('canonical full UUID required')
+    return value
+
 
 TEXT_BYTES = 1024
 RESULT_CHARS = 2400

@@ -24,6 +24,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true
 getrandom.workspace = true
 
 [lints]

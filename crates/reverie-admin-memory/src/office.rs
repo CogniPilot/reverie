@@ -3,7 +3,7 @@ use crate::{
     refused,
 };
 use reverie_contracts::memory::channel::Membership;
-use reverie_core::ids::ChatRoomId;
+use reverie_core::ids::{ChatMessageId, ChatRoomId};
 use serde::Deserialize;
 use std::{
     io,
@@ -57,6 +57,24 @@ impl Office {
                 room.as_str(),
                 "-n",
                 &count.to_string(),
+                "--json",
+            ],
+            HISTORY_BYTES,
+        )
+    }
+
+    pub(crate) fn exact_message(
+        &self,
+        room: &ChatRoomId,
+        id: &ChatMessageId,
+    ) -> io::Result<Vec<u8>> {
+        self.run(
+            &[
+                "read",
+                "--room",
+                room.as_str(),
+                "--message",
+                id.as_str(),
                 "--json",
             ],
             HISTORY_BYTES,

@@ -4,10 +4,12 @@ mod beliefs;
 mod claims;
 mod documents;
 mod error;
+mod journal;
 pub use documents::{
     BallotHistory, BallotOutcome, DocumentEnvelope, DocumentHistory, MemoryDocuments,
     RecordedBallot, TransactionDocuments,
 };
+pub use journal::{JournalEntryId, JournalKey, JournalReceipt};
 mod query;
 mod reader;
 pub use reader::{MemoryReadProfile, MemoryReader, NativeMemoryRead};
