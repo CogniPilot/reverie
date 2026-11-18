@@ -10,21 +10,31 @@ use std::{
     process::{Command, Stdio},
 };
 
-const RELEASE: &str =
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0";
 const LIMIT: u64 = 400 * 1024 * 1024;
 pub(super) const MODEL: &str = "kokoro-v1.0.onnx";
 pub(super) const VOICES: &str = "voices-v1.0.bin";
-const ASSETS: [(&str, &str); 2] = [
-    (
-        MODEL,
-        "7d5df8ecf7d4b1878015a32686053fd0eebe2bc377234608764cc0ef3636a6c5",
-    ),
-    (
-        VOICES,
-        "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
-    ),
-];
+
+#[derive(serde::Deserialize)]
+struct Asset {
+    url: String,
+    sha256: String,
+}
+
+#[derive(serde::Deserialize)]
+struct Pins {
+    model: Asset,
+    voices: Asset,
+}
+
+fn pins() -> Result<Pins> {
+    Ok(serde_json::from_str(include_str!("../model-files.json"))?)
+}
+
+pub(super) fn verify_files(model: &Path, voices: &Path) -> Result<()> {
+    let pins = pins()?;
+    verify(model, &pins.model.sha256)?;
+    verify(voices, &pins.voices.sha256)
+}
 
 pub(super) fn ensure(directory: &Path) -> Result<()> {
     DirBuilder::new()
@@ -43,12 +53,13 @@ pub(super) fn ensure(directory: &Path) -> Result<()> {
         return Err("Invalid model download lock".into());
     }
     let _guard = Flock::lock(lock, FlockArg::LockExclusive).map_err(|(_, error)| error)?;
-    for (name, digest) in ASSETS {
+    let pins = pins()?;
+    for (name, asset) in [(MODEL, pins.model), (VOICES, pins.voices)] {
         let target = directory.join(name);
         match target.symlink_metadata() {
-            Ok(_) => verify(&target, digest)?,
+            Ok(_) => verify(&target, &asset.sha256)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                download(directory, name, digest)?;
+                download(directory, name, &asset)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -83,7 +94,7 @@ impl Drop for Part {
     }
 }
 
-fn download(directory: &Path, name: &str, digest: &str) -> Result<()> {
+fn download(directory: &Path, name: &str, asset: &Asset) -> Result<()> {
     let path = directory.join(format!("{name}.part"));
     // The held cache lock makes this name specific to a previous interrupted
     // download. Removing a possible link never touches its target.
@@ -115,7 +126,7 @@ fn download(directory: &Path, name: &str, digest: &str) -> Result<()> {
             "--max-filesize",
         ])
         .arg(LIMIT.to_string())
-        .arg(format!("{RELEASE}/{name}"))
+        .arg(&asset.url)
         .stdin(Stdio::null())
         .stdout(file.try_clone()?)
         .status()?;
@@ -123,7 +134,7 @@ fn download(directory: &Path, name: &str, digest: &str) -> Result<()> {
         return Err(format!("Model download failed: {name}").into());
     }
     file.sync_all()?;
-    verify(&part.0, digest)?;
+    verify(&part.0, &asset.sha256)?;
     fs::hard_link(&part.0, directory.join(name))?;
     File::open(directory)?.sync_all()?;
     Ok(())

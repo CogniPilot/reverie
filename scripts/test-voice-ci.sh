@@ -34,14 +34,13 @@ trap cleanup EXIT INT TERM
 # Whitelist the fixture environment. A shell inherited from an expert must not
 # turn this route fixture into a reader/writer of the live owner data directory.
 fixture_env=(env -i "PATH=$PATH" "HOME=$private_home" "TMPDIR=$private_home/tmp"
-  "PYTHONPATH=$repo_root/python" "REVERIE_DATA_DIR=$private_home/data" "REVERIE_RUNTIME_TEST=1"
+  "REVERIE_DATA_DIR=$private_home/data" "REVERIE_RUNTIME_TEST=1"
   "REVERIE_VOICE_CI_ARTIFACTS=$REVERIE_VOICE_CI_ARTIFACTS" "CHROMIUM_PATH=$CHROMIUM_PATH"
-  "PHONEMIZER_ESPEAK_LIBRARY=$PHONEMIZER_ESPEAK_LIBRARY"
   "REVERIE_VOICE_CI_WHISPER_MODEL=$REVERIE_VOICE_CI_WHISPER_MODEL"
   "REVERIE_VOICE_CI_KOKORO_MODEL=$REVERIE_VOICE_CI_KOKORO_MODEL"
   "REVERIE_VOICE_CI_KOKORO_VOICES=$REVERIE_VOICE_CI_KOKORO_VOICES"
   OMP_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2)
-"${fixture_env[@]}" python3 scripts/voice-ci/service.py --artifacts "$REVERIE_VOICE_CI_ARTIFACTS" \
+"${fixture_env[@]}" reverie-voice-ci-serve --artifacts "$REVERIE_VOICE_CI_ARTIFACTS" \
   > "$REVERIE_VOICE_CI_ARTIFACTS/speech.log" 2>&1 &
 speech_pid=$!
 wait_ready() {

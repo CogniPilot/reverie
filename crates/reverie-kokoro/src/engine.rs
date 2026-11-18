@@ -10,7 +10,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(super) struct Engine {
+/// Loaded CPU model and matching voice bank.
+pub struct Engine {
     session: Session,
     voices: VoiceBank,
     phonemizer: Espeak,
@@ -18,8 +19,22 @@ pub(super) struct Engine {
 }
 
 impl Engine {
-    pub(super) fn load(directory: &Path) -> Result<Self> {
+    /// Verify an existing cache, downloading only missing assets.
+    pub fn load(directory: &Path) -> Result<Self> {
         assets::ensure(directory)?;
+        Self::open(
+            &directory.join(assets::MODEL),
+            &directory.join(assets::VOICES),
+        )
+    }
+
+    /// Open the same pinned graph and voice bank from preprovisioned files.
+    pub fn load_files(model: &Path, voices: &Path) -> Result<Self> {
+        assets::verify_files(model, voices)?;
+        Self::open(model, voices)
+    }
+
+    fn open(model: &Path, voices: &Path) -> Result<Self> {
         let library = option_env!("REVERIE_KOKORO_ONNX")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -32,9 +47,9 @@ impl Engine {
             .map_err(ort::Error::<()>::from)?
             .with_inter_threads(1)
             .map_err(ort::Error::<()>::from)?
-            .commit_from_file(directory.join(assets::MODEL))?;
+            .commit_from_file(model)?;
         let phonemizer = Espeak::new();
-        let voices = VoiceBank::load(&directory.join(assets::VOICES), &phonemizer.languages()?)?;
+        let voices = VoiceBank::load(voices, &phonemizer.languages()?)?;
         let vocab = serde_json::from_str(include_str!("vocab.json"))?;
         Ok(Self {
             session,
@@ -44,12 +59,20 @@ impl Engine {
         })
     }
 
-    pub(super) fn voices(&self) -> Vec<Voice> {
+    /// List supported voices in stable ID order.
+    #[must_use]
+    pub fn voices(&self) -> Vec<Voice> {
         self.voices.options()
     }
 
-    pub(super) fn synthesize(&mut self, text: &str, voice: &Voice) -> Result<Option<Vec<u8>>> {
-        let speech = self.phonemizer.text(voice.language, text)?;
+    /// Synthesize a bounded utterance as 24 kHz mono PCM16 WAV.
+    pub fn synthesize(&mut self, text: &str, id: &str) -> Result<Option<Vec<u8>>> {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > 600 {
+            return Err("Text must contain 1 to 600 characters".into());
+        }
+        let (voice, styles) = self.voices.get(id).ok_or("Unknown or unsupported voice")?;
+        let speech = self.phonemizer.text(voice.language(), text)?;
         let retained: String = speech
             .chars()
             .filter(|glyph| self.vocab.contains_key(glyph))
@@ -65,7 +88,7 @@ impl Engine {
                 .chars()
                 .filter_map(|glyph| self.vocab.get(&glyph).copied())
                 .collect();
-            let style = self.voices.style(voice, tokens.len());
+            let style = VoiceBank::style(styles, tokens.len());
             let audio = infer(&mut self.session, &tokens, style)?;
             let padding = if index + 1 < chunks.len() {
                 phonemes::pause(chunk)

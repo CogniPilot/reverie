@@ -82,6 +82,11 @@ same CPython/Unicode provenance as its existing text facts. Maintained
 the exact CPython algorithmic-name lexical check in Core. Its source-data-driven
 Rust code generator is build-time tooling, distinct from runtime name lookup.
 
+The optional voice acceptance environment uses Whisper.cpp (MIT) and its GGML
+conversion of OpenAI's Whisper Tiny.en weights (MIT). The Nix lock pins the
+native implementation and `scripts/voice-ci/whisper-model.json` pins the exact
+checkpoint published by the Whisper.cpp project.
+
 ## Rust front TLS dependencies
 
 The Rust TLS adapter uses rustls (Apache-2.0 OR ISC OR MIT), tokio-rustls

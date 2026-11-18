@@ -18,9 +18,15 @@ uses a loopback address, no redirects, and small JSON responses. Timing counters
 are nonnegative `u64` nanoseconds; the former Python control accepted unbounded
 integers. JSON formatting is semantic, not byte-identical to Python serialization.
 
-This tool performs acceptance, not speech inference. The surviving Python
-`service.py` and `audio.py`, real Whisper/Kokoro engines, and shell orchestrator
-remain separate migration work. A Rust verifier does not remove those dependencies.
+`reverie-voice-ci-serve` supplies real speech inference for the browser and
+verifier. It uses the production Rust Kokoro engine and checks the ONNX graph
+and voice archive before publishing readiness. Recognition uses a separately
+serialized CPU-only Whisper.cpp process. The service verifies its Tiny.en
+checkpoint and normalizes bounded WAV inputs to 16 kHz with FFmpeg. The
+`voice-ci` flake shell supplies the pinned engines and model files.
+
+The package depends on native speech libraries and executables. The separate
+Console PTY build uses the default development shell for node-gyp.
 
 The native integration control runs the real CLI against an owned deterministic
 HTTP fixture. It checks successful acceptance and refusals for voice, timing,

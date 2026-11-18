@@ -1770,10 +1770,15 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "clap",
+ "getrandom",
  "http-body-util",
  "hyper",
  "hyper-util",
+ "nix",
+ "reverie-kokoro",
+ "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 

@@ -1,5 +1,4 @@
 //! Loopback speech transport with immediate busy refusal.
-use crate::{Result, engine::Engine, voices::Voice};
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::{
@@ -10,6 +9,7 @@ use hyper::{
     service::service_fn,
 };
 use hyper_util::rt::{TokioIo, TokioTimer};
+use reverie_kokoro::{Engine, Result, Voice};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
@@ -110,7 +110,7 @@ fn select<'a>(
     if let Some(voice) = payload.get("voice").filter(|v| !v.is_null()) {
         return voices
             .iter()
-            .find(|candidate| voice.as_str() == Some(&candidate.id))
+            .find(|candidate| voice.as_str() == Some(candidate.id()))
             .ok_or("Unknown or unsupported voice");
     }
     let speaker = payload
@@ -122,7 +122,7 @@ fn select<'a>(
     let index = u32::from_be_bytes(digest[..4].try_into().expect("SHA-256 prefix")) as usize;
     let english: Vec<_> = voices
         .iter()
-        .filter(|voice| voice.language.starts_with("en-"))
+        .filter(|voice| voice.language().starts_with("en-"))
         .collect();
     if english.is_empty() {
         return Err("No compatible English voice is installed");
@@ -189,7 +189,7 @@ async fn synthesize(request: Request<Incoming>, state: &State) -> Reply {
         return error(StatusCode::SERVICE_UNAVAILABLE, "Kokoro is busy; try again");
     };
     let text = text.trim().to_owned();
-    match tokio::task::spawn_blocking(move || engine.synthesize(&text, &voice)).await {
+    match tokio::task::spawn_blocking(move || engine.synthesize(&text, voice.id())).await {
         Ok(Ok(Some(wav))) => reply(StatusCode::OK, "audio/wav", wav),
         Ok(Ok(None)) => error(StatusCode::BAD_REQUEST, "Nothing to synthesize"),
         _ => error(StatusCode::INTERNAL_SERVER_ERROR, "Speech synthesis failed"),

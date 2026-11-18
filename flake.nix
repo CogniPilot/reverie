@@ -399,6 +399,7 @@
               pkgs.gnutar pkgs.attr pkgs.acl pkgs.which pkgs.bash (pkgs.lib.getBin pkgs.util-linux)
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 pkgs.bubblewrap ];
             SHELL = "${pkgs.bash}/bin/bash";
+            npm_config_nodedir = "${pkgs.nodejs_22}";
             LOCALE_ARCHIVE = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.glibcLocales}/lib/locale/locale-archive";
             REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
             REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";

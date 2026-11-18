@@ -13,11 +13,25 @@ const ROWS: usize = 510;
 const MAX_MEMBER: u64 = (ROWS * DIMENSION * 4 + 4096) as u64;
 
 #[derive(Clone, serde::Serialize)]
-pub(super) struct Voice {
-    pub(super) id: String,
+pub struct Voice {
+    id: String,
     label: String,
-    pub(super) language: &'static str,
+    language: &'static str,
     gender: &'static str,
+}
+
+impl Voice {
+    /// The persisted voice ID accepted by the speech API.
+    #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    /// The model language tag for this voice.
+    #[must_use]
+    pub fn language(&self) -> &'static str {
+        self.language
+    }
 }
 
 pub(super) struct VoiceBank(BTreeMap<String, (Voice, Vec<f32>)>);
@@ -55,9 +69,15 @@ impl VoiceBank {
         self.0.values().map(|(voice, _)| voice.clone()).collect()
     }
 
-    pub(super) fn style(&self, voice: &Voice, length: usize) -> &[f32] {
+    pub(super) fn get(&self, voice: &str) -> Option<(&Voice, &[f32])> {
+        self.0
+            .get(voice)
+            .map(|(voice, styles)| (voice, styles.as_slice()))
+    }
+
+    pub(super) fn style(styles: &[f32], length: usize) -> &[f32] {
         let start = (length.min(ROWS) - 1) * DIMENSION;
-        &self.0[&voice.id].1[start..start + DIMENSION]
+        &styles[start..start + DIMENSION]
     }
 }
 

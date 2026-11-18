@@ -1,17 +1,10 @@
 //! Local Kokoro speech service with an owner-selected model cache.
-mod assets;
-mod audio;
-mod engine;
-mod phonemes;
 mod service;
-mod voices;
 
 use clap::Parser;
+use reverie_kokoro::Result;
 use std::{env, path::PathBuf, process::ExitCode, sync::Arc};
 use tokio::net::TcpListener;
-
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type Result<T> = std::result::Result<T, Error>;
 
 /// Serve Kokoro speech on loopback using the pinned model and voices.
 #[derive(Parser)]
