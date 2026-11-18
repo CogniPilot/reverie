@@ -5,6 +5,7 @@ mod configuration;
 mod database;
 mod journal;
 mod office;
+mod opencode_context;
 mod read_turn;
 mod recall;
 mod save;
@@ -30,6 +31,7 @@ const AUTOMATIC_BOUND: usize = 50_000;
 // The Office can return up to 1,000 rows of 8,000 UTF-16 units each.
 const TURN_CAPTURE_BOUND: usize = 32 * 1024 * 1024;
 const RESPONSE_BOUND: usize = 131_072;
+const OPENCODE_CONTEXT_BOUND: usize = 4 * 1024 * 1024;
 const MAX_CHARS: usize = 12_000;
 
 #[derive(Parser, Deserialize, Serialize)]
@@ -133,6 +135,11 @@ fn journal_context_worker(expected_parent: i32) -> io::Result<()> {
     write_reply(&turn_context::execute(&request)?, RESPONSE_BOUND)
 }
 
+fn opencode_context_worker(expected_parent: i32) -> io::Result<()> {
+    let request = worker_input(expected_parent, OPENCODE_CONTEXT_BOUND)?;
+    write_reply(&opencode_context::execute(&request), OPENCODE_CONTEXT_BOUND)
+}
+
 fn journal_read_worker(expected_parent: i32) -> io::Result<()> {
     let request = worker_input(expected_parent, RESPONSE_BOUND)?;
     write_reply(&read_turn::execute(&request)?, RESPONSE_BOUND)
@@ -166,6 +173,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-read-worker" => journal_read_worker,
         "--journal-capture-worker" => journal_capture_worker,
         "--journal-context-worker" => journal_context_worker,
+        "--opencode-context-worker" => opencode_context_worker,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

@@ -736,8 +736,8 @@ path. Select a short private temporary directory for the suite:
 ```bash
 mkdir -m 700 -p "$HOME/rt"
 export TMPDIR="$HOME/rt"
-python3 -m unittest discover -s tests
-node --test tests/test_opencode_plugin.mjs
+nix shell .#reverie.runtime.adminMemory -c python3 -m unittest discover -s tests
+nix shell .#reverie.runtime.adminMemory -c node --test tests/test_opencode_plugin.mjs
 ```
 
 Tests cover memory, reflection, dreams, deliberate values, scope isolation, lifecycle

@@ -413,9 +413,11 @@ it does not perform global Docker/Podman pruning or run a nightly scheduler.
 
 ## Validation
 
+Run these checks inside `nix develop`.
+
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_opencode_plugin.mjs
+nix shell .#reverie.runtime.adminMemory -c python3 -m unittest discover -s tests
+nix shell .#reverie.runtime.adminMemory -c node --test tests/test_opencode_plugin.mjs
 ```
 
 Tests cover memory, reflection, dreams, deliberate values, scope isolation, lifecycle

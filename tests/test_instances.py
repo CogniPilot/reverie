@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from reverie.config import Config
 from reverie.chat import ChatDaemon
-from reverie.context_budget import memory_byte_budget, recent_exchanges
 from reverie.reverie import Reverie
 from reverie.opencode import dispatch, install
 
@@ -85,21 +84,6 @@ class InstanceTests(unittest.TestCase):
         value = json.loads(path.read_text()); value["credentials"] = "unexpected"; path.write_text(json.dumps(value))
         with self.assertRaises(ValueError):
             Config(instance_config=path)
-
-    def test_context_budget_scales_and_reserves_tools_and_output(self):
-        small = memory_byte_budget(8192, 2048, 1000, "fixed rules")
-        large = memory_byte_budget(131072, 8192, 1000, "fixed rules")
-        self.assertGreater(large, small)
-        messages = []
-        for i in range(30):
-            messages.extend([{"role":"user", "content":str(i)+"x"*100},
-                             {"role":"assistant", "content":"y"*100}])
-        self.assertLessEqual(len(recent_exchanges(messages, small).encode()), small)
-        self.assertIn("user: 29", recent_exchanges(messages, small))
-        self.assertEqual(recent_exchanges(messages, 0), "")
-        self.assertEqual(memory_byte_budget(8192, 8192), 0)
-        with self.assertRaises(ValueError):
-            memory_byte_budget(-1)
 
     def test_local_gpu_provider_uses_selected_endpoint_limits_and_environment_credential(self):
         workspace=self.root/"gpu-runtime"

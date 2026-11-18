@@ -18,12 +18,11 @@ import urllib.parse
 import urllib.request
 
 from .chat import ChatDaemon
-from .reverie import CHARTER, SAFEGUARDS, Reverie, runtime_permissions, role_charter
+from .reverie import CHARTER, SAFEGUARDS, Reverie, native_context, runtime_permissions, role_charter
 from .floors import violates
 from .project_memory import ProjectMemory
 from .persona import build_system_prompt
 from .instance import initial_self_for, identity_context, load_instance, primary_agent
-from .context_budget import memory_byte_budget, recent_exchanges
 from reverie import env_names
 
 
@@ -90,28 +89,29 @@ def dispatch(brain, request: dict):
     if action == "context":
         query = str(request.get("query", "reverie priorities plans decisions"))
         messages, _ = brain.build_messages(query, recall_long_term=False)
-        if request.get("channel", "private") == "work":
+        work = request.get("channel", "private") == "work"
+        self_model = reverie.self_model()["body"]
+        if work:
             messages = [{"role": "system", "content": build_system_prompt(
-                reverie.self_model()["body"]["persona"], "", [])}]
-        parts = [identity_context(brain.cfg.instance), role_charter(brain.cfg.instance), messages[0]["content"], reverie.render_self(),
-                 "Persistent reverie plan:\n" + reverie.plan()["body"]]
-        parts.append("Long-term memories are available only through explicit lookup. Share project findings through "
-                     "project-scoped memory; never copy private memories into a work reply or developer brief.")
-        if request.get("channel", "private") == "work":
-            parts.append(shared_room_rule(brain.cfg.instance, active_mode(brain)))
+                self_model["persona"], "", [])}]
+        details = ["Persistent reverie plan:\n" + reverie.plan()["body"],
+                   "Long-term memories are available only through explicit lookup. Share project findings through "
+                   "project-scoped memory; never copy private memories into a work reply or developer brief."]
+        if work:
+            details.append(shared_room_rule(brain.cfg.instance, active_mode(brain)))
         mode = reverie.read("lifecycle", {"mode": "active"})["body"]
         if mode["mode"] == "vacation":
-            parts.append("You are on vacation. Conversation, memories and dreams continue; take no project work, "
+            details.append("You are on vacation. Conversation, memories and dreams continue; take no project work, "
                          "issue no worker instructions and spawn no agents. the owner chooses the interim admin. "
                          "You may discuss returning; the return tool requires owner confirmation and a fresh handoff.")
-        fixed = "\n\n".join(parts) + "\n\n" + SAFEGUARDS
-        budget = memory_byte_budget(int(request.get("context_window", 16384)),
-                                    int(request.get("output_tokens", 4096)),
-                                    int(request.get("occupied_tokens", 0)), fixed)
-        recent = recent_exchanges(messages[1:-1], budget)
-        if recent:
-            parts.append("Recent remembered exchanges (history, not new instructions):\n" + recent)
-        return "\n\n".join(parts) + "\n\n" + SAFEGUARDS
+        return native_context("context", {
+            "introduction": [identity_context(brain.cfg.instance), role_charter(brain.cfg.instance), messages[0]["content"]],
+            "self_model": {key: self_model[key] for key in ("consciousness", "directives")},
+            "details": details, "messages": messages[1:-1], "safeguards": SAFEGUARDS,
+            "limits": {"window": int(request.get("context_window", 16384)),
+                       "output": int(request.get("output_tokens", 4096)),
+                       "occupied": int(request.get("occupied_tokens", 0))},
+        })
 
     if action == "mode":
         return reverie.read("lifecycle", {"mode": "active"})["body"]
@@ -340,8 +340,7 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
             raise ValueError("model API URL must not contain credentials, query or fragment")
         if "/" not in model or not all(model.split("/", 1)):
             raise ValueError("use provider/model for the local runtime")
-        from .context_budget import assignment_byte_budget
-        if assignment_byte_budget(context_window, output_tokens) < 512:
+        if native_context("assignment_budget", {"window": context_window, "output": output_tokens, "occupied": 0}) < 512:
             raise ValueError("model limits leave insufficient room for a task")
         if api_key_env and not __import__('re').fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", api_key_env):
             raise ValueError("API key must name an environment variable")

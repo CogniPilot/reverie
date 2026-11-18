@@ -9,14 +9,38 @@ pub fn assignment_byte_budget(
     output_tokens: u64,
     occupied_tokens: u64,
 ) -> Result<usize, DocumentPolicyError> {
+    Ok(
+        remaining_prompt_bytes(context_window, output_tokens, occupied_tokens)?.min(32_000)
+            as usize,
+    )
+}
+
+pub fn recent_exchange_byte_budget(
+    context_window: u64,
+    output_tokens: u64,
+    occupied_tokens: u64,
+    fixed_bytes: usize,
+) -> Result<usize, DocumentPolicyError> {
+    let remaining = remaining_prompt_bytes(context_window, output_tokens, occupied_tokens)?;
+    Ok((remaining as usize)
+        .saturating_sub(fixed_bytes)
+        .div_euclid(2)
+        .min(context_window as usize / 5)
+        .min(32_000))
+}
+
+fn remaining_prompt_bytes(
+    context_window: u64,
+    output_tokens: u64,
+    occupied_tokens: u64,
+) -> Result<u64, DocumentPolicyError> {
     if !(1024..=10_000_000).contains(&context_window) {
         return Err(DocumentPolicyError);
     }
     Ok(context_window
         .saturating_sub(output_tokens)
         .saturating_sub(occupied_tokens)
-        .saturating_sub(2048)
-        .min(32_000) as usize)
+        .saturating_sub(2048))
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DocumentPolicyError;

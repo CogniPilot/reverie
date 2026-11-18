@@ -18,9 +18,13 @@ pub enum DocumentCodecError {
     Directives,
     Reason,
     Brief,
+    BriefEssentials,
 }
 impl fmt::Display for DocumentCodecError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if *self == Self::BriefEssentials {
+            return f.write_str("task and essential checks exceed the available model budget; shorten or split the assignment");
+        }
         write!(f, "{self:?}")
     }
 }

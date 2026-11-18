@@ -1,4 +1,4 @@
-// Run with node --test tests/test_opencode_plugin.mjs. No LLM or npm install needed.
+// Run with reverie-admin-memory on PATH and node --test tests/test_opencode_plugin.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, rm, stat } from "node:fs/promises";
