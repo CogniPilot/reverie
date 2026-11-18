@@ -41,5 +41,4 @@ df -h / /var/lib/docker
 su - installer -c 'bash /home/installer/step-1.sh'
 test "$(docker exec reverie curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/api/status)" = 401
 # Exercise browser owner bootstrap and authenticated access against this installation.
-docker exec reverie bash -c 'umask 077; printf "machine 127.0.0.1 login owner password %s\n" "$(cat /instances/default/owner-password)" > "$TMPDIR/netrc"'
-docker exec -i reverie bash -s < /ci/boot-owner.sh
+docker exec -i reverie node --input-type=module < /ci/boot-owner.mjs

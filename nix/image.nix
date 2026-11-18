@@ -1,4 +1,4 @@
-{ pkgs, src, reverie, console, memory, runtime, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
@@ -14,7 +14,6 @@ let
   claudeInterpreter = if pkgs.stdenv.hostPlatform.isx86_64 then "/lib64/ld-linux-x86-64.so.2"
     else if pkgs.stdenv.hostPlatform.isAarch64 then "/lib/ld-linux-aarch64.so.1"
     else null;
-  entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   humanToolkit = if runtimePackages == null then import ./human-terminal-toolkit.nix { inherit pkgs src; }
     else runtimePackages.humanTerminalToolkit;
   nixPrepare = if runtimePackages == null then import ./nix-store-prepare.nix { inherit pkgs src; }

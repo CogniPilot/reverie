@@ -4,7 +4,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
 
+mod bootstrap;
+
 fn main() -> ExitCode {
+    if std::env::var_os("REVERIE_BOOT_FIXTURE").is_some() {
+        return bootstrap::run();
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args
         .first()

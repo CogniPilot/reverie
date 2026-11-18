@@ -98,24 +98,23 @@
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             chatLanguageTools = {
               python = pkgs.pyright;
               modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
             };
           };
           inherit container-memory start update;
-          containerRuntime = import ./nix/container-runtime.nix { inherit pkgs; src = source; };
           launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = source; };
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
           };
           workerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
           };
           workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
@@ -126,13 +125,13 @@
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             resourceReplacement = true;
           };
           resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
@@ -169,7 +168,7 @@
           pkgs = pkgsFor system;
           src = source;
           inherit baseImage baseConfig;
-          inherit (self.packages.${system}) containerRuntime;
+          inherit (self.packages.${system}) containerRuntime entrypoint;
           inferenceRuntime = import ./nix/local-model-runtime.nix {
             nixpkgs = toString llama-nixpkgs;
             inherit system capability;
@@ -207,6 +206,7 @@
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs runtimePackages; src = source;
           inherit (packages) reverie console memory runtime;
+          entrypoint = self.packages.${system}.entrypoint;
           worker = true;
           inherit perfGuestCapsule;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };

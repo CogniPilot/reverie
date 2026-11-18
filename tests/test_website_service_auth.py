@@ -77,7 +77,7 @@ class ServiceAuthStartupTests(unittest.TestCase):
           valid = args: worker: resourceReplacement:
             (builtins.tryEval (builtins.deepSeq (import ROOT/nix/image.nix {
               inherit pkgs worker resourceReplacement; src = ROOT;
-              reverie = null; console = null; memory = null; runtime = null;
+              reverie = null; console = null; memory = null; runtime = null; entrypoint = null;
               ownerTerminalWebsite = if args == null then null else { webArgs = args; };
             }) true)).success;
           bad = [ [] "web" true 7

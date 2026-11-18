@@ -1,8 +1,7 @@
 # Optional GPU/model overlay. The base image and selected CUDA runtime are
 # immutable build inputs; this image needs no host Reverie packages or services.
-{ pkgs, src, baseImage, baseConfig, containerRuntime, inferenceRuntime }:
+{ pkgs, src, baseImage, baseConfig, containerRuntime, entrypoint, inferenceRuntime }:
 let
-  entrypoint = pkgs.writeShellScript "reverie-container-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
   modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   tailscale = import ./tailscale-serve.nix { inherit pkgs; };
 in

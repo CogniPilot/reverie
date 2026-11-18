@@ -15,7 +15,6 @@ let
   } // options);
   gpu = import ../nix/container-gpu-image.nix {
     pkgs = {
-      writeShellScript = _: _: "/nix/store/controlled-entry";
       nodejs_22 = "/nix/store/controlled-node";
       tailscale.overrideAttrs = _: "/nix/store/controlled-tailscale";
       writeText = _: _: "/nix/store/controlled-model-relay";
@@ -25,6 +24,7 @@ let
     baseImage = "/nix/store/controlled-base";
     baseConfig = { Entrypoint = [ "/bin/tini" ]; Env = [ "KEPT=yes" ]; };
     containerRuntime = "/nix/store/controlled-runtime";
+    entrypoint = "/nix/store/controlled-entry";
     inferenceRuntime = "/nix/store/controlled-inference";
   };
   checks = {
@@ -76,6 +76,8 @@ let
       "/bin/tini" "-g" "-s" "--" "/nix/store/controlled-runtime/bin/reverie-container-runtime"
       "/usr/local/bin/reverie-start"
     ];
+    gpuUsesNativeBootstrap = builtins.match
+      ".*ln -s /nix/store/controlled-entry usr/local/bin/reverie-start.*" gpu.extraCommands != null;
     gpuKeepsPrivateTelemetry = builtins.elem "/nix/store/controlled-runtime" gpu.contents
       && builtins.elem "REVERIE_GPU_PUBLISHER=/nix/store/controlled-runtime/bin/reverie-gpu-publisher" gpu.config.Env;
     gpuKeepsPrivateAccess = builtins.elem "/nix/store/controlled-tailscale" gpu.contents;

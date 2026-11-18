@@ -251,18 +251,8 @@ jobs:
           done
           echo "without the owner password: ${code:-none}"
           [ "$code" = 401 ] && ok=1
-          # Under enforce, the console (Basic) password alone must NOT reach an owner route:
-          # the signed-in owner session is required. Present it through a netrc file (so it never
-          # appears in a command line) and require a 401. The full owner sign-in 200 path is covered
-          # by the owner-auth-fresh-enforce unit test and the image acceptance checks.
-          docker exec boot bash -c 'umask 077; printf "machine 127.0.0.1 login owner password %s\n" \
-            "$(cat /instances/default/owner-password)" > "$TMPDIR/netrc"' || ok=
-          code=$(status --netrc-file /scratch/tmp/netrc)
-          echo "with the console password alone (must be refused under enforce): $code"
-          [ "$code" = 401 ] || ok=
-          # Full built-image owner-login acceptance: bootstrap, one-time sign-in, password
-          # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
-          docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
+          # Exercise bootstrap, recovery, password change and Basic-auth refusals.
+          docker exec -i boot node --input-type=module < .github/ci/boot-owner.mjs || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
           docker exec boot env REVERIE_INSTALL_CLIS=none reverie-install-clis || ok=
           docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=

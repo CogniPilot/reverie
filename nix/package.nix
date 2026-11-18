@@ -731,7 +731,8 @@ let
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
     passthru = { inherit cacert workerChild; };
   };
-  entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
+  entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
   requestUpdate = pkgs.writeShellApplication {
     name = "reverie-request-update";
     runtimeInputs = [ pkgs.coreutils ];
@@ -831,4 +832,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime containerRuntime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
