@@ -322,11 +322,10 @@ def prune_log(path: Path, cutoff: float, dry_run: bool, mark: Path) -> int:
 
 
 def morning_note(store) -> str:
-    from .dream import waking_recall
     dream = store.latest_dream()
     lines = []
     if dream:
-        lines.append("Dream (%s): %s" % (time.strftime("%Y-%m-%d", time.gmtime(dream.created_at)), waking_recall(dream)))
+        lines.append("Dream (%s): %s" % (time.strftime("%Y-%m-%d", time.gmtime(dream.created_at)), dream.waking_recall()))
     insights = sorted(store.reflections(), key=lambda m: m.created_at)[-3:]
     if insights:
         lines.append("Insights:")

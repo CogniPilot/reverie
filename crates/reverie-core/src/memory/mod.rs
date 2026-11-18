@@ -1,4 +1,5 @@
 //! Existing memory retrieval and lexical embeddings. Data is not model authority.
+mod dream;
 mod embedding;
 mod embedding_text;
 mod float_text;
@@ -8,6 +9,7 @@ mod numeric;
 use crate::python_text as text;
 mod ranking;
 mod startup;
+pub use dream::{DREAM_DRAWS, DreamEpisode, DreamTone, dream_sample};
 pub use embedding::{
     Embedder, EmbeddingError, EmbeddingKind, HashedEmbedder, cosine, normalize, pack, tokenize,
     unpack,

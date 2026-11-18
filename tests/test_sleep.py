@@ -9,6 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from reverie import sleep
+from reverie.memory import DREAM, Memory
 
 NIGHT = 1_800_000_000.0 - (1_800_000_000 % 86400) + 2 * 3600       # 02:00 UTC
 DAY = NIGHT + 10 * 3600                                              # 12:00 UTC
@@ -70,7 +71,8 @@ class Fixture:
         queue = self.results[brain.instance]
         action = queue.pop(0) if queue else "idle"
         if action == "dreamed":
-            brain.store.dream = SimpleNamespace(created_at=NIGHT, recall="I walked a long corridor of servers.", meta={})
+            brain.store.dream = Memory(1, DREAM, NIGHT, "", "", "A dream about servers.", 3,
+                                       meta={"recall": "I walked a long corridor of servers."})
             brain.store.insights = [SimpleNamespace(created_at=NIGHT - i, text="insight %d " % i + "x" * 300) for i in range(5)]
         return {"action": action, "count": {"rated": 3, "reflected": 2, "dreamed": 1}.get(action, 0)}
 

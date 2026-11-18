@@ -73,6 +73,13 @@ def legacy_memory_request(action, *, timeout=3, **payload):
     return native_memory_json("legacy-memory-worker", {"action": action, **payload}, TURN_CAPTURE_BYTES, timeout=timeout)
 
 
+def dream_memory_request(action, **payload):
+    reply = native_memory_json("dream-worker", {"action": action, **payload}, TURN_CAPTURE_BYTES)
+    if reply is None:
+        raise ValueError("native dream operation could not be completed")
+    return reply
+
+
 def journal_tool_request(phase, **payload):
     return native_memory_json('journal-tool-worker', {'phase': phase, **payload}, READ_WORKER_BYTES)
 

@@ -1,5 +1,5 @@
 //! Compatibility requests leave writes and model orchestration with legacy chat.
-use reverie_contracts::memory::{decode_mood, encode_mood};
+use reverie_contracts::memory::decode_mood;
 use reverie_core::{
     memory::{RATING_SUFFIX, RATING_SYSTEM, importance_rating},
     posix_text,
@@ -11,23 +11,10 @@ use std::{ffi::OsString, io, os::unix::ffi::OsStringExt, path::PathBuf};
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
-    MoodView {
-        raw: Option<String>,
-        now: f64,
-    },
-    MoodNudge {
-        raw: Option<String>,
-        now: f64,
-        tone: String,
-        weight: f64,
-    },
+    MoodView { raw: Option<String>, now: f64 },
     RatingPrompt,
-    RatingScore {
-        points: Vec<u32>,
-    },
-    History {
-        path: Vec<u32>,
-    },
+    RatingScore { points: Vec<u32> },
+    History { path: Vec<u32> },
 }
 
 #[derive(Serialize)]
@@ -50,20 +37,6 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
         Request::MoodView { raw, now } => {
             let description = decode_mood(raw.as_deref()).decayed(now).describe();
             crate::write_reply(&serde_json::json!({ "description": description }), bound)
-        }
-        Request::MoodNudge {
-            raw,
-            now,
-            tone,
-            weight,
-        } => {
-            let updated = decode_mood(raw.as_deref())
-                .decayed(now)
-                .nudge_tone(&tone, weight, now);
-            crate::write_reply(
-                &serde_json::json!({ "stored": encode_mood(updated) }),
-                bound,
-            )
         }
         Request::RatingPrompt => crate::write_reply(
             &serde_json::json!({

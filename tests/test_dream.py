@@ -1,11 +1,10 @@
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
-import random
 import tempfile
 import unittest
 from pathlib import Path
 
-from reverie.dream import DREAM_SYSTEM, Dreamer, parse_dream, sample_episodes
+from reverie.chat import Dreamer
 from reverie.memory import DREAM, MemoryStore, make_embedder
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector
@@ -28,74 +27,17 @@ def fill(store, n_recent=10, n_old=10):
     return ids
 
 
-class SamplingTest(unittest.TestCase):
-    def setUp(self):
-        self.s = MemoryStore(":memory:", make_embedder(dims=64))
-        self.ids = fill(self.s)
-
-    def test_counts_and_mix(self):
-        eps = self.s.all("episode")
-        for seed in range(5):
-            chosen = sample_episodes(eps, random.Random(seed), NOW, n_recent=4, n_old=1)
-            self.assertEqual(len(chosen), 5)
-            self.assertEqual(len({m.id for m in chosen}), 5)
-            self.assertFalse(any(m.is_idle for m in chosen))
-            old = [m for m in chosen if m.id in self.ids["old"]]
-            self.assertGreaterEqual(len(old), 1)
-            self.assertEqual([m.created_at for m in chosen], sorted(m.created_at for m in chosen))
-        self.assertEqual(len(sample_episodes(eps, random.Random(0), NOW, n_recent=9, n_old=9)), 8)   # clamped to 6 + 2
-        self.assertEqual(len(sample_episodes(eps, random.Random(0), NOW, n_recent=1, n_old=0)), 4)   # clamped to 3 + 1
-
-    def test_weighted_toward_recent_and_important(self):
-        eps = self.s.all("episode")
-        hits = {"important": 0, "newest": 0, "stale": 0}
-        important = self.ids["recent"][-1]        # 9 hours old, importance 9
-        newest = self.ids["recent"][0]
-        stale = self.ids["recent"][5]             # 5 hours old, importance 2
-        for seed in range(200):
-            chosen = {m.id for m in sample_episodes(eps, random.Random(seed), NOW)}
-            hits["important"] += important in chosen
-            hits["newest"] += newest in chosen
-            hits["stale"] += stale in chosen
-        self.assertGreater(hits["important"], hits["stale"])
-        self.assertGreater(hits["newest"], hits["stale"])
-
-    def test_empty(self):
-        self.assertEqual(sample_episodes([], random.Random(0), NOW), [])
-
-
-class ParseTest(unittest.TestCase):
-    def test_default_prompt_respects_configured_policy_and_scope(self):
-        self.assertIn("configured output policy", DREAM_SYSTEM)
-        self.assertIn("authorized scope", DREAM_SYSTEM)
-
-    @synthetic_output_policy()
-    def test_parse_json_and_fallbacks(self):
-        d = parse_dream('{"dream": "I float over the warehouse while the quadrotor hums a lullaby.", "recall": "I dreamed the quadrotor sang to me", "tone": "warm"}')
-        self.assertEqual(d.tone, "warm")
-        self.assertTrue(d.recall.startswith("I dreamed"))
-        d2 = parse_dream("just prose about the lean proofs turning into staircases that never end")
-        self.assertEqual(d2.tone, "strange")
-        self.assertTrue(d2.recall.startswith("I dreamed"))
-        d3 = parse_dream('{"dream": "a long enough dream about swap space", "recall": "the swap drive overflowed", "tone": "weird"}')
-        self.assertEqual(d3.tone, "strange")
-        self.assertEqual(d3.recall, "I dreamed the swap drive overflowed")
-        self.assertIsNone(parse_dream("short"))
-        self.assertIsNotNone(parse_dream('{"dream": "a pleasantly long dream about an ordinary walk", "recall": "x"}'))
-        first_marker, second_marker = output_policy_terms()
-        self.assertIsNone(parse_dream(json.dumps({"dream": f"{first_marker} and {second_marker} appear as markers", "recall": "x"})))
-
-
 class DreamerTest(unittest.TestCase):
     def setUp(self):
         self.s = MemoryStore(":memory:", make_embedder(dims=64))
         fill(self.s)
         self.resp = json.dumps({"dream": "The scratch drive fills with warm sand and User laughs from somewhere above the build logs.",
-                                "recall": "I dreamed the scratch drive turned into a beach", "tone": "playful"})
+                                "recall": "I dreamed the scratch drive turned into a beach", "tone": "playful",
+                                "ideas": [{"hypothesis": "Fast builds need fewer writes", "check": "Measure writes"}]})
 
     def dreamer(self, responder="good", **kw):
         client, t = fake_client(self.resp if responder == "good" else responder)
-        return Dreamer(self.s, client, sleep_min_idle=1800, per_sleep=1, spacing=3600, rng=random.Random(1), **kw), t
+        return Dreamer(self.s, client, sleep_min_idle=1800, per_sleep=1, spacing=3600, **kw), t
 
     def test_due_only_in_sleep_window(self):
         d, _ = self.dreamer()
@@ -114,7 +56,7 @@ class DreamerTest(unittest.TestCase):
         dreamer, transport = self.dreamer()
         dreamer.per_sleep = 0
         daemon = SimpleNamespace(brain=SimpleNamespace(dreamer=dreamer))
-        with patch('reverie.chat.ChatDaemon', return_value=daemon), patch('reverie.dream.time.time', return_value=NOW), redirect_stdout(io.StringIO()):
+        with patch('reverie.chat.ChatDaemon', return_value=daemon), patch('reverie.chat.time.time', return_value=NOW), redirect_stdout(io.StringIO()):
             self.assertEqual(main(['--dream']), 0)
         self.assertEqual(len(transport.calls), 1)
         self.assertEqual(self.s.count(DREAM), 1)
@@ -127,6 +69,8 @@ class DreamerTest(unittest.TestCase):
         self.assertEqual(m.meta["tone"], "playful")
         self.assertFalse(m.meta["released"])
         self.assertTrue(m.recall.startswith("I dreamed"))
+        self.assertIn("Unverified dream hypothesis: Fast builds need fewer writes Check before using: Measure writes",
+                      m.waking_recall())
         self.assertGreaterEqual(len(m.source_ids), 4)
         prompt = t.calls[0]["messages"][1]["content"]
         self.assertIn("fell asleep feeling bright and happy.", prompt)
@@ -137,6 +81,16 @@ class DreamerTest(unittest.TestCase):
         self.assertFalse(d.due(last_activity=NOW - 2000, now=NOW + 10))         # quota for this sleep window used
         self.assertFalse(d.due(last_activity=NOW + 5, now=NOW + 5 + 2000))      # new window, but spacing (3600) not elapsed
         self.assertTrue(d.due(last_activity=NOW + 5, now=NOW + 5000))           # new window, idle and spaced
+
+    @synthetic_output_policy()
+    def test_dream_rejects_denied_output_before_writing(self):
+        first_marker, second_marker = output_policy_terms()
+        dreamer, _ = self.dreamer(json.dumps({
+            "dream": f"{first_marker} and {second_marker} appear in a dream", "recall": "a short recall",
+        }))
+        self.assertIsNone(dreamer.dream(now=NOW))
+        self.assertEqual(self.s.count(DREAM), 0)
+        self.assertIsNone(self.s.get_state("mood"))
 
     def test_dream_survives_bad_api(self):
         d, _ = self.dreamer(responder=None)

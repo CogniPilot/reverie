@@ -18,7 +18,7 @@ from typing import Sequence
 
 from .beliefs import ensure_seeded, render
 from .config import ChatClient, Config, LLMError, limit_words
-from .dream import Dreamer, waking_recall
+from .hands.agent_journal import dream_memory_request
 from .gpu import GpuLock
 from .instance import initial_self_for
 from .reverie import violates
@@ -38,6 +38,69 @@ IDLE_USER_TEXT = "(idle moment; a joke was requested)"
 
 def _is_idle_user_text(text: str) -> bool:
     return text.startswith("(idle moment")
+
+
+class Dreamer:
+    """Connect native dream planning to the current model and SQLite writer."""
+
+    def __init__(self, store, client, sleep_min_idle=1800, per_sleep=1, spacing=3600, mood_weight=1.0):
+        self.store = store
+        self.client = client
+        self.sleep_min_idle = sleep_min_idle
+        self.per_sleep = per_sleep
+        self.spacing = spacing
+        self.mood_weight = mood_weight
+        self.system_prompt_path = None
+        self.creative_context = None
+
+    def last_dream_at(self):
+        return float(self.store.get_state("last_dream_at", "0") or 0)
+
+    def due(self, last_activity, now=None):
+        now = time.time() if now is None else now
+        if self.per_sleep <= 0 or now - last_activity < self.sleep_min_idle:
+            return False
+        return (self.store.count_dreams_since(last_activity) < self.per_sleep
+                and now - self.last_dream_at() >= self.spacing)
+
+    def dream(self, now=None):
+        now = time.time() if now is None else now
+        episodes = {m.id: m for m in self.store.all(EPISODE)}
+        selected = dream_memory_request("sample", now=now, episodes=[
+            (m.id, m.created_at, m.importance, m.is_idle) for m in episodes.values()
+        ])["ids"]
+        creative = self.creative_context()[:8000] if self.creative_context else ""
+        self.store.set_state("last_dream_at", str(now))
+        if not selected and not creative.strip():
+            return None
+        mood = self.store.get_state(MOOD_STATE)
+        override = self.system_prompt_path
+        prompt = dream_memory_request(
+            "prompt", now=now, mood=mood, beliefs=render(self.store.beliefs()), creative=creative,
+            revisable=self.store.get_state("revisable_self_model") == "1",
+            system=override.read_text(encoding="utf-8") if override and override.exists() else None,
+            episodes=[(episode_id, episodes[episode_id].text) for episode_id in selected],
+        )
+        try:
+            raw = self.client.chat(
+                [{"role": "system", "content": prompt["system"]}, {"role": "user", "content": prompt["user"]}],
+                max_tokens=prompt["max_tokens"], temperature=prompt["temperature"], max_chars=prompt["max_chars"],
+            )
+        except LLMError:
+            return None
+        reply = dream_memory_request(
+            "reply", points=list(map(ord, raw or "")), now=now, mood=mood, weight=self.mood_weight,
+        )["dream"]
+        if reply is None:
+            return None
+        ideas = [{field: "".join(map(chr, points)) for field, points in idea.items()} for idea in reply["ideas"]]
+        memory = self.store.add_dream(
+            "".join(map(chr, reply["text"])), "".join(map(chr, reply["recall"])), reply["tone"],
+            selected, created_at=now, ideas=ideas,
+        )
+        self.store.set_state(MOOD_STATE, reply["mood"])
+        self.store.prune_dream_summaries(30)
+        return memory
 
 
 class Brain:
@@ -82,7 +145,7 @@ class Brain:
         recalled = (self.store.retrieve(user_text, k=self.cfg.recall_k, now=now, exclude_ids=[m.id for m in recent])
                     if recall_long_term else [])
         last = self.store.latest_dream()
-        last_dream = waking_recall(last) if last and now - last.created_at <= self.cfg.dream_recall_hours * 3600 else ""
+        last_dream = last.waking_recall() if last and now - last.created_at <= self.cfg.dream_recall_hours * 3600 else ""
         persona = (self.cfg.instance.persona if self.cfg.instance and not self.cfg.persona_path.exists()
                    else load_persona(self.cfg.persona_path))
         if self.store.get_state("revisable_self_model") == "1":

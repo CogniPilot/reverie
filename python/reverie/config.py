@@ -167,7 +167,7 @@ class Config:
     reflect_min_episodes: int = _env_int("REVERIE_REFLECT_MIN_EPISODES", 3)
     rate_batch: int = 3                                              # importance ratings per idle pass
 
-    # dreams (see reverie.dream): only in the sleep window, i.e. no user activity for sleep_min_idle seconds
+    # dreams: only in the sleep window, i.e. no user activity for sleep_min_idle seconds
     sleep_min_idle: int = _env_int("REVERIE_SLEEP_MIN_IDLE", 1800)
     dreams_per_sleep: int = _env_int("REVERIE_DREAMS_PER_SLEEP", 0)   # off unless the owner turns it on
     dream_spacing: int = _env_int("REVERIE_DREAM_SPACING", 3600)

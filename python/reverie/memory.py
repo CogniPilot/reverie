@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Protocol, Sequence
 
-from .hands.agent_journal import legacy_memory_request
+from .hands.agent_journal import dream_memory_request, legacy_memory_request
 
 EPISODE = "episode"
 REFLECTION = "reflection"
@@ -227,6 +227,10 @@ class Memory:
         """The one-line waking recall of a dream (its text for other kinds)."""
         return str(self.meta.get("recall") or self.text)
 
+    def waking_recall(self) -> str:
+        reply = dream_memory_request("recall", text=self.text, meta=json.dumps(self.meta))
+        return "".join(map(chr, reply["points"]))
+
     def as_dict(self) -> dict:
         d = self.__dict__.copy()
         d.pop("embedding", None)
@@ -351,12 +355,6 @@ class MemoryStore:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO state(key, value) VALUES (?, ?)", (key, str(value)))
             self._commit()
-
-    def apply_dream_tone(self, raw: str | None, tone: str, weight: float, now: float) -> None:
-        reply = legacy_memory_request("mood_nudge", raw=raw, tone=tone, weight=weight, now=now)
-        if reply is None:
-            raise RuntimeError("native dream mood update is unavailable")
-        self.set_state(MOOD_STATE, reply["stored"])
 
     def import_legacy_history(self, path: Path, importance: float = 3.0) -> int:
         if self.get_state(LEGACY_HISTORY_STATE):

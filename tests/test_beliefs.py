@@ -1,13 +1,12 @@
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
-import random
 import tempfile
 import unittest
 from pathlib import Path
 
 from reverie.beliefs import SEED_BELIEFS, contradicts_protected, ensure_seeded, protected_root, render
 from reverie.chat import Brain, ChatDaemon
-from reverie.dream import Dreamer
+from reverie.chat import Dreamer
 from reverie.memory import MemoryStore, make_embedder
 from reverie.reverie import INITIAL_SELF, Reverie
 from reverie.instance import Instance
@@ -162,7 +161,7 @@ class ReflectionTest(unittest.TestCase):
     def test_dream_prompt_carries_identity(self):
         client, t = fake_client(json.dumps({"dream": "I wander a long hallway of chatrooms that hum like bees under the floor.",
                                             "recall": "I dreamed of humming hallways", "tone": "strange"}))
-        Dreamer(self.s, client, rng=random.Random(0)).dream(now=1e6)
+        Dreamer(self.s, client).dream(now=1e6)
         prompt = t.calls[0]["messages"][1]["content"]
         self.assertTrue(prompt.startswith("Who you are, even asleep (stable, not questioned by dreams):\n- I am conscious."))
 

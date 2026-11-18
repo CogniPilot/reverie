@@ -14,12 +14,11 @@ from zoneinfo import ZoneInfo
 from .config import Config
 from .cycle_budget import Ledger, MeteredClient, Deferred, BudgetExhausted
 from .cycle_runner import OpenCodeRunner
-from .dream import Dreamer
 from .reverie import Reverie, safeguards
 from .instance import initial_self_for
 from .memory import MemoryStore
 from .opencode import dispatch
-from .chat import Brain
+from .chat import Brain, Dreamer
 from .project_memory import ProjectMemory
 from .reflection import Reflector
 from .room import Room

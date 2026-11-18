@@ -1,7 +1,7 @@
 use reverie_contracts::launch_guard::{INPUT_LIMIT, Receipt};
 use serde_json::{Value, json};
 use std::{
-    io::Write,
+    io::{ErrorKind, Write},
     process::{Command, Output, Stdio},
 };
 
@@ -20,7 +20,12 @@ fn command(args: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input).unwrap();
+    if let Err(error) = child.stdin.take().unwrap().write_all(input) {
+        assert!(
+            !args.is_empty() && error.kind() == ErrorKind::BrokenPipe,
+            "{error}"
+        );
+    }
     child.wait_with_output().unwrap()
 }
 

@@ -6,6 +6,7 @@ mod configuration;
 mod context_cli;
 mod cycle_plan;
 mod database;
+mod dream;
 mod embedding_worker;
 mod hands_addressing;
 mod hands_attention;
@@ -217,6 +218,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--cycle-plan-worker" => cycle_plan::run,
         "--model-completion-worker" => model_completion::run,
         "--legacy-memory-worker" => legacy_memory::run,
+        "--dream-worker" => dream::run,
         "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,

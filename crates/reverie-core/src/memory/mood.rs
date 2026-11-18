@@ -1,4 +1,4 @@
-use super::numeric::clamp;
+use super::{DreamTone, numeric::clamp};
 
 const BASELINE_VALENCE: f64 = 0.2;
 const HALF_LIFE_HOURS: f64 = 6.0;
@@ -43,15 +43,7 @@ impl Mood {
 
     /// Apply a dream's tone to the captured, decayed mood from its prompt.
     pub fn nudge_tone(self, tone: &str, weight: f64, now: f64) -> Self {
-        let (valence, arousal) = match tone {
-            "warm" => (0.15, 0.0),
-            "playful" => (0.10, 0.10),
-            "calm" => (0.05, -0.15),
-            "strange" => (0.0, 0.05),
-            "anxious" => (-0.15, 0.15),
-            "melancholy" => (-0.15, -0.10),
-            _ => (0.0, 0.0),
-        };
+        let (valence, arousal) = DreamTone::parse(tone).map_or((0.0, 0.0), DreamTone::offsets);
         let current = self.decayed(now);
         Self::new(
             clamp(current.valence + valence * weight, -1.0, 1.0),
