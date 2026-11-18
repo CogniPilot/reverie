@@ -11,6 +11,15 @@ use std::{
 };
 
 pub(crate) fn open_private_directory(path: &Path) -> io::Result<File> {
+    let directory = open_absolute_directory(path)?;
+    let info = directory.metadata()?;
+    if info.uid() != getuid().as_raw() || info.mode() & 0o077 != 0 {
+        return Err(crate::refused());
+    }
+    Ok(directory)
+}
+
+pub(crate) fn open_absolute_directory(path: &Path) -> io::Result<File> {
     if !path.is_absolute() {
         return Err(crate::refused());
     }
@@ -23,10 +32,5 @@ pub(crate) fn open_private_directory(path: &Path) -> io::Result<File> {
             _ => return Err(crate::refused()),
         };
     }
-    let directory = File::from(directory);
-    let info = directory.metadata()?;
-    if info.uid() != getuid().as_raw() || info.mode() & 0o077 != 0 {
-        return Err(crate::refused());
-    }
-    Ok(directory)
+    Ok(File::from(directory))
 }

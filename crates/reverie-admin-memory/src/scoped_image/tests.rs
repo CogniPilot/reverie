@@ -4,7 +4,9 @@ use nix::{
     unistd::{mkdtemp, mkfifo},
 };
 use std::{
+    env,
     fs::{self, OpenOptions},
+    io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
     path::PathBuf,
 };
@@ -14,10 +16,10 @@ const ROOM: &str = "12345678-1234-1234-1234-123456789abc";
 const ATTACHMENT: &str = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 const PNG: &[u8] = b"\x89PNG\r\n\x1a\nfixture";
 
-struct Fixture(PathBuf);
+pub(crate) struct Fixture(pub(crate) PathBuf);
 
 impl Fixture {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let temporary = env::temp_dir()
             .canonicalize()
             .unwrap()
@@ -27,7 +29,7 @@ impl Fixture {
         Self(path)
     }
 
-    fn verify_cleanup(&self) {
+    pub(crate) fn verify_cleanup(&self) {
         assert_eq!(fs::read(self.0.join("elsewhere.bin")).unwrap(), PNG);
         assert_eq!(fs::read_dir(self.0.join("tmp")).unwrap().count(), 0);
     }
@@ -50,7 +52,7 @@ fn private_file(path: &Path, data: &[u8]) {
         .unwrap();
 }
 
-fn request(mode: &str) -> Request {
+pub(crate) fn request(mode: &str) -> Request {
     let mut cli = vec![
         env::current_exe()
             .unwrap()

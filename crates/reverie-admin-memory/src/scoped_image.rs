@@ -1,35 +1,30 @@
 //! Hands loads laptop attachments through the membership-checked Office CLI.
 mod scratch;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 use crate::capture::{self, Signals};
 use nix::sys::{prctl, signal::Signal};
 use reverie_core::ids::{ChatImageFileId, ChatRoomId, ProfileSessionId};
-use serde::Deserialize;
 use std::{
-    env,
-    io::{self, Write},
+    io,
     path::Path,
     process::Command,
     time::{Duration, Instant},
 };
 
-const REQUEST_BYTES: usize = 131_072;
 const IMAGE_BYTES: u64 = 64 * 1024 * 1024;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    cli: Vec<String>,
-    session: String,
-    room: String,
-    attachment: String,
-    max_bytes: u64,
-    timeout: f64,
+pub(super) struct Request {
+    pub(super) cli: Vec<String>,
+    pub(super) session: String,
+    pub(super) room: String,
+    pub(super) attachment: String,
+    pub(super) max_bytes: u64,
+    pub(super) timeout: f64,
 }
 
-struct Download {
+pub(super) struct Download {
     cli: Vec<String>,
     room: ChatRoomId,
     attachment: ChatImageFileId,
@@ -42,7 +37,11 @@ fn refused() -> io::Error {
 }
 
 impl Request {
-    fn authorize(self, worker: Option<&str>, session: Option<&str>) -> io::Result<Download> {
+    pub(super) fn authorize(
+        self,
+        worker: Option<&str>,
+        session: Option<&str>,
+    ) -> io::Result<Download> {
         let caller = ProfileSessionId::parse(&self.session).map_err(|_| refused())?;
         if worker != Some("1") || session != Some(caller.as_str()) {
             return Err(refused());
@@ -70,7 +69,7 @@ impl Request {
 }
 
 impl Download {
-    fn fetch(&self, root: &Path, signals: &Signals) -> io::Result<Vec<u8>> {
+    pub(super) fn fetch(&self, root: &Path, signals: &Signals) -> io::Result<Vec<u8>> {
         let scratch = scratch::ImageScratch::new(root)?;
         let mut command = Command::new(&self.cli[0]);
         command.args(&self.cli[1..]).current_dir(scratch.cwd());
@@ -95,18 +94,12 @@ impl Download {
     }
 }
 
-pub(crate) fn run(expected_parent: i32) -> io::Result<()> {
+pub(super) fn bind_download_worker(expected_parent: i32) -> io::Result<Signals> {
     crate::check_worker_parent(expected_parent)?;
     let signals = Signals::install()?;
     // Settle the Office process group and scratch directory on ordinary parent
     // loss. The signal is consumed by the same observer as an explicit stop.
     prctl::set_pdeathsig(Signal::SIGTERM)?;
     crate::check_worker_parent(expected_parent)?;
-    let request: Request = serde_json::from_slice(&crate::bounded_input(REQUEST_BYTES)?)?;
-    let worker = env::var("REVERIE_WORKER").ok();
-    let session = env::var("REVERIE_SESSION_ID").ok();
-    let download = request.authorize(worker.as_deref(), session.as_deref())?;
-    io::stdout()
-        .lock()
-        .write_all(&download.fetch(Path::new("/scratch/tmp"), &signals)?)
+    Ok(signals)
 }

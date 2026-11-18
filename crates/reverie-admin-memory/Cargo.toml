@@ -14,6 +14,7 @@ path = "tests/support/office.rs"
 required-features = ["test-fixtures"]
 
 [dependencies]
+base64.workspace = true
 bytes.workspace = true
 clap.workspace = true
 getrandom.workspace = true

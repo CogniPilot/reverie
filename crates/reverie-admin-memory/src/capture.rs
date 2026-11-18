@@ -35,7 +35,7 @@ impl Signals {
             SfdFlags::SFD_NONBLOCK | SfdFlags::SFD_CLOEXEC,
         )?))
     }
-    fn check(&self) -> io::Result<()> {
+    pub(crate) fn check(&self) -> io::Result<()> {
         if self.0.read_signal()?.is_some() {
             return Err(io::Error::from(ErrorKind::Interrupted));
         }

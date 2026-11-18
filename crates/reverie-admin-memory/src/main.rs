@@ -11,6 +11,7 @@ mod embedding_worker;
 mod hands_addressing;
 mod hands_attention;
 mod hands_chat;
+mod hands_images;
 mod hands_model;
 mod hands_office;
 mod hands_poll;
@@ -209,7 +210,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
         "--embedding-worker" => embedding_worker::run,
-        "--scoped-image-worker" => scoped_image::run,
+        "--hands-images-worker" => hands_images::run,
         "--hands-model-worker" => hands_model::run,
         "--hands-chat-worker" => hands_model::chat,
         "--hands-office-chat-worker" => hands_chat::run,

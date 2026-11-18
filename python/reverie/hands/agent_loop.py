@@ -32,7 +32,6 @@ A failed query reads nothing that tick. Membership is checked again right before
 no post. The same query gives the id of each room's newest message; a room is read again only when that id changed
 (or is missing), a claim is pending, or its last read stopped early. Each line of the prompt carries its time ("[5m ago]", "[9:16 AM EDT]").
 """
-import base64
 import json
 import math
 import os
@@ -85,8 +84,6 @@ CHAT_FAIL_LINE = "I couldn't finish a usable answer. Please ask me to try again.
 CHAT_LIMIT_LINE = "I reached my response limit before finishing. Please ask me to continue."
 # Tool-call markup written as text (Qwen/Hermes tags, function tags, a JSON call). A reply containing any is unusable.
 MARKUP = re.compile(r'</?tool_call\b|<\|tool_call|<function[=\s>]|<parameter[=\s>]|"name"\s*:\s*"web_(?:search|fetch)"', re.I)
-IMAGE_MAGIC = {'image/png': (b'\x89PNG\r\n\x1a\n',), 'image/jpeg': (b'\xff\xd8\xff',), 'image/gif': (b'GIF87a', b'GIF89a'),
-               'image/webp': (b'RIFF',)}
 SEARCH_TOOL = {'type': 'function', 'function': {
     'name': 'web_search',
     'description': 'Search the web. Use only when the answer needs current or outside facts.',
@@ -371,72 +368,21 @@ def alert_allows(cfg, chat, room, msg):
         return True
 
 
-ROOM_UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z')
-
-
-def room_dir(room, msg):
-    """The attachments directory name of a room: the console names it by the FULL room id, while the config may list
-    a short one. The message's roomId is used only when it is a full id of this same room; otherwise the configured id
-    as given (which then matches nothing, and every image is refused)."""
-    rid = msg.get('roomId')
-    if isinstance(rid, str) and ROOM_UUID.match(rid) and rid.startswith(room):
-        return rid
-    return room
-
-
-def fetch_scoped_image(cfg, room, attachment):
-    request = agent_journal.encode_memory_json({
-        'cli': cfg['cli'], 'session': cfg['self_session_id'], 'room': room,
-        'attachment': attachment, 'max_bytes': cfg['max_image_bytes'],
-        'timeout': cfg['cli_timeout_s'],
-    })
-    if request is None:
-        raise ValueError('invalid scoped image request')
-    return subprocess.run(agent_journal.native_memory_command('scoped-image-worker'), input=request,
-                          capture_output=True, check=True, start_new_session=True, timeout=14).stdout
-
-
 def load_images(cfg, room, msg):
-    """Image attachments of msg as image_url parts. Returns (parts, notes); notes say what was skipped and why."""
-    parts, notes = [], []
-    # The room directory is joined, NOT resolved: a room dir swapped for a link resolves elsewhere, so no file can be
-    # strictly inside it and everything is refused. Resolving it would make another room's files look like this room's.
-    # The attachments_root setting itself is trusted configuration.
-    scoped = os.environ.get('REVERIE_WORKER') == '1'
-    root = (os.path.join(os.path.realpath(cfg['attachments_root']), room_dir(room, msg))
-            if not scoped and cfg.get('attachments_root') else None)
-    for a in (msg.get('attachments') or [])[:20]:
-        if not isinstance(a, dict):
-            continue
-        name, kind = str(a.get('name') or 'file')[:80], a.get('type')
-        if kind not in IMAGE_MAGIC:
-            continue
-        if not cfg.get('vision') or (not scoped and not root):
-            notes.append(f'[image {name}: you cannot see images yet]')
-            continue
-        if len(parts) >= cfg['max_images']:
-            notes.append(f'[image {name}: skipped, more than {cfg["max_images"]} images]')
-            continue
-        try:
-            if scoped:
-                data = fetch_scoped_image(cfg, room_dir(room, msg), a.get('id'))
-            else:
-                path = os.path.realpath(str(a.get('path') or ''))
-                if os.path.commonpath([path, root]) != root or path == root:
-                    raise ValueError('outside the room attachments directory')
-                with open(path, 'rb') as f:
-                    data = f.read(cfg['max_image_bytes'] + 1)
-            if len(data) > cfg['max_image_bytes']:
-                raise ValueError('too large')
-            if not data.startswith(IMAGE_MAGIC[kind]) or (kind == 'image/webp' and data[8:12] != b'WEBP'):
-                raise ValueError('content does not match ' + kind)
-        except (OSError, ValueError, subprocess.SubprocessError) as e:
-            log('image skipped', room, msg.get('id'), name, repr(e)[:200])
-            notes.append(f'[image {name}: could not be read]')
-            continue
-        parts.append({'type': 'image_url',
-                      'image_url': {'url': f'data:{kind};base64,' + base64.b64encode(data).decode('ascii')}})
-    return parts, notes
+    if not msg.get('attachments'):
+        return [], []
+    reply = agent_journal.native_memory_json('hands-images-worker', {
+        'room': room, 'message': msg, 'settings': {
+            'vision': bool(cfg.get('vision')), 'root': os.fspath(cfg['attachments_root']) if cfg.get('attachments_root') else None,
+            'session': cfg.get('self_session_id'), 'cli': cfg['cli'],
+            'max_images': cfg['max_images'], 'max_bytes': cfg['max_image_bytes'], 'timeout': cfg['cli_timeout_s'],
+        },
+    }, agent_journal.TURN_CAPTURE_BYTES, timeout=14 * 20 + 3)
+    if reply is None:
+        raise ValueError('Hands image worker unavailable')
+    for name, reason in reply['failures']:
+        log('image skipped', room, msg.get('id'), name, reason)
+    return reply['parts'], reply['notes']
 
 
 def request_chars(messages):
