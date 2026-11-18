@@ -6,11 +6,10 @@ import time
 from dataclasses import asdict, replace
 
 from coding_arbiter import ModelArbiter
-from coding_chat import (RULES, authorize_task, inject_managed_context, read_tool_specs,
-                         report_managed_context, validate_settings)
+from coding_chat import (RULES, Limits, authorize_task, begin_request, control_request, encoded,
+                         inject_managed_context, permitted_sender, read_tool_specs,
+                         report_managed_context, reserve_chars, runner_outcome, validate_settings)
 from coding_process import BoundedProcess, CodingWorker
-from coding_tasks import (Limits, begin_request, control_request, encoded, permitted_sender,
-                          reserve_chars, runner_outcome)
 
 
 class TaskManager:

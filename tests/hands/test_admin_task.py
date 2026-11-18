@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import agent_loop as loop
 import admin_task
 import coding_chat
-from coding_tasks import Limits, reserve_chars
+from coding_chat import Limits, reserve_chars
 from test_coding_support import cfg_for, without_seat_environment
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'authenticatedOwner': True}

@@ -3,7 +3,7 @@ import time
 import unittest
 from types import SimpleNamespace
 
-import coding_tasks as tasks
+import coding_chat as tasks
 from coding_process import CodingWorker
 
 

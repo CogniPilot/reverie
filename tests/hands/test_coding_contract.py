@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from coding_chat import read_tool_specs
-from coding_tasks import TOOL_NAMES
+from coding_chat import TOOL_NAMES
 
 
 class ToolExportTests(unittest.TestCase):

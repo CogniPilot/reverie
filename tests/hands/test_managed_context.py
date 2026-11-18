@@ -12,7 +12,7 @@ import agent_loop as loop
 from coding_chat import report_managed_context
 from coding_arbiter import ModelArbiter
 from coding_manager import TaskManager
-from coding_tasks import Limits
+from coding_chat import Limits
 from test_coding_arbiter import FakeProcess
 from test_coding_support import cfg_for
 

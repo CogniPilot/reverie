@@ -2,7 +2,7 @@ import json
 import time
 import unittest
 
-from coding_tasks import Limits
+from coding_chat import Limits
 from coding_process import CodingWorker
 from test_coding_tasks import MESSAGES, TOOLS, call, response
 

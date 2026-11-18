@@ -1,7 +1,7 @@
 """Natural chat entry to the existing authorized, bounded workspace task manager."""
 import json
 import re
-from coding_tasks import permitted_sender
+from coding_chat import permitted_sender
 
 TOOL_NAME = 'run_workspace_task'
 TOOL = {'type': 'function', 'function': {

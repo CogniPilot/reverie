@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 import agent_loop as loop
 import coding_chat
-from reverie.hands.coding_tasks import control_request, permitted_sender
 from test_coding_support import FakeChat, cfg_for
 
 
@@ -184,11 +183,11 @@ class HarnessConfigurationTests(unittest.TestCase):
     def test_external_marker_does_not_grant_authority(self):
         message = {'text': '[external agent] /code example Fix it. @Jester',
                    'from': {'kind': 'agent', 'sessionId': 'external'}}
-        self.assertEqual(control_request(message)['task_id'], 'example')
+        self.assertEqual(coding_chat.control_request(message)['task_id'], 'example')
         settings = {'tasks': {'example': {'rooms': ['room'], 'delegate_sessions': []}}}
-        self.assertFalse(permitted_sender(settings, 'room', 'example', message))
+        self.assertFalse(coding_chat.permitted_sender(settings, 'room', 'example', message))
         settings['tasks']['example']['delegate_sessions'] = ['external']
-        self.assertTrue(permitted_sender(settings, 'room', 'example', message))
+        self.assertTrue(coding_chat.permitted_sender(settings, 'room', 'example', message))
 
 if __name__ == '__main__':
     unittest.main()

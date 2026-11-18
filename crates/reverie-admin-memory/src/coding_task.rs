@@ -1,5 +1,6 @@
 //! The isolated Hands task engine requests every model, authorization and
 //! tool effect from the existing controller. It has no network or tool client.
+mod admission;
 mod channel;
 mod diagnostics;
 mod session;
@@ -8,6 +9,7 @@ mod tests;
 mod wire;
 
 use crate::worker_channel::FRAME_BYTES;
+pub(super) use admission::admit;
 use channel::Channel;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
