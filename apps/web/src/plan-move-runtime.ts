@@ -64,6 +64,7 @@ export interface PlanMoveRuntime {
   /** Installer-owned dependency, never populated from route JSON/parent headers. */
   resourceReplacement?: PlanMoveResourceRuntime;
   dockerReplacement?: PlanMoveDockerActor;
+  verifyBoxedLegacyTarget?(record: Readonly<PlanMoveRecord>, current: () => void): Promise<() => void>;
   dockerRequester?: (target: DockerPlanMoveRequesterTarget) => unknown;
   dockerOriginalRequester?: (moveId: string) => Promise<unknown>;
   dockerDecision?: unknown;
@@ -174,7 +175,10 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       throw new PlanMoveError('Source cleanup was not durably confirmed; inspect before recovery');
     const candidate = requireViewer ? assertAlive(record.newSession) : session(record.newSession);
     const candidateState = candidate.toState();
-    if (candidateState.remote || candidateState.docker || candidateState.customModel)
+    const boxedProof = requireViewer && candidateState.docker?.continuation
+      ? runtime.verifyBoxedLegacyTarget
+      : undefined;
+    if (candidateState.remote || (candidateState.docker && !boxedProof) || candidateState.customModel)
       throw new PlanMoveError(
         'Remote, container and custom-model runtimes cannot be adopted as moved subscription sessions'
       );
@@ -222,6 +226,16 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
     currentBinding();
     if (!allocations.accounts.some((row) => row.id === record.toAccount && row.sessionIds.includes(record.newSession!)))
       throw new PlanMoveError('The candidate is not allocated to the recorded destination plan');
+    if (boxedProof) {
+      const requireNative = await boxedProof(record, currentBinding);
+      const fence = () => {
+        currentBinding();
+        requireNative();
+        currentBinding();
+      };
+      fence();
+      return fence;
+    }
     const mark = composerReadyMark(candidate.mode);
     const fence = () => {
       currentBinding();

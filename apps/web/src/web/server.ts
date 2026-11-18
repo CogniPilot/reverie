@@ -2460,6 +2460,9 @@ export class WebServer extends EventEmitter {
       mux: this.mux,
       cleanup: (id, killMux, reason) => this.cleanupSession(id, killMux, reason),
       dockerReplacement: dockerRuntime?.planMoveActor(this.planService, planMoveStore, this.chatroomService),
+      ...(dockerRuntime ? {
+        verifyBoxedLegacyTarget: (record, current) => dockerRuntime.verifyBoxedLegacyTarget(record, current),
+      } : {}),
     };
     const requirePlanRuntime = () => {
       if (!dockerRuntime?.current()) throw new PlanMoveError('The boxed runtime changed', 403);

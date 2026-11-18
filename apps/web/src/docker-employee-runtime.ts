@@ -8,6 +8,7 @@ import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
+import { PlanMoveError, type PlanMoveRecord } from './plan-move.js';
 import { isMultiUserMode } from './config/multiuser.js';
 /** Explicit Docker-only application composition. Config and journal are DATA;
  * only actual Engine/helper observations and current Company actions permit effects. */
@@ -501,6 +502,48 @@ export class DockerEmployeeRuntime {
         throw Error('Boxed recovery resource policy changed');
     };
     return a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, policyCurrent);
+  }
+  /** Reobserve the current boxed destination of an already-stopped legacy move.
+   * This supplies only the live view fence for journal settlement. */
+  async verifyBoxedLegacyTarget(record: Readonly<PlanMoveRecord>, authorized: () => void): Promise<() => void> {
+    authorized();
+    const a = this.#attached;
+    const employee = a?.company.employeeForSession(record.newSession ?? '', record.owner);
+    const row = employee && a?.store.record(employee.id);
+    const binding = employee?.dockerBinding;
+    const session = employee && a?.ctx.sessions.get(employee.sessionId);
+    if (
+      !a || !employee || !row || !binding || !session?.docker?.continuation ||
+      record.dockerReplacement || record.resourceIntent || record.purpose ||
+      !record.sourceStopRequested || record.sourceCleanupVerified !== true ||
+      record.phase !== 'recovery-required' || record.newSession === record.oldSession ||
+      employee.id !== record.employeeId || session.subscriptionProfile?.id !== record.toAccount
+    ) throw new PlanMoveError('The original boxed destination is unavailable', 409);
+    const bindingDigest = dockerContinuationDigest(binding);
+    const current = () => {
+      authorized();
+      const live = a.company.employeeForSession(session.id, record.owner);
+      const subject = a.store.existingSubject(employee.id, row);
+      if (
+        this.#attached !== a || !this.current() || a.company.store.publicationUnconfirmed ||
+        !live || live.id !== employee.id || live.onVacation || !live.desiredRunning || live.bindingMigration ||
+        !subject || subject.sessionGeneration !== binding.sessionGeneration ||
+        dockerContinuationDigest(live.dockerBinding ?? null) !== bindingDigest ||
+        a.ctx.sessions.get(session.id) !== session || session.pid === null || session.paneExit ||
+        session.providerInputHeld || session.terminalInputHeld ||
+        !session.dockerContinuationViewCurrent || session.subscriptionProfile?.id !== record.toAccount
+      ) throw new PlanMoveError('The original boxed destination changed', 409);
+    };
+    current();
+    const view = await this.#observeRunningProviderView(a, row, binding, current);
+    if (!view) throw new PlanMoveError('The original boxed destination is unconfirmed', 409);
+    const fence = () => {
+      current();
+      view.require(session.id, session.docker!);
+      current();
+    };
+    fence();
+    return fence;
   }
   /** Read-only native observation plus one attach-only website client repair.
    * No resource convergence, provider installation or generic wake is admitted. */
