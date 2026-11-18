@@ -1,4 +1,4 @@
-{ pkgs, src, reverie, console, memory, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, ownerTerminalWebsite ? null, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, memory, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
@@ -41,19 +41,9 @@ let
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
   webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
-  ownerWebArgs = if ownerTerminalWebsite == null then null else ownerTerminalWebsite.webArgs;
-  # The selected H factory adds only this exact pair to the fixed web command.
-  # Reuse its string-only canonical guest-path validator; no host file is read.
-  serviceAuthWebArgs = builtins.isList ownerWebArgs && builtins.length ownerWebArgs == 7
-    && builtins.elemAt ownerWebArgs 5 == "--service-auth-config"
-    && builtins.isString (builtins.elemAt ownerWebArgs 6)
-    && ownerWebArgs == webArgs ++ [ "--service-auth-config"
-      ((import ./service-auth-config.nix { inherit (pkgs) lib; }) (builtins.elemAt ownerWebArgs 6)) ];
 in assert builtins.isBool resourceReplacement && (!resourceReplacement || !worker);
 assert memoryGuestCapsule == null || worker;
 assert perfGuestCapsule == null || worker;
-assert ownerTerminalWebsite == null || (!worker && !resourceReplacement &&
-  (builtins.elem ownerWebArgs [ webArgs (webArgs ++ [ "--resource-replacement" ]) ] || serviceAuthWebArgs));
 assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt gid && uid > 0 && gid > 0
   && uid < 2147483648 && gid < 2147483648
   && builtins.isInt rootlessDocker.subuidStart && rootlessDocker.subuidStart > 0
@@ -64,12 +54,11 @@ assert rootlessDocker == null || (worker && builtins.isInt uid && builtins.isInt
   && !(uid >= rootlessDocker.subuidStart && uid < rootlessDocker.subuidStart + rootlessDocker.subidCount)
   && !(gid >= rootlessDocker.subgidStart && gid < rootlessDocker.subgidStart + rootlessDocker.subidCount));
 pkgs.dockerTools.buildLayeredImage rec {
-  name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else if ownerTerminalWebsite != null then "reverie-owner-terminal" else "reverie";
+  name = if browserRuntime != null then "reverie-worker-browser" else if worker then "reverie-worker" else "reverie";
   tag = "latest";
   passthru.reverieConfig = config;
   created = "1970-01-01T00:00:01Z";
-  contents = baseContents ++ pkgs.lib.optional worker nixBase
-    ++ pkgs.lib.optional (ownerTerminalWebsite != null) ownerTerminalWebsite;
+  contents = baseContents ++ pkgs.lib.optional worker nixBase;
   extraCommands = ''
     mkdir -p etc bin usr/local/bin opt/reverie home/agent workspace reverie_workspace scratch/tmp instances tmp
     ${pkgs.lib.optionalString (memoryGuestCapsule != null) ''
@@ -242,9 +231,8 @@ pkgs.dockerTools.buildLayeredImage rec {
     # Keep the worker factory-v1 program ABI. Actual native J selects its fixed
     # task-v2 init explicitly; payload presence alone selects no launch policy.
     Entrypoint = if worker then [ "/bin/sleep" ] else [ "/bin/tini" "-g" "-s" "--" "/usr/local/bin/reverie-start" ];
-    Cmd = if worker then [ "infinity" ] else if ownerTerminalWebsite != null then
-      ([ "${ownerTerminalWebsite}/libexec/reverie" ] ++ ownerTerminalWebsite.webArgs) else
-      [ "reverie" "web" "--host" "0.0.0.0" "--port" "3000" ]
+    Cmd = if worker then [ "infinity" ] else
+      [ "reverie" ] ++ webArgs
       ++ pkgs.lib.optionals resourceReplacement [ "--resource-replacement" ];
     Env = [ (if worker then "PATH=/opt/reverie/autoenv/bin:/home/agent/.nix-profile/bin:/home/agent/.local/bin:/home/agent/.local/state/nix/profiles/profile/bin:/bin" else "PATH=/bin")
       "HOME=/home/agent" "REVERIE_CONTAINER=1" "REVERIE_MANAGED_INSTALL=nix"
@@ -258,7 +246,7 @@ pkgs.dockerTools.buildLayeredImage rec {
       "NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ]
       # Laptops: Reverie's own hooks run the image's CLI, so an older `reverie` earlier on PATH (a home
       # install from before a release) cannot answer for them.
-      ++ pkgs.lib.optionals (!worker && ownerTerminalWebsite == null) [ "REVERIE_NATIVE_FRONT=1" ]
+      ++ pkgs.lib.optionals (!worker) [ "REVERIE_NATIVE_FRONT=1" ]
       ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${reverie}/bin/reverie" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
         "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]
@@ -277,10 +265,8 @@ pkgs.dockerTools.buildLayeredImage rec {
       "org.reverie.worker.child-manifest" = childManifest;
     } // pkgs.lib.optionalAttrs (worker && perfGuestCapsule != null) {
       "org.reverie.worker.perf-capsule-manifest" = "${perfGuestCapsule}/opt/reverie/perf/build-inputs.json";
-    } // pkgs.lib.optionalAttrs (!worker && (resourceReplacement || ownerTerminalWebsite != null)) {
-      "org.reverie.website.runtime" = if ownerTerminalWebsite == null then "resource"
-        else if builtins.elem "--resource-replacement" ownerTerminalWebsite.webArgs then "resource-terminal"
-        else "terminal";
+    } // pkgs.lib.optionalAttrs resourceReplacement {
+      "org.reverie.website.runtime" = "resource";
     } // pkgs.lib.optionalAttrs (browserRuntime != null) {
       "org.reverie.worker.browser" = "1";
     } // pkgs.lib.optionalAttrs (rootlessDocker != null) {

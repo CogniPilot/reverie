@@ -1,5 +1,8 @@
 # First laptop-terminal website activation
 
+This page records the retired host website activation workflow. Use the
+[Docker installation and update instructions](../README.md) for current deployments.
+
 The optional owner-local app `owner-terminal-website` prepares and applies the
 first **plain → H-only** website transition for an existing isolated-worker
 deployment. It uses the same `WebsiteStage` swap, maintenance OFD, exact plan,

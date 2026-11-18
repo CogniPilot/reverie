@@ -22,7 +22,8 @@ For private GHCR credentials, architectures and detailed prerequisites, see the
 Do not run the standalone installer over a custom bind-mounted company or an
 isolated-laptop deployment: its managed named volumes are a different layout.
 Preserve the existing mount sources, configuration, profiles and recovery evidence
-when recreating a custom container. Use [website updates](website-update.md) and
+when recreating a custom container. Use the
+[registered Docker deployment workflow](../crates/reverie-deployment/README.md) and
 the [agent workstation workflow](#agent-workstations) for coordinated deployments.
 
 ### Scratch and shared projects

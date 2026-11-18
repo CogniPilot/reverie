@@ -163,17 +163,9 @@ class CanonicalResourceBinding(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'WORKER_POLICY_CHANGED'): h.guard()
         self.assertNotEqual(self.path.read_bytes(), current)
 
-    def test_service_grants_only_existing_pinned_lock_leaves_not_journal_directory(self):
+    def test_lock_paths_are_pinned_leaves(self):
         paths = B.locking_paths(self.baseline)
         self.assertEqual(paths, [self.f.control/'admission.lock', self.f.control/'operations/operations.lock'])
-        from reverie.owner_terminal_install import unit_text
-        from types import SimpleNamespace
-        policy = SimpleNamespace(value={'version':2}, config=self.baseline, roots={'control':self.path.parent}, path=self.path)
-        raw = unit_text(policy, Path('/nix/store/fixed-host/bin/host'))
-        writable = next(line for line in raw.splitlines() if line.startswith('ReadWritePaths='))
-        self.assertIn('"'+str(paths[0])+'"', writable)
-        self.assertIn('"'+str(paths[1])+'"', writable)
-        self.assertNotIn('"'+str(self.f.control/'operations')+'"', writable)
         paths[1].rename(paths[1].with_name('preserved.lock'));paths[1].write_bytes(b'');paths[1].chmod(0o600)
         with self.assertRaisesRegex(ValueError, 'LOCK_CHANGED'):B.locking_paths(self.baseline)
 
@@ -344,22 +336,14 @@ class PurposeRootSeparation(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'ROOT_CHANGED'):owned.guard()
         with self.assertRaisesRegex(ValueError,'PURPOSE_ROOT_OVERLAP'):owned.unit_text()
 
-    def test_installation_native_guard_and_direct_unit_generator_refuse_broad_r_directory(self):
+    def test_installation_native_guard_refuses_broad_r_directory(self):
         from types import SimpleNamespace
-        from reverie.owner_terminal_install import unit_text
         h=H.Installation.__new__(H.Installation)
         h.roots={'controlRoot':self.f.control,'ledgerRoot':self.roots['ledgerBase'],
                  'bootstrapRoot':self.roots['bootstrapRoot']}
         # The purpose boundary must reject before any engine producer is used.
         h.engine=SimpleNamespace(guard=lambda:self.fail('No native producer before overlap refusal'))
         with self.assertRaisesRegex(ValueError,'PURPOSE_ROOT_OVERLAP'):h._guard_native(self.config)
-        policy=SimpleNamespace(value={'version':2},config=self.config,roots=h.roots,path=self.case.path)
-        with self.assertRaisesRegex(ValueError,'PURPOSE_ROOT_OVERLAP'):
-            unit_text(policy,Path('/nix/store/fixed-host/bin/host'))
-        policy.roots={key:path for key,path in zip(h.roots,self.roots.values())}
-        writable=next(line for line in unit_text(policy,Path('/nix/store/fixed-host/bin/host')).splitlines()
-                      if line.startswith('ReadWritePaths='))
-        self.assertNotIn('"'+str(self.f.control)+'"',writable)
 
     def test_direct_and_nested_mount_backing_aliases_refuse_both_directions(self):
         from reverie import worker_cold_tmp as C

@@ -42,7 +42,11 @@ let
     exactRetiredFactoryNamesPreserved = (verify expected ../.).retiredFactories == [
       "nix/local-model.nix"
       "nix/ops-core.nix"
+      "nix/owner-terminal-host.nix"
+      "nix/owner-terminal-lifecycle.nix"
       "nix/owner-terminal-packages.nix"
+      "nix/owner-terminal-python-source.nix"
+      "nix/owner-terminal-website.nix"
       "nix/worker-resume-program.nix"
     ];
     brokerCannotReturn = !(passes (add "packages" "workerBroker") ../.);

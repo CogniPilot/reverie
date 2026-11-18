@@ -39,6 +39,9 @@ The unreferenced `nix/local-model.nix`, `nix/ops-core.nix` and
 `nix/owner-terminal-packages.nix` host-entry factories have also been removed.
 The boundary check refuses their reintroduction. Their shared Rust libraries,
 container image producers and actively referenced component fixtures remain.
+The retired owner-terminal package factories and their Python host executable
+have also been removed. Existing historical proofs still use the legacy
+protocol code.
 The workspace and Kokoro commands now use Rust. Memory and Hands still bring
 Python into the image. The remaining runtime and acceptance callers must
 migrate before the root `python/` tree can be retired.

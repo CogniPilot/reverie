@@ -1,5 +1,9 @@
 # Pinned website update stage
 
+This page describes the historical host stage. The current registered Docker
+console workflow is implemented by
+[the Rust deployment service](../crates/reverie-deployment/README.md).
+
 `apps/host/website-update.py` supplies the website cutover stage for the separately
 reviewed paired-image planner. This source has no command-line or flake entrypoint.
 Normal startup is unchanged. No installation, image load, build, tag change, broker
