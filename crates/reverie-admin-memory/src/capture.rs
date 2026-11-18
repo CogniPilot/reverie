@@ -256,6 +256,23 @@ pub(crate) fn run(
     request: Option<&[u8]>,
     limits: Limits<'_>,
 ) -> io::Result<Vec<u8>> {
+    let output = completed(command, request, limits)?;
+    if !output.success {
+        return Err(io::Error::other("channel memory subprocess refused"));
+    }
+    Ok(output.stdout)
+}
+
+pub(crate) struct Completed {
+    pub(crate) success: bool,
+    pub(crate) stdout: Vec<u8>,
+}
+
+pub(crate) fn completed(
+    command: Command,
+    request: Option<&[u8]>,
+    limits: Limits<'_>,
+) -> io::Result<Completed> {
     let mut child = OwnedChild::spawn(command, request.is_some(), limits.group())?;
     let mut pipes = Pipes::new(&mut child.child, request)?;
     loop {
@@ -268,10 +285,10 @@ pub(crate) fn run(
             std::thread::sleep(TICK);
         }
     }
-    if !child.settle()? {
-        return Err(io::Error::other("channel memory subprocess refused"));
-    }
-    Ok(pipes.output)
+    Ok(Completed {
+        success: child.settle()?,
+        stdout: pipes.output,
+    })
 }
 
 #[cfg(test)]

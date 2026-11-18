@@ -67,24 +67,54 @@ impl Office {
         &self,
         room: &ChatRoomId,
         id: &ChatMessageId,
-    ) -> io::Result<Vec<u8>> {
-        self.run(
-            &[
-                "read",
-                "--room",
-                room.as_str(),
-                "--message",
-                id.as_str(),
-                "--json",
-            ],
-            HISTORY_BYTES,
-        )
+    ) -> io::Result<Option<Vec<u8>>> {
+        let command = self.command(&[
+            "read",
+            "--room",
+            room.as_str(),
+            "--message",
+            id.as_str(),
+            "--json",
+        ]);
+        let output = capture::completed(command, None, self.limits(HISTORY_BYTES))?;
+        if output.success {
+            let response: ExactRead<'_> = serde_json::from_slice(&output.stdout)?;
+            return Ok(response.message.is_some().then_some(output.stdout));
+        }
+        if not_found(&output.stdout) {
+            Ok(None)
+        } else {
+            Err(refused())
+        }
     }
 
     fn run(&self, args: &[&str], max_bytes: usize) -> io::Result<Vec<u8>> {
+        capture::run(self.command(args), None, self.limits(max_bytes))
+    }
+
+    fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(&self.cli[0]);
         command.args(&self.cli[1..]).args(args);
-        let deadline = Instant::now() + Duration::from_secs_f64(self.memory_timeout_s.min(10.0));
-        capture::run(command, None, Limits::office(deadline, max_bytes))
+        command
     }
+
+    fn limits(&self, max_bytes: usize) -> Limits<'_> {
+        let deadline = Instant::now() + Duration::from_secs_f64(self.memory_timeout_s.min(10.0));
+        Limits::office(deadline, max_bytes)
+    }
+}
+
+#[derive(Deserialize)]
+struct ExactRead<'a> {
+    #[serde(borrow)]
+    message: Option<&'a serde_json::value::RawValue>,
+}
+
+fn not_found(stdout: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(stdout).is_ok_and(|reply| {
+        reply["success"].as_bool() == Some(false)
+            && reply["error"]
+                .as_str()
+                .is_some_and(|code| code.starts_with("NOT_FOUND"))
+    })
 }

@@ -1,4 +1,5 @@
 use crate::{database::Database, journal, office::Office, refused};
+use reverie_contracts::memory::channel::journal::JournalCommit;
 use reverie_contracts::memory::channel::{ChannelEvidence, ConfirmedExchange, ExchangeClaim};
 use reverie_core::ids::ChatRoomId;
 use serde::Deserialize;
@@ -38,6 +39,7 @@ enum Operation {
     Record,
     JournalSource,
     JournalReceipt,
+    JournalCommit,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +55,12 @@ struct Job<'a> {
     captured_end: Option<&'a RawValue>,
     turn_id: Option<journal::Reference>,
     expected_hash: Option<String>,
+    #[serde(borrow)]
+    draft: Option<&'a RawValue>,
+    #[serde(borrow)]
+    captured: Option<&'a RawValue>,
+    #[serde(default, deserialize_with = "journal::previous_id")]
+    previous_id: Option<Option<i64>>,
 }
 
 pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
@@ -70,11 +78,13 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
             &room,
             &job.event.ok_or_else(refused)?,
         )?)?),
-        Operation::JournalSource | Operation::JournalReceipt => journal_read(&job, &room),
+        Operation::JournalSource | Operation::JournalReceipt | Operation::JournalCommit => {
+            journal_operation(&job, &room)
+        }
     }
 }
 
-fn journal_read(job: &Job<'_>, room: &ChatRoomId) -> io::Result<Box<RawValue>> {
+fn journal_operation(job: &Job<'_>, room: &ChatRoomId) -> io::Result<Box<RawValue>> {
     if !job.config.journal_enabled {
         return Err(refused());
     }
@@ -94,6 +104,21 @@ fn journal_read(job: &Job<'_>, room: &ChatRoomId) -> io::Result<Box<RawValue>> {
             job.turn_id.as_ref().ok_or_else(refused)?,
             job.expected_hash.as_deref(),
         ),
+        Operation::JournalCommit => {
+            let request = JournalCommit::decode(
+                job.draft.ok_or_else(refused)?,
+                job.captured.ok_or_else(refused)?,
+                room,
+            )
+            .ok_or_else(refused)?;
+            journal::commit(
+                office,
+                room,
+                &database,
+                &request,
+                job.previous_id.ok_or_else(refused)?,
+            )
+        }
         Operation::Recall | Operation::Record => Err(refused()),
     }
 }

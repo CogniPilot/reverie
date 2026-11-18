@@ -13,6 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "support/journal_write.rs"]
+mod journal_write;
+
 const SESSION: &str = "10000000-0000-0000-0000-000000000001";
 const ROOM: &str = "20000000-0000-0000-0000-000000000002";
 const OTHER: &str = "20000000-0000-0000-0000-000000000003";

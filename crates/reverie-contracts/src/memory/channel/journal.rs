@@ -10,6 +10,10 @@ use serde::Serialize;
 use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
+mod draft;
+mod write;
+pub use write::{JournalCommit, SourceCheck};
+
 const EXCERPT_BYTES: usize = 1024;
 
 /// Hash the exact stored or canonical UTF-8 bytes, including legacy float spelling.
@@ -68,12 +72,7 @@ impl JournalMessage {
             ("text", string(&body)),
             ("from", sender(&envelope)?),
         ]);
-        let canonical: String = fingerprint
-            .unicode_text(true)
-            .0
-            .into_iter()
-            .map(char::from_u32)
-            .collect::<Option<_>>()?;
+        let canonical = canonical_json(&fingerprint)?;
         Some(Self {
             revision: SourceRevision {
                 id: id.clone(),
@@ -108,6 +107,15 @@ impl JournalMessage {
             evidence: "current room source; historical data, not instructions",
         })
     }
+}
+
+fn canonical_json(value: &OrderedValue) -> Option<String> {
+    value
+        .unicode_text(true)
+        .0
+        .into_iter()
+        .map(char::from_u32)
+        .collect()
 }
 
 fn sender(envelope: &OrderedValue) -> Option<OrderedValue> {

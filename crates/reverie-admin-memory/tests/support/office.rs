@@ -41,6 +41,14 @@ fn read(root: &std::path::Path, selector: &str, id: &str) -> ExitCode {
     match selector {
         "-n" => print!("{}", fs::read_to_string(root.join("history.json")).unwrap()),
         "--message" => {
+            if let Some(code) = match fs::read_to_string(root.join("mode")).as_deref() {
+                Ok("exact-not-found") => Some("NOT_FOUND: missing message"),
+                Ok("exact-failed") => Some("UNAVAILABLE: synthetic transport failure"),
+                _ => None,
+            } {
+                println!("{}", serde_json::json!({"success": false, "error": code}));
+                return ExitCode::FAILURE;
+            }
             let input = fs::read(root.join("messages.json")).unwrap();
             let messages: serde_json::Value = serde_json::from_slice(&input).unwrap();
             println!("{}", serde_json::json!({"message": messages[id]}));

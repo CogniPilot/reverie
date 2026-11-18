@@ -9,7 +9,7 @@ pub use documents::{
     BallotHistory, BallotOutcome, DocumentEnvelope, DocumentHistory, MemoryDocuments,
     RecordedBallot, TransactionDocuments,
 };
-pub use journal::{JournalEntryId, JournalKey, JournalReceipt};
+pub use journal::{JournalEntryId, JournalKey, JournalReceipt, JournalWriteReceipt};
 mod query;
 mod reader;
 pub use reader::{MemoryReadProfile, MemoryReader, NativeMemoryRead};

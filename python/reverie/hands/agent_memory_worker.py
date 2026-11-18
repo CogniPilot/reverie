@@ -11,7 +11,7 @@ from pathlib import Path
 # -I excludes the script directory. Only the explicitly deployed sibling modules
 # are imported; never a cwd, HOME or another instance's code.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from agent_loop import Chat, ChatNotFound
+from agent_loop import Chat, ChatNotFound, NATIVE_MEMORY_OPS
 from reverie.instance import load_instance
 from reverie.memory import MemoryStore
 import agent_journal
@@ -97,9 +97,9 @@ def open_journal(root, room):
 
 def perform(job, chat=None):
     cfg = job['config']
-    if chat is None and job['op'] in ('journal_source', 'journal_receipt'):
+    if chat is None and job['op'] in NATIVE_MEMORY_OPS:
         # Existing injected-chat tests exercise the legacy result as an oracle.
-        raise ValueError('journal read belongs to the native worker')
+        raise ValueError('journal operation belongs to the native worker')
     chat = chat or Chat(cfg['cli'], cfg['memory_timeout_s'])
     instance = Path(cfg['memory_instance'])
     if not instance.is_absolute():

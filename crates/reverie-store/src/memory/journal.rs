@@ -3,6 +3,8 @@ use super::{MemoryError, Result};
 use reverie_contracts::memory::channel::journal::journal_digest;
 use reverie_core::{ids::ChatMessageId, operations::JournalDigest};
 use rusqlite::{Connection, OptionalExtension, Row};
+mod write;
+pub use write::JournalWriteReceipt;
 
 #[derive(Clone, Copy)]
 pub struct JournalEntryId(i64);
@@ -50,19 +52,28 @@ pub(super) fn receipt(
         snapshot.commit()?;
         return Ok(JournalReceipt::Missing);
     }
+    let result = lookup(&snapshot, key, expected)?;
+    snapshot.commit()?;
+    Ok(result)
+}
+
+fn lookup(
+    db: &Connection,
+    key: &JournalKey,
+    expected: Option<&JournalDigest>,
+) -> Result<JournalReceipt> {
     let result = match key {
-        JournalKey::Entry(id) => snapshot.query_row(
+        JournalKey::Entry(id) => db.query_row(
             "SELECT id,turn_id,committed_ms,payload_hash,payload FROM hands_journal WHERE id=?",
             [id.get()],
             |row| project(row, expected),
         ),
-        JournalKey::Turn(id) => snapshot.query_row(
+        JournalKey::Turn(id) => db.query_row(
             "SELECT id,turn_id,committed_ms,payload_hash,payload FROM hands_journal WHERE turn_id=?",
             [id.as_str()],
             |row| project(row, expected),
         ),
     }.optional()?;
-    snapshot.commit()?;
     result.unwrap_or(Ok(JournalReceipt::Missing))
 }
 
