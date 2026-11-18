@@ -1,7 +1,6 @@
 import json
 import os
 import shutil
-import sys
 import time
 
 from coding_process import BoundedProcess
@@ -62,15 +61,12 @@ class ModelArbiter:
         environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
         if self.key_env is not None and self.key_env in os.environ:
             environment[self.key_env] = os.environ[self.key_env]
-        if self.token_meter is not None:
-            helper = shutil.which(native_memory_command('token-meter-worker')[0])
-            if helper is not None:
-                environment['REVERIE_HANDS_MEMORY_COMMAND'] = os.path.abspath(helper)
-        worker = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'coding_model_client.py')
-        self.job = self.factory([sys.executable, '-I', '-B', worker, '--worker'],
-                                json.dumps(config, ensure_ascii=False).encode('utf-8'),
+        command = native_memory_command('hands-model-worker')
+        if helper := shutil.which(command[0]):
+            command[0] = os.path.abspath(helper)
+        self.job = self.factory(command, json.dumps(config, ensure_ascii=False).encode('utf-8'),
                                 min(self.timeout_s, remaining), self.max_response_bytes,
-                                environment=environment)
+                                environment=environment, parent_bound=True)
         self.requests_started += 1
 
     def pause_for_chat(self):

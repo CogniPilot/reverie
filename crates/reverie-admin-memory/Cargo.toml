@@ -15,7 +15,9 @@ required-features = ["test-fixtures"]
 
 [dependencies]
 clap.workspace = true
+getrandom.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
+regex-lite.workspace = true
 reverie-contracts.workspace = true
 reverie-core.workspace = true
 reverie-host.workspace = true
@@ -27,7 +29,6 @@ tokio.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true
-getrandom.workspace = true
 
 [lints]
 workspace = true

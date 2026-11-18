@@ -7,7 +7,8 @@ import time
 
 
 class BoundedProcess:
-    def __init__(self, argv, body, timeout, max_output, *, environment=None, clock=time.monotonic):
+    def __init__(self, argv, body, timeout, max_output, *, environment=None, clock=time.monotonic,
+                 parent_bound=False):
         if timeout <= 0 or max_output <= 0:
             raise ValueError('positive process budgets required')
         self.clock = clock
@@ -21,8 +22,10 @@ class BoundedProcess:
         self.error = None
         self.done = False
         self.selector = selectors.DefaultSelector()
-        guard = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'coding_process_guard.py')
-        command = [sys.executable, '-I', '-B', guard, str(os.getpid())] + list(argv)
+        command = list(argv)
+        if not parent_bound:
+            guard = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'coding_process_guard.py')
+            command = [sys.executable, '-I', '-B', guard, str(os.getpid())] + command
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE, env=environment,
                                         close_fds=True, start_new_session=True, bufsize=0)

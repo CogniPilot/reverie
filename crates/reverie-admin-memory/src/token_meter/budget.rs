@@ -1,4 +1,4 @@
-use reverie_host::embeddings::tokenizer::Failure;
+use reverie_host::embeddings::model_api::Failure;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
@@ -20,14 +20,14 @@ pub(super) struct Budget {
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct Stats {
+pub(crate) struct Stats {
     pub(super) prompt_tokens: usize,
     pub(super) context_tokens: u64,
     pub(super) output_tokens: u64,
     pub(super) margin: u64,
     pub(super) slots: u8,
     pub(super) image_tokens: u128,
-    pub(super) admitted: bool,
+    pub(crate) admitted: bool,
 }
 
 impl Budget {

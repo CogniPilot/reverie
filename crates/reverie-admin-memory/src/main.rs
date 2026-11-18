@@ -5,6 +5,7 @@ mod configuration;
 mod context_cli;
 mod database;
 mod embedding_worker;
+mod hands_model;
 mod journal;
 mod office;
 mod opencode_context;
@@ -192,6 +193,8 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--embedding-worker" => embedding_worker::run,
         "--scoped-image-worker" => scoped_image::run,
         "--token-meter-worker" => token_meter::run,
+        "--hands-model-worker" => hands_model::run,
+        "--hands-chat-worker" => hands_model::chat,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

@@ -51,7 +51,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
 import admin_task
 from coding_manager import TaskManager
-from coding_model_client import ModelClient, validate_token_meter
 from debug_terminal import DebugTerminal
 from attention_wake import AttentionWake, wait_for_scan
 import public_web
@@ -243,11 +242,12 @@ def chat_model(cfg, messages, tools=None):
     meter = dict(cfg['token_meter']) if cfg.get('token_meter') else None
     if meter is not None and cfg.get('vision'):
         meter['image_tokens_per_image'] = cfg.get('image_tokens_per_image', 2048)
-    client = ModelClient(cfg['api_base'], key_env=cfg.get('model_key_env'), timeout_s=cfg['model_timeout_s'],
-                         token_meter=meter, events_file=cfg.get('model_events_file'),
-                         token_meter_optional=True)
     managed_context.report(cfg)
-    return client(req_body, cfg['model_timeout_s'])
+    return coding_chat.model_completion({
+        'api_base': cfg['api_base'], 'key_env': cfg.get('model_key_env'), 'timeout_s': cfg['model_timeout_s'],
+        'max_response_bytes': 262144, 'token_meter': meter, 'events_file': cfg.get('model_events_file'),
+        'payload': req_body,
+    })
 
 
 def searxng_search(cfg, query):
@@ -1325,7 +1325,7 @@ def load_config(path):
     coding_chat.validate_settings(cfg.get('coding'))
     admin_task.validate(cfg)
     if cfg.get('token_meter') is not None:
-        validate_token_meter(cfg['token_meter'])
+        coding_chat.validate_token_meter(cfg['token_meter'])
     if (type(cfg['recall_cap_chars']) is not int or not 0 <= cfg['recall_cap_chars'] <= 12000 or
             any(type(cfg[k]) not in (int, float) or not 0.1 <= cfg[k] <= 10
                 for k in ('memory_timeout_s', 'journal_command_timeout_s', 'journal_status_timeout_s'))):

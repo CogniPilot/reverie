@@ -39,11 +39,11 @@ class HandsRuntimeTests(unittest.TestCase):
     def test_model_defaults_are_inherited_unless_owner_overrides_temperature(self):
         cfg = cfg_for('/unused')
         client = Mock(return_value={'content': 'ok'})
-        with patch.object(loop, 'ModelClient', return_value=client):
+        with patch.object(loop.coding_chat, 'model_completion', client):
             loop.chat_model(cfg, [])
-            self.assertNotIn('temperature', client.call_args.args[0])
+            self.assertNotIn('temperature', client.call_args.args[0]['payload'])
             loop.chat_model(dict(cfg, temperature=0.4), [])
-            self.assertEqual(client.call_args.args[0]['temperature'], 0.4)
+            self.assertEqual(client.call_args.args[0]['payload']['temperature'], 0.4)
 
     def test_unfinished_thinking_and_tool_markup_never_become_chat_replies(self):
         with tempfile.TemporaryDirectory() as directory:

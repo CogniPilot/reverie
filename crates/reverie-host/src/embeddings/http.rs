@@ -113,7 +113,7 @@ async fn tunnel(proxy: &Endpoint, target: &Endpoint, timeout: Duration) -> Resul
         .handshake(TokioIo::new(stream))
         .await
         .map_err(transport)?;
-    let driver = tokio::spawn(connection.with_upgrades());
+    let mut driver = Driver(tokio::spawn(connection.with_upgrades()));
     let mut request = Request::builder()
         .method(Method::CONNECT)
         .uri(&authority)
@@ -137,8 +137,8 @@ async fn tunnel(proxy: &Endpoint, target: &Endpoint, timeout: Duration) -> Resul
         Ok(response) => Err(LlamaError::HttpStatus(response.status().as_u16())),
         Err(error) => Err(error),
     };
-    driver.abort();
-    let _ = driver.await;
+    driver.0.abort();
+    let _ = (&mut driver.0).await;
     active.store(false, Ordering::Release);
     result
 }
@@ -164,46 +164,25 @@ async fn connect(
         None => socket(target, timeout).await,
     }
 }
-async fn body(response: Response, limit: Option<usize>) -> Result<Vec<u8>> {
-    let mut body = response.into_body();
-    let mut output = Vec::new();
-    while let Some(frame) = body.frame().await {
-        if let Ok(data) = frame.map_err(transport)?.into_data() {
-            if limit.is_some_and(|limit| data.len() > limit.saturating_sub(output.len())) {
-                return Err(transport(std::io::Error::other("tokenizer response limit")));
-            }
-            output.try_reserve(data.len()).map_err(transport)?;
-            output.extend_from_slice(&data);
-        }
-    }
-    Ok(output)
-}
-struct Reply {
-    next: Option<String>,
-    body: Vec<u8>,
-}
-#[derive(Clone, Copy)]
-enum ResponsePolicy<'a> {
-    Embedding,
-    Tokenizer {
-        authorization: Option<&'a http::HeaderValue>,
-        limit: usize,
-    },
-}
 struct Exchange<'a> {
     target: &'a Origin,
     proxy: Option<&'a Endpoint>,
     method: &'a Method,
-    url: &'a str,
     timeout: Duration,
     proxies: &'a ProxySettings,
-    policy: ResponsePolicy<'a>,
+    json: bool,
+    authorization: Option<&'a http::HeaderValue>,
 }
-async fn exchange(
-    exchange: Exchange<'_>,
-    bytes: Vec<u8>,
-    visited: &mut BTreeMap<String, usize>,
-) -> Result<Reply> {
+
+struct Driver(tokio::task::JoinHandle<hyper::Result<()>>);
+
+impl Drop for Driver {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn exchange(exchange: Exchange<'_>, bytes: Vec<u8>) -> Result<(Response, Driver)> {
     let Exchange {
         target,
         proxy,
@@ -223,25 +202,22 @@ async fn exchange(
         .handshake(TokioIo::new(stream))
         .await
         .map_err(transport)?;
-    let driver = tokio::spawn(connection);
-    let result = send(&mut sender, exchange, bytes, visited).await;
-    driver.abort();
-    let _ = driver.await;
-    result
+    let driver = Driver(tokio::spawn(connection));
+    let response = send(&mut sender, exchange, bytes).await?;
+    Ok((response, driver))
 }
 async fn send(
     sender: &mut http1::SendRequest<Full<Bytes>>,
     exchange: Exchange<'_>,
     bytes: Vec<u8>,
-    visited: &mut BTreeMap<String, usize>,
-) -> Result<Reply> {
+) -> Result<Response> {
     let Exchange {
         target,
         proxy,
         method,
-        url,
         proxies,
-        policy,
+        json,
+        authorization,
         ..
     } = exchange;
     let uri = if proxy.is_some() && !target.network.secure {
@@ -259,17 +235,13 @@ async fn send(
         .header("User-Agent", "Python-urllib/3.13")
         .header("Accept-Encoding", "identity")
         .header("Connection", "close");
-    if *method == Method::POST || matches!(policy, ResponsePolicy::Tokenizer { .. }) {
+    if *method == Method::POST || json {
         request = request.header("Content-Type", "application/json");
     }
     if *method == Method::POST {
         request = request.header("Content-Length", bytes.len());
     }
-    if let ResponsePolicy::Tokenizer {
-        authorization: Some(authorization),
-        ..
-    } = policy
-    {
+    if let Some(authorization) = authorization {
         request = request.header("Authorization", authorization);
     }
     let nested = proxy
@@ -286,28 +258,37 @@ async fn send(
     {
         request = request.header("Proxy-Authorization", authorization);
     }
-    let response = send_response(
+    send_response(
         sender,
         request
             .body(Full::new(Bytes::from(bytes)))
             .map_err(transport)?,
         true,
     )
-    .await?;
-    let (next, limit) = match policy {
-        // Embeddings drain the previous response before following a redirect.
-        ResponsePolicy::Embedding => (next_location(&response, method, url, visited)?, None),
-        ResponsePolicy::Tokenizer { limit, .. } if response.status().is_success() => {
-            (None, Some(limit))
+    .await
+}
+
+async fn consume(response: Response, mut on_data: impl FnMut(&[u8]) -> Result<bool>) -> Result<()> {
+    let mut body = response.into_body();
+    while let Some(frame) = body.frame().await {
+        if let Ok(data) = frame.map_err(transport)?.into_data()
+            && on_data(&data)?
+        {
+            break;
         }
-        ResponsePolicy::Tokenizer { .. } => {
-            return Err(LlamaError::HttpStatus(response.status().as_u16()));
-        }
-    };
-    Ok(Reply {
-        next,
-        body: body(response, limit).await?,
+    }
+    Ok(())
+}
+
+async fn body(response: Response) -> Result<Vec<u8>> {
+    let mut output = Vec::new();
+    consume(response, |data| {
+        output.try_reserve(data.len()).map_err(transport)?;
+        output.extend_from_slice(data);
+        Ok(false)
     })
+    .await?;
+    Ok(output)
 }
 fn next_location(
     response: &Response,
@@ -347,24 +328,25 @@ pub(super) async fn request(
     let mut visited = BTreeMap::<String, usize>::new();
     let mut target = Origin::parse_text(&url)?;
     loop {
-        let url = target.full_url.clone();
         let proxy = proxies.selected(&target.network)?;
-        let reply = exchange(
+        let (response, _driver) = exchange(
             Exchange {
                 target: &target,
                 proxy: proxy.as_ref(),
                 method: &method,
-                url: &url,
                 timeout,
                 proxies,
-                policy: ResponsePolicy::Embedding,
+                json: false,
+                authorization: None,
             },
             bytes.clone(),
-            &mut visited,
         )
         .await?;
-        let Some(selected) = reply.next else {
-            return Ok(reply.body);
+        let next = next_location(&response, &method, &target.full_url, &mut visited)?;
+        // Drain the previous response before following an embedding redirect.
+        let data = body(response).await?;
+        let Some(selected) = next else {
+            return Ok(data);
         };
         target = Origin::parse(&selected)?;
         method = Method::GET;
@@ -372,18 +354,21 @@ pub(super) async fn request(
     }
 }
 
-pub(super) struct TokenizerExchange<'a> {
+pub(super) struct ModelExchange<'a> {
     pub target: &'a Origin,
     pub timeout: Duration,
-    pub limit: usize,
     pub authorization: Option<&'a http::HeaderValue>,
     pub proxies: &'a ProxySettings,
 }
 
-impl TokenizerExchange<'_> {
-    pub(super) async fn request(self, data: Option<Vec<u8>>) -> Result<Vec<u8>> {
+impl ModelExchange<'_> {
+    pub(super) async fn request(
+        self,
+        data: Option<Vec<u8>>,
+        on_data: impl FnMut(&[u8]) -> Result<bool>,
+    ) -> Result<()> {
         let proxy = self.proxies.selected(&self.target.network)?;
-        let reply = exchange(
+        let (response, _driver) = exchange(
             Exchange {
                 target: self.target,
                 proxy: proxy.as_ref(),
@@ -392,19 +377,18 @@ impl TokenizerExchange<'_> {
                 } else {
                     &Method::GET
                 },
-                url: &self.target.full_url,
                 timeout: self.timeout,
                 proxies: self.proxies,
-                policy: ResponsePolicy::Tokenizer {
-                    authorization: self.authorization,
-                    limit: self.limit,
-                },
+                json: true,
+                authorization: self.authorization,
             },
             data.unwrap_or_default(),
-            &mut BTreeMap::new(),
         )
         .await?;
-        Ok(reply.body)
+        if !response.status().is_success() {
+            return Err(LlamaError::HttpStatus(response.status().as_u16()));
+        }
+        consume(response, on_data).await
     }
 }
 

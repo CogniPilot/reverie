@@ -3,15 +3,16 @@ mod budget;
 #[cfg(test)]
 mod tests;
 
-use budget::{Budget, Stats};
-use reverie_host::embeddings::tokenizer::{Client, Failure, Route};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use budget::Budget;
+pub(super) use budget::Stats;
+use reverie_host::embeddings::model_api::{Client, Failure, Route};
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::{env, io, time::Duration};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Settings {
+pub(super) struct Settings {
     base_url: String,
     context_ceiling: u64,
     #[serde(default = "default_margin")]
@@ -20,7 +21,7 @@ struct Settings {
     timeout_s: f64,
     #[serde(default = "default_limit")]
     max_bytes: usize,
-    key_env: Option<String>,
+    key_env: Option<KeyName>,
     #[serde(default)]
     image_tokens_per_image: u64,
 }
@@ -43,16 +44,35 @@ fn key_name_valid(name: &str) -> bool {
         && bytes.all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
 }
 
-impl Settings {
-    fn configure(self) -> Result<Meter, Failure> {
-        let timeout = Duration::try_from_secs_f64(self.timeout_s).map_err(|_| Failure::Invalid)?;
-        if self
-            .key_env
-            .as_deref()
-            .is_some_and(|name| !key_name_valid(name))
-        {
-            return Err(Failure::Invalid);
+#[derive(Deserialize)]
+#[serde(try_from = "String")]
+pub(super) struct KeyName(String);
+
+impl TryFrom<String> for KeyName {
+    type Error = &'static str;
+
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        if key_name_valid(&name) {
+            Ok(Self(name))
+        } else {
+            Err("invalid model API key variable")
         }
+    }
+}
+
+pub(super) fn credential(name: Option<&KeyName>) -> Result<Option<String>, Failure> {
+    name.map(|name| {
+        env::var(&name.0)
+            .ok()
+            .filter(|value| !value.is_empty())
+            .ok_or(Failure::Invalid)
+    })
+    .transpose()
+}
+
+impl Settings {
+    pub(super) fn configure(self) -> Result<Meter, Failure> {
+        let timeout = Duration::try_from_secs_f64(self.timeout_s).map_err(|_| Failure::Invalid)?;
         Ok(Meter {
             client: Client::new(self.base_url, timeout, self.max_bytes)?,
             budget: Budget::new(
@@ -65,25 +85,13 @@ impl Settings {
     }
 }
 
-struct Meter {
+pub(super) struct Meter {
     client: Client,
     budget: Budget,
-    key_env: Option<String>,
+    key_env: Option<KeyName>,
 }
 
 impl Meter {
-    fn key(&self) -> Result<Option<String>, Failure> {
-        self.key_env
-            .as_deref()
-            .map(|name| {
-                env::var(name)
-                    .ok()
-                    .filter(|value| !value.is_empty())
-                    .ok_or(Failure::Invalid)
-            })
-            .transpose()
-    }
-
     async fn request<T: DeserializeOwned>(
         &self,
         route: Route,
@@ -98,8 +106,8 @@ impl Meter {
         serde_json::from_slice(&response).map_err(|_| Failure::Invalid)
     }
 
-    async fn measure(&self, payload: &Value) -> Result<Stats, Failure> {
-        let key = self.key()?;
+    pub(super) async fn measure(&self, payload: &Value) -> Result<Stats, Failure> {
+        let key = credential(self.key_env.as_ref())?;
         let properties = self
             .request(Route::Properties, None, key.as_deref())
             .await?;
@@ -132,52 +140,14 @@ struct Tokens {
 #[serde(rename_all = "snake_case")]
 enum Action {
     Validate,
-    Measure,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
-    action: Action,
+    #[serde(rename = "action")]
+    _action: Action,
     settings: Settings,
-    payload: Option<Value>,
-}
-
-impl Request {
-    fn execute(self) -> Result<Option<Stats>, Failure> {
-        let meter = self.settings.configure()?;
-        match (self.action, self.payload) {
-            (Action::Validate, None) => Ok(None),
-            (Action::Measure, Some(payload)) => {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|_| Failure::Invalid)?;
-                runtime.block_on(meter.measure(&payload)).map(Some)
-            }
-            _ => Err(Failure::Invalid),
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-enum Reply {
-    Ok { stats: Option<Stats> },
-    Timeout,
-    Http { code: u16 },
-    Invalid,
-}
-
-impl From<Result<Option<Stats>, Failure>> for Reply {
-    fn from(result: Result<Option<Stats>, Failure>) -> Self {
-        match result {
-            Ok(stats) => Self::Ok { stats },
-            Err(Failure::Timeout) => Self::Timeout,
-            Err(Failure::Http(code)) => Self::Http { code },
-            Err(Failure::Invalid) => Self::Invalid,
-        }
-    }
 }
 
 pub(super) fn run(expected_parent: i32) -> io::Result<()> {
@@ -185,6 +155,7 @@ pub(super) fn run(expected_parent: i32) -> io::Result<()> {
     let input = io::BufReader::new(io::stdin().lock());
     let result = serde_json::from_reader::<_, Request>(input)
         .map_err(|_| Failure::Invalid)
-        .and_then(Request::execute);
-    crate::write_reply(&Reply::from(result), crate::REQUEST_BOUND)
+        .and_then(|request| request.settings.configure());
+    let status = if result.is_ok() { "ok" } else { "invalid" };
+    crate::write_reply(&json!({"status": status}), crate::REQUEST_BOUND)
 }

@@ -1,7 +1,7 @@
-//! Bounded tokenizer HTTP requests share the llama client transport.
+//! Model requests share the llama transport and refuse redirects.
 use super::{
     LlamaError,
-    http::TokenizerExchange,
+    http::ModelExchange,
     policy::{Origin, ProxySettings},
 };
 use http::HeaderValue;
@@ -11,6 +11,7 @@ pub enum Route {
     Properties,
     ApplyTemplate,
     Tokenize,
+    Completions,
 }
 
 impl Route {
@@ -19,6 +20,7 @@ impl Route {
             Self::Properties => "/props",
             Self::ApplyTemplate => "/apply-template",
             Self::Tokenize => "/tokenize",
+            Self::Completions => "/chat/completions",
         }
     }
 }
@@ -78,21 +80,59 @@ impl Client {
         data: Option<Vec<u8>>,
         key: Option<&str>,
     ) -> Result<Vec<u8>, Failure> {
+        let mut output = Vec::new();
+        self.receive(route, data, key, |data| {
+            if data.len() > self.limit.saturating_sub(output.len()) {
+                return Err(Failure::Invalid);
+            }
+            output
+                .try_reserve(data.len())
+                .map_err(|_| Failure::Invalid)?;
+            output.extend_from_slice(data);
+            Ok(false)
+        })
+        .await?;
+        Ok(output)
+    }
+
+    pub async fn stream(
+        &self,
+        data: Vec<u8>,
+        key: Option<&str>,
+        on_data: impl FnMut(&[u8]) -> Result<bool, Failure>,
+    ) -> Result<(), Failure> {
+        self.receive(Route::Completions, Some(data), key, on_data)
+            .await
+    }
+
+    async fn receive(
+        &self,
+        route: Route,
+        data: Option<Vec<u8>>,
+        key: Option<&str>,
+        mut on_data: impl FnMut(&[u8]) -> Result<bool, Failure>,
+    ) -> Result<(), Failure> {
         let target = Origin::parse(&format!("{}{}", self.base, route.path()))?;
         let authorization = key
             .map(|key| HeaderValue::from_str(&format!("Bearer {key}")))
             .transpose()
             .map_err(|_| Failure::Invalid)?;
-        TokenizerExchange {
+        let mut application_error = None;
+        let result = ModelExchange {
             target: &target,
             timeout: self.timeout,
-            limit: self.limit,
             authorization: authorization.as_ref(),
             proxies: &self.proxies,
         }
-        .request(data)
-        .await
-        .map_err(Failure::from)
+        .request(data, |bytes| match on_data(bytes) {
+            Ok(done) => Ok(done),
+            Err(error) => {
+                application_error = Some(error);
+                Ok(true)
+            }
+        })
+        .await;
+        application_error.map_or_else(|| result.map_err(Failure::from), Err)
     }
 }
 

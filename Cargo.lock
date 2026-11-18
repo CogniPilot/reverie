@@ -1284,6 +1284,7 @@ dependencies = [
  "clap",
  "getrandom",
  "nix",
+ "regex-lite",
  "reverie-contracts",
  "reverie-core",
  "reverie-host",

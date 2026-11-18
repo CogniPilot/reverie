@@ -16,7 +16,6 @@ from unittest.mock import patch
 
 import agent_loop as loop
 from debug_terminal import DebugTerminal
-from model_events import TraceWriter
 from test_coding_support import FakeChat, cfg_for
 
 
@@ -43,17 +42,22 @@ class TerminalTests(unittest.TestCase):
     def test_trace_is_coalesced_bounded_and_drained_before_model_done(self):
         path = Path(self.tmp.name) / 'events.jsonl'
         view = DebugTerminal(dict(self.cfg, model_events_file=str(path)), output=self.output, interactive=False)
-        writer = TraceWriter(path)
-        writer.write('thinking', 'first ')
+        path.touch(mode=0o600)
+
+        def emit(kind, text):
+            with path.open('a') as stream:
+                stream.write(json.dumps({'kind': kind, 'text': text}) + '\n')
+
+        emit('thinking', 'first ')
         view.poll_trace()
-        writer.write('thinking', 'second')
-        writer.write('answer', 'final answer')
+        emit('thinking', 'second')
+        emit('answer', 'final answer')
         view.event('model_done', seconds=0.1)
         self.assertEqual([record[1] for record in view.records], ['thinking', 'answer', 'model_done'])
         self.assertEqual(view.records[0][2], 'Thinking\nfirst second')
         self.assertEqual(view.records[1][2], 'Answer stream\nfinal answer')
         for _ in range(10):
-            writer.write('thinking', 'x' * 4096); view.poll_trace()
+            emit('thinking', 'x' * 4096); view.poll_trace()
         self.assertLessEqual(len(view.records[-1][2]), 12009)
         self.assertIn('earlier trace text omitted', view.records[-1][2])
         self.assertEqual(view.replies, 0)

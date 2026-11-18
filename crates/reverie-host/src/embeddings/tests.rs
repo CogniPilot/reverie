@@ -119,9 +119,9 @@ fn embedder(url: String) -> LlamaEmbedder {
 
 #[tokio::test]
 async fn token_meter_keeps_the_base_path_and_sends_the_selected_credential() {
-    use tokenizer::Route;
+    use model_api::Route;
     let server = Server::new(vec![response("200 OK", "", b"{}"); 3]);
-    let client = tokenizer::local_fixture(format!("{}/model", server.url), 128);
+    let client = model_api::local_fixture(format!("{}/model", server.url), 128);
     assert_eq!(
         client
             .request(Route::Properties, None, Some("fixture-key"))
@@ -160,7 +160,7 @@ async fn token_meter_keeps_the_base_path_and_sends_the_selected_credential() {
 
 #[tokio::test]
 async fn token_meter_refuses_redirects_and_caps_successful_bodies() {
-    use tokenizer::{Failure, Route};
+    use model_api::{Failure, Route};
     let trap = TcpListener::bind("127.0.0.1:0").unwrap();
     trap.set_nonblocking(true).unwrap();
     let location = format!(
@@ -172,7 +172,7 @@ async fn token_meter_refuses_redirects_and_caps_successful_bodies() {
         response("200 OK", "", b"1234"),
         response("200 OK", "", b"12345"),
     ]);
-    let client = tokenizer::local_fixture(server.url.clone(), 4);
+    let client = model_api::local_fixture(server.url.clone(), 4);
     assert_eq!(
         client
             .request(Route::Properties, None, Some("fixture-key"))
