@@ -1,6 +1,5 @@
 """First-answer journal context controls; owned SQLite and synthetic chat/model."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sqlite3
@@ -11,15 +10,11 @@ from unittest.mock import Mock, patch
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-journal = importlib.import_module('agent_journal')
-loop = importlib.import_module('agent_loop')
-worker = load('automatic_worker', HANDS/'agent_memory_worker.py')
+
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+import agent_loop as loop
+
 ROOM = '20000000-0000-0000-0000-000000000002'
 MID = '30000000-0000-0000-0000-000000000003'
 NOW = '40000000-0000-0000-0000-000000000004'

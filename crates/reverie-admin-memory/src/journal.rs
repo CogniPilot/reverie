@@ -15,6 +15,9 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+mod projection;
+pub(crate) use projection::{Projection, View};
+
 const MISSING: &str =
     "no matching receipt at lookup time; not proof an unknown write never happened";
 const FOUND: &str = "durable write receipt only; no semantic or current-source verification";

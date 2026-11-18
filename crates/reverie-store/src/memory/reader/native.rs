@@ -74,8 +74,22 @@ impl NativeMemoryRead {
         key: &JournalKey,
         expected: Option<&JournalDigest>,
     ) -> Result<JournalReceipt> {
+        Self::with_journal(path, |db| journal::receipt(db, key, expected))
+    }
+
+    pub fn read_journal<T>(
+        path: Option<&Path>,
+        run: impl FnOnce(&JournalReader<'_>) -> Result<T>,
+    ) -> Result<T> {
+        match path {
+            Some(path) => Self::with_journal(path, |db| JournalReader::observe(db, run)),
+            None => run(&JournalReader::default()),
+        }
+    }
+
+    fn with_journal<T>(path: &Path, run: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let owner = Self::capture(path)?;
-        let receipt = match owner.observe_receipt(key, expected) {
+        let receipt = match owner.observe_journal(run) {
             Ok(receipt) => receipt,
             Err(error) => return Err(owner.failed(error)),
         };
@@ -89,15 +103,11 @@ impl NativeMemoryRead {
         }
     }
 
-    fn observe_receipt(
-        &self,
-        key: &JournalKey,
-        expected: Option<&JournalDigest>,
-    ) -> Result<JournalReceipt> {
+    fn observe_journal<T>(&self, run: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
         let state = self.state.lock().map_err(|_| MemoryError::Poisoned)?;
         state.observe(|db| {
             db.busy_timeout(Duration::from_secs(1))?;
-            journal::receipt(db, key, expected)
+            run(db)
         })
     }
 

@@ -40,6 +40,9 @@ enum Operation {
     JournalSource,
     JournalReceipt,
     JournalCommit,
+    JournalStatus,
+    JournalRecall,
+    JournalView,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +64,9 @@ struct Job<'a> {
     captured: Option<&'a RawValue>,
     #[serde(default, deserialize_with = "journal::previous_id")]
     previous_id: Option<Option<i64>>,
+    before_id: Option<i64>,
+    snapshot_id: Option<i64>,
+    as_of_ms: Option<serde_json::Number>,
 }
 
 pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
@@ -78,9 +84,12 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
             &room,
             &job.event.ok_or_else(refused)?,
         )?)?),
-        Operation::JournalSource | Operation::JournalReceipt | Operation::JournalCommit => {
-            journal_operation(&job, &room)
-        }
+        Operation::JournalSource
+        | Operation::JournalReceipt
+        | Operation::JournalCommit
+        | Operation::JournalStatus
+        | Operation::JournalRecall
+        | Operation::JournalView => journal_operation(&job, &room),
     }
 }
 
@@ -119,6 +128,20 @@ fn journal_operation(job: &Job<'_>, room: &ChatRoomId) -> io::Result<Box<RawValu
                 job.previous_id.ok_or_else(refused)?,
             )
         }
+        Operation::JournalStatus => {
+            journal::Projection::Status(job.query.as_deref()).execute(office, room, &database)
+        }
+        Operation::JournalRecall => {
+            journal::Projection::Recall(job.query.as_deref().ok_or_else(refused)?)
+                .execute(office, room, &database)
+        }
+        Operation::JournalView => journal::Projection::View(journal::View {
+            query: job.query.as_deref().unwrap_or_default(),
+            before: job.before_id,
+            snapshot: job.snapshot_id,
+            as_of: job.as_of_ms.as_ref(),
+        })
+        .execute(office, room, &database),
         Operation::Recall | Operation::Record => Err(refused()),
     }
 }

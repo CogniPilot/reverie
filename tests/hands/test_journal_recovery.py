@@ -1,6 +1,5 @@
 """Lost response controls: actual owned SQLite worker, never a live journal."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -10,11 +9,10 @@ from unittest.mock import Mock, patch
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
-def load(name,path):
-    spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec)
-    sys.modules[name]=module;spec.loader.exec_module(module);return module
-journal=importlib.import_module('agent_journal')
-worker=load('recovery_worker',HANDS/'agent_memory_worker.py')
+
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+
 ROOM='20000000-0000-0000-0000-000000000002'
 MID='30000000-0000-0000-0000-000000000003'
 SID='10000000-0000-0000-0000-000000000001'

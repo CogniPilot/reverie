@@ -1,10 +1,4 @@
-"""Bounded, room-scoped journals for the Hands answer path.
-
-Entries are the agent's source-linked account, not verified beliefs. The worker
-owns source verification/current membership; this module never changes core,
-permissions, phone state or schedules. Journal content and checkpoint commit in
-one SQLite transaction alongside the existing room memory, without embeddings.
-"""
+"""Tool and turn handling for the Hands journal."""
 from __future__ import annotations
 
 import hashlib
@@ -12,7 +6,6 @@ import json
 import math
 import re
 import shlex
-import sqlite3
 import time
 
 from uuid import UUID
@@ -65,28 +58,6 @@ PROVENANCE = ('direct', 'relayed', 'reconstructed', 'unknown')
 # Curated so the memory map does not fragment into near-duplicate topics; edit here, not per entry.
 TOPICS = ('Shared history', 'People', 'Work', 'Memory and harness', 'Games and play', 'Identity', 'Other')
 IMPORTANCE = ('notable', 'important', 'keystone')
-# Recall ranks a pool of text matches the way generative-agent memories do (Park et al. 2023): relevance + recency +
-# importance, each on a 0-1 scale, so a later decision is not buried under an older note that shares more words.
-# Relevance is divided by the pool's best match (FTS rank has no fixed scale), so a weaker real match keeps proportional
-# credit instead of dropping to zero; recency and importance are already 0-1, so entries saved minutes apart do not get
-# an artificial full-point recency gap.
-RECALL_POOL = 20
-RECALL_LIMIT = 2
-RECALL_HALF_LIFE_DAYS = 7
-IMPORTANCE_WEIGHT = {'notable': 1 / 3, 'important': 2 / 3, 'keystone': 1.0}
-
-
-def memory_scores(relevance, committed_ms, importance, now_ms):
-    """One score per candidate: relevance as a share of the pool's best match (no positive best: 0), plus recency as
-    a half-life decay (RECALL_HALF_LIFE_DAYS), plus the entry's own importance (unrated = 0)."""
-    def scaled(values):
-        best = max(values, default=0)
-        return [max(0.0, v) / best if best > 0 else 0.0 for v in values]
-    recency = [0.5 ** (max(0.0, now_ms - c) / 86400000 / RECALL_HALF_LIFE_DAYS) for c in committed_ms]
-    weight = [IMPORTANCE_WEIGHT.get(i, 0.0) for i in importance]
-    return [r + t + w for r, t, w in zip(scaled(relevance), recency, weight)]
-
-
 def capsule_context(value, room):
     """Bound and validate derived recall before putting it in a DATA frame."""
     try:
@@ -210,141 +181,6 @@ def validate_draft(draft, captured):
                 raise ValueError('related names one to four prior journal entries')
         result['annotations'] = meta
     return result
-
-
-class Journal:
-    """Additive tables in an already validated own room-memory SQLite file."""
-    def __init__(self, path):
-        self.db = sqlite3.connect(str(path), timeout=1)
-        self.db.row_factory = sqlite3.Row
-        try:
-            self.db.executescript('''
-          CREATE TABLE IF NOT EXISTS hands_journal (
-            id INTEGER PRIMARY KEY, turn_id TEXT UNIQUE NOT NULL,
-            committed_ms REAL NOT NULL, payload_hash TEXT NOT NULL,
-            payload TEXT NOT NULL, end_at REAL NOT NULL);
-          CREATE VIRTUAL TABLE IF NOT EXISTS hands_journal_fts USING fts5(text);
-          CREATE TABLE IF NOT EXISTS hands_journal_links (
-            superseding_id INTEGER NOT NULL, target_id INTEGER NOT NULL,
-            PRIMARY KEY(superseding_id,target_id));
-          CREATE INDEX IF NOT EXISTS hands_journal_links_target ON hands_journal_links(target_id,superseding_id);
-
-            ''')
-        except BaseException:
-            self.db.close()
-            raise
-
-    def close(self):
-        self.db.close()
-
-    def status(self):
-        row = self.db.execute('SELECT id, turn_id, committed_ms, end_at FROM hands_journal ORDER BY id DESC LIMIT 1').fetchone()
-        return dict(row) if row else None
-
-    @staticmethod
-    def index_text(draft):
-        # A remembered phrase may occur only in the cited source after the agent
-        # compresses/paraphrases its journal. These remain retrieval cues, not an
-        # independent truth signal; the worker still rechecks current sources.
-        original = draft['text'] + ' ' + ' '.join(draft['tags']) + ' ' + ' '.join(s['quote'] for s in draft['sources'])
-        topics = draft.get('annotations', {}).get('topics', [])
-        return original + (' ' + ' '.join(topics) if topics else '')
-
-    def reindex(self):
-        """Explicit derived-index rebuild; never rewrites journal records/cursors."""
-        self.db.execute('BEGIN IMMEDIATE')
-        try:
-            self.db.execute('DELETE FROM hands_journal_fts')
-            count = 0
-            for row in self.db.execute('SELECT id,payload FROM hands_journal ORDER BY id'):
-                draft = json.loads(row['payload'])['draft']
-                self.db.execute('INSERT INTO hands_journal_fts(rowid,text) VALUES(?,?)',
-                                (row['id'], self.index_text(draft)))
-                count += 1
-            self.db.commit()
-            return count
-        except BaseException:
-            self.db.rollback()
-            raise
-
-    def commit(self, draft, captured, previous_id, now_ms=None):
-        draft = validate_draft(draft, captured)
-        now_ms = time.time() * 1000 if now_ms is None else now_ms
-        if type(now_ms) not in (int, float) or not math.isfinite(now_ms) or now_ms < 0:
-            raise ValueError('invalid commit clock')
-        payload = journal_payload(draft, captured)
-        fingerprint = digest(payload)
-        self.db.execute('BEGIN IMMEDIATE')
-        try:
-            old = self.db.execute('SELECT id, payload_hash FROM hands_journal WHERE turn_id=?',
-                                  (captured['end']['id'],)).fetchone()
-            if old:
-                if old['payload_hash'] != fingerprint:
-                    raise ValueError('same turn already committed different content')
-                self.db.rollback()
-                return {'status': 'committed', 'entry_id': old['id'], 'replayed': True}
-            last = self.status()
-            if (last['id'] if last else None) != previous_id:
-                raise ValueError('journal checkpoint changed; read status again')
-            if last and (captured['end']['at'], captured['end']['id']) <= (last['end_at'], last['turn_id']):
-                raise ValueError('journal cursor must advance beyond prior source time')
-            targets = draft.get('annotations', {}).get('supersedes', [])
-            for target in targets + draft.get('annotations', {}).get('related', []):
-                prior = self.db.execute('SELECT end_at,committed_ms FROM hands_journal WHERE id=?', (target,)).fetchone()
-                if prior is None or prior['end_at'] > captured['end']['at'] or prior['committed_ms'] > now_ms:
-                    raise ValueError('correction target must exist in this own room at an earlier point')
-            row = self.db.execute('INSERT INTO hands_journal(turn_id, committed_ms, payload_hash, payload, end_at) VALUES(?,?,?,?,?)',
-                                  (captured['end']['id'], now_ms, fingerprint, encoded(payload), captured['end']['at']))
-            self.db.execute('INSERT INTO hands_journal_fts(rowid,text) VALUES(?,?)',
-                            (row.lastrowid, self.index_text(draft)))
-            self.db.executemany('INSERT INTO hands_journal_links(superseding_id,target_id) VALUES(?,?)',
-                                [(row.lastrowid, target) for target in targets])
-            self.db.commit()
-            return {'status': 'committed', 'entry_id': row.lastrowid, 'replayed': False,
-                    'coverage': captured['coverage'], 'semantic_review': 'not_performed'}
-        except BaseException:
-            self.db.rollback()
-            raise
-
-    def receipt(self, turn_id, expected_hash=None):
-        """Read a single durable operation receipt; never return journal text.
-        turn_id is the request message UUID, or an int entry_id in this room's journal."""
-        key = 'entry_id' if type(turn_id) is int else 'turn_id'
-        if key == 'entry_id' and not 0 < turn_id < 10 ** 9:
-            raise ValueError('entry_id out of range')
-        if key == 'turn_id':
-            uuid(turn_id)
-        if expected_hash is not None and (not isinstance(expected_hash, str) or
-                not re.fullmatch('[0-9a-f]{64}', expected_hash)):
-            raise ValueError('canonical payload hash required')
-        row = self.db.execute('SELECT id,turn_id,committed_ms,payload_hash,payload FROM hands_journal WHERE ' +
-                              ('id=?' if key == 'entry_id' else 'turn_id=?'), (turn_id,)).fetchone()
-        if row is None:
-            return {'status': 'not_found', key: turn_id,
-                    'evidence': 'no matching receipt at lookup time; not proof an unknown write never happened'}
-        if (hashlib.sha256(row['payload'].encode()).hexdigest() != row['payload_hash'] or
-                expected_hash is not None and row['payload_hash'] != expected_hash):
-            return {'status': 'conflict', key: turn_id}
-        return {'status': 'committed', 'turn_id': row['turn_id'], 'entry_id': row['id'],
-                'committed_ms': row['committed_ms'], 'payload_sha256': row['payload_hash'],
-                'evidence': 'durable write receipt only; no semantic or current-source verification'}
-
-    def recall(self, query, now_ms=None):
-        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 300:
-            raise ValueError('bounded query required')
-        tokens = re.findall(r'[^\W_]+', query, re.UNICODE)[:12]
-        if not tokens:
-            return []
-        expression = ' OR '.join('"' + t.replace('"', '""') + '"' for t in tokens)
-        rows = self.db.execute('''SELECT j.id,j.committed_ms,j.payload,rank FROM hands_journal_fts f
-             JOIN hands_journal j ON j.id=f.rowid WHERE hands_journal_fts MATCH ?
-             ORDER BY rank,j.id DESC LIMIT ?''', (expression, RECALL_POOL)).fetchall()
-        entries = [dict(id=r['id'], committed_ms=r['committed_ms'], **json.loads(r['payload'])) for r in rows]
-        now_ms = time.time() * 1000 if now_ms is None else now_ms
-        scores = memory_scores([-r['rank'] for r in rows], [r['committed_ms'] for r in rows],
-                               [e['draft'].get('annotations', {}).get('importance') for e in entries], now_ms)
-        order = sorted(range(len(entries)), key=lambda i: (-scores[i], -entries[i]['id']))
-        return [entries[i] for i in order[:RECALL_LIMIT]]
 
 
 COMMIT_TOOL = {'type': 'function', 'function': {

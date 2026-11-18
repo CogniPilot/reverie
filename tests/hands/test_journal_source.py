@@ -1,6 +1,5 @@
 """Real worker/Turn/SQLite on owned synthetic fixtures; no live agent data."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -12,15 +11,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'python/reverie/hands'), str(ROOT / 'python')]
 
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    loaded = importlib.util.module_from_spec(spec)
-    sys.modules[name] = loaded
-    spec.loader.exec_module(loaded)
-    return loaded
 
-journal = importlib.import_module('agent_journal')
-worker = module('tested_memory_worker', ROOT / 'python/reverie/hands/agent_memory_worker.py')
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+
 ROOM = '20000000-0000-0000-0000-000000000002'
 MID = '30000000-0000-0000-0000-000000000003'
 OLD = '40000000-0000-0000-0000-000000000004'

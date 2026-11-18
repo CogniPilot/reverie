@@ -3,6 +3,8 @@ use super::{MemoryError, Result};
 use reverie_contracts::memory::channel::journal::journal_digest;
 use reverie_core::{ids::ChatMessageId, operations::JournalDigest};
 use rusqlite::{Connection, OptionalExtension, Row};
+mod read;
+pub use read::{CORRECTION_LIMIT, JournalCheckpoint, JournalReader, JournalRow, PAGE_SIZE};
 mod write;
 pub use write::JournalWriteReceipt;
 
@@ -41,20 +43,24 @@ pub(super) fn receipt(
     expected: Option<&JournalDigest>,
 ) -> Result<JournalReceipt> {
     let snapshot = db.unchecked_transaction()?;
-    let exists = snapshot
-        .query_row(
-            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='hands_journal'",
-            [],
-            |_| Ok(()),
-        )
-        .optional()?;
-    if exists.is_none() {
+    if !table_exists(&snapshot)? {
         snapshot.commit()?;
         return Ok(JournalReceipt::Missing);
     }
     let result = lookup(&snapshot, key, expected)?;
     snapshot.commit()?;
     Ok(result)
+}
+
+fn table_exists(db: &Connection) -> Result<bool> {
+    Ok(db
+        .query_row(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='hands_journal'",
+            [],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 fn lookup(

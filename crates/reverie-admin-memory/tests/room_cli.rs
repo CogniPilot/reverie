@@ -13,6 +13,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "support/journal_projection.rs"]
+mod journal_projection;
 #[path = "support/journal_write.rs"]
 mod journal_write;
 

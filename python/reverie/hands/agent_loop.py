@@ -1055,7 +1055,6 @@ def still_member(cfg, chat, room):
 
 
 JOURNAL_COMMAND_OPS = ('journal_recall', 'journal_view', 'journal_receipt', 'journal_source', 'journal_commit')
-NATIVE_MEMORY_OPS = ('recall', 'record', 'journal_source', 'journal_receipt', 'journal_commit')
 
 
 def memory_op(cfg, room, op, *, failures=None, **payload):
@@ -1076,8 +1075,7 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
         default_worker = 'agent_memory_worker.py'
         script = os.path.join(directory, cfg.get('memory_worker_name', default_worker))
         command = [sys.executable, '-I', '-B', script]
-        if (op in NATIVE_MEMORY_OPS and
-                os.path.realpath(script) == os.path.realpath(os.path.join(directory, default_worker))):
+        if os.path.realpath(script) == os.path.realpath(os.path.join(directory, default_worker)):
             command = [os.environ.get('REVERIE_HANDS_MEMORY_COMMAND', 'reverie-admin-memory'),
                        f'--automatic-worker={os.getpid()}']
         process = subprocess.Popen(command, stdin=subprocess.PIPE,

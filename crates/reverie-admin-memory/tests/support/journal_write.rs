@@ -7,7 +7,7 @@ use std::{fs, path::Path, sync::Barrier, thread};
 
 const LEGACY: &str = include_str!("journal_write_vectors.json");
 
-fn prepared(case: &Value) -> JournalCommit {
+pub(super) fn prepared(case: &Value) -> JournalCommit {
     let room = ChatRoomId::parse(ROOM).unwrap();
     JournalCommit::decode(
         &to_raw_value(&case["draft"]).unwrap(),
@@ -17,11 +17,11 @@ fn prepared(case: &Value) -> JournalCommit {
     .unwrap()
 }
 
-fn vectors() -> Value {
+pub(super) fn vectors() -> Value {
     serde_json::from_str(LEGACY).unwrap()
 }
 
-fn job(fixture: &Fixture, vectors: &Value, index: usize) -> Value {
+pub(super) fn job(fixture: &Fixture, vectors: &Value, index: usize) -> Value {
     let messages = vectors["messages"]
         .as_array()
         .unwrap()
