@@ -60,3 +60,16 @@ fn recall_is_scoped_and_bounded_independently_of_the_prompt() {
     too_long["catalog"] = json!("雪".repeat(CONTEXT_CHARS));
     assert!(job(too_long, Value::Null).is_err());
 }
+
+#[test]
+fn attaches_supplied_evidence_with_the_existing_context_call() {
+    let mut turn = frame();
+    turn["evidence"] = json!({"text": "Earlier history", "max_chars": 1000});
+    let capsule = json!({"status": "available", "scope": ROOM,
+                         "omitted_or_source_changed": false, "entries": []});
+    let response = serde_json::to_value(job(turn, capsule).unwrap()).unwrap();
+    assert_eq!(response["context"]["merged"]["status"], "included");
+    let text = response["context"]["merged"]["text"].as_str().unwrap();
+    assert!(text.starts_with("Journal capsule"));
+    assert!(text.ends_with("\nOther historical room evidence:\nEarlier history"));
+}

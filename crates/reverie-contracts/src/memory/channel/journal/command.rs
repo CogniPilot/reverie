@@ -4,7 +4,10 @@ use super::command_line;
 use crate::legacy_json::{Node, decode_python_str};
 use reverie_core::{memory::quoted_memory_text, python_lowercase_string};
 use serde::Serialize;
-use serde_json::{json, value::RawValue};
+use serde_json::{
+    json,
+    value::{RawValue, to_raw_value},
+};
 
 const ARGUMENT_BYTES: usize = 8192;
 const REPLAY_BYTES: usize = 1024;
@@ -34,6 +37,12 @@ enum Operation {
     JournalSource { message_id: String },
 }
 
+/// A decoded journal command ready for the turn policy.
+pub enum JournalAction {
+    Help(String),
+    Dispatch(Box<RawValue>),
+}
+
 impl JournalCommand {
     /// Decode the existing model arguments. Replay is kept even for a
     /// syntactically valid command that the journal will refuse.
@@ -52,6 +61,17 @@ impl JournalCommand {
             Err(error) => Outcome::Refused { error },
         };
         Self { replay, outcome }
+    }
+
+    pub fn resolve(self) -> (String, Result<JournalAction, String>) {
+        let action = match self.outcome {
+            Outcome::Parsed(Operation::Help { topic }) => Ok(JournalAction::Help(topic)),
+            Outcome::Parsed(operation) => to_raw_value(&operation)
+                .map(JournalAction::Dispatch)
+                .map_err(|_| "invalid journal arguments".to_owned()),
+            Outcome::Refused { error } => Err(error),
+        };
+        (self.replay, action)
     }
 }
 

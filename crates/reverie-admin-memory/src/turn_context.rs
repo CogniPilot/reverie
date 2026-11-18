@@ -1,13 +1,15 @@
 //! Render the journal prompt after the existing Office status call.
 
-use crate::refused;
+use crate::{
+    refused,
+    turn_tool::{CONTEXT_CHARS, Merged, Toolset, merge, toolset},
+};
 use reverie_contracts::memory::channel::journal::{SourceRevision, journal_capsule_context};
 use reverie_core::ids::ChatRoomId;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use std::io;
 
-const CONTEXT_CHARS: usize = 4800;
 const REMINDER_MS: f64 = 4.0 * 3600.0 * 1000.0;
 
 #[derive(Deserialize)]
@@ -29,6 +31,13 @@ struct Projection<'a> {
     catalog: String,
     read_only: bool,
     asked_to_remember: bool,
+    evidence: Option<ExistingEvidence>,
+}
+
+#[derive(Deserialize)]
+struct ExistingEvidence {
+    text: String,
+    max_chars: usize,
 }
 
 #[derive(Deserialize)]
@@ -51,6 +60,10 @@ struct TurnPrompt {
     text: String,
     previous_id: Option<i64>,
     needs_reason: bool,
+    #[serde(flatten)]
+    toolset: Toolset,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    merged: Option<Merged>,
 }
 
 pub(crate) fn execute(bytes: &[u8]) -> io::Result<Presentation> {
@@ -60,11 +73,11 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Presentation> {
         .capsule
         .and_then(|raw| journal_capsule_context(raw, &room))
         .unwrap_or_default();
-    let context = job.turn.map(present).transpose()?;
+    let context = job.turn.map(|turn| present(turn, &recall)).transpose()?;
     Ok(Presentation { recall, context })
 }
 
-fn present(turn: Projection<'_>) -> io::Result<TurnPrompt> {
+fn present(turn: Projection<'_>, recall: &str) -> io::Result<TurnPrompt> {
     let previous_id = turn
         .checkpoint
         .as_ref()
@@ -87,10 +100,16 @@ fn present(turn: Projection<'_>) -> io::Result<TurnPrompt> {
     if text.chars().count() > CONTEXT_CHARS {
         return Err(refused());
     }
+    let merged = turn
+        .evidence
+        .map(|evidence| merge(recall.to_owned(), evidence.text, &text, evidence.max_chars))
+        .transpose()?;
     Ok(TurnPrompt {
         text,
         previous_id,
         needs_reason,
+        toolset: toolset(turn.read_only, needs_reason),
+        merged,
     })
 }
 

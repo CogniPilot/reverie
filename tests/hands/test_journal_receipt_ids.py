@@ -79,10 +79,10 @@ class ReceiptIdTests(unittest.TestCase):
             self.assertEqual(self.ops, ['journal_status'])  # no worker read
 
     def test_help_says_entry_id_works(self):
-        self.assertIn('check_with', journal.help_text('save', False))
-        self.assertIn('entry_id number also works', journal.help_text('receipt', False))
+        self.assertIn('check_with', cli.help_text('save', False))
+        self.assertIn('entry_id number also works', cli.help_text('receipt', False))
         for topic in ('save', 'receipt'):
-            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': journal.help_text(topic, False)})),
+            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': cli.help_text(topic, False)})),
                                  journal.RESULT_CHARS)
 
 

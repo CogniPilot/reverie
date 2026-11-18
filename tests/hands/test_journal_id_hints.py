@@ -50,10 +50,10 @@ class IdHintTests(unittest.TestCase):
         self.assertEqual(receipt['status'], 'committed', receipt)
 
     def test_help_names_the_id_kind(self):
-        self.assertIn('An entry_id number is not a message ID', journal.help_text('source', False))
-        self.assertIn("The save's entry_id number also works", journal.help_text('receipt', False))
+        self.assertIn('An entry_id number is not a message ID', cli.help_text('source', False))
+        self.assertIn("The save's entry_id number also works", cli.help_text('receipt', False))
         for topic in ('source', 'receipt'):
-            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': journal.help_text(topic, False)})),
+            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': cli.help_text(topic, False)})),
                                  journal.RESULT_CHARS)
 
 

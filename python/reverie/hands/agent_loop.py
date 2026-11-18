@@ -794,10 +794,11 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
     place, then FAIL_LINE. So there are at most search_max_calls + 2 model calls and never a search past the cap.
     `timing`, if given, collects ('model'|'search', seconds, server timings) per step."""
     failures = []
+    cap = cfg.get('recall_cap_chars', 3000)
     journal = agent_journal.Turn(cfg, room, history, msg,
                                 lambda op, **payload: memory_op(cfg, room, op, failures=failures, **payload),
-                                failures=failures)
-    recalled = journal.merge_recalled(recalled, cfg.get('recall_cap_chars', 3000))
+                                failures=failures, evidence={'text': recalled, 'max_chars': cap})
+    recalled = journal.merged_recall if journal.merged_recall is not None else journal.merge_recalled(recalled, cap)
     start_task = cfg.get('_admin_start_task')
     task_reserve = len(admin_task.RULE) + len(json.dumps(admin_task.TOOLS)) if start_task is not None else 0
     # The callback narrows the tools for a message that does not address this harness: it may cancel, not start.
@@ -850,10 +851,10 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
             if task_reply is not None:return task_reply, largest, searches
             break
         if ((not web_enabled or searches >= cfg['search_max_calls']) and
-                (not journal.tools or journal.calls >= agent_journal.MAX_CALLS)):
+                (not journal.tools or journal.calls >= journal.call_limit)):
             break  # budget spent: finish without tools
         tools = (([SEARCH_TOOL] if cfg.get('search') else []) + ([public_web.TOOL] if cfg.get('web_fetch') else [])) if searches < cfg['search_max_calls'] else []
-        tools += journal.tools if journal.calls < agent_journal.MAX_CALLS else []
+        tools += journal.tools if journal.calls < journal.call_limit else []
         out = ask(tools + task_tools)
         task_reply = admin_task.invoke(out, start_task)
         if task_reply is not None:return task_reply, largest, searches

@@ -1,7 +1,7 @@
 //! Plan and settle a bounded journal read. The existing Office worker
 //! remains responsible for grants, room membership and live sources.
 
-use crate::journal::Reference;
+use crate::{journal::Reference, turn_tool::RESULT_CHARS};
 use reverie_contracts::memory::channel::journal::{append_exact_source, canonical_journal_output};
 use reverie_core::ids::ChatMessageId;
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,6 @@ use std::io;
 mod topic_map;
 
 const ARGUMENT_BYTES: usize = 8192;
-const RESULT_CHARS: usize = 2400;
 const MAX_EXPANSIONS: usize = 2;
 const INVALID: &str = "invalid_arguments_or_source; compress text and use exact source IDs/quotes";
 

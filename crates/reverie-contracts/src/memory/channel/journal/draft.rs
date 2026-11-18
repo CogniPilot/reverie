@@ -2,7 +2,7 @@ use super::EXCERPT_BYTES;
 use serde::{Deserialize, Deserializer};
 use std::collections::BTreeSet;
 
-pub(super) const TAGS: &[&str] = &[
+pub const JOURNAL_TAGS: &[&str] = &[
     "decision",
     "promise",
     "correction",
@@ -13,7 +13,7 @@ pub(super) const TAGS: &[&str] = &[
     "lesson",
     "personal-reflection",
 ];
-const TOPICS: &[&str] = &[
+pub const JOURNAL_TOPICS: &[&str] = &[
     "Shared history",
     "People",
     "Work",
@@ -90,7 +90,7 @@ impl Draft {
 
     fn valid(&self) -> bool {
         bounded_text(&self.text, EXCERPT_BYTES)
-            && selected(&self.tags, TAGS)
+            && selected(&self.tags, JOURNAL_TAGS)
             && distinct(self.sources.iter().map(|source| source.id.as_str()), 4)
             && self
                 .sources
@@ -136,7 +136,7 @@ impl Annotations {
             && self
                 .topics
                 .as_ref()
-                .is_none_or(|values| selected(values, TOPICS))
+                .is_none_or(|values| selected(values, JOURNAL_TOPICS))
             && self
                 .supersedes
                 .as_ref()

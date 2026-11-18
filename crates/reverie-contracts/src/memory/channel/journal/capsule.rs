@@ -1,6 +1,6 @@
 use super::{
     EXCERPT_BYTES, canonical_json,
-    draft::{Provenance, TAGS, bounded_text, distinct, selected},
+    draft::{JOURNAL_TAGS, Provenance, bounded_text, distinct, selected},
 };
 use crate::legacy_json::decode_memory_str;
 use reverie_core::ids::{ChatMessageId, ChatRoomId};
@@ -48,7 +48,7 @@ impl Entry {
             && self.committed_ms.is_finite()
             && self.committed_ms >= 0.0
             && bounded_text(&self.text, EXCERPT_BYTES)
-            && selected(&self.tags, TAGS)
+            && selected(&self.tags, JOURNAL_TAGS)
             && distinct(self.source_ids.iter().map(String::as_str), 4)
             && self
                 .source_ids

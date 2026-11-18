@@ -11,6 +11,13 @@ from test_journal_structured import ROOM, journal
 SAVE = 'save --text "Rory named me Lantern Keeper." --tag relationship --source {id} "Lantern Keeper"'
 
 
+def help_text(topic, read_only):
+    step = journal.journal_tool_request(
+        'invoke', read_only=read_only, state={'calls': 0, 'help_shown': False},
+        name='journal', arguments=json.dumps({'command': f'help {topic}'}))
+    return step['reply']['help']
+
+
 class CliTests(unittest.TestCase):
     # Borrow the owned SQLite/worker fixture without inheriting the structured test cases.
     setUp, op = base.StructuredTests.setUp, base.StructuredTests.op
@@ -61,7 +68,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(turn.calls, 1)
         self.assertIn('A missing receipt is not proof the write never happened', self.run_cli(turn, 'help receipt')['help'])
         for topic in ('', 'save', 'recall', 'source', 'receipt', 'map'):
-            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': journal.help_text(topic, False)})), journal.RESULT_CHARS)
+            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': help_text(topic, False)})), journal.RESULT_CHARS)
         self.assertIn('read-only', self.run_cli(self.turn(2, 'Read-only lookup'), 'help save')['help'])
 
     def test_save_then_recall_returns_guaranteed_fields(self):
@@ -106,10 +113,12 @@ class CliTests(unittest.TestCase):
                       [{k: e[k] for k in ('id', 'related')} for e in mapped['entries']])
 
     def test_tags_and_topics_have_separate_documented_jobs(self):
-        detail = journal.help_text('save', False)
+        detail = help_text('save', False)
         self.assertIn('What kind of note this is', detail)
         self.assertIn('What it is about', detail)
-        self.assertTrue(set(t.lower() for t in journal.TOPICS).isdisjoint({'preferences', 'promises', 'lessons'}))
+        topics = detail.split('1-6 of: ')[-1].splitlines()[0].lower().split(', ')
+        self.assertTrue(set(topics).isdisjoint({'preferences', 'promises', 'lessons'}))
+        self.assertIn('games and play', topics)
 
     def test_empty_or_incomplete_save_refused_before_worker(self):
         # Asked in review: "does the new build refuse a save missing required fields before anything runs?"
@@ -161,7 +170,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(saved['status'], 'committed', saved)
         found = self.run_cli(self.turn(3, 'lunch?'), 'recall lunch noon')['entries']
         self.assertEqual(found[0]['annotations']['reason'], 'postmortem: entry 9 receipt confirmed')
-        self.assertIn('--reason', journal.help_text('save', False))
+        self.assertIn('--reason', help_text('save', False))
         for text in ('Please remember this: lunch is at noon.', 'Note that the kite was green.',
                      "Don't forget the tin tithe.", 'Add this to your journal.'):
             self.assertFalse(self.turn(4, text).needs_reason, text)

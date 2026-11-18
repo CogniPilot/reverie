@@ -10,13 +10,13 @@ mod recall;
 mod save;
 mod turn_capture;
 mod turn_context;
+mod turn_tool;
 
 use clap::Parser;
 use nix::{
     sys::{prctl, signal::Signal},
     unistd::{getpgrp, getpid, getppid},
 };
-use reverie_contracts::memory::channel::journal::JournalCommand;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -118,9 +118,9 @@ fn automatic_worker(expected_parent: i32) -> io::Result<()> {
     write_reply(&reply, AUTOMATIC_BOUND)
 }
 
-fn journal_command_worker(expected_parent: i32) -> io::Result<()> {
-    let arguments = worker_input(expected_parent, AUTOMATIC_BOUND)?;
-    write_reply(&JournalCommand::decode(&arguments), AUTOMATIC_BOUND)
+fn journal_tool_worker(expected_parent: i32) -> io::Result<()> {
+    let request = worker_input(expected_parent, RESPONSE_BOUND)?;
+    write_reply(&turn_tool::execute(&request)?, RESPONSE_BOUND)
 }
 
 fn journal_capture_worker(expected_parent: i32) -> io::Result<()> {
@@ -129,8 +129,8 @@ fn journal_capture_worker(expected_parent: i32) -> io::Result<()> {
 }
 
 fn journal_context_worker(expected_parent: i32) -> io::Result<()> {
-    let request = worker_input(expected_parent, AUTOMATIC_BOUND)?;
-    write_reply(&turn_context::execute(&request)?, AUTOMATIC_BOUND)
+    let request = worker_input(expected_parent, RESPONSE_BOUND)?;
+    write_reply(&turn_context::execute(&request)?, RESPONSE_BOUND)
 }
 
 fn journal_read_worker(expected_parent: i32) -> io::Result<()> {
@@ -161,7 +161,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
     let worker = match option {
         "--recall-worker" => worker,
         "--automatic-worker" => automatic_worker,
-        "--journal-command-worker" => journal_command_worker,
+        "--journal-tool-worker" => journal_tool_worker,
         "--journal-save-worker" => journal_save_worker,
         "--journal-read-worker" => journal_read_worker,
         "--journal-capture-worker" => journal_capture_worker,
