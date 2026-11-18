@@ -213,7 +213,7 @@ def model_completion(config):
 
 def inject_managed_context(cfg, messages, used_chars):
     if not cfg.get('managed_context'):
-        return messages
+        return messages, used_chars
     stage = 'model-request' if cfg.get('_managed_context_started') else 'startup'
     reply = native_memory_json('hands-managed-context-worker', {
         'action': 'prepare', 'cli': cfg.get('cli'),
@@ -225,7 +225,7 @@ def inject_managed_context(cfg, messages, used_chars):
         raise ValueError('Managed context cannot fit the current prompt budget')
     cfg['_managed_context_started'] = True
     cfg['_managed_context_pending'] = reply.get('pending')
-    return messages[:1] + [reply['snapshot']] + messages[1:]
+    return messages[:1] + [reply['snapshot']] + messages[1:], used_chars + reply['characters']
 
 
 def report_managed_context(cfg):

@@ -108,10 +108,12 @@ fn prepare(
     let issued = fetch(cli, session_id).ok();
     let snapshot = Snapshot::new(issued.as_ref(), budget);
     let _ = manifest::publish(state_file, session_id, stage, &snapshot);
-    Ok(
-        json!({"snapshot": {"role": "system", "content": format!("{FRAME}{}", snapshot.text)},
-        "pending": snapshot.pending(stage)}),
-    )
+    let content = format!("{FRAME}{}", snapshot.text);
+    Ok(json!({
+        "characters": content.chars().count(),
+        "snapshot": {"role": "system", "content": content},
+        "pending": snapshot.pending(stage),
+    }))
 }
 
 fn fetch(cli: &Value, session_id: &str) -> io::Result<Issued> {

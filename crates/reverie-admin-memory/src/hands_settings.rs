@@ -1,5 +1,7 @@
 //! Default and validate the effective Hands configuration before the loop starts.
-use crate::{coding_task, token_meter, worker_channel::FRAME_BYTES};
+use crate::{
+    coding_task, hands_prompt::check_startup_budget, token_meter, worker_channel::FRAME_BYTES,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::{io, path::Path};
@@ -75,6 +77,9 @@ fn startup_reply(overrides: Map<String, Value>) -> Value {
         .is_none()
     {
         return json!({"error": "config: timezone is not a known time zone", "startup": true});
+    }
+    if let Err(error) = check_startup_budget(&config) {
+        return json!({"error": error, "startup": true});
     }
     json!({"settings": config})
 }
@@ -213,6 +218,22 @@ mod tests {
         assert_eq!(settings["timezone"], "America/New_York");
         assert_eq!(settings["fixture_extension"], config["fixture_extension"]);
         assert_eq!(settings["coding"], config["coding"]);
+    }
+
+    #[test]
+    fn startup_requires_space_for_journal_and_recall() {
+        let mut config = overrides();
+        config.insert("memory_instance".into(), json!("/fixture/memory"));
+        config.insert("journal_enabled".into(), json!(true));
+        config.insert("prompt_cap_chars".into(), json!(50_028));
+        assert_eq!(
+            startup_reply(config.clone())["settings"]["prompt_cap_chars"],
+            50_028
+        );
+        config.insert("prompt_cap_chars".into(), json!(50_027));
+        let refused = startup_reply(config);
+        assert_eq!(refused["startup"], true);
+        assert!(refused["error"].as_str().unwrap().contains("too small"));
     }
 
     #[test]

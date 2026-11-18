@@ -11,6 +11,7 @@ const MAX_CALLS: usize = 3;
 const TRANSPORT_ARGUMENT_BYTES: usize = 50_000;
 pub(super) const CONTEXT_CHARS: usize = 4800;
 pub(super) const RESULT_CHARS: usize = 2400;
+pub(super) const TURN_RESERVE: usize = CONTEXT_CHARS + MAX_CALLS * (RESULT_CHARS + 1500) + 2400;
 const COMMANDS: &[(&str, &str)] = &[
     ("save", "journal_commit"),
     ("recall", "journal_recall"),

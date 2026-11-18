@@ -56,13 +56,15 @@ class ManagedContextTests(unittest.TestCase):
         first_issued = issued('First core')
         second_issued = issued('Second core', 2)
         self.set_response(first_issued)
-        first = loop.turn_context(self.cfg, self.messages)
+        first, first_size = loop.turn_context(self.cfg, self.messages)
         report_managed_context(self.cfg)
         self.set_response({'success': True, 'data': second_issued})
-        second = loop.turn_context(self.cfg, self.messages)
+        second, second_size = loop.turn_context(self.cfg, self.messages)
         report_managed_context(self.cfg)
         self.assertIn('First core', first[1]['content']); self.assertIn('Second core', second[1]['content'])
         self.assertNotIn('First core', str(second)); self.assertEqual(self.messages, original)
+        self.assertEqual(first_size, loop.request_chars(first))
+        self.assertEqual(second_size, loop.request_chars(second))
         self.assertEqual(self.receipts(), [[first_issued['digest'], 'startup'],
                                            [second_issued['digest'], 'model-request']])
         path = Path(self.directory.name) / 'managed-context.json'
@@ -74,7 +76,7 @@ class ManagedContextTests(unittest.TestCase):
 
     def test_failure_replaces_context_with_unknown_and_never_reports_empty_success(self):
         self.set_response(None)
-        request = loop.turn_context(self.cfg, self.messages)
+        request, _ = loop.turn_context(self.cfg, self.messages)
         report_managed_context(self.cfg)
         self.assertIn(UNKNOWN, request[1]['content'])
         self.assertEqual(self.receipts(), [])
@@ -83,7 +85,7 @@ class ManagedContextTests(unittest.TestCase):
     def test_binding_mismatch_is_unknown_not_another_employee_context(self):
         value = issued(); value['sessionId'] = 'another'
         self.set_response(value)
-        request = loop.turn_context(self.cfg, self.messages)
+        request, _ = loop.turn_context(self.cfg, self.messages)
         self.assertIn(UNKNOWN, request[1]['content']); self.assertNotIn(value['context'], str(request))
 
     def test_optional_runtime_epoch_is_preserved_without_claiming_provider_attestation(self):
@@ -94,7 +96,8 @@ class ManagedContextTests(unittest.TestCase):
         self.assertEqual(record['runtimeBinding'], value['runtimeBinding'])
         value['runtimeBinding'] = 'unknown'
         self.set_response(value)
-        self.assertIn(UNKNOWN, loop.turn_context(self.cfg, self.messages)[1]['content'])
+        request, _ = loop.turn_context(self.cfg, self.messages)
+        self.assertIn(UNKNOWN, request[1]['content'])
 
     def test_a_later_success_cannot_be_mislabeled_as_the_missing_startup_input(self):
         self.set_response(None)
@@ -107,8 +110,8 @@ class ManagedContextTests(unittest.TestCase):
     def test_budget_partial_is_explicit_and_cannot_report_whole_issued_digest(self):
         self.cfg['prompt_cap_chars'] = 400
         self.set_response(issued('Core ' * 1000))
-        request = loop.turn_context(self.cfg, self.messages)
-        self.assertLessEqual(loop.request_chars(request), 400)
+        request, size = loop.turn_context(self.cfg, self.messages)
+        self.assertLessEqual(size, 400)
         self.assertIn('truncated', request[1]['content'])
         report_managed_context(self.cfg)
         self.assertEqual(self.receipts(), [])
@@ -121,7 +124,8 @@ class ManagedContextTests(unittest.TestCase):
 
     def test_generic_unmanaged_config_has_no_implicit_network_or_snapshot(self):
         self.cfg['managed_context'] = False
-        self.assertEqual(loop.turn_context(self.cfg, self.messages), self.messages)
+        request, _ = loop.turn_context(self.cfg, self.messages)
+        self.assertEqual(request, self.messages)
         self.assertEqual(self.events(), [])
         self.assertFalse((Path(self.directory.name) / 'managed-context.json').exists())
 
@@ -137,7 +141,7 @@ class ManagedContextTests(unittest.TestCase):
     def test_slow_scoped_cli_is_bounded_and_records_unknown(self):
         self.set_response(issued(), hold_fetch_ms=10_000)
         start = time.monotonic()
-        request = loop.turn_context(self.cfg, self.messages)
+        request, _ = loop.turn_context(self.cfg, self.messages)
         self.assertLess(time.monotonic() - start, 3)
         self.assertIn(UNKNOWN, request[1]['content'])
         self.assertEqual(self.events(), [['fetch']])

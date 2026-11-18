@@ -10,7 +10,7 @@ use crate::{
 };
 use reverie_core::memory::trim_text;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::io;
 use web::{Argument, CALL_ID_CAP};
 
@@ -40,11 +40,29 @@ const TRACE_TOOLS: &[&str] = &[
 
 #[derive(Deserialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
-struct WebPolicy {
+pub(super) struct WebPolicy {
     search: bool,
     fetch: bool,
     max_calls: usize,
     result_chars: usize,
+}
+
+impl WebPolicy {
+    pub(super) fn from_settings(settings: &Map<String, Value>) -> Self {
+        Self {
+            search: truthy(&settings["search"]),
+            fetch: truthy(&settings["web_fetch"]),
+            max_calls: bounded_setting(&settings["search_max_calls"]),
+            result_chars: bounded_setting(&settings["search_result_chars"]),
+        }
+    }
+}
+
+fn bounded_setting(value: &Value) -> usize {
+    value
+        .as_u64()
+        .and_then(|number| usize::try_from(number).ok())
+        .expect("web settings validated before prompt budgeting")
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -347,9 +365,6 @@ enum Request {
     Settle {
         state: Settlement,
     },
-    Reserve {
-        web: WebPolicy,
-    },
     WebReplay {
         call: Value,
         argument: Argument,
@@ -378,7 +393,6 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
             let model = ModelStep::read(&state.output);
             json!({ "decision": state.decide(&model), "outcome": model.outcome() })
         }
-        Request::Reserve { web } => json!({ "chars": web.reserve() }),
         Request::WebReplay {
             call,
             argument,

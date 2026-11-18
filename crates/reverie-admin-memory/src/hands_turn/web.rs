@@ -23,7 +23,7 @@ impl WebPolicy {
         self.enabled() && searches < self.max_calls
     }
 
-    pub(super) fn reserve(self) -> usize {
+    pub(crate) fn reserve(self) -> usize {
         if !self.enabled() {
             return 0;
         }

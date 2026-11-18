@@ -174,8 +174,8 @@ class TaskManager:
         """Also runs on resume after preemption. Current authorization follows every context IO."""
         cfg = dict(self.cfg, prompt_cap_chars=min(self.cfg['prompt_cap_chars'], self.active['limits'].prompt_chars))
         request = dict(payload)
-        used = len(json.dumps(payload.get('tools') or [])) + self.loop.request_chars(payload['messages'])
-        request['messages'] = inject_managed_context(cfg, payload['messages'], used)
+        used = self.loop.request_chars(payload['messages'], payload.get('tools') or [])
+        request['messages'], _ = inject_managed_context(cfg, payload['messages'], used)
         self.cfg['_managed_context_started'] = cfg['_managed_context_started']
         report_managed_context(cfg)
         if cfg.get('_managed_context_reported'): self.cfg['_managed_context_reported'] = True
