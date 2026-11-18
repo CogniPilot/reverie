@@ -21,6 +21,7 @@ pub mod human_protocol;
 pub mod js_json;
 pub mod kernel_accounting;
 pub mod kernel_mounts;
+pub mod launch_guard;
 pub mod lease_policy;
 pub mod lease_records;
 mod legacy_json;

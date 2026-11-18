@@ -1714,6 +1714,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-launch-guard"
+version = "0.1.0"
+dependencies = [
+ "reverie-contracts",
+ "serde_json",
+]
+
+[[package]]
 name = "reverie-lease-cli"
 version = "0.1.0"
 dependencies = [
