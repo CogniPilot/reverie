@@ -1973,22 +1973,34 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const observedAnchor = { ...anchor, startTicks: parent.anchor.startTicks },
       leaf = await this.#probe(observedAnchor, worker, attempts);
     check();
-    const after = await this.#probe(observedAnchor, undefined, attempts),
-      finalLeaf = await this.#refresh(leaf, check, attempts),
-      finalAnchorState = await this.#fixed(task.containerId, config);
-    check();
-    if (
-      !isDeepStrictEqual(anchorState.State, finalAnchorState.State) ||
-      !isDeepStrictEqual(parent, after) ||
-      !isDeepStrictEqual(after.parent, finalLeaf.parent) ||
-      !isDeepStrictEqual(after.anchor, finalLeaf.anchor) ||
-      !this.#matches(after, policy.pool, null) ||
-      !this.#matches(finalLeaf, policy, policy.memoryHighBytes)
-    )
-      refuse('DOCKER_RESOURCE_REATTACH_POLICY_UNCONFIRMED');
-    this.#fresh(after);
-    this.#fresh(finalLeaf);
-    return policy;
+    // Bookend the same placement with overlapping read-only pool and leaf
+    // observations so waiting for one probe need not expire the other.
+    for (let read = 0; ; read++) {
+      const [after, finalLeaf] = await Promise.all([
+        this.#probe(observedAnchor, undefined, attempts),
+        this.#refresh(leaf, check, attempts),
+      ]);
+      const finalAnchorState = await this.#fixed(task.containerId, config);
+      check();
+      if (
+        !isDeepStrictEqual(anchorState.State, finalAnchorState.State) ||
+        !isDeepStrictEqual(parent, after) ||
+        !isDeepStrictEqual(after.parent, finalLeaf.parent) ||
+        !isDeepStrictEqual(after.anchor, finalLeaf.anchor) ||
+        !this.#matches(after, policy.pool, null) ||
+        !this.#matches(finalLeaf, policy, policy.memoryHighBytes)
+      )
+        refuse('DOCKER_RESOURCE_REATTACH_POLICY_UNCONFIRMED');
+      try {
+        this.#fresh(after);
+        this.#fresh(finalLeaf);
+        return policy;
+      } catch (error) {
+        if (read > 0 || !(error instanceof DockerEmployeeContinuationError) ||
+            error.code !== 'DOCKER_RESOURCE_REVISION_OBSERVATION_EXPIRED') throw error;
+        check();
+      }
+    }
   }
   async read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null> {
     try {
