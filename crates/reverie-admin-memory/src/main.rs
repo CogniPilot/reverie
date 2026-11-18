@@ -18,6 +18,7 @@ mod hands_settings;
 mod hands_web;
 mod journal;
 mod managed_context;
+mod model_completion;
 mod office;
 mod opencode_context;
 mod private_directory;
@@ -213,6 +214,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-prompt-worker" => hands_prompt::run,
         "--hands-poll-worker" => hands_poll::run,
         "--cycle-plan-worker" => cycle_plan::run,
+        "--model-completion-worker" => model_completion::run,
         "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,

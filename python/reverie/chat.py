@@ -17,13 +17,12 @@ import time
 from typing import Sequence
 
 from .beliefs import ensure_seeded, render
-from .config import Config
+from .config import ChatClient, Config, LLMError, limit_words
 from .dream import Dreamer, waking_recall
 from .gpu import GpuLock
 from .importance import rate_episode
 from .instance import initial_self_for
 from .reverie import violates
-from .llm import ChatClient, LLMError, limit_words
 from .log import get, setup
 from .memory import DREAM, EPISODE, Memory, MemoryStore, make_embedder
 from .migrate import migrate_history

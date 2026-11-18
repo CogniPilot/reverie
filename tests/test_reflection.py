@@ -40,7 +40,7 @@ class ParseTest(unittest.TestCase):
 
 class CleanTest(unittest.TestCase):
     def test_limit_words(self):
-        from reverie.llm import limit_words
+        from reverie.config import limit_words
         self.assertEqual(limit_words("one two three", 5), "one two three")
         self.assertEqual(limit_words("a b c. d e f g", 4), "a b c.")
         self.assertEqual(limit_words("a b c d e f g", 4), "a b c d")

@@ -37,15 +37,23 @@ def native_memory_command(worker, *, resolve=False):
     return [executable, f'--{worker}={os.getpid()}']
 
 
-def native_memory_request(worker, arguments, bound=MEMORY_WORKER_BYTES, *, timeout=3):
+def native_memory_output(worker, arguments, bound=MEMORY_WORKER_BYTES, *, timeout=3):
     if len(arguments) > bound:
         return None
     try:
         reply = subprocess.run(native_memory_command(worker), input=arguments, capture_output=True,
                                check=True, start_new_session=True, timeout=timeout)
-        result = json.loads(reply.stdout)
-        return result if isinstance(result, dict) else None
+        return reply.stdout
     except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def native_memory_request(worker, arguments, bound=MEMORY_WORKER_BYTES, *, timeout=3):
+    output = native_memory_output(worker, arguments, bound, timeout=timeout)
+    try:
+        result = json.loads(output) if output is not None else None
+        return result if isinstance(result, dict) else None
+    except ValueError:
         return None
 
 

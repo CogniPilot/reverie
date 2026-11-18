@@ -7,8 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
-from reverie.config import Config
-from reverie.llm import ChatClient
+from reverie.config import ChatClient, Config
 from reverie.room import Room
 
 

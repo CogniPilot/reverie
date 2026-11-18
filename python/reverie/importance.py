@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from .llm import ChatClient, LLMError
+from .config import ChatClient, LLMError
 from .memory import Memory
 
 RATING_SYSTEM = (
