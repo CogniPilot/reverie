@@ -23,18 +23,8 @@ const BUDGET: &str = "fixed prompt and recalled evidence exceed available prompt
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
-    Build {
-        job: Box<Build>,
-    },
-    Wake {
-        scope: Scope,
-        history: Vec<Value>,
-        candidates: Option<Vec<Value>>,
-    },
-    Preview {
-        message: Value,
-        cap: usize,
-    },
+    Build { job: Box<Build> },
+    Preview { message: Value, cap: usize },
 }
 
 #[derive(Deserialize)]
@@ -70,15 +60,6 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, TURN_CAPTURE_BOUND)?;
     let output = match serde_json::from_slice(&input)? {
         Request::Build { job } => build_reply(&job),
-        Request::Wake {
-            scope,
-            history,
-            candidates,
-        } => {
-            let policy = WakePolicy::new(&scope, &history);
-            let rows = candidates.as_deref().unwrap_or(&history);
-            json!({ "wakes": rows.iter().map(|row| policy.accepts(row)).collect::<Vec<_>>() })
-        }
         Request::Preview { message, cap } => {
             json!({ "sender": speaker(&message), "text": trim_message(text(&message), cap) })
         }

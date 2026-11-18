@@ -59,8 +59,6 @@ PHONE_STATUS = {
     'unavailable': 'unavailable; polling fallback',
 }
 
-SEEN_CAP = 500           # seen ids kept per room
-CLAIM_RETRIES = 1        # times an unconfirmed claim is answered again after a crash
 ROOM_LIST_LOG_INTERVAL_S = 60  # report a continuing office outage at most once a minute
 THINK = re.compile(r'<think>.*?</think>', re.S)
 WEB_MARK = '[web] '
@@ -113,20 +111,12 @@ def terminal_event(cfg, kind, **data):
 
 
 def load_json(path, default):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return default
+    result = poll_request('load', path=os.fspath(path))
+    return result['value'] if result['present'] else default
 
 
 def save_json(path, data):
-    tmp = path + '.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(data, f)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    poll_request('save', path=os.fspath(path), data=data)
 
 
 class ChatNotFound(RuntimeError, ValueError):
@@ -312,14 +302,21 @@ def reply_outcome(reply):
         reply, 'overflow' if reply.startswith('This conversation exceeds my current context budget') else 'answer')
 
 
-def prompt_request(action, **fields):
-    reply = agent_journal.native_memory_json('hands-prompt-worker', {'action': action, **fields},
-                                             agent_journal.TURN_CAPTURE_BYTES)
+def hands_request(worker, payload):
+    reply = agent_journal.native_memory_json('hands-' + worker + '-worker', payload, agent_journal.TURN_CAPTURE_BYTES)
     if reply is None:
-        raise ValueError('Hands prompt worker unavailable')
+        raise ValueError(f'Hands {worker} worker unavailable')
     if 'error' in reply:
         raise ValueError(reply['error'])
     return reply
+
+
+def prompt_request(action, **fields):
+    return hands_request('prompt', {'action': action, **fields})
+
+
+def poll_request(action, **fields):
+    return hands_request('poll', {action: fields})
 
 
 def wake_scope(cfg, room):
@@ -772,15 +769,22 @@ def timing_text(timing):
     return ','.join(parts) or '-'
 
 
-def settle_claim(chat, cfg, room, claim):
-    """A claim left by a crash: True if a post of ours newer than the claimed message shows the answer went out.
+def change_room(cfg, state, room, kind, **fields):
+    state[room] = poll_request('change', room=state[room], event={'kind': kind, **fields})['room']
+    save_json(cfg['state_file'], state)
 
-    Compares server timestamps only (no local clock). A later answer of ours also settles it, which biases this to a
-    missed reply. It cannot rule out a double: a post that timed out here may still commit after the retry."""
-    for m in chat.read(room, cfg['history_n']):
-        if (m.get('from') or {}).get('sessionId') == cfg['self_session_id'] and m.get('at', 0) > claim['msg_at']:
-            return True
-    return False
+
+def settle_claims(chat, cfg, state, room):
+    for mid, claim in list(state[room].get('claims', {}).items()):
+        try:
+            result = poll_request('settlement', claim=claim, session=cfg['self_session_id'],
+                                  history=chat.read(room, cfg['history_n']))
+        except Exception as error:
+            log('claim check failed', room, mid, type(error).__name__)
+            continue
+        if result['disposition']:
+            log('claim ' + result['disposition'], room, mid)
+            change_room(cfg, state, room, 'complete', id=mid)
 
 
 def room_list(cfg, chat, state):
@@ -792,7 +796,7 @@ def room_list(cfg, chat, state):
     if cfg['rooms'] != 'auto':
         return cfg['rooms']
     try:
-        listed = [r for r in chat.member_rooms() if isinstance(r, dict) and ROOM_UUID.match(str(r.get('id') or ''))]
+        result = poll_request('rooms', listed=chat.member_rooms(), state=state, cap=cfg['max_rooms'])
     except Exception as e:
         now = time.monotonic()
         outage = cfg.get('_room_list_outage')
@@ -812,35 +816,23 @@ def room_list(cfg, chat, state):
     if outage is not None:
         log('room list recovered', f"failures={outage['failures']}",
             f"elapsed_s={int(time.monotonic() - outage['started'])}")
-    if len(listed) > cfg['max_rooms']:
-        log('room list capped', len(listed), 'of', cfg['max_rooms'])
-        listed = listed[: cfg['max_rooms']]
+    listed = result['rooms']
+    if result['total'] > cfg['max_rooms']:
+        log('room list capped', result['total'], 'of', cfg['max_rooms'])
     rooms = [r['id'] for r in listed]
-    cfg['_room_names'] = {r['id']: str(r.get('name') or r['id']) for r in listed}
+    cfg['_room_names'] = {r['id']: r['name'] for r in listed}
     terminal_event(cfg, 'rooms', count=len(rooms))
-    dms = [r['id'] for r in listed if r.get('kind') == 'dm']
-    # The id of each room's newest message: a room whose newest message is the same one is not read (see tick).
-    cfg['_last_id'] = {r['id']: newest_id(r) for r in listed}
-    before = state.get('_auto_rooms')
-    if before is not None:
-        for room in set(rooms) - set(before):
-            state.pop(room, None)  # (re)joined: first sight again, never the backlog since it left
-        if set(rooms) != set(before):
-            log('rooms changed', 'joined', len(set(rooms) - set(before)), 'left', len(set(before) - set(rooms)),
-                'now', len(rooms))
+    dms = [r['id'] for r in listed if r['direct']]
+    cfg['_last_id'] = {r['id']: r['latest'] for r in listed}
+    cfg['_no_read'] = {r['id'] for r in listed if not r['read']}
+    for room in result['joined']:
+        state.pop(room, None)
+    if result['joined'] or result['left']:
+        log('rooms changed', 'joined', len(result['joined']), 'left', result['left'], 'now', len(rooms))
     state['_auto_rooms'], state['_auto_dms'] = rooms, dms
     cfg['_auto_dms'] = set(dms)
     save_json(cfg['state_file'], state)
     return rooms
-
-
-def newest_id(listed_room):
-    """The id of a listed room's newest message (`lastMessage.id` in `chat rooms --json`), or None when it is missing or
-    not a usable id. An id, not `lastMessageAt`: two messages can share a millisecond, and an unchanged time would then
-    hide the second one. None means "cannot prove nothing is new", so the room is read."""
-    lm = listed_room.get('lastMessage')
-    mid = lm.get('id') if isinstance(lm, dict) else None
-    return mid if isinstance(mid, str) and 0 < len(mid) <= 200 else None
 
 
 def still_member(cfg, chat, room):
@@ -910,10 +902,9 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
     """One pass over every room. Returns the number of answers posted."""
     posted = 0
     for room in room_list(cfg, chat, state):
-        rs = state.setdefault(room, {'seen': [], 'claims': {}, 'since': None})
-        last = cfg.get('_last_id', {}).get(room)  # only an auto list fills this; None: read the room
-        if last is not None and rs['since'] is not None and not rs['claims'] and rs.get('last_id') == last:
-            continue  # its newest message is the one it had when it was last read in full
+        if room in cfg.get('_no_read', ()):
+            continue
+        last = cfg.get('_last_id', {}).get(room)
         try:
             history = chat.read(room, cfg['history_n'])
         except Exception as e:
@@ -921,55 +912,37 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
             continue
         if isinstance(getattr(chat, 'time_zone', None), str):
             cfg['_time_zone'] = chat.time_zone
-        if rs['since'] is None:
-            # First sight of a room: start from now, never answer the backlog.
-            rs['since'] = max([m.get('at', 0) for m in history] + [0])
-            rs['seen'] = [m['id'] for m in history][-SEEN_CAP:]
-            rs['last_id'] = last
+        if state.get(room, {}).get('since') is not None:
+            settle_claims(chat, cfg, state, room)
+        try:
+            scan = poll_request('scan', room=state.get(room, {}), latest=last,
+                                scope=wake_scope(cfg, room), history=history)
+        except ValueError as error:
+            log('room scan failed', room, type(error).__name__)
+            continue
+        if 'initial' in scan:
+            state[room] = scan['initial']
             save_json(cfg['state_file'], state)
             terminal_event(cfg, 'note', text=f"Following {cfg.get('_room_names', {}).get(room, room)}; "
                            f"{len(history)} existing messages skipped.")
             continue
-        for mid, claim in list(rs['claims'].items()):
-            try:
-                done = settle_claim(chat, cfg, room, claim)
-            except Exception as e:
-                log('claim check failed', room, mid, repr(e)[:200])
-                continue
-            if done or claim['tries'] > CLAIM_RETRIES:
-                log('claim settled' if done else 'claim abandoned', room, mid)
-                del rs['claims'][mid]
-                rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
-                save_json(cfg['state_file'], state)
-        seen = set(rs['seen'])
-        candidates = [m for m in sorted(history, key=lambda m: m.get('at', 0))
-                      if m['id'] not in seen and m.get('at', 0) >= rs['since']]
-        try:
-            flags = prompt_request('wake', scope=wake_scope(cfg, room), history=history,
-                                   candidates=candidates)['wakes'] if candidates else []
-        except ValueError as error:
-            log('wake check failed', room, type(error).__name__)
-            continue
-        for msg, wake in zip(candidates, flags, strict=True):
+        seen = set()
+        for index, wake in scan['pending']:
+            msg = history[index]
             mid = msg['id']
             if mid in seen:
                 continue
             if not wake:
-                rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
+                change_room(cfg, state, room, 'skip', id=mid)
                 seen.add(mid)
-                save_json(cfg['state_file'], state)
                 continue
             if posted >= cfg['max_answers_per_tick']:
                 break
             if not alert_allows(cfg, chat, room, msg):
-                rs['claims'].pop(mid, None)
-                rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
+                change_room(cfg, state, room, 'complete', id=mid)
                 seen.add(mid)
-                save_json(cfg['state_file'], state)
                 continue
-            prev = rs['claims'].get(mid)
-            rs['claims'][mid] = {'msg_at': msg.get('at', 0), 'tries': (prev['tries'] + 1) if prev else 1}
-            save_json(cfg['state_file'], state)
+            change_room(cfg, state, room, 'claim', id=mid, msg_at=msg.get('at', 0))
             room_name = cfg.get('_room_names', {}).get(room, room)
             incoming_event(cfg, room_name, msg)
             try:
@@ -995,10 +968,8 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
                 member = still_member(cfg, chat, room)
                 if member:
                     if not alert_allows(cfg, chat, room, msg):
-                        del rs['claims'][mid]
-                        rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
+                        change_room(cfg, state, room, 'complete', id=mid)
                         seen.add(mid)
-                        save_json(cfg['state_file'], state)
                         continue
                     sent = reply[: cfg['reply_cap_chars']]
                     terminal_event(cfg, 'posting')
@@ -1008,16 +979,12 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
                 continue  # claim stays; settled or retried once on a later tick
             if not member:
                 log('answer dropped: no longer a member', room, mid)
-                del rs['claims'][mid]  # never retried, never posted
-                rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
                 # Known as left: if she is back on the next list, the room starts again from now.
                 state['_auto_rooms'] = [r for r in state.get('_auto_rooms') or [] if r != room]
-                save_json(cfg['state_file'], state)
+                change_room(cfg, state, room, 'complete', id=mid)
                 break  # the rest of this room waits for the next tick's list
-            del rs['claims'][mid]
-            rs['seen'] = (rs['seen'] + [mid])[-SEEN_CAP:]
+            change_room(cfg, state, room, 'complete', id=mid)
             seen.add(mid)
-            save_json(cfg['state_file'], state)
             posted += 1
             terminal_event(cfg, 'reply', room=room_name, text=sent,
                            confirmed=isinstance(receipt, dict) and bool(receipt.get('id')))
@@ -1030,8 +997,7 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
         else:
             # Every message up to `last` was handled (answered, skipped or left to a claim). Not after a break
             # (tick cap, removed room): those rooms are read again next tick.
-            rs['last_id'] = last
-            save_json(cfg['state_file'], state)
+            change_room(cfg, state, room, 'advance', latest=last)
     return posted
 
 

@@ -11,6 +11,7 @@ mod hands_attention;
 mod hands_chat;
 mod hands_model;
 mod hands_office;
+mod hands_poll;
 mod hands_prompt;
 mod hands_settings;
 mod hands_web;
@@ -208,6 +209,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-chat-worker" => hands_model::chat,
         "--hands-office-chat-worker" => hands_chat::run,
         "--hands-prompt-worker" => hands_prompt::run,
+        "--hands-poll-worker" => hands_poll::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,
