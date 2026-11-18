@@ -6,9 +6,7 @@ from test_coding_support import cfg_for
 
 
 class PublicWebTests(unittest.TestCase):
-    def test_tool_schema_and_native_worker_refuse_an_unsafe_target(self):
-        call = {'function': {'name': 'web_fetch', 'arguments': '{"url":"https://example.com:444/"}'}}
-        self.assertIsNone(loop.tool_url(call))
+    def test_native_worker_refuses_an_unsafe_target(self):
         with self.assertRaisesRegex(ValueError, '^Public web read unavailable$'):
             loop.fetch_public_page('https://127.0.0.1/')
 

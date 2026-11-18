@@ -34,7 +34,7 @@ enum Request {
 pub(crate) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
     let result = match serde_json::from_slice(&input)? {
-        Request::ValidateTarget { url } => json!({"valid": Target::parse(&url).is_some()}),
+        Request::ValidateTarget { url } => json!({"valid": valid_target(&url)}),
         Request::Fetch { url } => {
             let text = fetch(&url)?.ok_or_else(crate::refused)?;
             json!({"text": text})
@@ -50,6 +50,10 @@ pub(crate) fn run(parent: i32) -> io::Result<()> {
         }
     };
     crate::write_reply(&result, crate::RESPONSE_BOUND)
+}
+
+pub(super) fn valid_target(url: &str) -> bool {
+    Target::parse(url).is_some()
 }
 
 fn fetch(url: &str) -> io::Result<Option<String>> {

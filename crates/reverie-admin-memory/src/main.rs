@@ -17,6 +17,7 @@ mod hands_office;
 mod hands_poll;
 mod hands_prompt;
 mod hands_settings;
+mod hands_turn;
 mod hands_web;
 mod journal;
 mod legacy_memory;
@@ -27,6 +28,7 @@ mod opencode_context;
 mod private_directory;
 mod read_turn;
 mod recall;
+mod reply_text;
 mod save;
 mod scoped_image;
 mod screen_output;
@@ -215,6 +217,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-chat-worker" => hands_model::chat,
         "--hands-office-chat-worker" => hands_chat::run,
         "--hands-prompt-worker" => hands_prompt::run,
+        "--hands-turn-worker" => hands_turn::run,
         "--hands-poll-worker" => hands_poll::run,
         "--cycle-plan-worker" => cycle_plan::run,
         "--model-completion-worker" => model_completion::run,

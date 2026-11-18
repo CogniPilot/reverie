@@ -64,7 +64,7 @@ class TurnSummaryTests(unittest.TestCase):
             return next(outputs)
         with patch.object(loop.Chat, 'turn_summary', side_effect=['first', 'second', 'third']) as fetch, patch.object(loop, 'log_web'):
             reply, _, _ = loop.answer(cfg, None, [], msg, model, lambda cfg, query: 'result')
-        self.assertEqual(reply, loop.WEB_MARK + 'answer')
+        self.assertEqual(reply, '[web] answer')
         self.assertEqual(fetch.call_count, 3)
         for index, expected in enumerate(['first', 'second', 'third']):
             snapshots = [m for m in requests[index] if str(m.get('content', '')).startswith(loop.SUMMARY_FRAME)]

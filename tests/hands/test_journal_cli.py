@@ -194,7 +194,6 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result['status'], 'refused', command)
             self.assertIn('run: help', result['reason'])
         self.assertEqual(turn.calls, journal.MAX_CALLS)
-        self.assertFalse(turn.handles({'function': {'name': 'journal', 'arguments': '{"command":"help"}'}}))
         self.assertEqual(self.run_cli(turn, 'recall x'), {'status': 'refused', 'reason': 'turn_budget'})
 
     def test_bad_supersedes_and_topics_are_refused_without_writing(self):

@@ -4,19 +4,13 @@ use super::{
     Controller, Start,
     wire::{Call, FRAME, Limits, OMITTED, STEP_CHARS, Tool, ToolReply, permitted_tools},
 };
-use regex_lite::Regex;
 pub(super) use report::Report;
 use serde_json::{Map, Value, json};
 use std::{
     collections::{HashSet, VecDeque},
     io,
-    sync::LazyLock,
     time::Duration,
 };
-
-static THINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<think>.*?</think>").unwrap());
-static MARKUP: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)</?tool_call\b|<\|tool_call|<function[=\s>]").unwrap());
 
 const CALL_REPAIR_LIMIT: usize = 2;
 const PARALLEL_NOTE: &str = "Your previous response requested multiple tools. None of those calls ran. Return exactly one tool call in your next response, then wait for its result before requesting another.";
@@ -141,12 +135,13 @@ impl Session {
         let content = response.get("content").filter(|value| truthy(value));
         let content =
             content.map_or(Ok(""), |value| value.as_str().ok_or("invalid_model_result"))?;
-        let text = THINK.replace_all(content, "");
-        let text = reverie_core::memory::trim_text(&text);
+        let text = crate::reply_text::visible(content);
         match response.get("tool_calls").filter(|value| truthy(value)) {
-            Some(calls) => self.tool_step(controller, calls, text),
-            None if text.is_empty() || MARKUP.is_match(text) => Err("unusable_reply"),
-            None => Ok(Action::Complete(prefix(text, 2400))),
+            Some(calls) => self.tool_step(controller, calls, &text),
+            None if text.is_empty() || crate::reply_text::coding_markup(&text) => {
+                Err("unusable_reply")
+            }
+            None => Ok(Action::Complete(prefix(&text, 2400))),
         }
     }
 

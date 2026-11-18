@@ -51,9 +51,9 @@ class HandsRuntimeTests(unittest.TestCase):
             message = {'id': 'message', 'text': 'hello', 'at': 1000, 'from': {'kind': 'user', 'name': 'Owner'}}
             for text in ('<think>unfinished private notes', 'notes</think>answer', '<tool_call>command'):
                 result, _, _ = loop.answer(cfg, 'room', [], message, lambda *args: {'content': text}, None)
-                self.assertEqual(result, loop.CHAT_FAIL_LINE)
+                self.assertEqual(result, "I couldn't finish a usable answer. Please ask me to try again.")
                 self.assertNotIn(text, result)
-            self.assertEqual(loop.usable({'content': '<think>private notes</think>final'}), 'final')
+            self.assertEqual(loop.turn_request('visible', output={'content': '<think>private notes</think>final'})['reply'], 'final')
             result, _, _ = loop.answer(cfg, 'room', [], message,
                 lambda *args: {'content': 'partial', '_finish_reason': 'length'}, None)
-            self.assertEqual(result, loop.CHAT_LIMIT_LINE)
+            self.assertEqual(result, "I reached my response limit before finishing. Please ask me to continue.")

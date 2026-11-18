@@ -193,11 +193,6 @@ class Turn:
         recent = self.failures[getattr(self, 'failure_mark', 0):]
         return {'status': 'unavailable', **extra, **({'failure': recent[-1]} if recent else {})}
 
-    def handles(self, call):
-        fn = call.get('function')
-        return (bool(self.tools) and self.calls < self.call_limit and isinstance(fn, dict) and
-                fn.get('name') in self.accepted_calls)
-
     def invoke(self, call):
         self.replay = '{}'
         self.failure_mark = len(self.failures)  # report only this command's worker failures

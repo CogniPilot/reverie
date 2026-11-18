@@ -173,7 +173,7 @@ pub fn quoted_memory_text(points: &[u32]) -> Option<String> {
             }
             cp => {
                 if let Some(value) = char::from_u32(cp)
-                    && contains(printable::PRINTABLE, value)
+                    && regex::printable(value)
                 {
                     result.push(value);
                 } else if cp <= 255 {
