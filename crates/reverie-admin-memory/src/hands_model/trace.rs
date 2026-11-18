@@ -1,9 +1,11 @@
 mod file;
+mod reader;
 #[cfg(test)]
 mod tests;
 
 use super::delta::{Display, DisplayKind};
 use file::{TRACE_BYTES, TraceFile};
+pub(crate) use reader::trace_worker;
 use regex_lite::Regex;
 use reverie_host::embeddings::model_api::Failure;
 use std::{path::Path, sync::LazyLock};
@@ -115,17 +117,19 @@ impl Writer {
     }
 
     fn append(&self, kind: DisplayKind, value: &str) -> Result<(), Failure> {
-        let value = CREDENTIAL.replace_all(value, REDACTED);
-        let clean: String = value
-            .chars()
-            .filter(|ch| {
-                !matches!(*ch,
-            '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{7f}'..='\u{9f}'
-                | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-            })
-            .collect();
         self.file
-            .append(kind.name(), &clean)
+            .append(kind.name(), &redact(value))
             .map_err(|_| Failure::Invalid)
     }
+}
+
+fn redact(value: &str) -> String {
+    CREDENTIAL
+        .replace_all(value, REDACTED)
+        .chars()
+        .filter(|ch| {
+            !matches!(*ch, '\u{0}'..='\u{8}' | '\u{b}'..='\u{1f}' | '\u{7f}'..='\u{9f}'
+            | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+        })
+        .collect()
 }

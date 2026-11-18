@@ -42,6 +42,7 @@ class TerminalTests(unittest.TestCase):
     def test_trace_is_coalesced_bounded_and_drained_before_model_done(self):
         path = Path(self.tmp.name) / 'events.jsonl'
         view = DebugTerminal(dict(self.cfg, model_events_file=str(path)), output=self.output, interactive=False)
+        self.addCleanup(view.stop)
         path.touch(mode=0o600)
 
         def emit(kind, text):
@@ -61,6 +62,9 @@ class TerminalTests(unittest.TestCase):
         self.assertLessEqual(len(view.records[-1][2]), 12009)
         self.assertIn('earlier trace text omitted', view.records[-1][2])
         self.assertEqual(view.replies, 0)
+        worker = view.trace.worker.process
+        view.stop()
+        self.assertIsNotNone(worker.poll())
 
     def test_terminal_prompt_preempts_background_model_before_inference(self):
         observed = []

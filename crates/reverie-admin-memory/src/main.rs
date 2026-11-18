@@ -20,6 +20,7 @@ mod token_meter;
 mod turn_capture;
 mod turn_context;
 mod turn_tool;
+mod worker_channel;
 
 use clap::Parser;
 use nix::{
@@ -202,6 +203,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,
         "--hands-managed-context-worker" => managed_context::run,
+        "--hands-trace-worker" => hands_model::trace_worker,
         _ => return None,
     };
     Some((worker, pid.parse().ok()?))

@@ -7,14 +7,13 @@ mod session;
 mod tests;
 mod wire;
 
+use crate::worker_channel::FRAME_BYTES;
 use channel::Channel;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use session::Session;
 use std::{io, num::NonZeroU64, time::Duration};
 use wire::{Limits, ToolReply};
-
-const FRAME_BYTES: usize = 1_048_576;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -14,12 +14,36 @@ import textwrap
 import threading
 import time
 import urllib.parse
-from model_events import TraceReader
+from coding_process import WorkerSocket
 
 
 CONTROL = re.compile(r'\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|[\x00-\x08\x0b-\x1f\x7f-\x9f]')
 BEARER = re.compile(r'(?i)\bBearer\s+[^\s"\']+')
 QUERY_SECRET = re.compile(r'(?i)((?:api[_-]?key|token|password|secret)=)[^&\s"\']+')
+
+
+class TraceReader:
+    def __init__(self, path, *, from_end=True):
+        self.worker = WorkerSocket('hands-trace-worker', {'path': os.fspath(path), 'from_end': from_end})
+        try:
+            if self.worker.wait(0.5) != {'ready': True}:
+                raise ValueError('invalid trace worker reply')
+        except (OSError, ValueError, EOFError):
+            self.worker.close()
+            raise ValueError('trace worker refused the file') from None
+
+    def poll(self):
+        try:
+            self.worker.send('poll')
+            events = self.worker.wait(0.5)
+        except EOFError:
+            raise ValueError('trace worker exited') from None
+        if not isinstance(events, list):
+            raise ValueError('invalid trace worker reply')
+        return events
+
+    def close(self):
+        self.worker.close()
 
 
 class DebugTerminal:
@@ -110,6 +134,10 @@ class DebugTerminal:
         if self.trace_thread:
             self.trace_thread.join(2)
         self.poll_trace(drain=True)
+        with self.lock:
+            if self.trace is not None:
+                self.trace.close()
+                self.trace = None
         self._print('Reverie Admin Harness stopped.')
 
     def _print(self, text):
@@ -211,6 +239,7 @@ class DebugTerminal:
                             # deltas, without printing the accumulated row again.
                             self._print(f'[{stamp}] {label}: {delta}')
             except (OSError, ValueError):
+                self.trace.close()
                 self.trace = None
                 self.trace_failed = True
                 self.event('note', text='Model trace unavailable: private-file checks failed.')

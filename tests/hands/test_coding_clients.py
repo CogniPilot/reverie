@@ -10,7 +10,7 @@ import time
 import unittest
 
 from agent_journal import native_memory_command
-from model_events import TraceReader
+from debug_terminal import TraceReader
 
 
 class ModelClientTests(unittest.TestCase):
@@ -74,7 +74,11 @@ class ModelClientTests(unittest.TestCase):
                     self.assertEqual(result['result']['content'], 'Final answer')
                     self.assertEqual(result['result']['reasoning_content'], thought + key)
                     self.assertNotIn(key, path.read_text())
-                    events = TraceReader(path, from_end=False).poll()
+                    reader = TraceReader(path, from_end=False)
+                    try:
+                        events = reader.poll()
+                    finally:
+                        reader.close()
                     self.assertEqual(''.join(e['text'] for e in events if e['kind'] == 'thinking'),
                                      thought + '[redacted]')
                     self.assertEqual(''.join(e['text'] for e in events if e['kind'] == 'answer'), 'Final answer')

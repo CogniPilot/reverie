@@ -1,6 +1,6 @@
 use super::stream::checked_count;
 use reverie_host::embeddings::model_api::Failure;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
@@ -8,7 +8,8 @@ pub(super) trait Display {
     fn write(&mut self, kind: DisplayKind, value: &str) -> Result<(), Failure>;
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum DisplayKind {
     Thinking,
     Answer,

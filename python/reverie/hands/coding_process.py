@@ -115,19 +115,15 @@ class BoundedProcess:
         return self.done
 
 
-class CodingWorker:
-    def __init__(self, messages, tools, limits, options, *, epoch=1):
-        if type(epoch) is not int or epoch <= 0:
-            raise ValueError('invalid task epoch')
-        self.epoch = epoch
+class WorkerSocket:
+    def __init__(self, worker, initial):
         self.closed = False
         self.input = bytearray()
-        self.output = self.packet({'epoch': epoch, 'messages': messages, 'tools': tools,
-                                   'limits': asdict(limits), 'options': options})
+        self.output = self.packet(initial)
         self.connection, child = socket.socketpair()
         self.connection.setblocking(False)
         try:
-            self.process = subprocess.Popen(native_memory_command('hands-coding-worker', resolve=True),
+            self.process = subprocess.Popen(native_memory_command(worker, resolve=True),
                 stdin=child, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True, env={'PATH': os.defpath, 'LANG': 'C.UTF-8'})
         except BaseException:
@@ -153,7 +149,7 @@ class CodingWorker:
 
     def next_event(self):
         budget = POLL_BYTES
-        while budget:
+        while True:
             boundary = self.input.find(b'\n')
             if boundary >= 0:
                 frame = self.input[:boundary]
@@ -161,6 +157,8 @@ class CodingWorker:
                 return json.loads(frame)
             if len(self.input) > FRAME_BYTES:
                 raise ValueError('worker event limit')
+            if not budget:
+                return None
             try:
                 data = self.connection.recv(min(budget, 65536, FRAME_BYTES + 1 - len(self.input)))
             except BlockingIOError:
@@ -168,10 +166,47 @@ class CodingWorker:
             if not data:
                 if self.input:
                     raise ValueError('incomplete worker event')
-                return {'epoch': self.epoch, 'kind': 'failed', 'error': 'worker_exited'}
+                raise EOFError('worker exited')
             self.input.extend(data)
             budget -= len(data)
-        return None
+    def send(self, message):
+        if self.closed or self.output:
+            raise ValueError('worker reply unavailable')
+        self.output = self.packet(message)
+        self.send_pending()
+
+    def wait(self, seconds):
+        deadline = time.monotonic() + seconds
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.connection, selectors.EVENT_READ)
+            while True:
+                self.send_pending()
+                packet = self.next_event()
+                if packet is not None:
+                    return packet
+                mask = selectors.EVENT_READ | (selectors.EVENT_WRITE if self.output else 0)
+                selector.modify(self.connection, mask)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    raise TimeoutError('worker reply deadline')
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        self.connection.close()
+        if self.process.poll() is None:
+            self.process.kill()
+        self.process.wait()
+
+
+class CodingWorker(WorkerSocket):
+    def __init__(self, messages, tools, limits, options, *, epoch=1):
+        if type(epoch) is not int or epoch <= 0:
+            raise ValueError('invalid task epoch')
+        self.epoch = epoch
+        super().__init__('hands-coding-worker', {'epoch': epoch, 'messages': messages, 'tools': tools,
+                                               'limits': asdict(limits), 'options': options})
 
     def poll(self):
         if self.closed:
@@ -183,21 +218,10 @@ class CodingWorker:
                     type(event.get('epoch')) is not int or event['epoch'] != self.epoch):
                 raise ValueError('invalid worker event')
             return event
+        except EOFError:
+            return {'epoch': self.epoch, 'kind': 'failed', 'error': 'worker_exited'}
         except (ValueError, OSError):
             return {'epoch': self.epoch, 'kind': 'failed', 'error': 'invalid_worker_event'}
 
     def reply(self, sequence, result=None, error=None):
-        if self.closed or self.output:
-            raise ValueError('worker reply unavailable')
-        self.output = self.packet({'epoch': self.epoch, 'sequence': sequence,
-                                   'ok': error is None, 'result': result})
-        self.send_pending()
-
-    def close(self):
-        if self.closed:
-            return
-        self.closed = True
-        self.connection.close()
-        if self.process.poll() is None:
-            self.process.kill()
-        self.process.wait()
+        self.send({'epoch': self.epoch, 'sequence': sequence, 'ok': error is None, 'result': result})

@@ -4,6 +4,7 @@ mod stream;
 #[cfg(test)]
 mod tests;
 mod trace;
+pub(super) use trace::trace_worker;
 
 use crate::token_meter::{self, KeyName, Meter, Stats, credential};
 use reverie_host::embeddings::model_api::{Client, Failure, Route};
