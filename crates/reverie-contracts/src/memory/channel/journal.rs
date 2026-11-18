@@ -20,7 +20,7 @@ mod write;
 pub use capsule::{JOURNAL_CAPSULE_BYTES, journal_capsule_context};
 pub use command::JournalCommand;
 pub use read::{JournalEntry, canonical_journal_output};
-pub use snapshot::JournalSnapshot;
+pub use snapshot::{JournalSnapshot, append_exact_source};
 pub use write::{JournalCommit, SourceCheck};
 
 const EXCERPT_BYTES: usize = 1024;
@@ -75,6 +75,10 @@ impl SourceRevision {
         })
     }
 
+    fn matches(&self, other: &Self) -> bool {
+        self.id == other.id && self.at.compare(&other.at).is_eq() && self.sha256 == other.sha256
+    }
+
     pub fn id(&self) -> &ChatMessageId {
         &self.id
     }
@@ -123,9 +127,7 @@ impl JournalMessage {
     }
 
     pub fn matches(&self, saved: &SourceRevision) -> bool {
-        self.revision.id == saved.id
-            && self.revision.at.compare(&saved.at).is_eq()
-            && self.revision.sha256 == saved.sha256
+        self.revision.matches(saved)
     }
 
     pub fn excerpt(&self, end: &SourceRevision) -> Option<JournalExcerpt<'_>> {

@@ -5,6 +5,7 @@ mod configuration;
 mod database;
 mod journal;
 mod office;
+mod read_turn;
 mod recall;
 mod save;
 mod turn_capture;
@@ -132,6 +133,11 @@ fn journal_context_worker(expected_parent: i32) -> io::Result<()> {
     write_reply(&turn_context::execute(&request)?, AUTOMATIC_BOUND)
 }
 
+fn journal_read_worker(expected_parent: i32) -> io::Result<()> {
+    let request = worker_input(expected_parent, RESPONSE_BOUND)?;
+    write_reply(&read_turn::execute(&request)?, RESPONSE_BOUND)
+}
+
 fn journal_save_worker(expected_parent: i32) -> io::Result<()> {
     let arguments = worker_input(expected_parent, AUTOMATIC_BOUND)?;
     write_reply(&save::execute(&arguments)?, AUTOMATIC_BOUND)
@@ -157,6 +163,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--automatic-worker" => automatic_worker,
         "--journal-command-worker" => journal_command_worker,
         "--journal-save-worker" => journal_save_worker,
+        "--journal-read-worker" => journal_read_worker,
         "--journal-capture-worker" => journal_capture_worker,
         "--journal-context-worker" => journal_context_worker,
         _ => return None,

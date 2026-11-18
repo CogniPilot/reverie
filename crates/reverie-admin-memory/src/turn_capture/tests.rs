@@ -19,7 +19,7 @@ fn source_snapshots_match_the_legacy_revisions_and_tie_order() {
         });
         let result = execute(input.to_string().as_bytes());
         if let Some(expected) = case.get("snapshot") {
-            let result = result.expect(case["name"].as_str().unwrap());
+            let result = result.unwrap_or_else(|error| panic!("{}: {error}", case["name"]));
             let snapshot: Value = serde_json::from_str(result.captured.get()).unwrap();
             assert_eq!(&snapshot, expected, "{}", case["name"]);
         } else {

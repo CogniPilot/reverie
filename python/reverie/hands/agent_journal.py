@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import json
-import math
 import os
-import re
 import subprocess
 import time
 
@@ -17,12 +15,12 @@ def uuid(value):
 
 
 MEMORY_WORKER_BYTES = 50000
+READ_WORKER_BYTES = 128 * 1024
 TURN_CAPTURE_BYTES = 32 * 1024 * 1024
 TEXT_BYTES = 1024
 RESULT_CHARS = 2400
 CONTEXT_CHARS = 4800
 MAX_CALLS = 3
-MAX_EXPANDED_SOURCES = 2
 CAPSULE_BYTES = 1536
 RESERVE = CONTEXT_CHARS + MAX_CALLS * (RESULT_CHARS + 1500) + 2400
 KINDS = ['decision', 'promise', 'correction', 'preference', 'identity',
@@ -102,21 +100,6 @@ def help_text(topic, read_only):
         return 'save is unavailable this turn: this is a read-only request.'
     return HELP[topic].format(save_note=' (unavailable this turn: read-only request)' if read_only else '',
                               max_calls=MAX_CALLS, kinds=', '.join(KINDS), topics=', '.join(TOPICS))
-
-
-ID_HINTS = {'source': "a full message ID from a recalled entry's source_ids",
-            'receipt': 'the full turn_id from the save result (the message that asked for it)'}
-
-
-def id_refusal(value, command):
-    """A named refusal for an ID that is not a message UUID, so an entry number is not retried as one."""
-    try:
-        uuid(value)
-        return None
-    except ValueError:
-        pass
-    seen = f'{value} looks like an entry_id. ' if isinstance(value, str) and re.fullmatch('[0-9]{1,9}', value) else ''
-    return {'status': 'refused', 'reason': f'{command}_needs_message_id; {seen}Use {ID_HINTS[command]}'}
 
 
 def journal_tool(read_only, needs_reason=False):
@@ -315,76 +298,33 @@ class Turn:
             fn = call['function']
             if fn['name'] == 'journal_commit':
                 return self.save(fn.get('arguments'))
-            raw = fn.get('arguments')
-            if not isinstance(raw, str) or len(raw.encode()) > 8192:
-                raise ValueError('bounded JSON arguments required')
-            args = json.loads(raw)
-            if fn['name'] == 'journal_map':
-                if (not isinstance(args, dict) or set(args) != {'query'} or
-                        not isinstance(args['query'], str) or len(args['query']) > 300):
-                    raise ValueError('bounded map query required')
-                view = self.operation('journal_view', query=args['query'])
-                if not view:return self.unavailable()
-                if view.get('status') != 'available':return self.unavailable(reason=view.get('reason', 'view_unavailable'))
-                selected = sorted(view['tags'],key=lambda item:(-item['count'],item['label']))[:8]
-                labels = {item['label'] for item in selected}
-                result = {'status':'available','scope':self.captured['room'],
-                    'entries':[{key:e[key] for key in ('id','currentness','importance','related')} |
-                               {'provenance':e['provenance']} for e in view['entries']],
-                    'tags':selected,'edges':[e for e in view['edges'] if e['a'] in labels and e['b'] in labels][:6],
-                    'coverage':view['coverage'], 'map_bounded':len(view['tags'])>8 or len(view['edges'])>6,
-                    'meaning':'Topic co-occurrence, self-assessed importance and stated provenance; not causation, truth or authority'}
-                if len(encoded(result)) > RESULT_CHARS:return {'status':'unavailable','reason':'map_result_budget; narrow query'}
-                return result
-            if fn['name'] == 'journal_receipt':
-                if not isinstance(args, dict) or set(args) != {'turn_id'}:
-                    raise ValueError('turn_id field required')
-                if isinstance(args['turn_id'], str) and re.fullmatch('[1-9][0-9]{0,8}', args['turn_id']):
-                    entry_id = int(args['turn_id'])
-                    result = self.operation('journal_receipt', turn_id=entry_id)
-                    if isinstance(result, dict) and result.get('status') == 'committed':
-                        uuid(result.get('turn_id'))
-                        if result.get('entry_id') != entry_id:
-                            raise ValueError('receipt is for another entry')
-                    return result or self.unavailable()
-                refusal = id_refusal(args['turn_id'], 'receipt')
-                if refusal:
-                    return refusal
-                return self.operation('journal_receipt', turn_id=uuid(args['turn_id'])) or self.unavailable()
-            if fn['name'] == 'journal_source':
-                if not isinstance(args, dict) or set(args) != {'message_id'}:
-                    raise ValueError('message_id field required')
-                refusal = id_refusal(args['message_id'], 'source')
-                if refusal:
-                    return refusal
-                source_id = uuid(args['message_id'])
-                if source_id not in self.expanded_sources and len(self.expanded_sources) >= MAX_EXPANDED_SOURCES:
-                    return {'status': 'refused', 'reason': 'source_budget'}
-                result = self.operation('journal_source', message_id=source_id,
-                                        captured_end=dict(self.captured['end']))
-                if not result or result.get('status') != 'available':
-                    return self.unavailable(reason='source_unavailable')
-                event, text = result['revision'], result['text']
-                if (set(event) != {'id', 'at', 'sha256'} or event['id'] != source_id or
-                        type(event['at']) not in (int, float) or not math.isfinite(event['at']) or
-                        not 0 <= event['at'] <= self.captured['end']['at'] or
-                        not isinstance(event['sha256'], str) or not re.fullmatch('[0-9a-f]{64}', event['sha256']) or
-                        not isinstance(text, str) or len(text.encode()) > TEXT_BYTES or
-                        len(encoded(result)) > RESULT_CHARS):
-                    raise ValueError('bounded exact source result required')
-                existing = next((e for e in self.captured['events'] if e['id'] == source_id), None)
-                if existing is not None and existing != event:
-                    raise ValueError('visible source changed')
-                if existing is None:
-                    self.captured['events'].append(dict(event))
-                    self.captured['coverage'] = 'bounded-visible-and-exact-sources; gaps are not claimed covered'
-                self.expanded_sources.add(source_id)
-                return result
-            if not isinstance(args, dict) or set(args) != {'query'}:
-                raise ValueError('query field required')
-            return self.operation('journal_recall', query=args['query']) or self.unavailable()
+            return self.read(fn['name'], fn.get('arguments'))
         except (ValueError, TypeError, KeyError):
             return {'status': 'refused', 'reason': 'invalid_arguments_or_source; compress text and use exact source IDs/quotes'}
+
+    def read(self, tool, arguments):
+        request = native_memory_json('journal-read-worker', {
+            'phase': 'plan', 'tool': tool, 'captured_end': self.captured['end'],
+            'expanded_sources': sorted(self.expanded_sources),
+            'arguments': arguments if isinstance(arguments, str) and len(arguments) <= MEMORY_WORKER_BYTES else None,
+        }, READ_WORKER_BYTES)
+        if not request:
+            return self.unavailable(reason='journal_read_worker_unavailable')
+        if 'reply' in request:
+            return request['reply']
+        operation = dict(request['request'])
+        result = self.operation(operation.pop('op'), **operation)
+        recent = self.failures[self.failure_mark:]
+        settled = native_memory_json('journal-read-worker', {
+            'phase': 'settle', 'request': request['request'], 'captured': self.captured,
+            'result': result, 'failure': recent[-1] if recent else None,
+        }, READ_WORKER_BYTES)
+        if not settled:
+            return self.unavailable(reason='journal_read_worker_unavailable')
+        if 'captured' in settled:
+            self.captured = settled['captured']
+            self.expanded_sources.add(settled['expanded_id'])
+        return settled['reply']
 
     def save(self, raw):
         plan = journal_save_request('prepare', room=self.captured['room'], captured=self.captured,

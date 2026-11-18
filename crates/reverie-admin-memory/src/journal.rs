@@ -5,7 +5,7 @@ use reverie_core::{
     operations::JournalDigest,
 };
 use reverie_store::memory::{JournalEntryId, JournalKey, JournalReceipt, NativeMemoryRead};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{
     Value, json,
     value::{self, RawValue},
@@ -52,7 +52,7 @@ fn message(
         .transpose()
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(untagged)]
 pub(crate) enum Reference {
     Entry(i64),

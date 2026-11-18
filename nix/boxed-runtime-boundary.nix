@@ -28,7 +28,6 @@ let
     "nix/local-model.nix"
     "nix/ops-core.nix"
     "nix/owner-terminal-packages.nix"
-    "python/reverie/ops_installer.py"
   ];
   groups = [ "packages" "apps" "nixosModules" "lib" ];
   sorted = values: builtins.sort builtins.lessThan values;

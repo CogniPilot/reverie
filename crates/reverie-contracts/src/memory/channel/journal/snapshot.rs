@@ -1,7 +1,8 @@
 //! Bounded turn evidence captured from messages already visible to Hands.
 
 use super::{
-    JournalMessage, Timestamp, WireRevision, canonical_json, field, scalar, write::Coverage,
+    EXCERPT_BYTES, JournalMessage, SourceRevision, Timestamp, WireRevision, canonical_json, field,
+    scalar, write::Coverage,
 };
 use crate::legacy_json::{decode_memory_str, ordered::OrderedValue};
 use crate::memory::{object, string};
@@ -134,4 +135,30 @@ fn visible_rows<'a>(
             JournalMessage::observed(&value, room, &id)
         })
         .collect()
+}
+
+/// Admit one live exact-source reply to the already captured turn, retaining
+/// the original revision of any evidence that was visible earlier.
+pub fn append_exact_source(
+    captured: &mut serde_json::Value,
+    expected: &str,
+    reply: &serde_json::Value,
+) -> Option<()> {
+    let observed = reply.get("revision")?;
+    let source = SourceRevision::decode(observed.to_string().as_bytes())?;
+    let end = SourceRevision::decode(captured.get("end")?.to_string().as_bytes())?;
+    if source.id().as_str() != expected
+        || source.at.compare(&end.at).is_gt()
+        || reply.get("text")?.as_str()?.len() > EXCERPT_BYTES
+    {
+        return None;
+    }
+    let events = captured.get_mut("events")?.as_array_mut()?;
+    if let Some(previous) = events.iter().find(|event| event["id"] == expected) {
+        let previous = SourceRevision::decode(previous.to_string().as_bytes())?;
+        return source.matches(&previous).then_some(());
+    }
+    events.push(observed.clone());
+    captured["coverage"] = serde_json::json!(Coverage::Expanded.as_str());
+    Some(())
 }
