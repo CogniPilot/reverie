@@ -1,21 +1,11 @@
 /** Real accepted SQLite ledger through owned local child; no auth/model/host adapter. */
 import { mkdtemp, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { resolve, join } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { it, expect } from 'vitest';
 import { RecoveryLedgerClient } from '../src/recovery-ledger-client.js';
 import { RecoveryTransaction, RecoveryEffectLocks } from '../src/recovery-transaction.js';
-const python = execFileSync('python3', ['-I', '-B', '-c', 'import sys; print(sys.executable)'], {
-  encoding: 'utf8',
-  timeout: 2000,
-  maxBuffer: 4096,
-}).trim();
-const repositoryWorker = resolve(import.meta.dirname, '../../../python/reverie/resume_ledger_rpc.py');
-const worker = existsSync(repositoryWorker)
-  ? repositoryWorker
-  : resolve(import.meta.dirname, 'fixtures/recovery-ledger/reverie/resume_ledger_rpc.py');
+import { recoveryLedgerBinary } from './helpers/recovery-ledger.js';
 const binding = {
   employeeId: 'employee',
   goalId: 'goal',
@@ -27,7 +17,7 @@ const binding = {
 async function fixture() {
   const dir = await mkdtemp(join(tmpdir(), 'recovery-rpc-'));
   await chmod(dir, 0o700);
-  const ledger = new RecoveryLedgerClient('owner', python, worker, join(dir, 'ledger.sqlite'));
+  const ledger = new RecoveryLedgerClient('owner', recoveryLedgerBinary(), join(dir, 'ledger.sqlite'));
   let now = 1000,
     sent = 0;
   const authority = {
@@ -58,7 +48,7 @@ async function fixture() {
     close: () => rm(dir, { recursive: true, force: true }),
   };
 }
-it('uses the unchanged real ledger for durable 3/30 rather than a second budget store', async () => {
+it('executes the durable three-attempt rolling budget through the native ledger', async () => {
   const f = await fixture();
   try {
     expect((await f.service.initialize()).code).toBe('READY');
@@ -100,11 +90,6 @@ it('real restart reconciliation fences a possibly sent QUEUED reservation withou
   }
 });
 it('fails closed on missing worker/custody and does not echo its paths', async () => {
-  const ledger = new RecoveryLedgerClient(
-    'owner',
-    '/bin/python3',
-    '/nonexistent/source-worker',
-    '/unavailable/private-ledger'
-  );
+  const ledger = new RecoveryLedgerClient('owner', '/nonexistent/source-worker', '/unavailable/private-ledger');
   await expect(ledger.reconcileRestart(1000)).rejects.toThrow('LEDGER_UNAVAILABLE');
 });

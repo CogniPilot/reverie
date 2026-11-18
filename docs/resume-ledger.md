@@ -1,11 +1,11 @@
 # Fixed resume attempt ledger
 
-This internal source component implements the durable attempt/budget part of the
-efficiency contract. It is not imported by a CLI, route, broker, worker, service,
-or scheduler. It has no send, wake, process, terminal, network, or model adapter.
-Every receipt says automaticAction NONE. It cannot authorize a resume.
+The Rust ledger in `reverie-store` owns the durable attempt and budget record.
+The Console integration tests use the bounded `reverie-recovery-ledger` stdio
+adapter. Every receipt carries `automaticAction: NONE`. A resume still requires
+the separate canonical authority and conditional provider operation.
 
-ResumeLedger requires an explicit private SQLite file in an existing trusted
+`Ledger` requires an explicit private SQLite file in an existing trusted
 service directory. Directory mode must be 0700, database mode 0600, with current
 UID ownership, no symlink path and one database hard link. The directory's
 ancestors and absence of untrusted writers remain operator custody requirements.
@@ -77,6 +77,14 @@ immediately before submission, preserve uncertain-send reconciliation, and pass
 independent source/security/privacy and the existing report-only/dry/canary
 stages. No current source/test receipt proves this integration or deployment.
 
-Run the owned synthetic controls with:
+The Rust tests replay historical version-one rows from the previous implementation
+and exercise the same byte encoding and event fingerprints for new writes.
 
-    PYTHONPATH=python python3 -B -m unittest tests.test_resume_ledger -v
+```bash
+nix develop --command cargo test -p reverie-store recovery_ledger
+nix build .#recoveryLedger
+```
+
+For the Console child-process tests, first build with
+`cargo build -p reverie-store --bin reverie-recovery-ledger` in the development
+shell using the same scratch `CARGO_TARGET_DIR` as the test runner.

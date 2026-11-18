@@ -10,6 +10,7 @@ pub mod memory;
 pub mod operations;
 mod private_fs;
 pub mod profiles;
+pub mod recovery_ledger;
 pub mod storage_identity;
 mod transaction;
 pub mod worker_storage;

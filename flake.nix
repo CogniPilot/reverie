@@ -51,6 +51,7 @@
             name = "reverie-boxed-recovery-helper";
           };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
+          recoveryLedger = import ./nix/recovery-ledger.nix { inherit pkgs; src = source; };
           imageCheck = import ./nix/image-check.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };

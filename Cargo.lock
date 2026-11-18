@@ -1751,7 +1751,9 @@ dependencies = [
  "reverie-contracts",
  "reverie-core",
  "rusqlite",
+ "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

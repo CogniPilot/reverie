@@ -11,6 +11,7 @@ let
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   rustFront = import ./rust-front.nix { inherit pkgs src; };
+  recoveryLedger = import ./recovery-ledger.nix { inherit pkgs src; };
   dockerViewerExecutables = pkgs.writeText "docker-viewer-executables.json"
     (builtins.toJSON (import ./docker-viewer-executables.nix { inherit pkgs; }));
   console = pkgs.buildNpmPackage {
@@ -29,10 +30,6 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
-      mkdir -p test/fixtures/recovery-ledger/reverie
-      cp ${consoleFixture "python/reverie/__init__.py"} test/fixtures/recovery-ledger/reverie/__init__.py
-      cp ${consoleFixture "python/reverie/resume_ledger.py"} test/fixtures/recovery-ledger/reverie/resume_ledger.py
-      cp ${consoleFixture "python/reverie/resume_ledger_rpc.py"} test/fixtures/recovery-ledger/reverie/resume_ledger_rpc.py
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
       mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
@@ -82,6 +79,7 @@ let
     nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
+      export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
       # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).

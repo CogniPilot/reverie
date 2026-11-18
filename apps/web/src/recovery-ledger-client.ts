@@ -17,14 +17,13 @@ function binding(value: FixedResumeBinding) {
 export class RecoveryLedgerClient implements RecoveryLedger {
   constructor(
     readonly ownerId: string,
-    private readonly python: string,
     private readonly worker: string,
     private readonly file: string
   ) {
     if (typeof ownerId !== 'string' || !/^[A-Za-z0-9_.:-]{1,100}$/.test(ownerId) || /[\r\n]/.test(ownerId))
       throw new Error('LEDGER_UNAVAILABLE');
     if (
-      ![python, worker, file].every(
+      ![worker, file].every(
         (path) => typeof path === 'string' && isAbsolute(path) && path.length <= 4096 && !/[\0\r\n]/.test(path)
       )
     )
@@ -35,10 +34,10 @@ export class RecoveryLedgerClient implements RecoveryLedger {
     if (Buffer.byteLength(input) > 8192) throw new Error('LEDGER_UNAVAILABLE');
     return new Promise((resolve, reject) => {
       const child = execFile(
-        this.python,
-        ['-I', '-B', this.worker, this.file],
+        this.worker,
+        [this.file],
         {
-          env: { LANG: 'C.UTF-8', PYTHONDONTWRITEBYTECODE: '1' },
+          env: { LANG: 'C.UTF-8' },
           timeout: 4000,
           killSignal: 'SIGKILL',
           maxBuffer: 262144,

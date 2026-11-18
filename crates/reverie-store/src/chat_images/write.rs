@@ -31,7 +31,7 @@ impl ImageCache {
             format.extension()
         ))
         .expect("closed random UUID and raster suffix");
-        let mut file = self.custody.cache().create_image_file(name.as_str())?;
+        let mut file = self.custody.cache().create_exclusive(name.as_str())?;
         let mut adopted = false;
         let result = (|| {
             let stamp = Stamp::from_metadata(&file.metadata().map_err(crate::StoreError::io)?);
