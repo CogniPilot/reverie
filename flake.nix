@@ -371,16 +371,18 @@
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
           '';
-          pillowSmoke = pkgs.runCommand "reverie-pillow-smoke" { } ''
-            ${packages.memory}/bin/python3 -I - <<'PYTHON'
-            from PIL import Image, ImageDraw
-            im = Image.new("RGBA", (64, 64))
-            ImageDraw.Draw(im).ellipse((8, 8, 56, 56), fill=(90, 60, 30, 255))
-            for extension in ("png", "webp"):
-                name = "smoke." + extension
-                im.save(name)
-                assert Image.open(name).size == (64, 64)
-            PYTHON
+          pillowSmoke = let
+            serviceClosure = pkgs.closureInfo { rootPaths = [ packages.memory ]; };
+          in pkgs.runCommand "reverie-python-environment-boundary" { } ''
+            for package in ${pkgs.python3Packages.pillow} ${pkgs.python3Packages.pytest}; do
+              if grep -Fx "$package" "${serviceClosure}/store-paths"; then
+                echo "Laptop development package in the service Python closure" >&2
+                exit 1
+              fi
+            done
+            test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
+            ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
+              -t "${source}" -s "${source}/tests" -p test_image_requirements.py
             touch "$out"
           '';
         });
@@ -397,7 +399,7 @@
           default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
             "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
             pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.

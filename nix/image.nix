@@ -149,10 +149,18 @@ pkgs.dockerTools.buildLayeredImage rec {
       mkdir opt/reverie/worker-child
       cp ${childManifest} opt/reverie/worker-child/program.json
       chmod 444 opt/reverie/worker-child/program.json
-      # Keep the interactive aliases and pytest on the laptop-only interpreter.
-      for command in python python3 ${pkgs.python3.executable} pytest py.test; do
+      # Replace the shared interpreter aliases with the laptop interpreter.
+      for command in python python3 ${pkgs.python3.executable}; do
         test -L "bin/$command"
         unlink "bin/$command"
+        ln -s ${imagePython}/bin/"$command" "bin/$command"
+      done
+      # The test runner now comes from the laptop environment. An older
+      # runtime source may already supply these links.
+      for command in pytest py.test; do
+        if [ -L "bin/$command" ]; then unlink "bin/$command"; fi
+        test ! -e "bin/$command"
+        test -x ${imagePython}/bin/"$command"
         ln -s ${imagePython}/bin/"$command" "bin/$command"
       done
       mkdir -p opt/reverie/human/bin

@@ -1,5 +1,4 @@
-# Keep this compatibility interpreter private to the laptop image. The site,
-# broker, store interpreter and external Python installations are untouched.
+# The laptop interpreter provides the agent's Python project tools.
 { pkgs, memory }:
 let
   python = pkgs.python3;
@@ -27,8 +26,9 @@ let
 in
 assert pkgs.stdenv.hostPlatform.isLinux;
 assert memory.python.outPath == python.outPath;
-memory.override {
+memory.override ({ extraLibs, ... }: {
   python = wheelPython;
+  extraLibs = extraLibs ++ [ python.pkgs.pillow python.pkgs.pytest ];
   postBuild = ''
     # The pytest entry points otherwise keep their original store shebang.
     # Route both aliases through this environment's compatibility interpreter.
@@ -40,4 +40,4 @@ memory.override {
       fi
     done
   '';
-}
+})

@@ -609,7 +609,7 @@ let
   interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
   # Explicit noncircular ABI fixture: PATH may select the bare interpreter in
   # buildPythonPackage checks even while this environment runs the suite.
-  pythonCheckEnvironment = pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ]);
+  pythonCheckEnvironment = pkgs.python3.withPackages (ps: [ ps.aiohttp ]);
   memoryPackage = pkgs.python3Packages.buildPythonPackage {
     NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
     NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER = "${pythonCheckEnvironment}/bin/python3";
@@ -620,7 +620,7 @@ let
     makeWrapperArgs = [ "--prefix" "PATH" ":" "${adminMemory}/bin" ];
     postUnpack = ''sourceRoot="$sourceRoot/python"'';
     build-system = [ pkgs.python3Packages.setuptools ];
-    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp adminMemory ];
+    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.aiohttp adminMemory ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       # The modules discovery would load (test*.py in tests/ and its packages), in chunks of 12, two unittest processes
@@ -638,7 +638,7 @@ let
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
-  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ps.pytest ]);
+  memory = pkgs.python3.withPackages (_: [ memoryPackage ]);
   kokoro = import ./kokoro.nix { inherit pkgs src; };
   hands = pkgs.writeShellApplication {
     name = "reverie-hands";

@@ -1,6 +1,6 @@
 # Laptop toolchains
 
-The laptop image includes Rust and Cargo, GCC, pytest, GitHub CLI, jq,
+The laptop image includes Rust and Cargo, GCC, Pillow, pytest, GitHub CLI, jq,
 diffutils and fd. Project-specific dependencies still belong in the project's
 development environment.
 
@@ -21,10 +21,9 @@ Packages may require additional native libraries beyond GCC and zlib. Those
 dependencies still need a suitable project environment; this does not make
 every binary wheel self-contained.
 
-The website and broker interpreters are unchanged. This image change does not
-modify an existing laptop or virtual environment. Updating deployed laptops
-requires the normal reviewed image rollout; recreate a virtual environment
-when it still points to the previous interpreter.
+The website's Python services use a smaller environment that omits Pillow and
+pytest. Updating deployed laptops requires the normal reviewed image rollout.
+Recreate a virtual environment when it still points to the previous interpreter.
 
 The `workerPythonRuntime` flake check loads an extension with C++ and zlib
 dependencies through Python, a new venv and both pytest commands, without
