@@ -26,7 +26,7 @@ class ReliabilityTests(unittest.TestCase):
         self.dir = Path(temp.name)
         for name, body in WORKERS.items():
             (self.dir / f'{name}.py').write_text(body)
-        self.cfg = dict(loop.DEFAULTS, memory_instance=str(self.dir / 'instance.json'), self_session_id='s', cli=None,
+        self.cfg = dict(loop.default_config(), memory_instance=str(self.dir / 'instance.json'), self_session_id='s', cli=None,
                         journal_enabled=True)
 
     def run_op(self, worker, op, **cfg):

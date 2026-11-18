@@ -4,6 +4,7 @@ mod admission;
 mod channel;
 mod diagnostics;
 mod session;
+mod settings;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -14,6 +15,7 @@ use channel::Channel;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use session::Session;
+pub(super) use settings::{admin_task, check_coding, tool_export};
 use std::{io, num::NonZeroU64, time::Duration};
 use wire::{Limits, ToolReply};
 

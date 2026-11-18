@@ -155,7 +155,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_actual_answer_recovers_then_reads_receipt_and_recall(self):
         import agent_loop as loop
-        cfg=dict(loop.DEFAULTS,**self.cfg,self_name='Fixture',timezone='UTC')
+        cfg=dict(loop.default_config(),**self.cfg,self_name='Fixture',timezone='UTC')
         calls=[]
         def operation(cfg,room,op,**p):
             result=self.perform(op,**p)

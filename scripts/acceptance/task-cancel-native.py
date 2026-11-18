@@ -244,7 +244,7 @@ def main():
         coding={'root':str(root/'tasks'),'runner_argv':[pins['tools']['python'],'-I','-B',str(HERE/'task-cancel-program.py')],
                 'tool_schema_file':str(schema),'profiles':{'drill':{'seconds':45,'operation_seconds':30}},
                 'tasks':{TASK:{'rooms':[room],'delegate_sessions':[]}}}
-        cfg=dict(loop.DEFAULTS,rooms=[room],dm_rooms=[],self_session_id=binding['sessionId'],self_name='Cancellation fixture',
+        cfg=dict(loop.default_config(),rooms=[room],dm_rooms=[],self_session_id=binding['sessionId'],self_name='Cancellation fixture',
                  state_file=str(root/'state.json'),api_base='http://127.0.0.1:'+str(provider.server_port)+'/v1',model='fixture-only',
                  prompt_cap_chars=120000,model_timeout_s=5,coding=coding,cli=['unused-fixed-bridge'],memory_instance=None,phone_wake=True)
         configpath=root/'settings.json';exclusive(configpath,{'coding':coding});cfg['_config_path']=str(configpath)

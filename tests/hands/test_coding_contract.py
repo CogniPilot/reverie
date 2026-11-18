@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 
 from coding_chat import read_tool_specs
-from coding_chat import TOOL_NAMES
 
 
 class ToolExportTests(unittest.TestCase):
@@ -22,7 +21,8 @@ class ToolExportTests(unittest.TestCase):
     def test_sealed_dispatcher_envelope_returns_only_the_model_array(self):
         tools = self.load(self.export)
         self.assertEqual(tools, self.export['tools'])
-        self.assertEqual({schema['function']['name'] for schema in tools}, TOOL_NAMES)
+        self.assertEqual({schema['function']['name'] for schema in tools}, {
+            'read_file', 'list_files', 'search_files', 'edit_file', 'write_file', 'run_command', 'run_tests'})
         self.assertIsInstance(tools, list)
 
     def test_changed_version_caps_and_extra_metadata_refuse(self):

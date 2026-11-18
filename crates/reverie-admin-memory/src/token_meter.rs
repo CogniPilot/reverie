@@ -8,7 +8,7 @@ pub(super) use budget::Stats;
 use reverie_host::embeddings::model_api::{Client, Failure, Route};
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use std::{env, io, time::Duration};
+use std::{env, time::Duration};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -85,6 +85,12 @@ impl Settings {
     }
 }
 
+pub(super) fn validate_value(setting: Value) -> bool {
+    serde_json::from_value::<Settings>(setting)
+        .ok()
+        .is_some_and(|settings| settings.configure().is_ok())
+}
+
 pub(super) struct Meter {
     client: Client,
     budget: Budget,
@@ -134,28 +140,4 @@ struct Template {
 #[derive(Deserialize)]
 struct Tokens {
     tokens: Vec<serde_json::Number>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum Action {
-    Validate,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Request {
-    #[serde(rename = "action")]
-    _action: Action,
-    settings: Settings,
-}
-
-pub(super) fn run(expected_parent: i32) -> io::Result<()> {
-    crate::bind_worker(expected_parent)?;
-    let input = io::BufReader::new(io::stdin().lock());
-    let result = serde_json::from_reader::<_, Request>(input)
-        .map_err(|_| Failure::Invalid)
-        .and_then(|request| request.settings.configure());
-    let status = if result.is_ok() { "ok" } else { "invalid" };
-    crate::write_reply(&json!({"status": status}), crate::REQUEST_BOUND)
 }

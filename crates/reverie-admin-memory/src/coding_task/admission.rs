@@ -1,4 +1,5 @@
 //! Decisions over the controller's current message, grants, and journal.
+use super::settings::task_name;
 use reverie_core::python_trim_text;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -77,19 +78,10 @@ fn control(text: &str, agent: bool) -> Option<Control<'_>> {
         None => ("start", text.strip_prefix("/code ")?),
     };
     let boundary = rest
-        .find(|character: char| {
-            !(character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || matches!(character, '_' | '-'))
-        })
+        .find(|character: char| python_trim_text(character.encode_utf8(&mut [0; 4])).is_empty())
         .unwrap_or(rest.len());
     let (task_id, suffix) = rest.split_at(boundary);
-    if task_id.is_empty() || task_id.len() > 64 || task_id.starts_with(['_', '-']) {
-        return None;
-    }
-    if let Some(first) = suffix.chars().next()
-        && !python_trim_text(&suffix[..first.len_utf8()]).is_empty()
-    {
+    if !task_name(task_id) {
         return None;
     }
     let brief = python_trim_text(suffix);

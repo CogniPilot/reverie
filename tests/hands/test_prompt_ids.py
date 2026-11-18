@@ -16,7 +16,7 @@ LINE = re.compile(rf'^\[[^\]\n]*\] \[msg ({UUID})\] ', re.M)
 
 class PromptIdTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = dict(loop.DEFAULTS, self_session_id='s', self_name='Iris', timezone='America/Indianapolis',
+        self.cfg = dict(loop.default_config(), self_session_id='s', self_name='Iris', timezone='America/Indianapolis',
                         message_cap_chars=4000, prompt_cap_chars=60000, cli=None)
 
     def msg(self, n, text='hello', at=None, mid=...):

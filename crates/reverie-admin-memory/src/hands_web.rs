@@ -6,7 +6,6 @@ mod search;
 mod transport;
 
 use destination::Target;
-use reverie_contracts::hands_web::validate_settings;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::{future::Future, io, path::PathBuf, time::Duration};
@@ -18,9 +17,6 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 enum Request {
     ValidateTarget {
         url: String,
-    },
-    ValidateSettings {
-        settings: Map<String, Value>,
     },
     Fetch {
         url: String,
@@ -39,9 +35,6 @@ pub(crate) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
     let result = match serde_json::from_slice(&input)? {
         Request::ValidateTarget { url } => json!({"valid": Target::parse(&url).is_some()}),
-        Request::ValidateSettings { settings } => {
-            json!({"error": validate_settings(&settings).err()})
-        }
         Request::Fetch { url } => {
             let text = fetch(&url)?.ok_or_else(crate::refused)?;
             json!({"text": text})

@@ -16,7 +16,7 @@ ROW = re.compile(rf'^\[[^\]\n]*\] \[msg ({UUID})\] ', re.M)
 
 class NewerIntakeTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = dict(loop.DEFAULTS, self_session_id=ME, self_name='Iris', timezone='America/Indianapolis',
+        self.cfg = dict(loop.default_config(), self_session_id=ME, self_name='Iris', timezone='America/Indianapolis',
                         message_cap_chars=4000, prompt_cap_chars=60000, cli=None)
 
     def msg(self, n, text='hello', who='Rory', kind='agent', session='20000000-0000-4000-8000-000000000002', **extra):

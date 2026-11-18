@@ -136,7 +136,7 @@ class SourceTests(unittest.TestCase):
 
     def test_actual_answer_source_write_recall_within_existing_budget(self):
         import agent_loop as loop
-        cfg = dict(loop.DEFAULTS, **self.cfg, self_name='Fixture', timezone='UTC')
+        cfg = dict(loop.default_config(), **self.cfg, self_name='Fixture', timezone='UTC')
         calls = []
         def model(cfg, messages, tools):
             calls.append(1)

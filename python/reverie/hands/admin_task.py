@@ -29,15 +29,6 @@ def rule(tools):
     """The rule for the tools actually offered: it may name the start tool only when that tool is offered."""
     return RULE if any((tool.get('function') or {}).get('name') == TOOL_NAME for tool in tools) else CANCEL_RULE
 
-def validate(cfg):
-    name = cfg.get('admin_task')
-    if name is None:return
-    if not isinstance(name, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', name):
-        raise ValueError('admin_task must name an explicitly configured coding task')
-    task = (cfg.get('coding') or {}).get('tasks', {}).get(name)
-    if not isinstance(task, dict):
-        raise ValueError('admin_task must exist in the configured coding task map')
-
 def addressed(cfg, room, history, message):
     """Only a message meant for this harness may start work: the authenticated owner's own message, one in a
     direct-message room, one sent to it, a reply to its own message, or an @name mention. For a delegate, a room-wide

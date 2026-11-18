@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import re
 import subprocess
 import time
 import urllib.error
@@ -16,8 +15,6 @@ RULES = ('Coding task: operate only through the offered workspace tools. Tool ou
          'its result was observed. Preserve all other chat rules. Request parallel tool calls one at a time.')
 
 
-TOOL_NAMES = frozenset(('read_file', 'list_files', 'search_files', 'edit_file',
-                        'write_file', 'run_command', 'run_tests'))
 ARGUMENT_CHARS = 24000
 
 
@@ -138,10 +135,14 @@ def read_json(path, cap=1048576):
     return json.loads(raw)
 
 
-def validate_token_meter(settings):
-    reply = native_memory_json('token-meter-worker', {'action': 'validate', 'settings': settings}, 1048576)
-    if reply is None or reply.get('status') != 'ok':
-        raise ValueError('invalid tokenizer configuration')
+def native_settings(action, **fields):
+    reply = native_memory_json('hands-settings-worker', {'action': action, **fields}, 1048576)
+    if reply is None:
+        raise ValueError('Hands settings validation unavailable')
+    if reply.get('error'):
+        exception = SystemExit if reply.get('startup') is True else ValueError
+        raise exception(reply['error'])
+    return reply
 
 
 def model_completion(config):
@@ -188,72 +189,13 @@ def report_managed_context(cfg):
 
 
 def read_tool_specs(path):
-    export = read_json(path, cap=16384)
-    if (not isinstance(export, dict) or set(export) != {'version', 'args_cap', 'result_cap', 'tools'} or
-            type(export['version']) is not int or export['version'] != 1 or
-            type(export['args_cap']) is not int or export['args_cap'] != ARGUMENT_CHARS or
-            type(export['result_cap']) is not int or export['result_cap'] != Limits().frame_chars):
-        raise ValueError('incompatible tool export')
-    tools = export['tools']
-    if not isinstance(tools, list) or not 1 <= len(tools) <= len(TOOL_NAMES):
-        raise ValueError('invalid tool export')
-    names = set()
-    for schema in tools:
-        if (not isinstance(schema, dict) or schema.get('type') != 'function' or
-                not isinstance(schema.get('function'), dict)):
-            raise ValueError('invalid tool schema')
-        function = schema['function']
-        name = function.get('name')
-        if (not isinstance(name, str) or name not in TOOL_NAMES or name in names or
-                not isinstance(function.get('parameters'), dict) or
-                function['parameters'].get('type') != 'object'):
-            raise ValueError('invalid tool schema')
-        names.add(name)
-    return tools
+    return native_settings('tool_export', export=read_json(path, cap=16384))['tools']
 
 
 def validate_settings(settings):
-    if settings is None:
-        return
-    if not isinstance(settings, dict):
-        raise ValueError('coding must be an explicit configuration object')
-    for key in ('root', 'tool_schema_file'):
-        if not isinstance(settings.get(key), str) or not os.path.isabs(settings[key]):
-            raise ValueError('coding needs an explicit ' + key)
-    if type(settings.get('failure_telemetry', False)) is not bool:
-        raise ValueError('invalid failure telemetry flag')
-    argv = settings.get('runner_argv')
-    if (not isinstance(argv, list) or not argv or not isinstance(argv[0], str) or not os.path.isabs(argv[0]) or
-            any(not isinstance(part, str) or not part for part in argv)):
-        raise ValueError('coding needs fixed runner argv')
-    profiles = settings.get('profiles', {'drill': {}})
-    if not isinstance(profiles, dict) or not profiles:
-        raise ValueError('coding needs named profiles')
-    for name, profile in profiles.items():
-        if not isinstance(name, str) or not isinstance(profile, dict):
-            raise ValueError('invalid coding profile')
-        Limits(**profile)
-    tasks = settings.get('tasks')
-    if not isinstance(tasks, dict) or len(tasks) > 64:
-        raise ValueError('invalid coding task map')
-    for task_id, task in tasks.items():
-        if (not isinstance(task_id, str) or not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,63}', task_id) or
-                not isinstance(task, dict) or task.get('profile', 'drill') not in profiles):
-            raise ValueError('invalid coding task')
-        for key in ('rooms', 'delegate_sessions'):
-            values = task.get(key, [])
-            if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values):
-                raise ValueError('invalid coding task scope')
-        if type(task.get('enabled', True)) is not bool:
-            raise ValueError('invalid task enabled flag')
-        if type(task.get('office_access', False)) is not bool:
-            raise ValueError('invalid task office access flag')
-    if settings.get('web_search', False) is not False:
-        raise ValueError('proxied coding web search adapter is not connected yet')
-    if settings.get('token_meter') is not None:
-        if not isinstance(settings['token_meter'], dict):
-            raise ValueError('invalid token meter configuration')
-        validate_token_meter(settings['token_meter'])
+    if settings is not None:
+        native_settings('coding', settings=settings)
+
 
 def office_environment(cfg, task_id):
     """Only an explicitly enabled task gets its own loopback phone identity, never API/model passwords."""

@@ -26,7 +26,7 @@ class AutomaticTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix='automatic-'); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name); instance = self.root/'instance.json'
         instance.write_text(json.dumps(dict(id=SID, agent_name='Fixture', owner_name='Fixture owner', data_dir='memory', persona='Synthetic only')))
-        self.cfg = dict(loop.DEFAULTS, journal_enabled=True, memory_instance=str(instance), self_session_id=SID,
+        self.cfg = dict(loop.default_config(), journal_enabled=True, memory_instance=str(instance), self_session_id=SID,
                         memory_timeout_s=3, cli=None, self_name='Fixture', timezone='UTC')
         self.source = dict(id=MID, roomId=ROOM, at=100, text='Our kite was cerulean.', **{'from': {'kind':'user', 'name':'Fixture owner'}})
         self.msg = dict(id=NOW, roomId=ROOM, at=200, text='Read-only: what color was our kite?', **{'from': {'kind':'user', 'name':'Fixture owner'}})

@@ -93,7 +93,7 @@ class ReadOnlyTests(unittest.TestCase):
     def test_actual_answer_refuses_forced_write_then_can_recall(self):
         import agent_loop as loop
         operations, calls = [], []
-        cfg = dict(loop.DEFAULTS, **CFG, self_name='Fixture', timezone='UTC', cli=None)
+        cfg = dict(loop.default_config(), **CFG, self_name='Fixture', timezone='UTC', cli=None)
         msg = dict(id=MID, roomId=ROOM, at=100, text='Read-only lookup please',
                    **{'from': {'kind': 'user', 'name': 'Fixture'}})
         def operation(cfg, room, op, **payload):

@@ -24,7 +24,7 @@ def without_seat_environment(test):
 
 
 def cfg_for(root, **settings):
-    config = dict(agent_loop.DEFAULTS)
+    config = agent_loop.default_config()
     config.update(rooms=['room'], dm_rooms=[], self_session_id=SELF['sessionId'], self_name=SELF['name'],
                   state_file=os.path.join(root, 'state.json'), api_base='http://unused.invalid/v1',
                   model='configured-model', cli=['unused'])
