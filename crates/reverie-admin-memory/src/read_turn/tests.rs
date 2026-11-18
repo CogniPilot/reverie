@@ -30,6 +30,58 @@ fn result(request: Value, result: Value, captured: Value) -> Value {
 }
 
 #[test]
+fn invalid_source_ids_offer_a_hint_without_requesting_a_read() {
+    let entry = plan_call("journal_source", json!({"message_id": "1"}), json!([]));
+    assert!(entry.get("request").is_none());
+    assert_eq!(entry["reply"]["status"], "refused");
+    let reason = entry["reply"]["reason"].as_str().unwrap();
+    assert!(reason.starts_with("source_needs_message_id; 1 looks like an entry_id."));
+    assert!(reason.contains("source_ids"));
+
+    for id in [
+        "a1b2c3d4",
+        "a1b2c3d4-9444",
+        "<script>",
+        "12345678901234567890",
+        "²",
+    ] {
+        let plan = plan_call("journal_source", json!({"message_id": id}), json!([]));
+        assert!(plan.get("request").is_none());
+        let reason = plan["reply"]["reason"].as_str().unwrap();
+        assert!(reason.starts_with("source_needs_message_id; Use "));
+        assert!(!reason.contains(id));
+    }
+    let number = plan_call("journal_source", json!({"message_id": 7}), json!([]));
+    assert!(number.get("request").is_none());
+    assert_eq!(
+        number["reply"]["reason"],
+        "source_needs_message_id; Use a full message ID from a recalled entry's source_ids"
+    );
+}
+
+#[test]
+fn receipt_uses_a_full_turn_id_or_a_positive_canonical_entry_number() {
+    for (reference, expected) in [("9", json!(9)), (TURN, json!(TURN))] {
+        let plan = plan_call("journal_receipt", json!({"turn_id": reference}), json!([]));
+        assert_eq!(plan["request"]["turn_id"], expected);
+    }
+    for reference in ["0", "007", "a1b2c3d4", "1234567890"] {
+        let plan = plan_call("journal_receipt", json!({"turn_id": reference}), json!([]));
+        assert!(plan.get("request").is_none());
+        let reason = plan["reply"]["reason"].as_str().unwrap();
+        assert!(reason.starts_with("receipt_needs_message_id; "));
+        assert!(reason.contains("turn_id"));
+    }
+    let zero = plan_call("journal_receipt", json!({"turn_id": "0"}), json!([]));
+    assert!(
+        zero["reply"]["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("receipt_needs_message_id; 0 looks like an entry_id.")
+    );
+}
+
+#[test]
 fn allows_two_distinct_source_expansions_and_refuses_override() {
     let expanded = json!([TURN, "30000000-0000-0000-0000-000000000012"]);
     let third = plan_call(

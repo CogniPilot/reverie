@@ -492,6 +492,8 @@ fn native_journal_receipt_checks_stored_digest_and_never_changes_database() {
     assert_eq!(receipt["turn_id"], SOURCE);
     assert_eq!(receipt["committed_ms"], 200.5);
     assert_eq!(receipt["payload_sha256"], RECEIPT_DIGEST);
+    assert!(receipt["evidence"].is_string());
+    assert_eq!(receipt.as_object().unwrap().len(), 6);
     assert!(!String::from_utf8_lossy(&found.stdout).contains("must never expose"));
     assert_eq!(
         accepted(&fixture.automatic(
@@ -511,6 +513,8 @@ fn native_journal_receipt_checks_stored_digest_and_never_changes_database() {
     connection.close().unwrap();
     let corrupt = accepted(&fixture.automatic("journal_receipt", json!({"turn_id": SOURCE})));
     assert_eq!(corrupt, json!({"status": "conflict", "turn_id": SOURCE}));
+    let corrupt = accepted(&fixture.automatic("journal_receipt", json!({"turn_id": 7})));
+    assert_eq!(corrupt, json!({"status": "conflict", "entry_id": 7}));
 }
 
 #[test]
@@ -543,4 +547,14 @@ fn native_journal_receipt_distinguishes_absence_from_corruption_or_lost_access()
     fs::write(fixture.0.join("calls"), "0").unwrap();
     fs::write(fixture.0.join("mode"), "second-membership-revoked").unwrap();
     automatic_refused(&fixture.automatic("journal_receipt", job));
+}
+
+#[test]
+fn native_journal_receipt_reports_an_unknown_numeric_entry_without_proving_absence() {
+    let fixture = Fixture::new();
+    original_receipt(&fixture);
+    let missing = accepted(&fixture.automatic("journal_receipt", json!({"turn_id": 9})));
+    assert_eq!(missing["status"], "not_found");
+    assert_eq!(missing["entry_id"], 9);
+    assert!(missing["evidence"].as_str().unwrap().contains("not proof"));
 }

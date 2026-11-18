@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::memory::channel::journal::canonical_journal_output;
 
 fn invoke_line(line: &str, calls: usize, help_shown: bool) -> Value {
     let request = json!({
@@ -35,6 +36,32 @@ fn read_only_advertisement_keeps_save_recognizable_for_refusal() {
     assert!(advertised.accepted_calls.contains(&"journal_commit"));
     assert_eq!(advertised.call_limit, 3);
     assert!(help::text("SAVE", true).unwrap().contains("read-only"));
+}
+
+#[test]
+fn source_and_receipt_spend_a_call_before_validation() {
+    for (line, name) in [
+        ("source 1", "journal_source"),
+        ("receipt 9", "journal_receipt"),
+    ] {
+        let reply = invoke_line(line, 0, false);
+        assert_eq!(reply["state"]["calls"], 1);
+        assert_eq!(reply["dispatch"]["name"], name);
+    }
+}
+
+#[test]
+fn journal_help_names_the_ids_and_command_the_model_can_use() {
+    for (topic, hint) in [
+        ("source", "An entry_id number is not a message ID"),
+        ("receipt", "The save's entry_id number also works"),
+        ("save", "check_with"),
+    ] {
+        let response = invoke_line(&format!("help {topic}"), 0, false);
+        let reply = &response["reply"];
+        assert!(reply["help"].as_str().unwrap().contains(hint));
+        assert!(canonical_journal_output(reply).unwrap().chars().count() <= RESULT_CHARS);
+    }
 }
 
 #[test]

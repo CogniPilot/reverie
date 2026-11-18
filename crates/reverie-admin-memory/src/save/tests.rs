@@ -1,4 +1,5 @@
 use super::*;
+use reverie_contracts::memory::channel::journal::canonical_journal_output;
 
 fn legacy() -> Value {
     serde_json::from_str(include_str!(
@@ -100,7 +101,32 @@ fn refusal_is_terminal_and_an_ambiguous_reply_only_requests_receipt() {
     }
     let committed = request("classify", json!({"key": key, "result": case["reply"]}));
     assert_eq!(committed["reply"]["turn_id"], key["turn_id"]);
+    assert_eq!(committed["reply"]["entry_id"], case["reply"]["entry_id"]);
     assert_eq!(committed["previous_id"], case["reply"]["entry_id"]);
+}
+
+#[test]
+fn committed_reply_starts_with_a_runnable_receipt_command() {
+    let legacy = legacy();
+    let case = &legacy["cases"][0];
+    let key = key(case);
+    let committed = request("classify", json!({"key": key, "result": case["reply"]}));
+    let reply = &committed["reply"];
+    let shown = canonical_journal_output(reply).unwrap();
+    let command = format!("receipt {}", key["turn_id"].as_str().unwrap());
+    assert!(shown.starts_with(&format!("{{\"check_with\":{command:?},")));
+    assert!(shown.chars().count() <= crate::turn_tool::RESULT_CHARS);
+    let invoke = json!({
+        "phase": "invoke", "name": "journal", "read_only": false,
+        "state": {"calls": 0, "help_shown": false},
+        "arguments": json!({"command": reply["check_with"]}).to_string(),
+    });
+    let dispatch = crate::turn_tool::execute(invoke.to_string().as_bytes()).unwrap();
+    let routed: Value = serde_json::from_str(dispatch.get()).unwrap();
+    assert_eq!(
+        routed["dispatch"],
+        json!({"name": "journal_receipt", "arguments": {"turn_id": key["turn_id"]}}),
+    );
 }
 
 #[test]
