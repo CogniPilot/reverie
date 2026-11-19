@@ -1,4 +1,4 @@
-use crate::{database::Database, journal, office::Office, refused};
+use crate::{AUTOMATIC_BOUND, capture, database::Database, journal, office::Office, refused};
 use reverie_contracts::memory::channel::journal::JournalCommit;
 use reverie_contracts::memory::channel::{ChannelEvidence, ConfirmedExchange, ExchangeClaim};
 use reverie_core::ids::ChatRoomId;
@@ -7,7 +7,12 @@ use serde_json::{
     Value, json,
     value::{self, RawValue},
 };
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::PathBuf,
+    process::Command,
+    time::{Duration, Instant},
+};
 
 #[derive(Deserialize)]
 struct Settings {
@@ -91,6 +96,32 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
         | Operation::JournalRecall
         | Operation::JournalView => journal_operation(&job, &room),
     }
+}
+
+pub(super) fn call_worker(
+    config: &Value,
+    room: &str,
+    timeout_s: f64,
+    mut request: Value,
+) -> io::Result<Value> {
+    let timeout = Duration::try_from_secs_f64(timeout_s)
+        .ok()
+        .filter(|timeout| !timeout.is_zero() && *timeout <= Duration::from_secs(10))
+        .ok_or_else(refused)?;
+    request["room"] = json!(room);
+    request["config"] = config.clone();
+    let bytes = serde_json::to_vec(&request)?;
+    if bytes.len() > AUTOMATIC_BOUND {
+        return Err(refused());
+    }
+    let mut command = Command::new(std::env::current_exe()?);
+    command.arg(format!("--automatic-worker={}", std::process::id()));
+    let reply = capture::run(
+        command,
+        Some(&bytes),
+        capture::Limits::scoped(Instant::now() + timeout, AUTOMATIC_BOUND),
+    )?;
+    Ok(serde_json::from_slice(&reply)?)
 }
 
 fn journal_operation(job: &Job<'_>, room: &ChatRoomId) -> io::Result<Box<RawValue>> {

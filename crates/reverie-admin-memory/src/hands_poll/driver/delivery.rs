@@ -1,6 +1,8 @@
 use super::{Pass, Target, book::State};
 use crate::{
+    coding_task::is_control,
     hands_poll::state::{Change, Room},
+    hands_prompt::preview,
     hands_settings::truthy,
     refused,
 };
@@ -33,6 +35,19 @@ struct Answer {
 
 impl Pass {
     pub(super) fn respond(&mut self, room: &mut Room, source: &Source<'_>) -> io::Result<Progress> {
+        if self.settings.preview {
+            let mut incoming = preview(source.message, self.settings.message_chars);
+            incoming["room"] = json!(source.target.name);
+            self.link.observe("incoming", incoming)?;
+        }
+        let control = self.settings.coding && is_control(source.message);
+        if !control && self.settings.coordinator {
+            let status: Value = self.link.exchange(json!({"effect":"before_chat"}))?;
+            if let Some(detail) = status["failure"].as_str() {
+                return self.failed(source, detail);
+            }
+        }
+        let recalled = self.recall(source, control)?;
         let Answer {
             reply,
             failure,
@@ -41,8 +56,8 @@ impl Pass {
             timing,
             coding,
         } = self.link.exchange(json!({
-            "effect":"answer", "room":source.target.id, "room_name":source.target.name,
-            "history":source.history, "message":source.message,
+            "effect":"answer", "room":source.target.id, "recalled":recalled,
+            "history":source.history, "message":source.message, "control":control,
         }))?;
         self.book.coding(coding);
         let Some(reply) = reply.as_deref().filter(|reply| !reply.is_empty()) else {
@@ -55,6 +70,15 @@ impl Pass {
             timing: timing.as_deref().ok_or_else(refused)?,
         };
         self.post(room, source, span)
+    }
+
+    fn recall(&mut self, source: &Source<'_>, control: bool) -> io::Result<String> {
+        if control || self.is_direct(source.target) {
+            return Ok(String::new());
+        }
+        let text = source.message["text"].as_str().unwrap_or_default();
+        let query = truncate(text, self.settings.message_chars);
+        self.memory.recall(&mut self.link, source.target.id, query)
     }
 
     fn post(
@@ -115,13 +139,16 @@ impl Pass {
                 "room":source.target.name, "text":sent, "confirmed":truthy(id),
             }),
         )?;
-        if truthy(id) {
+        if truthy(id) && !self.is_direct(source.target) {
             let text = source.message["text"].as_str().unwrap_or_default();
-            let _: Value = self.link.exchange(json!({
-                "effect":"record","room":source.target.id,
-                "event":{"source":source.id, "at":source.message.get("at").cloned().unwrap_or(json!(0)),
-                         "text":truncate(text,self.settings.message_chars), "reply":sent, "reply_id":id}
-            }))?;
+            self.memory.record(
+                &mut self.link,
+                source.target.id,
+                json!({
+                    "source":source.id, "at":source.message.get("at").cloned().unwrap_or(json!(0)),
+                    "text":truncate(text,self.settings.message_chars), "reply":sent, "reply_id":id
+                }),
+            )?;
         }
         let characters = format!("request_chars={}", answer.characters);
         let reply_chars = format!("reply_chars={}", answer.text.chars().count());

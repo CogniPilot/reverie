@@ -1,6 +1,7 @@
 //! Run one serial Hands poll using the same wake policy and durable claim file.
 mod book;
 mod delivery;
+mod memory;
 mod office;
 
 use self::{
@@ -29,6 +30,8 @@ use std::{
 #[serde(deny_unknown_fields)]
 struct Job {
     office: Option<Client>,
+    #[serde(default)]
+    memory: memory::Memory,
     state: book::State,
     path: PathBuf,
     settings: Settings,
@@ -46,11 +49,18 @@ struct Settings {
     max_answers: usize,
     reply_chars: usize,
     message_chars: usize,
+    #[serde(default)]
+    coding: bool,
+    #[serde(default)]
+    coordinator: bool,
+    #[serde(default)]
+    preview: bool,
 }
 
 struct Pass {
     book: Book,
     office: Office,
+    memory: memory::Memory,
     settings: Settings,
     link: Link,
     posted: usize,
@@ -98,6 +108,7 @@ pub(crate) fn run_tick(parent: i32) -> io::Result<()> {
     let mut pass = Pass {
         book: Book::new(job.path, job.state),
         office: Office::new(job.office),
+        memory: job.memory,
         settings: job.settings,
         link: Link(channel),
         posted: 0,
@@ -253,7 +264,7 @@ impl Pass {
         let scope = Scope {
             session: self.settings.session.clone(),
             name: self.settings.name.clone(),
-            direct: target.direct || self.settings.dm_rooms.iter().any(|id| id == target.id),
+            direct: self.is_direct(target),
         };
         let mut seen = HashSet::new();
         for (index, wake) in room.pending(&scope, history) {
@@ -289,6 +300,10 @@ impl Pass {
                 latest: target.latest.map(str::to_owned),
             },
         )
+    }
+
+    fn is_direct(&self, target: &Target<'_>) -> bool {
+        target.direct || self.settings.dm_rooms.iter().any(|id| id == target.id)
     }
 
     fn message(&mut self, room: &mut Room, source: Source<'_>, wake: bool) -> io::Result<Progress> {

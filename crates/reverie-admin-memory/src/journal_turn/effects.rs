@@ -201,29 +201,12 @@ impl NativeEffect {
         }
     }
 
-    fn execute(&self, mut request: Value) -> std::io::Result<Value> {
+    fn execute(&self, request: Value) -> std::io::Result<Value> {
         let seconds = if request["op"] == "journal_status" {
             self.settings.status_timeout_s
         } else {
             self.settings.command_timeout_s
         };
-        let timeout = std::time::Duration::try_from_secs_f64(seconds)
-            .ok()
-            .filter(|timeout| !timeout.is_zero() && timeout.as_secs_f64() <= 10.0)
-            .ok_or_else(crate::refused)?;
-        request["room"] = json!(self.room);
-        request["config"] = self.settings.config.clone();
-        let bytes = serde_json::to_vec(&request)?;
-        if bytes.len() > AUTOMATIC_BOUND {
-            return Err(crate::refused());
-        }
-        let mut command = std::process::Command::new(std::env::current_exe()?);
-        command.arg(format!("--automatic-worker={}", std::process::id()));
-        let reply = crate::capture::run(
-            command,
-            Some(&bytes),
-            crate::capture::Limits::scoped(std::time::Instant::now() + timeout, AUTOMATIC_BOUND),
-        )?;
-        Ok(serde_json::from_slice(&reply)?)
+        crate::automatic::call_worker(&self.settings.config, &self.room, seconds, request)
     }
 }

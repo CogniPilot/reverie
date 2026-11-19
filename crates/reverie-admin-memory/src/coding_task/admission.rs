@@ -126,6 +126,12 @@ fn control(text: &str, agent: bool) -> Option<Control<'_>> {
     })
 }
 
+pub(crate) fn is_control(message: &Value) -> bool {
+    message["text"]
+        .as_str()
+        .is_some_and(|text| control(text, message["from"]["kind"] == "agent").is_some())
+}
+
 fn includes(values: &Value, name: &str) -> bool {
     values
         .as_array()

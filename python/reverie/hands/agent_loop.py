@@ -377,7 +377,7 @@ def _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, ste
                              'cancel_rule': controls['cancel_rule']}
 
     failures = []
-    if journal_operation is None and cfg.get('memory_worker_name', 'agent_memory_worker.py') != 'agent_memory_worker.py':
+    if journal_operation is None and custom_memory_worker(cfg) is not None:
         def journal_operation(op, **payload):
             return memory_op(cfg, room, op, failures=failures, **payload)
 
@@ -521,19 +521,18 @@ def custom_memory_worker(cfg):
 
 
 def memory_op(cfg, room, op, *, failures=None, **payload):
-    """Optional, killable memory I/O. Failure never changes delivery claims or retries a POST.
+    """Optional legacy memory adapter. Failure leaves the original claim and POST alone.
 
     Journal commands make several network source checks, so they get their own bounded time limit. When
     `failures` is a list, the failure class ('timeout' or 'worker_error') is appended to it."""
-    if (not cfg.get('memory_instance') or
+    script = custom_memory_worker(cfg)
+    if (script is None or not cfg.get('memory_instance') or
             room in set(cfg.get('dm_rooms', [])) | set(cfg.get('_auto_dms', []))):
         return None
     process = None
     try:
         job = dict(config=agent_journal.automatic_config(cfg), room=room, op=op, **payload)
-        script = custom_memory_worker(cfg)
-        command = ([sys.executable, '-I', '-B', script] if script is not None else
-                   agent_journal.native_memory_command('automatic-worker'))
+        command = [sys.executable, '-I', '-B', script]
         process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)
@@ -568,9 +567,12 @@ def tick(cfg, chat, state, model=chat_model, search=searxng_search):
                 'dm_rooms': cfg.get('dm_rooms', []), 'name': cfg.get('self_name'),
                 'session': cfg.get('self_session_id'), 'max_rooms': cfg['max_rooms'],
                 'history_n': cfg['history_n'], 'max_answers': cfg['max_answers_per_tick'],
-                'reply_chars': cfg['reply_cap_chars'], 'message_chars': cfg['message_cap_chars']}
+                'reply_chars': cfg['reply_cap_chars'], 'message_chars': cfg['message_cap_chars'],
+                'coding': bool(cfg.get('coding')), 'coordinator': bool(cfg.get('_coding_manager')),
+                'preview': cfg.get('_terminal') is not None}
     office = {'cli': chat.argv, 'timeout_s': chat.timeout} if type(chat) is Chat else None
-    job = {'settings': settings, 'state': state, 'path': cfg['state_file'], 'office': office}
+    job = {'settings': settings, 'state': state, 'path': cfg['state_file'], 'office': office,
+           'memory': tick_memory(cfg)}
     bound = agent_journal.TURN_CAPTURE_BYTES
     worker = WorkerSocket('hands-tick-worker', job, environment=os.environ,
                           startup_limit=bound, reply_limit=bound, send_limit=bound)
@@ -610,12 +612,27 @@ def tick_effect(cfg, chat, state, model, search, event):
     effect = event['effect']
     if effect == 'answer':
         return tick_answer(cfg, state, model, search, event)
-    if effect == 'record':
-        memory_op(cfg, event['room'], 'record', event=event['event'])
-        return {}
+    if effect == 'memory':
+        request = event['request']
+        return memory_op(cfg, event['room'], request.pop('op'), **request)
+    if effect == 'before_chat':
+        try:
+            cfg['_coding_manager'].before_chat()
+            return {}
+        except Exception as error:
+            return {'failure': repr(error)[:300]}
     if effect == 'alert':
         return alert_allows(cfg, chat, event['room'], event['message'])
     return tick_chat(chat, event['operation'])
+
+
+def tick_memory(cfg):
+    if not cfg.get('memory_instance'):
+        return {'mode': 'disabled'}
+    if custom_memory_worker(cfg) is not None:
+        return {'mode': 'external'}
+    return {'mode': 'native', 'config': agent_journal.automatic_config(cfg),
+            'timeout_s': cfg['memory_timeout_s'], 'recall_chars': cfg['recall_cap_chars']}
 
 
 def tick_chat(chat, operation):
@@ -635,11 +652,9 @@ def tick_chat(chat, operation):
 
 
 def tick_answer(cfg, state, model, search, event):
-    room, history, msg = event['room'], event['history'], event['message']
-    incoming_event(cfg, event['room_name'], msg)
     timing = []
     try:
-        reply, size, searches = room_answer(cfg, state, model, search, room, history, msg, timing)
+        reply, size, searches = room_answer(cfg, state, model, search, event, timing)
         result = {'reply': reply, 'characters': size, 'searches': searches, 'timing': timing_text(timing)}
     except Exception as error:
         result = {'failure': repr(error)[:300]}
@@ -647,18 +662,16 @@ def tick_answer(cfg, state, model, search, event):
     return result
 
 
-def room_answer(cfg, state, model, search, room, history, msg, timing):
+def room_answer(cfg, state, model, search, event, timing):
+    room, history, msg = event['room'], event['history'], event['message']
     manager = cfg.get('_coding_manager')
-    if cfg.get('coding') and coding_chat.control_request(msg):
+    if event['control']:
         reply = (manager.control(state, room, history, msg) if manager else
                  'Coding task refused: background task manager is not running.')
         return reply, 0, 0
-    if manager:
-        manager.before_chat()
-    recalled = memory_op(cfg, room, 'recall', query=(msg.get('text') or '')[:cfg['message_cap_chars']])
     cfg['_admin_start_task'] = coding_chat.workspace_callback(cfg, manager, state, room, history, msg)
     try:
-        return answer(cfg, room, history, msg, model, search, timing, recalled=(recalled or {}).get('text', ''))
+        return answer(cfg, room, history, msg, model, search, timing, recalled=event['recalled'])
     finally:
         cfg.pop('_admin_start_task', None)
 

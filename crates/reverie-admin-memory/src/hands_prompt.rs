@@ -67,13 +67,15 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, TURN_CAPTURE_BOUND)?;
     let output = match serde_json::from_slice(&input)? {
         Request::Build { job } => build_reply(&job),
-        Request::Preview { message, cap } => {
-            json!({ "sender": speaker(&message), "text": trim_message(text(&message), cap) })
-        }
+        Request::Preview { message, cap } => preview(&message, cap),
         Request::Prepare { job } => job.prepare()?,
         Request::Reserve { job } => job.calculate()?,
     };
     crate::write_reply(&output, TURN_CAPTURE_BOUND)
+}
+
+pub(super) fn preview(message: &Value, cap: usize) -> Value {
+    json!({ "sender": speaker(message), "text": trim_message(text(message), cap) })
 }
 
 pub(super) fn reported_zone(value: Value) -> Option<Value> {

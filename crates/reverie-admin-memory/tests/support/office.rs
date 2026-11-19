@@ -44,7 +44,15 @@ fn main() -> ExitCode {
 
 fn read(root: &std::path::Path, selector: &str, id: &str) -> ExitCode {
     match selector {
-        "-n" => print!("{}", fs::read_to_string(root.join("history.json")).unwrap()),
+        "-n" => {
+            let after_post = root.join("history-after.json");
+            let source = if root.join("post.json").exists() && after_post.exists() {
+                after_post
+            } else {
+                root.join("history.json")
+            };
+            print!("{}", fs::read_to_string(source).unwrap());
+        }
         "--message" => {
             if let Some(code) = match fs::read_to_string(root.join("mode")).as_deref() {
                 Ok("exact-not-found") => Some("NOT_FOUND: missing message"),
