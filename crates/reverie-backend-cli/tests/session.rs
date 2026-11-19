@@ -35,6 +35,7 @@ impl Fixture {
         let mut cmd = Command::new(PROGRAM);
         cmd.current_dir(&self.0)
             .env("REVERIE_API_URL", url)
+            .env("CONSOLE_API", url)
             .env("REVERIE_SESSION_ID", "session-123")
             .env("REVERIE_USERNAME", "tester")
             .env("REVERIE_PASSWORD", "fixture")
@@ -126,6 +127,87 @@ fn assert_refused(output: &Output, reason: &str) {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+fn continuity_replies(sessions: Value, members: Value, binding: &str) -> Vec<(String, Value)> {
+    [
+        sessions,
+        json!({"success": true, "data": {"rooms": [
+            {"id": "room", "name": "Design", "members": members}
+        ]}}),
+        json!({"data": {"employees": [{"id": "employee", "sessionId": binding}]}}),
+    ]
+    .into_iter()
+    .map(|value| ("200 OK".into(), value))
+    .collect()
+}
+
+#[test]
+fn continuity_acceptance_keeps_existing_snapshots_and_checks_bindings() {
+    let fixture = Fixture::create();
+    let sessions = json!([
+        {"id": "session", "pinned": true, "pid": 42, "name": "Alex", "mode": "opencode",
+         "openCodeConfig": {"continueSession": "thread"}},
+        {"id": "stopped", "pinned": true, "name": "Blair"}
+    ]);
+    let members = json!([{"sessionId": "session", "role": null}]);
+    let before = continuity_replies(sessions.clone(), members.clone(), "session");
+    let (output, requests) = fixture.run_sequence(before, |cmd| {
+        cmd.args(["--persistent-ids", "before"]);
+    });
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for (request, route) in requests.iter().zip(["sessions", "chatrooms", "company"]) {
+        assert!(request.starts_with(&format!("GET /office/api/v1/{route} ")));
+        assert!(
+            !request
+                .to_ascii_lowercase()
+                .contains("x-reverie-parent-session")
+        );
+        assert!(request.contains("Authorization: Basic "));
+    }
+    let path = fixture.0.join("persistent-ids-snapshot.json");
+    let legacy = json!({
+        "sessions": {
+            "session": {"name": "Alex", "mode": "opencode", "pinned": true, "alive": true, "thread": "thread"},
+            "stopped": {"name": "Blair", "mode": null, "pinned": true, "alive": false, "thread": null}
+        },
+        "rooms": {"room": {"name": "Design", "members": {"session": null}}},
+        "employees": {"employee": "session"}
+    });
+    assert_eq!(
+        serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(),
+        legacy
+    );
+    // The previous snapshot writer serialized these same nullable fields.
+    fs::write(&path, legacy.to_string()).unwrap();
+    let after = continuity_replies(json!({"data": {"sessions": sessions}}), members, "session");
+    let (output, _) = fixture.run_sequence(after, |cmd| {
+        cmd.args(["--persistent-ids", "after"]);
+    });
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("RESULT: PASS"));
+
+    let changed = continuity_replies(
+        json!([
+            {"id": "session", "pinned": true, "pid": 42, "name": "Alex", "mode": "opencode",
+             "openCodeConfig": {"continueSession": "replacement"}},
+            {"id": "duplicate", "pid": 43, "name": "Alex"},
+            {"id": "stopped", "pid": 44, "name": "Blair"}
+        ]),
+        json!([]),
+        "duplicate",
+    );
+    let (output, _) = fixture.run_sequence(changed, |cmd| {
+        cmd.args(["--persistent-ids", "after"]);
+    });
+    assert_eq!(output.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("FAIL room Design keeps Alex"));
+    assert!(stdout.contains("RESULT: 5 FAIL(S)"), "{stdout}");
 }
 
 #[test]

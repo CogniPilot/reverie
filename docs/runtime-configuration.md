@@ -159,6 +159,14 @@ Choose each employee's model through its provider plan. Follow the
 [Docker GPU deployment guide](container-gpu.md) to serve an operator-selected
 model inside Docker or connect an existing provider endpoint.
 
+## Verify identity after a restart
+
+For restart acceptance, run `cargo persistent-ids-acceptance before [FILE]`
+and then `cargo persistent-ids-acceptance after [FILE]` with the same snapshot
+file. The command reads the console API and checks pinned sessions, OpenCode
+threads, room memberships, and employee bindings. Use `CONSOLE_API` to select
+the console and keep the snapshot with the instance's private evidence.
+
 ## User service templates
 
 `reverie-watcher.service` and `reverie-watcher-check.service` require

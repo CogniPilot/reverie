@@ -47,9 +47,12 @@ fn origin_matches(original: &Uri, next: &Uri) -> bool {
             .is_some_and(|(left, right)| left.eq_ignore_ascii_case(right))
 }
 
-fn headers(id: &str, default_user: &str) -> Result<String> {
-    HeaderValue::from_str(id).map_err(|_| "invalid Reverie session identity")?;
-    let mut headers = format!("Content-Type: application/json\nX-Reverie-Parent-Session: {id}\n");
+fn headers(id: Option<&str>, default_user: &str) -> Result<String> {
+    let mut headers = String::from("Content-Type: application/json\n");
+    if let Some(id) = id {
+        HeaderValue::from_str(id).map_err(|_| "invalid Reverie session identity")?;
+        headers.push_str(&format!("X-Reverie-Parent-Session: {id}\n"));
+    }
     if let Ok(password) = env::var("REVERIE_PASSWORD")
         && !password.is_empty()
     {
@@ -169,7 +172,7 @@ fn request(url: &str, headers: &str, timeout: &str) -> FetchResult<Response> {
     }
 }
 
-fn get(base: &str, id: &str, path: &str, user: &str, timeout: &str) -> FetchResult<Value> {
+fn get(base: &str, id: Option<&str>, path: &str, user: &str, timeout: &str) -> FetchResult<Value> {
     let base = base.trim_end_matches('/');
     let origin = http_uri(base)?;
     if origin.query().is_some() {
@@ -192,11 +195,19 @@ fn get(base: &str, id: &str, path: &str, user: &str, timeout: &str) -> FetchResu
 }
 
 pub(super) fn sessions(base: &str, id: &str) -> Result<Value> {
-    get(base, id, SESSIONS, "admin", "45").map_err(|error| error.message())
+    get(base, Some(id), SESSIONS, "admin", "45").map_err(|error| error.message())
 }
 
 pub(super) fn company(base: &str, id: &str, timeout: &str) -> FetchResult<Value> {
-    get(base, id, "/api/company", "owner", timeout)
+    get(base, Some(id), "/api/company", "owner", timeout)
+}
+
+pub(super) fn continuity_snapshot(base: &str) -> FetchResult<[Value; 3]> {
+    Ok([
+        get(base, None, SESSIONS, "admin", "15")?,
+        get(base, None, "/api/v1/chatrooms", "admin", "15")?,
+        get(base, None, "/api/v1/company", "admin", "15")?,
+    ])
 }
 
 pub(super) fn resolve_session<'a>(value: &'a Value, prefix: &str) -> Result<&'a Value> {
