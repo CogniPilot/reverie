@@ -15,7 +15,6 @@ it('resolves the explicitly supplied flattened fixture and refuses an incomplete
     for (const file of [
       'python/reverie/goal_bootstrap.py',
       'tests/goal_private_fixture.py',
-      'tests/goal_broker_fixture.py',
     ])
       fs.writeFileSync(join(fixture, file), 'synthetic source locator marker');
     expect(goalFixtureRepository(test)).toBe(fixture);

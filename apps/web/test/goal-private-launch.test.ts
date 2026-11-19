@@ -7,7 +7,7 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { goalFixtureRepository } from './goal-source-fixture.js';
+import { goalCustodyClientBinary, goalFixtureRepository } from './goal-source-fixture.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -41,7 +41,7 @@ vi.mock('../src/goal-custody-channel.js', async (original) => {
   const actual = await original<typeof import('../src/goal-custody-channel.js')>();
   return {
     GoalCustodyChannel: class extends actual.GoalCustodyChannel {
-      // Only the packaged executable is substituted with an owned source wrapper.
+      // The actual native client reads the fixture's owned broker socket.
       constructor(_packaged: string, socket: string) {
         super(edge.helper, socket);
       }
@@ -209,21 +209,7 @@ describe('normal private Goal launcher', () => {
       },
     ];
     write(join(root, 'inventory.json'), inventory);
-    const python = nativeProcess.spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], {
-      encoding: 'utf8',
-    });
-    expect(python.status).toBe(0);
-    edge.helper = join(root, 'owned-packaged-helper');
-    fs.writeFileSync(
-      edge.helper,
-      `#!${python.stdout.trim()}
-import runpy, sys
-sys.path.insert(0, ${JSON.stringify(join(repository, 'python'))})
-sys.argv = ['reverie.worker', 'client', *sys.argv[1:]]
-runpy.run_module('reverie.worker', run_name='__main__')
-`,
-      { mode: 0o700 }
-    );
+    edge.helper = goalCustodyClientBinary();
     host = nativeProcess.spawn('python3', ['-m', 'tests.goal_private_fixture', '--owned-socket', root], {
       cwd: repository,
       env: { PATH: process.env.PATH, PYTHONPATH: join(repository, 'python'), PYTHONDONTWRITEBYTECODE: '1' },
