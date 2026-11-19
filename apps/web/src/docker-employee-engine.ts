@@ -546,8 +546,53 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   /** Historical source DATA only. The SourceReader separately owns the exact
    * stopped source/requester proof; this cannot mint a provider view or launch. */
-  async existingPlanSourceImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
-    return this.#existingImage(input, current, false);
+  async existingPlanSourceImage(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerEmployeeWorkerImage> {
+    try {
+      return await this.#existingImage(input, current, false);
+    } catch (error) {
+      current();
+      const row = DockerEmployeeContinuationRecord.parse(input);
+      if (row.version !== 3) throw error;
+      try {
+        if (!this.#publishedRead(row)) throw error;
+      } catch {
+        throw error;
+      }
+      const digest = dockerContinuationDigest(row);
+      const check = () => {
+        current();
+        if (dockerContinuationDigest(input) !== digest) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+        this.#publishedRead(row);
+      };
+      if (!(await this.#historicalPlanContainerAbsent(row, check))) throw error;
+      const image = await this.#existingImage(row, check, true);
+      if (!(await this.#historicalPlanContainerAbsent(row, check)))
+        refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+      return image;
+    }
+  }
+  /** A failed inspect conveys no absence. Confirm the full immutable ID in
+   * the same Docker engine's inventory before and after reading the binding. */
+  async #historicalPlanContainerAbsent(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<boolean> {
+    current();
+    const listed = await this.command.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'id=' + row.original.containerId,
+      '--format',
+      '{{.ID}}',
+    ]);
+    current();
+    return listed.trim() === '';
   }
   async #existingImage(
     input: DockerEmployeeContinuationRecord,

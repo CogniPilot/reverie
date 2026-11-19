@@ -622,6 +622,48 @@ describe('existing provider reattachment after Docker restart', () => {
   );
 });
 describe('retained published plan source after historical source deletion', () => {
+  it.each([false, true])('brackets an absent v3 ancestor for plan recovery (reappears: %s)', async (reappears) => {
+    let published = '';
+    const f = await dockerPlanRetirementFixture({
+      canonicalRead: async (row) => ({
+        providerSourceDigest: row.providerSourceDigest,
+        publish(ready) {
+          published = dockerContinuationDigest(ready);
+          return Promise.resolve();
+        },
+        requireCurrent(ready) {
+          expect(dockerContinuationDigest(ready)).toBe(published);
+        },
+      }),
+    });
+    try {
+      const row = f.state.work!;
+      const ancestor = row.original.containerId;
+      const run = vi.mocked(f.command.run);
+      const original = run.getMockImplementation()!;
+      let censuses = 0;
+      run.mockImplementation(async (args, input) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === ancestor)
+          throw Error('Historical container inspect unavailable');
+        if (args[0] === 'container' && args[1] === 'ls' && args.includes('id=' + ancestor)) {
+          expect(args).toEqual(['container', 'ls', '--all', '--no-trunc', '--filter', 'id=' + ancestor, '--format', '{{.ID}}']);
+          return ++censuses === 2 && reappears ? ancestor : '';
+        }
+        return original(args, input);
+      });
+      vi.mocked(f.command.create).mockClear();
+      run.mockClear();
+      const image = f.engine.existingPlanSourceImage(row, () => {});
+      if (reappears) await expect(image).rejects.toThrow('ORIGINAL_CHANGED');
+      else await expect(image).resolves.toEqual(row.workerImage);
+      expect(censuses).toBe(2);
+      expect(f.command.create).not.toHaveBeenCalled();
+      expect(run.mock.calls.some(([args]) => args.includes('start') || args.includes('exec'))).toBe(false);
+    } finally {
+      f.engine.close();
+    }
+  });
+
   const read = (
     f: Awaited<ReturnType<typeof retainedStoppedFixture>>,
     kind: 'HOME' | 'networks',
