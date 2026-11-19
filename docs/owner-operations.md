@@ -218,8 +218,9 @@ then records only global observation metadata through the canonical company
 writer. It never creates or starts a helper, changes limits, launches a provider,
 or clears an employee launch fence. No retired employee/session/origin UUID is
 invented from helper labels. Multiple original successful helpers are accepted
-only when every discovered writer is fixed and terminal and every original ACK
-agrees with the same current pool policy and epoch. One verified task is selected
+when every discovered writer is fixed and terminal. An earlier epoch's ACK must
+match a retained receipt for the same pool and policy. The current observation
+requires a fresh ACK for the current native epoch. One verified task is selected
 as new observation correlation, preferring an already retained proof; this is
 not a claim about which historical operation caused the pool state.
 

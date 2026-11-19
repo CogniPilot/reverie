@@ -475,6 +475,33 @@ describe('fixed Docker resource orchestration', () => {
     await expect(f.controller.observePool(f.row())).rejects.toThrow('ANCHOR_REPLACED');
     expect({ creates: f.creates, starts: f.starts }).toEqual(before);
   });
+
+  it('retains a verified closed old writer while requiring a fresh acknowledgement for a restarted pool', async () => {
+    const f = fixture();
+    await f.controller.preparePool(f.row(), f.current);
+    const old = f.tasks.get('pool-helper')!;
+    const anchor = f.tasks.get('anchor')!;
+    if (old.phase !== 'completed' || anchor.phase !== 'running') throw Error('Expected a configured pool');
+    f.retain([old]);
+    f.driftEpoch();
+    f.tasks.set('anchor', { ...anchor, initStartTicks: '999' });
+    f.tasks.delete('pool-helper');
+    f.row().request.operationId = '88888888-8888-4888-8888-888888888888';
+    f.requireConfigure();
+    await f.controller.preparePool(f.row(), f.current);
+    const fresh = f.tasks.get('pool-helper')!;
+    if (fresh.phase !== 'completed') throw Error('Expected a fresh configuration acknowledgement');
+    expect(fresh.containerId).not.toBe(old.containerId);
+    const before = { creates: [...f.creates], starts: [...f.starts], phases: [...f.phases] };
+    const read = () => f.controller.capturePoolObservation(policy.pool, f.current);
+    expect((await read()).snapshot(f.current).configuration).toEqual(fresh);
+    f.retain([fresh]);
+    await expect(read()).rejects.toThrow('ORIGINAL_ACK_CHANGED');
+    f.retain([old, fresh]);
+    f.containers.delete(fresh.containerId);
+    await expect(read()).rejects.toThrow('ORIGINAL_ACK_MISSING');
+    expect({ creates: f.creates, starts: f.starts, phases: f.phases }).toEqual(before);
+  });
   it('another unresolved writer blocks new configuration before CREATE or START', async () => {
     const f = fixture();
     await f.controller.preparePool(f.row(), f.current);
