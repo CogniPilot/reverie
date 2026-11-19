@@ -26,6 +26,7 @@ fn main() {
     let executable = env::current_exe().unwrap();
     let mode = executable.file_name().unwrap().to_str().unwrap();
     match mode {
+        "offline-store-engine" => offline_store(&args),
         "native-worker-service-bus" => {
             assert_eq!(args.len(), 7);
             assert_eq!(&args[..3], ["--user", "--json=short", "get-property"]);
@@ -221,6 +222,26 @@ fn main() {
             print!("{}", args.join("\0"));
         }
     }
+}
+
+fn offline_store(args: &[String]) {
+    let endpoint = format!("unix://{}/docker.sock", env::current_dir().unwrap().display());
+    assert_eq!(&args[..2], ["--host", &endpoint]);
+    let path = match &args[2..] {
+        [command, flag, template]
+            if command == "info" && flag == "--format" && template == "{{json .ID}}" => "engine-id",
+        [command, all, quiet, full]
+            if command == "ps" && all == "--all" && quiet == "--quiet" && full == "--no-trunc" => "engine-inventory",
+        [command, inspect, image]
+            if command == "image" && inspect == "inspect" && image == &format!("sha256:{}", "1".repeat(64)) => "engine-image",
+        [command, id] if command == "inspect" && id == &"a".repeat(64) => "engine-validation",
+        [command, a, b] if command == "inspect" && a == &"a".repeat(64) && b == &"b".repeat(64) => "engine-rows",
+        [command, source, output]
+            if command == "cp" && source == &format!("{}:/etc/reverie-nix-base", "a".repeat(64)) && output == "-" => "engine-base",
+        _ => panic!("unexpected offline engine arguments"),
+    };
+    io::stderr().write_all(&[0xff]).unwrap();
+    io::stdout().write_all(&std::fs::read(path).unwrap()).unwrap();
 }
 fn serde_json_free_invocation() -> String {
     let value=if std::path::Path::new("manager-invocation-changed").exists() { "2" } else { "1" };

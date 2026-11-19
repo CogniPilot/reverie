@@ -53,7 +53,8 @@ pub(super) struct Job {
     pub(super) policy: Policy,
     pub(super) nix_tail: bool,
     pub(super) stdout_only: bool,
-    pub(super) raw_stdout: bool,
+    pub(super) raw_output: bool,
+    pub(super) stderr_bound: Option<usize>,
     #[cfg(test)]
     pub(super) hooks: super::test_hooks::Hooks,
 }
@@ -121,6 +122,7 @@ enum ExecutionMode {
     NixTail,
     GoalStdout,
     GpuPreflightStdout,
+    OfflineStoreRead,
 }
 impl CallFailure {
     fn before_admission(error: EngineError) -> Self {
@@ -459,6 +461,23 @@ impl CapturedClient {
             ExecutionMode::GpuPreflightStdout,
         )
     }
+    /// Offline store metadata can contain binary tar and bounds each pipe.
+    pub(crate) fn run_offline_store_read(
+        &self,
+        args: Vec<OsString>,
+        deadline: Instant,
+        policy: Policy,
+    ) -> Result<CapturedOutput> {
+        self.run_owned(
+            args,
+            deadline,
+            &CancellationToken::new(),
+            policy,
+            &mut None,
+            ExecutionMode::OfflineStoreRead,
+        )
+        .map_err(|failure| failure.error)
+    }
     /// The closed guest bootstrap alone streams a one-shot installed
     /// registration file and retains diagnostic tails. Failed admission leaves
     /// input with its caller; admitted input belongs to Process before the
@@ -616,7 +635,11 @@ impl CapturedClient {
                 mode,
                 ExecutionMode::GoalStdout | ExecutionMode::GpuPreflightStdout
             ),
-            raw_stdout: matches!(mode, ExecutionMode::GpuPreflightStdout),
+            raw_output: matches!(
+                mode,
+                ExecutionMode::GpuPreflightStdout | ExecutionMode::OfflineStoreRead
+            ),
+            stderr_bound: matches!(mode, ExecutionMode::OfflineStoreRead).then_some(64 * 1024),
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });

@@ -424,10 +424,7 @@ class OfflineStoreTests(unittest.TestCase):
         engine=M.DockerEngine.__new__(M.DockerEngine)
         engine.executable=str(script);engine.endpoint='unix:///unused-owned-fixture'
         return engine
-    def test_native_cli_binary_output_is_preserved(self):
-        engine=self.client('import os;os.write(1,b"\\0tar\\xff")')
-        self.assertEqual(engine._run(['fixture']),b'\0tar\xff')
-    def test_native_cli_output_and_timeout_are_bounded(self):
+    def test_mutating_cli_output_and_timeout_are_bounded(self):
         engine=self.client('import os;os.write(2,b"x"*1000000)')
         with self.assertRaisesRegex(M.Refused,'response bound'):engine._run(['fixture'])
         engine=self.client('import time;time.sleep(1)')

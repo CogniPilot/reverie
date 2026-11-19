@@ -1,6 +1,9 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
+use reverie_contracts::worker_image_switch::WorkerImageId;
 use reverie_contracts::worker_nix::offline_qualification::{CapacityBudget, plan};
+use reverie_core::ids::ContainerId;
 use reverie_host::worker_nix::offline_qualification::{self, ControlPin};
+use reverie_host::worker_nix::offline_store_engine::{self, Query};
 use serde::{Deserialize, Deserializer, de};
 use serde_json::{Value, json, value::RawValue};
 use std::{ffi::OsString, io, os::unix::ffi::OsStringExt, path::PathBuf};
@@ -8,10 +11,16 @@ use std::{ffi::OsString, io, os::unix::ffi::OsStringExt, path::PathBuf};
 const PLAN_REQUEST_BOUND: usize = 16 * 1024 * 1024;
 const QUALIFICATION_REPLY_BOUND: usize = 16 * 1024 * 1024;
 const PLAN_REPLY_BOUND: usize = 17 * 1024 * 1024;
+const ENGINE_REPLY_BOUND: usize = 24 * 1024 * 1024;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    Engine {
+        #[serde(deserialize_with = "path")]
+        socket: PathBuf,
+        query: EngineQuery,
+    },
     Config {
         #[serde(deserialize_with = "path")]
         config: PathBuf,
@@ -51,6 +60,32 @@ enum Request {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+enum EngineQuery {
+    Identity {},
+    Inventory {},
+    Image { image: String },
+    Inspect { ids: Vec<String> },
+    Base { id: String },
+}
+
+impl EngineQuery {
+    fn query(self) -> Result<Query, Box<dyn std::error::Error>> {
+        Ok(match self {
+            Self::Identity {} => Query::Identity,
+            Self::Inventory {} => Query::Inventory,
+            Self::Image { image } => Query::Image(WorkerImageId::parse(&image)?),
+            Self::Inspect { ids } => Query::Inspect(
+                ids.iter()
+                    .map(|id| ContainerId::parse(id))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Self::Base { id } => Query::Base(ContainerId::parse(&id)?),
+        })
+    }
+}
+
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Pin {
     #[serde(deserialize_with = "path")]
@@ -78,6 +113,7 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     let request: Request = serde_json::from_slice(&input)?;
     let bound = match request {
         Request::Plan { .. } => PLAN_REPLY_BOUND,
+        Request::Engine { .. } if input.len() <= crate::REQUEST_BOUND => ENGINE_REPLY_BOUND,
         _ if input.len() <= crate::REQUEST_BOUND => QUALIFICATION_REPLY_BOUND,
         _ => return Err(crate::refused()),
     };
@@ -100,6 +136,9 @@ fn bytes(raw: Vec<u8>) -> Value {
 impl Request {
     fn execute(self) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
+            Self::Engine { socket, query } => {
+                Ok(bytes(offline_store_engine::read(&socket, query.query()?)?))
+            }
             Self::Config { config } => Ok(bytes(offline_qualification::config(&config)?)),
             Self::Target { target, now } => {
                 let qualified = offline_qualification::inspect(&target, now)?;

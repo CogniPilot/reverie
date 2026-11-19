@@ -3,6 +3,7 @@
 mod error;
 pub mod guest;
 pub mod offline_qualification;
+pub mod offline_store_engine;
 mod selection;
 mod workflow;
 pub(crate) use workflow::Workflows;

@@ -10,7 +10,6 @@ import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
@@ -20,7 +19,6 @@ import shutil
 import stat
 import subprocess
 import sys
-import tarfile
 import time
 import uuid
 
@@ -99,13 +97,13 @@ def _json(raw):
                       parse_constant=lambda _: (_ for _ in ()).throw(Refused("non-finite JSON number")))
 
 
-def _native_observation(action, **fields):
+def _native_observation(action, *, timeout=20, **fields):
     request = {action: fields}
     try:
         result = subprocess.run(
             ["reverie-admin-memory", f"--offline-store-qualification-worker={os.getpid()}"],
             input=json.dumps(request, separators=(",", ":"), allow_nan=False).encode(),
-            capture_output=True, check=True, start_new_session=True, timeout=20,
+            capture_output=True, check=True, start_new_session=True, timeout=timeout,
         )
         reply = _json(result.stdout)
         need(isinstance(reply, dict), "native qualification response unavailable")
@@ -240,10 +238,11 @@ class DockerEngine:
         endpoint = Path(socket_path)
         need(endpoint.is_absolute() and endpoint == endpoint.resolve()
              and stat.S_ISSOCK(endpoint.lstat().st_mode), "canonical existing local engine socket required")
+        self.socket_path = _native_path(endpoint)
         self.endpoint = "unix://" + str(endpoint)
 
     def _run(self, args, timeout=20):
-        # Keep binary tar responses binary; bound both pipes before buffering.
+        # Bound both pipes for the three remaining mutating commands.
         child = subprocess.Popen([self.executable, "--host", self.endpoint, *args],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                  stderr=subprocess.PIPE)
@@ -274,38 +273,26 @@ class DockerEngine:
             child.stdout.close(); child.stderr.close()
             need(child.poll() is not None, "engine client reaping unconfirmed")
 
+    def _observe(self, query, **fields):
+        raw, _ = _native_observation("engine", socket=self.socket_path, query={query: fields}, timeout=25)
+        return _json(raw)
+
     def identity(self):
-        return _json(self._run(["info", "--format", "{{json .ID}}"])).strip()
+        return self._observe("identity")
 
     def image(self, image):
-        items = _json(self._run(["image", "inspect", image]))
-        need(type(items) is list and len(items) == 1 and items[0].get("Id") == image,
-             "exact loaded image unavailable")
-        return items[0]
+        return self._observe("image", image=image)[0]
 
     def containers(self):
-        ids = self._run(["ps", "--all", "--quiet", "--no-trunc"]).decode().split()
-        need(len(ids) <= 256 and len(set(ids)) == len(ids)
-             and all(CID.fullmatch(value) for value in ids), "container inventory unavailable")
-        result = []
-        for offset in range(0, len(ids), 32):
-            result.extend(_json(self._run(["inspect", *ids[offset:offset + 32]])))
-        need({v.get("Id") for v in result} == set(ids), "container inventory changed")
-        return result
+        ids = self._observe("inventory")
+        return [row for offset in range(0, len(ids), 32)
+                for row in self._observe("inspect", ids=ids[offset:offset + 32])]
 
     def inspect(self, cid):
-        result = _json(self._run(["inspect", cid]))
-        need(type(result) is list and len(result) == 1 and result[0].get("Id") == cid,
-             "exact helper identity unavailable")
-        return result[0]
+        return self._observe("inspect", ids=[cid])[0]
 
     def base_target(self, cid):
-        raw = self._run(["cp", cid + ":/etc/reverie-nix-base", "-"])
-        need(len(raw) <= 1024**2, "image base metadata bound")
-        with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
-            items = archive.getmembers()
-            need(len(items) == 1 and items[0].issym(), "image base must be an immutable link")
-            return items[0].linkname
+        return self._observe("base", id=cid)
 
     def create(self, args):
         cid = self._run(args).decode().strip()

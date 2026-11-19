@@ -218,9 +218,7 @@ impl Process {
                     .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 if job.nix_tail {
                     super::nix_tail::append(&mut self.output[index], &buffer[..count]);
-                } else if self.output.iter().map(Vec::len).sum::<usize>() + count
-                    > job.policy.maximum_output
-                {
+                } else if self.output_exceeds(index, count, job) {
                     return Err(EngineError::new(EngineFault::OutputBound));
                 } else {
                     self.output[index].extend_from_slice(&buffer[..count]);
@@ -235,6 +233,14 @@ impl Process {
             Err(_) => return Err(EngineError::new(EngineFault::Read)),
         }
         Ok(())
+    }
+    fn output_exceeds(&self, index: usize, incoming: usize, job: &Job) -> bool {
+        if let Some(stderr_bound) = job.stderr_bound {
+            let bound = [job.policy.maximum_output, stderr_bound][index];
+            self.output[index].len() + incoming > bound
+        } else {
+            self.output.iter().map(Vec::len).sum::<usize>() + incoming > job.policy.maximum_output
+        }
     }
     fn close_stream(&mut self, index: usize, job: &Job) -> Result<()> {
         let fd = self.streams[index].take().expect("live stream");
@@ -295,7 +301,7 @@ impl Process {
         for output in &mut self.output {
             if job.nix_tail {
                 super::nix_tail::finish(output);
-            } else if !job.raw_stdout {
+            } else if !job.raw_output {
                 std::str::from_utf8(output).map_err(|_| EngineError::new(EngineFault::Utf8))?;
             }
         }

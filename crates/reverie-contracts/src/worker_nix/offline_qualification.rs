@@ -1,5 +1,6 @@
 //! Closed qualification evidence for the host's offline worker-store command.
 mod admission;
+pub mod engine;
 mod evidence;
 mod profiles;
 pub use admission::{Capacity, CapacityBudget, CohortBinding, plan};
