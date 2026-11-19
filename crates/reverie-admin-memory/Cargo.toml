@@ -37,6 +37,7 @@ reverie-http.workspace = true
 reverie-python-regex.workspace = true
 reverie-store.workspace = true
 reverie-time-zone.workspace = true
+rusqlite.workspace = true
 rustls.workspace = true
 rustls-platform-verifier.workspace = true
 serde.workspace = true
@@ -45,9 +46,6 @@ sha2.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
 unicode-width.workspace = true
-
-[dev-dependencies]
-rusqlite.workspace = true
 
 [lints]
 workspace = true

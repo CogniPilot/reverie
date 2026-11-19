@@ -2,7 +2,7 @@
 mod activity;
 mod documents;
 mod journal;
-mod maintenance;
+pub(crate) mod maintenance;
 pub(crate) use maintenance::reflection_worker;
 mod recall;
 mod record;

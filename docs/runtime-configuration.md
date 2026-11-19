@@ -96,7 +96,7 @@ automatic room replies rather than falling back to a local guess.
   provider/model identifier before installing. Bridge actions need no model flag.
 - Runtime policies select `backends.local.model` and `keep_alive.model_id`.
   `examples/runtime-policy.json` uses `MODEL_ID` placeholders; replace both.
-- `reverie.sleep` takes `--policy`; all chat database, state, instance and employee
+- `reverie-sleep` takes `--policy`; all chat database, state, instance and employee
   selection values are supplied by that private policy. `examples/sleep.json` is
   dry-run only, with a generic instance path and a synthetic employee identifier.
 

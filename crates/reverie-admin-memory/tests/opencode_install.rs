@@ -82,6 +82,8 @@ fn send(mut command: Command, request: &Value) -> Output {
 
 #[path = "support/opencode_maintenance.rs"]
 mod maintenance;
+#[path = "support/maintenance_model.rs"]
+mod maintenance_model;
 #[path = "support/opencode_memory.rs"]
 mod memory;
 

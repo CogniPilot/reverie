@@ -20,7 +20,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(super) fn try_lock(path: &Path) -> Result<Option<Flock<File>>> {
+pub(crate) fn try_lock(path: &Path) -> Result<Option<Flock<File>>> {
     let opened = OpenOptions::new()
         .read(true)
         .write(true)

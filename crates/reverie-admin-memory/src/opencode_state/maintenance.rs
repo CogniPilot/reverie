@@ -3,6 +3,7 @@ mod dreaming;
 mod gpu;
 mod model;
 mod reflection;
+pub(crate) use gpu::try_lock;
 pub(crate) use reflection::insight::run as reflection_worker;
 
 use super::{Result, documents};
@@ -21,22 +22,44 @@ use std::{
 };
 
 pub(super) fn run(config: &MemoryConfiguration) -> Result<Value> {
+    admitted(config, || {
+        let memory = StartedMemory::initialize(config, &[])?;
+        let result = pass(config, memory.store());
+        let closed = memory.close();
+        let reply = result?;
+        closed?;
+        Ok(reply)
+    })
+}
+
+pub(crate) fn run_started(config: &MemoryConfiguration, store: &MemoryStore) -> Result<Value> {
+    admitted(config, || pass(config, store))
+}
+
+pub(crate) fn due(
+    config: &MemoryConfiguration,
+    store: &MemoryStore,
+    now: f64,
+) -> Result<(bool, bool)> {
+    let activity = state(store, "reverie_last_activity", now)?;
+    Ok((
+        reflection::Batch::due(config, store, now)?.is_some(),
+        dreaming::due(config, store, now, activity)?,
+    ))
+}
+
+fn admitted(config: &MemoryConfiguration, run: impl FnOnce() -> Result<Value>) -> Result<Value> {
     config.ensure_directories()?;
     let lock_path = config
         .native_path(MemoryPath::Data)?
         .join("maintenance.lock");
-    let Some(_lock) = gpu::try_lock(&lock_path)? else {
+    let Some(_lock) = try_lock(&lock_path)? else {
         return Ok(json!({"skipped":"another maintenance pass is running"}));
     };
     if gpu::busy(config) {
         return Ok(busy());
     }
-    let memory = StartedMemory::initialize(config, &[])?;
-    let result = pass(config, memory.store());
-    let closed = memory.close();
-    let reply = result?;
-    closed?;
-    Ok(reply)
+    run()
 }
 
 fn pass(config: &MemoryConfiguration, store: &MemoryStore) -> Result<Value> {

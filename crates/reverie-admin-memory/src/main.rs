@@ -38,6 +38,7 @@ mod reply_text;
 mod save;
 mod scoped_image;
 mod screen_output;
+mod sleep;
 mod token_meter;
 mod turn_capture;
 mod turn_context;
@@ -280,6 +281,7 @@ fn main() -> ExitCode {
         .and_then(|name| name.to_str())
     {
         Some("reverie-context") => return context_cli::entry(),
+        Some("reverie-sleep") => return sleep::entry(),
         Some("reverie-opencode" | "reverie-opencode-bridge") => {
             return opencode_install::entry(argv);
         }
