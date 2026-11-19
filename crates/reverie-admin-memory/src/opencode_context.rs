@@ -23,6 +23,8 @@ enum Action {
     AssignmentBudget,
     Charter,
     Safeguards,
+    Permissions,
+    Rules,
 }
 
 #[derive(Deserialize)]
@@ -72,6 +74,10 @@ pub(crate) fn execute(bytes: &[u8]) -> Value {
             Ok::<_, String>(guidance::charter(&role))
         }),
         Action::Safeguards => json!({"value": guidance::SAFEGUARDS}),
+        Action::Permissions => decode(&payload, |container_admin: bool| {
+            Ok::<_, String>(crate::opencode_install::permissions(container_admin))
+        }),
+        Action::Rules => json!({"value": crate::opencode_install::rules()}),
     }
 }
 

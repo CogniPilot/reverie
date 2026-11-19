@@ -25,6 +25,7 @@ mod managed_context;
 mod model_completion;
 mod office;
 mod opencode_context;
+mod opencode_install;
 mod private_directory;
 mod read_turn;
 mod recall;
@@ -211,6 +212,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-capture-worker" => journal_capture_worker,
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
+        "--opencode-install-worker" => opencode_install::worker,
         "--embedding-worker" => embedding_worker::run,
         "--hands-images-worker" => hands_images::run,
         "--hands-model-worker" => hands_model::run,
@@ -258,18 +260,17 @@ fn guarded_exec(
 }
 
 fn main() -> ExitCode {
-    if std::env::args_os()
-        .next()
-        .and_then(|arg| {
-            std::path::PathBuf::from(arg)
-                .file_name()
-                .map(std::ffi::OsStr::to_owned)
-        })
-        .is_some_and(|name| name == "reverie-context")
+    let argv = env::args_os().collect::<Vec<_>>();
+    match argv
+        .first()
+        .and_then(|arg| std::path::Path::new(arg).file_name())
+        .and_then(|name| name.to_str())
     {
-        return context_cli::entry();
+        Some("reverie-context") => return context_cli::entry(),
+        Some("reverie-opencode") => return opencode_install::entry(argv),
+        _ => {}
     }
-    let mut args = env::args_os().skip(1);
+    let mut args = argv.into_iter().skip(1);
     let flag = args.next();
     if let Some(code) = flag
         .as_deref()

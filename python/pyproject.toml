@@ -17,7 +17,7 @@ train = ["torch", "transformers", "peft", "bitsandbytes", "trl", "datasets", "ac
 [project.scripts]
 reverie-cycle = "reverie.cycle:main"
 reverie-runtime = "reverie.runtime:main"
-reverie-opencode = "reverie.opencode:main"
+reverie-opencode-bridge = "reverie.opencode:main"
 reverie-chat = "reverie.chat:main"
 reverie-sleep = "reverie.sleep:main"
 reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
@@ -26,7 +26,7 @@ reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
 package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
-reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md", "ops-core*.schema.json", "ops-classifier-pin.json"]
+reverie = ["ops-core*.schema.json", "ops-classifier-pin.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

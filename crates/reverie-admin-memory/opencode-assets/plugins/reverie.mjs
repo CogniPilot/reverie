@@ -65,22 +65,37 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
   const researchCycle = envName("RESEARCH_CYCLE_ID");
   const settings = JSON.parse(await readFile(join(directory, ".reverie-instance"), "utf8"));
   const bridge = (request) => new Promise((resolve, reject) => {
-    const native = request.action === "context" && settings.instance;
-    const command = native ? "reverie-context" : settings.python;
-    const args = native ? contextArgs(settings.instance, request) : ["-m", "reverie.opencode"];
+    const context = request.action === "context" && settings.instance;
+    const journal = request.action === "remember";
+    const packaged = settings.bridge === "reverie-opencode-bridge";
+    let command = packaged ? "reverie-opencode-bridge" : settings.python;
+    let args = packaged ? [] : ["-m", "reverie.opencode"];
+    if (context) {
+      command = "reverie-context";
+      args = contextArgs(settings.instance, request);
+    } else if (journal) {
+      command = "reverie-memory-journal";
+      args = ["--journal-only"];
+      const save = { action: "remember", private: !request.project };
+      for (const key of ["text", "project", "room", "turn", "tag", "quote", "source", "reason"]) {
+        if (key in request) save[key] = request[key];
+      }
+      request = save;
+    }
+    const legacySource = !context && !journal && !packaged;
     const child = execFile(command, args, {
-      cwd: native ? directory : settings.source,
-      env: native ? process.env : { ...process.env, PYTHONPATH: settings.source,
+      cwd: legacySource ? settings.source : directory,
+      env: { ...process.env, ...(legacySource ? { PYTHONPATH: settings.source } : {}),
         ...(settings.instance ? { REVERIE_INSTANCE_CONFIG: settings.instance } : {}) },
       timeout: request.action === "maintenance" ? 120000 : 60000,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (error) return reject(new Error(stderr.trim() || error.message));
-      if (native) return resolve(stdout.replace(/\n$/, ""));
+      if (context) return resolve(stdout.replace(/\n$/, ""));
       try { resolve(JSON.parse(stdout)); } catch (parseError) { reject(parseError); }
     });
     child.stdin.on("error", () => {});
-    child.stdin.end(native ? undefined : JSON.stringify(request));
+    child.stdin.end(context ? undefined : JSON.stringify(request));
   });
   const log = async (message) => {
     await client.app.log({ body: { service: "reverie", level: "error", message: String(message) } });

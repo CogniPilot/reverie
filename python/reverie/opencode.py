@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import shlex
 import fcntl
 import json
 import re
@@ -18,10 +17,11 @@ import urllib.parse
 import urllib.request
 
 from .chat import ChatDaemon
-from .reverie import Reverie, native_context, runtime_permissions, role_charter, safeguards, violates
+from .reverie import Reverie, native_context, violates
 from .project_memory import ProjectMemory
 from .persona import build_system_prompt
-from .instance import initial_self_for, identity_context, load_instance, primary_agent
+from .hands.agent_journal import native_memory_json
+from .instance import initial_self_for, identity_context, primary_agent
 from reverie import env_names
 
 
@@ -97,7 +97,7 @@ def dispatch(brain, request: dict):
     if action == "mode":
         return reverie.read("lifecycle", {"mode": "active"})["body"]
     if action == "rules":
-        return (Path(__file__).parent / "rules.md").read_text()
+        return native_context("rules", None)
     if action == "votes":
         return reverie.ballot_history()
     if action == "self_history":
@@ -306,117 +306,23 @@ def voice_reply(brain, transcript: str) -> tuple[bool, str | None]:
 
 
 # The tools a conversation turn may run; mirrors the allowlist in plugins/interaction.mjs (beforeTool).
-CHAT_TOOLS = ("interaction_mode", "reverie_memory", "reverie_room", "agent_profile")
-
-
 def install(workspace: Path, model: str, instance_config: Path | None = None,
             api_base: str | None = None, context_window: int = 32768,
             output_tokens: int = 4096, api_key_env: str | None = None) -> dict:
-    """Install only in a dedicated workspace. Refuse to overwrite unrelated config."""
-    instance = load_instance(instance_config) if instance_config else None
-    provider = None
-    if api_base:
-        endpoint = urllib.parse.urlsplit(api_base)
-        if endpoint.scheme not in ("http", "https") or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
-            raise ValueError("model API URL must not contain credentials, query or fragment")
-        if "/" not in model or not all(model.split("/", 1)):
-            raise ValueError("use provider/model for the local runtime")
-        if native_context("assignment_budget", {"window": context_window, "output": output_tokens, "occupied": 0}) < 512:
-            raise ValueError("model limits leave insufficient room for a task")
-        if api_key_env and not __import__('re').fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", api_key_env):
-            raise ValueError("API key must name an environment variable")
-        provider_name, model_id = model.split("/", 1)
-        provider = {provider_name: {"npm": "@ai-sdk/openai-compatible", "name": "Reverie local GPU",
-            "options": {"baseURL": api_base.rstrip("/"),
-                        "apiKey": "{env:" + api_key_env + "}" if api_key_env else "local",
-                        "timeout": 300000},
-            "models": {model_id: {"name": model_id, "tool_call": True,
-                                  "limit": {"context": context_window, "output": output_tokens}}}}}
-
-    if (workspace / ".git").exists():
-        raise ValueError("install into a dedicated runtime workspace, separate from the shareable source checkout")
-    workspace.mkdir(parents=True, exist_ok=True)
-    config = workspace / "opencode.json"
-    marker = workspace / ".reverie-instance"
-    if config.exists() and not marker.exists():
-        raise ValueError("workspace already has an unmanaged opencode.json")
-    plugins = workspace / ".opencode" / "plugins"
-    plugins.mkdir(parents=True, exist_ok=True)
-    source = Path(__file__).parent
-    # The source module's relative imports stay valid after a normal wheel install.
-    (plugins / "reverie.js").write_text((source / "plugins" / "reverie.mjs").read_text(), encoding="utf-8")
-    library = workspace / ".opencode" / "lib"
-    library.mkdir(parents=True, exist_ok=True)
-    (library / "interaction.mjs").write_text((source / "plugins" / "interaction.mjs").read_text(), encoding="utf-8")
-    (plugins / "zz-interaction.js").write_text((source / "plugins" / "interaction-plugin.mjs").read_text().replace(
-        "from './interaction.mjs'", "from '../lib/interaction.mjs'"), encoding="utf-8")
-    if marker.exists():
-        (plugins / "reverie.mjs").unlink(missing_ok=True)
-    permissions = runtime_permissions()
-    agent = primary_agent(instance)
-    settings = {"$schema": "https://opencode.ai/config.json", "default_agent": agent, "model": model,
-                "small_model": model,
-                "permission": permissions,
-                "agent": {agent: {"description": "Conversation and owner-authorized reverie maintenance" if agent == "chat" else "Persistent expert with owner-selected permissions",
-                                   "mode": "primary", "prompt": identity_context(instance) + "\n" + role_charter(instance) + "\n" + safeguards(),
-                                   "permission": permissions}}}
-    if agent == "chat":
-        settings["agent"][agent]["steps"] = 10
-        # The full toolset lives in the coding agent; conversation carries only the tools it may call, so its
-        # prompt stays small. Coding continuations switch agents (interaction-policy coding_agent).
-        settings["agent"]["coding"] = {**settings["agent"][agent], "steps": 24,
-            "description": "Bounded coding, then return to chat"}
-        settings["agent"][agent]["permission"] = {"*": "deny", **{name: "allow" for name in CHAT_TOOLS},
-                                                  "reverie_return": permissions.get("reverie_return", "ask")}
-        policy = workspace / ".opencode" / "interaction-policy.json"
-        if not policy.exists():
-            policy.write_text(json.dumps({"enabled": True, "role": getattr(instance, "role", "Expert"),
-                "max_continuations": 3, "coding_window_ms": 600000, "cooldown_ms": 10000,
-                "coding_agent": "coding"}) + "\n")
-        else:
-            # An older policy predates coding_agent; without it the lean chat agent could never reach its tools.
-            current = json.loads(policy.read_text())
-            if isinstance(current, dict) and "coding_agent" not in current:
-                policy.write_text(json.dumps({**current, "coding_agent": "coding"}) + "\n")
-    if provider:
-        settings["provider"] = provider
-    config.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-    (workspace / ".opencode" / "package.json").write_text(
-        json.dumps({"private": True, "type": "module", "dependencies": {"@opencode-ai/plugin": "1.15.10"}}, indent=2) + "\n")
-    # The plugin reads this metadata without embedding machine paths in portable source.
-    metadata = {"python": sys.executable, "source": str(source.parent),
-                "cycle_managed": env_names.lookup("REVERIE_CYCLE_MANAGED") == "1"}
-    if instance_config:
-        metadata["instance"] = str(instance_config.expanduser().resolve(strict=True))
-    marker.write_text(json.dumps(metadata) + "\n")
-    (workspace / "REVERIE_RULES.md").write_text((source / "rules.md").read_text(), encoding="utf-8")
-    for skill in (source / "skills").glob("*/SKILL.md"):
-        for base in (".agents", ".claude", ".opencode"):
-            dest = workspace / base / "skills" / skill.parent.name / "SKILL.md"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(skill.read_text(), encoding="utf-8")
-    if instance_config:
-        command = shlex.join(["reverie-context", "--instance",
-                              str(instance_config.expanduser().resolve(strict=True)), "--channel", "work"])
-        instructions = ("<!-- reverie:begin -->\n"
-            "This workspace runs one configured persistent agent. The OpenCode plugin automatically loads identity and "
-            "bounded context; do not run this command again there. In other harnesses, before taking work load identity, "
-            "current values, lifecycle mode, durable plan and context with:\n\n```bash\n" + command + "\n```\n\n"
-            "Read the reverie-memory skill for explicit scoped long-term lookup, and reverie-runtime for "
-            "model changes. Use reverie-context for task-specific context. "
-            "Select the actual model context/output limits when available. Shared-channel "
-            "context is the default. Load private context only in an actual private conversation. "
-            "Preserve the same instance across provider changes. Weight training is disabled.\n"
-            "<!-- reverie:end -->\n")
-        for filename in ("AGENTS.md", "CLAUDE.md"):
-            path = workspace / filename
-            previous = path.read_text() if path.exists() else ""
-            begin = previous.find("<!-- reverie:begin -->")
-            end = previous.find("<!-- reverie:end -->")
-            if begin >= 0 and end >= begin:
-                previous = previous[:begin] + previous[end + len("<!-- reverie:end -->"):]
-            path.write_text(previous.rstrip() + "\n\n" + instructions, encoding="utf-8")
-    return {"workspace": str(workspace), "model": model}
+    """Compatibility caller for the native workspace installer."""
+    request = {
+        "install": {"install": str(workspace), "model": model,
+                    "instance": str(instance_config) if instance_config else None,
+                    "api_base": api_base, "context_window": context_window,
+                    "output_tokens": output_tokens, "api_key_env": api_key_env},
+        "legacy": {"python": sys.executable, "source": str(Path(__file__).resolve().parent.parent)},
+    }
+    result = native_memory_json("opencode-install-worker", request, 32768, timeout=30)
+    if result is None:
+        raise RuntimeError("the packaged OpenCode installer is unavailable")
+    if "error" in result:
+        raise ValueError(result["error"])
+    return result
 
 
 def main(argv=None) -> int:

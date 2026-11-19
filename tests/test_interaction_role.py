@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 from reverie.reverie import role_charter
-from reverie.opencode import CHAT_TOOLS
 
 CHARTER = "You are a persistent AI agent and expert."
 
@@ -53,7 +52,7 @@ class InteractionRoleTest(unittest.TestCase):
             self.assertEqual(set(settings["agent"]), {"chat", "coding"})
             chat, coding = settings["agent"]["chat"], settings["agent"]["coding"]
             self.assertEqual(chat["permission"]["*"], "deny")                       # conversation is lean
-            self.assertEqual({k for k, v in chat["permission"].items() if v == "allow"}, set(CHAT_TOOLS))
+            self.assertEqual({k for k, v in chat["permission"].items() if v == "allow"}, {"interaction_mode", "reverie_memory", "reverie_room", "agent_profile"})
             self.assertNotEqual(coding["permission"].get("*"), "deny")              # the coding agent keeps the toolset
             self.assertEqual(coding["steps"], 24)
             policy = workspace / ".opencode/interaction-policy.json"
@@ -106,9 +105,9 @@ class InteractionRoleTest(unittest.TestCase):
 
     def test_chat_tools_match_the_plugin_allowlist(self):
         import re
-        source = (Path(__file__).resolve().parent.parent / "python/reverie/plugins/interaction.mjs").read_text()
+        source = (Path(__file__).resolve().parent.parent / "crates/reverie-admin-memory/opencode-assets/plugins/interaction.mjs").read_text()
         allowed = re.search(r"const allowed = \[([^\]]*)\]", source).group(1)
-        self.assertEqual(set(re.findall(r"'([a-z_]+)'", allowed)), set(CHAT_TOOLS))
+        self.assertEqual(set(re.findall(r"'([a-z_]+)'", allowed)), {"interaction_mode", "reverie_memory", "reverie_room", "agent_profile"})
 
     def test_cto_defaults_keep_their_charter(self):
         self.assertIn(CHARTER, role_charter())
@@ -124,7 +123,7 @@ class InteractionRoleTest(unittest.TestCase):
     def test_default_prompt_sources_do_not_assign_a_privileged_title(self):
         from reverie.persona import DEFAULT_PERSONA
         root = Path(__file__).resolve().parent.parent
-        rules = (root / "python/reverie/rules.md").read_text()
+        rules = (root / "crates/reverie-admin-memory/opencode-assets/rules.md").read_text()
         self.assertNotIn("You are the CTO", DEFAULT_PERSONA + CHARTER + rules)
         self.assertIn("titles grant no permissions", rules)
         for role in ("CTO", "COO", "Researcher"):

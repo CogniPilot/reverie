@@ -59,18 +59,7 @@ INITIAL_SELF = {
 
 
 def runtime_permissions(container_admin: bool = False) -> dict:
-    """Owner-reviewed OpenCode controls; self-model tools cannot edit these."""
-    if container_admin:
-        return {"*": "allow", "reverie_return": "ask"}
-    return {"*": "ask", "read": {"*": "allow", "*.env": "deny", "*.env.*": "deny",
-            "*/.ssh/*": "deny", "*/.codex-accounts/*": "deny", "*/.claude-accounts/*": "deny"},
-            "glob": "allow", "grep": "allow", "skill": "allow", "todowrite": "allow", "todoread": "allow",
-            "bash": "ask", "external_directory": "ask", "task": "ask", "webfetch": "ask", "websearch": "ask",
-            "edit": {"*": "ask", "opencode.json": "deny", "*/opencode.json": "deny",
-                     ".reverie-instance": "deny", "*/.reverie-instance": "deny", ".opencode/*": "deny",
-                     "*/.opencode/*": "deny", "*/.config/opencode/*": "deny",
-                     "*/reverie/reverie.py": "deny", "*/reverie/opencode.py": "deny", "*/reverie/plugins/*": "deny"},
-            "reverie_memory": "allow", "reverie_tools": "allow", "reverie_room": "allow", "reverie_return": "ask"}
+    return native_context("permissions", container_admin)
 
 DEFAULT_PLAN = """# Reverie plan
 

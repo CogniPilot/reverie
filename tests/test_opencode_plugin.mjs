@@ -13,6 +13,37 @@ for (const key of Object.keys(process.env)) {
   if (key.startsWith("REVERIE_")) delete process.env[key];
 }
 
+test("the OpenCode journal save calls the native client with only the save fields", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "opencode-journal-"));
+  const oldPath = process.env.PATH;
+  try {
+    process.env.PATH = dir;
+    await writeFile(join(dir, ".reverie-instance"), JSON.stringify({
+      bridge: "reverie-opencode-bridge", cycle_managed: true,
+    }));
+    const command = join(dir, "reverie-memory-journal");
+    await writeFile(command, NODE_SHEBANG + `
+      const fs = require("node:fs");
+      const input = JSON.parse(fs.readFileSync(0, "utf8"));
+      console.log(JSON.stringify({ args: process.argv.slice(2), input }));
+    `, { mode: 0o700 });
+    const source = (await readFile(new URL("../crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs", import.meta.url), "utf8")).replace(
+      'import { tool } from "@opencode-ai/plugin";',
+      'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
+    const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+    const hooks = await ReveriePlugin({ directory: dir });
+    const save = { action: "remember", text: "Include the requested fact", project: "", source: "",
+      room: "fixture-room", turn: "fixture-message", tag: "decision", quote: "the requested fact" };
+    const result = JSON.parse(await hooks.tool.reverie_memory.execute(save));
+    assert.deepEqual(result, { args: ["--journal-only"], input: { ...save, private: true } });
+    const project = JSON.parse(await hooks.tool.reverie_memory.execute({ ...save, project: "fixture-project" }));
+    assert.deepEqual(project.input, { ...save, project: "fixture-project", private: false });
+  } finally {
+    process.env.PATH = oldPath;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("OpenCode hooks restore context, persist complete turns once, and compose developer briefs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "assistant-plugin-"));
   const oldEnv = { ...process.env };
@@ -21,7 +52,7 @@ test("OpenCode hooks restore context, persist complete turns once, and compose d
     Object.assign(process.env, { REVERIE_HOME: dir, REVERIE_DATA_DIR: join(dir, "data"), REVERIE_EMBED_URL: "" });
     await mkdir(join(dir, "data"));
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: "python3", source: join(root, "python") }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -101,7 +132,7 @@ test("A configured OpenCode instance loads the native context without starting P
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({
       python: join(dir, "unused-python"), source: join(dir, "unused-source"), instance
     }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -129,7 +160,7 @@ test("Research cycles mark activity without registering a primary runtime, recor
       'process.stdin.on("end", () => { fs.appendFileSync(process.env.REVERIE_TEST_REQUESTS, input + "\\n"); process.stdout.write("{}"); });\n', {mode: 0o700});
     Object.assign(process.env, { REVERIE_RESEARCH_CYCLE_ID: "research-cycle", REVERIE_TEST_REQUESTS: requests });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python") }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -174,7 +205,7 @@ test("A refused turn is logged and skipped, later turns still record, and each i
       '  process.stdout.write("{}"); });\n', {mode: 0o700});
     Object.assign(process.env, { REVERIE_TEST_REQUESTS: requests });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -220,7 +251,7 @@ test("reverie_room targets the room a message came from, takes an explicit room,
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls, REVERIE_CYCLE_MANAGED: "1",
       REVERIE_HOME: dir, REVERIE_DATA_DIR: join(dir, "data"), REVERIE_EMBED_URL: "" });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: "python3", source: join(root, "python") }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -272,7 +303,7 @@ test("reverie_room targets the room a message came from, takes an explicit room,
 
 test("Room guidance never tells an agent to address a single member", async () => {
   const root = resolve(import.meta.dirname, "..");
-  for (const file of ["python/reverie/reverie.py", "python/reverie/skills/reverie/SKILL.md", "python/reverie/plugins/reverie.mjs"]) {
+  for (const file of ["python/reverie/reverie.py", "crates/reverie-admin-memory/opencode-assets/skills/reverie/SKILL.md", "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"]) {
     assert.doesNotMatch(await readFile(join(root, file), "utf8"), /--to user|chat say --to/, file);
   }
 });
@@ -307,7 +338,7 @@ test("The reply guard relays an unposted reply only to rooms the delivery named,
     await writeFile(bridge, NODE_SHEBANG + 'process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true, reply_guard: "post", reply_guard_grace_ms: 40, reply_guard_coding_ms: 400 }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
@@ -461,7 +492,7 @@ test("Delivery-format contract, DM privacy, the turn clock and the web taint", a
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true,
       reply_guard: "post", reply_guard_grace_ms: 40, reply_guard_coding_ms: 400, timezone: "America/New_York" }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});')
       + "\nexport { roomsOf, ownerRoomsOf, channelOf, clockLine };\n";   // test-only exports
@@ -570,7 +601,7 @@ test("By default the reply guard logs an unposted final text instead of posting 
     await writeFile(bridge, NODE_SHEBANG + 'process.stdin.resume(); process.stdin.on("end", () => process.stdout.write("{}"));\n', {mode: 0o700});
     Object.assign(process.env, { PATH: bin + ":" + process.env.PATH, REVERIE_TEST_CALLS: calls });
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: bridge, source: join(root, "python"), cycle_managed: true, reply_guard_grace_ms: 40, reply_guard_coding_ms: 400 }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));

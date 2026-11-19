@@ -406,7 +406,7 @@ function memberLine(room: ChatRoom, nameOf: (id: string) => string, exclude?: st
 /**
  * The room's name in a delivered header. A direct message is named by its id (`DM:<roomId>`), so a harness can tell it is
  * private and reply into exactly that DM; "Direct message" is only its label, the same for every DM. Harness parsers
- * (python/reverie/plugins) read this; test/fixtures/delivery-lines.json pins the format for both sides.
+ * (the OpenCode plugins) read this; test/fixtures/delivery-lines.json pins the format for both sides.
  */
 export function deliveryRoomName(room: { id: string; name: string; kind?: 'dm'; dm?: string[] }): string {
   return isDm(room as never) ? `DM:${room.id}` : roomLabel(room);

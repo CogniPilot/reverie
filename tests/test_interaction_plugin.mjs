@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInteractionController, CONTINUATION } from '../python/reverie/plugins/interaction.mjs';
+import { createInteractionController, CONTINUATION } from '../crates/reverie-admin-memory/opencode-assets/plugins/interaction.mjs';
 
 async function setup(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'interaction-test-'));
@@ -137,9 +137,9 @@ async function wrapper(t, child = false, policy = {}) {
   const schema = { max() { return this; }, optional() { return this; } };
   const tool = Object.assign((definition) => definition, { schema: { enum: () => schema, string: () => schema } });
   globalThis.__interactionTestTool = tool;
-  const source = (await readFile(new URL('../python/reverie/plugins/interaction-plugin.mjs', import.meta.url), 'utf8'))
+  const source = (await readFile(new URL('../crates/reverie-admin-memory/opencode-assets/plugins/interaction-plugin.mjs', import.meta.url), 'utf8'))
     .replace("import { tool } from '@opencode-ai/plugin';", 'const tool = globalThis.__interactionTestTool;')
-    .replace("'./interaction.mjs'", JSON.stringify(new URL('../python/reverie/plugins/interaction.mjs', import.meta.url).href));
+    .replace("'./interaction.mjs'", JSON.stringify(new URL('../crates/reverie-admin-memory/opencode-assets/plugins/interaction.mjs', import.meta.url).href));
   const factory = (await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))).default;
   const hooks = await factory({ directory: f.directory, client: {
     session: { ...f.args.client.session, get: async () => ({ data: child ? { parentID: 'parent' } : {} }) },
