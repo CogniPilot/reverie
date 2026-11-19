@@ -15,6 +15,9 @@ import time
 import uuid
 
 
+COMMAND_KEYS = ('shell', 'python', 'git', 'zip')
+
+
 @dataclass(frozen=True)
 class Principal:
     """Trusted in-process binding supplied by the existing authenticated runtime.
