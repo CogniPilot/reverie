@@ -80,17 +80,14 @@ fn prepare(root: &Path, temp: &TestDir, files: &str) -> BTreeSet<PathBuf> {
         "skills/reverie/SKILL.md",
         "apps/web/src/example.ts",
         "apps/web/package.json",
-        "python/reverie/fixture.json",
+        "crates/reverie-application/src/installing_broker/goal_custody/tests/web_fixture.rs",
+        "crates/reverie-host/src/worker_laptop/tests/existing_viewer/transport/web_fixture.rs",
         "crates/reverie-routes/src/lib.rs",
     ]
     .into_iter()
     .map(PathBuf::from)
     .collect::<BTreeSet<_>>();
-    for path in [
-        "skills/reverie/SKILL.md",
-        "apps/web/src/example.ts",
-        "python/reverie/fixture.json",
-    ] {
+    for path in ["skills/reverie/SKILL.md", "apps/web/src/example.ts"] {
         temp.write(path, "fixture\n");
     }
     let package = fs::read_to_string(root.join("nix/package.nix")).unwrap();
@@ -147,6 +144,7 @@ fn copy_file(src: &Path, root: &Path, relative: &str, is_symlink: bool) {
 
 fn unrelated_edits(temp: &TestDir) {
     temp.write("README.md", "Unrelated documentation edit.\n");
+    temp.write("python/reverie/unused.py", "Unrelated legacy source.\n");
     temp.write(
         "crates/reverie-core/target/cache-entry",
         "Unrelated build result.\n",

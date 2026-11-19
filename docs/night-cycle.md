@@ -100,7 +100,7 @@ and `reverie-memory remember`. Restoring under them can corrupt the store or los
 4. Restore and check:
    ```
    install -m 0600 <backup_dir>/<agent>/<night>.sqlite memory.sqlite
-   python3 -c "import sqlite3; print(sqlite3.connect('memory.sqlite').execute('PRAGMA quick_check').fetchone()[0])"
+   sqlite3 -readonly memory.sqlite 'PRAGMA quick_check;'
    ```
    Then restore `profile.md` from `<night>.profile.md` with mode 0600.
 5. **Writes made after the backup are lost:** turns recorded during that day, and the night's

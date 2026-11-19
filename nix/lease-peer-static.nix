@@ -5,7 +5,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
   dontUnpack = true;
   buildPhase = ''
     $CC ${pkgs.lib.optionalString testRoots "-DREVERIE_TEST_ROOTS"} -std=c11 -Os -Wall -Wextra -Werror -static -no-pie \
-      ${src}/python/reverie/cleanup/peer_static.c -lm -o reverie-acceptance-peer
+      ${src}/nix/lease-peer-static.c -lm -o reverie-acceptance-peer
   '';
   installPhase = ''
     mkdir -p "$out/bin"

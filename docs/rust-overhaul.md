@@ -41,7 +41,7 @@ ability to use scientific Python inside an employee laptop.
 
 At `dcf331d29` the tracked tree contains 453 `.py` files. Of those, 204 are
 under `python/`, 226 are under `tests/`, and 23 are distributed across
-`scripts/`, `apps/`, `nix/` and `.github/`. The worker image still selects
+`scripts/`, `apps/`, `nix/` and `.github/`. That revision's worker image selected
 the compatibility interpreter in `nix/worker-python.nix`. Removing a console
 script registration alone leaves the interpreter and its other consumers in
 that image.

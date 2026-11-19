@@ -736,16 +736,13 @@ unqualified.
 
 ## Validation
 
-Enter `nix develop` before running the checks. Custody-sensitive fixtures require
-private scratch under trusted directory ancestry; a `TMPDIR` under world-writable
-`/tmp` causes those fixtures to refuse. Unix socket fixtures also require a short
-path. Select a short private temporary directory for the suite:
+Run the Rust workspace gate and OpenCode plugin tests in the pinned environment.
+Use a task-specific Cargo target directory. Custody-sensitive fixtures manage
+their own trusted directories.
 
 ```bash
-mkdir -m 700 -p "$HOME/rt"
-export TMPDIR="$HOME/rt"
-nix shell .#reverie.runtime.adminMemory -c python3 -m unittest discover -s tests
-nix shell .#reverie.runtime.adminMemory -c node --test tests/test_opencode_plugin.mjs
+nix develop --command cargo xtask verify
+nix develop --command nix shell .#reverie.runtime.adminMemory --command node --test tests/test_opencode_plugin*.mjs
 ```
 
 Tests cover memory, reflection, dreams, deliberate values, scope isolation, lifecycle
@@ -753,12 +750,10 @@ archives, model continuity, context budgeting and scratch leases. Test histories
 synthetic fixtures. Keep migration receipts and operational logs in private instance
 storage; do not commit them with the shareable source.
 
-The portable acceptance-helper controls run separately inside `nix develop`:
+Run the stale-session fixture controls separately:
 
 ```bash
-python3 scripts/acceptance/stale-busy-lifecycle.test.py
-python3 scripts/acceptance/task-cancel-source.test.py
-python3 scripts/acceptance/task-cancel-scope.test.py
+nix develop --command node --test scripts/acceptance/stale-busy-spec.test.mjs
 ```
 
 These controls do not start the native fixtures. The native runners' `--help`
@@ -768,15 +763,7 @@ component acceptance from production agent authentication or laptop replacement.
 
 ## Proposed memory design
 
-GitHub displays the [memory explorer HTML source](memory-explorer.html) rather than running it.
-To view the standalone demo, run this from the repository root:
-
-```bash
-python3 -m http.server 8000 --bind 127.0.0.1 --directory docs
-```
-
-Then [open the memory explorer](http://127.0.0.1:8000/memory-explorer.html).
-Stop the preview server with Ctrl+C when finished.
+Open the standalone [memory explorer](memory-explorer.html) from a local checkout in your browser.
 
 The demo contains only synthetic records and shows a self-organizing tag tree, typed
 associations, human-inspired consolidation and bounded task-context selection.

@@ -1,7 +1,12 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
+
+export const nativeClaudeBackend = (process.env.PATH ?? '')
+  .split(delimiter)
+  .map((path) => join(path, 'reverie-backend'))
+  .find(existsSync);
 
 /** Execute the real selector and shell quoting with a synthetic provider only. */
 export function captureClaudeLaunch(command: string, transcriptId?: string): string[] {
@@ -12,10 +17,7 @@ export function captureClaudeLaunch(command: string, transcriptId?: string): str
     const bin = join(root, 'bin');
     const log = join(root, 'calls.jsonl');
     for (const directory of [home, config, bin]) mkdirSync(directory);
-    const python = execFileSync('python3', ['-I', '-c', 'import sys;print(sys.executable)'], {
-      encoding: 'utf8',
-    }).trim();
-    symlinkSync(python, join(bin, 'python3'));
+    if (nativeClaudeBackend) symlinkSync(nativeClaudeBackend, join(bin, 'reverie-backend'));
     const provider = join(bin, 'claude');
     writeFileSync(
       provider,

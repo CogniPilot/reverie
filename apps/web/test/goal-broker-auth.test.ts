@@ -1,6 +1,9 @@
-import { createHash, createHmac } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { goalFixtureRepository } from './goal-source-fixture.js';
+import {
+  syntheticGoalAssertion,
+  syntheticGoalForward,
+  syntheticGoalKey as KEY,
+  syntheticGoalSession as SID,
+} from './helpers/goal-proof-fixture.js';
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,35 +17,8 @@ import {
   type GoalNonceKey,
 } from '../src/goal-broker-auth.js';
 
-const SID = '11111111-2222-3333-4444-555555555555';
-const KEY = Buffer.from('not-a-deployment-key-synthetic-01!');
 const BODY = Buffer.from('{"objective":"synthetic"}');
-const sha = (body: Buffer) => createHash('sha256').update(body).digest('hex');
-function token(overrides: Record<number, unknown> = {}, body = BODY): string {
-  const fields: unknown[] = [
-    1,
-    'goal-request',
-    'test-broker',
-    'test-epoch',
-    SID,
-    7,
-    'POST',
-    '/api/goals',
-    sha(body),
-    100_000,
-    110_000,
-    'a'.repeat(32),
-  ];
-  for (const [index, value] of Object.entries(overrides)) fields[Number(index)] = value;
-  const encoded = Buffer.from(JSON.stringify(fields)).toString('base64url');
-  return (
-    encoded +
-    '.' +
-    createHmac('sha256', KEY)
-      .update('reverie-goal-request-v1\n' + encoded)
-      .digest('hex')
-  );
-}
+const token = (overrides: Record<number, unknown> = {}, body = BODY) => syntheticGoalAssertion(body, overrides);
 function fixture() {
   let now = 100_000;
   let binding: GoalBrokerBinding | undefined = {
@@ -111,26 +87,37 @@ const request = (assertion = token(), extra = {}) => ({
 const denied = (operation: Promise<unknown>) =>
   expect(operation).rejects.toMatchObject({ code: 'GOAL_FORBIDDEN', status: 403 });
 
-// Component mode uses real codecs with synthetic key/binding/clock/transport; it is not Office signing.
-// One interpreter answers every input in order, each forwarded on its own.
-function fixtureForward(mode: 'component-proof' | 'restricted-office', inputs: Record<string, unknown>[]) {
-  const args = ['-B', '-m', 'tests.goal_broker_fixture'];
-  if (mode === 'component-proof') args.push('--component-proof');
-  return JSON.parse(
-    execFileSync('python3', args, {
-      cwd: goalFixtureRepository(import.meta.dirname),
-      input: JSON.stringify(inputs),
-      encoding: 'utf8',
-      timeout: 5000 * inputs.length,
-      env: { PATH: process.env.PATH, HOME: process.env.HOME, PYTHONDONTWRITEBYTECODE: '1' },
-    })
-  );
+function componentProof(input: {
+  method?: 'GET' | 'POST';
+  target?: string;
+  body?: string;
+  headers?: Record<string, string>;
+}) {
+  return syntheticGoalForward({ ...input, method: input.method ?? 'POST' });
 }
 
-const componentProof = (input: Record<string, unknown>) => fixtureForward('component-proof', [input])[0];
-const restrictedOffice = (input: Record<string, unknown>) => fixtureForward('restricted-office', [input])[0];
-
 describe('purpose-separated broker Goal boundary', () => {
+  it('keeps the legacy assertion bytes for a canonical metadata request', async () => {
+    const target = '/api/goal-metadata/AA:.._-?grantId=g:1';
+    const assertion = syntheticGoalForward({
+      method: 'GET',
+      target,
+      body: '',
+      nonce: '0123456789abcdef0123456789abcdef',
+    }).headers['X-Reverie-Goal-Assertion'];
+    // Captured from the legacy signer with the same synthetic fixture key.
+    expect(assertion).toBe(
+      'WzEsImdvYWwtcmVxdWVzdCIsInRlc3QtYnJva2VyIiwidGVzdC1lcG9jaCIsIjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIs' +
+        'NywiR0VUIiwiL2FwaS9nb2FsLW1ldGFkYXRhL0FBOi4uXy0_Z3JhbnRJZD1nOjEiLCJlM2IwYzQ0Mjk4ZmMxYzE0OWFmYmY0Yzg5OTZmYjky' +
+        'NDI3YWU0MWU0NjQ5YjkzNGNhNDk1OTkxYjc4NTJiODU1IiwxMDAwMDAsMTEwMDAwLCIwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2Rl' +
+        'ZiJd.63ee6058c8df5c156d2ace1ce1074a77d813bd3881d0f986ffe30e2937ac8ccf'
+    );
+    const context = {};
+    const { auth } = fixture();
+    await auth.verify(context, { method: 'GET', target, body: Buffer.alloc(0), assertion });
+    expect((await auth.authenticate(context))?.employeeId).toBe('employee-1');
+  });
+
   const canonicalRoutes = (value: string): Array<{ method: 'GET' | 'POST'; target: string; route: string }> => [
     { method: 'GET', target: '/api/goals/' + value, route: '/api/goals/:id' },
     { method: 'POST', target: '/api/goals/' + value + '/transitions', route: '/api/goals/:id/transitions' },
@@ -156,9 +143,8 @@ describe('purpose-separated broker Goal boundary', () => {
     async (size) => {
       const value = 'Aa0_.:-'.repeat(15).slice(0, size);
       const routes = canonicalRoutes(value);
-      const forwards = fixtureForward(
-        'component-proof',
-        routes.map(({ method, target }) => ({ method, target, body: method === 'GET' ? '' : '{}' }))
+      const forwards = routes.map(({ method, target }) =>
+        componentProof({ method, target, body: method === 'GET' ? '' : '{}' })
       );
       for (const [index, { method, target, route }] of routes.entries()) {
         expect(isBrokerGoalRequest(method, target)).toBe(true);
@@ -193,13 +179,9 @@ describe('purpose-separated broker Goal boundary', () => {
   );
 
   it.each(['x'.repeat(101), 'bad%41', 'bad/name', 'bad name', 'bad\n', 'nonascii-é', 'bad?extra=1'])(
-    'both languages reject overlong or invalid canonical route identifier %s',
+    'rejects overlong or invalid canonical route identifier %s',
     async (value) => {
       const routes = canonicalRoutes(value);
-      const inputs = routes.map(({ method, target }) => ({ method, target, body: method === 'GET' ? '' : '{}' }));
-      const refusal = { refused: 403, upstream: false, environmentReads: 0 };
-      for (const mode of ['component-proof', 'restricted-office'] as const)
-        expect(fixtureForward(mode, inputs)).toEqual(inputs.map(() => refusal));
       for (const { method, target } of routes) {
         expect(isBrokerGoalRequest(method, target), target).toBe(false);
         const f = fixture();
@@ -548,17 +530,6 @@ describe('purpose-separated broker Goal boundary', () => {
     }
   });
 
-  it('actual restricted Office refuses Goal forwarding even with a valid synthetic component proof', () => {
-    const forwarded = componentProof({ body: BODY.toString() });
-    expect(forwarded.headers['X-Reverie-Goal-Assertion']).toEqual(expect.any(String));
-    for (const headers of [{}, forwarded.headers])
-      expect(restrictedOffice({ body: BODY.toString(), headers })).toEqual({
-        refused: 403,
-        upstream: false,
-        environmentReads: 0,
-      });
-  });
-
   it('ordinary Basic/parent headers never create a Goal principal', async () => {
     expect(
       await fixture().auth.authenticate({
@@ -570,6 +541,5 @@ describe('purpose-separated broker Goal boundary', () => {
         principal: { kind: 'owner' },
       })
     ).toBeUndefined();
-    expect(restrictedOffice({ unavailable: true })).toEqual({ refused: 403, upstream: false, environmentReads: 0 });
   });
 });

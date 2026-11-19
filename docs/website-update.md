@@ -20,13 +20,8 @@ The sole replacement builder is
 `replacement_spec(old_container, previous_image, target_image, admin_phone_wake)`.
 The sole cutover implementation is:
 
-```python
-stage = WebsiteStage(api, state_directory, deployment_path, schema_policy_path,
-                     guard=guard, ready=ready)
-plan = stage.plan(name, target_image, expected_container_id, expected_image)
-# An explicit owner action approves the exact final spec and then the plan digest.
-receipt = stage.apply(plan, expected_plan_digest)
-```
+The archived stage first planned against the expected container and image. Applying the
+plan required approval of the exact replacement specification and plan digest.
 
 `api(method, path, data=None)` is a bounded local engine JSON transport. `ready(id,
 spec)` is a bounded, read-only readiness check that must return exactly `True`.

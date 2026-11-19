@@ -207,13 +207,10 @@ fn startup_runs_in_the_legacy_order_and_close_removes_the_socket() {
     let core = Arc::new(Fake::default());
     let socket = scratch("order");
     let (service, handle) = running(core.clone(), all_owners(), &socket);
-    assert_eq!(
-        core.log()[..4],
-        ["check_pool", "recover", "lease", "watchdog"]
-    );
     assert_eq!(fs::symlink_metadata(&socket).unwrap().mode() & 0o777, 0o600);
     service.request_close();
     assert_eq!(handle.join().unwrap(), Ok(()));
+    assert_eq!(core.log(), ["check_pool", "recover", "lease", "watchdog"]);
     assert!(fs::symlink_metadata(&socket).is_err());
 }
 

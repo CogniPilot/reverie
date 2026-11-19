@@ -1,11 +1,9 @@
-{ pkgs, src, reverie, console, memory, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
-  imagePython = if worker then import ./worker-python.nix { inherit pkgs; } else memory;
-  imageLaunchers = if worker then reverie.imageLaunchers else reverie;
-  imageRuntime = if worker then runtime.worker else runtime;
+  imageLaunchers = reverie.imageLaunchers;
   laptopTools = if runtimePackages == null then import ./laptop-tools.nix { inherit pkgs src; }
     else runtimePackages.laptopTools;
   childArtifacts = if runtimePackages == null then import ./policy-artifacts.nix { inherit pkgs src; }
@@ -27,7 +25,7 @@ let
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-certificates.crt
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/pki/tls/certs/ca-bundle.crt
   '';
-  baseContents = [ imageRuntime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
+  baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optional (!worker) runtime.voiceService
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare laptopTools ]
@@ -40,7 +38,7 @@ let
     ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
   nixBase = pkgs.linkFarm "reverie-laptop-base" (pkgs.lib.imap0 (i: path: {
     name = "share/reverie/base/${toString i}"; inherit path;
-  }) (baseContents ++ [ imageLaunchers console imagePython entrypoint ]));
+  }) (baseContents ++ [ imageLaunchers console entrypoint ]));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
   webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
@@ -136,7 +134,6 @@ pkgs.dockerTools.buildLayeredImage rec {
     ln -s ${console}/lib/reverie opt/reverie/console
     mkdir -p opt/reverie/apps
     ln -s ${console}/lib/reverie opt/reverie/apps/web
-    ln -s ${imagePython} opt/reverie/python
     ln -s ${entrypoint} usr/local/bin/reverie-start
     ${pkgs.lib.optionalString (worker && claudeInterpreter != null) ''
       mkdir -p .${builtins.dirOf claudeInterpreter}
@@ -152,13 +149,6 @@ pkgs.dockerTools.buildLayeredImage rec {
       mkdir opt/reverie/worker-child
       cp ${childManifest} opt/reverie/worker-child/program.json
       chmod 444 opt/reverie/worker-child/program.json
-      # Supply the project interpreter and test runner independently of the service runtime.
-      for command in python python3 ${pkgs.python3.executable} pytest py.test; do
-        if [ -L "bin/$command" ]; then unlink "bin/$command"; fi
-        test ! -e "bin/$command"
-        test -x ${imagePython}/bin/"$command"
-        ln -s ${imagePython}/bin/"$command" "bin/$command"
-      done
       mkdir -p opt/reverie/human/bin
       # Direct image-root files, not links into the laptop's writable /nix.
       cp ${humanToolkit}/opt/reverie/human/bin/{reverie-human-shell,bash} opt/reverie/human/bin/
@@ -176,12 +166,12 @@ pkgs.dockerTools.buildLayeredImage rec {
       done
     ''}
     chmod 1777 tmp
-  '' + pkgs.lib.optionalString worker ''
-    mkdir -p etc/nix nix/store/.links target/nix
-    if grep -Eq '/[^/]+-python[^/]*-reverie-memory-' ${nixClosure}/store-paths; then
-      echo "Legacy Reverie Python package reached the worker closure" >&2
+    if grep -E '/[^/]+-(python|pypy)[0-9.]*(-|$)' ${nixClosure}/store-paths >&2; then
+      echo "Python reached the image runtime closure" >&2
       exit 1
     fi
+  '' + pkgs.lib.optionalString worker ''
+    mkdir -p etc/nix nix/store/.links target/nix
     cp ${nixClosure}/registration etc/reverie-nix-registration
     ln -s ${nixBase} etc/reverie-nix-base
     cat > etc/nix/nix.conf <<'NIXCONF'

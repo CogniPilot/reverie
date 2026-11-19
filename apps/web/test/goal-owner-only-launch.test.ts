@@ -1,14 +1,21 @@
 /** Owner-only ordinary launcher -> private bootstrap -> actual WebServer/canonical adapter/disk nonce.
  * Web listener, engine inspection, packaged executable metadata and missing trusted
  * original-program observer are explicitly synthetic edges. The
- * closed broker protocol, custody checks and restricted Broker.office refusal run in
- * an owned Python fixture. No host endpoint, provider, real key or live mount.
+ * closed broker protocol and custody checks run in an owned Rust fixture. No host endpoint, provider, real key or live mount.
  */
 import * as fs from 'node:fs';
 import { createHash, createHmac } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { goalFixtureRepository } from './goal-source-fixture.js';
+import {
+  goalCustodyClientBinary,
+  startGoalBroker,
+  stopGoalBroker,
+  waitForGoalBroker,
+  writeGoalInventory,
+  writeGoalWorkerPolicy,
+  type GoalInventoryRecord,
+} from './helpers/goal-custody-fixture.js';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { FastifyInstance } from 'fastify';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -45,7 +52,7 @@ vi.mock('../src/goal-custody-channel.js', async (original) => {
   const actual = await original<typeof import('../src/goal-custody-channel.js')>();
   return {
     GoalCustodyChannel: class extends actual.GoalCustodyChannel {
-      // Only the packaged executable is substituted with an owned source wrapper.
+      // The actual native client reads the fixture's owned broker socket.
       constructor(_packaged: string, socket: string) {
         super(edge.helper, socket);
       }
@@ -70,8 +77,6 @@ vi.mock('../src/web/server.js', async (original) => {
   };
 });
 
-const nativeProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-const repository = goalFixtureRepository(import.meta.dirname);
 const sid = '11111111-2222-3333-4444-555555555555',
   storeId = '11111111-2222-4333-8444-555555555555';
 const serverId = 'a'.repeat(64),
@@ -83,7 +88,7 @@ const old = { data: process.env.REVERIE_DATA_DIR, socket: process.env.REVERIE_WO
 describe('owner-only private Goal launcher', () => {
   let root: string, data: string, configFile: string, keyFile: string, nonce: string, cookie: string;
   let server: WebServer, internal: Internal, app: FastifyInstance, company: CompanyService;
-  let inventory: Array<Record<string, any>>;
+  let inventory: GoalInventoryRecord[];
   let host: ChildProcessWithoutNullStreams;
   const write = (file: string, value: unknown) => {
     fs.writeFileSync(file, JSON.stringify(value), { mode: 0o600 });
@@ -92,7 +97,7 @@ describe('owner-only private Goal launcher', () => {
   const owner = (method: 'GET' | 'POST', url: string, payload?: unknown) =>
     app.inject({ method, url, payload, headers: { host: 'localhost', origin: 'http://localhost', cookie } });
   beforeAll(async () => {
-    root = fs.mkdtempSync(join(tmpdir(), 'goal-owner-only-launch-'));
+    root = fs.mkdtempSync(join(tmpdir(), 'go-'));
     fs.chmodSync(root, 0o700);
     data = join(root, 'private');
     fs.mkdirSync(data, { mode: 0o700 });
@@ -160,20 +165,7 @@ describe('owner-only private Goal launcher', () => {
     });
     const uid = process.getuid!(),
       gid = process.getgid!();
-    write(join(root, 'worker.json'), {
-      goalPrivateConfig: configFile,
-      companyFile: store.file,
-      stateRoot: join(root, 'workers'),
-      socket: process.env.REVERIE_WORKER_SOCKET,
-      mounts: [{ source: publicRoot, destination: '/workspace', readOnly: false }],
-      uid,
-      gid,
-      maxWorkers: 4,
-      deployment: 'synthetic',
-      serverContainer: 'synthetic-console',
-      apiSocketRoot: join(root, 'office'),
-      companyRoot: data,
-    });
+    writeGoalWorkerPolicy(root, configFile, store.file);
     inventory = [
       {
         Id: serverId,
@@ -191,36 +183,10 @@ describe('owner-only private Goal launcher', () => {
         Mounts: [{ Type: 'bind', Source: publicRoot, Destination: '/workspace', RW: true }],
       },
     ];
-    write(join(root, 'inventory.json'), inventory);
-    const python = nativeProcess.spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], {
-      encoding: 'utf8',
-    });
-    expect(python.status).toBe(0);
-    edge.helper = join(root, 'owned-packaged-helper');
-    fs.writeFileSync(
-      edge.helper,
-      `#!${python.stdout.trim()}
-import runpy, sys
-sys.path.insert(0, ${JSON.stringify(join(repository, 'python'))})
-sys.argv = ['reverie.worker', 'client', *sys.argv[1:]]
-runpy.run_module('reverie.worker', run_name='__main__')
-`,
-      { mode: 0o700 }
-    );
-    host = nativeProcess.spawn('python3', ['-m', 'tests.goal_private_fixture', '--owned-socket', root], {
-      cwd: repository,
-      env: { PATH: process.env.PATH, PYTHONPATH: join(repository, 'python'), PYTHONDONTWRITEBYTECODE: '1' },
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    await new Promise<void>((done, reject) => {
-      const deadline = setTimeout(() => reject(Error('Owned broker readiness bound')), 3000);
-      host.once('error', reject);
-      host.stdout.once('data', (bytes) => {
-        clearTimeout(deadline);
-        if (bytes.toString().trim() === 'READY') done();
-        else reject(Error('Owned broker refused'));
-      });
-    });
+    writeGoalInventory(root, inventory);
+    edge.helper = goalCustodyClientBinary();
+    host = startGoalBroker(root);
+    await waitForGoalBroker(host);
     edge.executable = fs.realpathSync(process.execPath);
     const owners = new OwnerAuthService({
       store: new OwnerAuthStore(join(data, 'owner-auth.json')),
@@ -250,19 +216,14 @@ runpy.run_module('reverie.worker', run_name='__main__')
   afterAll(async () => {
     internal?.sessions.delete(sid);
     await server?.stop();
-    host?.stdin.end();
-    if (host && host.exitCode === null && host.signalCode === null)
-      await new Promise<void>((done) => {
-        host.once('exit', () => done());
-        host.kill();
-      });
+    await stopGoalBroker(host);
     for (const [key, value] of [
       ['REVERIE_DATA_DIR', old.data],
       ['REVERIE_WORKER_SOCKET', old.socket],
     ])
       if (value === undefined) delete process.env[key!];
       else process.env[key!] = value;
-    if (root?.startsWith(join(tmpdir(), 'goal-owner-only-launch-'))) fs.rmSync(root, { recursive: true, force: true });
+    if (root?.startsWith(join(tmpdir(), 'go-'))) fs.rmSync(root, { recursive: true, force: true });
     vi.restoreAllMocks();
   });
 
@@ -458,7 +419,7 @@ runpy.run_module('reverie.worker', run_name='__main__')
           if (!revoked) {
             revoked = true;
             inventory[1]!.Mounts.push({ Type: 'bind', Source: data, Destination: '/stolen', RW: false });
-            write(join(root, 'inventory.json'), inventory);
+            writeGoalInventory(root, inventory);
           }
         };
       }
@@ -476,7 +437,7 @@ runpy.run_module('reverie.worker', run_name='__main__')
     } finally {
       hook.mockRestore();
       inventory[1]!.Mounts.pop();
-      write(join(root, 'inventory.json'), inventory);
+      writeGoalInventory(root, inventory);
     }
   }, 30000);
   it('restarts on the same canonical data, with adapters OFF preserving every Goal and generation field', async () => {

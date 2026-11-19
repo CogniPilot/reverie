@@ -1,5 +1,8 @@
 # Packaged owner-terminal core components
 
+This document records the legacy optional host implementation. Current employee
+terminals use the [Docker runtime](host-runtime-retirement.md).
+
 Source only. No installed issuer, permission, route, H operation, PTY, shell,
 service, provider/laptop action or production ledger write. The fixture's owner
 cookie, company identities and native observations are synthetic and never come
@@ -12,10 +15,8 @@ Source provenance is listed below.
 
 The host receives the already admitted **R2 Handoff** object. It constructs:
 
-```python
-service = LedgerService(admitted_channel, installed_private_ledger_directory,
-    native_target=fixed_native_target, consumer_verifier=fixed_broker_peer)
-```
+The archived ledger service combined the admitted channel with a private ledger
+directory, an independent native target observer, and a fixed consumer verifier.
 
 `native_target.observe(employeeId)` must synchronously return the ten exact
 accepted protocol CURRENT_KEYS, freshly produced from canonical owner intent,
@@ -113,11 +114,8 @@ returned as errors. Explicit owner status/revoke still uses the unchanged ledger
 
 On that SAME serialized host event loop, outside any concurrent `serve_once`:
 
-```python
-capability = service.for_consumer(reference, independently_verified_consumer_digest)
-channel = human_terminal_protocol.Channel(capability.request,
-    fixed_native_target.observe(employee_id), capability=capability)
-```
+The consumer obtained a capability from the ledger after checking its digest, then
+bound the channel to a fresh native target observation and the capability request.
 
 The existing LedgerCapability performs one durable consume and current
 owner/native/peer rechecks. A new shim cannot consume an already consumed record.

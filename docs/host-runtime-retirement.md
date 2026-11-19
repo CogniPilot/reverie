@@ -21,6 +21,12 @@ its tests have been removed. Existing private data, account homes,
 journals, unknown operation fences and installed services are not altered by
 this source change. Actual deactivation needs a separate reviewed operation.
 
+This source tree retires the Python-backed host prune packages and systemd
+watcher, cycle and stall-watch templates. The native lease and task workspace
+commands still protect registered disposable work. The separately packaged
+observations tool can report disk use. Old deployment records remain useful
+for migration.
+
 The shared GPU publisher now lives at apps/container/gpu-telemetry.ts and is
 selected privately by the GPU image producer. CUDA/llama build inputs and the
 container supervisor remain. The reverie-local-model library still supplies

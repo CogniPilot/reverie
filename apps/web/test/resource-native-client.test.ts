@@ -649,42 +649,38 @@ it('logout during reconciliation save retains recovery and ordinary non-resource
   expect((await ordinary.get(normal.id))?.phase).toBe('completed');
 });
 
-it('accepts the actual Python integral CPU response without losing a valid preview', async () => {
-  const { execFileSync } = await import('node:child_process');
-  const { fileURLToPath } = await import('node:url');
-  const { dirname } = await import('node:path');
-  const { goalFixtureRepository } = await import('./goal-source-fixture.js');
-  const source = join(goalFixtureRepository(dirname(fileURLToPath(import.meta.url))), 'python');
-  let operation: Frame;
+it('accepts the canonical integral CPU count in a legacy draft response', async () => {
   behavior = (socket, value) => {
     if (value.kind === 'resource-operation') {
-      operation = value;
       check(socket, value);
-    } else {
-      const script = [
-        'import sys,json,uuid;from unittest.mock import patch;sys.path.insert(0,sys.argv[1])',
-        'from reverie import worker_resource_actor as A',
-        'from reverie.worker_resources import validate_resources',
-        'request=json.loads(sys.argv[2])',
-        "resources={'budgetMode':'admission','memoryMiB':2048,'pidsLimit':512,'cpus':1.0,'poolMemoryMiB':8192,'poolTasksMax':4096}",
-        'validate_resources(resources)',
-        'class DraftOwner:',
-        ' def draft(self,*args,**kwargs):',
-        "  return {'draftId':str(uuid.uuid4()),'operationId':str(uuid.uuid4()),'reservationId':str(uuid.uuid4()),'targetSid':str(uuid.uuid4()),'profileVersion':'1','profileDigest':'a'*64,'previewDigest':'b'*64,'resources':resources,'sourceMemoryMiB':1024,'capacityHeld':False,'nativeEffects':False}",
-        'connection=A._Connection.__new__(A._Connection);connection.owner=DraftOwner()',
-        "with patch.object(A._OwnerOperation,'assert_current'),patch.object(A._OwnerOperation,'assert_live'):",
-        ' result=connection.dispatch(request)',
-        "sys.stdout.buffer.write(A.encoded({'kind':'resource-result','requestId':request['requestId'],'value':result}))",
-      ].join('\n');
-      const raw = execFileSync('python3', ['-I', '-B', '-c', script, source, JSON.stringify(operation!)], {
-        timeout: 5000,
-        maxBuffer: 65536,
-        env: { PATH: process.env.PATH, HOME: directory },
-      });
-      const header = Buffer.alloc(4);
-      header.writeUInt32BE(raw.length);
-      socket.write(Buffer.concat([header, raw]));
+      return;
     }
+    // Legacy actors converted an integral CPU float to an integer before sending it.
+    const response = {
+      kind: 'resource-result',
+      requestId: value.requestId,
+      value: {
+        draftId: approval.draftId,
+        operationId: approval.operationId,
+        reservationId: approval.reservationId,
+        targetSid: approval.targetSid,
+        profileVersion: approval.profileVersion,
+        profileDigest: approval.profileDigest,
+        previewDigest: approval.previewDigest,
+        resources: {
+          budgetMode: 'admission',
+          memoryMiB: 2048,
+          pidsLimit: 512,
+          cpus: 1,
+          poolMemoryMiB: 8192,
+          poolTasksMax: 4096,
+        },
+        sourceMemoryMiB: 1024,
+        capacityHeld: false,
+        nativeEffects: false,
+      },
+    };
+    socket.write(frame(response));
   };
   const client = await open();
   await expect(

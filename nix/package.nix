@@ -3,7 +3,7 @@ let
   lib = pkgs.lib;
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
-  goalPythonFixture = lib.cleanSource (src + "/python/reverie");
+  workerWebFixtures = import ./worker-web-fixtures.nix { inherit pkgs src; };
   # Copy individual fixture files into the store. Interpolating ${src}/path
   # otherwise makes every repository edit an input to the console derivation.
   # Use the original snapshot for the selected files so read-only flake check
@@ -32,11 +32,6 @@ let
       cp -r ${consoleSkill} skills/reverie
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
-      mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
-      cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
-      cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
-      cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
-      cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
       # The Rust handler's TS byte goldens live with its crate.
       mkdir -p test/fixtures/subscription-profiles
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
@@ -76,10 +71,15 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    passthru = { inherit workerWebFixtures; };
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
+      export NIX_TEST_GOAL_WORKER_EXEC=${workerExec}/bin/reverie-worker-exec
+      export NIX_TEST_GOAL_FIXTURE=${workerWebFixtures}/bin/reverie-goal-custody-fixture
+      export NIX_TEST_VIEWER_FIXTURE=${workerWebFixtures}/bin/reverie-viewer-fixture
+      export NIX_TEST_VIEWER_WORKSPACES=${leaseCli}/bin/reverie-workspaces
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
@@ -237,7 +237,7 @@ let
         test/goal-canonical-authority.test.ts test/goal-manager-verification.test.ts \
         test/goal-broker-auth.test.ts test/goal-nonce-store.test.ts test/goal-nonce-independent.test.ts test/goal-nonce-successor.test.ts \
         test/cli-goal.test.ts test/goal-canonical-transport.test.ts test/goal-combined-server.test.ts test/goal-server-assembly.test.ts \
-        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts test/goal-source-fixture.test.ts \
+        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts \
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
         test/routes/status-page-auth.test.ts test/routes/status-page-routes.test.ts test/routes/html-view-routes.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
@@ -571,13 +571,6 @@ let
         test/webview-proxy-timeout.test.ts test/webview-proxy.test.ts test/webview-sse.test.ts test/wiki-home-index.test.ts \
         test/workflow-run-watcher.test.ts test/working-directory-schema.test.ts test/workspace-hooks-unreachable-mount.test.ts \
         test/ws-connection-registry.test.ts test/ws-reconnect-plan.test.ts test/ws-state-lifecycle.test.ts test/xterm-private-api.test.ts
-      # memoryPackage's Python discovery never depends on the console output.
-      PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
-        OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
-        OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
-        OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
-        NIX_REVERIE_TEST_NODE_CUSTODY=1 \
-        python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';
     installPhase = ''
@@ -606,39 +599,6 @@ let
     '';
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
   };
-  interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
-  # Explicit noncircular ABI fixture: PATH may select the bare interpreter in
-  # buildPythonPackage checks even while this environment runs the suite.
-  pythonCheckEnvironment = pkgs.python3.withPackages (_: []);
-  memoryPackage = pkgs.python3Packages.buildPythonPackage {
-    NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
-    NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER = "${pythonCheckEnvironment}/bin/python3";
-    pname = "reverie-memory";
-    version = "0.1.0";
-    inherit src;
-    pyproject = true;
-    makeWrapperArgs = [ "--prefix" "PATH" ":" "${adminMemory}/bin" ];
-    postUnpack = ''sourceRoot="$sourceRoot/python"'';
-    build-system = [ pkgs.python3Packages.setuptools ];
-    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) adminMemory ];
-    postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
-    checkPhase = ''
-      # The modules discovery would load (test*.py in tests/ and its packages), in chunks of 12, two unittest processes
-      # at a time so the suite uses two cores. Each chunk gets its own temp and tmux socket directory and prints its
-      # output when it ends, so a failure reads as one block; xargs fails the build if any chunk fails.
-      (cd ..
-        for f in $(find tests -name 'test*.py' | sort); do
-          d=$(dirname "$f")
-          while [ "$d" != . ] && [ -f "$d/__init__.py" ]; do d=$(dirname "$d"); done
-          if [ "$d" = . ]; then echo "''${f%.py}" | tr / .; fi
-        done | PYTHONPATH="$PWD/python" PYTHONWARNINGS=ignore::ResourceWarning xargs -n 12 -P 2 sh -c '
-          dir=$(mktemp -d); status=0
-          TMPDIR=$dir TMUX_TMPDIR=$dir ${pythonCheckEnvironment}/bin/python3 -m unittest "$@" >"$dir/log" 2>&1 || status=$?
-          cat "$dir/log"; exit "$status"' unittest-chunk)
-      (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
-    '';
-  };
-  memory = pkgs.python3.withPackages (_: [ memoryPackage ]);
   kokoro = import ./kokoro.nix { inherit pkgs src; };
   voiceService = import ./voice-service.nix { inherit pkgs src; };
   hands = (pkgs.writeShellApplication {
@@ -708,9 +668,9 @@ let
     };
   });
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
-  mkRuntime = name: legacyPackages: pkgs.buildEnv {
-    inherit name;
-    paths = [ console ] ++ legacyPackages ++ [ memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+  runtime = pkgs.buildEnv {
+    name = "reverie-runtime";
+    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -719,8 +679,6 @@ let
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
     passthru = { inherit adminMemory cacert memoryJournalCli voiceService workerChild; };
   };
-  workerRuntime = mkRuntime "reverie-worker-runtime" [];
-  runtime = (mkRuntime "reverie-runtime" [ memory ]) // { worker = workerRuntime; };
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
   requestUpdate = pkgs.writeShellApplication {
@@ -754,8 +712,8 @@ let
     export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
     exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else "unversioned")} "$@"
   '') [ "claude" "codex" "opencode" ];
-  launcher = runtimeBundle: pkgs.writeShellScript "reverie-launcher" ''
-    export PATH=${installClis}/bin:${runtimeBundle}/bin:$PATH
+  launcher = pkgs.writeShellScript "reverie-launcher" ''
+    export PATH=${installClis}/bin:${runtime}/bin:$PATH
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
@@ -777,8 +735,8 @@ let
     fi
     exec ${console}/bin/reverie "$@"
   '';
-  launchers = runtimeBundle: pkgs.linkFarm "reverie-image-launchers" [
-    { name = "bin/reverie"; path = launcher runtimeBundle; }
+  imageLaunchers = pkgs.linkFarm "reverie-image-launchers" [
+    { name = "bin/reverie"; path = launcher; }
     { name = "bin/reverie-request-update"; path = "${requestUpdate}/bin/reverie-request-update"; }
     { name = "bin/reverie-install-clis"; path = "${installClis}/bin/reverie-install-clis"; }
   ];
@@ -787,10 +745,10 @@ let
   reverie = pkgs.runCommand "reverie-${manifest.version}" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
-    passthru = { inherit console memory runtime; imageLaunchers = launchers workerRuntime; };
+    passthru = { inherit console runtime imageLaunchers; };
   } ''
     mkdir -p "$out/bin"
-    cp -P ${launchers runtime}/bin/* "$out/bin/"
+    cp -P ${imageLaunchers}/bin/* "$out/bin/"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
@@ -826,10 +784,6 @@ let
     ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
     # Terminal session tool (list, info, attach, kill); works with or without the console running.
     ln -s ${muxNative}/bin/reverie-mux "$out/bin/reverie-mux"
-    for command in ${memory}/bin/reverie-*; do
-      makeWrapper "$command" "$out/bin/$(basename "$command")" \
-        --prefix PATH : ${runtime}/bin
-    done
   '';
 
-in { inherit reverie console memory memoryPackage runtime containerRuntime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console runtime containerRuntime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }

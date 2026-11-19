@@ -60,32 +60,12 @@
           chatPythonLsp = pkgs.pyright;
           capabilitiesAddon = import ./nix/capabilities-addon.nix { inherit pkgs; src = source; };
           leaseCli = import ./nix/lease-cli.nix { inherit pkgs; src = source; };
-          prune = import ./nix/prune.nix {
-            inherit pkgs; src = source;
-            leaseCli = self.packages.${system}.leaseCli;
-          };
-          pruneR12 = import ./nix/prune-r12.nix {
-            inherit pkgs; src = source;
-            leaseCli = self.packages.${system}.leaseCli;
-          };
-          pruneHost = import ./nix/prune-host.nix { inherit pkgs; src = source; };
-          pruneDeclared = import ./nix/prune-declared.nix {
-            inherit pkgs; src = source;
-            prune = self.packages.${system}.pruneR12;
-          };
-          pruneSelftest = import ./nix/prune-selftest.nix {
-            inherit pkgs; src = source;
-            prune = self.packages.${system}.pruneR12;
-          };
           leasePeer = import ./nix/lease-peer-static.nix { inherit pkgs; src = source; };
-          leaseAcceptance = import ./nix/lease-acceptance.nix {
-            inherit pkgs; src = source;
-            initializer = self.packages.${system}.pruneDeclared;
-            peerArtifact = self.packages.${system}.leasePeer;
-          };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
-          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
-          ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
+          adminHarnessAddon = import ./nix/admin-harness-addon.nix {
+            inherit pkgs;
+            inherit (packages) hands handsTools;
+          };
           humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
           codexObserver = import ./nix/codex-observer.nix { inherit pkgs; };
@@ -98,7 +78,7 @@
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             chatLanguageTools = {
               python = pkgs.pyright;
               modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
@@ -109,15 +89,14 @@
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
           };
           workerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             worker = true;
           };
-          workerPython = import ./nix/worker-python.nix { inherit pkgs; };
           workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -125,13 +104,13 @@
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             resourceReplacement = true;
           };
           resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
@@ -175,25 +154,6 @@
             inherit system capability;
           };
         };
-      nixosModules.reveriePrune = { config, lib, pkgs, ... }: {
-        imports = [
-          (import ./nix/prune-service.nix {
-            inherit config lib pkgs;
-            pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
-            prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
-            pruneReportPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
-          })
-          (import ./nix/prune-selftest-service.nix {
-            inherit config lib pkgs;
-            selftestPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneSelftest;
-            prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
-          })
-          (import ./nix/prune-lease-acceptance-service.nix {
-            inherit config lib pkgs;
-            leaseAcceptancePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.leaseAcceptance;
-          })
-        ];
-      };
       nixosModules.reverieCollect = { config, lib, pkgs, ... }: import ./nix/collect-service.nix {
         inherit config lib pkgs;
         observationsPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
@@ -207,7 +167,7 @@
         let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs runtimePackages; src = source;
-          inherit (packages) reverie console memory runtime;
+          inherit (packages) reverie console runtime;
           entrypoint = self.packages.${system}.entrypoint;
           worker = true;
           inherit perfGuestCapsule;
@@ -231,9 +191,7 @@
           pkgs = pkgsFor system; src = source; inherit baseProvenance;
         };
       apps = forAllSystems (system: {
-        prune = { type = "app"; program = "${self.packages.${system}.prune}/bin/reverie-prune"; meta.description = "Report eligible rebuildable output without deleting it"; };
-        prune-host = { type = "app"; program = "${self.packages.${system}.pruneHost}/bin/reverie-prune-host"; meta.description = "Prepare an explicit dry-run cleanup host installation"; };
-        lease = { type = "app"; program = "${self.packages.${system}.prune}/bin/lease"; meta.description = "Lease disposable work directories during active jobs"; };
+        lease = { type = "app"; program = "${self.packages.${system}.leaseCli}/bin/reverie-lease"; meta.description = "Lease disposable work directories during active jobs"; };
         launch-guard = { type = "app"; program = "${self.packages.${system}.launchGuard}/bin/reverie-launch-guard"; meta.description = "Evaluate metadata-only launch guard fixtures without live effects"; };
         default = { type = "app"; program = "${self.packages.${system}.reverie}/bin/reverie"; meta.description = "Reverie agent console"; };
         container-memory = { type = "app"; program = "${self.packages.${system}.container-memory}/bin/container-memory"; meta.description = "Manage Reverie container memory"; };
@@ -247,7 +205,8 @@
           pkgs = pkgsFor system;
           packages = self.packages.${system};
         in {
-          inherit (packages) reverie memoryPackage start update prune pruneR12 cleanupObservations ownerTerminalCore;
+          inherit (packages) reverie start update cleanupObservations;
+          inherit (packages.console) workerWebFixtures;
           # Legacy attach transport remains a component-only CI fixture.
           # It is not an installable public package, app or host module.
           nativeViewerFixtureImage = import ./nix/worker-viewer-image.nix {
@@ -270,7 +229,6 @@
 
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
-          workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
@@ -285,48 +243,6 @@
               inherit nixpkgs system;
               observationsPackage = packages.cleanupObservations;
             });
-          } ''
-            mkdir -p "$out"
-            printf '%s\n' "$checks" > "$out/checks.json"
-          '';
-          # Builds the helper and imports it from its immutable source; usage only, no socket or cgroup.
-          pruneService = let
-            evaluated = import ./tests/prune_service_eval.nix {
-              inherit nixpkgs system;
-              pruneHostPackage = packages.pruneDeclared;
-              prunePackage = packages.pruneR12;
-              legacyPrunePackage = packages.prune;
-              pruneReportPackage = packages.cleanupObservations;
-            };
-          in pkgs.runCommand "reverie-prune-service-evaluation" {
-            checks = builtins.toJSON evaluated.checks;
-          } ''
-            mkdir -p "$out"
-            printf '%s\n' "$checks" > "$out/checks.json"
-          '';
-          pruneLeaseAcceptanceService = let
-            evaluated = import ./tests/prune_lease_acceptance_eval.nix {
-              inherit nixpkgs system;
-              leaseAcceptancePackage = packages.leaseAcceptance;
-              pruneModule = self.nixosModules.reveriePrune;
-            };
-          in pkgs.runCommand "reverie-prune-lease-acceptance-evaluation" {
-            checks = builtins.toJSON evaluated.checks;
-          } ''
-            mkdir -p "$out"
-            printf '%s\n' "$checks" > "$out/checks.json"
-          '';
-          pruneSelftestService = let
-            evaluated = import ./tests/prune_selftest_eval.nix {
-              inherit nixpkgs system;
-              selftestPackage = packages.pruneSelftest;
-              prunePackage = packages.pruneR12;
-              pruneHostPackage = packages.pruneDeclared;
-              pruneReportPackage = packages.cleanupObservations;
-              pruneModule = self.nixosModules.reveriePrune;
-            };
-          in pkgs.runCommand "reverie-prune-selftest-evaluation" {
-            checks = builtins.toJSON evaluated.checks;
           } ''
             mkdir -p "$out"
             printf '%s\n' "$checks" > "$out/checks.json"
@@ -371,23 +287,6 @@
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
           '';
-          pillowSmoke = let
-            serviceClosure = pkgs.closureInfo { rootPaths = [ packages.memory ]; };
-          in pkgs.runCommand "reverie-python-environment-boundary" { } ''
-            for package in ${pkgs.python3Packages.pillow} ${pkgs.python3Packages.pytest}; do
-              if grep -Fx "$package" "${serviceClosure}/store-paths"; then
-                echo "Laptop development package in the service Python closure" >&2
-                exit 1
-              fi
-            done
-            test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
-            test ! -e "${packages.workerPython}/${pkgs.python3.sitePackages}/reverie"
-            test ! -e "${packages.workerPython}/bin/reverie-runtime"
-            test ! -e "${packages.workerPython}/bin/reverie-cycle"
-            ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
-              -t "${source}" -s "${source}/tests" -p test_image_requirements.py
-            touch "$out"
-          '';
         });
       devShells = forAllSystems (system:
         let pkgs = pkgsFor system; in {
@@ -402,7 +301,9 @@
           default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
             "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
             pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.setuptools ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+            packages = [ pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+              # npm uses node-gyp to build the third-party node-pty addon.
+              pkgs.python3
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
@@ -416,7 +317,6 @@
             REVERIE_FIXED_BUILD_GZIP_PATH = "${pkgs.gzip}/bin";
             REVERIE_TEST_CONTROLLER_PROGRAM = "${import ./nix/controller-program-test-fixture.nix { inherit pkgs; }}/bin/reverie-worker-resource-controller";
             shellHook = ''
-              export PYTHONPATH="$PWD/python''${PYTHONPATH:+:$PYTHONPATH}"
               export REVERIE_LEASE_DIR="''${REVERIE_LEASE_DIR:-''${REVERIE_ROOT:-$HOME/reverie}/runtime/leases}"
               export TMPDIR="''${TMPDIR:-$HOME/scratch/reverie/tmp}"
               mkdir -p "$TMPDIR"

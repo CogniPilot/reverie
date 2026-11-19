@@ -12,6 +12,10 @@ fn main() {
     }
     let mut trace=OpenOptions::new().append(true).create(true).open("trace").unwrap();
     writeln!(trace,"{}",args.join("\0")).unwrap();drop(trace);
+    if mode == "web-viewer" {
+        web_viewer(&args);
+        return;
+    }
     if Path::new("existing-stop-control").is_file() && args.first().map(String::as_str)!=Some("exec") {
         existing_stop(&args);return;
     }
@@ -233,13 +237,65 @@ fn viewer_early_group_control() {
     while !Path::new("viewer-descendant").exists() {assert!(Instant::now()<end);std::thread::sleep(Duration::from_millis(1));}
     std::process::exit(7);
 }
-fn viewer(args:&[String],mode:&str) {
-    use std::io::Read;
+fn web_viewer(args: &[String]) {
+    use std::os::unix::process::CommandExt;
+    use std::process::Command;
+    let name = format!("fixture-agent-{}", fs::read_to_string("started-laptop").unwrap());
+    if args == ["inspect", &name] {
+        std::io::stdout().write_all(&fs::read("existing-inspect.json").unwrap()).unwrap();
+        return;
+    }
+    let cid = "c".repeat(64);
+    if let [exec, target, cat, environ] = args {
+        assert_eq!([exec.as_str(), target.as_str(), cat.as_str()], ["exec", &cid, "/bin/cat"]);
+        let pid = environ.strip_prefix("/proc/").and_then(|path| path.strip_suffix("/environ")).unwrap();
+        let pid: u32 = pid.parse().unwrap();
+        let raw = fs::read(format!("/proc/{pid}/environ")).unwrap();
+        let marker = fs::read("viewer-ready").unwrap();
+        assert!(raw.split(|byte| *byte == 0).any(|field|
+            field.strip_prefix(b"REVERIE_VIEWER=") == Some(&marker)));
+        write!(std::io::stdout(), "REVERIE_VIEWER={}\0", String::from_utf8(marker).unwrap()).unwrap();
+        return;
+    }
+    let tmux = fs::read_to_string("web-tmux").unwrap();
+    let socket = fs::read_to_string("web-socket").unwrap();
+    let mut command = Command::new(tmux);
+    command.args(["-u", "-S", &socket]);
+    if args.get(1).map(String::as_str) == Some("-it") {
+        let (marker, target) = viewer_arguments(args);
+        assert!(target == name || target == cid);
+        fs::write("viewer-ready", marker).unwrap();
+        let error = command
+            .env("REVERIE_VIEWER", marker)
+            .env("TERM", "xterm-256color")
+            .args(["attach-session", "-d", "-t", "office"])
+            .exec();
+        panic!("owned tmux attach: {error}");
+    }
+    assert_eq!(&args[..9], ["exec","--env","LANG=C.UTF-8","--env","LC_ALL=C.UTF-8","--env","TERM=xterm-256color","--env","COLORTERM=truecolor"]);
+    assert!(args[9] == name || args[9] == cid);
+    assert_eq!(&args[10..14], ["/bin/tmux","-u","-L","reverie-laptop"]);
+    let tail = &args[14..];
+    assert!(
+        tail == ["list-clients", "-F", "#{client_pid} #{client_width} #{client_height}"]
+            || tail == ["display-message", "-p", "-t", "office", "#{pane_dead}"]
+    );
+    let error = command.args(tail).exec();
+    panic!("owned tmux observation: {error}");
+}
+
+fn viewer_arguments(args: &[String]) -> (&str, &str) {
     assert_eq!(&args[..10],&["exec","-it","--env","LANG=C.UTF-8","--env","LC_ALL=C.UTF-8","--env","TERM=xterm-256color","--env","COLORTERM=truecolor"]);
     assert_eq!(args[10],"--env");let marker=args[11].strip_prefix("REVERIE_VIEWER=").unwrap();
     assert_eq!(marker.len(),32);assert!(marker.bytes().all(|b|b.is_ascii_digit()||(b'a'..=b'f').contains(&b)));
-    assert_eq!(args[12],format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap()));
     assert_eq!(&args[13..],&["/bin/tmux","-u","-L","reverie-laptop","attach-session","-d","-t","office"]);
+    (marker, &args[12])
+}
+
+fn viewer(args:&[String],mode:&str) {
+    use std::io::Read;
+    let (marker, target) = viewer_arguments(args);
+    assert_eq!(target,format!("fixture-agent-{}",fs::read_to_string("started-laptop").unwrap()));
     // SAFETY: fixed stdio descriptor observations and handler in the owned
     // subprocess. Handler only updates a lock-free atomic, never allocates.
     assert!((0..3).all(|fd|unsafe { isatty(fd)==1 }));

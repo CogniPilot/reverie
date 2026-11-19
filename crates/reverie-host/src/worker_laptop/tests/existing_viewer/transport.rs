@@ -11,6 +11,7 @@ mod diagnostic;
 mod identity;
 mod receipt;
 mod resize;
+mod web_fixture;
 mod worker;
 use crate::worker_reports::{
     ViewerRelay, ViewerRelayEnd, ViewerRelayEvent, WorkerLaunchConnection, WorkerLaunchHold,
@@ -96,9 +97,19 @@ fn cleanup_component(
     fixture: &Fixture,
     existing: &ExistingViewer,
     connection: WorkerLaunchConnection,
-    mut hold: WorkerLaunchHold,
+    hold: WorkerLaunchHold,
     service: &WorkerReportService,
 ) {
+    let storage = close_relay(fixture, existing, connection, hold);
+    service.close(end()).unwrap();
+    storage.close(end()).unwrap();
+}
+fn close_relay(
+    fixture: &Fixture,
+    existing: &ExistingViewer,
+    connection: WorkerLaunchConnection,
+    mut hold: WorkerLaunchHold,
+) -> Box<LaunchStorage> {
     fixture
         .runtime()
         .close_existing_viewer(existing, end())
@@ -111,8 +122,7 @@ fn cleanup_component(
     connection.close_socket(end()).unwrap();
     hold.release(end())
         .unwrap_or_else(|_| panic!("actual known socket + transferred owner"));
-    service.close(end()).unwrap();
-    storage.close(end()).unwrap();
+    storage
 }
 #[test]
 fn actual_j_input_output_and_child_exit_frames_keep_storage_and_native_pin_for_real_finalizer() {

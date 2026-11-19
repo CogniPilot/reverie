@@ -197,6 +197,7 @@ class PhysicalDocker implements DockerEngineCommand {
           ([id, r]) =>
             !(this.absent && id === destinationId) &&
             filters.every((f) => {
+              if (f.startsWith('id=')) return id === f.slice(3);
               if (f.startsWith('name=')) return r.Config.Labels?.['reverie.box.resource.name'] === f.slice(5);
               if (!f.startsWith('label=')) return true;
               const [key, ...rest] = f.slice(6).split('=');

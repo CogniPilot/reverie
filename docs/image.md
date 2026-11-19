@@ -172,8 +172,7 @@ bytes that ran before.
    `accounts/claude` and `accounts/codex` on the volume so a recreate keeps a sign-in;
 5. runs the given command, by default `reverie web --host 0.0.0.0 --port 3000`.
 
-Any other command runs after the same preparation. The development and personal
-launchers (`scripts/reverie-container`, `scripts/reverie-recreate`) bypass it with
+Any other command runs after the same preparation. The isolated development launcher (`scripts/reverie-container`) bypasses it with
 `--entrypoint /usr/bin/env`, because they mount their own instance and workspace.
 
 ## Hiring an expert

@@ -76,16 +76,13 @@ and credentials. Do not move or delete a live socket by hand. Do not clean anoth
 task's files, shared caches or Nix store paths without specific preservation and
 ownership checks.
 
-Legacy Linux Python tests require a short, private fixture directory outside
-shared temporary/runtime roots: production custody intentionally refuses
-`/tmp` ancestry, and Unix sockets have short path limits. Create an owned
-mode-0700 directory such as `$HOME/.rt`, then run
-`nix develop --command env TMPDIR="$HOME/.rt" python3 -m unittest discover -s tests`.
-Apply `TMPDIR` after entering the flake so Nix does not substitute its own
-temporary subdirectory. Keep custody guards intact when classifying failures.
-Run `nix develop --command node --test tests/test_opencode_plugin.mjs` as well
-(or use the optional development container). Use explicit file
-paths when staging; do not stage instance data, runtime metadata or local receipts.
+Custody fixtures that require trusted ancestry need a short private directory
+with mode 0700. When a fixture needs that directory as `TMPDIR`, set it after
+entering the flake. Keep custody guards intact when classifying failures.
+Inside `nix develop`, also run
+`nix shell .#reverie.runtime.adminMemory --command node --test tests/test_opencode_plugin*.mjs`.
+Stage explicit file paths and keep instance data, runtime metadata and local
+receipts outside commits.
 For Rust changes run `nix develop --command cargo xtask verify`, the canonical
 format, strict Clippy and workspace-test gate. Set `CARGO_TARGET_DIR` to
 task-specific temporary storage.

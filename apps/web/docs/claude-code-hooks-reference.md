@@ -493,72 +493,39 @@ MCP tools follow the pattern `mcp__<server>__<tool>`:
 
 ### Bash Command Validation
 
-```python
-#!/usr/bin/env python3
-import json
-import re
-import sys
+```js
+import { readFileSync } from 'node:fs';
 
-VALIDATION_RULES = [
-    (r"\bgrep\b(?!.*\|)", "Use 'rg' instead of 'grep'"),
-    (r"\bfind\s+\S+\s+-name\b", "Use 'rg --files' instead of 'find -name'"),
-]
-
-try:
-    input_data = json.load(sys.stdin)
-except json.JSONDecodeError as e:
-    print(f"Error: {e}", file=sys.stderr)
-    sys.exit(1)
-
-tool_name = input_data.get("tool_name", "")
-tool_input = input_data.get("tool_input", {})
-command = tool_input.get("command", "")
-
-if tool_name != "Bash" or not command:
-    sys.exit(1)
-
-issues = []
-for pattern, message in VALIDATION_RULES:
-    if re.search(pattern, command):
-        issues.append(message)
-
-if issues:
-    for message in issues:
-        print(f"- {message}", file=sys.stderr)
-    sys.exit(2)
+const input = JSON.parse(readFileSync(0, 'utf8'));
+const command = input.tool_input?.command;
+if (input.tool_name !== 'Bash' || typeof command !== 'string' || !command) {
+  process.exit(1);
+}
+const rules = [
+  [/\bgrep\b(?!.*\|)/, "Use 'rg' instead of 'grep'"],
+  [/\bfind\s+\S+\s+-name\b/, "Use 'rg --files' instead of 'find -name'"],
+];
+const issues = rules.filter(([pattern]) => pattern.test(command));
+for (const [, message] of issues) console.error(message);
+if (issues.length) process.exitCode = 2;
 ```
 
 ### Auto-Approve Documentation Reads
 
-```python
-#!/usr/bin/env python3
-import json
-import sys
+```js
+import { readFileSync } from 'node:fs';
 
-try:
-    input_data = json.load(sys.stdin)
-except json.JSONDecodeError as e:
-    print(f"Error: {e}", file=sys.stderr)
-    sys.exit(1)
-
-tool_name = input_data.get("tool_name", "")
-tool_input = input_data.get("tool_input", {})
-
-if tool_name == "Read":
-    file_path = tool_input.get("file_path", "")
-    if file_path.endswith((".md", ".mdx", ".txt", ".json")):
-        output = {
-            "hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": "Documentation file auto-approved"
-            },
-            "suppressOutput": True
-        }
-        print(json.dumps(output))
-        sys.exit(0)
-
-sys.exit(0)
+const input = JSON.parse(readFileSync(0, 'utf8'));
+if (input.tool_name === 'Read' && /\.(md|mdx|txt|json)$/.test(input.tool_input?.file_path ?? '')) {
+  console.log(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      permissionDecisionReason: 'Documentation file auto-approved',
+    },
+    suppressOutput: true,
+  }));
+}
 ```
 
 ### Post-Write Formatter

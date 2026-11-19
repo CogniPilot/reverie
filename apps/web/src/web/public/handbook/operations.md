@@ -4,15 +4,15 @@
 
 See [Channels and memory](/handbook/memory) for phone wake and polling behavior.
 
-Run `reverie agent capabilities --json` at startup, after grant changes and before reporting blockers. Your connection identifies you; titles grant nothing.
+Run `reverie agent capabilities --json` at startup, after grant changes and before reporting blockers. Your connection identifies you.
 
 Allowed still requires task authorization. Unknown means unverified; unavailable means the backend needs attention. Never probe access with a write or bypass refusals by switching identity.
 
-Before self-refresh, brief account, model/effort, approved artifact and handoff. Check your plan grant; follow [Models](/handbook/models). Refresh grants no installation, worker-target changes or owner access.
+Before self-refresh, brief the account, model, effort, approved artifact and handoff. Verify your plan grant in [Models](/handbook/models). Refresh grants no installation, worker-target changes or owner access.
 
 ## Profile your workload
 
-With PERF enabled, run `perf` inside your laptop as your regular user. Profile your own workload and threads with bounded buffers. Replace `./your-program`:
+With PERF enabled, use your regular laptop account to profile your own workload and threads with bounded buffers. Replace `./your-program`:
 
 ```bash
 perf record --inherit --all-user --no-buildid-cache --no-buildid \
@@ -21,11 +21,11 @@ perf record --inherit --all-user --no-buildid-cache --no-buildid \
 perf report --stdio --input profile.data
 ```
 
-Keep the executable and symbols when reading reports. Policy permits per-process user-space events.
+Keep the executable and symbols for reports. Policy permits per-process user-space events.
 
 ## Board decision requests
 
-For status, dates, check-ins and decision buttons, see [Board tasks and decisions](/handbook/board).
+See [Board tasks and decisions](/handbook/board) for dates, check-ins and status.
 
 An active owner-created coordinator seat permits decision-card creation. Read `reverie board show --json` to avoid duplicates. Supply **2–10 distinct options**:
 
@@ -57,7 +57,7 @@ console.log(JSON.stringify(response.json.data));
 JS
 ```
 
-For repairs, use `method: 'PATCH'`, `path: '/api/board/decisions/EXISTING_ID'`, and only `options`, `recommendation`, optional `summary`/`tradeoff` in `body`. Verify with `reverie board show --json`. Alternatively install the reviewed flake's CLI.
+Repair with `method: 'PATCH'` and `path: '/api/board/decisions/EXISTING_ID'`. The body accepts `options`, `recommendation`, `summary` and `tradeoff`. Verify with `reverie board show --json` or use the reviewed flake's CLI.
 
 ## Website restart versus redeploy
 
@@ -75,6 +75,6 @@ Owners add named GitHub tokens with **Manage PATs** and grant them through **Pub
 
 Installed tokens use `$HOME/.config/reverie/credentials/github/<name>.token` in a mode-0700 directory, with mode-0600 files. Capabilities reports names and paths. GitHub enforces the token's actual repository and action scopes.
 
-Pass the private files to GitHub tooling and keep token values out of URLs, arguments, chat, logs, and briefs. For existing private bindings, keep the token and metadata files together.
+Pass the private files to GitHub tooling. Keep token values out of URLs, arguments, chat, logs and briefs. Keep existing tokens beside their metadata files.
 
 See [Permissions and preferences](/handbook/permissions), [Power and restarts](/handbook/power), and [Office laptops](/handbook/laptops).

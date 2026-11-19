@@ -32,7 +32,7 @@ let
     grep -Fq 'Use --contract <private reviewed fixture JSON>' "$TMPDIR/baseline-refusal.txt"
 
   '';
-  platform = pkgs.buildEnv { name = "reverie-ci-plan-worker-platform"; paths = [ pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.util-linux pkgs.python3 ]; };
+  platform = pkgs.buildEnv { name = "reverie-ci-plan-worker-platform"; paths = [ pkgs.bashInteractive pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.util-linux ]; };
   platformClosure = pkgs.closureInfo { rootPaths = [ platform ]; };
   worker = name: pkgs.dockerTools.buildLayeredImage {
     inherit name;

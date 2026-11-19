@@ -10,7 +10,7 @@ Use the project's pinned flake first:
 
 ```bash
 nix develop
-nix develop --command python3 -m unittest discover -s tests
+nix develop --command cargo xtask verify
 nix build
 nix run
 ```

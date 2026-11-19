@@ -24,7 +24,7 @@ The current native runtime adapter uses OpenCode and its provider/model selectio
 The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
 Full automatic conversation ingestion for those other harnesses is future work;
 installing the skill alone does not hook every completed turn automatically.
-The implementation lives in `python/reverie/`; generic specialist templates live in `python/experts/`.
+The [generic specialist profiles](../examples/specialist-profiles.json) remain available as data.
 Personal identities and their histories live in the ignored `local/` directory.
 Existing SQLite history columns are read compatibly during migration.
 
@@ -224,7 +224,7 @@ Install rootless Podman and its user-namespace prerequisites, then:
 scripts/reverie-container build
 scripts/reverie-container up
 scripts/reverie-container exec bash
-scripts/reverie-container exec python3 -m unittest discover -s tests
+scripts/reverie-container exec cargo xtask verify
 ```
 
 `REVERIE_PODMAN`, `REVERIE_SCRATCH`, `REVERIE_ENGINE_ROOT`, `REVERIE_INSTANCE_DATA`, `REVERIE_CONTAINER_NAME`
@@ -257,9 +257,8 @@ package is downloaded. `reverie` is the product and CLI name. The original MIT
 license and copyright are retained in `apps/web/LICENSE`, with source
 provenance in `apps/web/UPSTREAM.md`.
 
-For a recovered personal deployment, `scripts/reverie-recreate --dry-run` shows
-the mounts before creation. The personal launcher mounts `~/reverie/companies/default/home`
-at `/home/agent`, so native conversations and login configuration survive recreation.
+Keep the existing Docker data and home mounts when recreating the office so
+that conversations and provider sign-in survive the change.
 Persistent instance handoffs belong under `/instances/example/runtime/handoffs`;
 only disposable working copies belong under `/scratch`.
 
@@ -270,9 +269,8 @@ existing host services and live sessions are untouched by an image build.
 Console state persists by default at `~/reverie/companies/development/data/console`,
 mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
 instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
-The monorepo contains `apps/web` (TypeScript/JavaScript), `python/reverie` (the shared Python
-memory runtime), `python/experts` (specialist templates), `docker`, `scripts`, shared skills
-and their tests.
+The monorepo contains `apps/web` (TypeScript/JavaScript), `crates` (Rust), `docker`,
+`scripts`, shared skills and tests.
 
 Open **Company** to register permanent employees with names, icons, positions and
 expertise, invite experts into a room, and configure nightly research. Temporary
@@ -415,8 +413,8 @@ it does not perform global Docker/Podman pruning or run a nightly scheduler.
 Run these checks inside `nix develop`.
 
 ```bash
-nix shell .#reverie.runtime.adminMemory -c python3 -m unittest discover -s tests
-nix shell .#reverie.runtime.adminMemory -c node --test tests/test_opencode_plugin.mjs
+nix develop --command cargo xtask verify
+nix develop --command nix shell .#reverie.runtime.adminMemory --command node --test tests/test_opencode_plugin*.mjs
 ```
 
 Tests cover memory, reflection, dreams, deliberate values, scope isolation, lifecycle
@@ -426,15 +424,7 @@ storage; do not commit them with the shareable source.
 
 ## Proposed memory design
 
-GitHub displays the [memory explorer HTML source](memory-explorer.html) rather than running it.
-To view the standalone demo, run this from the repository root:
-
-```bash
-python3 -m http.server 8000 --bind 127.0.0.1 --directory docs
-```
-
-Then [open the memory explorer](http://127.0.0.1:8000/memory-explorer.html).
-Stop the preview server with Ctrl+C when finished.
+Open the standalone [memory explorer](memory-explorer.html) from a local checkout in your browser.
 
 The demo contains only synthetic records and shows a self-organizing tag tree, typed
 associations, human-inspired consolidation and bounded task-context selection.
