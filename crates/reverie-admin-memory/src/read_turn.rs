@@ -16,7 +16,7 @@ const INVALID: &str = "invalid_arguments_or_source; compress text and use exact 
 
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "op")]
-enum Request {
+pub(super) enum Request {
     #[serde(rename = "journal_source")]
     Source {
         message_id: String,
@@ -54,13 +54,7 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Value> {
             arguments,
             captured_end,
             expanded_sources,
-        } => {
-            let request = arguments.as_deref().and_then(arguments_object);
-            request
-                .as_ref()
-                .and_then(|args| plan(&tool, args, captured_end, &expanded_sources))
-                .unwrap_or_else(|| refusal(INVALID))
-        }
+        } => plan_call(&tool, arguments.as_deref(), captured_end, &expanded_sources),
         Job::Settle {
             request,
             result,
@@ -69,6 +63,19 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Value> {
         } => settle(request, result, captured, failure.as_deref())
             .unwrap_or_else(|| refusal(INVALID)),
     })
+}
+
+pub(super) fn plan_call(
+    tool: &str,
+    arguments: Option<&str>,
+    captured_end: Value,
+    expanded_sources: &[String],
+) -> Value {
+    arguments
+        .and_then(arguments_object)
+        .as_ref()
+        .and_then(|args| plan(tool, args, captured_end, expanded_sources))
+        .unwrap_or_else(|| refusal(INVALID))
 }
 
 fn arguments_object(raw: &str) -> Option<Value> {
@@ -176,7 +183,7 @@ fn empty(result: &Value) -> bool {
     result.as_object().is_none_or(serde_json::Map::is_empty)
 }
 
-fn settle(
+pub(super) fn settle(
     request: Request,
     result: Value,
     mut captured: Value,

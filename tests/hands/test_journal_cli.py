@@ -123,12 +123,12 @@ class CliTests(unittest.TestCase):
     def test_empty_or_incomplete_save_refused_before_worker(self):
         # Asked in review: "does the new build refuse a save missing required fields before anything runs?"
         src = self.message(101, 'Rory: All hail the Lantern Keeper.', at=999)
-        turn = self.turn(1, history=[src])
         for command in ('save', 'save --tag lesson', 'save --text "no source" --tag lesson',
                         f'save --text "no tag" --source {src["id"]} "Lantern Keeper"'):
+            turn = self.turn(1, history=[src])
             self.assertEqual(self.run_cli(turn, command)['status'], 'refused', command)
-            turn.calls = 0
         for raw in ('{}', None):
+            turn = self.turn(1, history=[src])
             call = {'function': {'name': 'journal_commit', **({} if raw is None else {'arguments': raw})}}
             self.assertEqual(turn.invoke(call)['status'], 'refused')
         self.assertNotIn('journal_commit', self.ops)
@@ -141,7 +141,7 @@ class CliTests(unittest.TestCase):
         self.assertIn('recall needs search words', bare['reason'])
         self.assertNotIn('journal_recall', self.ops)
         for raw in ('{}', None, '{"query":""}', '{"query":"   "}'):
-            turn.calls = 0
+            turn = self.turn(2, 'What do you remember?')
             call = {'function': {'name': 'journal_recall', **({} if raw is None else {'arguments': raw})}}
             result = turn.invoke(call)
             self.assertEqual(result['status'], 'refused', raw)

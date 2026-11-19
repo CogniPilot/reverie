@@ -32,6 +32,7 @@ A failed query reads nothing that tick. Membership is checked again right before
 no post. The same query gives the id of each room's newest message; a room is read again only when that id changed
 (or is missing), a claim is pending, or its last read stopped early. Each line of the prompt carries its time ("[5m ago]", "[9:16 AM EDT]").
 """
+from contextlib import ExitStack
 import json
 import math
 import os
@@ -406,13 +407,14 @@ def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled="")
     return [{'role': 'system', 'content': text['system']}, {'role': 'user', 'content': content}], text['characters']
 
 
-def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fetch=fetch_public_page):
+def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fetch=fetch_public_page, *, journal_operation=None):
     """_answer, plus one content-free record in turn_trace_file (when set) for every reply, failure or error."""
     steps = []
     started = time.monotonic()
     outcome = 'error'
     try:
-        result = _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps=steps)
+        with ExitStack() as cleanup:
+            result = _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, cleanup, journal_operation)
         outcome = None
         return result
     except BaseException as e:
@@ -430,7 +432,7 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
                 log('turn trace not written', type(e).__name__)
 
 
-def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fetch=fetch_public_page, steps=None):
+def _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, cleanup, journal_operation):
     """Prompt -> (optional web_search steps) -> reply text. Returns (reply, request_chars, searches), where
     request_chars is the largest request actually sent.
 
@@ -443,9 +445,12 @@ def _answer(cfg, room, history, msg, model, search, timing=None, recalled="", fe
     `timing`, if given, collects ('model'|'search', seconds, server timings) per step."""
     failures = []
     cap = cfg.get('recall_cap_chars', 3000)
-    journal = agent_journal.Turn(cfg, room, history, msg,
-                                lambda op, **payload: memory_op(cfg, room, op, failures=failures, **payload),
-                                failures=failures, evidence={'text': recalled, 'max_chars': cap})
+    if journal_operation is None and cfg.get('memory_worker_name', 'agent_memory_worker.py') != 'agent_memory_worker.py':
+        def journal_operation(op, **payload):
+            return memory_op(cfg, room, op, failures=failures, **payload)
+    journal = cleanup.enter_context(agent_journal.Turn(
+        cfg, room, history, msg, journal_operation, failures=failures,
+        evidence={'text': recalled, 'max_chars': cap}))
     recalled = journal.merged_recall if journal.merged_recall is not None else journal.merge_recalled(recalled, cap)
     start_task = cfg.get('_admin_start_task')
     task_controls = coding_chat.workspace_controls() if start_task is not None else None
@@ -639,6 +644,13 @@ def still_member(cfg, chat, room):
 JOURNAL_COMMAND_OPS = ('journal_recall', 'journal_view', 'journal_receipt', 'journal_source', 'journal_commit')
 
 
+def custom_memory_worker(cfg):
+    directory = os.path.dirname(os.path.abspath(__file__))
+    default = os.path.join(directory, 'agent_memory_worker.py')
+    selected = os.path.join(directory, cfg.get('memory_worker_name', 'agent_memory_worker.py'))
+    return selected if os.path.realpath(selected) != os.path.realpath(default) else None
+
+
 def memory_op(cfg, room, op, *, failures=None, **payload):
     """Optional, killable memory I/O. Failure never changes delivery claims or retries a POST.
 
@@ -647,18 +659,12 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
     if (not cfg.get('memory_instance') or
             room in set(cfg.get('dm_rooms', [])) | set(cfg.get('_auto_dms', []))):
         return None
-    keys = ('cli', 'memory_instance', 'memory_timeout_s', 'recall_cap_chars',
-            'history_n', 'message_cap_chars', 'self_session_id')
     process = None
     try:
-        job = dict(config={k: cfg[k] for k in keys}, room=room, op=op, **payload)
-        job['config']['journal_enabled'] = cfg.get('journal_enabled', False)
-        directory = os.path.dirname(os.path.abspath(__file__))
-        default_worker = 'agent_memory_worker.py'
-        script = os.path.join(directory, cfg.get('memory_worker_name', default_worker))
-        command = [sys.executable, '-I', '-B', script]
-        if os.path.realpath(script) == os.path.realpath(os.path.join(directory, default_worker)):
-            command = agent_journal.native_memory_command('automatic-worker')
+        job = dict(config=agent_journal.automatic_config(cfg), room=room, op=op, **payload)
+        script = custom_memory_worker(cfg)
+        command = ([sys.executable, '-I', '-B', script] if script is not None else
+                   agent_journal.native_memory_command('automatic-worker'))
         process = subprocess.Popen(command, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                    start_new_session=True)

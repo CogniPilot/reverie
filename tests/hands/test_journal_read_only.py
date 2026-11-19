@@ -115,8 +115,9 @@ class ReadOnlyTests(unittest.TestCase):
                 self.assertIn('read_only_request', messages[-1]['content'])
                 return {'tool_calls': [{'id': 'recall', 'function': {'name': 'journal_recall', 'arguments': '{"query":"reminder"}'}}]}
             return {'content': 'No matching journal entries; no journal write performed.'}
-        with patch.object(loop, 'agent_journal', journal), patch.object(loop, 'memory_op', side_effect=operation):
-            reply, _, _ = loop.answer(cfg, ROOM, [msg], msg, model, None)
+        with patch.object(loop, 'agent_journal', journal):
+            reply, _, _ = loop.answer(cfg, ROOM, [msg], msg, model, None,
+                                      journal_operation=lambda op, **p: operation(cfg, ROOM, op, **p))
         self.assertIn('no journal write performed', reply)
         self.assertEqual(operations, ['journal_status', 'journal_recall'])
         self.assertEqual(len(calls), 3)

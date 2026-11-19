@@ -1,5 +1,8 @@
 //! Bounded JSON frames on a supervisor-owned Unix socket.
-use nix::unistd::dup;
+use nix::{
+    fcntl::{FcntlArg, FdFlag, fcntl},
+    unistd::dup,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     io::{self, BufRead, BufReader, Write},
@@ -19,6 +22,7 @@ impl WorkerChannel {
 
     pub(crate) fn from_fd(fd: impl AsFd) -> io::Result<Self> {
         let socket = UnixStream::from(dup(fd)?);
+        fcntl(&socket, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
         socket.peer_addr()?;
         Ok(Self(BufReader::new(socket)))
     }
@@ -30,6 +34,14 @@ impl WorkerChannel {
     pub(crate) fn read<T: DeserializeOwned>(
         &mut self,
         deadline: Option<Instant>,
+    ) -> io::Result<Option<T>> {
+        self.read_bounded(deadline, FRAME_BYTES)
+    }
+
+    pub(crate) fn read_bounded<T: DeserializeOwned>(
+        &mut self,
+        deadline: Option<Instant>,
+        limit: usize,
     ) -> io::Result<Option<T>> {
         let mut frame = Vec::new();
         loop {
@@ -43,7 +55,7 @@ impl WorkerChannel {
             }
             let boundary = data.iter().position(|&byte| byte == b'\n');
             let end = boundary.unwrap_or(data.len());
-            if end > FRAME_BYTES.saturating_sub(frame.len()) {
+            if end > limit.saturating_sub(frame.len()) {
                 return Err(crate::refused());
             }
             frame.extend_from_slice(&data[..end]);

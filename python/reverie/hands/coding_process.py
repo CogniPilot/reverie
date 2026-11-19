@@ -117,10 +117,10 @@ class BoundedProcess:
 
 
 class WorkerSocket:
-    def __init__(self, worker, initial, *, environment=None, terminal=False):
+    def __init__(self, worker, initial, *, environment=None, terminal=False, startup_limit=FRAME_BYTES):
         self.closed = False
         self.input = bytearray()
-        self.output = self.packet(initial)
+        self.output = self.packet(initial, startup_limit)
         self.connection, child = socket.socketpair()
         self.connection.setblocking(False)
         try:
@@ -137,9 +137,9 @@ class WorkerSocket:
             child.close()
 
     @staticmethod
-    def packet(value):
+    def packet(value, limit=FRAME_BYTES):
         frame = json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8')
-        if len(frame) > FRAME_BYTES:
+        if len(frame) > limit:
             raise ValueError('worker frame limit')
         return memoryview(frame + b'\n')
 

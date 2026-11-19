@@ -160,8 +160,7 @@ class SourceTests(unittest.TestCase):
                 self.assertTrue(any('source revisions checked' in m.get('content','') for m in messages))
                 return {'content':'Saved and recalled the stated preference; its source is checked, interpretation is not verified.'}
             return {'tool_calls':[{'id':f'call{len(calls)}', 'function':dict(name=name,arguments=json.dumps(args))}]}
-        with patch.object(loop, 'memory_op', side_effect=lambda cfg, room, op, **p:self.perform(op, **p)):
-            reply, _, _ = loop.answer(cfg, ROOM, [self.msg], self.msg, model, None)
+        reply, _, _ = loop.answer(cfg, ROOM, [self.msg], self.msg, model, None, journal_operation=self.perform)
         self.assertIn('Saved and recalled', reply)
         self.assertEqual(len(calls), journal.MAX_CALLS + 1)
         self.assertEqual(self.operations, ['journal_status','journal_source','journal_commit','journal_recall'])

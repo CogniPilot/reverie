@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import time
+from weakref import finalize
 
 from uuid import UUID
 
@@ -98,16 +99,17 @@ def journal_save_request(phase, **payload):
     return native_memory_json('journal-save-worker', {'phase': phase, 'payload': payload})
 
 
-def capture_turn(room, history, message):
+def journal_sources(room, history, message):
     fields = ('id', 'roomId', 'at', 'text', 'from')
 
     def source(row):
         return {k: row[k] for k in fields if k in row} if isinstance(row, dict) else None
 
-    return native_memory_json(
-        'journal-capture-worker',
-        {'room': room, 'history': [source(row) for row in history], 'message': source(message)},
-        TURN_CAPTURE_BYTES)
+    return {'room': room, 'history': [source(row) for row in history], 'message': source(message)}
+
+
+def capture_turn(room, history, message):
+    return native_memory_json('journal-capture-worker', journal_sources(room, history, message), TURN_CAPTURE_BYTES)
 
 
 def present_turn(room, capsule, turn=None):
@@ -121,171 +123,117 @@ def present_turn(room, capsule, turn=None):
     return native_memory_request('journal-context-worker', arguments, READ_WORKER_BYTES) if arguments is not None else None
 
 
+def automatic_config(cfg):
+    keys = ('cli', 'memory_instance', 'memory_timeout_s', 'recall_cap_chars',
+            'history_n', 'message_cap_chars', 'self_session_id')
+    return {**{key: cfg[key] for key in keys}, 'journal_enabled': cfg.get('journal_enabled', False)}
+
+
 class Turn:
-    def __init__(self, cfg, room, history, message, operation, now_ms=None, failures=None, evidence=None):
+    """Compatibility client for the native journal turn and its room effects."""
+
+    call_limit = calls = 0
+    tools = offered = accepted_calls = ()
+    context = recalled = ''
+    merged_recall = captured = None
+    recall_context_status = 'not_available'
+    replay = '{}'
+
+    def __init__(self, cfg, room, history, message, operation=None, now_ms=None, failures=None, evidence=None):
         self.operation = operation
+        self.timeout = 23 if operation is None else 5
         self.failures = failures if failures is not None else []
-        self.read_only = False
-        self.calls = 0
-        self.call_limit = 0
-        self.expanded_sources = set()
-        self.tools = []
-        self.accepted_calls = []
-        self.offered = []
-        self.needs_reason = False
-        self.help_shown = False
-        self.context = ''
-        self.recalled = ''
-        self.merged_recall = None
-        self.recall_context_status = 'not_available'
+        self.worker = self.cleanup = None
+        self.write_sent = False
         if not cfg.get('journal_enabled') or not cfg.get('memory_instance') or room is None:
             return
+        from coding_process import WorkerSocket
         try:
-            # Capture before any callback can alter the caller-owned message.
-            capture = capture_turn(room, history, message)
-            if not capture:
-                raise ValueError('invalid journal capture')
-            self.captured = capture['captured']
-            self.read_only = capture['read_only']
-            # Query the journal in the same worker already needed for status.
-            # Older workers ignore the additive query and still return status.
-            automatic = room not in cfg.get('journal_auto_recall_exclude_rooms', [])
-            response = (operation('journal_status', query=capture['query']) if automatic
-                        else operation('journal_status'))
-            if not response or response.get('status') != 'available':
-                raise ValueError('writer unavailable')
-            projected = present_turn(room, response.get('recall'), {
-                'captured_end': self.captured['end'],
-                'checkpoint': response.get('checkpoint') or None,
-                'clock_ms': time.time() * 1000 if now_ms is None else now_ms,
-                'catalog': capture['catalog'], 'read_only': self.read_only,
-                'asked_to_remember': capture['asked_to_remember'],
-                'evidence': evidence,
-            })
-            if not projected or not projected.get('context'):
-                raise ValueError('invalid journal context')
-            context = projected['context']
-            self.previous_id = context['previous_id']
-            self.needs_reason = context['needs_reason']
-            self.context = context['text']
-            self.recalled = projected['recall']
-            self.recall_context_status = 'prepared' if self.recalled else 'unavailable_or_unsupported'
-            self.offered = context['offered']
-            self.tools = context['tools']
-            self.accepted_calls = context['accepted_calls']
-            self.call_limit = context['call_limit']
-            if 'merged' in context:
-                self.merged_recall = self.apply_merge(context['merged'])
-        except (ValueError, TypeError, KeyError):
-            self.recalled = ''
-            self.context = '\nJournal unavailable in this turn; no commit or recall command is offered. Do not claim a journal write.'
+            job = journal_sources(room, history, message)
+            job.update(automatic=room not in cfg.get('journal_auto_recall_exclude_rooms', []),
+                       clock_ms=time.time() * 1000 if now_ms is None else now_ms, evidence=evidence)
+            if operation is None:
+                job['memory'] = {'config': automatic_config(cfg),
+                                 'status_timeout_s': cfg.get('journal_status_timeout_s', 5),
+                                 'command_timeout_s': cfg.get('journal_command_timeout_s', 8),
+                                 'suppress': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', [])}
+            self.worker = WorkerSocket('journal-turn-worker', job, startup_limit=TURN_CAPTURE_BYTES,
+                                       environment=os.environ if operation is None else None)
+            self.cleanup = finalize(self, self.worker.close, grace=0.1)
+            self.__dict__.update(self.receive())
+        except (OSError, EOFError, KeyError, ValueError):
+            self.close()
+            self.context = ('\nJournal unavailable in this turn; no commit or recall command is offered. '
+                            'Do not claim a journal write.')
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+    def close(self):
+        if self.cleanup:
+            self.cleanup()
+        self.worker = None
+
+    def receive(self):
+        while True:
+            reply = self.worker.wait(self.timeout)
+            if reply.get('write_started'):
+                self.write_sent = True
+            elif 'effect' in reply:
+                self.send_effect(reply['effect'])
+            else:
+                return reply
+
+    def send_effect(self, request):
+        op = request.pop('op')
+        self.write_sent |= op == 'journal_commit'
+        mark = len(self.failures)
+        result, invalid = None, False
+        try:
+            result = self.operation(op, **request)
+        except Exception as error:
+            invalid = isinstance(error, (ValueError, TypeError, KeyError))
+            if not invalid and not self.write_sent:
+                self.close()
+                raise
+        failure = self.failures[-1] if len(self.failures) > mark else None
+        frame = {'result': result, 'failure': failure, 'invalid': invalid}
+        if encode_memory_json(frame) is None and op == 'journal_status' and isinstance(result, dict):
+            frame['result'] = {**result, 'recall': None}
+        if encode_memory_json(frame) is None:
+            frame['result'] = None
+        self.worker.send(frame)
+
+    def request(self, action, **fields):
+        self.worker.send({'action': action, **fields})
+        reply = self.receive()
+        self.__dict__.update(reply['turn'])
+        return reply['result']
 
     def merge_recalled(self, existing, max_chars):
-        """Keep historical data in the existing user-data slot, never system text."""
         if not isinstance(existing, str) or len(existing) > max_chars:
             raise ValueError('recalled evidence exceeds configured cap')
-        if not self.recalled:
+        if not self.worker or not self.recalled:
             return existing
-        merged = journal_tool_request('merge', recall=self.recalled, existing=existing,
-                                      context=self.context, max_chars=max_chars)
-        if not merged:
-            self.recall_context_status = 'unavailable_or_unsupported'
-            return existing
-        return self.apply_merge(merged)
-
-    def apply_merge(self, merged):
-        self.recall_context_status = merged.get('status', self.recall_context_status)
-        self.context += merged.get('context_note', '')
-        return merged['text']
-
-    def unavailable(self, **extra):
-        """A journal result that could not be read, with the worker failure class when one was recorded."""
-        recent = self.failures[getattr(self, 'failure_mark', 0):]
-        return {'status': 'unavailable', **extra, **({'failure': recent[-1]} if recent else {})}
+        merged = self.request('merge', existing=existing, max_chars=max_chars)
+        if isinstance(merged, dict):
+            raise ValueError(merged['error'])
+        return merged
 
     def invoke(self, call):
         self.replay = '{}'
-        self.failure_mark = len(self.failures)  # report only this command's worker failures
-        if not self.tools:
+        if not self.worker or not self.tools:
             return {'status': 'refused', 'reason': 'journal_unavailable'}
-        fn = call.get('function') if isinstance(call, dict) else None
-        fn = fn if isinstance(fn, dict) else {}
-        name, raw = fn.get('name'), fn.get('arguments')
-        step = journal_tool_request('invoke', read_only=self.read_only,
-                                    state={'calls': self.calls, 'help_shown': self.help_shown},
-                                    name=name if isinstance(name, str) else None,
-                                    arguments=raw if isinstance(raw, str) and len(raw) <= MEMORY_WORKER_BYTES else None)
-        if not step:
-            self.calls += 1
-            return self.unavailable(reason='journal_command_worker_unavailable')
-        self.calls = step['state']['calls']
-        self.help_shown = step['state']['help_shown']
-        self.replay = step['replay']
-        if 'reply' in step:
-            return step['reply']
+        self.write_sent = False
         try:
-            dispatch = step['dispatch']
-            raw = dispatch.get('arguments')
-            if isinstance(raw, dict):
-                raw = json.dumps(raw)
-            if dispatch['name'] == 'journal_commit':
-                return self.save(raw)
-            return self.read(dispatch['name'], raw)
-        except (ValueError, TypeError, KeyError):
-            return {'status': 'refused', 'reason': 'invalid_arguments_or_source; compress text and use exact source IDs/quotes'}
-
-    def read(self, tool, arguments):
-        request = native_memory_json('journal-read-worker', {
-            'phase': 'plan', 'tool': tool, 'captured_end': self.captured['end'],
-            'expanded_sources': sorted(self.expanded_sources),
-            'arguments': arguments if isinstance(arguments, str) and len(arguments) <= MEMORY_WORKER_BYTES else None,
-        }, READ_WORKER_BYTES)
-        if not request:
-            return self.unavailable(reason='journal_read_worker_unavailable')
-        if 'reply' in request:
-            return request['reply']
-        operation = dict(request['request'])
-        result = self.operation(operation.pop('op'), **operation)
-        recent = self.failures[self.failure_mark:]
-        settled = native_memory_json('journal-read-worker', {
-            'phase': 'settle', 'request': request['request'], 'captured': self.captured,
-            'result': result, 'failure': recent[-1] if recent else None,
-        }, READ_WORKER_BYTES)
-        if not settled:
-            return self.unavailable(reason='journal_read_worker_unavailable')
-        if 'captured' in settled:
-            self.captured = settled['captured']
-            self.expanded_sources.add(settled['expanded_id'])
-        return settled['reply']
-
-    def save(self, raw):
-        plan = journal_save_request('prepare', room=self.captured['room'], captured=self.captured,
-                                    read_only=self.read_only, needs_reason=self.needs_reason,
-                                    arguments=raw if isinstance(raw, str) and len(raw) <= MEMORY_WORKER_BYTES else None)
-        if plan is None:
-            return self.unavailable(reason='journal_save_worker_unavailable')
-        if plan.get('action') == 'reply':
-            return plan['reply']
-        if plan.get('action') != 'commit':
-            return self.unavailable(reason='journal_save_worker_unavailable')
-        key = plan['key']
-        result = self.save_effect('journal_commit', draft=plan['draft'], captured=self.captured,
-                                  previous_id=self.previous_id)
-        settled = journal_save_request('classify', key=key, result=result)
-        if not settled or settled.get('action') != 'reply':
-            result = self.save_effect('journal_receipt', **key)
-            recent = self.failures[self.failure_mark:]
-            settled = journal_save_request('recover', key=key, result=result,
-                                           failure=recent[-1] if recent else None)
-        if not settled or settled.get('action') != 'reply' or not isinstance(settled.get('reply'), dict):
-            return {'status': 'unknown', 'turn_id': key['turn_id'],
-                    'reason': 'write outcome unresolved; do not retry the write'}
-        if 'previous_id' in settled:
-            self.previous_id = settled['previous_id']
-        return settled['reply']
-
-    def save_effect(self, operation, **payload):
-        try:
-            return self.operation(operation, **payload)
-        except Exception:
-            return None
+            return self.request('invoke', call=call)
+        except (ConnectionError, TimeoutError, EOFError, ValueError):
+            self.close()
+            self.tools = ()
+            if self.write_sent:
+                return {'status': 'unknown', 'turn_id': self.captured['end']['id'],
+                        'reason': 'write outcome unresolved; do not retry the write'}
+            return {'status': 'unavailable', 'failure': 'worker_error'}

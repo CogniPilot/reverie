@@ -45,11 +45,11 @@ fn asked_to_remember(text: &str) -> bool {
 
 #[derive(Serialize)]
 pub(crate) struct Capture {
-    captured: Box<RawValue>,
-    catalog: String,
-    query: String,
-    read_only: bool,
-    asked_to_remember: bool,
+    pub(super) captured: Box<RawValue>,
+    pub(super) catalog: String,
+    pub(super) query: String,
+    pub(super) read_only: bool,
+    pub(super) asked_to_remember: bool,
 }
 
 pub(crate) fn execute(input: &[u8]) -> io::Result<Capture> {

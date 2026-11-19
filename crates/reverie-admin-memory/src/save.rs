@@ -20,8 +20,8 @@ const INVALID: &str = "invalid_arguments_or_source; compress text and use exact 
 const NEEDS_REASON: &str = "save_needs_reason_this_turn; add --reason WHY";
 
 #[derive(Deserialize, Serialize)]
-struct Key {
-    turn_id: String,
+pub(super) struct Key {
+    pub(super) turn_id: String,
     expected_hash: String,
 }
 
@@ -58,13 +58,13 @@ struct Job<'a> {
 }
 
 #[derive(Deserialize)]
-struct Preparation<'a> {
-    room: String,
-    read_only: bool,
-    needs_reason: bool,
-    arguments: Option<String>,
+pub(super) struct Preparation<'a> {
+    pub(super) room: String,
+    pub(super) read_only: bool,
+    pub(super) needs_reason: bool,
+    pub(super) arguments: Option<String>,
     #[serde(borrow)]
-    captured: &'a RawValue,
+    pub(super) captured: &'a RawValue,
 }
 
 #[derive(Deserialize)]
@@ -76,14 +76,14 @@ struct Settlement {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Failure {
+pub(super) enum Failure {
     Timeout,
     WorkerError,
 }
 
 #[derive(Serialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
-enum Next {
+pub(super) enum Next {
     Commit {
         key: Key,
         draft: Box<RawValue>,
@@ -120,7 +120,7 @@ impl Settlement {
     }
 }
 
-fn prepare(input: &Preparation<'_>) -> Next {
+pub(super) fn prepare(input: &Preparation<'_>) -> Next {
     if input.read_only {
         return rejection("read_only_request");
     }
@@ -167,7 +167,7 @@ fn reply(reply: Value) -> Next {
     }
 }
 
-fn classify(key: &Key, result: Option<Value>) -> Next {
+pub(super) fn classify(key: &Key, result: Option<Value>) -> Next {
     let Some(result) = result.filter(|value| value.as_object().is_some_and(|map| !map.is_empty()))
     else {
         return Next::Receipt;
@@ -207,7 +207,7 @@ fn entry_id(result: &Value) -> Option<i64> {
     result["entry_id"].as_i64().filter(|id| *id > 0)
 }
 
-fn recover(key: &Key, result: Option<&Value>, failure: Option<Failure>) -> Next {
+pub(super) fn recover(key: &Key, result: Option<&Value>, failure: Option<Failure>) -> Next {
     let status = result.and_then(|value| value["status"].as_str());
     if status == Some("conflict") {
         return reply(json!({

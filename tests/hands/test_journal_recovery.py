@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
@@ -74,16 +74,6 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(result['status'],'unknown')
         self.assertEqual(self.calls.count('journal_commit'),1)
         self.assertEqual(self.perform('journal_receipt',turn_id=MID)['status'],'committed')
-
-    def test_unavailable_settlement_worker_still_reads_once_and_leaves_outcome_unknown(self):
-        request = journal.journal_save_request
-        def fail_after_dispatch(phase, **payload):
-            return request(phase, **payload) if phase == 'prepare' else None
-        with patch.object(journal, 'journal_save_request', side_effect=fail_after_dispatch):
-            result = self.commit(self.turn(self.perform))
-        self.assertEqual(result['status'], 'unknown')
-        self.assertIn('do not retry', result['reason'])
-        self.assertEqual(self.calls, ['journal_status', 'journal_commit', 'journal_receipt'])
 
     def test_different_stored_payload_is_conflict_not_false_recovery(self):
         def operation(op,**p):
@@ -174,8 +164,8 @@ class RecoveryTests(unittest.TestCase):
                 self.assertIsNone(tools)
                 return {'content':'The durable write receipt was recovered without repeating the write; the entry was recalled.'}
             return {'tool_calls':[{'id':str(len(calls)),'function':dict(name=name,arguments=json.dumps(args))}]}
-        with patch.object(loop,'memory_op',side_effect=operation):
-            reply,_,_=loop.answer(cfg,ROOM,[self.msg],self.msg,model,None)
+        reply,_,_=loop.answer(cfg,ROOM,[self.msg],self.msg,model,None,
+                             journal_operation=lambda op, **p: operation(cfg, ROOM, op, **p))
         self.assertIn('without repeating',reply)
         self.assertEqual(self.calls,['journal_status','journal_commit','journal_receipt','journal_receipt','journal_recall'])
         self.assertEqual(len(calls),journal.MAX_CALLS+1)

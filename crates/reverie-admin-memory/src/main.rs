@@ -21,6 +21,7 @@ mod hands_terminal;
 mod hands_turn;
 mod hands_web;
 mod journal;
+mod journal_turn;
 mod legacy_memory;
 mod managed_context;
 mod model_completion;
@@ -213,6 +214,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-save-worker" => journal_save_worker,
         "--journal-read-worker" => journal_read_worker,
         "--journal-capture-worker" => journal_capture_worker,
+        "--journal-turn-worker" => journal_turn::run,
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
         "--opencode-install-worker" => opencode_install::worker,

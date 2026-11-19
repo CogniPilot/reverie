@@ -51,19 +51,19 @@ struct Checkpoint<'a> {
 
 #[derive(Serialize)]
 pub(crate) struct Presentation {
-    recall: String,
-    context: Option<TurnPrompt>,
+    pub(super) recall: String,
+    pub(super) context: Option<TurnPrompt>,
 }
 
 #[derive(Serialize)]
-struct TurnPrompt {
-    text: String,
-    previous_id: Option<i64>,
-    needs_reason: bool,
+pub(super) struct TurnPrompt {
+    pub(super) text: String,
+    pub(super) previous_id: Option<i64>,
+    pub(super) needs_reason: bool,
     #[serde(flatten)]
-    toolset: Toolset,
+    pub(super) toolset: Toolset,
     #[serde(skip_serializing_if = "Option::is_none")]
-    merged: Option<Merged>,
+    pub(super) merged: Option<Merged>,
 }
 
 pub(crate) fn execute(bytes: &[u8]) -> io::Result<Presentation> {

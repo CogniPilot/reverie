@@ -81,30 +81,30 @@ enum Request {
     },
 }
 
-#[derive(Deserialize, Serialize)]
-struct CallState {
-    calls: usize,
+#[derive(Default, Deserialize, Serialize)]
+pub(super) struct CallState {
+    pub(super) calls: usize,
     help_shown: bool,
 }
 
 #[derive(Serialize)]
-struct Step {
-    state: CallState,
-    replay: String,
+pub(super) struct Step {
+    pub(super) state: CallState,
+    pub(super) replay: String,
     #[serde(flatten)]
-    outcome: Outcome,
+    pub(super) outcome: Outcome,
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
-enum Outcome {
+pub(super) enum Outcome {
     Reply { reply: Value },
     Dispatch { dispatch: Dispatch },
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
-enum Dispatch {
+pub(super) enum Dispatch {
     Parsed(Box<RawValue>),
     Raw {
         name: String,
@@ -130,7 +130,7 @@ pub(crate) fn execute(bytes: &[u8]) -> io::Result<Box<RawValue>> {
     })
 }
 
-fn invoke(
+pub(super) fn invoke(
     read_only: bool,
     state: CallState,
     name: Option<String>,
@@ -206,11 +206,11 @@ fn refused(reason: &str) -> Outcome {
 
 #[derive(Serialize)]
 pub(super) struct Merged {
-    text: String,
+    pub(super) text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    status: Option<&'static str>,
+    pub(super) status: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    context_note: Option<&'static str>,
+    pub(super) context_note: Option<&'static str>,
 }
 
 pub(super) fn merge(

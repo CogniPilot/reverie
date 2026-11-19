@@ -15,6 +15,8 @@ use std::{
 
 #[path = "support/journal_projection.rs"]
 mod journal_projection;
+#[path = "support/journal_turn.rs"]
+mod journal_turn;
 #[path = "support/journal_write.rs"]
 mod journal_write;
 
@@ -86,14 +88,17 @@ impl Fixture {
     fn store(&self) -> MemoryStore {
         MemoryStore::open(self.database()).unwrap()
     }
-    fn automatic(&self, op: &str, fields: Value) -> Output {
+    fn automatic_settings(&self) -> Value {
         let mut config: Value =
             serde_json::from_slice(&fs::read(self.settings()).unwrap()).unwrap();
         config["recall_cap_chars"] = json!(3000);
         config["history_n"] = json!(30);
         config["journal_enabled"] = json!(true);
         config["message_cap_chars"] = json!(19);
-        let mut job = json!({"config": config, "op": op, "room": ROOM});
+        config
+    }
+    fn automatic(&self, op: &str, fields: Value) -> Output {
+        let mut job = json!({"config": self.automatic_settings(), "op": op, "room": ROOM});
         job.as_object_mut()
             .unwrap()
             .extend(fields.as_object().unwrap().clone());

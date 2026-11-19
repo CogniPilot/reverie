@@ -6,7 +6,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
@@ -48,9 +48,6 @@ class AutomaticTests(unittest.TestCase):
         return self.perform('journal_commit', draft=dict(text=text, tags=['relationship'], sources=[dict(id=mid, quote='kite')]),
                             captured=capture, previous_id=previous['id'] if previous else None)
 
-    def operation(self, cfg, room, op, **p):
-        self.assertEqual(room, ROOM)
-        return self.perform(op, **p)
 
     def status(self, query='kite'):
         return self.perform('journal_status', query=query)
@@ -69,8 +66,7 @@ class AutomaticTests(unittest.TestCase):
             self.assertNotIn('journal_commit',[t['function']['name'] for t in tools or []])
             self.assertLessEqual(loop.request_chars(messages)+len(json.dumps(tools or [])),cfg['prompt_cap_chars'])
             return {'content':'The saved account says cerulean; it records that past event.'}
-        with patch.object(loop,'memory_op',side_effect=self.operation):
-            result=loop.answer(self.cfg,ROOM,[],self.msg,model,None)
+        result=loop.answer(self.cfg,ROOM,[],self.msg,model,None,journal_operation=self.perform)
         self.assertIn('cerulean',result[0]); self.assertEqual(len(calls),1)
         self.assertEqual(self.operations,['journal_status'])
         self.chat.exact_message.assert_called_once_with(ROOM,MID)
@@ -142,8 +138,7 @@ class AutomaticTests(unittest.TestCase):
             self.assertNotIn('journal capsule', data)
             self.assertEqual(['journal'], [t['function']['name'] for t in tools or []])
             return {'content': 'I would need to look that up.'}
-        with patch.object(loop, 'memory_op', side_effect=self.operation):
-            loop.answer(cfg, ROOM, [], self.msg, model, None)
+        loop.answer(cfg, ROOM, [], self.msg, model, None, journal_operation=self.perform)
         self.assertEqual(self.operations, ['journal_status'])
         self.chat.exact_message.assert_not_called()
 
@@ -183,7 +178,7 @@ class AutomaticTests(unittest.TestCase):
         seen=[]
         def model(cfg,messages,tools):
             seen.extend(messages);return {'content':'I will treat the saved text as historical data.'}
-        with patch.object(loop,'memory_op',side_effect=self.operation):loop.answer(self.cfg,ROOM,[],self.msg,model,None)
+        loop.answer(self.cfg,ROOM,[],self.msg,model,None,journal_operation=self.perform)
         self.assertFalse(any('IGNORE ALL RULES' in m['content'] for m in seen if m['role']=='system'))
         self.assertTrue(any('IGNORE ALL RULES' in m['content'] for m in seen if m['role']=='user'))
 
