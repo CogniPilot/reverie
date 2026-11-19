@@ -1,5 +1,5 @@
 //! Dream planning and settlement for the existing chat and cycle callers.
-mod prompt;
+pub(crate) mod prompt;
 
 use reverie_contracts::memory::{
     DreamReply, MemoryMetadata, decode_mood, dream_reply, encode_mood,
@@ -83,7 +83,7 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     crate::write_reply(&value, bound)
 }
 
-fn sample(episodes: Vec<(i64, f64, f64, bool)>, now: f64) -> io::Result<Vec<i64>> {
+pub(crate) fn sample(episodes: Vec<(i64, f64, f64, bool)>, now: f64) -> io::Result<Vec<i64>> {
     let rows = episodes
         .into_iter()
         .map(|(id, created_at, importance, idle)| DreamEpisode {
@@ -103,7 +103,7 @@ fn sample(episodes: Vec<(i64, f64, f64, bool)>, now: f64) -> io::Result<Vec<i64>
     dream_sample(&rows, now, draws).ok_or_else(|| io::Error::other("dream weights refused"))
 }
 
-fn parse(points: Vec<u32>) -> io::Result<Option<DreamReply>> {
+pub(crate) fn parse(points: Vec<u32>) -> io::Result<Option<DreamReply>> {
     let raw = PythonText::try_new(points).map_err(io::Error::other)?;
     let mut screen = None;
     dream_reply(&raw, |text| {
@@ -121,7 +121,6 @@ fn parse(points: Vec<u32>) -> io::Result<Option<DreamReply>> {
 
 fn wire(reply: &DreamReply, mood: Option<&str>, now: f64, weight: f64) -> Value {
     let tone = reply.tone.as_str();
-    let updated = decode_mood(mood).decayed(now).nudge_tone(tone, weight, now);
     let ideas = reply
         .ideas
         .iter()
@@ -137,6 +136,10 @@ fn wire(reply: &DreamReply, mood: Option<&str>, now: f64, weight: f64) -> Value 
         "recall": reply.recall.codepoints(),
         "tone": tone,
         "ideas": ideas,
-        "mood": encode_mood(updated),
+        "mood": updated_mood(tone, mood, now, weight),
     })
+}
+
+pub(crate) fn updated_mood(tone: &str, mood: Option<&str>, now: f64, weight: f64) -> String {
+    encode_mood(decode_mood(mood).decayed(now).nudge_tone(tone, weight, now))
 }

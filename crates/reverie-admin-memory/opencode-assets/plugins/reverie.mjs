@@ -62,7 +62,7 @@ const contextArgs = (instance, request) => [
 ];
 
 const stateActions = new Set(["activity", "record", "mode", "rules", "plan", "profile", "profiles", "brief",
-  "self", "votes", "self_history", "self_vote", "publication_proposal", "return", "recall", "vacation"]);
+  "self", "votes", "self_history", "self_vote", "publication_proposal", "return", "recall", "vacation", "maintenance"]);
 
 export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
   const researchCycle = envName("RESEARCH_CYCLE_ID");
@@ -72,7 +72,7 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
     const journal = request.action === "remember";
     const packaged = settings.bridge === "reverie-opencode-bridge";
     const state = stateActions.has(request.action) &&
-      (settings.instance || packaged || request.action === "recall" || request.action === "vacation");
+      (settings.instance || packaged || ["recall", "vacation", "maintenance"].includes(request.action));
     let command = packaged ? "reverie-opencode-bridge" : settings.python;
     let args = packaged ? [] : ["-m", "reverie.opencode"];
     if (context) {

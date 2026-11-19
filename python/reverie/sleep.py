@@ -467,8 +467,11 @@ class _brain_for:
 
 
 def _dispatch(brain, request):
-    from .opencode import dispatch
-    return dispatch(brain, request)
+    from .opencode import native_state
+    result = native_state(request, brain.cfg.instance_config, capture_output=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.rstrip())
+    return json.loads(result.stdout)
 
 
 def main(argv=None, out=None) -> int:

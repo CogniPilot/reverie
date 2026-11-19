@@ -1,5 +1,6 @@
 //! Non-streaming completion transport for the remaining legacy model callers.
 mod reply;
+pub(crate) use reply::clean as clean_reply;
 
 use crate::TURN_CAPTURE_BOUND;
 use reverie_core::PythonText;
@@ -48,21 +49,32 @@ fn complete(url: &str, body: String, timeout: f64, key_env: Option<String>) -> i
         .strip_suffix("/chat/completions")
         .ok_or_else(crate::refused)?;
     let timeout = Duration::try_from_secs_f64(timeout).map_err(io::Error::other)?;
+    let key = key_from_environment(key_env)?;
+    let response = request(
+        base,
+        Route::Completions,
+        Some(body.into_bytes()),
+        timeout,
+        key.as_deref(),
+    )?;
+    io::stdout().lock().write_all(&response)
+}
+
+pub(crate) fn request(
+    base: &str,
+    route: Route,
+    data: Option<Vec<u8>>,
+    timeout: Duration,
+    key: Option<&str>,
+) -> io::Result<Vec<u8>> {
     let client =
         Client::new(base.to_owned(), timeout, MAX_RESPONSE_BYTES).map_err(|_| crate::refused())?;
-    let key = key_from_environment(key_env)?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let result = runtime.block_on(client.request(
-        Route::Completions,
-        Some(body.into_bytes()),
-        key.as_deref(),
-    ));
+    let result = runtime.block_on(client.request(route, data, key));
     runtime.shutdown_background();
-    io::stdout()
-        .lock()
-        .write_all(&result.map_err(|_| crate::refused())?)
+    result.map_err(|_| crate::refused())
 }
 
 fn format(

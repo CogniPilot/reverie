@@ -84,7 +84,7 @@ fn system(
     parts.join("\n\n")
 }
 
-fn render_beliefs(beliefs: &[Belief]) -> String {
+pub(crate) fn render_beliefs(beliefs: &[Belief]) -> String {
     let mut ordered = beliefs.iter().collect::<Vec<_>>();
     ordered.sort_by(|left, right| {
         right

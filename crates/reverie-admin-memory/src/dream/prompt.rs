@@ -21,7 +21,7 @@ const SUFFIX: &str = "\nAll dreams and proposed ideas are imagination, not verif
 const STABLE: &str = "Who you are, even asleep (stable, not questioned by dreams):";
 const REVISABLE: &str = "Your current self-understanding (revisable, not an objective finding):";
 
-pub(super) fn system(override_text: Option<&str>) -> String {
+pub(crate) fn system(override_text: Option<&str>) -> String {
     let mut prompt = override_text
         .map(trim_text)
         .filter(|text| !text.is_empty())
@@ -38,7 +38,7 @@ pub(super) fn system(override_text: Option<&str>) -> String {
     prompt
 }
 
-pub(super) fn user(
+pub(crate) fn user(
     episodes: &[(i64, String)],
     beliefs: &str,
     revisable: bool,

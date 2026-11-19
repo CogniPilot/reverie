@@ -2,6 +2,7 @@
 //! It uses the OpenCode renderer with a read-only view of existing state.
 mod history;
 mod system;
+pub(crate) use system::render_beliefs;
 
 use crate::opencode_context::{Context, Limits};
 use clap::{Parser, ValueEnum};

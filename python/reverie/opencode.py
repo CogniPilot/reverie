@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import fcntl
 import json
 import re
 from pathlib import Path
@@ -173,52 +172,7 @@ def dispatch(brain, request: dict):
                            context=request.get("context"), context_window=request.get("context_window"),
                            output_tokens=request.get("output_tokens", 4096),
                            occupied_tokens=request.get("occupied_tokens", 0))
-    if action == "maintenance":
-        # A nonblocking host lock prevents overlapping plugin instances from dreaming twice.
-        with (brain.cfg.data_dir / "maintenance.lock").open("a") as lock:
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                return {"skipped": "another maintenance pass is running"}
-            if brain.room.gpu_busy():
-                return {"skipped": "GPU busy or maintenance held"}
-            brain.last_activity = float(brain.store.get_state("reverie_last_activity", str(time.time())))
-            mode = reverie.read("lifecycle", {"mode": "active"})["body"]
-            if mode["mode"] == "vacation":
-                last = float(brain.store.get_state("vacation_last_dream_attempt", "0"))
-                if time.time() - last < 86400 or not brain.dreamer.due(brain.last_activity):
-                    return {"skipped": "vacation dream budget or sleep window"}
-                if not vacation_gpu_available(brain):
-                    return {"skipped": "vacation yields to the active admin or GPU"}
-                brain.client.timeout = min(brain.client.timeout, 120)
-                brain.store.set_state("vacation_last_dream_attempt", str(time.time()))
-                dream = brain.dream_if_due()
-                return {"action": "dreamed" if dream else "vacation dream skipped"}
-            # Maintenance never polls the room, generates replies or posts idle jokes.
-            rated = brain.rate_pending()
-            if rated:
-                return {"action": "rated", "count": rated}
-            reflected = brain.reflect_if_due()
-            if reflected:
-                return {"action": "reflected", "count": reflected}
-            dream = brain.dream_if_due()
-            return {"action": "dreamed" if dream else "idle", "count": 1 if dream else 0}
     raise ValueError(f"unknown bridge action {action}")
-
-
-def vacation_gpu_available(brain) -> bool:
-    """Fail closed; never replace another admin's resident model for a vacation dream."""
-    try:
-        probe = subprocess.run(["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-                               capture_output=True, text=True, check=True, timeout=5)
-        if any(int(line.strip()) > 5 for line in probe.stdout.splitlines()):
-            return False
-        with urllib.request.urlopen(brain.cfg.api_base.rstrip("/").removesuffix("/v1") + "/models", timeout=5) as response:
-            models = json.load(response).get("data", [])
-        return bool(models) and all(m.get("id") == brain.cfg.model or
-            m.get("status", {}).get("value") == "unloaded" for m in models)
-    except Exception:
-        return False
 
 
 def voice_reply(brain, transcript: str) -> tuple[bool, str | None]:
@@ -272,6 +226,15 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
     return result
 
 
+def native_state(request, instance=None, *, capture_output=False):
+    command = ["reverie-opencode", "--bridge"]
+    if instance:
+        command.extend(("--instance", str(instance)))
+    return subprocess.run(command, input=json.dumps(request), encoding="utf-8",
+                          timeout=120 if request.get("action") == "maintenance" else 60,
+                          check=False, capture_output=capture_output)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--install", type=Path, metavar="WORKSPACE")
@@ -292,12 +255,8 @@ def main(argv=None) -> int:
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
             action = request.get("action")
-            if action in ("recall", "vacation"):
-                command = ["reverie-opencode", "--bridge"]
-                if args.instance:
-                    command.extend(("--instance", str(args.instance)))
-                return subprocess.run(command, input=json.dumps(request), encoding="utf-8",
-                                      timeout=60, check=False).returncode
+            if action in ("recall", "vacation", "maintenance"):
+                return native_state(request, args.instance).returncode
             if action == "remember":
                 result = remember_on_office(request)
             else:

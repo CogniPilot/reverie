@@ -69,6 +69,8 @@ impl Fixture {
     }
 }
 
+#[path = "support/opencode_maintenance.rs"]
+mod maintenance;
 #[path = "support/opencode_memory.rs"]
 mod memory;
 

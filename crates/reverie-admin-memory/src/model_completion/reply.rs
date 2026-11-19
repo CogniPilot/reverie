@@ -32,7 +32,7 @@ fn without_thoughts(mut remaining: &[u32]) -> Vec<u32> {
     cleaned
 }
 
-pub(super) fn clean(text: &PythonText, limit: i64) -> Vec<u32> {
+pub(crate) fn clean(text: &PythonText, limit: i64) -> Vec<u32> {
     let without_thoughts = without_thoughts(text.codepoints());
     let plain: Vec<_> = without_thoughts
         .into_iter()

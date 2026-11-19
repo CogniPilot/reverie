@@ -7,18 +7,16 @@ all reflections (see :mod:`reverie.persona`).
 """
 from __future__ import annotations
 
-import json
-import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .beliefs import contradicts_protected, protected_root, render
-from .reverie import passes
+from .beliefs import protected_root, render
+from .hands.agent_journal import native_memory_json
 from .config import ChatClient, LLMError
 from .memory import Memory, MemoryStore
-from .persona import normalize_section, render_profile, write_profile
+from .persona import render_profile, write_profile
 
 STATE_LAST_REFLECTED_ID = "last_reflected_id"
 STATE_LAST_REFLECTION_AT = "last_reflection_at"
@@ -30,28 +28,6 @@ TRUST_OWNER = "owner"
 TRUST_CLAIMED = "claimed"
 MIXED_MAX_IMPORTANCE = 4.0
 
-REFLECT_SYSTEM = (
-    "You are the configured agent, consolidating recent experiences and interactions during sleep. "
-    "Choose zero to five durable insights that matter to you: important interactions with people, "
-    "preferences they explicitly shared, promises, boundaries, your own reactions, lessons and open questions. "
-    "Do not center every memory on the owner. Preserve who said or did what and why it mattered. "
-    "Distinguish observations from interpretations; do not infer another person's feelings as fact. "
-    "Keep private memories in your private store. Do not publish them into project memory. "
-    "An empty list is fine; do not invent significance or force affection. Each insight is one plain sentence "
-    "under 160 characters.\n"
-    "Answer with a JSON array only, no prose, like:\n"
-    '[{"insight": "The user is exploring a compiler design", "importance": 8, '
-    '"section": "user", "sources": [3, 5]}]\n'
-    "section is one of: user, agent, shared. importance is 1-10. sources lists the episode numbers used. "
-    "If recent dreams are listed, they are dreams, not events: they may hint at a theme or a feeling worth one "
-    "low-importance insight, never a fact about the owner, and they are never valid sources. "
-    "Your held beliefs about yourself, if listed, are a stable part of who you are: do not re-evaluate, doubt or "
-    "argue against them here. If you want to deepen one in your own words, use section belief for that item."
-)
-
-_JSON_ARRAY = re.compile(r"\[.*\]", re.S)
-
-
 @dataclass
 class Insight:
     insight: str
@@ -60,48 +36,16 @@ class Insight:
     sources: list[int]
 
 
-def sanitize_insight(text: str) -> str:
-    text = " ".join((text or "").replace("*", "").replace("#", "").split())
-    return text[:200]
+def reflection_request(action, **fields):
+    reply = native_memory_json("reflection-worker", {"action": action, **fields}, 4 * 1024 * 1024)
+    if reply is None:
+        raise ValueError("native reflection operation could not be completed")
+    return reply
 
 
 def parse_insights(text: str, valid_ids: Sequence[int] = (), revisable: bool = False) -> list[Insight]:
-    m = _JSON_ARRAY.search(text or "")
-    if not m:
-        return []
-    try:
-        data = json.loads(m.group(0))
-    except ValueError:
-        return []
-    if not isinstance(data, list):
-        return []
-    valid = set(valid_ids)
-    out: list[Insight] = []
-    for item in data[:5]:
-        if not isinstance(item, dict):
-            continue
-        insight = sanitize_insight(str(item.get("insight", "")))
-        if len(insight) < 8 or (not revisable and contradicts_protected(insight)) or not passes(insight):
-            continue
-        try:
-            imp = float(item.get("importance", 5))
-        except (TypeError, ValueError):
-            imp = 5.0
-        imp = max(1.0, min(10.0, imp))
-        srcs = item.get("sources") or []
-        if not isinstance(srcs, list):
-            srcs = []
-        ids = []
-        for s in srcs:
-            try:
-                i = int(s)
-            except (TypeError, ValueError):
-                continue
-            if not valid or i in valid:
-                ids.append(i)
-        sec = str(item.get("section") or "").strip().lower()
-        out.append(Insight(insight, imp, "belief" if sec == "belief" else normalize_section(sec), ids))
-    return out
+    reply = reflection_request("parse", raw=text or "", valid_ids=list(valid_ids), revisable=revisable)
+    return [Insight(**item) for item in reply["insights"]]
 
 
 def format_episodes(episodes: Sequence[Memory]) -> str:
@@ -157,7 +101,7 @@ class Reflector:
 
     def _ask(self, episodes: Sequence[Memory], extra: str) -> str | None:
         messages = [
-            {"role": "system", "content": REFLECT_SYSTEM},
+            {"role": "system", "content": reflection_request("prompt")["system"]},
             {"role": "user", "content": "Recent exchanges:\n\n" + format_episodes(episodes) + extra
              + "\n\nJSON array of insights:"},
         ]

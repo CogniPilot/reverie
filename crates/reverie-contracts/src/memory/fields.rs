@@ -19,6 +19,12 @@ impl MemoryMetadata {
     pub fn json(&self) -> String {
         String::from_utf8(self.0.encode()).expect("ASCII JSON")
     }
+    pub fn is_owner_observation(&self) -> bool {
+        let Node::Object(fields) = &self.0.value.0 else {
+            return false;
+        };
+        matches!(fields.get(&text("trust")), Some(Value(Node::String(label))) if *label == text("owner"))
+    }
     pub fn or_empty(self) -> Self {
         if truthy(Some(&self.0.value)) {
             self

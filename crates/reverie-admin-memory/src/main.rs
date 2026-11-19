@@ -228,6 +228,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--legacy-memory-worker" => legacy_memory::run,
         "--project-memory-worker" => project_memory::run,
         "--dream-worker" => dream::run,
+        "--reflection-worker" => opencode_state::reflection_worker,
         "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,
         "--hands-coding-worker" => coding_task::run,

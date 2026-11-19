@@ -1,6 +1,8 @@
 //! Instance-owned OpenCode state on the existing SQLite memory store.
 mod activity;
 mod documents;
+mod maintenance;
+pub(crate) use maintenance::reflection_worker;
 mod recall;
 mod record;
 mod vacation;
@@ -27,6 +29,7 @@ enum Request {
     Activity(activity::Request),
     Recall(recall::Request),
     Record(record::Request),
+    Maintenance,
     Vacation(vacation::Request),
     Mode,
     Rules,
@@ -55,6 +58,7 @@ fn execute(args: Arguments, input: &[u8]) -> Result<Value> {
         Request::Rules => Ok(json!(super::opencode_install::rules())),
         Request::Mode => mode(&args),
         Request::Record(request) => request.save(&configuration(&args)?),
+        Request::Maintenance => maintenance::run(&configuration(&args)?),
         Request::Recall(request) => request.read(&configuration(&args)?),
         Request::Activity(request) if request.is_research() => {
             Ok(json!({ "ok": true, "research": true }))

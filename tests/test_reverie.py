@@ -150,18 +150,6 @@ class ReverieTests(unittest.TestCase):
         for expected in ("persistent AI agent", "Only explicit owner policy", "Be witty", "Review PR 437", "Dreams are hypotheses"):
             self.assertIn(expected, text)
 
-    def test_maintenance_respects_hold_and_does_not_joke_or_reply(self):
-        self.brain.room.busy = True
-        self.assertIn("skipped", dispatch(self.brain, {"action": "maintenance"}))
-        self.brain.room.busy = False
-        self.brain.rate_pending = lambda: 0
-        self.brain.reflect_if_due = lambda: 0
-        dreams = []
-        self.brain.dream_if_due = lambda: dreams.append(True)
-        dispatch(self.brain, {"action": "maintenance"})
-        self.assertEqual(dreams, [True])
-        self.assertEqual(self.brain.room.said, [])
-
     def test_install_stays_local_and_preserves_unmanaged_config(self):
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp)
@@ -237,25 +225,6 @@ class ReverieTests(unittest.TestCase):
         self.assertEqual(policy["edit"]["*/opencode.json"], "deny")
         self.assertEqual(policy["task"], "ask")
         self.assertEqual(policy["reverie_return"], "ask")
-
-    def test_real_maintenance_can_generate_a_new_dream_and_recall_math_lead(self):
-        for index in range(4):
-            self.store.add_episode(f"Question about symmetry {index}", "Try a counterexample")
-        client, transport = fake_client(json.dumps({"dream": "I fold a lattice until a symmetry becomes a question rather than an answer.",
-            "recall": "I dreamed about a lattice symmetry", "tone": "playful",
-            "ideas": [{"hypothesis": "A symmetry might reduce the search", "check": "Enumerate the smallest counterexamples"}]}))
-        self.brain.dreamer.client = client
-        self.brain.rate_pending = lambda: 0
-        self.brain.reflect_if_due = lambda: 0
-        self.store.set_state("reverie_last_activity", str(time.time() - 2000))
-        self.assertEqual(self.brain.dreamer.per_sleep, 0)
-        self.assertEqual(dispatch(self.brain, {"action": "maintenance"})["action"], "idle")
-        self.assertEqual(transport.calls, [])
-        self.brain.dreamer.per_sleep = 1  # This dream-generation fixture explicitly opts in.
-        self.assertEqual(dispatch(self.brain, {"action": "maintenance"})["action"], "dreamed")
-        self.assertEqual(self.store.count("dream"), 1)
-        self.assertIn("Unverified dream hypothesis", dispatch(self.brain, {"action": "context"}))
-        self.assertIn("no person or topic has to appear", transport.calls[0]["messages"][0]["content"])
 
     def test_same_week_repetition_cannot_change_core_and_missed_week_breaks_streak(self):
         self.reverie.save_self(INITIAL_SELF, "Initial values", 0)

@@ -287,6 +287,21 @@ fn refresh_missing_profile(
     if profile.is_present()? {
         return Ok(ProfileOutcome::Existing);
     }
+    Ok(profile.ensure(&derive_profile(store, configuration)?)?)
+}
+
+pub fn refresh_memory_profile(
+    store: &MemoryStore,
+    configuration: &MemoryConfiguration,
+) -> Result<(), StartupError> {
+    let profile = ProfileFile::for_configuration(configuration)?;
+    Ok(profile.refresh(&derive_profile(store, configuration)?)?)
+}
+
+fn derive_profile(
+    store: &MemoryStore,
+    configuration: &MemoryConfiguration,
+) -> Result<PythonText, StartupError> {
     let entries = store
         .reflections()?
         .into_iter()
@@ -307,6 +322,5 @@ fn refresh_missing_profile(
         .integer(IntegerSetting::ProfileMaxCharacters)
         .to_i64()
         .expect("fixed profile bound");
-    let text = render_profile(&entries, maximum, &aliases).map_err(StartupError::Render)?;
-    Ok(profile.ensure(&text)?)
+    render_profile(&entries, maximum, &aliases).map_err(StartupError::Render)
 }

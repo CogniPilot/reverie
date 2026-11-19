@@ -65,8 +65,17 @@ impl ProfileFile {
         let text = text.as_text_ref();
         let text = text.scalar_text().ok_or(ProfileError::NonScalarText)?;
         let mut pending = Pending::open(&self.0)?;
-        let result = pending.publish(text.as_bytes());
+        let result = pending.publish(text.as_bytes(), false);
         pending.finish(result)
+    }
+
+    /// Reflection owns a newly derived profile for this installed memory.
+    pub fn refresh(&self, text: &PythonText) -> Result<(), ProfileError> {
+        let text = text.as_text_ref();
+        let text = text.scalar_text().ok_or(ProfileError::NonScalarText)?;
+        let mut pending = Pending::open(&self.0)?;
+        let result = pending.publish(text.as_bytes(), true);
+        pending.finish(result).map(|_| ())
     }
 }
 struct Pending {
@@ -136,14 +145,14 @@ impl Pending {
             Err(error) => Err(error),
         }
     }
-    fn publish(&mut self, bytes: &[u8]) -> Result<ProfileOutcome, ProfileError> {
+    fn publish(&mut self, bytes: &[u8], replace: bool) -> Result<ProfileOutcome, ProfileError> {
         self.prepare(bytes)?;
         #[cfg(test)]
         tests::after_prepare(&self.temporary);
         self.check_parent()?;
         self.check_prepared()?;
         self.attempted = true;
-        self.install(bytes)
+        self.install(bytes, replace)
     }
     fn prepare(&mut self, bytes: &[u8]) -> Result<(), ProfileError> {
         let file = self.file.as_mut().expect("held writer");
@@ -180,11 +189,15 @@ impl Pending {
         }
         Ok(())
     }
-    fn install(&mut self, bytes: &[u8]) -> Result<ProfileOutcome, ProfileError> {
-        match native::publish_memory_profile(
-            self.parent.as_ref().expect("held parent"),
-            self.temporary.file_name().expect("owned temporary leaf"),
-        ) {
+    fn install(&mut self, bytes: &[u8], replace: bool) -> Result<ProfileOutcome, ProfileError> {
+        let parent = self.parent.as_ref().expect("held parent");
+        let temporary = self.temporary.file_name().expect("owned temporary leaf");
+        let publication = if replace {
+            nix::fcntl::renameat(parent, temporary, parent, "profile.md").map_err(io::Error::from)
+        } else {
+            native::publish_memory_profile(parent, temporary)
+        };
+        match publication {
             Ok(()) => (),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 self.attempted = false;

@@ -12,6 +12,7 @@ pub enum Route {
     ApplyTemplate,
     Tokenize,
     Completions,
+    Models,
 }
 
 impl Route {
@@ -21,6 +22,7 @@ impl Route {
             Self::ApplyTemplate => "/apply-template",
             Self::Tokenize => "/tokenize",
             Self::Completions => "/chat/completions",
+            Self::Models => "/models",
         }
     }
 }
