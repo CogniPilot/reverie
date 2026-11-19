@@ -120,7 +120,7 @@ test("OpenCode hooks restore context, persist complete turns once, and compose d
   }
 });
 
-test("A configured OpenCode instance loads the native context without starting Python", async () => {
+test("A configured OpenCode instance uses native context and document tools without starting Python", async () => {
   const dir = await mkdtemp(join(tmpdir(), "reverie-native-context-"));
   try {
     const root = resolve(import.meta.dirname, "..");
@@ -142,6 +142,12 @@ test("A configured OpenCode instance loads the native context without starting P
     assert.match(output.system[0], /Synthetic context/);
     assert.match(output.system[0], /Persistent reverie plan/);
     await assert.rejects(stat(join(dir, "state")), {code: "ENOENT"});
+    const plan = JSON.parse(await hooks.tool.reverie_tools.execute({
+      action: "plan", data: JSON.stringify({ text: "Use the current compiler.", revision: 0 }),
+    }, {}));
+    assert.equal(plan.revision, 1);
+    const stored = JSON.parse(await hooks.tool.reverie_tools.execute({ action: "plan", data: "{}" }, {}));
+    assert.equal(stored.body, "Use the current compiler.");
   } finally {
     await rm(dir, {recursive: true, force: true});
   }

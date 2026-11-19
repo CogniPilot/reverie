@@ -58,6 +58,9 @@ struct Worker {
 }
 
 pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
+    if args.get(1).is_some_and(|arg| arg == "--bridge") {
+        return crate::opencode_state::entry(args.into_iter().skip(1));
+    }
     if !args.iter().skip(1).any(|arg| {
         matches!(arg.to_str(), Some("--install" | "-h" | "--help"))
             || arg

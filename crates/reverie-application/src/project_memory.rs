@@ -11,7 +11,13 @@ pub enum ProjectMemoryError {
 }
 impl fmt::Display for ProjectMemoryError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        match self {
+            Self::InvalidProject => f.write_str("project must be a lowercase project identifier"),
+            Self::MissingFactOrSource => {
+                f.write_str("project memory requires a fact and a verification source")
+            }
+            Self::Store(error) => error.fmt(f),
+        }
     }
 }
 impl std::error::Error for ProjectMemoryError {

@@ -19,11 +19,10 @@ from .instance import initial_self_for
 from .memory import MemoryStore
 from .opencode import dispatch
 from .chat import Brain, Dreamer
-from .project_memory import ProjectMemory
 from .reflection import Reflector
 from .room import Room
 from .runtime import Reverie as Office
-from .hands.agent_journal import encode_memory_json, native_memory_request
+from .hands.agent_journal import encode_memory_json, native_memory_request, project_memory_request
 from reverie import env_names
 
 PHASES=('waking','planning','research','implementation','reporting','consolidation','dreaming','sleeping')
@@ -194,13 +193,10 @@ class Cycle:
                'Current style traits/tags (not capability claims): '+json.dumps(self.attributes(name)),task]
         root=self.resolve(self.policy['project_memory_dir'])
         for project in config.get('projects',[]):
-            memory=ProjectMemory(root,project)
-            try:
-                for query in config.get('memory_queries',config.get('interests',[]))[:3]:
-                    for item in memory.lookup(query)[:3]:
-                        parts.append(json.dumps({'project':project,'id':item['id'],'text':item['text'],
-                                                 'source':item['meta'].get('source','')})[:1600])
-            finally: memory.close()
+            for query in config.get('memory_queries',config.get('interests',[]))[:3]:
+                for item in project_memory_request('lookup',root,project,query=query)[:3]:
+                    parts.append(json.dumps({'project':project,'id':item['id'],'text':item['text'],
+                                             'source':item['meta'].get('source','')})[:1600])
         return '\n\n'.join(parts)[:10000]
 
     def client(self, name, phase, model_key, day):
@@ -384,10 +380,9 @@ class Cycle:
                                                       (status,json.dumps(receipt),task['id']))
             # Verified command receipts are shared. A model's narrative is not promoted as fact.
             if verified:
-                memory=ProjectMemory(self.resolve(self.policy['project_memory_dir']),task['project'])
-                try: memory.remember('Task '+task['id']+' verification commands passed: '+json.dumps(checks),
-                                      'cycle receipt '+task['id']+'; inspect project workspace '+task['workdir'])
-                finally: memory.close()
+                project_memory_request('remember',self.resolve(self.policy['project_memory_dir']),task['project'],
+                                       text='Task '+task['id']+' verification commands passed: '+json.dumps(checks),
+                                       source='cycle receipt '+task['id']+'; inspect project workspace '+task['workdir'])
         except BaseException:
             self.ledger.finish(key,status='interrupted_or_unknown')
             with self.ledger.db: self.ledger.db.execute('UPDATE jobs SET status=? WHERE id=?',('needs_review',task['id']))

@@ -71,6 +71,18 @@ def legacy_memory_request(action, *, timeout=3, **payload):
     return native_memory_json("legacy-memory-worker", {"action": action, **payload}, TURN_CAPTURE_BYTES, timeout=timeout)
 
 
+def project_memory_request(action, root, project, **fields):
+    reply = native_memory_json("project-memory-worker", {
+        "action": action, "root": list(map(ord, os.fspath(root))), "project": project,
+        **{key: list(map(ord, value)) for key, value in fields.items()},
+    }, 4 * 1024 * 1024, timeout=35)
+    if reply is None:
+        raise RuntimeError("the packaged project memory worker is unavailable")
+    if "error" in reply:
+        raise ValueError(reply["error"])
+    return reply["value"]
+
+
 def dream_memory_request(action, **payload):
     reply = native_memory_json("dream-worker", {"action": action, **payload}, TURN_CAPTURE_BYTES)
     if reply is None:

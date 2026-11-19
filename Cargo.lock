@@ -1414,6 +1414,7 @@ dependencies = [
  "jiff",
  "nix",
  "regex-lite",
+ "reverie-application",
  "reverie-contracts",
  "reverie-core",
  "reverie-host",

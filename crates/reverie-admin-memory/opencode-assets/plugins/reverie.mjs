@@ -61,18 +61,25 @@ const contextArgs = (instance, request) => [
   "--occupied-tokens", String(request.occupied_tokens ?? 0),
 ];
 
+const stateActions = new Set(["activity", "record", "mode", "rules", "plan", "profile", "profiles", "brief",
+  "self", "votes", "self_history", "self_vote", "publication_proposal", "return"]);
+
 export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
   const researchCycle = envName("RESEARCH_CYCLE_ID");
   const settings = JSON.parse(await readFile(join(directory, ".reverie-instance"), "utf8"));
   const bridge = (request) => new Promise((resolve, reject) => {
     const context = request.action === "context" && settings.instance;
     const journal = request.action === "remember";
+    const state = settings.instance && stateActions.has(request.action);
     const packaged = settings.bridge === "reverie-opencode-bridge";
     let command = packaged ? "reverie-opencode-bridge" : settings.python;
     let args = packaged ? [] : ["-m", "reverie.opencode"];
     if (context) {
       command = "reverie-context";
       args = contextArgs(settings.instance, request);
+    } else if (state) {
+      command = "reverie-opencode";
+      args = ["--bridge", "--instance", settings.instance];
     } else if (journal) {
       command = "reverie-memory-journal";
       args = ["--journal-only"];
@@ -82,7 +89,7 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
       }
       request = save;
     }
-    const legacySource = !context && !journal && !packaged;
+    const legacySource = !context && !journal && !state && !packaged;
     const child = execFile(command, args, {
       cwd: legacySource ? settings.source : directory,
       env: { ...process.env, ...(legacySource ? { PYTHONPATH: settings.source } : {}),

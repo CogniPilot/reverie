@@ -27,6 +27,7 @@ idna.workspace = true
 jiff.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
 regex-lite.workspace = true
+reverie-application.workspace = true
 reverie-contracts.workspace = true
 reverie-core.workspace = true
 reverie-host.workspace = true

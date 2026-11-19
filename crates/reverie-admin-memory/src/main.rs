@@ -26,7 +26,9 @@ mod model_completion;
 mod office;
 mod opencode_context;
 mod opencode_install;
+mod opencode_state;
 mod private_directory;
+mod project_memory;
 mod read_turn;
 mod recall;
 mod reply_text;
@@ -224,6 +226,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--cycle-plan-worker" => cycle_plan::run,
         "--model-completion-worker" => model_completion::run,
         "--legacy-memory-worker" => legacy_memory::run,
+        "--project-memory-worker" => project_memory::run,
         "--dream-worker" => dream::run,
         "--screen-output-worker" => screen_output::run,
         "--hands-model-slot-worker" => hands_model::supervise,

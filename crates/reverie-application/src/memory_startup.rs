@@ -3,7 +3,10 @@
 //! serialize this operation against active recall/other startup contexts.
 //! Configuration, readiness text and employee titles are never that authority.
 use crate::memory_import::migrate_history_atomic;
-use reverie_contracts::{memory_documents::SelfModelDraft, storage_identity::MetadataText};
+use reverie_contracts::{
+    memory_documents::{DocumentBody, SelfModelDraft},
+    storage_identity::MetadataText,
+};
 use reverie_core::shutdown::ShutdownStatus;
 use reverie_core::{
     PythonText,
@@ -16,7 +19,9 @@ use reverie_host::{
     memory_configuration::{MemoryConfiguration, MemoryPath},
     memory_profile::{ProfileError, ProfileFile, ProfileOutcome},
 };
-use reverie_store::memory::{MemoryError, MemoryStartupStore, MemoryStore, MemoryTransaction};
+use reverie_store::memory::{
+    MemoryDocuments, MemoryError, MemoryStartupStore, MemoryStore, MemoryTransaction,
+};
 use std::{
     collections::BTreeSet,
     fmt, io,
@@ -211,11 +216,7 @@ pub(crate) fn initialize_admitted(
         let seeded = ensure_seeds(tx, seeds)?;
         let mut created = false;
         if fresh && let Some(initial) = initial {
-            let model = SelfModelDraft::from_body(initial)?;
-            created = documents.in_transaction(tx)?.initialize_identity(
-                &model,
-                &MetadataText::from_scalar_text("Owner-selected initial instance identity"),
-            )?;
+            created = install_owner_identity(tx, &documents, initial)?;
         }
         Ok((seeded, created))
     })?;
@@ -238,6 +239,20 @@ pub(crate) fn initialize_admitted(
         embedding_fallback: fallback,
     })
 }
+/// Initialize the existing document in an acquired SQLite writer transaction.
+/// The caller checks its startup policy before passing the owner-selected body.
+pub fn install_owner_identity(
+    tx: &mut MemoryTransaction<'_>,
+    documents: &MemoryDocuments<'_>,
+    initial: DocumentBody,
+) -> Result<bool, MemoryError> {
+    let model = SelfModelDraft::from_body(initial)?;
+    documents.in_transaction(tx)?.initialize_identity(
+        &model,
+        &MetadataText::from_scalar_text("Owner-selected initial instance identity"),
+    )
+}
+
 fn ensure_seeds(
     tx: &mut MemoryTransaction<'_>,
     seeds: &[MemorySeed],

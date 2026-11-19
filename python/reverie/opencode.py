@@ -18,9 +18,8 @@ import urllib.request
 
 from .chat import ChatDaemon
 from .reverie import Reverie, native_context, violates
-from .project_memory import ProjectMemory
 from .persona import build_system_prompt
-from .hands.agent_journal import native_memory_json
+from .hands.agent_journal import native_memory_json, project_memory_request
 from .instance import initial_self_for, identity_context, primary_agent
 from reverie import env_names
 
@@ -184,11 +183,8 @@ def dispatch(brain, request: dict):
         return {"memory_id": memory.id}
     if action == "recall":
         if request.get("project"):
-            memory = ProjectMemory(brain.cfg.data_dir / "projects", request["project"])
-            try:
-                legacy = memory.lookup(str(request.get("query", "")))
-            finally:
-                memory.close()
+            legacy = project_memory_request("lookup", brain.cfg.data_dir / "projects",
+                                            request["project"], query=str(request.get("query", "")))
         elif request.get("channel") == "work":
             raise ValueError("private recall is unavailable in a shared work channel; select a project")
         else:
