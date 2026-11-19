@@ -108,3 +108,11 @@ Runtime through the Rust `ort` binding (MIT or Apache-2.0). Nix supplies the nat
 ONNX Runtime (MIT) and eSpeak NG (GPL-3.0-or-later) from the pinned package set.
 The eSpeak NG adapter uses the published C phoneme API in a subprocess. The existing Kokoro model and
 voices remain versioned, checksum-pinned downloads.
+
+## Docker speech recognition and Piper
+
+The optional loopback speech service uses Whisper.cpp and FFmpeg from the
+pinned Nix package set. The native C++ CLI is built from the GPL-3.0-only
+[OHF-Voice Piper v1.8.0 source](https://github.com/OHF-Voice/piper1-gpl/releases/tag/v1.8.0).
+Piper and Kokoro share Nix's ONNX Runtime and eSpeak NG libraries.
+Voice and recognition checkpoints are selected separately by the operator.

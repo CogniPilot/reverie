@@ -167,6 +167,18 @@ class BrainTest(unittest.TestCase):
 
 
 class DaemonTest(unittest.TestCase):
+    def test_daemon_answers_linked_spoken_delivery_and_skips_legacy_voice_duplicates(self):
+        brain, _, room = make_brain("Hey.")
+        daemon = ChatDaemon(brain.cfg, brain)
+        room.inbox.append({"id": "v1", "from": {"kind": "user"}, "to": ["me"], "text": "spoken thing", "voice": True})
+        brain.store.claim_voice("another spoken thing")
+        room.post("🎙 Another spoken thing")
+        room.post("typed thing")
+        room.inbox.append({"id": "s1", "from": {"kind": "user"}, "to": ["me"], "text": "hands-free delivery", "spoken": True})
+        self.assertEqual(daemon.tick(), 2)
+        self.assertEqual(room.said, ["Hey.", "Hey."])
+        self.assertEqual([m.user_text for m in brain.store.recent_episodes(2)], ["typed thing", "hands-free delivery"])
+
     def test_tick_answers_only_new_user_messages(self):
         cfg = temp_config()
         brain, t, room = make_brain("Hey.", cfg)

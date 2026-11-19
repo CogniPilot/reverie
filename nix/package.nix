@@ -640,6 +640,7 @@ let
   };
   memory = pkgs.python3.withPackages (_: [ memoryPackage ]);
   kokoro = import ./kokoro.nix { inherit pkgs src; };
+  voiceService = import ./voice-service.nix { inherit pkgs src; };
   hands = (pkgs.writeShellApplication {
     name = "reverie-hands";
     text = ''
@@ -716,7 +717,7 @@ let
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit adminMemory cacert memoryJournalCli workerChild; };
+    passthru = { inherit adminMemory cacert memoryJournalCli voiceService workerChild; };
   };
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };

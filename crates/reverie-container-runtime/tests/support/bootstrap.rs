@@ -12,6 +12,10 @@ pub(super) fn run() -> ExitCode {
             eprintln!("synthetic Kokoro started");
             ExitCode::SUCCESS
         }
+        "reverie-speech" => {
+            eprintln!("synthetic speech started");
+            ExitCode::SUCCESS
+        }
         "codex" => {
             println!("managed-provider-guard");
             ExitCode::SUCCESS

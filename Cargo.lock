@@ -1993,6 +1993,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-speech"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "clap",
+ "getrandom",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "reverie-store"
 version = "0.1.0"
 dependencies = [
@@ -2034,6 +2051,7 @@ dependencies = [
  "hyper-util",
  "nix",
  "reverie-kokoro",
+ "reverie-speech",
  "serde",
  "serde_json",
  "sha2",

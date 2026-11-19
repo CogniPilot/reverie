@@ -81,6 +81,11 @@ fn launch(instance: &instance::Instance, path: &OsStr) -> io::Error {
         {
             background(instance, path, "reverie-kokoro");
         }
+        if setting("REVERIE_VOICE_ENABLED", "0") == "1"
+            && setting("REVERIE_VOICE_TURN_URL", "").is_empty()
+        {
+            background(instance, path, "reverie-speech");
+        }
     }
     let mut command = Command::new(program);
     instance.configure(&mut command, path);

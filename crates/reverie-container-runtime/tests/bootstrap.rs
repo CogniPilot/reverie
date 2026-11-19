@@ -19,7 +19,13 @@ impl Root {
         let path = env::temp_dir().join(format!("reverie-boot-{}", URL_SAFE_NO_PAD.encode(random)));
         fs::DirBuilder::new().mode(0o700).create(&path).unwrap();
         fs::create_dir(path.join("bin")).unwrap();
-        for alias in ["reverie", "reverie-kokoro", "reverie-install-clis", "codex"] {
+        for alias in [
+            "reverie",
+            "reverie-kokoro",
+            "reverie-speech",
+            "reverie-install-clis",
+            "codex",
+        ] {
             symlink(FIXTURE, path.join("bin").join(alias)).unwrap();
         }
         Self(path)
@@ -272,4 +278,35 @@ fn upgrade_failure_retries_before_advancing_the_version_or_replacing_state() {
     let names = String::from_utf8(listing.stdout).unwrap();
     assert!(names.contains("console/state.json"));
     assert!(!names.contains("owner-auth.policy"));
+}
+
+#[test]
+fn speech_starts_only_for_the_opted_in_local_web_service() {
+    let root = Root::new();
+    let started = |output: Output| {
+        String::from_utf8(succeeded(output).stderr)
+            .unwrap()
+            .contains("synthetic speech started")
+    };
+    assert!(!started(root.command().output().unwrap()));
+    assert!(started(
+        root.command()
+            .env("REVERIE_VOICE_ENABLED", "1")
+            .output()
+            .unwrap()
+    ));
+    assert!(!started(
+        root.command()
+            .env("REVERIE_VOICE_ENABLED", "1")
+            .env("REVERIE_VOICE_TURN_URL", "http://operator-service:8090")
+            .output()
+            .unwrap()
+    ));
+    assert!(!started(
+        root.command()
+            .env("REVERIE_VOICE_ENABLED", "1")
+            .args(["reverie", "--version"])
+            .output()
+            .unwrap()
+    ));
 }

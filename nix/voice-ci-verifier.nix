@@ -2,7 +2,7 @@
 let
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
-    members = [ "reverie-voice-ci" "reverie-kokoro" ];
+    members = [ "reverie-voice-ci" "reverie-kokoro" "reverie-speech" ];
   };
   fixtureFile = name: builtins.path {
     inherit name;
@@ -23,8 +23,8 @@ in pkgs.rustPlatform.buildRustPackage (engine // {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-voice-ci" ];
   cargoTestFlags = [ "-p" "reverie-voice-ci" ];
-  REVERIE_VOICE_CI_WHISPER = "${whisper}/bin/whisper-cli";
-  REVERIE_VOICE_CI_FFMPEG = pkgs.lib.getExe' pkgs.ffmpeg-headless "ffmpeg";
+  REVERIE_SPEECH_WHISPER = "${whisper}/bin/whisper-cli";
+  REVERIE_SPEECH_FFMPEG = pkgs.lib.getExe' pkgs.ffmpeg-headless "ffmpeg";
   doCheck = true;
   meta = {
     description = "Native real-model speech fixture and voice acceptance verifier";

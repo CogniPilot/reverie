@@ -27,6 +27,7 @@ let
   '';
   baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     caCertificates pkgs.sudo pkgs.tini ]
+    ++ pkgs.lib.optional (!worker) runtime.voiceService
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare laptopTools ]
       # Laptops build Rust (the autoenv cargo/rustc shims pass through to these);
       # the server image does not, and the toolchain closure is about 2.4 GB.
