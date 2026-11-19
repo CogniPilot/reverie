@@ -84,7 +84,10 @@
             peerArtifact = self.packages.${system}.leasePeer;
           };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
-          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
+          adminHarnessAddon = import ./nix/admin-harness-addon.nix {
+            inherit pkgs;
+            inherit (packages) hands handsTools;
+          };
           ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
           humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
