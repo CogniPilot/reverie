@@ -5,6 +5,7 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
+import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -296,6 +297,7 @@ export class DockerEmployeeRuntime {
       });
     const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
+    const coldPool = new DockerColdPoolJournal(join(dirname(company.store.file), 'docker-pool-cold-recovery.jsonl'));
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
         boxId,
@@ -303,6 +305,7 @@ export class DockerEmployeeRuntime {
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
+        requireColdPoolIdle: () => coldPool.requireIdle(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
@@ -384,7 +387,7 @@ export class DockerEmployeeRuntime {
     );
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
-    });
+    }, coldPool);
     const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
     const recoveryHelper = configuration.recoveryHelperImageId
       ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({

@@ -1,5 +1,5 @@
-/** Observe/repair only original native pool ACK correlation. No paid/worker/
- * provider or resource-policy mutation is available through this service. */
+/** Reconcile native pool observations and recover a stopped, empty pool using
+ * its approved policy. Employee and provider launches use their own workflow. */
 import { CompanyService, CompanyError } from './company-service.js';
 import { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerContainedResources, DockerPoolReconciliationReceipt } from './docker-contained-resource-controller.js';
@@ -10,6 +10,7 @@ import {
 } from './docker-employee-continuation.js';
 import { dockerPoolMetadataDigest, type DockerPoolObservationRecord } from './docker-pool-observation-data.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
+import type { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 export interface DockerPoolStatus {
   readonly state: 'retained' | 'reconciliation-required' | 'held';
   readonly sessionId: string;
@@ -26,7 +27,8 @@ export class DockerPoolReconciliation {
     private readonly company: CompanyService,
     private readonly store: CompanyDockerContinuationStore,
     private readonly resources: DockerContainedResources,
-    private readonly runtimeCurrent: () => void
+    private readonly runtimeCurrent: () => void,
+    private readonly cold?: DockerColdPoolJournal
   ) {
     if (
       !(company instanceof CompanyService) ||
@@ -98,6 +100,82 @@ export class DockerPoolReconciliation {
     ) === true;
   }
 
+  #coldContext(employeeId: string, authority: DockerContinuationAuthority) {
+    const base = this.#context(employeeId, authority);
+    const row = this.store.record(employeeId);
+    if (!row || row.owner !== authority.owner ||
+        row.request.sessionId !== base.original.sessionId ||
+        row.request.sessionGeneration !== base.original.sessionGeneration ||
+        dockerContinuationDigest(row.policy.pool) !== dockerContinuationDigest(base.original.policy))
+      refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const rowDigest = dockerContinuationDigest(row);
+    const requireSource = () => {
+      authority.requireOffice();
+      if (this.company.store.publicationUnconfirmed ||
+          dockerContinuationDigest(this.store.record(employeeId) ?? null) !== rowDigest)
+        refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+      if (this.company.store.snapshot().employees.some(employee => employee.dockerResourcePolicy &&
+          dockerContinuationDigest(employee.dockerResourcePolicy.pool) !== dockerContinuationDigest(row.policy.pool)))
+        refuse('DOCKER_POOL_COLD_POLICY_CHANGED');
+    };
+    const current = () => { base.current(); requireSource(); };
+    current();
+    return { base, row, requireSource, current };
+  }
+
+  async coldPreview(employeeId: string, authority: DockerContinuationAuthority) {
+    if (!this.cold) refuse('DOCKER_POOL_COLD_RECOVERY_UNAVAILABLE');
+    this.cold.requireIdle();
+    const context = this.#coldContext(employeeId, authority);
+    const native = await this.resources.coldPoolScope(context.row, context.current);
+    return {
+      sessionId: context.base.original.sessionId,
+      sessionGeneration: context.base.original.sessionGeneration,
+      scopeDigest: dockerContinuationDigest({ subject: context.base.original, prior: context.base.beforePool, native: native.digest }),
+      policy: context.base.original.policy,
+    };
+  }
+
+  async coldRecover(
+    employeeId: string,
+    input: { operationId: string; sessionId: string; sessionGeneration: number; expectedScopeDigest: string },
+    authority: DockerContinuationAuthority,
+  ): Promise<DockerPoolStatus> {
+    if (!this.cold) refuse('DOCKER_POOL_COLD_RECOVERY_UNAVAILABLE');
+    this.cold.requireIdle();
+    const context = this.#coldContext(employeeId, authority);
+    const { base } = context;
+    if (input.sessionId !== base.original.sessionId || input.sessionGeneration !== base.original.sessionGeneration)
+      refuse('DOCKER_POOL_TARGET_CHANGED');
+    const native = await this.resources.coldPoolScope(context.row, context.current);
+    const scopeDigest = dockerContinuationDigest({ subject: base.original, prior: base.beforePool, native: native.digest });
+    if (input.expectedScopeDigest !== scopeDigest) refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    let published: DockerPoolObservationRecord | undefined;
+    const current = () => {
+      if (published) {
+        base.requireSubject();
+        context.requireSource();
+        if (!this.#retained(published)) refuse('DOCKER_POOL_CANONICAL_CHANGED');
+      } else context.current();
+    };
+    return this.cold.issue({
+      operationId: input.operationId, employeeId, sessionId: input.sessionId,
+      sessionGeneration: input.sessionGeneration, scopeDigest,
+    }, current, async (journal, confirm) => {
+      const receipt = await this.resources.recoverColdPool(context.row, {
+        id: input.operationId, nativeDigest: native.digest,
+      }, journal, current);
+      const observation = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, current);
+      const saved = await this.company.store.publishDockerPoolObservation(receipt, base.beforePool, current);
+      if (saved.state === 'not-issued') throw saved.cause;
+      if (saved.state === 'unconfirmed') refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
+      published = observation;
+      current();
+      confirm(dockerContinuationDigest(observation));
+      return this.#result(base, observation, dockerPoolMetadataDigest(this.company.store.snapshot()));
+    });
+  }
+
   /** A plan move may read an already-reconciled source pool. The original
    * anchor task and source record retain their historical process identity. */
   async requirePlanSourcePool(
@@ -111,6 +189,7 @@ export class DockerPoolReconciliation {
     const check = () => {
       current();
       this.runtimeCurrent();
+      this.cold?.requireIdle();
       if (this.company.store.publicationUnconfirmed) refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
     };
     check();
@@ -151,6 +230,7 @@ export class DockerPoolReconciliation {
         allowedActions: [],
       };
     try {
+      this.cold?.requireIdle();
       const receipt = await this.#capture(context.original.policy, context.current);
       context.current();
       const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, context.current);
@@ -172,18 +252,22 @@ export class DockerPoolReconciliation {
     authority: DockerContinuationAuthority
   ): Promise<DockerPoolStatus> {
     const context = this.#context(employeeId, authority);
+    const ready = () => {
+      context.current();
+      this.cold?.requireIdle();
+    };
     if (
       input.sessionId !== context.original.sessionId ||
       input.sessionGeneration !== context.original.sessionGeneration
     )
       refuse('DOCKER_POOL_TARGET_CHANGED');
     if (this.company.store.publicationUnconfirmed) refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
-    const receipt = await this.#capture(context.original.policy, context.current);
-    const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, context.current);
+    const receipt = await this.#capture(context.original.policy, ready);
+    const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, ready);
     const expected = this.#result(context, record, context.beforePool).scopeDigest;
     if (input.expectedScopeDigest !== expected) refuse('DOCKER_POOL_SCOPE_CHANGED');
-    context.current();
-    const result = await this.company.store.publishDockerPoolObservation(receipt, context.beforePool, context.current);
+    ready();
+    const result = await this.company.store.publishDockerPoolObservation(receipt, context.beforePool, ready);
     if (result.state === 'not-issued') throw result.cause;
     if (result.state === 'unconfirmed') refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
     context.requireSubject();

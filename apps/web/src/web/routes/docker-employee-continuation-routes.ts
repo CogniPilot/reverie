@@ -15,6 +15,7 @@ import {
   DockerEmployeeResourcePolicy,
 } from '../../docker-employee-continuation-data.js';
 import { CompanyDockerContinuationStore } from '../../docker-employee-store.js';
+import { sameOrigin } from '../../owner-auth/policy.js';
 const uuid = z
   .string()
   .uuid()
@@ -98,6 +99,27 @@ export function registerDockerEmployeeContinuationRoutes(
     }
   };
   if (pool) {
+    app.get('/api/company/employees/:id/docker-pool/cold-preview', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req)) throw new CompanyError('Verified owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        return pool.coldPreview(id, capture(req, id));
+      })
+    );
+    app.post('/api/company/employees/:id/docker-pool/cold-recover', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        const input = z.object({
+          operationId: uuid,
+          sessionId: uuid,
+          sessionGeneration: z.number().int().positive().safe(),
+          expectedScopeDigest: digest,
+        }).strict().parse(req.body);
+        return pool.coldRecover(id, input, capture(req, id));
+      })
+    );
     app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);

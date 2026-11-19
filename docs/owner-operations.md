@@ -228,14 +228,33 @@ not a claim about which historical operation caused the pool state.
 later resource use still needs its own fresh native proof. Running/unknown
 writers, ambiguous or foreign helpers, changed epochs, missing original logs,
 revoked authority and stale previews remain held. Unknown publication is not
-silently retried; after restart the canonical record and original native proof
-must be observed again. This does not implement a new resource epoch or authorize
-replaying a historical START. Source tests use controlled physical ports and do
-not establish installed Docker/provider acceptance.
+silently retried. After restart, obtain the canonical record and original native
+proof again.
 
 Canonical company format 2 is published atomically when either retained pool
 lineage or a re-earned observation becomes nonempty. Empty legacy format 1
 remains readable; format 1 containing new retained pool metadata is rejected.
+
+## Recover the shared Docker pool after a host restart
+
+Open Docker resources for an employee whose shared pool anchor is unconfirmed
+and select **Review stopped pool recovery**. The verified owner can also call
+`GET /api/company/employees/:id/docker-pool/cold-preview`. The preview checks the
+exact stopped anchor, the approved shared policy, the selected workers and the
+original resource writers. It is available when the worker pool is empty and
+the prior writers can be accounted for.
+
+Confirm with `POST /api/company/employees/:id/docker-pool/cold-recover` using a
+new UUID as `operationId`, the returned `sessionId` and `sessionGeneration`, and
+the returned `scopeDigest` as `expectedScopeDigest`. The backend starts the
+existing anchor and uses the native helper to apply the previously approved
+limits. It commits the new pool observation after fresh kernel readback. The
+employee session remains under its original recovery operation.
+
+The backend records the attempt before starting the anchor and records each
+helper action before issuing it. If an outcome is uncertain, subsequent effects
+stay held under the original operation ID. `retained` reports fresh pool proof.
+Use the employee's existing recovery operation to continue its session.
 Once format 2 is published, this writer refuses downgrades even if the arrays
 later become empty. Older literal-1 readers must refuse the entire store rather
 than strip fields. Do not run old/new writers together or restore an older backup

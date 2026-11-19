@@ -2,6 +2,7 @@
  * Docker transport is controlled; no Engine, paid provider or personal data. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Fastify from 'fastify';
@@ -21,6 +22,8 @@ import { CompanyService, type CompanyServiceDeps } from '../src/company-service.
 import { EmployeeSchema } from '../src/company-types.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { DockerPoolReconciliation } from '../src/docker-pool-reconciliation.js';
+import { DockerColdPoolJournal } from '../src/docker-cold-pool-journal.js';
+import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import {
   DockerPoolReconciliationReceipt,
   DockerContainedResources,
@@ -459,17 +462,19 @@ afterEach(async () => {
   vi.restoreAllMocks();
   for (const fn of cleanups.splice(0).reverse()) await fn();
 });
-async function fixture(options: { recover?: boolean } = {}) {
+async function fixture(options: { recover?: boolean; cold?: boolean } = {}) {
   const physical = physicalFixture();
   await physical.controller.preparePool(physical.row(), physical.current);
   const completed = physical.tasks.get('pool-helper')!;
   if (!('containerId' in completed)) throw Error('Actual fixture helper CID required');
+  if (options.cold) await physical.setPool();
   physical.tasks.delete('pool-helper');
   physical.retain([]);
   const beforeEffects = { creates: [...physical.creates], starts: [...physical.starts] };
   const directory = await fs.mkdtemp(join(tmpdir(), 'pool-reconcile-'));
   cleanups.push(() => fs.rm(directory, { recursive: true, force: true }));
   const companyFile = join(directory, 'company.json'),
+    coldFile = join(directory, 'cold-pool.jsonl'),
     companyStore = new CompanyStore(companyFile);
   await companyStore.init();
   const sessions = new Map([[actorSid, { id: actorSid, name: 'Scoped coordinator', owner: undefined }]]);
@@ -506,8 +511,8 @@ async function fixture(options: { recover?: boolean } = {}) {
         position: 'Employee',
         expertise: ['synthetic'],
         createdAt: 1,
-        onVacation: true,
-        desiredRunning: false,
+        onVacation: !options.cold,
+        desiredRunning: !!options.cold,
         dockerResourcePolicy: policy,
       }),
     ];
@@ -521,7 +526,38 @@ async function fixture(options: { recover?: boolean } = {}) {
   const resources = physical.controllerWith(() =>
     store.retainedPoolConfigurationTasks('reverie-boxed-anchor-' + 'b'.repeat(32), helper, 'b'.repeat(64))
   );
-  const service = new DockerPoolReconciliation(company, store, resources, runtimeCurrent);
+  const anchor = physical.tasks.get('anchor');
+  if (anchor?.phase !== 'running') throw Error('Original fixture anchor required');
+  const service = new DockerPoolReconciliation(
+    company, store, resources, runtimeCurrent, options.cold ? new DockerColdPoolJournal(coldFile) : undefined
+  );
+  if (options.cold) {
+    const original = {
+      containerId: 'c'.repeat(64), imageId: 'sha256:' + 'd'.repeat(64), deployment, employeeId: eid, sessionId: sid,
+      home: { type: 'bind', source: '/synthetic/home', destination: '/home/agent', readWrite: true },
+      mountDigest: '1'.repeat(64), storageDigest: '2'.repeat(64), configurationDigest: '3'.repeat(64),
+    };
+    const source = physical.row();
+    const row = DockerEmployeeContinuationRecord.parse({
+      version: 1, purpose: 'docker-employee-continuation-v1', employeeId: eid, sourceDigest: '4'.repeat(64),
+      original, policy, request: {
+        ...source.request, containerId: original.containerId, imageId: original.imageId, expectedPolicyDigest: '5'.repeat(64),
+        expectedDestinationImageId: source.workerImage.imageId, enterOffice: false,
+      },
+      workerImage: { ...source.workerImage, sourceImageId: original.imageId, clientManifestDigest: '6'.repeat(64) },
+      credentialId: '44444444-4444-4444-8444-444444444444', phase: 'pool-ready',
+      pool: source.pool, tasks: [anchor, completed],
+    });
+    await companyStore.update((state) => { state.dockerEmployeeContinuations = [row]; });
+    const before = await resources.capturePoolObservation(policy.pool, runtimeCurrent);
+    expect((await companyStore.publishDockerPoolObservation(
+      before, dockerPoolMetadataDigest(companyStore.snapshot()), runtimeCurrent
+    )).state).toBe('committed');
+    physical.containers.get(anchor.containerId)!.State = {
+      Status: 'exited', Running: false, Restarting: false, Paused: false, Dead: false, Pid: 0,
+      OOMKilled: false, Error: '', ExitCode: 255, StartedAt: '2026-11-18T08:00:00Z', FinishedAt: '2026-11-19T09:00:00Z',
+    };
+  }
   const ownerAuth = new OwnerAuthService({
     store: new OwnerAuthStore(join(directory, 'owner.json')),
     auditFile: join(directory, 'audit.jsonl'),
@@ -625,6 +661,8 @@ async function fixture(options: { recover?: boolean } = {}) {
   return {
     physical,
     completed,
+    anchor,
+    coldFile,
     directory,
     companyFile,
     companyStore,
@@ -648,6 +686,97 @@ async function fixture(options: { recover?: boolean } = {}) {
     },
   };
 }
+describe('owner recovery of a stopped shared pool', () => {
+  async function preview(f: Awaited<ReturnType<typeof fixture>>) {
+    const result = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(result.statusCode, result.body).toBe(200);
+    return result.json().data.scopeDigest as string;
+  }
+  function recover(f: Awaited<ReturnType<typeof fixture>>, expected: string, operationId: string) {
+    return f.app.inject({ method: 'POST', url: f.url + '/cold-recover', headers: f.ownerHeaders,
+      payload: { ...f.body(expected), operationId } });
+  }
+  async function latest(f: Awaited<ReturnType<typeof fixture>>) {
+    const lines = (await fs.readFile(f.coldFile, 'utf8')).trimEnd().split('\n');
+    return JSON.parse(lines.at(-1)!);
+  }
+  function observeEffects(f: Awaited<ReturnType<typeof fixture>>, operationId: string, lostReply = false) {
+    const command = f.physical.command;
+    const run = command.run.bind(command);
+    const create = command.create.bind(command);
+    const effects: string[] = [];
+    vi.spyOn(command, 'run').mockImplementation(async (args) => {
+      if (args[0] !== 'container' || args[1] !== 'start') return run(args);
+      const entry = await latest(f);
+      expect(entry.scope.operationId).toBe(operationId);
+      if (args[2] === f.anchor.containerId) {
+        expect(entry.task).toBeUndefined();
+        effects.push('start original anchor');
+        const raw = f.physical.containers.get(f.anchor.containerId)!;
+        raw.State = { ...raw.State as object, Running: true, Status: 'running', Pid: 100,
+          StartedAt: '2026-11-19T09:01:00Z', FinishedAt: '0001-01-01T00:00:00Z', ExitCode: 0 };
+        f.physical.driftEpoch();
+        f.physical.requireConfigure();
+        if (lostReply) throw Error('Lost original anchor start reply');
+        return args[2];
+      }
+      expect(entry.task.phase).toBe('start-issued');
+      expect(entry.task.containerId).toBe(args[2]);
+      f.physical.tasks.set('pool-helper', entry.task);
+      effects.push('start pool helper');
+      return run(args);
+    });
+    vi.spyOn(command, 'create').mockImplementation(async (name, configuration, current) => {
+      const entry = await latest(f);
+      expect(entry.scope.operationId).toBe(operationId);
+      expect(entry.task.phase).toBe('create-issued');
+      expect(entry.task.name).toBe(name);
+      f.physical.tasks.set('pool-helper', entry.task);
+      effects.push('create pool helper');
+      return create(name, configuration, current);
+    });
+    return effects;
+  }
+  it('journals every effect and publishes a fresh native ACK without altering the employee or its launch record', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
+    const prior = f.companyStore.snapshot();
+    const scope = await preview(f);
+    const unauthorized = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.workerHeaders });
+    expect(unauthorized.statusCode).toBe(403);
+    const stale = await recover(f, '0'.repeat(64), id);
+    expect(stale.statusCode).toBe(409);
+    expect(stale.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    expect(effects).toEqual([]);
+    const result = await recover(f, scope, id);
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data.state).toBe('retained');
+    expect(effects).toEqual(['start original anchor', 'create pool helper', 'start pool helper']);
+    const after = f.companyStore.snapshot();
+    expect(after.employees).toEqual(prior.employees);
+    expect(after.dockerEmployeeContinuations).toEqual(prior.dockerEmployeeContinuations);
+    const fresh = after.dockerPoolObservations?.find(record => record.epoch.anchor.startTicks === '999');
+    expect(fresh?.anchorTask.containerId).toBe(f.anchor.containerId);
+    expect(fresh?.configuration.containerId).not.toBe(f.completed.containerId);
+    expect((await latest(f)).observationDigest).toBe(dockerContinuationDigest(fresh));
+  });
+  it('holds the durable original attempt if its exact anchor START reply is lost', async () => {
+    const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id, true);
+    const scope = await preview(f);
+    const result = await recover(f, scope, id);
+    expect(result.statusCode, result.body).toBe(409);
+    expect(result.json().error.code).toBe('DOCKER_CONTINUATION_UNCONFIRMED');
+    expect(effects).toEqual(['start original anchor']);
+    expect((await latest(f)).scope.operationId).toBe(id);
+    expect(() => new DockerColdPoolJournal(f.coldFile).requireIdle()).toThrow('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    const status = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(status.json().data).toMatchObject({ state: 'held', code: 'DOCKER_POOL_COLD_ATTEMPT_HELD' });
+    const replay = await recover(f, scope, randomUUID());
+    expect(replay.statusCode).toBe(409);
+    expect(replay.json().error.code).toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect(effects).toEqual(['start original anchor']);
+  });
+});
+
 describe('supported metadata-only recovery of an already lost pool ACK', () => {
   it('accepts a bounded consistent set of original closed ACKs without inventing causality or stranding retained proof', async () => {
     const f = await fixture(),
