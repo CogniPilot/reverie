@@ -24,7 +24,7 @@ with pkgs; [
   rsync           # rsync
   strace          # strace
   (import ./worker-perf.nix { inherit pkgs; }) # perf stat/record/report, no Python scripting
-  gdb             # gdb
+  (gdb.override { pythonSupport = false; }) # gdb without the project interpreter
   cmake ninja pkg-config   # cmake ninja pkg-config
   perl            # perl
   man-db          # man
@@ -38,6 +38,4 @@ with pkgs; [
   hostname-debian # hostname
 ]
 # Not included, on purpose:
-# - pip/pip3: Nix's python3 is immutable. `python3 -m venv .venv && .venv/bin/pip` works today (tested), so ship a
-#   one-line hint instead (see README).
 # - libudev, project toolchains and wasm tools: they belong in each repo's flake dev shell, not the base layer.
