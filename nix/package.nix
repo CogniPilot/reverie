@@ -789,6 +789,7 @@ let
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+    ln -s ${adminMemory}/bin/reverie-chat "$out/bin/reverie-chat"
     ln -s ${adminMemory}/bin/reverie-context "$out/bin/reverie-context"
     ln -s ${adminMemory}/bin/reverie-sleep "$out/bin/reverie-sleep"
     ln -s ${adminMemory}/bin/reverie-opencode "$out/bin/reverie-opencode"

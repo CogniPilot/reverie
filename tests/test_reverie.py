@@ -7,13 +7,12 @@ import unittest
 from unittest.mock import patch
 import subprocess
 
-from reverie.chat import Brain
 from reverie.reverie import Reverie, RevisionConflict
 from reverie.memory import MemoryStore
 from reverie.hands.agent_journal import project_memory_request
 from reverie.reverie import INITIAL_SELF, runtime_permissions, safeguards
 from reverie.beliefs import ensure_seeded
-from tests.helpers import FakeRoom, fake_client, temp_config
+from tests.helpers import temp_config
 
 
 class ReverieTests(unittest.TestCase):
@@ -23,8 +22,6 @@ class ReverieTests(unittest.TestCase):
         self.store = MemoryStore(self.cfg.db_path)
         self.addCleanup(self.store.close)
         self.reverie = Reverie(self.store)
-        client, _ = fake_client("ok")
-        self.brain = Brain(self.cfg, self.store, client, FakeRoom(hold_path=self.cfg.hold_path))
 
     def bridge(self, request, *, check=True):
         env = {**os.environ, "REVERIE_DATA_DIR": str(self.cfg.data_dir),
@@ -139,11 +136,10 @@ class ReverieTests(unittest.TestCase):
         self.assertEqual(ensure_seeded(self.store), [])
         self.assertEqual(self.store.beliefs()[0].text, revised["consciousness"])
         self.assertFalse(self.store.beliefs()[0].protected)
-        messages, _ = self.brain.build_messages("hello")
-        self.assertIn("curious about geometry", messages[0]["content"])
-        self.assertNotIn("not up for daily re-evaluation", messages[0]["content"])
         self.assertEqual(self.store._db.execute("SELECT count(*) FROM reverie_document_history WHERE name='self'").fetchone()[0], 1)
         text = json.loads(self.bridge({"action": "context"}).stdout)
+        self.assertIn("curious about geometry", text)
+        self.assertNotIn("not up for daily re-evaluation", text)
         self.assertTrue(text.endswith(safeguards()))
 
     def test_permissions_keep_general_shell_and_edits_behind_approval(self):
@@ -156,7 +152,7 @@ class ReverieTests(unittest.TestCase):
     def test_project_memory_is_separate_and_private_recall_blocked_at_work(self):
         self.store.add_episode("A private conversation", "private detail")
         # remember writes only the office journal now; the old project store is still read as history.
-        project_memory_request("remember", self.brain.cfg.data_dir / "projects", "rumoca",
+        project_memory_request("remember", self.cfg.data_dir / "projects", "rumoca",
                                text="Compiler parity passed", source="public handoff, commit abc123")
         def recall(**fields):
             return self.bridge({"action": "recall", "channel": "work", **fields}, check=False)

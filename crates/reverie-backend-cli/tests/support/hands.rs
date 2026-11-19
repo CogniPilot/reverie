@@ -194,3 +194,76 @@ fn hands_help_needs_no_office_or_python() {
             .contains("Reverie Admin Harness")
     );
 }
+
+#[test]
+fn chat_continuity_reuses_the_existing_store_for_both_instance_selections() {
+    let fixture = Fixture::create();
+    let existing = fixture.0.join("selected-data");
+    fs::create_dir(&existing).unwrap();
+    let database = existing.join("memory.sqlite");
+    fs::write(&database, b"preserve this store").unwrap();
+    let existing_instance = fixture.0.join("selected.json");
+    fs::write(
+        &existing_instance,
+        json!({
+            "id":"legacy-fixture","agent_name":"Fixture","owner_name":"Owner",
+            "persona":"Distinct persona","data_dir":existing,
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let directory = directory(&fixture);
+    for instance in [Some(&existing_instance), None] {
+        let (output, _) = fixture.run(
+            "200 OK",
+            json!({"data":{
+                "employees":[{"sessionId":"session-123","name":"Fixture"}]
+            }}),
+            |command| {
+                configure(&fixture, command);
+                command
+                    .env("REVERIE_DATA_DIR", &existing)
+                    .env("REVERIE_ROOT", &fixture.0)
+                    .env("REVERIE_MODEL", "original-model")
+                    .env("REVERIE_API_BASE", "http://original-model.test/v1")
+                    .env_remove("REVERIE_HANDS_API_KEY")
+                    .env_remove("REVERIE_INSTANCE_CONFIG")
+                    .args([
+                        "--hands-launch",
+                        "--native-runtime",
+                        "echo",
+                        "--chat-continuity",
+                    ])
+                    .arg(&database)
+                    .arg("--no-tui");
+                if let Some(path) = instance {
+                    command.env("REVERIE_INSTANCE_CONFIG", path);
+                    command.env("REVERIE_HANDS_API_KEY", "synthetic");
+                }
+            },
+        );
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let config_path = existing.join("hands/session-123/chat-continuity.json");
+        let config: Value = serde_json::from_slice(&fs::read(config_path).unwrap()).unwrap();
+        assert_eq!(config["model"], "original-model");
+        assert_eq!(config["api_base"], "http://original-model.test/v1");
+        assert_eq!(config["self_session_id"], "session-123");
+        assert_eq!(
+            config["model_key_env"],
+            instance
+                .map(|_| json!("REVERIE_HANDS_API_KEY"))
+                .unwrap_or_default(),
+        );
+        let selection = Path::new(config["memory_instance"].as_str().unwrap());
+        if let Some(instance) = instance {
+            assert_eq!(selection, instance);
+        }
+        let loaded = reverie_host::memory_instance::LoadedMemoryInstance::load(selection).unwrap();
+        assert_eq!(loaded.native_data_directory().unwrap(), existing);
+    }
+    assert!(!directory.join("memory-state").exists());
+}

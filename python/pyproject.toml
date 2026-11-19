@@ -14,7 +14,6 @@ dependencies = []
 [project.scripts]
 reverie-cycle = "reverie.cycle:main"
 reverie-runtime = "reverie.runtime:main"
-reverie-chat = "reverie.chat:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}

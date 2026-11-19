@@ -31,14 +31,20 @@ impl Batch {
         if now - since < integer(config, IntegerSetting::ReflectInterval)? as f64 {
             return Ok(None);
         }
+        let batch = Self::pending(store, since)?;
+        let due =
+            batch.episodes.len() as i64 >= integer(config, IntegerSetting::ReflectMinEpisodes)?;
+        Ok(due.then_some(batch))
+    }
+
+    pub(super) fn pending(store: &MemoryStore, since: f64) -> Result<Self> {
         let mut episodes = Vec::new();
         for episode in store.episodes_after(state(store, CURSOR, 0)?, 40)? {
             if !episode.is_idle()? {
                 episodes.push(episode);
             }
         }
-        let due = episodes.len() as i64 >= integer(config, IntegerSetting::ReflectMinEpisodes)?;
-        Ok(due.then_some(Self { episodes, since }))
+        Ok(Self { episodes, since })
     }
 
     pub(super) fn run(
@@ -46,14 +52,14 @@ impl Batch {
         config: &MemoryConfiguration,
         store: &MemoryStore,
         now: f64,
-    ) -> Result<usize> {
+    ) -> Result<Vec<Memory>> {
         store.set_state(LAST, &now.to_string())?;
         let Some(last) = self.episodes.iter().map(|m| m.id).max() else {
-            return Ok(0);
+            return Ok(Vec::new());
         };
         let revisable = store.get_state("revisable_self_model", None)?.as_deref() == Some("1");
         let Some(insights) = self.infer(config, store, revisable)? else {
-            return Ok(0);
+            return Ok(Vec::new());
         };
         let beliefs = store.beliefs()?;
         let root = beliefs
@@ -66,16 +72,16 @@ impl Batch {
                     first
                 }
             });
-        let count = store.atomic(|tx| {
-            let mut count = 0;
+        let stored = store.atomic(|tx| {
+            let mut stored = Vec::new();
             for (insight, trust) in insights {
-                count += install(tx, insight, trust, root, revisable, now)?;
+                stored.extend(install(tx, insight, trust, root, revisable, now)?);
             }
             tx.set_state(CURSOR, &last.to_string())?;
-            Ok(count)
+            Ok(stored)
         })?;
         refresh_memory_profile(store, config)?;
-        Ok(count)
+        Ok(stored)
     }
 
     fn infer(
@@ -191,7 +197,7 @@ fn install(
     root: Option<&Belief>,
     revisable: bool,
     now: f64,
-) -> reverie_store::memory::Result<usize> {
+) -> reverie_store::memory::Result<Option<Memory>> {
     let belief = insight.section == "belief";
     if belief {
         if let Some(root) = root {
@@ -202,10 +208,10 @@ fn install(
                 false,
                 Some(now),
             )?;
-            return Ok(0);
+            return Ok(None);
         }
         if !revisable {
-            return Ok(0);
+            return Ok(None);
         }
     }
     let (section, metadata) = if belief {
@@ -217,6 +223,5 @@ fn install(
     input.section = reverie_contracts::storage_identity::MetadataText::from_scalar_text(section);
     input.created_at = Some(now);
     input.metadata = MemoryMetadata::decode(&metadata.to_string())?;
-    tx.add_reflection(input)?;
-    Ok(1)
+    tx.add_reflection(input).map(Some)
 }

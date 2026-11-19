@@ -54,6 +54,7 @@ fn start(args: Arguments) -> io::Result<()> {
         println!("configuration ok; runtime endpoints and sandbox not exercised");
         return Ok(());
     }
+    let _session = state::reserve(&cfg.state)?;
     state::recover(&cfg.state)?;
     let signals = Signals::install()?;
     let view = View::start(&cfg, !args.no_tui && !args.once);

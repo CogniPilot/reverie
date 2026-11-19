@@ -8,7 +8,10 @@ import threading
 import time
 from dataclasses import asdict
 
-from agent_journal import native_memory_command
+if __package__:
+    from .agent_journal import native_memory_command
+else:
+    from agent_journal import native_memory_command
 
 
 FRAME_BYTES = 1048576

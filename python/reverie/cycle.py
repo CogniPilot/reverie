@@ -12,16 +12,16 @@ import subprocess
 import time
 import urllib.request
 from zoneinfo import ZoneInfo
-from .config import Config
+from .config import Config, LLMError
 from .cycle_budget import Ledger, MeteredClient, Deferred, BudgetExhausted
 from .cycle_runner import OpenCodeRunner
 from .reverie import Reverie, safeguards
 from .instance import initial_self_for
 from .memory import MemoryStore
-from .chat import Dreamer
 from .reflection import Reflector
 from .runtime import Reverie as Office
 from .hands.agent_journal import encode_memory_json, native_memory_request, project_memory_request
+from .hands.coding_process import WorkerSocket
 from reverie import env_names
 
 PHASES=('waking','planning','research','implementation','reporting','consolidation','dreaming','sleeping')
@@ -437,19 +437,40 @@ class Cycle:
         def dream(cfg,store,reverie,client):
             vacation=reverie.read('lifecycle',{'mode':'active'})['body']['mode']=='vacation'
             if vacation:
-                last=float(store.get_state('vacation_last_dream_attempt','0'))
-                if time.time()-last<86400: return {'skipped':'vacation daily limit'}
-                store.set_state('vacation_last_dream_attempt',str(time.time())); client.timeout=min(client.timeout,120)
-            dreamer=Dreamer(store,client,per_sleep=cfg.dreams_per_sleep)
-            # Shared technical context + this specialist's own experiences; no other private store.
-            dreamer.creative_context=lambda:self.context(name,'Questions you may freely explore: '+', '.join(self.agents[name].get('interests',[])))
-            dreamer.system_prompt_path=cfg.dream_prompt_path
-            memory=dreamer.dream()
-            if memory is None:
+                client.timeout=min(client.timeout,120)
+            creative = self.context(name,'Questions you may freely explore: '+', '.join(self.agents[name].get('interests',[])))[:8000]
+            worker = WorkerSocket('cycle-dream-worker', {
+                'instance': str(cfg.instance_config), 'database': str(cfg.db_path),
+                'creative': creative, 'vacation': vacation,
+            }, environment={key: os.environ[key] for key in
+                ('HOME', 'REVERIE_ROOT', 'REVERIE_OUTPUT_POLICY', 'REVERIE_PROTECTED_PEOPLE') if key in os.environ})
+            try:
+                event = worker.wait(45)
+                if event['action'] == 'busy':
+                    raise Deferred('another memory maintenance pass is running')
+                if event['action'] == 'vacation_limit':
+                    return {'skipped':'vacation daily limit'}
+                if event['action'] == 'prompt':
+                    prompt = event['prompt']
+                    try:
+                        reply = client.chat(
+                            [{'role':'system','content':prompt['system']}, {'role':'user','content':prompt['user']}],
+                            max_tokens=prompt['max_tokens'], temperature=prompt['temperature'], max_chars=prompt['max_chars'],
+                        )
+                    except LLMError:
+                        reply = None
+                    worker.send({'text':reply})
+                    event = worker.wait(45)
+                if event['action'] != 'finished':
+                    raise RuntimeError('dream persistence was not confirmed')
+                memory_id = event['memory_id']
+            finally:
+                worker.close(grace=1)
+            if memory_id is None:
                 failures=self.ledger.db.execute("SELECT COUNT(*) FROM usage WHERE day=? AND agent=? AND phase=? AND status!='completed'",
                                                 (day,name,'dreaming')).fetchone()[0]
                 if failures: raise RuntimeError('dream inference failed')
-            return {'dream_memory_id':memory.id if memory else None,'raw_narrative_retained':False}
+            return {'dream_memory_id':memory_id,'raw_narrative_retained':False}
         self.phase(name,'consolidation',model,day,consolidate)
         self.phase(name,'dreaming',model,day,dream)
         self.phase(name,'sleeping',model,day,lambda *args:{'state':'sleeping','background_inference':False})

@@ -6,10 +6,14 @@ use reverie_store::memory::{EpisodeInput, MemoryMetadata, MemoryStore};
 use serde_json::{Value, json};
 use std::{
     env, fs,
-    os::unix::fs::symlink,
-    path::PathBuf,
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    io::{BufRead, BufReader, Write},
+    os::{
+        fd::OwnedFd,
+        unix::{fs::symlink, net::UnixStream, process::CommandExt},
+    },
+    path::{Path, PathBuf},
+    process::{Child, Command, Output, Stdio},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 struct Maintenance {
@@ -30,6 +34,11 @@ impl Maintenance {
         // The fixed argv "agent ls" selects the synthetic agent row from ls.
         fs::write(fixture.0.join("ls"), "agent fixture is idle\n").unwrap();
         symlink(grep, bin.join("reverie")).unwrap();
+        symlink(
+            env!("CARGO_BIN_EXE_reverie-admin-memory"),
+            bin.join("reverie-chat"),
+        )
+        .unwrap();
         Self {
             fixture,
             instance,
@@ -50,17 +59,34 @@ impl Maintenance {
             &self.instance,
             json!({"action":"maintenance"}),
             |command| {
-                command
-                    .current_dir(&self.fixture.0)
-                    .env("PATH", &self.bin)
-                    .env("REVERIE_API_BASE", base)
-                    .env("REVERIE_MODEL", "fixture-model")
-                    .env("REVERIE_TIMEOUT", "3")
-                    .env("REVERIE_GPU_LOCK", self.fixture.0.join("gpu.lock"))
-                    .env("REVERIE_GPU_ACTIVITY", self.fixture.0.join("gpu.activity"));
+                self.configure(command, base);
                 settings(command);
             },
         ))
+    }
+
+    fn configure(&self, command: &mut Command, base: &str) {
+        command
+            .current_dir(&self.fixture.0)
+            .env("HOME", &self.fixture.0)
+            .env("PATH", &self.bin)
+            .env("REVERIE_API_BASE", base)
+            .env("REVERIE_MODEL", "fixture-model")
+            .env("REVERIE_TIMEOUT", "3")
+            .env("REVERIE_GPU_LOCK", self.fixture.0.join("gpu.lock"))
+            .env("REVERIE_GPU_ACTIVITY", self.fixture.0.join("gpu.activity"));
+    }
+
+    fn chat(&self, base: &str, flags: &[&str], settings: impl FnOnce(&mut Command)) -> Output {
+        let mut command = Command::new(self.bin.join("reverie-chat"));
+        command
+            .env_clear()
+            .arg("--instance")
+            .arg(&self.instance)
+            .args(flags);
+        self.configure(&mut command, base);
+        settings(&mut command);
+        command.output().unwrap()
     }
 }
 
@@ -262,4 +288,170 @@ fn native_maintenance_dreams_only_with_opt_in_and_keeps_summary() {
 
 fn prompt(frame: &Value) -> &str {
     frame["messages"][1]["content"].as_str().unwrap()
+}
+
+fn output(result: Output) -> String {
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    String::from_utf8(result.stdout).unwrap()
+}
+
+#[test]
+fn chat_command_preserves_private_history_and_profile_across_restarts() {
+    let fixture = Maintenance::new();
+    let state = fixture.state();
+    fs::create_dir(&state).unwrap();
+    fs::write(state.join("profile.md"), "Existing owner profile.\n").unwrap();
+    let legacy = json!([
+        {"role":"user","content":"  A retained question.  "},
+        {"role":"assistant","content":"Existing test evidence."},
+        {"role":"user","content":"(idle moment; a joke was requested)"},
+        {"role":"assistant","content":"An idle reply."},
+        {"role":"user","content":"An incomplete exchange."},
+    ]);
+    fs::write(state.join("legacy-history.json"), legacy.to_string()).unwrap();
+    let check_base = "http://127.0.0.1:1/v1";
+    for _ in 0..2 {
+        assert_eq!(
+            output(fixture.chat(check_base, &["--profile"], |_| {})),
+            "Existing owner profile.\n"
+        );
+    }
+    let store = fixture.store();
+    let rows = store.recent_episodes(5).unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].user_text, "A retained question.");
+    assert_eq!(rows[0].importance_source, "migrated");
+    assert!(rows[1].is_idle().unwrap());
+    store.close().unwrap();
+    let recalled = output(fixture.chat(check_base, &["--recall", "retained question"], |_| {}));
+    assert!(recalled.contains("A retained question."));
+    let (base, model) = serve_model(vec![Some("Hello there, fixture.".to_owned())]);
+    let checked = output(fixture.chat(&base, &["--check"], |_| {}));
+    assert!(checked.contains("2 episodes, 0 reflections"));
+    assert!(checked.contains("Hello there, fixture."));
+    let requests = model.join().unwrap();
+    assert_eq!(requests[0]["max_tokens"], 12);
+}
+
+#[test]
+fn manual_dream_keeps_stable_identity_screens_output_and_releases_the_summary() {
+    let fixture = Maintenance::new();
+    let store = fixture.store();
+    store
+        .add_belief("My retained private identity.", 8.0, None, true, None)
+        .unwrap();
+    episode(&store, "A fixture observation", "{}", false);
+    store.close().unwrap();
+    let dream = |text| {
+        Some(
+            json!({"dream":text, "recall":"I dreamed about a new question", "tone":"playful"})
+                .to_string(),
+        )
+    };
+    let (base, model) = serve_model(vec![
+        dream("A long ephemeral dream about a pattern that is not a factual observation."),
+        dream("A dream containing the blocked_fixture phrase."),
+    ]);
+    let allowed = output(fixture.chat(&base, &["--dream"], |cmd| {
+        cmd.env("REVERIE_DREAMS_PER_SLEEP", "0");
+    }));
+    assert!(allowed.contains("I dreamed about a new question"));
+    let refused = output(fixture.chat(&base, &["--dream"], |cmd| {
+        cmd.env(
+            "REVERIE_OUTPUT_POLICY",
+            r#"{"denied_patterns":["blocked_fixture"]}"#,
+        );
+    }));
+    assert_eq!(refused, "no dream\n");
+    let requests = model.join().unwrap();
+    assert!(prompt(&requests[0]).starts_with("Who you are, even asleep (stable, not questioned by dreams):\n- My retained private identity."));
+    let store = fixture.store();
+    assert_eq!(store.count(Some("dream")).unwrap(), 1);
+    let latest = store.latest_dream().unwrap().unwrap();
+    assert_eq!(latest.text, "I dreamed about a new question");
+    assert!(store.get_state("mood", None).unwrap().is_some());
+    store.close().unwrap();
+    let id = latest.id.to_string();
+    let _ = output(fixture.chat(&base, &["--release-dream", &id], |_| {}));
+    let listed = output(fixture.chat(&base, &["--dreams"], |_| {}));
+    assert!(listed.contains("[playful released]"));
+    assert!(listed.contains(&format!("#{id}")));
+}
+
+fn scheduled_dream(
+    fixture: &Maintenance,
+    database: &Path,
+    vacation: bool,
+) -> (Child, BufReader<UnixStream>) {
+    let (socket, child) = UnixStream::pair().unwrap();
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let process = Command::new(env!("CARGO_BIN_EXE_reverie-admin-memory"))
+        .env_clear()
+        .env("HOME", &fixture.fixture.0)
+        .arg(format!("--cycle-dream-worker={}", std::process::id()))
+        .stdin(Stdio::from(OwnedFd::from(child)))
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let mut socket = BufReader::new(socket);
+    let request = json!({"instance":fixture.instance,"database":database,
+        "creative":"A scoped question about lattice symmetry","vacation":vacation});
+    writeln!(socket.get_mut(), "{request}").unwrap();
+    (process, socket)
+}
+
+fn scheduled_event(socket: &mut BufReader<UnixStream>) -> Value {
+    let mut line = String::new();
+    socket.read_line(&mut line).unwrap();
+    serde_json::from_str(&line).unwrap()
+}
+
+#[test]
+fn scheduled_dream_holds_admission_through_disconnect_and_keeps_vacation_budget() {
+    let fixture = Maintenance::new();
+    let database = fixture.state().join("memory.sqlite");
+    let (mut first, mut first_socket) = scheduled_dream(&fixture, &database, true);
+    let planned = scheduled_event(&mut first_socket);
+    assert_eq!(planned["action"], "prompt");
+    assert!(
+        planned["prompt"]["user"]
+            .as_str()
+            .unwrap()
+            .contains("scoped question")
+    );
+
+    let (mut concurrent, mut other_socket) = scheduled_dream(&fixture, &database, true);
+    assert_eq!(scheduled_event(&mut other_socket), json!({"action":"busy"}));
+    assert!(concurrent.wait().unwrap().success());
+    drop(first_socket);
+    assert!(!first.wait().unwrap().success());
+
+    let (mut retry, mut retry_socket) = scheduled_dream(&fixture, &database, true);
+    assert_eq!(
+        scheduled_event(&mut retry_socket),
+        json!({"action":"vacation_limit"})
+    );
+    assert!(retry.wait().unwrap().success());
+    let store = fixture.store();
+    assert_eq!(store.count(Some("dream")).unwrap(), 0);
+    assert!(store.get_state("mood", None).unwrap().is_none());
+    store.close().unwrap();
+}
+
+#[test]
+fn scheduled_dream_refuses_a_changed_store_before_creating_memory() {
+    let fixture = Maintenance::new();
+    let previous = fixture.fixture.0.join("previous/memory.sqlite");
+    let (mut worker, mut socket) = scheduled_dream(&fixture, &previous, false);
+    let mut line = String::new();
+    assert_eq!(socket.read_line(&mut line).unwrap(), 0);
+    assert!(!worker.wait().unwrap().success());
+    assert!(!fixture.state().exists());
+    assert!(!previous.exists());
 }

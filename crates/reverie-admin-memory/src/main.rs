@@ -1,6 +1,7 @@
 //! Explicit recall of Hands channel evidence through the current Office session.
 mod automatic;
 mod capture;
+mod chat_cli;
 mod coding_task;
 mod configuration;
 mod context_cli;
@@ -231,6 +232,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-poll-worker" => hands_poll::run,
         "--hands-tick-worker" => hands_poll::run_tick,
         "--cycle-plan-worker" => cycle_plan::run,
+        "--cycle-dream-worker" => opencode_state::cycle_dream_worker,
         "--model-completion-worker" => model_completion::run,
         "--legacy-memory-worker" => legacy_memory::run,
         "--project-memory-worker" => project_memory::run,
@@ -281,6 +283,7 @@ fn main() -> ExitCode {
         .and_then(|name| name.to_str())
     {
         Some("reverie-context") => return context_cli::entry(),
+        Some("reverie-chat") => return chat_cli::entry(),
         Some("reverie-sleep") => return sleep::entry(),
         Some("reverie-worker-store-maintenance") => return offline_maintenance::entry(argv),
         Some("reverie-opencode" | "reverie-opencode-bridge") => {

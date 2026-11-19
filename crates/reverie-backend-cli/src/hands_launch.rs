@@ -8,6 +8,7 @@ use nix::{
     sys::stat::{Mode, umask},
     unistd::{User, getuid},
 };
+use reverie_host::memory_configuration::{MemoryConfiguration, MemoryPath};
 use serde_json::{Value, json};
 use std::{
     env,
@@ -30,6 +31,7 @@ struct Launch {
     base: String,
     office: String,
     directory: PathBuf,
+    chat_continuity: Option<PathBuf>,
 }
 
 fn setting(key: &str) -> Option<String> {
@@ -59,7 +61,7 @@ fn data_directory() -> crate::Result<PathBuf> {
 }
 
 impl Launch {
-    fn capture() -> crate::Result<Self> {
+    fn capture(chat_continuity: Option<PathBuf>) -> crate::Result<Self> {
         let session = setting("REVERIE_SESSION_ID")
             .filter(|id| {
                 (8..=100).contains(&id.len())
@@ -68,12 +70,7 @@ impl Launch {
                         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
             })
             .ok_or("Hands must start in a registered Reverie session")?;
-        let [Some(model), Some(base)] = [
-            setting("REVERIE_HANDS_MODEL"),
-            setting("REVERIE_HANDS_BASE_URL"),
-        ] else {
-            return Err("Choose a local model endpoint for this Hands session");
-        };
+        let (model, base) = model_settings(chat_continuity.is_some())?;
         let directory = data_directory()?.join("hands").join(&session);
         if directory.to_str().is_none() {
             return Err("Hands data directory must be a UTF-8 path");
@@ -84,6 +81,7 @@ impl Launch {
             base: base.trim_end_matches('/').to_owned(),
             office: env::var("REVERIE_API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".into()),
             directory,
+            chat_continuity,
         })
     }
 
@@ -120,7 +118,7 @@ impl Launch {
         let settings = settings::load(&files)?;
         let employee = self.employee()?;
         let name = employee["name"].as_str().ok_or(PROFILE_UNAVAILABLE)?;
-        let config = self.configuration(name, settings);
+        let mut config = self.configuration(name, settings);
         files
             .publish(
                 "profile.txt",
@@ -128,34 +126,92 @@ impl Launch {
                 false,
             )
             .map_err(file_error)?;
-        let memory = json!({
-            "id": self.session,
-            "agent_name": name,
-            "owner_name": "Company owner",
-            "data_dir": "memory-state",
-            "persona": profile::persona(&employee).unwrap_or(name),
-        });
-        files
-            .publish(
-                "memory-instance.json",
-                &serde_json::to_vec(&memory)
-                    .map_err(|_| "Could not encode Hands memory configuration")?,
-                true,
-            )
-            .map_err(file_error)?;
+        let memory =
+            self.configuration_memory(&files, name, profile::persona(&employee).unwrap_or(name))?;
+        if let Some(memory) = memory {
+            config["memory_instance"] = json!(memory);
+        }
         let bytes = serde_json::to_vec_pretty(&config)
             .map_err(|_| "Could not encode Hands configuration")?;
-        files
-            .publish("agent.json", &bytes, false)
-            .map_err(file_error)?;
-        Ok(self.directory.join("agent.json"))
+        let file = if self.chat_continuity.is_some() {
+            "chat-continuity.json"
+        } else {
+            "agent.json"
+        };
+        files.publish(file, &bytes, false).map_err(file_error)?;
+        Ok(self.directory.join(file))
+    }
+
+    fn configuration_memory(
+        &self,
+        files: &files::Directory,
+        name: &str,
+        persona: &str,
+    ) -> crate::Result<Option<PathBuf>> {
+        let Some(expected) = &self.chat_continuity else {
+            let memory = self.memory_document(name, persona, std::path::Path::new("memory-state"));
+            publish_memory(files, "memory-instance.json", &memory, true)?;
+            return Ok(None);
+        };
+        let config =
+            MemoryConfiguration::capture().map_err(|_| "Invalid legacy chat memory selection")?;
+        let database = config
+            .native_path(MemoryPath::Database)
+            .and_then(std::fs::canonicalize)
+            .map_err(|_| "Legacy chat database unavailable")?;
+        if &database != expected {
+            return Err("Legacy chat memory selection changed during startup");
+        }
+        if let Some(instance) = config.instance() {
+            let absolute: String = instance
+                .configuration_path()
+                .codepoints()
+                .into_iter()
+                .map(char::from_u32)
+                .collect::<Option<_>>()
+                .ok_or("Hands memory selection must be a UTF-8 path")?;
+            return Ok(Some(absolute.into()));
+        }
+        let data = config
+            .native_path(MemoryPath::Data)
+            .and_then(std::fs::canonicalize)
+            .map_err(|_| "Legacy chat data directory unavailable")?;
+        let directory = config
+            .native_path(MemoryPath::Cache)
+            .map_err(|_| "Legacy chat configuration directory unavailable")?
+            .join("chat-continuity")
+            .join(&self.session);
+        if directory.starts_with(&data) {
+            return Err(
+                "Select --instance with a configuration outside the legacy chat data directory",
+            );
+        }
+        let cache = files::Directory::open(&directory).map_err(file_error)?;
+        let file = "memory-instance.json";
+        publish_memory(
+            &cache,
+            file,
+            &self.memory_document(name, persona, &data),
+            false,
+        )?;
+        Ok(Some(directory.join(file)))
+    }
+
+    fn memory_document(&self, name: &str, persona: &str, data: &std::path::Path) -> Value {
+        json!({
+            "id": self.session, "agent_name": name, "owner_name": "Company owner",
+            "data_dir": data, "persona": persona,
+        })
     }
 
     fn configuration(&self, name: &str, overrides: serde_json::Map<String, Value>) -> Value {
+        let key_env = (self.chat_continuity.is_none()
+            || setting("REVERIE_HANDS_API_KEY").is_some())
+        .then_some("REVERIE_HANDS_API_KEY");
         let mut config = json!({
             "rooms": "auto", "self_session_id": self.session, "self_name": name,
             "state_file": self.directory.join("state.json"), "api_base": self.base, "model": self.model,
-            "model_key_env": "REVERIE_HANDS_API_KEY", "cli": ["reverie", "agent", "chat"],
+            "model_key_env": key_env, "cli": ["reverie", "agent", "chat"],
             "identity_file": self.directory.join("profile.txt"), "memory_file": null,
             "memory_instance": self.directory.join("memory-instance.json"),
             "poll_s": 15, "phone_wake": true, "prompt_cap_chars": 60000, "reply_max_tokens": 4096,
@@ -176,9 +232,39 @@ fn file_error(_: io::Error) -> &'static str {
     "Could not publish private Hands configuration"
 }
 
-fn launch(mut command: Command, flags: &[OsString]) -> crate::Result<()> {
+fn publish_memory(
+    files: &files::Directory,
+    file: &str,
+    memory: &Value,
+    once: bool,
+) -> crate::Result<()> {
+    let bytes =
+        serde_json::to_vec(memory).map_err(|_| "Could not encode Hands memory configuration")?;
+    files.publish(file, &bytes, once).map_err(file_error)
+}
+
+fn model_settings(chat_continuity: bool) -> crate::Result<(String, String)> {
+    if chat_continuity {
+        let model = setting("REVERIE_MODEL")
+            .or_else(|| setting("REVERIE_HANDS_MODEL"))
+            .unwrap_or_else(|| "MODEL_ID".into());
+        let base = setting("REVERIE_API_BASE")
+            .or_else(|| setting("REVERIE_HANDS_BASE_URL"))
+            .unwrap_or_else(|| "http://127.0.0.1:8080/v1".into());
+        return Ok((model, base));
+    }
+    setting("REVERIE_HANDS_MODEL")
+        .zip(setting("REVERIE_HANDS_BASE_URL"))
+        .ok_or("Choose a local model endpoint for this Hands session")
+}
+
+fn launch(
+    mut command: Command,
+    flags: &[OsString],
+    chat_continuity: Option<PathBuf>,
+) -> crate::Result<()> {
     umask(Mode::S_IRWXG | Mode::S_IRWXO);
-    let path = Launch::capture()?.prepare()?;
+    let path = Launch::capture(chat_continuity)?.prepare()?;
     let _ = command.arg(path).args(flags).exec();
     Err("Could not start the Hands runtime")
 }
@@ -186,7 +272,13 @@ fn launch(mut command: Command, flags: &[OsString]) -> crate::Result<()> {
 fn native(runtime: &OsStr, flags: &[OsString]) -> crate::Result<()> {
     let mut command = Command::new(runtime);
     command.arg("--hands-native");
-    launch(command, flags)
+    if let Some(rest) = flags.strip_prefix(&[OsString::from("--chat-continuity")]) {
+        let (database, flags) = rest
+            .split_first()
+            .ok_or("Legacy chat database is required")?;
+        return launch(command, flags, Some(database.into()));
+    }
+    launch(command, flags, None)
 }
 
 pub(super) fn entry(args: Vec<OsString>) -> ExitCode {

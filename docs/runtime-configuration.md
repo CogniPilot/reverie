@@ -91,6 +91,12 @@ automatic room replies rather than falling back to a local guess.
 - `reverie-cycle-demo` takes `--directory`, `--api-base`, and `--model`. It
   creates a synthetic trial in an empty owned directory. The sample task uses
   the packaged Node runtime for verification.
+- `reverie-chat` starts the registered employee's native Office room loop.
+  It uses the existing instance or legacy memory location. Supply `--instance`
+  to select an existing external instance configuration explicitly. The
+  maintenance flags, including `--dream`, `--reflect` and `--recall`, use
+  the same memory selection. The Office room loop replies to accepted
+  deliveries. The old standalone daemon's idle jokes have been retired.
 - `reverie-opencode --install WORKSPACE` accepts `--model` or
   `REVERIE_MODEL`, with neutral fallback `local_agent/MODEL_ID`; configure a real
   provider/model identifier before installing. Bridge actions need no model flag.

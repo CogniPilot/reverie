@@ -2,6 +2,7 @@ use super::{Fixture, ROOM, SESSION, SOURCE};
 #[path = "hands_coding.rs"]
 mod coding;
 use nix::{
+    fcntl::{Flock, FlockArg},
     pty::{Winsize, openpty},
     sys::{
         signal::{Signal, kill},
@@ -53,6 +54,20 @@ fn listener() -> TcpListener {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     listener.set_nonblocking(true).unwrap();
     listener
+}
+
+#[test]
+fn native_supervisor_refuses_a_second_writer_for_the_same_state() {
+    let fixture = Fixture::new();
+    let model = listener();
+    let mut command = configure(&fixture, &model);
+    let state = fs::read(fixture.0.join("state.json")).unwrap();
+    let lock = fs::File::create(fixture.0.join("state.run.lock")).unwrap();
+    let _owner = Flock::lock(lock, FlockArg::LockExclusiveNonblock).unwrap();
+    let output = command.arg("--once").output().unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Hands is already running"));
+    assert_eq!(fs::read(fixture.0.join("state.json")).unwrap(), state);
 }
 
 fn accept(listener: &TcpListener, child: &mut Child) -> TcpStream {

@@ -115,7 +115,7 @@ class CycleTests(unittest.TestCase):
             with self.subTest(dreaming=flag):
                 day=f'2026-01-{index+1:02d}'
                 if flag is not None: self.cycle.agents['math']['dreaming']=flag
-                with patch('reverie.cycle.Dreamer') as dreamer:
+                with patch('reverie.cycle.WorkerSocket') as dreamer:
                     self.cycle.night('math','local',day)
                 dreamer.assert_not_called()
                 self.assertEqual(self.calls,[])

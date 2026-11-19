@@ -3,7 +3,7 @@ mod activity;
 mod documents;
 mod journal;
 pub(crate) mod maintenance;
-pub(crate) use maintenance::reflection_worker;
+pub(crate) use maintenance::{cycle_dream_worker, reflection_worker};
 mod recall;
 mod record;
 mod vacation;

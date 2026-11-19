@@ -2,6 +2,7 @@ import unittest
 from types import SimpleNamespace
 import tempfile
 from pathlib import Path
+import subprocess
 
 from reverie.reverie import role_charter
 from tests.helpers import install_opencode
@@ -54,7 +55,7 @@ class InteractionRoleTest(unittest.TestCase):
     def test_all_titles_and_legacy_kinds_share_memory_and_tool_gates(self):
         import json
         from reverie.config import Config
-        from reverie.chat import ChatDaemon
+        from reverie.memory import MemoryStore
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -64,13 +65,16 @@ class InteractionRoleTest(unittest.TestCase):
                 config = root / (role + ".json")
                 config.write_text(json.dumps({"id": role, "agent_name": role, "owner_name": "Owner",
                     "data_dir": role + "-memory", "persona": "Be curious.", "role": role, "kind": kind}))
-                brain = ChatDaemon(cfg=Config(instance_config=config)).brain
+                subprocess.run(["reverie-chat", "--instance", str(config), "--profile"],
+                               capture_output=True, check=True, timeout=10)
+                database = Config(instance_config=config).db_path
+                store = MemoryStore(database)
                 try:
-                    brain.store.add_episode(role + " private memory", "Keep this private.")
-                    self.assertEqual(brain.store.count("episode"), 1)
-                    stores.append(brain.cfg.db_path)
+                    store.add_episode(role + " private memory", "Keep this private.")
+                    self.assertEqual(store.count("episode"), 1)
+                    stores.append(database)
                 finally:
-                    brain.store.close()
+                    store.close()
                 workspace = root / (role + "-workspace")
                 # A container marker is deployment context, not an owner grant.
                 with patch.dict("os.environ", {"REVERIE_CONTAINER": "1"}):

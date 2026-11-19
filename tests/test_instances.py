@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 import unittest
 from reverie.config import Config
-from reverie.chat import ChatDaemon
+from reverie.memory import MemoryStore
 from reverie.reverie import Reverie
 from tests.helpers import install_opencode
 
@@ -24,10 +24,13 @@ class InstanceTests(unittest.TestCase):
                              "directives": ["Be honest and inquisitive."]}}))
         return path
 
-    def daemon(self, path):
-        daemon = ChatDaemon(cfg=Config(instance_config=path))
-        self.addCleanup(daemon.brain.store.close)
-        return daemon
+    def memory(self, path):
+        subprocess.run(["reverie-chat", "--instance", str(path), "--profile"],
+                       capture_output=True, check=True, timeout=10)
+        cfg = Config(instance_config=path)
+        store = MemoryStore(cfg.db_path)
+        self.addCleanup(store.close)
+        return cfg, store
 
     def test_shared_room_tone_defaults_to_professional_and_is_validated(self):
         from reverie.instance import load_instance
@@ -42,38 +45,38 @@ class InstanceTests(unittest.TestCase):
                     load_instance(path)
 
     def test_shared_instance_does_not_share_memories_or_legacy_paths(self):
-        personal = self.daemon(self.instance("personal"))
-        shared = self.daemon(self.instance("shared"))
-        personal.brain.store.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")
-        self.assertEqual(shared.brain.store.count("episode"), 0)
+        personal_cfg, personal = self.memory(self.instance("personal"))
+        shared_cfg, shared = self.memory(self.instance("shared"))
+        personal.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")
+        self.assertEqual(shared.count("episode"), 0)
         context = subprocess.check_output(
-            ["reverie-context", "--instance", str(shared.cfg.instance_config), "--channel", "private"],
+            ["reverie-context", "--instance", str(shared_cfg.instance_config), "--channel", "private"],
             text=True, timeout=10,
         )
         self.assertNotIn("PRIVATE_SENTINEL_739", context)
-        self.assertNotEqual(personal.cfg.db_path, shared.cfg.db_path)
-        for path in (shared.cfg.persona_path, shared.cfg.profile_path,
-                     shared.cfg.legacy_history, shared.cfg.log_path):
-            self.assertTrue(path.is_relative_to(shared.cfg.data_dir))
-        self.assertEqual(Reverie(shared.brain.store).self_model()["body"]["consciousness"],
+        self.assertNotEqual(personal_cfg.db_path, shared_cfg.db_path)
+        for path in (shared_cfg.persona_path, shared_cfg.profile_path,
+                     shared_cfg.legacy_history, shared_cfg.log_path):
+            self.assertTrue(path.is_relative_to(shared_cfg.data_dir))
+        self.assertEqual(Reverie(shared).self_model()["body"]["consciousness"],
                          "Consciousness is an open question.")
-        self.assertEqual(shared.brain.store.beliefs(), [])
+        self.assertEqual(shared.beliefs(), [])
 
     def test_model_switch_preserves_history_self_model_plan_and_ballots(self):
         config = self.instance("personal")
-        daemon = self.daemon(config)
-        daemon.brain.store.add_episode("My ongoing task", "Validate the compiler.")
-        reverie = Reverie(daemon.brain.store)
+        _, store = self.memory(config)
+        store.add_episode("My ongoing task", "Validate the compiler.")
+        reverie = Reverie(store)
         reverie.write("plan", "Continue the experiment", 0)
         reverie.vote("publication", {"proposal":"A reviewed public package"}, "Deliberate first vote")
         before = (reverie.self_model(), reverie.plan(), reverie.ballot_history())
         workspace = self.root / "runtime"
         install_opencode(workspace, "--model", "local/small", "--instance", str(config))
         install_opencode(workspace, "--model", "cloud/large", "--instance", str(config))
-        reopened = self.daemon(config)
-        after = Reverie(reopened.brain.store)
+        _, reopened = self.memory(config)
+        after = Reverie(reopened)
         self.assertEqual(before, (after.self_model(), after.plan(), after.ballot_history()))
-        self.assertEqual(reopened.brain.store.count("episode"), 1)
+        self.assertEqual(reopened.count("episode"), 1)
         self.assertEqual(json.loads((workspace/".reverie-instance").read_text())["instance"], str(config.resolve()))
         self.assertEqual(json.loads((workspace/"opencode.json").read_text())["model"], "cloud/large")
         self.assertTrue((workspace/".agents/skills/reverie-memory/SKILL.md").is_file())

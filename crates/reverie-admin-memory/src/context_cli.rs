@@ -240,7 +240,7 @@ fn env_number<T: std::str::FromStr>(name: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
-fn read_text(path: &Path) -> io::Result<Option<String>> {
+pub(super) fn read_text(path: &Path) -> io::Result<Option<String>> {
     const TEXT_BOUND: u64 = 8 * 1024 * 1024;
     let file = match OpenOptions::new()
         .read(true)

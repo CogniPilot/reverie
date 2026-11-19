@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Callable
 
 from reverie.config import ChatClient, Config
-from reverie.room import Room
 
 
 def install_opencode(workspace: Path, *options: str) -> None:
@@ -36,34 +35,6 @@ class FakeTransport:
 def fake_client(responder="ok") -> tuple[ChatClient, FakeTransport]:
     t = FakeTransport(responder)
     return ChatClient("http://test/v1", "test-model", 5, transport=t), t
-
-
-class FakeRoom(Room):
-    def __init__(self, session_id="me", hold_path: Path | None = None, busy=False):
-        super().__init__(session_id, hold_path or Path(tempfile.mkdtemp()) / "hold", runner=self._runner)
-        self.inbox: list[dict] = []
-        self.said: list[str] = []
-        self.busy = busy
-        self.ls_fails = False
-
-    def _runner(self, cmd, timeout):
-        cmd = list(cmd)
-        if cmd[:4] == ["reverie", "agent", "chat", "read"]:
-            return json.dumps({"messages": self.inbox})
-        if cmd[:4] == ["reverie", "agent", "chat", "say"]:
-            assert "--to" not in cmd, cmd
-            self.said.append(cmd[-1])
-            return ""
-        if cmd[:3] == ["reverie", "agent", "ls"]:
-            if self.ls_fails:
-                raise RuntimeError("down")
-            return "x review-gpu: standing [agent, busy]\n" if self.busy else "x review-gpu: standing [agent, idle]\n"
-        return ""
-
-    def post(self, text, kind="user", to="all", mid=None):
-        m = {"id": mid or f"m{len(self.inbox)+1}", "from": {"kind": kind, "name": "USER"}, "to": to, "text": text}
-        self.inbox.append(m)
-        return m
 
 
 def temp_config() -> Config:
