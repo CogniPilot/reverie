@@ -23,5 +23,5 @@ reverie = ["ops-core*.schema.json", "ops-classifier-pin.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["reverie*", "experts*"]
+include = ["reverie*"]
 namespaces = false
