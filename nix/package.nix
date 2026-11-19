@@ -668,9 +668,10 @@ let
     };
   });
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
+  runtimeGit = pkgs.git.override { pythonSupport = false; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux runtimeGit pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
