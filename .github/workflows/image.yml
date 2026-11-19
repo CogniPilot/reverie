@@ -32,10 +32,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: image-${{ github.ref }}
-  # A newer PR commit supersedes its previous image build. Keep main and
-  # release builds running so accepted artifacts are still produced.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Manual acceptance scenarios run independently of automatic CI.
+  group: image-${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-{1}', github.ref, inputs.plan_office_scenario) || github.ref }}
+  # Once a tagged release starts, let it finish publishing its artifacts.
+  cancel-in-progress: ${{ github.event_name != 'release' }}
 
 jobs:
   memory-high-native:
