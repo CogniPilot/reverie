@@ -43,20 +43,18 @@ readiness. The runner owns only fresh temporary out-links and stops on failure.
 
 This thin runner makes two explicit `nix build` calls for `.#workerExec` and
 `.#workerResourceClientManifest`, using fresh private temporary out-links. It
-canonicalizes the executable and manifest paths and supplies them to the existing
-`tests.test_worker_resource_launcher_package` unittest module and two qualified
-Goal-stream tests in `tests.test_owner_goal_broker` through its two qualification
-environment variables. These eight cases own ELF, manifest, exact kernel argv,
-inert-broker validation and interoperability with the existing Python broker.
+canonicalizes the executable and manifest paths and supplies them to the Rust
+`reverie-worker-client` integration suite. The suite verifies the manifest and
+ELF digest, then exercises exact kernel argv, resource frames, the Goal custody
+stream and terminal behavior against owned socket fixtures and PTYs.
 The runner parses no product metadata and
 contains no deployment or privileged operation. It stops at any build, path or
 test failure and removes only its own temporary symlinks and empty directory;
 Nix store outputs remain intact. Unexpected scratch entries are retained with an
 error. Unsupported platforms fail explicitly without claiming checks ran.
 
-The Python test invocation is existing migration-debt qualification, not a
-shipped runtime dependency or a new Python implementation. `verify-portable`
-continues to run without Nix or this native package gate on macOS and Windows.
+`verify-portable` runs independently of Nix and this native package gate on
+macOS and Windows.
 
 Repository policies run as Rust integration tests in that workspace test step:
 
