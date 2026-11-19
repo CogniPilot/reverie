@@ -39,6 +39,8 @@ jobs:
           nix build .#recoveryLedger --out-link "$RUNNER_TEMP/recovery-ledger"
           nix build .#workerExec --out-link "$RUNNER_TEMP/goal-worker-exec"
           nix build .#checks.x86_64-linux.goalCustodyFixture --out-link "$RUNNER_TEMP/goal-custody-fixture"
+          nix build .#backendNativeCli --out-link "$RUNNER_TEMP/reverie-backend"
+          echo "$RUNNER_TEMP/reverie-backend/bin" >> "$GITHUB_PATH"
       - name: Run every default web test and enforce source coverage
         working-directory: apps/web
         env:

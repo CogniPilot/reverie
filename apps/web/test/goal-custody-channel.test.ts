@@ -2,7 +2,6 @@
 import * as fs from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { GoalCustodyChannel } from '../src/goal-custody-channel.js';
 
@@ -11,26 +10,31 @@ describe('closed persistent Goal helper transport', () => {
   const channels: GoalCustodyChannel[] = [];
   beforeEach(() => {
     root = fs.mkdtempSync(join(tmpdir(), 'goal-channel-fixture-'));
-    const python = spawnSync('python3', ['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
-    expect(python.status).toBe(0);
     executable = join(root, 'closed-helper');
     fs.writeFileSync(
       executable,
-      `#!${python.stdout.trim()}
-import json, os, struct, sys, time
-assert sys.argv[1:] == ['--goal-custody-stream']
-assert 'SYNTHETIC_CHANNEL_PARENT' not in os.environ
-mode = os.environ['REVERIE_WORKER_SOCKET']
-counter = 0
-while sys.stdin.buffer.read(1) == b'G':
-    counter += 1
-    if mode == '/timeout': time.sleep(10)
-    if mode == '/exit': sys.exit(1)
-    if mode == '/oversize':
-        sys.stdout.buffer.write(b'J' + struct.pack('!I', 32769)); sys.stdout.buffer.flush(); continue
-    payload = json.dumps({'counter': counter}).encode()
-    sys.stdout.buffer.write((b'E' if mode == '/invalid' else b'J') + struct.pack('!I', len(payload)) + payload)
-    sys.stdout.buffer.flush()
+      `#!${process.execPath}
+const assert = require('node:assert/strict');
+assert.deepEqual(process.argv.slice(2), ['--goal-custody-stream']);
+assert.equal(process.env.SYNTHETIC_CHANNEL_PARENT, undefined);
+const mode = process.env.REVERIE_WORKER_SOCKET;
+let counter = 0;
+function reply() {
+  const payload = Buffer.from(JSON.stringify({ counter }));
+  const header = Buffer.alloc(5);
+  header.write(mode === '/invalid' ? 'E' : 'J');
+  header.writeUInt32BE(mode === '/oversize' ? 32769 : payload.length, 1);
+  process.stdout.write(mode === '/oversize' ? header : Buffer.concat([header, payload]));
+}
+process.stdin.on('data', (bytes) => {
+  for (const byte of bytes) {
+    if (byte !== 71) return process.stdin.destroy();
+    if (mode === '/exit') process.exit(1);
+    counter += 1;
+    if (mode === '/timeout') setTimeout(reply, 10000);
+    else reply();
+  }
+});
 `,
       { mode: 0o700 }
     );
