@@ -78,7 +78,8 @@ their permissions.
 
 Active Python consumers remain migration debt: `worker.py` uses the guard and
 preparation; `employee_laptop_migrate.py` and `worker_nix_migrate.py` use offline
-guard paths; `worker_store_maintenance.py` uses selection and helper arguments.
+guard paths. The native offline worker store CLI uses the existing selection and
+helper arguments and holds both broker locks through seed settlement.
 Those entry points must migrate before deleting their shared Python module.
 The worker image selects the native guest package at the same fixed entrypoint;
 the former standalone Bash recipe is retired. Its source hash and actual

@@ -27,9 +27,7 @@ mod legacy_memory;
 mod managed_context;
 mod model_completion;
 mod office;
-mod offline_custody;
-mod offline_planner;
-mod offline_store;
+mod offline_maintenance;
 mod opencode_context;
 mod opencode_install;
 mod opencode_state;
@@ -223,9 +221,6 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
         "--opencode-install-worker" => opencode_install::worker,
-        "--offline-store-custody-worker" => offline_custody::run,
-        "--offline-store-planner-worker" => offline_planner::run,
-        "--offline-store-qualification-worker" => offline_store::run,
         "--embedding-worker" => embedding_worker::run,
         "--hands-images-worker" => hands_images::run,
         "--hands-model-worker" => hands_model::run,
@@ -288,6 +283,7 @@ fn main() -> ExitCode {
     {
         Some("reverie-context") => return context_cli::entry(),
         Some("reverie-sleep") => return sleep::entry(),
+        Some("reverie-worker-store-maintenance") => return offline_maintenance::entry(argv),
         Some("reverie-opencode" | "reverie-opencode-bridge") => {
             return opencode_install::entry(argv);
         }

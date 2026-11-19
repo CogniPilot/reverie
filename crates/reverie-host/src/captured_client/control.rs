@@ -122,7 +122,7 @@ enum ExecutionMode {
     NixTail,
     GoalStdout,
     GpuPreflightStdout,
-    OfflineStoreRead,
+    OfflineStore,
 }
 impl CallFailure {
     fn before_admission(error: EngineError) -> Self {
@@ -462,7 +462,7 @@ impl CapturedClient {
         )
     }
     /// Offline store metadata can contain binary tar and bounds each pipe.
-    pub(crate) fn run_offline_store_read(
+    pub(crate) fn run_offline_store(
         &self,
         args: Vec<OsString>,
         deadline: Instant,
@@ -474,7 +474,7 @@ impl CapturedClient {
             &CancellationToken::new(),
             policy,
             &mut None,
-            ExecutionMode::OfflineStoreRead,
+            ExecutionMode::OfflineStore,
         )
         .map_err(|failure| failure.error)
     }
@@ -637,9 +637,9 @@ impl CapturedClient {
             ),
             raw_output: matches!(
                 mode,
-                ExecutionMode::GpuPreflightStdout | ExecutionMode::OfflineStoreRead
+                ExecutionMode::GpuPreflightStdout | ExecutionMode::OfflineStore
             ),
-            stderr_bound: matches!(mode, ExecutionMode::OfflineStoreRead).then_some(64 * 1024),
+            stderr_bound: matches!(mode, ExecutionMode::OfflineStore).then_some(64 * 1024),
             #[cfg(test)]
             hooks: self.bootstrap.hooks.clone(),
         });

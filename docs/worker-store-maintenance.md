@@ -21,12 +21,9 @@ Omitting the field preserves the existing current-agent validation mode.
 ## Qualification and private inputs
 
 Run on Linux as the configured non-root broker owner with the normal local Docker
-client. The installed command uses the Rust planner for qualification, Docker observations,
-cohort and capacity admission, existing store and lock selection, and plan digests.
-Apply uses that same planner to recheck its approved plan. For source development,
-put the `runtime.adminMemory` Nix package
-on PATH when running
-`python -m reverie.worker_store_maintenance` in the native flake environment.
+client. The native command in the `runtime.adminMemory` Nix package provides
+qualification, planning and apply. Apply repeats the same plan checks under both
+existing broker locks before seeding the store.
 There is no sudo, host-OS activation, image build/pull/load, or service restart.
 
 The config and qualification bundle must be canonical owner-only 0600 regular

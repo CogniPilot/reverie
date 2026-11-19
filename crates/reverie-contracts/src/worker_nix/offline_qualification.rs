@@ -4,7 +4,9 @@ pub mod engine;
 mod evidence;
 pub mod mounts;
 mod profiles;
-pub use admission::{Capacity, CapacityBudget, CohortBinding, PlanFacts, plan, plan_text};
+pub use admission::{
+    Capacity, CapacityBudget, CohortBinding, PlanFacts, SealedPlan, plan, plan_text,
+};
 pub use profiles::{InventoryError, ProfileEntry, ProfileInventory};
 
 use crate::legacy_json::decode_ops_private_bytes;
@@ -118,6 +120,11 @@ impl Target {
     }
     pub fn needs_isolated_image(&self) -> bool {
         self.validation_scope == ValidationScope::OfflineImage
+    }
+    pub fn closure_names(&self) -> impl Iterator<Item = &str> {
+        self.closure_paths
+            .iter()
+            .map(|path| &path["/nix/store/".len()..])
     }
     pub fn budget(&self) -> Result<(CapacityBudget, u8)> {
         Ok((

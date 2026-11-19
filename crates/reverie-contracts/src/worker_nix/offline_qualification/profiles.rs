@@ -3,6 +3,7 @@
 use crate::legacy_json::{Node, Number, Text, Value, ordered::OrderedValue};
 use std::{collections::BTreeMap, fmt};
 
+#[derive(Clone, PartialEq, Eq)]
 pub enum ProfileEntry {
     Absent,
     Directory([u64; 4]),
@@ -26,6 +27,8 @@ impl fmt::Display for InventoryError {
 }
 impl std::error::Error for InventoryError {}
 
+const IMAGE_ROOT: &str = "nix:var/nix/gcroots/reverie-image";
+
 pub struct ProfileInventory {
     entries: BTreeMap<Text, ProfileEntry>,
     limit: usize,
@@ -33,12 +36,24 @@ pub struct ProfileInventory {
 
 impl ProfileInventory {
     pub fn require_image_root(&self) -> super::Result<()> {
-        let key = ascii("nix:var/nix/gcroots/reverie-image");
+        let key = ascii(IMAGE_ROOT);
         super::require(
             matches!(self.entries.get(&key), Some(ProfileEntry::Link(_, target))
                 if target.iter().copied().map(char::from_u32).collect::<Option<String>>()
                     .is_some_and(|target| super::store_path(&target))),
             "existing image GCroot required",
+        )
+    }
+
+    pub fn verify_seed(&self, before: &Self, expected: &str) -> super::Result<()> {
+        let key = ascii(IMAGE_ROOT);
+        let actual = self.entries.iter().filter(|(name, _)| *name != &key);
+        let original = before.entries.iter().filter(|(name, _)| *name != &key);
+        super::require(
+            matches!(self.entries.get(&key), Some(ProfileEntry::Link(_, target))
+                if target.iter().copied().eq(expected.chars().map(u32::from)))
+                && actual.eq(original),
+            "non-image profile/link metadata changed or selected image root missing",
         )
     }
 
@@ -69,11 +84,11 @@ impl ProfileInventory {
         }
     }
 
-    pub fn bytes(self) -> std::result::Result<Vec<u8>, InventoryError> {
+    pub fn bytes(&self) -> std::result::Result<Vec<u8>, InventoryError> {
         let entries = self
             .entries
-            .into_iter()
-            .map(|(key, entry)| (key, encode(entry)))
+            .iter()
+            .map(|(key, entry)| (key.clone(), encode(entry.clone())))
             .collect();
         let bytes = OrderedValue::object(entries).encode_compact();
         if bytes.len() > 8 * 1024 * 1024 {

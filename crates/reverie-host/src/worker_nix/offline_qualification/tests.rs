@@ -110,7 +110,10 @@ fn qualification_keeps_the_exact_legacy_bytes_and_custody_paths() {
         let path = fixture.private("target.json", &raw);
         let qualified = inspect(&path, 100.0).unwrap();
         assert_eq!(qualified.digest, hash(&raw));
-        assert_eq!(qualified.bytes, raw);
+        assert_eq!(
+            qualified.digest,
+            format!("sha256:{:x}", Sha256::digest(&raw))
+        );
         assert_eq!(
             qualified.evidence_paths,
             ["D2.json", "D2.txt", "CAN.json", "CAN.txt", "probe"].map(|item| fixture.0.join(item))

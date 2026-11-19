@@ -12,7 +12,8 @@ use std::{
 
 const DIRECTORY: i32 = libc::O_RDONLY | libc::O_DIRECTORY;
 
-pub fn inventory(home: &[u32], nix: &[u32], entries: usize) -> Result<Vec<u8>> {
+#[cfg(test)]
+pub(super) fn inventory(home: &[u32], nix: &[u32], entries: usize) -> Result<Vec<u8>> {
     let home = native::python_path(home)?;
     let nix = native::python_path(nix)?;
     Ok(collect(&home, &nix, entries)?.bytes()?)

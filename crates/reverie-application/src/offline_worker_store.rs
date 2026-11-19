@@ -1,9 +1,11 @@
-//! Read-only planning for an existing offline employee's private Nix store.
+//! Plan and apply seed-only preparation for an existing offline employee's private Nix store.
+mod apply;
 mod engine;
 use crate::worker_validation::{self, ValidatedWorkerSnapshot};
+pub use apply::{ApplyError, apply};
 use reverie_contracts::{
     worker_config,
-    worker_nix::offline_qualification::{PlanFacts, plan, plan_text},
+    worker_nix::offline_qualification::{PlanFacts, ProfileInventory, SealedPlan, plan, plan_text},
     worker_schema::{WorkerEnvelope, WorkerPath},
 };
 use reverie_core::ids::{OfflineStoreOperationId, ProfileEmployeeId, ProfileSessionId};
@@ -22,21 +24,22 @@ use std::{
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type ReadEngine<'a> = &'a dyn Fn(&Path, Query) -> Result<Vec<u8>>;
 
-pub struct Snapshot {
-    pub configuration: Vec<u8>,
-    pub target: QualifiedTarget,
-    pub seat: Seat,
-    pub facts: Box<RawValue>,
-    pub plan: Option<Vec<u8>>,
+struct Snapshot {
+    config: Config,
+    target: QualifiedTarget,
+    seat: Seat,
+    plan: SealedPlan,
+    profiles: ProfileInventory,
+    retained: Vec<String>,
 }
 
 /// The same read-only implementation supplies the operator's plan and each
 /// apply-path recheck. Engine observations carry no mutation capability.
-pub fn snapshot(
+fn snapshot(
     config_path: &Path,
     target_path: &Path,
     employee: &ProfileEmployeeId,
-    operation: Option<&OfflineStoreOperationId>,
+    operation: &OfflineStoreOperationId,
     clock: impl Fn() -> f64,
     read_engine: ReadEngine<'_>,
 ) -> Result<Snapshot> {
@@ -72,21 +75,34 @@ pub fn snapshot(
         [config_path, target_path],
         read_engine,
     )?;
-    let facts = plan_facts(&config, &target, binding.digest(), &seat, retained)?;
-    let plan = operation
-        .map(|id| seal(&config.roots.state, &target, employee, &session, id, &facts))
-        .transpose()?;
+    let profiles = observe::capture_profiles(seat.paths.home(), seat.paths.nix())?;
+    let facts = plan_facts(
+        &config,
+        &target,
+        binding.digest(),
+        &seat,
+        &profiles,
+        &retained,
+    )?;
+    let plan = seal(
+        &config.roots.state,
+        &target,
+        employee,
+        &session,
+        operation,
+        &facts,
+    )?;
     Ok(Snapshot {
-        configuration: config.raw,
+        config,
         target,
         seat,
-        facts,
         plan,
+        profiles,
+        retained,
     })
 }
 
 struct Config {
-    raw: Vec<u8>,
     digest: String,
     worker: ValidatedWorkerSnapshot,
     roots: Roots,
@@ -100,7 +116,6 @@ impl Config {
         let roots = Roots::capture(worker.envelope())?;
         Ok(Self {
             digest: format!("sha256:{:x}", Sha256::digest(&raw)),
-            raw,
             worker,
             roots,
         })
@@ -146,11 +161,11 @@ fn plan_facts(
     target: &QualifiedTarget,
     employee_digest: &str,
     seat: &Seat,
-    stopped_container_ids: Vec<String>,
+    profiles: &ProfileInventory,
+    stopped_container_ids: &[String],
 ) -> Result<Box<RawValue>> {
     let (model, cohort) = target.target.budget()?;
     let budget = observe::capacity(model, cohort, &config.roots.state, &config.roots.scratch)?;
-    let profiles = observe::capture_profiles(seat.paths.home(), seat.paths.nix())?;
     Ok(PlanFacts {
         config_digest: &config.digest,
         target_digest: &target.digest,
@@ -159,9 +174,9 @@ fn plan_facts(
         nix_identity: identity(fs::metadata(seat.paths.nix())?),
         lock_identity: identity(fs::symlink_metadata(seat.locks.lock())?),
         sid_lock_identity: identity(fs::symlink_metadata(&seat.session_lock)?),
-        profiles: serde_json::from_slice(&profiles)?,
+        profiles: serde_json::from_slice(&profiles.bytes()?)?,
         budget,
-        stopped_container_ids,
+        stopped_container_ids: stopped_container_ids.to_vec(),
         helper_args: seat.helper.arguments().iter().map(plan_text).collect(),
         helper_name: plan_text(seat.helper.name()),
     }
@@ -188,7 +203,7 @@ fn seal(
     session: &ProfileSessionId,
     operation: &OfflineStoreOperationId,
     facts: &RawValue,
-) -> Result<Vec<u8>> {
+) -> Result<SealedPlan> {
     let audit = audit_directory(state).join(format!("{}.json", operation.as_str()));
     match fs::symlink_metadata(&audit) {
         Ok(_) => return Err("operation already recorded; never retry it".into()),
@@ -202,4 +217,22 @@ fn seal(
         target.target.image_id(),
         facts,
     )?)
+}
+
+/// Produce the standalone CLI plan with native local read-only engine access.
+pub fn preview(
+    config: &Path,
+    target: &Path,
+    employee: &ProfileEmployeeId,
+    operation: &OfflineStoreOperationId,
+) -> Result<Vec<u8>> {
+    let snapshot = snapshot(
+        config,
+        target,
+        employee,
+        operation,
+        apply::epoch,
+        &reverie_host::worker_nix::offline_store_engine::read,
+    )?;
+    Ok(snapshot.plan.bytes().to_vec())
 }

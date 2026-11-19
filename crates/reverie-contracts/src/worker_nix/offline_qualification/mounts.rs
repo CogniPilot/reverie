@@ -2,6 +2,8 @@
 use super::{QualificationError, Result, require};
 use crate::legacy_json::{Node, Number, Text, Value, decode_strict_bytes, numeric_key, truthy};
 use reverie_core::PythonText;
+mod seed;
+pub use seed::{SeedHelper, SeedState};
 use std::collections::BTreeMap;
 
 type Object = BTreeMap<Text, Value>;

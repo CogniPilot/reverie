@@ -1,15 +1,19 @@
 //! Read pinned private qualification evidence without invoking Docker.
+mod journal;
+mod lease;
 pub mod mount_custody;
+pub use journal::{Fence, Journal};
+pub use lease::Lease;
 mod profiles;
 mod seat;
 #[cfg(test)]
 mod tests;
 use crate::native;
-pub use profiles::inventory;
+#[cfg(test)]
+use profiles::inventory;
 use reverie_contracts::worker_nix::offline_qualification::{
-    Capacity, CapacityBudget, EvidenceKind, EvidenceReference, Receipt, Target,
+    Capacity, CapacityBudget, EvidenceKind, EvidenceReference, ProfileInventory, Receipt, Target,
 };
-use reverie_core::ids::ProfileEmployeeId;
 use reverie_store::storage_identity;
 pub use seat::{Seat, inspect_seat};
 use sha2::{Digest, Sha256};
@@ -25,7 +29,6 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 /// Private file observations bound to the byte-exact target returned here.
 pub struct QualifiedTarget {
     pub target: Target,
-    pub bytes: Vec<u8>,
     pub digest: String,
     pub evidence_paths: Vec<PathBuf>,
 }
@@ -42,7 +45,6 @@ pub fn inspect(path: &Path, now: f64) -> Result<QualifiedTarget> {
     Ok(QualifiedTarget {
         target,
         digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
-        bytes,
         evidence_paths,
     })
 }
@@ -84,10 +86,10 @@ pub fn path(text: &reverie_contracts::storage_identity::MetadataText) -> std::io
     native::python_path(text.codepoints())
 }
 
-pub fn capture_profiles(home: &Path, nix: &Path) -> Result<Vec<u8>> {
+pub fn capture_profiles(home: &Path, nix: &Path) -> Result<ProfileInventory> {
     let profiles = profiles::collect(home, nix, 4096)?;
     profiles.require_image_root()?;
-    Ok(profiles.bytes()?)
+    Ok(profiles)
 }
 
 pub fn path_text(path: &Path) -> Vec<u32> {
@@ -96,21 +98,19 @@ pub fn path_text(path: &Path) -> Vec<u32> {
 
 /// Reopen the pinned controls and trusted company metadata before
 /// admitting or rechecking the cohort. This issues no engine commands.
-pub fn cohort(
+pub fn verify_cohort(
     company: &Path,
     config: ControlPin<'_>,
     target: ControlPin<'_>,
-    employee: Option<&str>,
-) -> Result<Vec<u8>> {
+    model: &Target,
+) -> Result<()> {
     let uid = nix::unistd::getuid().as_raw();
-    config.read(uid)?;
-    let target = Target::decode_qualified(&target.read(uid)?)?;
+    config.verify_current()?;
+    target.verify_current()?;
     let company =
         storage_identity::read_metadata(company, uid, storage_identity::DEFAULT_METADATA_LIMIT)?;
-    let employee = employee.map(ProfileEmployeeId::parse).transpose()?;
-    Ok(serde_json::to_vec(
-        &target.admit_cohort(&company, employee.as_ref())?,
-    )?)
+    model.admit_cohort(&company, None)?;
+    Ok(())
 }
 
 pub fn capacity(

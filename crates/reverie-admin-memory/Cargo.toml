@@ -47,5 +47,8 @@ tokio.workspace = true
 tokio-rustls.workspace = true
 unicode-width.workspace = true
 
+[dev-dependencies]
+tar.workspace = true
+
 [lints]
 workspace = true

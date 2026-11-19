@@ -199,6 +199,20 @@ struct Plan<'a> {
     facts: &'a RawValue,
 }
 
+pub struct SealedPlan {
+    bytes: Vec<u8>,
+    digest: String,
+}
+
+impl SealedPlan {
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+}
+
 /// Seal the observation using the installed plan schema and legacy digest.
 /// Observations and digests are data, and do not authorize a seed operation.
 pub fn plan(
@@ -207,7 +221,7 @@ pub fn plan(
     session: &str,
     image: &str,
     facts: &RawValue,
-) -> Result<Vec<u8>> {
+) -> Result<SealedPlan> {
     require(
         ProfileEmployeeId::parse(employee).is_ok()
             && OfflineStoreOperationId::parse(operation).is_ok(),
@@ -237,5 +251,8 @@ pub fn plan(
         Text("planDigest".bytes().map(u32::from).collect()),
         Value(Node::String(Text(digest.bytes().map(u32::from).collect()))),
     );
-    Ok(compact_data(&body))
+    Ok(SealedPlan {
+        bytes: compact_data(&body),
+        digest,
+    })
 }

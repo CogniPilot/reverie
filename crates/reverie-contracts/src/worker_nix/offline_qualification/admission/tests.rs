@@ -15,7 +15,7 @@ fn plans_keep_the_legacy_sorted_ascii_digest() {
     .unwrap();
     let expected = "sha256:3cf41d5d268b8916851824862bac202ab61e596b4d409c8f5fbefc644a7db524";
     let bytes = plan(OPERATION, EMPLOYEE, SESSION, IMAGE, &facts).unwrap();
-    let text = String::from_utf8(bytes).unwrap();
+    let text = std::str::from_utf8(bytes.bytes()).unwrap();
     assert!(text.contains(&format!(r#""planDigest":"{expected}""#)));
     assert!(text.contains(r#""a":"\u007f","z":[-0.0,1e-06,18446744073709551616,"#));
 }
