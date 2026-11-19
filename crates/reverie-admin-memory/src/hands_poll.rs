@@ -1,6 +1,7 @@
 //! Room discovery, stable polling order, and reply-claim transitions for Hands.
 mod driver;
 mod file;
+pub(super) use file::{load as load_state, save as save_state};
 mod rooms;
 mod state;
 

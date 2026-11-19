@@ -18,19 +18,19 @@ struct Start {
     session: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Status {
+pub(super) enum Status {
     Unscoped,
     Active,
     OfficeDisabled,
     Unavailable,
 }
 
-#[derive(Serialize)]
-struct Notice {
-    status: Status,
-    wake: bool,
+#[derive(Deserialize, Serialize)]
+pub(super) struct Notice {
+    pub(super) status: Status,
+    pub(super) wake: bool,
 }
 
 const RETRY_MIN: Duration = Duration::from_secs(1);

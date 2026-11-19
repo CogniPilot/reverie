@@ -143,15 +143,9 @@ class Chat:
 
 
 def model_settings(cfg):
-    payload = {'model': cfg['model'], 'max_tokens': cfg['reply_max_tokens'], 'stream': False}
-    if 'temperature' in cfg:
-        payload['temperature'] = cfg['temperature']
-    meter = dict(cfg['token_meter']) if cfg.get('token_meter') else None
-    if meter is not None and cfg.get('vision'):
-        meter['image_tokens_per_image'] = cfg.get('image_tokens_per_image', 2048)
-    return {'api_base': cfg['api_base'], 'key_env': cfg.get('model_key_env'), 'timeout_s': cfg['model_timeout_s'],
-            'max_response_bytes': 262144, 'token_meter': meter, 'events_file': cfg.get('model_events_file'),
-            'payload': payload}
+    fields = ('api_base', 'model', 'reply_max_tokens', 'model_timeout_s', 'model_key_env',
+              'model_events_file', 'token_meter', 'temperature', 'vision', 'image_tokens_per_image')
+    return coding_chat.native_settings('model', settings={key: cfg[key] for key in fields if key in cfg})
 
 
 def chat_model(cfg, messages, tools=None):

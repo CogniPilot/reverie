@@ -17,6 +17,7 @@ mod hands_office;
 mod hands_poll;
 mod hands_prompt;
 mod hands_settings;
+mod hands_supervisor;
 mod hands_terminal;
 mod hands_turn;
 mod hands_web;
@@ -243,6 +244,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-managed-context-worker" => managed_context::run,
         "--hands-trace-worker" => hands_model::trace_worker,
         "--hands-terminal-worker" => hands_terminal::run,
+        "--hands-native-terminal-worker" => hands_terminal::run_detached,
         "--hands-attention-worker" => hands_attention::run,
         "--hands-office-worker" => hands_office::run,
         "--hands-web-worker" => hands_web::run,
@@ -282,6 +284,9 @@ fn main() -> ExitCode {
     }
     let mut args = argv.into_iter().skip(1);
     let flag = args.next();
+    if flag.as_deref().is_some_and(|flag| flag == "--hands-native") {
+        return hands_supervisor::entry(args);
+    }
     if let Some(code) = flag
         .as_deref()
         .and_then(|flag| guarded_exec(flag, &mut args))

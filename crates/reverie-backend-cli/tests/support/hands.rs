@@ -1,18 +1,64 @@
 use super::*;
 use std::os::unix::fs::{PermissionsExt, symlink};
 
-fn setup(fixture: &Fixture, cmd: &mut Command) {
+fn configure(fixture: &Fixture, cmd: &mut Command) {
     cmd.env("REVERIE_DATA_DIR", &fixture.0)
         .env("REVERIE_HANDS_MODEL", "selected-model")
         .env("REVERIE_HANDS_BASE_URL", "http://model.test/v1///")
-        .env_remove("REVERIE_USERNAME")
-        .args([
-            "--hands-launch",
-            "echo",
-            "/fixture/agent_loop.py",
-            "--no-tui",
-            "--once",
-        ]);
+        .env_remove("REVERIE_USERNAME");
+}
+
+fn setup(fixture: &Fixture, cmd: &mut Command) {
+    configure(fixture, cmd);
+    cmd.args([
+        "--hands-launch",
+        "echo",
+        "/fixture/agent_loop.py",
+        "--no-tui",
+        "--once",
+    ]);
+}
+
+#[test]
+fn packaged_launcher_selects_native_hands_and_preserves_explicit_coding() {
+    let fixture = Fixture::create();
+    let directory = directory(&fixture);
+    for coding in [false, true] {
+        if coding {
+            private_write(
+                &directory.join("runtime-settings.json"),
+                r#"{"coding":{"root":"/workspace"}}"#,
+            );
+        }
+        let (output, _) = fixture.run(
+            "200 OK",
+            json!({"data":{"employees":[{"sessionId":"session-123","name":"Selected employee"}]}}),
+            |cmd| {
+                configure(&fixture, cmd);
+                cmd.args([
+                    "--hands-launch",
+                    "echo",
+                    "/fixture/agent_loop.py",
+                    "--native-runtime",
+                    "echo",
+                    "--once",
+                ]);
+            },
+        );
+        assert!(output.status.success());
+        let prefix = if coding {
+            "-I -B /fixture/agent_loop.py"
+        } else {
+            "--hands-native"
+        };
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap(),
+            format!(
+                "{prefix} {} --once\n",
+                directory.join("agent.json").display()
+            )
+        );
+    }
 }
 
 fn directory(fixture: &Fixture) -> PathBuf {

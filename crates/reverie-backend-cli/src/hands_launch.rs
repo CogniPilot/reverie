@@ -32,6 +32,11 @@ struct Launch {
     directory: PathBuf,
 }
 
+struct Prepared {
+    path: PathBuf,
+    coding: bool,
+}
+
 fn setting(key: &str) -> Option<String> {
     env::var(key).ok().filter(|value| !value.is_empty())
 }
@@ -114,7 +119,7 @@ impl Launch {
         }
     }
 
-    fn prepare(self) -> crate::Result<PathBuf> {
+    fn prepare(self) -> crate::Result<Prepared> {
         let files = files::Directory::open(&self.directory)
             .map_err(|_| "Private Hands data directory unavailable")?;
         let settings = settings::load(&files)?;
@@ -148,7 +153,10 @@ impl Launch {
         files
             .publish("agent.json", &bytes, false)
             .map_err(file_error)?;
-        Ok(self.directory.join("agent.json"))
+        Ok(Prepared {
+            path: self.directory.join("agent.json"),
+            coding: !config["coding"].is_null(),
+        })
     }
 
     fn configuration(&self, name: &str, overrides: serde_json::Map<String, Value>) -> Value {
@@ -176,15 +184,24 @@ fn file_error(_: io::Error) -> &'static str {
     "Could not publish private Hands configuration"
 }
 
-fn launch(runtime: &OsStr, loop_path: &OsStr, flags: &[OsString]) -> crate::Result<()> {
+fn launch(
+    runtime: &OsStr,
+    loop_path: &OsStr,
+    native: Option<&OsStr>,
+    flags: &[OsString],
+) -> crate::Result<()> {
     umask(Mode::S_IRWXG | Mode::S_IRWXO);
-    let config = Launch::capture()?.prepare()?;
-    let _ = Command::new(runtime)
-        .args(["-I", "-B"])
-        .arg(loop_path)
-        .arg(config)
-        .args(flags)
-        .exec();
+    let prepared = Launch::capture()?.prepare()?;
+    let mut command = if let Some(native) = native.filter(|_| !prepared.coding) {
+        let mut command = Command::new(native);
+        command.arg("--hands-native");
+        command
+    } else {
+        let mut command = Command::new(runtime);
+        command.args(["-I", "-B"]).arg(loop_path);
+        command
+    };
+    let _ = command.arg(prepared.path).args(flags).exec();
     Err("Could not start the Hands runtime")
 }
 
@@ -194,7 +211,10 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
             println!("{HELP}");
             return ExitCode::SUCCESS;
         }
-        [runtime, loop_path, flags @ ..] => launch(runtime, loop_path, flags),
+        [runtime, loop_path, option, native, flags @ ..] if option == "--native-runtime" => {
+            launch(runtime, loop_path, Some(native), flags)
+        }
+        [runtime, loop_path, flags @ ..] => launch(runtime, loop_path, None, flags),
         _ => Err("Hands runtime executable and entry point are required"),
     };
     if let Err(error) = result {

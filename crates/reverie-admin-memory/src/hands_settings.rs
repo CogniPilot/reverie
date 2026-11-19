@@ -10,6 +10,7 @@ use std::{io, path::Path};
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Defaults,
+    Model { settings: Value },
     Startup { overrides: Map<String, Value> },
     Coding { settings: Value },
     ToolExport { export: Value },
@@ -19,6 +20,7 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, FRAME_BYTES)?;
     let result = match serde_json::from_slice(&input)? {
         Request::Defaults => json!({"settings": defaults()}),
+        Request::Model { settings } => model_request(&settings),
         Request::Startup { overrides } => startup_reply(overrides),
         Request::Coding { settings } => {
             json!({"error": coding_task::check_coding(&settings).err()})
@@ -29,6 +31,33 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
         },
     };
     crate::write_reply(&result, FRAME_BYTES)
+}
+
+pub(super) fn model_request(settings: &Value) -> Value {
+    let mut payload = json!({
+        "model":settings["model"], "max_tokens":settings["reply_max_tokens"], "stream":false,
+    });
+    if let Some(temperature) = settings.get("temperature") {
+        payload["temperature"] = temperature.clone();
+    }
+    let mut meter = settings["token_meter"].clone();
+    if !truthy(&meter) {
+        meter = Value::Null;
+    } else if truthy(&settings["vision"])
+        && let Some(meter) = meter.as_object_mut()
+    {
+        meter.insert(
+            "image_tokens_per_image".into(),
+            settings
+                .get("image_tokens_per_image")
+                .cloned()
+                .unwrap_or(json!(2048)),
+        );
+    }
+    json!({
+        "api_base":settings["api_base"], "key_env":settings["model_key_env"], "timeout_s":settings["model_timeout_s"],
+        "max_response_bytes":262144, "token_meter":meter, "events_file":settings["model_events_file"], "payload":payload,
+    })
 }
 
 fn defaults() -> Map<String, Value> {
@@ -56,7 +85,7 @@ fn defaults() -> Map<String, Value> {
     settings
 }
 
-fn startup_reply(overrides: Map<String, Value>) -> Value {
+pub(super) fn startup_reply(overrides: Map<String, Value>) -> Value {
     let mut config = defaults();
     config.extend(overrides);
     if let Err(error) = reverie_contracts::hands_web::validate_settings(&config) {

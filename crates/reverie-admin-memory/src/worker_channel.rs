@@ -31,6 +31,10 @@ impl WorkerChannel {
         self.0.get_ref().shutdown(Shutdown::Both)
     }
 
+    pub(crate) fn duplicate(&self) -> io::Result<Self> {
+        Self::from_fd(self.0.get_ref())
+    }
+
     pub(crate) fn read<T: DeserializeOwned>(
         &mut self,
         deadline: Option<Instant>,
@@ -43,10 +47,45 @@ impl WorkerChannel {
         deadline: Option<Instant>,
         limit: usize,
     ) -> io::Result<Option<T>> {
+        self.read_frame(deadline, limit, None)
+    }
+
+    pub(crate) fn read_checked<T: DeserializeOwned>(
+        &mut self,
+        deadline: Instant,
+        limit: usize,
+        check: &dyn Fn() -> io::Result<()>,
+    ) -> io::Result<Option<T>> {
+        self.read_frame(Some(deadline), limit, Some(check))
+    }
+
+    fn read_frame<T: DeserializeOwned>(
+        &mut self,
+        deadline: Option<Instant>,
+        limit: usize,
+        check: Option<&dyn Fn() -> io::Result<()>>,
+    ) -> io::Result<Option<T>> {
         let mut frame = Vec::new();
         loop {
-            self.0.get_ref().set_read_timeout(timeout(deadline)?)?;
-            let data = self.0.fill_buf()?;
+            let mut interval = timeout(deadline)?;
+            if let Some(check) = check {
+                check()?;
+                let quantum = Duration::from_millis(50);
+                interval = Some(interval.map_or(quantum, |remaining| remaining.min(quantum)));
+            }
+            self.0.get_ref().set_read_timeout(interval)?;
+            let data = match self.0.fill_buf() {
+                Err(error)
+                    if check.is_some()
+                        && matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                        ) =>
+                {
+                    continue;
+                }
+                result => result?,
+            };
             if data.is_empty() && frame.is_empty() {
                 return Ok(None);
             }

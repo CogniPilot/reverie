@@ -30,7 +30,7 @@ struct Answer {
     characters: Option<usize>,
     searches: Option<usize>,
     timing: Option<String>,
-    coding: State,
+    coding: Option<State>,
 }
 
 impl Pass {
@@ -58,8 +58,11 @@ impl Pass {
         } = self.link.exchange(json!({
             "effect":"answer", "room":source.target.id, "recalled":recalled,
             "history":source.history, "message":source.message, "control":control,
+            "direct":self.is_direct(source.target),
         }))?;
-        self.book.coding(coding);
+        if let Some(coding) = coding {
+            self.book.coding(coding);
+        }
         let Some(reply) = reply.as_deref().filter(|reply| !reply.is_empty()) else {
             return self.failed(source, failure.as_deref().unwrap_or("empty reply"));
         };

@@ -78,6 +78,14 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     result
 }
 
+pub(super) fn run_detached(parent: i32) -> io::Result<()> {
+    if nix::unistd::getppid().as_raw() != parent {
+        return Err(crate::refused());
+    }
+    nix::unistd::setsid()?;
+    run(parent)
+}
+
 struct Session {
     transcript: Transcript,
     screen: Option<Screen>,

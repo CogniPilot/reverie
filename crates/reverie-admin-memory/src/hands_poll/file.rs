@@ -9,12 +9,12 @@ use std::{
 };
 
 #[derive(Serialize)]
-pub(super) struct Loaded {
+pub(crate) struct Loaded {
     present: bool,
-    value: Option<Box<RawValue>>,
+    pub(crate) value: Option<Box<RawValue>>,
 }
 
-pub(super) fn load(path: &Path) -> io::Result<Loaded> {
+pub(crate) fn load(path: &Path) -> io::Result<Loaded> {
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -37,7 +37,7 @@ pub(super) fn load(path: &Path) -> io::Result<Loaded> {
     })
 }
 
-pub(super) fn save(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(crate) fn save(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .filter(|dir| !dir.as_os_str().is_empty())

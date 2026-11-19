@@ -11,6 +11,10 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let root = PathBuf::from(args.next().unwrap());
     let args = args.collect::<Vec<_>>();
+    if args == ["summary", "--json"] {
+        println!(r#"{{"text":""}}"#);
+        return ExitCode::SUCCESS;
+    }
     if args.first().is_some_and(|operation| operation == "say") {
         fs::write(root.join("post.json"), serde_json::to_vec(&args).unwrap()).unwrap();
         print!("{}", fs::read_to_string(root.join("receipt.json")).unwrap());
