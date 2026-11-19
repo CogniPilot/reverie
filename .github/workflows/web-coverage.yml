@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: web-coverage-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   web-coverage:
