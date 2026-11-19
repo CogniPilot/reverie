@@ -17,6 +17,7 @@ use std::{
 };
 const CID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 mod peer;
+mod web_fixture;
 struct Fixture {
     broker: InstallingBroker,
     tree: Tree,

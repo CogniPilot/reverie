@@ -16,11 +16,32 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from reverie.worker import Broker, client
-from tests.goal_private_fixture import install_synthetic_program_observer
+from reverie.goal_private import private_json
 
 SID = '11111111-2222-3333-4444-555555555555'
 SERVER = 'a' * 64
 LAPTOP = 'b' * 64
+
+
+class SyntheticTrustedProgramObserver:
+    """EXPLICIT missing-host-edge substitute, never a production attestation.
+    The actual Broker has no observer and cannot sign for ordinary legacy workers.
+    This fixture binds an exact synthetic launch tuple, not an always-true grant.
+    """
+    def __init__(self, session_id, pin, metadata):
+        self.session_id, self.pin, self.metadata = session_id, pin, metadata
+        self.completed = False
+
+    def assert_current(self, session_id, pin, metadata):
+        if self.completed or (session_id, pin, metadata) != (self.session_id, self.pin, self.metadata):
+            raise ValueError('Synthetic original program no longer current')
+
+
+def install_synthetic_program_observer(broker, session_id):
+    metadata = private_json(str(Path(broker.config['stateRoot']) / session_id / 'runtime.json'))[0]
+    observer = SyntheticTrustedProgramObserver(session_id, metadata.get('goalBinding'), metadata)
+    broker.goals._program_observer = observer
+    return observer
 
 
 class GoalBootstrapTests(unittest.TestCase):
