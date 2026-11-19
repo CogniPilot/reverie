@@ -59,10 +59,10 @@ impl Scratch {
                 let probe = self.private("probe", b"owned shell proof");
                 data["probePath"] = json!(probe);
                 data["probeDigest"] = json!(hash(b"owned shell proof"));
-                if !offline {
-                    data["scope"] = json!("CURRENT_CODEX_TOOL_SHELL_ONLY");
-                    data["ownToolShell"] = json!(true);
-                }
+            }
+            if !offline && kind == "CAN" {
+                data["scope"] = json!("CURRENT_CODEX_TOOL_SHELL_ONLY");
+                data["ownToolShell"] = json!(true);
             }
             let envelope = json!({"version":1,"kind":kind,"data":data});
             let bytes = serde_json::to_vec(&envelope).unwrap();
