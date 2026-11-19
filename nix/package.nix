@@ -3,8 +3,7 @@ let
   lib = pkgs.lib;
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
-  goalCustodyFixture = import ./goal-custody-fixture.nix { inherit pkgs src; };
-  legacyViewerFixture = lib.cleanSource (src + "/python/reverie");
+  workerWebFixtures = import ./worker-web-fixtures.nix { inherit pkgs src; };
   # Copy individual fixture files into the store. Interpolating ${src}/path
   # otherwise makes every repository edit an input to the console derivation.
   # Use the original snapshot for the selected files so read-only flake check
@@ -33,8 +32,6 @@ let
       cp -r ${consoleSkill} skills/reverie
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
-      mkdir -p test/fixtures/viewer-source/python
-      cp -r ${legacyViewerFixture} test/fixtures/viewer-source/python/reverie
       mkdir -p test/fixtures/owner-terminal/python/reverie
       cp ${consoleFixture "python/reverie/human_shell_capabilities.py"} test/fixtures/owner-terminal/python/reverie/human_shell_capabilities.py
       cp ${consoleFixture "python/reverie/human_terminal_protocol.py"} test/fixtures/owner-terminal/python/reverie/human_terminal_protocol.py
@@ -80,13 +77,15 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    passthru = { inherit goalCustodyFixture; };
+    passthru = { inherit workerWebFixtures; };
     nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
       export NIX_TEST_GOAL_WORKER_EXEC=${workerExec}/bin/reverie-worker-exec
-      export NIX_TEST_GOAL_FIXTURE=${goalCustodyFixture}/bin/reverie-goal-custody-fixture
+      export NIX_TEST_GOAL_FIXTURE=${workerWebFixtures}/bin/reverie-goal-custody-fixture
+      export NIX_TEST_VIEWER_FIXTURE=${workerWebFixtures}/bin/reverie-viewer-fixture
+      export NIX_TEST_VIEWER_WORKSPACES=${leaseCli}/bin/reverie-workspaces
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and

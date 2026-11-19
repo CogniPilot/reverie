@@ -59,7 +59,7 @@ export function writeGoalInventory(root: string, inventory: GoalInventoryRecord[
 export function startGoalBroker(root: string): ChildProcessWithoutNullStreams {
   const binary = process.env.NIX_TEST_GOAL_FIXTURE;
   if (!binary || !existsSync(binary)) {
-    throw Error('Build the native Goal fixture with nix build .#checks.x86_64-linux.goalCustodyFixture');
+    throw Error('Build the native Goal fixture with nix build .#checks.x86_64-linux.workerWebFixtures');
   }
   writeFileSync(join(root, 'goal-inventory-control'), '', { mode: 0o600 });
   const child = spawn(binary, ['--exact', brokerTest, '--ignored', '--nocapture'], {
