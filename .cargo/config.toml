@@ -7,3 +7,5 @@ namegate = "run --locked --package reverie-namegate --bin reverie-namegate --"
 commit-policy = "run --locked --package reverie-commit-policy --bin reverie-commit-policy --"
 # The task-cancel acceptance controller, the native successor of scripts/acceptance/task-cancel-scope.py.
 task-cancel-scope = "run --locked --package reverie-task-cancel --bin reverie-task-cancel --"
+# Read-only console identity acceptance before and after an operator-managed restart.
+persistent-ids-acceptance = "run --locked --package reverie-backend-cli --bin reverie-backend -- --persistent-ids"

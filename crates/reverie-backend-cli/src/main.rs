@@ -2,6 +2,7 @@
 mod claude_launch;
 mod hands_launch;
 mod office;
+mod persistent_ids;
 
 use clap::{Parser, ValueEnum};
 use reverie_contracts::memory_instance::primary_agent;
@@ -152,6 +153,7 @@ fn main() -> ExitCode {
             return claude_launch::entry(plan.as_deref());
         }
         Some("--hands-launch") => return hands_launch::entry(raw.collect()),
+        Some("--persistent-ids") => return persistent_ids::entry(raw),
         _ => {}
     }
     match run(Args::parse()) {
