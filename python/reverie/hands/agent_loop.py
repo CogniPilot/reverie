@@ -41,6 +41,7 @@ import subprocess
 import sys
 import threading
 import time
+from time import monotonic as room_list_clock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
@@ -212,11 +213,6 @@ def poll_request(action, **fields):
     return hands_request('poll', {action: fields})
 
 
-def wake_scope(cfg, room):
-    return {'direct': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', ()),
-            'name': cfg.get('self_name'), 'session': cfg.get('self_session_id')}
-
-
 def incoming_event(cfg, room, message, sender=None):
     if cfg.get('_terminal') is not None:
         try:
@@ -321,6 +317,11 @@ def turn_request(action, **fields):
 def web_policy(cfg):
     return {'search': bool(cfg.get('search')), 'fetch': bool(cfg.get('web_fetch')),
             'max_calls': cfg['search_max_calls'], 'result_chars': cfg['search_result_chars']}
+
+
+def wake_scope(cfg, room):
+    return {'direct': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', ()),
+            'name': cfg.get('self_name'), 'session': cfg.get('self_session_id')}
 
 
 def prompt_job(cfg, history, msg, room, now, reserve, recalled, notes):
@@ -488,82 +489,25 @@ def timing_text(timing):
     return ','.join(parts) or '-'
 
 
-def change_room(cfg, state, room, kind, **fields):
-    state[room] = poll_request('change', room=state[room], event={'kind': kind, **fields})['room']
-    save_json(cfg['state_file'], state)
-
-
-def settle_claims(chat, cfg, state, room):
-    for mid, claim in list(state[room].get('claims', {}).items()):
-        try:
-            result = poll_request('settlement', claim=claim, session=cfg['self_session_id'],
-                                  history=chat.read(room, cfg['history_n']))
-        except Exception as error:
-            log('claim check failed', room, mid, type(error).__name__)
-            continue
-        if result['disposition']:
-            log('claim ' + result['disposition'], room, mid)
-            change_room(cfg, state, room, 'complete', id=mid)
-
-
-def room_list(cfg, chat, state):
-    """The rooms to read this tick. A fixed list from the config, or with "rooms": "auto" the rooms the server says
-    this session is in (so adding or removing her is one room action; no config edit or restart). DMs are the rooms
-    of kind "dm". At most max_rooms rooms, ids checked. If the list cannot be read, nothing is read this tick (fail
-    closed): no stale list is used, and the saved list and per-room state are kept for the next good list.
-    A room that was gone and comes back starts again from "now", like a room seen for the first time."""
-    if cfg['rooms'] != 'auto':
-        return cfg['rooms']
-    try:
-        result = poll_request('rooms', listed=chat.member_rooms(), state=state, cap=cfg['max_rooms'])
-    except Exception as e:
-        now = time.monotonic()
-        outage = cfg.get('_room_list_outage')
-        if outage is None:
-            outage = cfg['_room_list_outage'] = {'started': now, 'last_log': now, 'failures': 1}
-            # CLI exceptions can contain response bodies, URLs or credentials.
-            log('room list failed, reading no room this tick', type(e).__name__)
-        else:
-            outage['failures'] += 1
-            if now - outage['last_log'] >= ROOM_LIST_LOG_INTERVAL_S:
-                log('room list still unavailable, reading no rooms',
-                    f"failures={outage['failures']}", f"elapsed_s={int(now - outage['started'])}")
-                outage['last_log'] = now
-        cfg['_auto_dms'] = set()
-        return []
-    outage = cfg.pop('_room_list_outage', None)
-    if outage is not None:
-        log('room list recovered', f"failures={outage['failures']}",
-            f"elapsed_s={int(time.monotonic() - outage['started'])}")
-    listed = result['rooms']
-    if result['total'] > cfg['max_rooms']:
-        log('room list capped', result['total'], 'of', cfg['max_rooms'])
-    rooms = [r['id'] for r in listed]
-    cfg['_room_names'] = {r['id']: r['name'] for r in listed}
-    terminal_event(cfg, 'rooms', count=len(rooms))
-    dms = [r['id'] for r in listed if r['direct']]
-    cfg['_last_id'] = {r['id']: r['latest'] for r in listed}
-    cfg['_no_read'] = {r['id'] for r in listed if not r['read']}
-    for room in result['joined']:
-        state.pop(room, None)
-    if result['joined'] or result['left']:
-        log('rooms changed', 'joined', len(result['joined']), 'left', result['left'], 'now', len(rooms))
-    state['_auto_rooms'], state['_auto_dms'] = rooms, dms
-    cfg['_auto_dms'] = set(dms)
-    save_json(cfg['state_file'], state)
-    return rooms
-
-
-def still_member(cfg, chat, room):
-    """With "rooms": "auto", ask again right before a post: an answer can take a minute, and a room she was removed
-    from meanwhile gets nothing. A failed query counts as not a member (fail closed: a missed reply)."""
-    if cfg['rooms'] != 'auto':
-        return True
-    try:
-        return room in {r.get('id') for r in chat.member_rooms()}
-    except Exception as e:
-        log('membership check failed', room, repr(e)[:200])
-        return False
+def room_list_status(cfg, error):
+    now = room_list_clock()
+    if error is None:
+        outage = cfg.pop('_room_list_outage', None)
+        if outage is not None:
+            log('room list recovered', f"failures={outage['failures']}",
+                f"elapsed_s={int(now - outage['started'])}")
+        return
+    outage = cfg.get('_room_list_outage')
+    if outage is None:
+        cfg['_room_list_outage'] = {'started': now, 'last_log': now, 'failures': 1}
+        log('room list failed, reading no room this tick', error)
+    else:
+        outage['failures'] += 1
+        if now - outage['last_log'] >= ROOM_LIST_LOG_INTERVAL_S:
+            log('room list still unavailable, reading no rooms',
+                f"failures={outage['failures']}", f"elapsed_s={int(now - outage['started'])}")
+            outage['last_log'] = now
+    cfg['_auto_dms'] = set()
 
 
 JOURNAL_COMMAND_OPS = ('journal_recall', 'journal_view', 'journal_receipt', 'journal_source', 'journal_commit')
@@ -619,106 +563,104 @@ def memory_op(cfg, room, op, *, failures=None, **payload):
 
 
 def tick(cfg, chat, state, model=chat_model, search=searxng_search):
-    """One pass over every room. Returns the number of answers posted."""
-    posted = 0
-    for room in room_list(cfg, chat, state):
-        if room in cfg.get('_no_read', ()):
-            continue
-        last = cfg.get('_last_id', {}).get(room)
-        try:
-            history = chat.read(room, cfg['history_n'])
-        except Exception as e:
-            log('read failed', room, repr(e)[:300])
-            continue
-        if isinstance(getattr(chat, 'time_zone', None), str):
-            cfg['_time_zone'] = chat.time_zone
-        if state.get(room, {}).get('since') is not None:
-            settle_claims(chat, cfg, state, room)
-        try:
-            scan = poll_request('scan', room=state.get(room, {}), latest=last,
-                                scope=wake_scope(cfg, room), history=history)
-        except ValueError as error:
-            log('room scan failed', room, type(error).__name__)
-            continue
-        if 'initial' in scan:
-            state[room] = scan['initial']
-            save_json(cfg['state_file'], state)
-            terminal_event(cfg, 'note', text=f"Following {cfg.get('_room_names', {}).get(room, room)}; "
-                           f"{len(history)} existing messages skipped.")
-            continue
-        seen = set()
-        for index, wake in scan['pending']:
-            msg = history[index]
-            mid = msg['id']
-            if mid in seen:
-                continue
-            if not wake:
-                change_room(cfg, state, room, 'skip', id=mid)
-                seen.add(mid)
-                continue
-            if posted >= cfg['max_answers_per_tick']:
-                break
-            if not alert_allows(cfg, chat, room, msg):
-                change_room(cfg, state, room, 'complete', id=mid)
-                seen.add(mid)
-                continue
-            change_room(cfg, state, room, 'claim', id=mid, msg_at=msg.get('at', 0))
-            room_name = cfg.get('_room_names', {}).get(room, room)
-            incoming_event(cfg, room_name, msg)
-            try:
-                timing = []
-                if cfg.get('coding') and coding_chat.control_request(msg):
-                    manager = cfg.get('_coding_manager')
-                    reply = (manager.control(state, room, history, msg) if manager else
-                             'Coding task refused: background task manager is not running.')
-                    size = 0
-                    searches = 0
-                else:
-                    if cfg.get('_coding_manager'):
-                        cfg['_coding_manager'].before_chat()
-                    recalled = memory_op(cfg, room, 'recall', query=(msg.get('text') or '')[:cfg['message_cap_chars']])
-                    cfg['_admin_start_task'] = coding_chat.workspace_callback(cfg, cfg.get('_coding_manager'), state, room, history, msg)
-                    try:
-                        reply, size, searches = answer(cfg, room, history, msg, model, search, timing,
-                                                       recalled=(recalled or {}).get('text', ''))
-                    finally:
-                        cfg.pop('_admin_start_task', None)
-                if not reply:
-                    raise RuntimeError('empty reply')
-                member = still_member(cfg, chat, room)
-                if member:
-                    if not alert_allows(cfg, chat, room, msg):
-                        change_room(cfg, state, room, 'complete', id=mid)
-                        seen.add(mid)
-                        continue
-                    sent = reply[: cfg['reply_cap_chars']]
-                    terminal_event(cfg, 'posting')
-                    receipt = chat.say(room, sent, reply_to=mid)
-            except Exception as e:
-                log('answer failed', room, mid, repr(e)[:300])
-                continue  # claim stays; settled or retried once on a later tick
-            if not member:
-                log('answer dropped: no longer a member', room, mid)
-                # Known as left: if she is back on the next list, the room starts again from now.
-                state['_auto_rooms'] = [r for r in state.get('_auto_rooms') or [] if r != room]
-                change_room(cfg, state, room, 'complete', id=mid)
-                break  # the rest of this room waits for the next tick's list
-            change_room(cfg, state, room, 'complete', id=mid)
-            seen.add(mid)
-            posted += 1
-            terminal_event(cfg, 'reply', room=room_name, text=sent,
-                           confirmed=isinstance(receipt, dict) and bool(receipt.get('id')))
-            if isinstance(receipt, dict) and receipt.get('id'):
-                memory_op(cfg, room, 'record', event={'source': mid, 'at': msg.get('at'),
-                          'text': (msg.get('text') or '')[:cfg['message_cap_chars']],
-                          'reply': sent, 'reply_id': receipt['id']})
-            log('answered', room, mid, f'request_chars={size}', f'reply_chars={len(reply)}', f'searches={searches}',
-                'timing=' + timing_text(timing))
+    """Run the native room pass with the existing optional coding and memory effects."""
+    settings = {'rooms': None if cfg['rooms'] == 'auto' else cfg['rooms'],
+                'dm_rooms': cfg.get('dm_rooms', []), 'name': cfg.get('self_name'),
+                'session': cfg.get('self_session_id'), 'max_rooms': cfg['max_rooms'],
+                'history_n': cfg['history_n'], 'max_answers': cfg['max_answers_per_tick'],
+                'reply_chars': cfg['reply_cap_chars'], 'message_chars': cfg['message_cap_chars']}
+    office = {'cli': chat.argv, 'timeout_s': chat.timeout} if type(chat) is Chat else None
+    job = {'settings': settings, 'state': state, 'path': cfg['state_file'], 'office': office}
+    bound = agent_journal.TURN_CAPTURE_BYTES
+    worker = WorkerSocket('hands-tick-worker', job, environment=os.environ,
+                          startup_limit=bound, reply_limit=bound, send_limit=bound)
+    try:
+        while True:
+            event = worker.wait(max(90, cfg.get('cli_timeout_s', 60) * 2 + 5))
+            if 'effect' in event:
+                result = tick_effect(cfg, chat, state, model, search, event)
+                worker.send(result)
+            elif 'error' in event:
+                raise ValueError(event['error'])
+            elif 'posted' in event:
+                return event['posted']
+            else:
+                tick_observation(cfg, state, event)
+    finally:
+        worker.close(grace=0.1)
+
+
+def tick_observation(cfg, state, event):
+    if 'state' in event:
+        patch = event['state']
+        for room in patch['remove']:
+            state.pop(room, None)
+        state.update(patch['set'])
+        if any(key == '_auto_dms' for key, _ in patch['set']):
+            cfg['_auto_dms'] = set(state['_auto_dms'])
+    elif 'time_zone' in event:
+        cfg['_time_zone'] = event['time_zone']
+    elif 'room_list' in event:
+        room_list_status(cfg, event['room_list']['error'])
+    else:
+        observe_reply(cfg, event, [], None)
+
+
+def tick_effect(cfg, chat, state, model, search, event):
+    effect = event['effect']
+    if effect == 'answer':
+        return tick_answer(cfg, state, model, search, event)
+    if effect == 'record':
+        memory_op(cfg, event['room'], 'record', event=event['event'])
+        return {}
+    if effect == 'alert':
+        return alert_allows(cfg, chat, event['room'], event['message'])
+    return tick_chat(chat, event['operation'])
+
+
+def tick_chat(chat, operation):
+    try:
+        kind = operation['kind']
+        if kind == 'rooms':
+            value = chat.member_rooms()
+        elif kind == 'history':
+            messages = chat.read(operation['room'], int(operation['count']))
+            zone = getattr(chat, 'time_zone', None)
+            value = {'messages': messages, 'timeZone': zone if isinstance(zone, str) else None}
         else:
-            # Every message up to `last` was handled (answered, skipped or left to a claim). Not after a break
-            # (tick cap, removed room): those rooms are read again next tick.
-            change_room(cfg, state, room, 'advance', latest=last)
-    return posted
+            value = chat.say(operation['room'], operation['text'], reply_to=operation['reply_to'])
+        return {'value': value}
+    except Exception as error:
+        return {'error': {'name': type(error).__name__, 'detail': repr(error)[:300]}}
+
+
+def tick_answer(cfg, state, model, search, event):
+    room, history, msg = event['room'], event['history'], event['message']
+    incoming_event(cfg, event['room_name'], msg)
+    timing = []
+    try:
+        reply, size, searches = room_answer(cfg, state, model, search, room, history, msg, timing)
+        result = {'reply': reply, 'characters': size, 'searches': searches, 'timing': timing_text(timing)}
+    except Exception as error:
+        result = {'failure': repr(error)[:300]}
+    result['coding'] = {key: state[key] for key in ('_coding', '_coding_epoch') if key in state}
+    return result
+
+
+def room_answer(cfg, state, model, search, room, history, msg, timing):
+    manager = cfg.get('_coding_manager')
+    if cfg.get('coding') and coding_chat.control_request(msg):
+        reply = (manager.control(state, room, history, msg) if manager else
+                 'Coding task refused: background task manager is not running.')
+        return reply, 0, 0
+    if manager:
+        manager.before_chat()
+    recalled = memory_op(cfg, room, 'recall', query=(msg.get('text') or '')[:cfg['message_cap_chars']])
+    cfg['_admin_start_task'] = coding_chat.workspace_callback(cfg, manager, state, room, history, msg)
+    try:
+        return answer(cfg, room, history, msg, model, search, timing, recalled=(recalled or {}).get('text', ''))
+    finally:
+        cfg.pop('_admin_start_task', None)
 
 
 def terminal_prompt(cfg, text, history, model=chat_model, search=searxng_search):

@@ -227,6 +227,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-turn-worker" => hands_turn::run,
         "--hands-answer-worker" => hands_turn::run_answer,
         "--hands-poll-worker" => hands_poll::run,
+        "--hands-tick-worker" => hands_poll::run_tick,
         "--cycle-plan-worker" => cycle_plan::run,
         "--model-completion-worker" => model_completion::run,
         "--legacy-memory-worker" => legacy_memory::run,

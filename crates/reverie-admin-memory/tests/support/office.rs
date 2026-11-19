@@ -11,6 +11,11 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let root = PathBuf::from(args.next().unwrap());
     let args = args.collect::<Vec<_>>();
+    if args.first().is_some_and(|operation| operation == "say") {
+        fs::write(root.join("post.json"), serde_json::to_vec(&args).unwrap()).unwrap();
+        print!("{}", fs::read_to_string(root.join("receipt.json")).unwrap());
+        return ExitCode::SUCCESS;
+    }
     if let [operation, room_flag, _, selector, id, json] = args.as_slice()
         && [operation.as_str(), room_flag.as_str(), json.as_str()] == ["read", "--room", "--json"]
     {

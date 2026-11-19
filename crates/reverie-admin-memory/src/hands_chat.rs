@@ -1,7 +1,7 @@
 //! Bounded Hands client for the existing scoped Office chat CLI.
 use crate::{capture, office, refused, worker_channel::FRAME_BYTES};
 use reverie_core::{python_lowercase_string, python_trim_text};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
     env,
@@ -20,8 +20,15 @@ struct Request {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Client {
+    cli: Vec<String>,
+    timeout_s: f64,
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Operation {
+pub(super) enum Operation {
     History {
         room: String,
         count: String,
@@ -45,7 +52,11 @@ enum Operation {
 
 pub(super) fn run(parent: i32) -> io::Result<()> {
     let request: Request = serde_json::from_slice(&crate::worker_input(parent, FRAME_BYTES)?)?;
-    let result = match execute(&request) {
+    let client = Client {
+        cli: request.cli,
+        timeout_s: request.timeout_s,
+    };
+    let result = match client.call(&request.operation) {
         Ok(value) => json!({"status": "ok", "value": value}),
         Err(Error::NotFound) => json!({"status": "not_found"}),
         Err(Error::Timeout) => json!({"status": "timeout"}),
@@ -56,52 +67,50 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
 }
 
 pub(super) fn summary(cli: Vec<String>, timeout_s: f64) -> Option<String> {
-    execute(&Request {
-        cli,
-        timeout_s,
-        operation: Operation::Summary,
-    })
-    .ok()?
-    .as_str()
-    .map(str::to_owned)
+    Client { cli, timeout_s }
+        .call(&Operation::Summary)
+        .ok()?
+        .as_str()
+        .map(str::to_owned)
 }
 
-enum Error {
+pub(super) enum Error {
     NotFound,
     Timeout,
     Invalid(&'static str),
     Unavailable,
 }
 
-fn execute(request: &Request) -> Result<Value, Error> {
-    let operation = &request.operation;
-    let deadline = Duration::try_from_secs_f64(request.timeout_s)
-        .ok()
-        .filter(|timeout| !timeout.is_zero())
-        .and_then(|timeout| Instant::now().checked_add(timeout))
-        .ok_or(Error::Unavailable)?;
-    let mut command = guarded_command(&request.cli).map_err(|_| Error::Unavailable)?;
-    command.args(operation.args());
-    let result = capture::completed(
-        command,
-        None,
-        capture::Limits::scoped(deadline, operation.byte_cap()),
-    )
-    .map_err(|error| {
-        if error.kind() == ErrorKind::TimedOut {
-            Error::Timeout
-        } else {
-            Error::Unavailable
+impl Client {
+    pub(super) fn call(&self, operation: &Operation) -> Result<Value, Error> {
+        let deadline = Duration::try_from_secs_f64(self.timeout_s)
+            .ok()
+            .filter(|timeout| !timeout.is_zero())
+            .and_then(|timeout| Instant::now().checked_add(timeout))
+            .ok_or(Error::Unavailable)?;
+        let mut command = guarded_command(&self.cli).map_err(|_| Error::Unavailable)?;
+        command.args(operation.args());
+        let result = capture::completed(
+            command,
+            None,
+            capture::Limits::scoped(deadline, operation.byte_cap()),
+        )
+        .map_err(|error| {
+            if error.kind() == ErrorKind::TimedOut {
+                Error::Timeout
+            } else {
+                Error::Unavailable
+            }
+        })?;
+        if !result.success {
+            return Err(if office::not_found(&result.stdout) {
+                Error::NotFound
+            } else {
+                Error::Unavailable
+            });
         }
-    })?;
-    if !result.success {
-        return Err(if office::not_found(&result.stdout) {
-            Error::NotFound
-        } else {
-            Error::Unavailable
-        });
+        operation.decode(&result.stdout)
     }
-    operation.decode(&result.stdout)
 }
 
 fn guarded_command(cli: &[String]) -> io::Result<Command> {

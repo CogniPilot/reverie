@@ -1,49 +1,62 @@
 use crate::hands_settings::truthy;
 use reverie_core::ids::ChatRoomId;
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::Value;
 use std::collections::BTreeSet;
 
 #[derive(Serialize)]
-struct ListedRoom<'a> {
-    id: &'a str,
-    name: &'a str,
-    direct: bool,
-    latest: Option<&'a str>,
-    read: bool,
+pub(super) struct ListedRoom<'a> {
+    pub(super) id: &'a str,
+    pub(super) name: &'a str,
+    pub(super) direct: bool,
+    pub(super) latest: Option<&'a str>,
+    pub(super) read: bool,
 }
 
-pub(super) fn reconcile(listed: &[Value], state: &Map<String, Value>, cap: usize) -> Value {
+#[derive(Serialize)]
+pub(super) struct Selection<'a> {
+    pub(super) rooms: Vec<ListedRoom<'a>>,
+    pub(super) total: usize,
+    pub(super) joined: Vec<&'a str>,
+    pub(super) left: usize,
+}
+
+pub(super) fn reconcile<'a>(
+    listed: &'a [Value],
+    before: Option<&[Value]>,
+    saved: impl Fn(&str) -> Value,
+    cap: usize,
+) -> Selection<'a> {
     let eligible: Vec<_> = listed
         .iter()
-        .filter_map(|row| listed_room(row, state))
+        .filter_map(|row| listed_room(row, &saved))
         .collect();
     let total = eligible.len();
     let mut selected: Vec<_> = eligible.into_iter().take(cap).collect();
     let current: BTreeSet<_> = selected.iter().map(|room| room.id).collect();
-    let before = state
-        .get("_auto_rooms")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice);
     let (joined, left) = changes(&current, before);
     for room in &mut selected {
         room.read |= joined.contains(&room.id);
     }
-    json!({ "rooms": selected, "total": total, "joined": joined, "left": left })
+    Selection {
+        rooms: selected,
+        total,
+        joined,
+        left,
+    }
 }
 
-fn listed_room<'a>(row: &'a Value, state: &Map<String, Value>) -> Option<ListedRoom<'a>> {
+fn listed_room<'a>(row: &'a Value, saved: &impl Fn(&str) -> Value) -> Option<ListedRoom<'a>> {
     let id = row["id"].as_str()?;
     ChatRoomId::parse(id).ok()?;
     let latest = row["lastMessage"]["id"]
         .as_str()
         .filter(|id| !id.is_empty() && id.chars().count() <= 200);
-    let read = state.get(id).is_none_or(|saved| {
-        latest.is_none()
-            || saved["since"].is_null()
-            || truthy(&saved["claims"])
-            || latest != saved["last_id"].as_str()
-    });
+    let saved = saved(id);
+    let read = latest.is_none()
+        || saved["since"].is_null()
+        || truthy(&saved["claims"])
+        || latest != saved["last_id"].as_str();
     Some(ListedRoom {
         id,
         name: row["name"]

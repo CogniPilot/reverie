@@ -117,11 +117,12 @@ class BoundedProcess:
 
 
 class WorkerSocket:
-    def __init__(self, worker, initial, *, environment=None, terminal=False, startup_limit=FRAME_BYTES, reply_limit=FRAME_BYTES):
+    def __init__(self, worker, initial, *, environment=None, terminal=False, startup_limit=FRAME_BYTES, reply_limit=FRAME_BYTES, send_limit=FRAME_BYTES):
         self.closed = False
         self.input = bytearray()
         self.output = self.packet(initial, startup_limit)
         self.reply_limit = reply_limit
+        self.send_limit = send_limit
         self.connection, child = socket.socketpair()
         self.connection.setblocking(False)
         try:
@@ -177,7 +178,7 @@ class WorkerSocket:
     def send(self, message):
         if self.closed or self.output:
             raise ValueError('worker reply unavailable')
-        self.output = self.packet(message)
+        self.output = self.packet(message, self.send_limit)
         self.send_pending()
 
     def wait(self, seconds):

@@ -45,6 +45,15 @@ pub(super) enum Disposition {
     Abandoned,
 }
 
+impl Disposition {
+    pub(super) fn as_str(&self) -> &'static str {
+        match self {
+            Self::Settled => "settled",
+            Self::Abandoned => "abandoned",
+        }
+    }
+}
+
 impl Claim {
     pub(super) fn disposition(&self, session: &str, history: &[Value]) -> Option<Disposition> {
         let at = self.msg_at.as_f64().unwrap_or_default();
@@ -60,6 +69,14 @@ impl Claim {
 }
 
 impl Room {
+    pub(super) fn claim_ids(&self) -> Vec<String> {
+        self.claims.keys().cloned().collect()
+    }
+
+    pub(super) fn claim(&self, id: &str) -> Option<&Claim> {
+        self.claims.get(id)
+    }
+
     pub(super) fn initialize(&mut self, history: &[Value], latest: Option<String>) -> bool {
         if self.since.is_some() {
             return false;

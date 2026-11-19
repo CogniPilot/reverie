@@ -1,4 +1,7 @@
-use super::{Claim, Room, file, rooms, state::Change};
+use super::{
+    file, rooms,
+    state::{Change, Claim, Room},
+};
 use crate::hands_addressing::Scope;
 use serde_json::{Value, json};
 use std::{
@@ -104,6 +107,14 @@ fn uncertain_claim_retries_once_and_requires_a_newer_post_from_the_same_session(
 
 #[test]
 fn room_list_reads_joins_claims_and_new_ids_before_advancing_cached_rooms() {
+    fn reconcile(listed: &[Value], state: &Value, cap: usize) -> Value {
+        json!(rooms::reconcile(
+            listed,
+            state["_auto_rooms"].as_array().map(Vec::as_slice),
+            |id| state[id].clone(),
+            cap,
+        ))
+    }
     const JOINED: &str = "40000000-0000-4000-8000-000000000001";
     const STAYS: &str = "40000000-0000-4000-8000-000000000002";
     const GONE: &str = "40000000-0000-4000-8000-000000000003";
@@ -117,27 +128,21 @@ fn room_list_reads_joins_claims_and_new_ids_before_advancing_cached_rooms() {
         json!({"id":JOINED,"kind":"dm","lastMessage":{"id":"same"}}),
         json!({"id":STAYS,"lastMessage":{"id":"same"}}),
     ];
-    let before = rooms::reconcile(&listed, state.as_object().unwrap(), 1);
+    let before = reconcile(&listed, &state, 1);
     assert_eq!(before["rooms"].as_array().unwrap().len(), 1);
     assert_eq!(before["rooms"][0]["read"], true);
     assert_eq!(before["total"], 2);
 
-    let summary = rooms::reconcile(&listed, state.as_object().unwrap(), 2);
+    let summary = reconcile(&listed, &state, 2);
     assert_eq!(summary["joined"], json!([JOINED]));
     assert_eq!(summary["left"], 1);
     assert_eq!(summary["rooms"][0]["direct"], true);
     assert_eq!(summary["rooms"][1]["read"], false);
     state[STAYS]["claims"] = json!({"waiting":{"msg_at":1,"tries":1}});
-    assert_eq!(
-        rooms::reconcile(&listed, state.as_object().unwrap(), 2)["rooms"][1]["read"],
-        true
-    );
+    assert_eq!(reconcile(&listed, &state, 2)["rooms"][1]["read"], true);
     state[STAYS]["claims"] = json!({});
     listed[2]["lastMessage"]["id"] = json!("new");
-    assert_eq!(
-        rooms::reconcile(&listed, state.as_object().unwrap(), 2)["rooms"][1]["read"],
-        true
-    );
+    assert_eq!(reconcile(&listed, &state, 2)["rooms"][1]["read"], true);
 }
 
 #[test]

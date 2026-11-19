@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import agent_loop as loop
@@ -10,26 +11,29 @@ from test_coding_support import cfg_for
 class HandsRuntimeTests(unittest.TestCase):
     def test_room_outage_logs_once_then_periodically_and_recovers_without_stale_reads(self):
         room = '12345678-1234-1234-1234-123456789abc'
-        state = {'_auto_rooms': [room], '_auto_dms': [room], room: {'seen': ['previous']}}
+        state = {'_auto_rooms': [room], '_auto_dms': [room],
+                 room: {'since': 1, 'last_id': 'previous', 'seen': ['previous']}}
         before = json.loads(json.dumps(state))
-        cfg = {'rooms': 'auto', 'max_rooms': 10, 'state_file': '/unused', '_auto_dms': {room}}
         chat = Mock()
         chat.member_rooms.side_effect = [RuntimeError('secret bearer credential')] * 4 + [
-            [{'id': room, 'kind': 'dm'}], RuntimeError('new secret')]
-        with patch.object(loop.time, 'monotonic', side_effect=[10, 12, 69, 70, 72, 74]), \
-                patch.object(loop, 'log') as log, patch.object(loop, 'save_json') as save:
+            [{'id': room, 'kind': 'dm', 'lastMessage': {'id': 'previous'}}], RuntimeError('new secret')]
+        with tempfile.TemporaryDirectory() as root, \
+                patch.object(loop, 'room_list_clock', side_effect=[10, 12, 69, 70, 72, 74]), \
+                patch.object(loop, 'log') as log:
+            cfg = cfg_for(root, rooms='auto', max_rooms=10, _auto_dms={room})
+            path = Path(cfg['state_file'])
             for expected_calls in (1, 1, 1, 2):
-                self.assertEqual(loop.room_list(cfg, chat, state), [])
+                self.assertEqual(loop.tick(cfg, chat, state), 0)
                 self.assertEqual(log.call_count, expected_calls)
                 self.assertEqual(cfg['_auto_dms'], set())
                 self.assertEqual(state, before)
-                save.assert_not_called()
-            self.assertEqual(loop.room_list(cfg, chat, state), [room])
+                self.assertFalse(path.exists())
+            self.assertEqual(loop.tick(cfg, chat, state), 0)
             self.assertEqual(cfg['_auto_dms'], {room})
             self.assertNotIn('_room_list_outage', cfg)
             self.assertEqual(log.call_args.args, ('room list recovered', 'failures=4', 'elapsed_s=62'))
-            save.assert_called_once()
-            self.assertEqual(loop.room_list(cfg, chat, state), [])
+            self.assertEqual(json.loads(path.read_text()), state)
+            self.assertEqual(loop.tick(cfg, chat, state), 0)
             self.assertEqual(log.call_count, 4)  # a later outage gets its own first warning
         logged = str(log.call_args_list)
         self.assertNotIn('secret', logged)
