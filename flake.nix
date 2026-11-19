@@ -117,7 +117,7 @@
             inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
           };
-          workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
+          workerPython = import ./nix/worker-python.nix { inherit pkgs; };
           workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -381,6 +381,9 @@
               fi
             done
             test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
+            test ! -e "${packages.workerPython}/${pkgs.python3.sitePackages}/reverie"
+            test ! -e "${packages.workerPython}/bin/reverie-runtime"
+            test ! -e "${packages.workerPython}/bin/reverie-cycle"
             ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
               -t "${source}" -s "${source}/tests" -p test_image_requirements.py
             touch "$out"

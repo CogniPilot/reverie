@@ -3,7 +3,9 @@ let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
-  imagePython = if worker then import ./worker-python.nix { inherit pkgs memory; } else memory;
+  imagePython = if worker then import ./worker-python.nix { inherit pkgs; } else memory;
+  imageLaunchers = if worker then reverie.imageLaunchers else reverie;
+  imageRuntime = if worker then runtime.worker else runtime;
   laptopTools = if runtimePackages == null then import ./laptop-tools.nix { inherit pkgs src; }
     else runtimePackages.laptopTools;
   childArtifacts = if runtimePackages == null then import ./policy-artifacts.nix { inherit pkgs src; }
@@ -25,7 +27,7 @@ let
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-certificates.crt
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/pki/tls/certs/ca-bundle.crt
   '';
-  baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
+  baseContents = [ imageRuntime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optional (!worker) runtime.voiceService
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare laptopTools ]
@@ -38,7 +40,7 @@ let
     ++ pkgs.lib.optionals (chatLanguageTools != null) [ chatLanguageTools.python chatLanguageTools.modelica ];
   nixBase = pkgs.linkFarm "reverie-laptop-base" (pkgs.lib.imap0 (i: path: {
     name = "share/reverie/base/${toString i}"; inherit path;
-  }) (baseContents ++ [ reverie console memory entrypoint ] ++ pkgs.lib.optional worker imagePython));
+  }) (baseContents ++ [ imageLaunchers console imagePython entrypoint ]));
   nixClosure = pkgs.closureInfo { rootPaths = [ nixBase ]; };
   nixpkgsPin = (builtins.fromJSON (builtins.readFile (src + "/flake.lock"))).nodes.nixpkgs.locked;
   webArgs = [ "web" "--host" "0.0.0.0" "--port" "3000" ];
@@ -86,9 +88,9 @@ pkgs.dockerTools.buildLayeredImage rec {
       test ! -e opt/rvprf
     ''}
     unlink bin/reverie
-    ln -s ${reverie}/bin/reverie bin/reverie
-    ln -s ${reverie}/bin/reverie-request-update bin/reverie-request-update
-    ln -s ${reverie}/bin/reverie-install-clis bin/reverie-install-clis
+    ln -s ${imageLaunchers}/bin/reverie bin/reverie
+    ln -s ${imageLaunchers}/bin/reverie-request-update bin/reverie-request-update
+    ln -s ${imageLaunchers}/bin/reverie-install-clis bin/reverie-install-clis
     printf 'root:x:0:0:root:/root:/bin/bash\nagent:x:${toString uid}:${toString gid}:Reverie:/home/agent:/bin/bash\n' > etc/passwd
     printf 'root:x:0:\nreverie:x:${toString gid}:\n' > etc/group
     printf 'root:!:1::::::\nagent:!:1::::::\n' > etc/shadow
@@ -150,15 +152,8 @@ pkgs.dockerTools.buildLayeredImage rec {
       mkdir opt/reverie/worker-child
       cp ${childManifest} opt/reverie/worker-child/program.json
       chmod 444 opt/reverie/worker-child/program.json
-      # Replace the shared interpreter aliases with the laptop interpreter.
-      for command in python python3 ${pkgs.python3.executable}; do
-        test -L "bin/$command"
-        unlink "bin/$command"
-        ln -s ${imagePython}/bin/"$command" "bin/$command"
-      done
-      # The test runner now comes from the laptop environment. An older
-      # runtime source may already supply these links.
-      for command in pytest py.test; do
+      # Supply the project interpreter and test runner independently of the service runtime.
+      for command in python python3 ${pkgs.python3.executable} pytest py.test; do
         if [ -L "bin/$command" ]; then unlink "bin/$command"; fi
         test ! -e "bin/$command"
         test -x ${imagePython}/bin/"$command"
@@ -183,6 +178,10 @@ pkgs.dockerTools.buildLayeredImage rec {
     chmod 1777 tmp
   '' + pkgs.lib.optionalString worker ''
     mkdir -p etc/nix nix/store/.links target/nix
+    if grep -Eq '/[^/]+-python[^/]*-reverie-memory-' ${nixClosure}/store-paths; then
+      echo "Legacy Reverie Python package reached the worker closure" >&2
+      exit 1
+    fi
     cp ${nixClosure}/registration etc/reverie-nix-registration
     ln -s ${nixBase} etc/reverie-nix-base
     cat > etc/nix/nix.conf <<'NIXCONF'
@@ -256,7 +255,7 @@ pkgs.dockerTools.buildLayeredImage rec {
       # Laptops: Reverie's own hooks run the image's CLI, so an older `reverie` earlier on PATH (a home
       # install from before a release) cannot answer for them.
       ++ pkgs.lib.optionals (!worker) [ "REVERIE_NATIVE_FRONT=1" ]
-      ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${reverie}/bin/reverie" ]
+      ++ pkgs.lib.optionals worker [ "REVERIE_CLI=${imageLaunchers}/bin/reverie" ]
       ++ pkgs.lib.optionals worker [ "NIX_REMOTE=local" "NIX_PATH=nixpkgs=flake:nixpkgs"
         "TZDIR=${pkgs.tzdata}/share/zoneinfo" ]
       ++ pkgs.lib.optionals (chatLanguageTools != null) [

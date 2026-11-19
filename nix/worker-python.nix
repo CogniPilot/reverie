@@ -1,5 +1,5 @@
 # The laptop interpreter provides the agent's Python project tools.
-{ pkgs, memory }:
+{ pkgs }:
 let
   python = pkgs.python3;
   interpreter = pkgs.runCommand "reverie-worker-python-${python.version}" {
@@ -25,10 +25,9 @@ let
   wheelPython = python // { interpreter = "${interpreter}/bin/${python.executable}"; };
 in
 assert pkgs.stdenv.hostPlatform.isLinux;
-assert memory.python.outPath == python.outPath;
-memory.override ({ extraLibs, ... }: {
+python.buildEnv.override {
   python = wheelPython;
-  extraLibs = extraLibs ++ [ python.pkgs.pillow python.pkgs.pytest ];
+  extraLibs = [ python.pkgs.pillow python.pkgs.pytest ];
   postBuild = ''
     # The pytest entry points otherwise keep their original store shebang.
     # Route both aliases through this environment's compatibility interpreter.
@@ -40,4 +39,4 @@ memory.override ({ extraLibs, ... }: {
       fi
     done
   '';
-})
+}
