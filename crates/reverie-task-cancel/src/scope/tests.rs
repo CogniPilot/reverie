@@ -67,11 +67,12 @@ fn fake() -> &'static Path {
                 .unwrap()
                 .success()
         );
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
         binary
     })
 }
-/// A tool directory holding its own copy of the fake systemctl; the other tools share one
-/// directory of their own.
+/// A tool directory with a local name for the compiled fake systemctl.
+/// The fake keeps its state next to that name.
 struct Bus {
     dir: PathBuf,
     tools: Tools,
@@ -81,8 +82,9 @@ impl Bus {
         let dir = scratch();
         let systemctl = dir.join("bin/systemctl");
         fs::create_dir_all(systemctl.parent().unwrap()).unwrap();
-        fs::copy(fake(), &systemctl).unwrap();
-        fs::set_permissions(&systemctl, fs::Permissions::from_mode(0o755)).unwrap();
+        // Link the finished executable so concurrent test spawns cannot inherit
+        // a writable copy descriptor and make exec fail with ETXTBSY.
+        fs::hard_link(fake(), &systemctl).unwrap();
         let mut tools = Map::new();
         for name in TOOLS {
             let path = if name == "systemctl" {
