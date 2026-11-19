@@ -16,7 +16,6 @@ use policy::{Agent, Policy};
 use reverie_host::memory_configuration::MemoryConfiguration;
 use rooms::Rooms;
 use std::{
-    fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
     process::ExitCode,
@@ -122,7 +121,7 @@ fn tick(policy: &Policy, now: Timestamp) -> Result<()> {
         println!("sleep v1 previous_tick_running");
         return Ok(());
     };
-    let mut report = Report::open(&policy.state_dir, now, mode(policy))?;
+    let mut report = Report::new(&policy.state_dir, now, mode(policy));
     if !policy.in_window(now) {
         return report.line("outside_window", "-", 0);
     }
@@ -305,24 +304,24 @@ fn error_code(error: &(dyn std::error::Error + 'static)) -> &'static str {
 }
 
 struct Report {
-    log: File,
+    log: PathBuf,
     utc: String,
     mode: &'static str,
 }
 
 impl Report {
-    fn open(path: &Path, now: Timestamp, mode: &'static str) -> Result<Self> {
-        Ok(Self {
-            log: storage::regular(&path.join("sleep.log"), true)?,
+    fn new(path: &Path, now: Timestamp, mode: &'static str) -> Self {
+        Self {
+            log: path.join("sleep.log"),
             utc: now.to_zoned(TimeZone::UTC).strftime("%H:%M:%S").to_string(),
             mode,
-        })
+        }
     }
 
     fn line(&mut self, code: &str, agent: &str, count: usize) -> Result<()> {
         let line = format!("sleep v1 {} {code} {agent} {count} {}", self.utc, self.mode);
         writeln!(io::stdout().lock(), "{line}")?;
-        writeln!(self.log, "{line}")?;
+        writeln!(storage::regular(&self.log, true)?, "{line}")?;
         Ok(())
     }
 }

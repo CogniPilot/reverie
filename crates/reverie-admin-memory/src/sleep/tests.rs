@@ -43,8 +43,7 @@ fn fixed_clock_respects_timezone_midnight_and_end_boundary() {
 fn exhausted_budget_stops_before_opening_an_agent() {
     let scratch = Scratch::new();
     let policy = scratch.policy(json!({"start":"00:00","end":"00:00"}), "UTC");
-    let mut report =
-        Report::open(&scratch.0, "1970-01-01T00:00:00Z".parse().unwrap(), "live").unwrap();
+    let mut report = Report::new(&scratch.0, "1970-01-01T00:00:00Z".parse().unwrap(), "live");
     let tick = Tick {
         policy: &policy,
         now: 0.0,
@@ -76,4 +75,27 @@ fn note_clipping_counts_characters_and_prefers_complete_sentences_or_lines() {
     let clipped = memory::clip(&word, 600);
     assert_eq!(clipped.chars().count(), 600);
     assert!(clipped.ends_with('…'));
+}
+
+#[test]
+fn new_reports_follow_a_rotated_log() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("sleep.log");
+    let rotated = scratch.0.join("sleep.log.1");
+    let time = "1970-01-01T00:00:00Z".parse().unwrap();
+    let mut report = Report::new(&scratch.0, time, "live");
+    assert!(!path.exists());
+    report.line("rated", "expert", 2).unwrap();
+    fs::rename(&path, &rotated).unwrap();
+    report.line("reflected", "expert", 1).unwrap();
+    assert!(
+        fs::read_to_string(rotated)
+            .unwrap()
+            .contains("rated expert 2 live")
+    );
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains("reflected expert 1 live")
+    );
 }
