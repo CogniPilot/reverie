@@ -859,6 +859,16 @@
       ],
       "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
     },
+    "docker-resources-cold-pool": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "requires explicit owner confirmation before submitting the stopped pool recovery preview",
+      "assertions": [
+        "expect(f.writes()).toEqual([])",
+        "expect(dialog.textContent).toContain('48 GiB RAM ceiling')",
+        "expect(f.writes()).toHaveLength(1)"
+      ],
+      "outcome": "The profile previews the stopped pool and submits its exact scope after owner confirmation."
+    },
     "docker-resources-new-revision": {
       "test": "test/docker-resources-ui.test.ts",
       "title": "keeps a new same-value approval explicit and collapsed after a closed writer",
@@ -1540,6 +1550,11 @@
       "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Reconcile shared pool observation",
       "scenarios": ["docker-resources-pool"],
       "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Review stopped pool recovery",
+      "scenarios": ["docker-resources-cold-pool"],
+      "remaining": "Native recovery and installed office behavior require separate verification."
     },
     {
       "declaration": "src/web/public/company-resources.js::Panel.constructor::inline::button:Refresh Docker resources",
