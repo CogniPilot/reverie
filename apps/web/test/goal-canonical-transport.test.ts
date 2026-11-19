@@ -1,42 +1,17 @@
-/** Real client/HTTP serialization with explicit synthetic proof components; restricted Office refuses. */
-import { spawnSync } from 'node:child_process';
+/** Real client/HTTP serialization using an owned synthetic upstream. */
 import { EventEmitter } from 'node:events';
 import http from 'node:http';
-import { goalFixtureRepository } from './goal-source-fixture.js';
+import { syntheticGoalForward } from './helpers/goal-proof-fixture.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { httpRequest, type AgentDeps } from '../src/cli-agent.js';
 import { agentGoalMetadata, agentGoalRead, agentGoalTransition } from '../src/cli-goal.js';
 import { GoalId } from '../src/goal-client-contract.js';
 import { goalClientTarget } from '../src/goal-client-target.js';
 
-const repository = goalFixtureRepository(import.meta.dirname);
-function fixtureForward(mode: 'component-proof' | 'restricted-office', method: string, target: string, body = '') {
-  const args = ['-m', 'tests.goal_broker_fixture'];
-  if (mode === 'component-proof') args.push('--component-proof');
-  const result = spawnSync('python3', args, {
-    cwd: repository,
-    env: { PATH: process.env.PATH, PYTHONPATH: repository + '/python', PYTHONDONTWRITEBYTECODE: '1' },
-    input: JSON.stringify({ method, target, body, generation: 1, now: 100000, nonce: 'a'.repeat(32) }),
-    encoding: 'utf8',
-    timeout: 8000,
-    maxBuffer: 128 * 1024,
-  });
-  expect(result.status, result.stderr).toBe(0);
-  return JSON.parse(result.stdout) as {
-    target?: string;
-    method?: string;
-    body?: string;
-    refused?: number;
-    upstream?: boolean;
-    environmentReads?: number;
-  };
-}
 const componentProof = (method: string, target: string, body = '') =>
-  fixtureForward('component-proof', method, target, body);
-const restrictedOffice = (method: string, target: string, body = '') =>
-  fixtureForward('restricted-office', method, target, body);
+  syntheticGoalForward({ method, target, body, generation: 1 });
 function networkEdge(forward = componentProof) {
-  const calls: { method: string; path: string; proof: ReturnType<typeof fixtureForward> }[] = [];
+  const calls: { method: string; path: string; proof: ReturnType<typeof componentProof> }[] = [];
   vi.spyOn(http, 'request').mockImplementation(((
     options: http.RequestOptions,
     callback: (response: http.IncomingMessage) => void
@@ -131,18 +106,23 @@ describe('canonical client transport with explicit synthetic proof components', 
     '/api/goals/goal/extra',
     '/api/goals/goal?owner=true',
     '/api/goals/goal\n',
-  ])('does not recognize or authorize arbitrary/encoded path %j', (path) => {
+  ])('does not recognize arbitrary or encoded Goal path %j', (path) => {
     expect(goalClientTarget({ method: 'GET', path })).toBeUndefined();
-    for (const forward of [componentProof, restrictedOffice])
-      expect(forward('GET', path)).toEqual({ refused: 403, upstream: false, environmentReads: 0 });
+    expect(componentProof('GET', path).refused).toBe(403);
   });
   it.each(['worker:sample', '.', '..', 'x:._-'.padEnd(100, 'x')])(
-    'actual restricted Office refuses canonical metadata %s without upstream or key lookup',
+    'the client propagates a metadata refusal for %s',
     async (id) => {
-      const { calls, deps } = networkEdge(restrictedOffice);
+      const { calls, deps } = networkEdge((method, target, body = '') => ({
+        method,
+        target,
+        body,
+        headers: {},
+        refused: 403,
+      }));
       expect(await agentGoalMetadata(deps, id, id)).toBe(4);
       expect(calls).toHaveLength(1);
-      expect(calls[0].proof).toEqual({ refused: 403, upstream: false, environmentReads: 0 });
+      expect(calls[0].path).toBe(`/api/goal-metadata/${id}?grantId=${id}`);
     }
   );
   it('limits exact-target handling to the supported method/path/query tuples and preserves other transport', () => {

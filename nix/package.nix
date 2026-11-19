@@ -36,7 +36,6 @@ let
       cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
       cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
       cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
-      cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
       # The Rust handler's TS byte goldens live with its crate.
       mkdir -p test/fixtures/subscription-profiles
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
@@ -80,6 +79,7 @@ let
     checkPhase = ''
       runHook preCheck
       export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
+      export NIX_TEST_GOAL_WORKER_EXEC=${workerExec}/bin/reverie-worker-exec
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
