@@ -4,6 +4,7 @@ let
   manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
   goalCustodyFixture = import ./goal-custody-fixture.nix { inherit pkgs src; };
+  legacyViewerFixture = lib.cleanSource (src + "/python/reverie");
   # Copy individual fixture files into the store. Interpolating ${src}/path
   # otherwise makes every repository edit an input to the console derivation.
   # Use the original snapshot for the selected files so read-only flake check
@@ -32,6 +33,8 @@ let
       cp -r ${consoleSkill} skills/reverie
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
+      mkdir -p test/fixtures/viewer-source/python
+      cp -r ${legacyViewerFixture} test/fixtures/viewer-source/python/reverie
       mkdir -p test/fixtures/owner-terminal/python/reverie
       cp ${consoleFixture "python/reverie/human_shell_capabilities.py"} test/fixtures/owner-terminal/python/reverie/human_shell_capabilities.py
       cp ${consoleFixture "python/reverie/human_terminal_protocol.py"} test/fixtures/owner-terminal/python/reverie/human_terminal_protocol.py
