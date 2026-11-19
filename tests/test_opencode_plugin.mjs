@@ -316,7 +316,7 @@ test("reverie_room targets the room a message came from, takes an explicit room,
 
 test("Room guidance never tells an agent to address a single member", async () => {
   const root = resolve(import.meta.dirname, "..");
-  for (const file of ["python/reverie/reverie.py", "crates/reverie-admin-memory/opencode-assets/skills/reverie/SKILL.md", "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"]) {
+  for (const file of ["crates/reverie-backend-cli/src/hands_launch/profile.rs", "crates/reverie-admin-memory/opencode-assets/skills/reverie/SKILL.md", "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"]) {
     assert.doesNotMatch(await readFile(join(root, file), "utf8"), /--to user|chat say --to/, file);
   }
 });
