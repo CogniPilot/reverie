@@ -280,7 +280,7 @@ fn flake_does_not_pin_the_raw_repository_root() {
     for raw in ["src = self;", "${self}"] {
         assert!(!text.contains(raw), "raw Nix repository input {raw}");
     }
-    for reference in ["self.packages.", "self.nixosModules."] {
+    for reference in ["self.packages.", "nixosModules.reverieCollect ="] {
         assert!(
             text.contains(reference),
             "missing public flake output {reference}"

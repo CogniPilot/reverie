@@ -3,7 +3,7 @@
 //! Python source file or `-m`/quoted `reverie.*` module value must name a
 //! module that still exists. Quoted Nix attribute keys are not module values.
 
-use crate::support::workspace_root;
+use crate::support::{TestDir, workspace_root};
 use std::fs;
 use std::path::Path;
 
@@ -211,12 +211,13 @@ fn removed_python_modules_have_no_remaining_registrations() {
 fn closure_rules_reject_dangling_registrations() {
     let pyproject = "[project]\nname = \"x\"\n[project.scripts]\nreverie-a = \"reverie.a:main\"\n\n[tool.x]\nb = \"c:d\"\n";
     assert_eq!(console_modules(pyproject), ["reverie.a"]);
-    let root = workspace_root();
+    let root = TestDir::new();
+    root.write("python/reverie/present.py", "");
     let problems = nix_problems(
-        &root,
+        root.path(),
         "fixture.nix",
         "cp ${src}/python/reverie/absent_module.py $out/libexec/reverie/x.py; python3 -m reverie.absent_module; \
-         if module not in ('reverie.worker','reverie.absent_two'): \"reverie.worker.nix-store\" = 1;",
+         if module not in ('reverie.present','reverie.absent_two'): \"reverie.worker.nix-store\" = 1;",
     );
     assert_eq!(
         problems,
