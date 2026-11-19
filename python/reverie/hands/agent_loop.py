@@ -33,9 +33,7 @@ no post. The same query gives the id of each room's newest message; a room is re
 (or is missing), a claim is pending, or its last read stopped early. Each line of the prompt carries its time ("[5m ago]", "[9:16 AM EDT]").
 """
 import json
-import math
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -230,25 +228,7 @@ def alert_allows(cfg, chat, room, msg):
             log('phone acceptance unavailable; no reply', room, type(error).__name__)
             return False
     try:
-        current = chat.member_alert(room, cfg['self_session_id'])
-        lease = current['lease']
-        if lease is None:
-            return True
-        if (not isinstance(lease, dict) or lease.get('mode') not in ('ring', 'vibrate', 'silent') or
-                type(lease.get('until')) not in (int, float) or not math.isfinite(lease['until'])):
-            raise ValueError('room view has an invalid alert lease')
-        if lease['mode'] != 'silent' or lease['until'] <= time.time() * 1000:
-            return True
-        sender = msg.get('from') or {}
-        if sender.get('kind') != 'user' or sender.get('mark') not in ('owner_typed', 'owner_spoken'):
-            return False
-        if re.search(r'(^|[^\w@])@everyone(?![\w-])', msg.get('text') or '', re.I | re.ASCII) is not None:
-            return True
-        name = current.get('name')
-        if not current.get('unique') or not isinstance(name, str) or not name.strip():
-            return False
-        return re.search(r'(^|[^\w@])@' + re.escape(name) + r'(?![\w-])',
-                         msg.get('text') or '', re.I | re.ASCII) is not None
+        return coding_chat.legacy_alert(chat.member_alert(room, cfg['self_session_id']), msg)
     except Exception as error:
         log('alert mode unavailable; preserving current wake behavior', room, repr(error)[:200])
         return True

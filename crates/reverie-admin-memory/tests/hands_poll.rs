@@ -18,6 +18,8 @@ const SOURCE: &str = "30000000-0000-4000-8000-000000000002";
 const REPLY: &str = "30000000-0000-4000-8000-000000000003";
 const SESSION: &str = "20000000-0000-4000-8000-000000000004";
 
+#[path = "support/hands_authorization.rs"]
+mod authorization;
 #[path = "support/hands_supervisor.rs"]
 mod supervisor;
 

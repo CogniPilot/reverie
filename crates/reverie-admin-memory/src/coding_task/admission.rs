@@ -5,12 +5,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::io;
 
+mod authorization;
 mod workspace;
+pub(crate) use authorization::run as authorize;
 pub(crate) use workspace::call as workspace_call;
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    LegacyAlert {
+        view: Value,
+        message: Value,
+    },
     Control {
         text: String,
         agent: bool,
@@ -59,6 +65,7 @@ pub(crate) fn admit(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::worker_channel::FRAME_BYTES)?;
     let request: Request = serde_json::from_slice(&input)?;
     let reply = match request {
+        Request::LegacyAlert { view, message } => authorization::legacy_alert(&view, &message),
         Request::Control { text, agent } => json!({"control": control(&text, agent)}),
         Request::Sender {
             room,

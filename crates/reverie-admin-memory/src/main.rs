@@ -240,6 +240,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--hands-coding-worker" => coding_task::run,
         "--hands-coding-policy-worker" => coding_task::policy,
         "--hands-coding-admission-worker" => coding_task::admit,
+        "--hands-coding-authorization-worker" => coding_task::authorize,
         "--hands-settings-worker" => hands_settings::run,
         "--hands-managed-context-worker" => managed_context::run,
         "--hands-trace-worker" => hands_model::trace_worker,

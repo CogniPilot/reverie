@@ -50,7 +50,10 @@ fn read(root: &std::path::Path, selector: &str, id: &str) -> ExitCode {
     match selector {
         "-n" => {
             let after_post = root.join("history-after.json");
-            let source = if root.join("post.json").exists() && after_post.exists() {
+            let alert = root.join("alert.json");
+            let source = if id == "1" && alert.exists() {
+                alert
+            } else if root.join("post.json").exists() && after_post.exists() {
                 after_post
             } else {
                 root.join("history.json")
