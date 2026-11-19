@@ -1883,6 +1883,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "reverie-preview"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "bytes",
+ "getrandom",
+ "http",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "nix",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "reverie-publish"
 version = "0.1.0"
 dependencies = [
