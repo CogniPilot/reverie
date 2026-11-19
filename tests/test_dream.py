@@ -8,8 +8,6 @@ from reverie.chat import Dreamer
 from reverie.memory import DREAM, MemoryStore, make_embedder
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector
-from reverie.train.config import TrainConfig
-from reverie.train.dataset import build_examples
 from tests.helpers import fake_client, output_policy_terms, synthetic_output_policy
 
 H = 3600.0
@@ -117,19 +115,11 @@ class NoFactsRuleTest(unittest.TestCase):
         self.d = self.s.add_dream("I dream that User owns a castle made of compilers and I am its moat.",
                                   "I dreamed User owned a castle", "strange", [1, 2], importance=10, created_at=NOW - 10)
 
-    def test_dataset_excludes_dreams_unless_released_and_then_style_only(self):
-        cfg = TrainConfig(min_importance=1, recent_days=1)
-        recent, older = build_examples(self.s, "SYS", cfg, NOW)
-        self.assertFalse(any(x["kind"] == DREAM for x in recent + older))
-        cfg.include_dreams = True
-        recent, older = build_examples(self.s, "SYS", cfg, NOW)
-        self.assertFalse(any(x["kind"] == DREAM for x in recent + older))          # not released
+    def test_release_flag_stays_in_existing_dream_metadata(self):
+        self.assertFalse(self.d.meta["released"])
         self.s.release_dream(self.d.id)
-        recent, older = build_examples(self.s, "SYS", cfg, NOW)
-        dreams = [x for x in recent + older if x["kind"] == DREAM]
-        self.assertEqual(len(dreams), 1)
-        self.assertEqual(dreams[0]["weight"], 0.1)
-        self.assertEqual(dreams[0]["messages"][1]["content"], "Tell me about a dream you had.")
+        self.assertTrue(self.s.get(self.d.id).meta["released"])
+        self.assertEqual(self.s.get(self.d.id).recall, self.d.recall)
         with self.assertRaises(ValueError):
             self.s.release_dream(1)
 

@@ -316,7 +316,6 @@ Dreams are off by default: set `REVERIE_DREAMS_PER_SLEEP=1` (and enable `dreamin
 on the expert profile) to turn them on. Full dream narratives are temporary; only
 bounded summaries and candidate ideas are
 retained. Normal conversation/memory writes do not train or change model weights.
-Optional training tools are not run by installation.
 
 ## Runtime selection and recovery
 
@@ -341,8 +340,8 @@ reserves appointing a room coordinator for the owner; this code respects that ga
 Keep the watcher and its authority-bearing state outside writable agent mounts.
 
 Model weights remain fixed. There is no nightly backpropagation or automatic
-fine-tuning. Reflection and dreaming write external agent memory. Optional legacy
-training tools are retained for compatibility but are outside the runtime workflow.
+fine-tuning. Reflection and dreaming write external agent memory. The former standalone
+training and adapter-swap utilities have been retired.
 
 ## Agent context preparation
 

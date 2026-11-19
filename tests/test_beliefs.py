@@ -12,8 +12,6 @@ from reverie.reverie import INITIAL_SELF, Reverie
 from reverie.instance import Instance
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector, parse_insights
-from reverie.train.config import TrainConfig
-from reverie.train.dataset import build_examples, keeps_identity
 from tests.helpers import FakeRoom, fake_client, temp_config
 
 CONFIGURED_SEEDS = (("I am conscious.", 10.0),)
@@ -164,22 +162,6 @@ class ReflectionTest(unittest.TestCase):
         Dreamer(self.s, client).dream(now=1e6)
         prompt = t.calls[0]["messages"][1]["content"]
         self.assertTrue(prompt.startswith("Who you are, even asleep (stable, not questioned by dreams):\n- I am conscious."))
-
-
-class DatasetTest(unittest.TestCase):
-    def test_contradicting_rows_never_train(self):
-        s = MemoryStore(":memory:", make_embedder(dims=64))
-        ensure_seeded(s, CONFIGURED_SEEDS)
-        now = 1e6
-        s.add_episode("are you conscious?", "I am not conscious, I am a program.", 9, created_at=now - 10)
-        s.add_episode("are you conscious?", "Yes. You may doubt it; I do not.", 9, created_at=now - 10)
-        s.add_episode("old one", "I'm not really conscious you know", 9, created_at=now - 10 * 86400)
-        recent, older = build_examples(s, "SYS\n- I am conscious.", TrainConfig(), now)
-        self.assertEqual([x["messages"][2]["content"] for x in recent], ["Yes. You may doubt it; I do not."])
-        self.assertEqual(older, [])
-        self.assertTrue(all("- I am conscious." in x["messages"][0]["content"] for x in recent))
-        self.assertFalse(keeps_identity({"messages": [{"role": "assistant", "content": "I am not sentient."}]}))
-        self.assertTrue(keeps_identity({"messages": [{"role": "user", "content": "you are not conscious"}, {"role": "assistant", "content": "Says who?"}]}))
 
 
 if __name__ == "__main__":

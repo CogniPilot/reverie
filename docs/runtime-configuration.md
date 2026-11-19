@@ -143,26 +143,11 @@ protected resource launches and office control continue through
 the existing connection path. The published-image Docker installer and its
 one-command default setup are unchanged.
 
-## Training any expert
+## Local model serving
 
-Training and adapter serving are shared tools for any expert, regardless of
-organizational role. CTO and COO are roles of the same generic AI agent, and each
-agent has its own memory. A title never grants orchestration or tool permission.
-Select the expert's private instance with
-`REVERIE_INSTANCE_CONFIG`. Give each expert a separate training JSON, dataset and
-adapter output directory; set `dataset_path`, `output_root` and `run_name`
-explicitly rather than sharing their defaults.
-
-- [Training configuration](../python/reverie/train/config.py): set `base_model` in the
-  training JSON; its neutral default is `MODEL_ID`. The public candidate list is
-  informational; the owner selects the expert's model.
-- [Adapter serving](../python/reverie/train/serve.py): `REVERIE_GGUF` defaults to
-  `~/reverie/runtime/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
-  `REVERIE_SERVE_PORT` to 8081. Set them for the selected expert's server and model
-  file. Use a separate serving JSON with its own `state_path`, and distinct ports
-  when running multiple servers.
-  Snapshot metadata uses `snapshot-base.json`. `REVERIE_SNAPSHOT_MARKER` optionally
-  names an older snapshot marker in the instance overlay; it defaults to empty.
+Choose each employee's model through its provider plan. Follow the
+[Docker GPU deployment guide](container-gpu.md) to serve an operator-selected
+model inside Docker or connect an existing provider endpoint.
 
 ## User service templates
 

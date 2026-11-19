@@ -59,7 +59,7 @@ that image.
 | Terminals, devices and scoped Office transport | `owner_terminal_*`, `worker_*` launch/Office/device paths, GPU/browser components | Same scoped grants, peer provenance, terminal/session identity and device selection; no engine socket in clients |
 | Memory and agent runtime | `memory.py`, `project_memory.py`, `runtime.py`, `sleep.py`, context/identity/governance and plugin/CLI adapters | Existing SQLite data remains readable, tested write/migration semantics, conversation/account/model behavior preserved, CLI/plugin compatibility |
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |
-| Numerical/model adapters and tooling | Native hash and HTTP(S) embeddings, legacy training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
+| Numerical/model adapters and tooling | Native hash and HTTP(S) embeddings, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
 | Kokoro speech | Docker's `reverie-kokoro` and the instrumented Rust voice-CI fixture share the native ONNX Runtime and eSpeak NG engine. The fixture uses CPU-only Whisper.cpp for ASR | Keep real-model browser, timing, voice-ID, transcript and truncated-audio acceptance in the voice workflow |
 
 The narrow helper and active Cargo-default/build-job laptop tools now have Rust

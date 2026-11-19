@@ -394,7 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--reflect", action="store_true", help="run one reflection pass now and exit")
     p.add_argument("--dream", action="store_true", help="dream once now (ignores the sleep window) and exit")
     p.add_argument("--dreams", action="store_true", help="list stored dreams and exit")
-    p.add_argument("--release-dream", type=int, metavar="ID", help="mark a dream as released for style training and exit")
+    p.add_argument("--release-dream", type=int, metavar="ID", help="mark a dream as released in its memory record and exit")
     p.add_argument("--beliefs", action="store_true", help="print her held beliefs (self-model) and exit")
     p.add_argument("--rate", action="store_true", help="rate pending episodes now and exit")
     p.add_argument("--profile", action="store_true", help="print the current profile and exit")
