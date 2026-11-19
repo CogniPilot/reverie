@@ -13,26 +13,26 @@ const INVALID_CALL: &str =
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Scope {
-    room: String,
-    direct: bool,
-    session: Option<String>,
-    name: Option<String>,
-    task: Value,
+pub(crate) struct Scope {
+    pub(crate) room: String,
+    pub(crate) direct: bool,
+    pub(crate) session: Option<String>,
+    pub(crate) name: Option<String>,
+    pub(crate) task: Value,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum Mode {
+pub(crate) enum Mode {
     Start,
     Cancel,
 }
 
-pub(super) fn definitions() -> io::Result<Value> {
+pub(crate) fn definitions() -> io::Result<Value> {
     serde_json::from_str(include_str!("workspace.json")).map_err(io::Error::from)
 }
 
-pub(super) fn offer(scope: &Scope, message: &Value, history: &[Value]) -> Option<Mode> {
+pub(crate) fn offer(scope: &Scope, message: &Value, history: &[Value]) -> Option<Mode> {
     let task = scope.task.as_object()?;
     let sender = message.get("from").unwrap_or(&Value::Null);
     if task
@@ -109,7 +109,7 @@ fn decode_call(call: &Value) -> Option<Value> {
     }
 }
 
-pub(super) fn plan(task: &str, may_start: bool, original: &str, brief: &Value) -> Value {
+pub(crate) fn plan(task: &str, may_start: bool, original: &str, brief: &Value) -> Value {
     if !may_start {
         return error(
             "Workspace task not started: the message did not address me. Mention me or reply to me to ask for work.",

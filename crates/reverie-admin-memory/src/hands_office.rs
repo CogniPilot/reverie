@@ -21,11 +21,14 @@ struct Request {
 pub(super) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
     let request: Request = serde_json::from_slice(&input)?;
-    crate::write_reply(&scoped_environment(request)?, crate::RESPONSE_BOUND)
+    crate::write_reply(
+        &scoped_environment(&request.session, request.config_path.as_deref())?,
+        crate::RESPONSE_BOUND,
+    )
 }
 
-fn scoped_environment(request: Request) -> io::Result<Value> {
-    let session = ProfileSessionId::parse(&request.session).map_err(|_| refused())?;
+pub(super) fn scoped_environment(session: &str, config_path: Option<&Path>) -> io::Result<Value> {
+    let session = ProfileSessionId::parse(session).map_err(|_| refused())?;
     if env::var_os("REVERIE_SESSION_ID")
         .is_some_and(|current| current != OsStr::new(session.as_str()))
     {
@@ -33,7 +36,7 @@ fn scoped_environment(request: Request) -> io::Result<Value> {
     }
     let origin = env::var("REVERIE_API_URL").map_err(|_| refused())?;
     loopback_port(&origin).ok_or_else(refused)?;
-    let root = configured_root(&session, request.config_path.as_deref())?;
+    let root = configured_root(&session, config_path)?;
     Ok(json!({
         "REVERIE_SCOPED_OFFICE": "1",
         "REVERIE_MUX": "1",

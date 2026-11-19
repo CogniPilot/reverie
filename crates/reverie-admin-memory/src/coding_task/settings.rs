@@ -96,7 +96,7 @@ fn check_tasks(settings: &Map<String, Value>) -> Result<()> {
         .transpose()?;
     if let Some(profiles) = profiles {
         for profile in profiles.values() {
-            check_profile(profile)?;
+            profile_limits(profile)?;
         }
     }
     let tasks = settings
@@ -114,7 +114,7 @@ fn check_tasks(settings: &Map<String, Value>) -> Result<()> {
     Ok(())
 }
 
-fn check_profile(profile: &Value) -> Result<()> {
+pub(crate) fn profile_limits(profile: &Value) -> Result<Limits> {
     let profile = profile.as_object().ok_or("invalid coding profile")?;
     let Value::Object(mut limits) =
         serde_json::to_value(Limits::default()).map_err(|_| "invalid coding profile")?
@@ -122,10 +122,10 @@ fn check_profile(profile: &Value) -> Result<()> {
         return Err("invalid coding profile");
     };
     limits.extend(profile.clone());
-    serde_json::from_value::<Limits>(Value::Object(limits))
-        .map_err(|_| "invalid coding profile")?
-        .validate()
-        .map_err(|_| "invalid coding profile")
+    let limits: Limits =
+        serde_json::from_value(Value::Object(limits)).map_err(|_| "invalid coding profile")?;
+    limits.validate().map_err(|_| "invalid coding profile")?;
+    Ok(limits)
 }
 
 fn check_task(task: &Map<String, Value>, profiles: Option<&Map<String, Value>>) -> Result<()> {

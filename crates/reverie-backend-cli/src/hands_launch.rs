@@ -1,4 +1,4 @@
-//! Select and publish the legacy Hands runtime configuration before exec.
+//! Prepare the Hands runtime configuration before exec.
 mod files;
 mod profile;
 mod settings;
@@ -30,11 +30,6 @@ struct Launch {
     base: String,
     office: String,
     directory: PathBuf,
-}
-
-struct Prepared {
-    path: PathBuf,
-    coding: bool,
 }
 
 fn setting(key: &str) -> Option<String> {
@@ -119,7 +114,7 @@ impl Launch {
         }
     }
 
-    fn prepare(self) -> crate::Result<Prepared> {
+    fn prepare(self) -> crate::Result<PathBuf> {
         let files = files::Directory::open(&self.directory)
             .map_err(|_| "Private Hands data directory unavailable")?;
         let settings = settings::load(&files)?;
@@ -153,10 +148,7 @@ impl Launch {
         files
             .publish("agent.json", &bytes, false)
             .map_err(file_error)?;
-        Ok(Prepared {
-            path: self.directory.join("agent.json"),
-            coding: !config["coding"].is_null(),
-        })
+        Ok(self.directory.join("agent.json"))
     }
 
     fn configuration(&self, name: &str, overrides: serde_json::Map<String, Value>) -> Value {
@@ -184,25 +176,17 @@ fn file_error(_: io::Error) -> &'static str {
     "Could not publish private Hands configuration"
 }
 
-fn launch(
-    runtime: &OsStr,
-    loop_path: &OsStr,
-    native: Option<&OsStr>,
-    flags: &[OsString],
-) -> crate::Result<()> {
+fn launch(mut command: Command, flags: &[OsString]) -> crate::Result<()> {
     umask(Mode::S_IRWXG | Mode::S_IRWXO);
-    let prepared = Launch::capture()?.prepare()?;
-    let mut command = if let Some(native) = native.filter(|_| !prepared.coding) {
-        let mut command = Command::new(native);
-        command.arg("--hands-native");
-        command
-    } else {
-        let mut command = Command::new(runtime);
-        command.args(["-I", "-B"]).arg(loop_path);
-        command
-    };
-    let _ = command.arg(prepared.path).args(flags).exec();
+    let path = Launch::capture()?.prepare()?;
+    let _ = command.arg(path).args(flags).exec();
     Err("Could not start the Hands runtime")
+}
+
+fn native(runtime: &OsStr, flags: &[OsString]) -> crate::Result<()> {
+    let mut command = Command::new(runtime);
+    command.arg("--hands-native");
+    launch(command, flags)
 }
 
 pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
@@ -211,11 +195,8 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
             println!("{HELP}");
             return ExitCode::SUCCESS;
         }
-        [runtime, loop_path, option, native, flags @ ..] if option == "--native-runtime" => {
-            launch(runtime, loop_path, Some(native), flags)
-        }
-        [runtime, loop_path, flags @ ..] => launch(runtime, loop_path, None, flags),
-        _ => Err("Hands runtime executable and entry point are required"),
+        [option, runtime, flags @ ..] if option == "--native-runtime" => native(runtime, flags),
+        _ => Err("Hands native runtime executable is required"),
     };
     if let Err(error) = result {
         eprintln!("Reverie Admin Harness could not start: {error}");

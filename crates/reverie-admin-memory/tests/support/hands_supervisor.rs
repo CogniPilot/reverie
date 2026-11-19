@@ -1,4 +1,6 @@
 use super::{Fixture, ROOM, SESSION, SOURCE};
+#[path = "hands_coding.rs"]
+mod coding;
 use nix::{
     pty::{Winsize, openpty},
     sys::{

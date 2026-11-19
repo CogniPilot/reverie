@@ -110,6 +110,10 @@ impl Pass {
             Err(error) => return self.failed(source, &error.detail),
         };
         self.change(target, room, Change::Complete { id })?;
+        if self.settings.coordinator && receipt["id"].as_str().is_some_and(|id| !id.is_empty()) {
+            self.link
+                .tell(json!({"coding_post":{"room":target,"source":source.id}}))?;
+        }
         self.posted += 1;
         self.receipt(source, &receipt, sent, answer)
     }

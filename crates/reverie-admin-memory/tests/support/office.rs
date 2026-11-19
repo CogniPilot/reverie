@@ -1,7 +1,7 @@
 //! Synthetic executable implementing the installed Office membership command.
 use std::{
     env, fs,
-    io::{self, Write},
+    io::{self, Read, Write},
     path::PathBuf,
     process::ExitCode,
     time::Duration,
@@ -11,6 +11,12 @@ fn main() -> ExitCode {
     let mut args = env::args().skip(1);
     let root = PathBuf::from(args.next().unwrap());
     let args = args.collect::<Vec<_>>();
+    if args
+        .first()
+        .is_some_and(|operation| operation == "--task-dir")
+    {
+        return runner(&root, &args);
+    }
     if args == ["summary", "--json"] {
         println!(r#"{{"text":""}}"#);
         return ExitCode::SUCCESS;
@@ -43,6 +49,30 @@ fn main() -> ExitCode {
         "second-membership-revoked" if call >= 2 => println!("[]"),
         _ => print!("{}", fs::read_to_string(root.join("rooms.json")).unwrap()),
     }
+    ExitCode::SUCCESS
+}
+
+fn runner(root: &std::path::Path, args: &[String]) -> ExitCode {
+    assert_eq!(std::path::Path::new(&args[1]), root.join("work/fixture"));
+    for name in [
+        "REVERIE_HANDS_API_KEY",
+        "REVERIE_API_PASSWORD",
+        "REVERIE_API_URL",
+    ] {
+        assert!(env::var_os(name).is_none(), "{name} reached the runner");
+    }
+    let mut body = Vec::new();
+    io::stdin().read_to_end(&mut body).unwrap();
+    let request: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(request["name"], "read_file");
+    assert_eq!(request["args"]["path"], "fixture.txt");
+    fs::write(root.join("runner-request.json"), &body).unwrap();
+    eprintln!(
+        r#"{{"sandbox_runner":{{"rc":0,"mode":"task","reason":"done","wall_ms":10,"peak_rss_bytes":1000}}}}"#
+    );
+    println!(
+        r#"{{"version":1,"ok":true,"output":"The fixture was read.","error":null,"truncated":false,"exit_code":0}}"#
+    );
     ExitCode::SUCCESS
 }
 

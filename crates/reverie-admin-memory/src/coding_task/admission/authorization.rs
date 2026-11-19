@@ -9,7 +9,7 @@ use crate::{
     refused,
     worker_channel::{FRAME_BYTES, WorkerChannel},
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     fs::File,
@@ -27,21 +27,20 @@ struct Job {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Request {
-    config_path: Option<PathBuf>,
-    settings: Value,
-    room: String,
-    session: String,
-    task: String,
-    message: Value,
-    history_n: usize,
-    expired: bool,
-    check_cancel: bool,
+pub(crate) struct Request {
+    pub(crate) config_path: Option<PathBuf>,
+    pub(crate) settings: Value,
+    pub(crate) room: String,
+    pub(crate) session: String,
+    pub(crate) task: String,
+    pub(crate) message: Value,
+    pub(crate) history_n: usize,
+    pub(crate) expired: bool,
+    pub(crate) check_cancel: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Denial {
+#[derive(Clone, Copy)]
+pub(crate) enum Denial {
     AuthorizationUnavailable,
     NotMember,
     Revoked,
@@ -49,32 +48,44 @@ enum Denial {
     Silent,
 }
 
+impl Denial {
+    pub(crate) fn reason(self) -> &'static str {
+        match self {
+            Self::AuthorizationUnavailable => "authorization_unavailable",
+            Self::NotMember => "not_member",
+            Self::Revoked => "revoked",
+            Self::Cancelled => "cancelled",
+            Self::Silent => "silent",
+        }
+    }
+}
+
 type Decision<T = ()> = Result<T, Denial>;
 
-struct Office<'a> {
-    client: Option<Client>,
-    channel: &'a mut WorkerChannel,
+enum Office<'a> {
+    Direct(&'a Client),
+    Exchange(&'a mut WorkerChannel),
 }
 
 impl Office<'_> {
     fn call(&mut self, operation: Operation) -> Decision<Value> {
-        if let Some(client) = &self.client {
-            return client
+        match self {
+            Self::Direct(client) => client
                 .call(&operation)
-                .map_err(|_| Denial::AuthorizationUnavailable);
+                .map_err(|_| Denial::AuthorizationUnavailable),
+            Self::Exchange(channel) => {
+                Self::exchange(channel, operation).map_err(|_| Denial::AuthorizationUnavailable)
+            }
         }
-        self.exchange(operation)
-            .map_err(|_| Denial::AuthorizationUnavailable)
     }
 
-    fn exchange(&mut self, operation: Operation) -> io::Result<Value> {
-        self.channel.write_bounded(
+    fn exchange(channel: &mut WorkerChannel, operation: Operation) -> io::Result<Value> {
+        channel.write_bounded(
             &json!({"operation":operation}),
             Some(deadline()),
             TURN_CAPTURE_BOUND,
         )?;
-        let mut reply: Value = self
-            .channel
+        let mut reply: Value = channel
             .read_bounded(Some(deadline()), TURN_CAPTURE_BOUND)?
             .ok_or_else(refused)?;
         reply
@@ -92,17 +103,22 @@ pub(crate) fn run(parent: i32) -> io::Result<()> {
     crate::bind_worker(parent)?;
     let mut channel = WorkerChannel::open()?;
     let job: Job = channel.read(Some(deadline()))?.ok_or_else(refused)?;
-    let denial = job
-        .request
-        .authorize(&mut Office {
-            client: job.office,
-            channel: &mut channel,
-        })
-        .err();
-    channel.write(&json!({"denial":denial}), Some(deadline()))
+    let denial = match &job.office {
+        Some(client) => job.request.check(client),
+        None => job.request.authorize(&mut Office::Exchange(&mut channel)),
+    }
+    .err();
+    channel.write(
+        &json!({"denial":denial.map(Denial::reason)}),
+        Some(deadline()),
+    )
 }
 
 impl Request {
+    pub(crate) fn check(&self, client: &Client) -> Decision {
+        self.authorize(&mut Office::Direct(client))
+    }
+
     fn authorize(&self, office: &mut Office<'_>) -> Decision {
         if self.expired && self.check_cancel {
             return Err(Denial::Cancelled);

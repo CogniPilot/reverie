@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::io;
 
-mod authorization;
-mod workspace;
+pub(crate) mod authorization;
+pub(crate) mod workspace;
 pub(crate) use authorization::run as authorize;
 pub(crate) use workspace::call as workspace_call;
 
@@ -55,10 +55,10 @@ enum Request {
 }
 
 #[derive(Serialize)]
-struct Control<'a> {
-    action: &'static str,
-    task_id: &'a str,
-    brief: &'a str,
+pub(crate) struct Control<'a> {
+    pub(crate) action: &'static str,
+    pub(crate) task_id: &'a str,
+    pub(crate) brief: &'a str,
 }
 
 pub(crate) fn admit(parent: i32) -> io::Result<()> {
@@ -108,7 +108,7 @@ pub(crate) fn admit(parent: i32) -> io::Result<()> {
     crate::write_reply(&reply, crate::worker_channel::FRAME_BYTES)
 }
 
-fn control(text: &str, agent: bool) -> Option<Control<'_>> {
+pub(crate) fn control(text: &str, agent: bool) -> Option<Control<'_>> {
     let text = if agent {
         text.strip_prefix("[external agent] ").unwrap_or(text)
     } else {
@@ -145,7 +145,7 @@ fn includes(values: &Value, name: &str) -> bool {
         .is_some_and(|values| values.iter().any(|value| value.as_str() == Some(name)))
 }
 
-fn permitted(room: &str, rooms: &Value, delegates: &Value, sender: &Value) -> bool {
+pub(crate) fn permitted(room: &str, rooms: &Value, delegates: &Value, sender: &Value) -> bool {
     if !includes(rooms, room) {
         return false;
     }
@@ -159,7 +159,12 @@ fn permitted(room: &str, rooms: &Value, delegates: &Value, sender: &Value) -> bo
     }
 }
 
-fn begin(room: &str, source: &Value, task: &str, statuses: &Map<String, Value>) -> Value {
+pub(crate) fn begin(
+    room: &str,
+    source: &Value,
+    task: &str,
+    statuses: &Map<String, Value>,
+) -> Value {
     let Some(source) = source
         .as_str()
         .filter(|source| !source.is_empty() && source.chars().count() <= 200)

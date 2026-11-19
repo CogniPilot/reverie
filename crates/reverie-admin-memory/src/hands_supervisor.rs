@@ -1,4 +1,5 @@
 //! Launch the native Hands room loop with its existing bounded workers.
+mod coding;
 mod config;
 mod state;
 mod trace;
@@ -8,6 +9,7 @@ mod worker;
 
 use crate::{capture::Signals, hands_prompt::preview, hands_settings::truthy, refused};
 use clap::Parser;
+use coding::{Coding, Offer};
 use config::{Config, epoch};
 use serde_json::{Value, json};
 use std::{
@@ -65,15 +67,18 @@ fn start(args: Arguments) -> io::Result<()> {
         managed_started: false,
         outage: None,
         history: Vec::new(),
+        coding: Coding::default(),
     };
     run.startup_notice();
-    match run.run(args.once) {
+    let result = match run.run(args.once) {
         Err(error) if error.kind() == io::ErrorKind::Interrupted => {
             run.view.log("stopped by operator");
             Ok(())
         }
         result => result,
-    }
+    };
+    let stopped = run.coding.stop(&run.cfg, "terminal_exit");
+    result.and(stopped)
 }
 
 struct Supervisor {
@@ -85,6 +90,15 @@ struct Supervisor {
     managed_started: bool,
     outage: Option<Outage>,
     history: Vec<Value>,
+    coding: Coding,
+}
+
+#[derive(serde::Serialize)]
+struct RoomAnswer {
+    #[serde(flatten)]
+    reply: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    coding: Option<state::Ordered>,
 }
 
 impl Supervisor {
@@ -101,7 +115,10 @@ impl Supervisor {
                 self.view.observe("rooms", json!({"count":rooms.len()}));
             }
             match self.poll() {
-                Ok(()) => self.view.observe("idle", json!({})),
+                Ok(()) => {
+                    self.pump_coding();
+                    self.view.observe("idle", json!({}));
+                }
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => return Err(error),
                 Err(error) => self.view.log(&format!("tick failed {error}")),
             }
@@ -150,6 +167,7 @@ impl Supervisor {
             }
             match event["effect"].as_str() {
                 Some("answer") => poll.send(&self.room_answer(&event)?)?,
+                Some("before_chat") => poll.send(&self.before_chat())?,
                 Some(_) => return Err(refused()),
                 None => self.poll_event(&event),
             }
@@ -158,6 +176,9 @@ impl Supervisor {
 
     fn poll_event(&mut self, event: &Value) {
         self.wake.show(&mut self.view);
+        if let Some(receipt) = event.get("coding_post") {
+            self.coding.acknowledge(receipt);
+        }
         if let Some(zone) = event["time_zone"].as_str() {
             self.zone = Some(zone.to_owned());
         }
@@ -167,15 +188,39 @@ impl Supervisor {
         self.view.event(event);
     }
 
-    fn room_answer(&mut self, turn: &Value) -> io::Result<Value> {
-        match self.answer(turn) {
-            Ok(result) => Ok(json!({
+    fn room_answer(&mut self, turn: &Value) -> io::Result<RoomAnswer> {
+        let outcome = if turn["control"] == true {
+            let directive = turn["message"]["text"].as_str().ok_or_else(refused)?;
+            self.coding
+                .control(&self.cfg, turn, directive, self.zone.as_deref())
+                .map(|reply| json!({"reply":reply,"characters":0,"searches":0,"timing":"-"}))
+        } else {
+            self.answer(turn).map(|result| json!({
                 "reply":result["answer"],"characters":result["characters"],"searches":result["searches"],
                 "timing":result["timing"]
-            })),
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => Err(error),
-            Err(error) => Ok(json!({"failure":error.to_string()})),
+            }))
+        };
+        let reply = match outcome {
+            Ok(reply) => reply,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Err(error),
+            Err(error) => json!({"failure":error.to_string()}),
+        };
+        Ok(RoomAnswer {
+            reply,
+            coding: Coding::snapshot(&self.cfg)?,
+        })
+    }
+
+    fn before_chat(&mut self) -> Value {
+        match self.coding.before_chat() {
+            Ok(()) => json!({}),
+            Err(error) => json!({"failure":error.to_string()}),
         }
+    }
+
+    fn pump_coding(&mut self) {
+        self.coding
+            .pump(&self.cfg, &mut self.view, &mut self.managed_started);
     }
 
     fn answer(&mut self, turn: &Value) -> io::Result<Value> {
@@ -192,9 +237,13 @@ impl Supervisor {
     }
 
     fn ask(&mut self, turn: &Value, trace: &mut Trace) -> io::Result<Value> {
-        let job = self
+        let offer = coding::offer(&self.cfg, turn);
+        let mut job = self
             .cfg
             .turn_job(turn, self.zone.as_deref(), self.managed_started);
+        if let Some(offer) = &offer {
+            job["workspace"] = offer.options()?;
+        }
         let mut answer = Worker::start(Kind::Answer, &job)?;
         loop {
             let event = answer.receive(self.cfg.answer_wait, &self.signals)?;
@@ -204,13 +253,27 @@ impl Supervisor {
             if event["answer"].is_string() {
                 return Ok(event);
             }
-            if event.get("effect").is_some() {
-                return Err(refused());
+            if let Some(effect) = event["effect"].as_str() {
+                let offer = offer
+                    .as_ref()
+                    .filter(|_| effect == "workspace")
+                    .ok_or_else(refused)?;
+                let reply = self.workspace(offer, turn, &event["call"])?;
+                answer.send(&json!({"reply":reply}))?;
             }
             self.managed_started |= event["managed"]["started"] == true;
             self.wake.show(&mut self.view);
             trace.event(&event);
             self.view.event(&event);
+        }
+    }
+
+    fn workspace(&mut self, offer: &Offer, turn: &Value, call: &Value) -> io::Result<String> {
+        match offer.directive(&turn["message"], call)? {
+            Ok(directive) => self
+                .coding
+                .control(&self.cfg, turn, &directive, self.zone.as_deref()),
+            Err(reason) => Ok(reason),
         }
     }
 
@@ -222,6 +285,7 @@ impl Supervisor {
             if self.wake.pending() || self.view.pending() {
                 break;
             }
+            self.pump_coding();
             thread::sleep(
                 until
                     .saturating_duration_since(Instant::now())
@@ -285,6 +349,7 @@ impl Supervisor {
     }
 
     fn local_answer(&mut self, text: &str) -> io::Result<()> {
+        self.coding.before_chat()?;
         let stamp = epoch();
         let id = format!(
             "terminal-{}",

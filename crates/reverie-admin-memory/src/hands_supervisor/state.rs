@@ -6,15 +6,28 @@ use serde_json::{
 };
 use std::{io, path::Path};
 
+pub(super) type Ordered = IndexMap<String, Box<RawValue>>;
+
 pub(super) fn load(path: &Path) -> io::Result<Box<RawValue>> {
     Ok(hands_poll::load_state(path)?
         .value
         .unwrap_or(to_raw_value(&json!({}))?))
 }
 
+pub(super) fn ordered(path: &Path) -> io::Result<Ordered> {
+    Ok(serde_json::from_str(load(path)?.get())?)
+}
+
+pub(super) fn save(path: &Path, state: &Ordered) -> io::Result<()> {
+    let bytes = serde_json::to_vec(state)?;
+    if bytes.len() > crate::TURN_CAPTURE_BOUND - 128 {
+        return Err(crate::refused());
+    }
+    hands_poll::save_state(path, &bytes)
+}
+
 pub(super) fn recover(path: &Path) -> io::Result<()> {
-    type Ordered = IndexMap<String, Box<RawValue>>;
-    let mut state: Ordered = serde_json::from_str(load(path)?.get())?;
+    let mut state = ordered(path)?;
     let Some(raw) = state.get_mut("_coding") else {
         return Ok(());
     };
@@ -31,7 +44,7 @@ pub(super) fn recover(path: &Path) -> io::Result<()> {
     }
     if changed {
         *raw = to_raw_value(&journal)?;
-        hands_poll::save_state(path, &serde_json::to_vec(&state)?)?;
+        save(path, &state)?;
     }
     Ok(())
 }

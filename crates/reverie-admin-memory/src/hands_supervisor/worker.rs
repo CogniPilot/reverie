@@ -2,7 +2,7 @@ use crate::{TURN_CAPTURE_BOUND, capture::Signals, refused, worker_channel::Worke
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::{
-    io,
+    env, io,
     os::{
         fd::OwnedFd,
         unix::{net::UnixStream, process::CommandExt},
@@ -17,6 +17,8 @@ pub(super) enum Kind {
     Answer,
     Terminal,
     Attention,
+    Coding,
+    ModelSlot(Option<String>),
 }
 
 pub(super) struct Worker {
@@ -30,18 +32,20 @@ impl Worker {
         let (local, peer) = UnixStream::pair()?;
         let channel = WorkerChannel::from_fd(&local)?;
         let peer = Stdio::from(OwnedFd::from(peer));
-        let mut command = Command::new(std::env::current_exe()?);
-        let flag = match kind {
+        let mut command = Command::new(env::current_exe()?);
+        let flag = match &kind {
             Kind::Poll => "hands-tick-worker",
             Kind::Answer => "hands-answer-worker",
             Kind::Terminal => "hands-native-terminal-worker",
             Kind::Attention => "hands-attention-worker",
+            Kind::Coding => "hands-coding-worker",
+            Kind::ModelSlot(_) => "hands-model-slot-worker",
         };
         command.arg(format!("--{flag}={}", std::process::id()));
         if matches!(kind, Kind::Terminal) {
             command
                 .env_clear()
-                .env("TERM", std::env::var_os("TERM").unwrap_or_default())
+                .env("TERM", env::var_os("TERM").unwrap_or_default())
                 .env("LANG", "C.UTF-8")
                 .stderr(peer);
         } else {
@@ -51,6 +55,7 @@ impl Worker {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null());
         }
+        restrict_coding_environment(&kind, &mut command);
         let grace = Duration::from_millis(if matches!(kind, Kind::Terminal) {
             1000
         } else {
@@ -91,6 +96,24 @@ impl Worker {
 
     pub(super) fn copy_receiver(&self) -> io::Result<WorkerChannel> {
         self.channel.duplicate()
+    }
+
+    pub(super) fn ready(&mut self) -> io::Result<Option<Value>> {
+        self.channel.poll()
+    }
+}
+
+fn restrict_coding_environment(kind: &Kind, command: &mut Command) {
+    if matches!(kind, Kind::Coding | Kind::ModelSlot(_)) {
+        command
+            .env_clear()
+            .env("PATH", "/bin:/usr/bin")
+            .env("LANG", "C.UTF-8");
+    }
+    if let Kind::ModelSlot(Some(key)) = kind
+        && let Some(value) = env::var_os(key)
+    {
+        command.env(key, value);
     }
 }
 

@@ -640,14 +640,12 @@ let
   };
   memory = pkgs.python3.withPackages (_: [ memoryPackage ]);
   kokoro = import ./kokoro.nix { inherit pkgs src; };
-  hands = pkgs.writeShellApplication {
+  hands = (pkgs.writeShellApplication {
     name = "reverie-hands";
-    runtimeInputs = [ memory ];
     text = ''
-      export REVERIE_HANDS_MEMORY_COMMAND=${adminMemory}/bin/reverie-admin-memory
-      exec ${backendNativeCli}/bin/reverie-backend --hands-launch ${memory}/bin/python3 ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/agent_loop.py --native-runtime ${adminMemory}/bin/reverie-admin-memory "$@"
+      exec ${backendNativeCli}/bin/reverie-backend --hands-launch --native-runtime ${adminMemory}/bin/reverie-admin-memory "$@"
     '';
-  };
+  }).overrideAttrs (_: { disallowedRequisites = [ pkgs.python3 ]; });
   adminMemory = import ./admin-memory.nix { inherit pkgs src; };
   handsTools = import ./hands-tools.nix { inherit pkgs src; };
   modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };

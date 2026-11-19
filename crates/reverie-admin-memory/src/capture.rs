@@ -1,4 +1,7 @@
 //! Linux-owned subprocess and bounded pipe handling for channel recall.
+mod background;
+
+pub(crate) use background::Background;
 use nix::{
     errno::Errno,
     fcntl::{FcntlArg, OFlag, fcntl},

@@ -1,6 +1,6 @@
 //! The isolated Hands task engine requests every model, authorization and
 //! tool effect from the existing controller. It has no network or tool client.
-mod admission;
+pub(super) mod admission;
 pub(super) use admission::{authorize, is_control, workspace_call};
 mod channel;
 mod diagnostics;
@@ -8,7 +8,7 @@ mod session;
 mod settings;
 #[cfg(test)]
 mod tests;
-mod wire;
+pub(super) mod wire;
 
 use crate::worker_channel::FRAME_BYTES;
 pub(super) use admission::admit;
@@ -16,7 +16,7 @@ use channel::Channel;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use session::Session;
-pub(super) use settings::{admin_task, check_coding, tool_export};
+pub(super) use settings::{admin_task, check_coding, profile_limits, tool_export};
 use std::{io, num::NonZeroU64, time::Duration};
 use wire::{Limits, ToolReply};
 
@@ -66,17 +66,24 @@ pub(super) fn policy(parent: i32) -> io::Result<()> {
             FRAME_BYTES,
         );
     }
-    let mut value = match input.frame {
-        Some(frame) => match ToolReply::checked(Value::String(frame), &input.limits) {
+    let value = runner_reply(input.frame, input.diagnostics.as_deref(), &input.limits);
+    crate::write_reply(&value, FRAME_BYTES)
+}
+
+pub(super) fn runner_reply(
+    frame: Option<String>,
+    diagnostics: Option<&str>,
+    limits: &Limits,
+) -> Value {
+    let mut value = match frame {
+        Some(frame) => match ToolReply::checked(Value::String(frame), limits) {
             Ok((reply, _)) => json!({"result": reply}),
             Err(reason) => json!({"error": reason}),
         },
         None => json!({}),
     };
-    value["report"] = input
-        .diagnostics
-        .as_deref()
+    value["report"] = diagnostics
         .and_then(diagnostics::report)
         .unwrap_or(Value::Null);
-    crate::write_reply(&value, FRAME_BYTES)
+    value
 }

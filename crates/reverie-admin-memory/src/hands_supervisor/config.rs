@@ -13,6 +13,7 @@ use std::{
 
 pub(super) struct Config {
     pub(super) values: Value,
+    pub(super) path: PathBuf,
     pub(super) state: PathBuf,
     pub(super) poll: Duration,
     pub(super) chat_wait: Duration,
@@ -30,7 +31,7 @@ impl Config {
             ));
         }
         let values = validated["settings"].take();
-        if !values["coding"].is_null() || values["memory_worker_name"] != "agent_memory_worker.py" {
+        if values["memory_worker_name"] != "agent_memory_worker.py" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Hands configuration requires the legacy adapter",
@@ -42,6 +43,7 @@ impl Config {
         let answer_wait = seconds(&values["model_timeout_s"], 5.0, 288.0)?;
         Ok(Self {
             values,
+            path: path.to_owned(),
             state,
             poll,
             chat_wait,
@@ -75,7 +77,8 @@ impl Config {
             settings: json!({"rooms":rooms,"dm_rooms":cfg["dm_rooms"],"name":cfg["self_name"],
                 "session":cfg["self_session_id"],"max_rooms":cfg["max_rooms"],"history_n":cfg["history_n"],
                 "max_answers":cfg["max_answers_per_tick"],"reply_chars":cfg["reply_cap_chars"],
-                "message_chars":cfg["message_cap_chars"],"preview":true}),
+                "message_chars":cfg["message_cap_chars"],"preview":true,
+                "coding":!cfg["coding"].is_null(),"coordinator":!cfg["coding"].is_null()}),
             memory,
             state,
             path: &self.state,
@@ -91,6 +94,15 @@ impl Config {
         let cfg = &self.values;
         let room = &turn["room"];
         let direct = turn["direct"] == true;
+        let managed = truthy(&cfg["managed_context"]);
+        let web = WebPolicy::from_settings(cfg.as_object().expect("validated Hands configuration"));
+        json!({"prompt":self.prompt_job(turn, zone),"images":self.images_job(turn),"workspace":null,"web":web,
+            "memory":self.journal(room,direct),"prompt_cap":cfg["prompt_cap_chars"],"summary":true,
+            "managed":managed,"runtime":self.runtime(turn,managed,managed_started)})
+    }
+
+    pub(super) fn prompt_job(&self, turn: &Value, zone: Option<&str>) -> Value {
+        let cfg = &self.values;
         let mut settings = project(
             cfg,
             &[
@@ -106,17 +118,16 @@ impl Config {
             ],
         );
         settings.insert("reported_zone".into(), json!(zone));
-        let prompt = json!({"settings":settings,"scope":{"session":cfg["self_session_id"],"name":cfg["self_name"],"direct":direct},
-            "room":room,"history":turn["history"],"message":turn["message"],"notes":[],
-            "now":epoch(),"reserve":0,"recalled":turn["recalled"].as_str().unwrap_or_default()});
-        let images = (!room.is_null() && truthy(&turn["message"]["attachments"])).then(||
+        json!({"settings":settings,"scope":{"session":cfg["self_session_id"],"name":cfg["self_name"],"direct":turn["direct"] == true},
+            "room":turn["room"],"history":turn["history"],"message":turn["message"],"notes":[],
+            "now":epoch(),"reserve":0,"recalled":turn["recalled"].as_str().unwrap_or_default()})
+    }
+
+    pub(super) fn images_job(&self, turn: &Value) -> Option<Value> {
+        let cfg = &self.values;
+        (!turn["room"].is_null() && truthy(&turn["message"]["attachments"])).then(||
             json!({"vision":truthy(&cfg["vision"]),"root":cfg["attachments_root"],"session":cfg["self_session_id"],
-                "cli":cfg["cli"],"max_images":cfg["max_images"],"max_bytes":cfg["max_image_bytes"],"timeout":cfg["cli_timeout_s"]}));
-        let managed = truthy(&cfg["managed_context"]);
-        let web = WebPolicy::from_settings(cfg.as_object().expect("validated Hands configuration"));
-        json!({"prompt":prompt,"images":images,"workspace":null,"web":web,
-            "memory":self.journal(room,direct),"prompt_cap":cfg["prompt_cap_chars"],"summary":true,
-            "managed":managed,"runtime":self.runtime(turn,managed,managed_started)})
+                "cli":cfg["cli"],"max_images":cfg["max_images"],"max_bytes":cfg["max_image_bytes"],"timeout":cfg["cli_timeout_s"]}))
     }
 
     fn runtime(&self, turn: &Value, managed: bool, started: bool) -> Value {

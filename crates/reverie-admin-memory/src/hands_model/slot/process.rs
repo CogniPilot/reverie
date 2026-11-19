@@ -4,16 +4,11 @@ use serde_json::{Map, Value, json};
 use std::env;
 use std::io::{self, ErrorKind};
 use std::process::Command;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 pub(super) struct Call {
-    cancelled: Arc<AtomicBool>,
-    handle: Option<JoinHandle<io::Result<Value>>>,
+    capture: capture::Background,
+    epoch: u64,
 }
 
 impl Call {
@@ -47,55 +42,26 @@ impl Call {
         {
             command.env(name, key);
         }
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let cancel = Arc::clone(&cancelled);
-        let bound = settings.max_response_bytes;
-        let handle = thread::Builder::new()
-            .name("hands-model-call".into())
-            .spawn(move || {
-                let output = capture::supervised(
-                    command,
-                    Some(&body),
-                    capture::Limits::cancellable(deadline, bound, &cancel),
-                )?;
-                Ok(capture_answer(output, epoch))
-            })?;
-        Ok(Self {
-            cancelled,
-            handle: Some(handle),
-        })
+        let capture = capture::Background::start(
+            "hands-model-call",
+            command,
+            body,
+            deadline,
+            settings.max_response_bytes,
+        )?;
+        Ok(Self { capture, epoch })
     }
 
     pub(super) fn take_answer(&mut self) -> io::Result<Option<Value>> {
-        if !self.handle.as_ref().is_some_and(JoinHandle::is_finished) {
-            return Ok(None);
-        }
-        self.handle.take().map(join).transpose()
+        Ok(self
+            .capture
+            .take()?
+            .map(|output| capture_answer(output, self.epoch)))
     }
 
     pub(super) fn cancel(mut self) -> io::Result<()> {
-        self.settle()
+        self.capture.cancel()
     }
-
-    fn settle(&mut self) -> io::Result<()> {
-        self.cancelled.store(true, Ordering::Release);
-        if let Some(handle) = self.handle.take() {
-            join(handle)?;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Call {
-    fn drop(&mut self) {
-        let _ = self.settle();
-    }
-}
-
-fn join(handle: JoinHandle<io::Result<Value>>) -> io::Result<Value> {
-    handle
-        .join()
-        .map_err(|_| io::Error::other("model capture thread failed"))?
 }
 
 fn capture_answer(output: io::Result<capture::Completed>, epoch: u64) -> Value {

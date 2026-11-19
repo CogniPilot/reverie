@@ -20,7 +20,7 @@ pub(super) fn valid_call_id(id: &str) -> bool {
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Limits {
+pub(crate) struct Limits {
     pub steps: usize,
     pub seconds: f64,
     pub operation_seconds: f64,
@@ -60,7 +60,7 @@ fn duration(seconds: f64) -> io::Result<Duration> {
 }
 
 impl Limits {
-    pub(super) fn task_duration(&self) -> io::Result<Duration> {
+    pub(crate) fn task_duration(&self) -> io::Result<Duration> {
         duration(self.seconds)
     }
 
@@ -68,7 +68,7 @@ impl Limits {
         duration(self.operation_seconds)
     }
 
-    pub(super) fn validate(&self) -> io::Result<()> {
+    pub(crate) fn validate(&self) -> io::Result<()> {
         self.task_duration()?;
         self.operation_duration()?;
         let sizes = [
@@ -89,7 +89,7 @@ impl Limits {
         Ok(())
     }
 
-    pub(super) fn reserve_chars(&self) -> usize {
+    pub(crate) fn reserve_chars(&self) -> usize {
         self.frame_chars
             .saturating_add(self.argument_chars)
             .saturating_mul(2)

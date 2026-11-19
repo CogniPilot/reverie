@@ -12,15 +12,15 @@ fn setup(fixture: &Fixture, cmd: &mut Command) {
     configure(fixture, cmd);
     cmd.args([
         "--hands-launch",
+        "--native-runtime",
         "echo",
-        "/fixture/agent_loop.py",
         "--no-tui",
         "--once",
     ]);
 }
 
 #[test]
-fn packaged_launcher_selects_native_hands_and_preserves_explicit_coding() {
+fn packaged_launcher_selects_native_hands_for_standard_and_coding_sessions() {
     let fixture = Fixture::create();
     let directory = directory(&fixture);
     for coding in [false, true] {
@@ -35,29 +35,20 @@ fn packaged_launcher_selects_native_hands_and_preserves_explicit_coding() {
             json!({"data":{"employees":[{"sessionId":"session-123","name":"Selected employee"}]}}),
             |cmd| {
                 configure(&fixture, cmd);
-                cmd.args([
-                    "--hands-launch",
-                    "echo",
-                    "/fixture/agent_loop.py",
-                    "--native-runtime",
-                    "echo",
-                    "--once",
-                ]);
+                cmd.args(["--hands-launch", "--native-runtime", "echo", "--once"]);
             },
         );
         assert!(output.status.success());
-        let prefix = if coding {
-            "-I -B /fixture/agent_loop.py"
-        } else {
-            "--hands-native"
-        };
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             format!(
-                "{prefix} {} --once\n",
+                "--hands-native {} --once\n",
                 directory.join("agent.json").display()
             )
         );
+        let config: Value =
+            serde_json::from_slice(&fs::read(directory.join("agent.json")).unwrap()).unwrap();
+        assert_eq!(!config["coding"].is_null(), coding);
     }
 }
 
@@ -73,7 +64,7 @@ fn private_write(path: &Path, content: &str) {
 }
 
 #[test]
-fn hands_waits_for_the_exact_office_employee_and_execs_the_existing_runtime() {
+fn hands_waits_for_the_exact_office_employee_and_execs_the_native_runtime() {
     let fixture = Fixture::create();
     let directory = directory(&fixture);
     private_write(&directory.join("state.json"), r#"{"saved_cursor":"keep"}"#);
@@ -98,7 +89,7 @@ fn hands_waits_for_the_exact_office_employee_and_execs_the_existing_runtime() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "-I -B /fixture/agent_loop.py {} --no-tui --once\n",
+            "--hands-native {} --no-tui --once\n",
             directory.join("agent.json").display()
         )
     );
@@ -190,7 +181,7 @@ fn hands_help_needs_no_office_or_python() {
         .env_clear()
         .args([
             "--hands-launch",
-            "/missing/interpreter",
+            "--native-runtime",
             "/missing/runtime",
             "--help",
         ])

@@ -82,6 +82,10 @@ pub(super) enum Error {
 }
 
 impl Client {
+    pub(super) fn new(cli: Vec<String>, timeout_s: f64) -> Self {
+        Self { cli, timeout_s }
+    }
+
     pub(super) fn call(&self, operation: &Operation) -> Result<Value, Error> {
         let deadline = Duration::try_from_secs_f64(self.timeout_s)
             .ok()

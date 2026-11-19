@@ -13,7 +13,7 @@ use std::{
 
 pub(crate) const FRAME_BYTES: usize = 1_048_576;
 
-pub(crate) struct WorkerChannel(BufReader<UnixStream>);
+pub(crate) struct WorkerChannel(BufReader<UnixStream>, Vec<u8>);
 
 impl WorkerChannel {
     pub(crate) fn open() -> io::Result<Self> {
@@ -24,7 +24,7 @@ impl WorkerChannel {
         let socket = UnixStream::from(dup(fd)?);
         fcntl(&socket, FcntlArg::F_SETFD(FdFlag::FD_CLOEXEC))?;
         socket.peer_addr()?;
-        Ok(Self(BufReader::new(socket)))
+        Ok(Self(BufReader::new(socket), Vec::new()))
     }
 
     pub(crate) fn shutdown(&self) -> io::Result<()> {
@@ -47,7 +47,7 @@ impl WorkerChannel {
         deadline: Option<Instant>,
         limit: usize,
     ) -> io::Result<Option<T>> {
-        self.read_frame(deadline, limit, None)
+        self.read_frame(deadline, limit, None, true)
     }
 
     pub(crate) fn read_checked<T: DeserializeOwned>(
@@ -56,7 +56,27 @@ impl WorkerChannel {
         limit: usize,
         check: &dyn Fn() -> io::Result<()>,
     ) -> io::Result<Option<T>> {
-        self.read_frame(Some(deadline), limit, Some(check))
+        self.read_frame(Some(deadline), limit, Some(check), true)
+    }
+
+    pub(crate) fn poll(&mut self) -> io::Result<Option<serde_json::Value>> {
+        match self.read_frame(
+            Some(Instant::now() + Duration::from_millis(1)),
+            FRAME_BYTES,
+            None,
+            false,
+        ) {
+            Ok(None) => Err(io::ErrorKind::UnexpectedEof.into()),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                Ok(None)
+            }
+            result => result,
+        }
     }
 
     fn read_frame<T: DeserializeOwned>(
@@ -64,8 +84,8 @@ impl WorkerChannel {
         deadline: Option<Instant>,
         limit: usize,
         check: Option<&dyn Fn() -> io::Result<()>>,
+        strict: bool,
     ) -> io::Result<Option<T>> {
-        let mut frame = Vec::new();
         loop {
             let mut interval = timeout(deadline)?;
             if let Some(check) = check {
@@ -86,7 +106,7 @@ impl WorkerChannel {
                 }
                 result => result?,
             };
-            if data.is_empty() && frame.is_empty() {
+            if data.is_empty() && self.1.is_empty() {
                 return Ok(None);
             }
             if data.is_empty() {
@@ -94,15 +114,19 @@ impl WorkerChannel {
             }
             let boundary = data.iter().position(|&byte| byte == b'\n');
             let end = boundary.unwrap_or(data.len());
-            if end > limit.saturating_sub(frame.len()) {
+            if end > limit.saturating_sub(self.1.len()) {
                 return Err(crate::refused());
             }
-            frame.extend_from_slice(&data[..end]);
+            self.1.extend_from_slice(&data[..end]);
             self.0.consume(end + usize::from(boundary.is_some()));
-            if boundary.is_some() {
-                timeout(deadline)?;
-                return Ok(Some(serde_json::from_slice(&frame)?));
+            if boundary.is_none() {
+                continue;
             }
+            let frame = std::mem::take(&mut self.1);
+            if strict {
+                timeout(deadline)?;
+            }
+            return Ok(Some(serde_json::from_slice(&frame)?));
         }
     }
 
@@ -148,4 +172,20 @@ fn timeout(deadline: Option<Instant>) -> io::Result<Option<Duration>> {
     deadline
         .map(|deadline| remaining(deadline).ok_or_else(|| io::ErrorKind::TimedOut.into()))
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polling_keeps_a_partial_frame_for_the_next_pass() {
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        let mut channel = WorkerChannel::from_fd(reader).unwrap();
+        writer.write_all(br#"{"phase":"#).unwrap();
+        assert!(channel.poll().unwrap().is_none());
+        writeln!(writer, r#""tool"}}"#).unwrap();
+        let observed: serde_json::Value = channel.read(None).unwrap().unwrap();
+        assert_eq!(observed["phase"], "tool");
+    }
 }
