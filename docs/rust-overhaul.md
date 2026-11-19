@@ -41,10 +41,11 @@ ability to use scientific Python inside an employee laptop.
 
 At `dcf331d29` the tracked tree contains 453 `.py` files. Of those, 204 are
 under `python/`, 226 are under `tests/`, and 23 are distributed across
-`scripts/`, `apps/`, `nix/` and `.github/`. The worker image still selects
-the compatibility interpreter in `nix/worker-python.nix`. Removing a console
-script registration alone leaves the interpreter and its other consumers in
-that image.
+`scripts/`, `apps/`, `nix/` and `.github/`. Project Python tools now belong in
+project development environments. The standard worker image checks its
+registered Nix closure for a bundled interpreter. The browser worker still
+has a transitive interpreter through Chromium's GStreamer dependency, and the
+legacy office image still has its own Python environment.
 
 ## Replacement cohorts
 

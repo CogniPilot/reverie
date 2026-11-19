@@ -117,7 +117,6 @@
             inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
           };
-          workerPython = import ./nix/worker-python.nix { inherit pkgs; };
           workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -270,7 +269,6 @@
 
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
-          workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
@@ -371,21 +369,15 @@
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
           '';
-          pillowSmoke = let
+          officePythonBoundary = let
             serviceClosure = pkgs.closureInfo { rootPaths = [ packages.memory ]; };
           in pkgs.runCommand "reverie-python-environment-boundary" { } ''
             for package in ${pkgs.python3Packages.pillow} ${pkgs.python3Packages.pytest}; do
               if grep -Fx "$package" "${serviceClosure}/store-paths"; then
-                echo "Laptop development package in the service Python closure" >&2
+                echo "Project development package in the office service Python closure" >&2
                 exit 1
               fi
             done
-            test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
-            test ! -e "${packages.workerPython}/${pkgs.python3.sitePackages}/reverie"
-            test ! -e "${packages.workerPython}/bin/reverie-runtime"
-            test ! -e "${packages.workerPython}/bin/reverie-cycle"
-            ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
-              -t "${source}" -s "${source}/tests" -p test_image_requirements.py
             touch "$out"
           '';
         });

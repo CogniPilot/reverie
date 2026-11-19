@@ -103,7 +103,6 @@
     "workerNativeClientManifest",
     "workerNativeNixStorePrepare",
     "workerPerfImageTransport",
-    "workerPython",
     "workerResourceClientManifest",
     "workerTaskPerfPolicy",
     "workerTaskPerfPolicyV2"
