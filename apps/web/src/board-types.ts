@@ -14,7 +14,7 @@ export type IssueStatus = (typeof ISSUE_STATUSES)[number];
 export const LINK_KINDS = ['github-issue', 'github-pr', 'report', 'other'] as const;
 
 /** Caps: a write past one is refused (409), never made room for by dropping older entries. */
-export const BOARD_LIMITS = { issues: 2000, milestones: 200, wins: 500, blockers: 500, decisions: 500, receipts: 20, marks: 100 };
+export const BOARD_LIMITS = { issues: 4_000, milestones: 200, wins: 500, blockers: 500, decisions: 500, receipts: 20, marks: 100 };
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const id = z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/, 'An id is 1-64 letters, digits or _ . : -');
