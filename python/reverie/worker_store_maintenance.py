@@ -6,12 +6,12 @@ migration fence is understood by the ordinary broker, including after a crash.
 from __future__ import annotations
 
 import argparse
+import base64
 from contextlib import contextmanager
 import fcntl
 import hashlib
 import io
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -38,11 +38,6 @@ MAX_BYTES = 8 * 1024 * 1024
 GIB = 1024**3
 OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
 OFFLINE_EVIDENCE_SCOPE = "OFFLINE_IMAGE_TOOL_SHELL"
-CURRENT_AGENT_SCOPE = "CURRENT_CODEX_TOOL_SHELL_ONLY"
-# Preserve the exact legacy report prefix without retaining personal provenance.
-# Suffix acceptance is unchanged; the raw receipt digest remains checked below.
-D2_LEGACY_SHIM_PREFIX_LENGTH = 50
-D2_LEGACY_SHIM_PREFIX_DIGEST = "sha256:d269adb515570c5188ef3752a6ae7abb57e8050b7fe39b8445967e814c3a79a2"
 
 
 class Refused(RuntimeError):
@@ -133,6 +128,25 @@ def _json(raw):
                       parse_constant=lambda _: (_ for _ in ()).throw(Refused("non-finite JSON number")))
 
 
+def _native_observation(action, **fields):
+    request = {"action": action, **fields}
+    try:
+        result = subprocess.run(
+            ["reverie-admin-memory", f"--offline-store-qualification-worker={os.getpid()}"],
+            input=json.dumps(request, allow_nan=False).encode(),
+            capture_output=True, check=True, start_new_session=True, timeout=20,
+        )
+        reply = _json(result.stdout)
+        need(isinstance(reply, dict), "native qualification response unavailable")
+        if "error" not in reply:
+            return base64.b64decode(reply["bytes"], validate=True), reply
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
+        raise Refused("native offline-store observation could not be completed") from error
+    if reply.get("errno") is not None:
+        raise OSError(reply["errno"], os.strerror(reply["errno"]))
+    raise Refused(reply["error"])
+
+
 def _sync_parent(path):
     fd = os.open(Path(path).parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
@@ -180,50 +194,12 @@ def _existing_lock(path, uid):
 
 
 def _profiles(paths):
-    """Bounded metadata inventory through pinned nofollow directory FDs."""
-    result = {}
-    scopes = [(paths.nix, "var/nix/profiles"), (paths.nix, "var/nix/gcroots"),
-              (paths.home, ".nix-profile"), (paths.home, ".local/state/nix/profiles")]
-    def visit(parent, name, key, device, depth=0):
-        need(len(result) < MAX_ENTRIES and depth <= 24, "profile inventory bound")
-        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        need(before.st_dev == device and before.st_uid == os.getuid(), "profile ownership/device changed")
-        kind = "link" if stat.S_ISLNK(before.st_mode) else "directory" if stat.S_ISDIR(before.st_mode) else "file"
-        need(kind != "file" or stat.S_ISREG(before.st_mode), "unsupported profile object")
-        value = {"type": kind, "identity": _identity(before)}
-        if kind == "link":
-            value["target"] = os.readlink(name, dir_fd=parent)
-        result[key] = value
-        if kind == "directory":
-            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=parent)
-            try:
-                need(_identity(os.fstat(fd)) == _identity(before), "profile directory replaced")
-                with os.scandir(fd) as entries:
-                    for entry in entries:
-                        visit(fd, entry.name, key + "/" + entry.name, device, depth + 1)
-                after = os.fstat(fd)
-                need((before.st_mtime_ns, before.st_ctime_ns) == (after.st_mtime_ns, after.st_ctime_ns), "profile listing changed")
-            finally:
-                os.close(fd)
-        after = os.stat(name, dir_fd=parent, follow_symlinks=False)
-        need(_identity(before) == _identity(after) and (before.st_mtime_ns, before.st_ctime_ns) ==
-             (after.st_mtime_ns, after.st_ctime_ns), "profile metadata changed")
-    for root, relative in scopes:
-        key = ("nix:" if root == paths.nix else "home:") + relative
-        path = root / relative
-        try:
-            with _parent(path) as (parent, name):
-                try:
-                    visit(parent, name, key, root.stat().st_dev)
-                except FileNotFoundError:
-                    need(key not in result, "profile object disappeared")
-                    need(len(result) < MAX_ENTRIES, "profile inventory bound")
-                    result[key] = {"type": "absent"}
-        except FileNotFoundError:
-            need(len(result) < MAX_ENTRIES, "profile inventory bound")
-            result[key] = {"type": "absent"}
-    need(len(canonical(result)) <= MAX_BYTES, "profile inventory byte bound")
-    return result
+    """Read the bounded native profile inventory using the legacy JSON format."""
+    raw, _ = _native_observation(
+        "profiles", home=list(map(ord, os.fspath(paths.home))),
+        nix=list(map(ord, os.fspath(paths.nix))), entries=MAX_ENTRIES,
+    )
+    return _json(raw)
 
 
 FOCUS = "nix:var/nix/gcroots/reverie-image"
@@ -376,92 +352,11 @@ class OfflineStoreMaintenance:
         self.statvfs, self.wall, self.clock, self.sleep = statvfs, wall, clock, sleep
 
     def _target(self):
-        raw = _private_bytes(self.target_path)
-        value = _json(raw)
-        keys = {"version", "kind", "imageId", "engineId", "engineSocket", "validationContainerId", "baseTarget",
-                "closurePaths", "expiresAtEpoch", "cohort", "budget", "receipts"}
-        need(type(value) is dict and keys <= set(value) <= keys | {"validationScope"} and type(value["version"]) is int and value["version"] == 1
-             and value["kind"] == "reverie.worker-store-target", "closed validated target required")
-        scope = value.get("validationScope", CURRENT_AGENT_SCOPE)
-        need(scope in (CURRENT_AGENT_SCOPE, OFFLINE_IMAGE_SCOPE), "unsupported validation scope")
-        need(pin(value["imageId"]) and CID.fullmatch(value["validationContainerId"] or "")
-             and STORE.fullmatch(value["baseTarget"] or ""), "exact validated image/base required")
-        need(isinstance(value["engineId"], str) and 1 <= len(value["engineId"]) <= 128
-             and not any(ord(c) < 32 for c in value["engineId"]), "exact validated engine identity required")
-        expiry = value["expiresAtEpoch"]
-        need(type(expiry) in (int, float) and math.isfinite(expiry) and expiry > self.wall(),
-             "target qualification expired")
-        paths = value["closurePaths"]
-        need(type(paths) is list and 1 <= len(paths) <= 32768 and paths == sorted(set(paths))
-             and all(isinstance(p, str) and STORE.fullmatch(p) for p in paths)
-             and value["baseTarget"] in paths, "bounded image closure required")
-        need(type(value["cohort"]) is list and 1 <= len(value["cohort"]) <= 32,
-             "explicit bounded offline cohort required")
-        for row in value["cohort"]:
-            need(type(row) is dict and set(row) == {"employeeId", "sessionId", "sessionGeneration", "employeeDigest"}
-                 and UUID.fullmatch(row["employeeId"] or "") and UUID.fullmatch(row["sessionId"] or "")
-                 and type(row["sessionGeneration"]) is int and row["sessionGeneration"] > 0
-                 and pin(row["employeeDigest"]), "closed current employee cohort required")
-        need(len({r["employeeId"] for r in value["cohort"]}) == len(value["cohort"])
-             and len({r["sessionId"] for r in value["cohort"]}) == len(value["cohort"]), "duplicate employee/session")
-        receipts = value["receipts"]
-        need(type(receipts) is dict and set(receipts) == {"D2", "CAN"}, "actual target validation receipts required")
-        validation_employee = None
-        for kind, reference in receipts.items():
-            need(type(reference) is dict and set(reference) == {"path", "digest"} and pin(reference["digest"]), "pinned validation receipt required")
-            evidence = _private_bytes(reference["path"], 1024**2)
-            need(sha(evidence) == reference["digest"], "validation receipt changed")
-            record = _json(evidence)
-            need(type(record) is dict and record.get("kind") == kind and type(record.get("version")) is int and record["version"] == 1
-                 and record.get("data", {}).get("containerId") == value["validationContainerId"],
-                 "actual validation container binding required")
-            data = record["data"]
-            fields = {"version", "containerId", "rawEvidencePath", "rawEvidenceDigest"}
-            fields |= {"imageId", "scope"} if scope == OFFLINE_IMAGE_SCOPE else {"employeeId"}
-            fields |= {"jobs"} if kind == "D2" else {"probePath", "probeDigest"}
-            if kind == "CAN" and scope == CURRENT_AGENT_SCOPE:
-                fields |= {"ownToolShell", "scope"}
-            need(type(data) is dict and set(data) == fields and type(data["version"]) is int
-                 and data["version"] == 1
-                 and pin(data["rawEvidenceDigest"]), "closed canonical validation data required")
-            if scope == OFFLINE_IMAGE_SCOPE:
-                need(data["scope"] == OFFLINE_EVIDENCE_SCOPE and data["imageId"] == value["imageId"],
-                     "offline image evidence must bind its exact image/scope")
-            else:
-                need(UUID.fullmatch(data["employeeId"] or "")
-                     and validation_employee in (None, data["employeeId"]), "validation employee differs between receipts")
-                validation_employee = data["employeeId"]
-            body = _private_bytes(data["rawEvidencePath"], 1024**2)
-            need(sha(body) == data["rawEvidenceDigest"], "raw validation evidence changed")
-            text = body.decode()
-            if kind == "D2":
-                lines = text.splitlines()
-                passes = [line for line in lines if line.startswith("PASS ")]
-                expected = ["shim body = F1 r7 / native bridge r5 (shebang line excluded)",
-                            "builder body = r5 (", "cargo resolves to the shim",
-                            "shim sets CARGO_BUILD_JOBS=" + str(data["jobs"]),
-                            "REVERIE_NO_AUTOENV=1 untouched", "explicit -j left as given"]
-                need(type(data.get("jobs")) is int and data["jobs"] > 0
-                     and len(passes) == 6 and not any(s.startswith("FAIL") for s in lines)
-                     and (passes[0][5:].startswith(expected[0]) or
-                          sha(passes[0][5:5 + D2_LEGACY_SHIM_PREFIX_LENGTH].encode()) == D2_LEGACY_SHIM_PREFIX_DIGEST)
-                     and all(line[5:].startswith(prefix) for line, prefix in zip(passes[1:], expected[1:]))
-                     and re.search(r"\bjobs=" + str(data["jobs"]) + r"\b", text), "target D2 did not pass")
-            else:
-                # Exact existing CAN core predicates. Reporting-only probe/T10/
-                # EXECPATH fields do not acquire new gating semantics here.
-                grep = re.search(r"^GREP pos=(\S+) neg=(\S+) find=(\S+)", text, re.M)
-                jobs = re.search(r"jobs=(\S+)", text)
-                shims = re.search(r"^SHIMS (\S+) (\S+)", text, re.M)
-                need((scope == OFFLINE_IMAGE_SCOPE or
-                      data.get("ownToolShell") is True and data.get("scope") == CURRENT_AGENT_SCOPE)
-                     and grep is not None and grep.groups() == ("0", "1", "0")
-                     and jobs is not None and jobs.group(1).isdigit()
-                     and shims is not None and shims.group(1) == "/opt/reverie/autoenv/bin/cargo"
-                     and "CAN-DONE" in text, "target own-shell CAN did not pass")
-                probe = _private_bytes(data["probePath"], 1024**2)
-                need(sha(probe) == data["probeDigest"], "actual own-shell probe bytes changed")
-        return value, sha(raw)
+        raw, reply = _native_observation("target", target=str(self.target_path), now=self.wall())
+        need(sha(raw) == reply["targetDigest"], "qualified target bytes changed")
+        target = _json(raw)
+        need(target["expiresAtEpoch"] > self.wall(), "target qualification expired")
+        return target, reply["targetDigest"], reply["evidencePaths"]
 
     def _budget(self, config, target):
         b = target["budget"]
@@ -479,7 +374,7 @@ class OfflineStoreMaintenance:
         from .worker import validate_config
         config = validate_config(_json(raw))
         need(config.get("uid") == os.getuid() and os.getuid() != 0, "ordinary configured host owner required")
-        target, target_digest = self._target()
+        target, target_digest, evidence_paths = self._target()
         if self.engine is None:
             self.engine = DockerEngine(target["engineSocket"])
         need(self.engine.identity() == target["engineId"], "validated engine identity changed")
@@ -522,12 +417,7 @@ class OfflineStoreMaintenance:
         need(not any(v.get("Name") == "/" + helper_name for v in containers), "existing helper must be reconciled, never removed by name")
         private = [self.config_path.resolve(), self.target_path.resolve(), lock.parent.resolve(),
                    (Path(config["stateRoot"]) / "offline-store-maintenance").resolve()]
-        for reference in target["receipts"].values():
-            private.append(Path(reference["path"]).resolve())
-            receipt = _json(_private_bytes(reference["path"], 1024**2))
-            private.append(Path(receipt["data"]["rawEvidencePath"]).resolve())
-            if "probePath" in receipt["data"]:
-                private.append(Path(receipt["data"]["probePath"]).resolve())
+        private.extend(Path(path) for path in evidence_paths)
         # Account paths are selected dynamically at normal launch. Exclude the
         # whole source namespace rather than guessing today's selected profile.
         # Cold employee homes/stores can become future grants without an

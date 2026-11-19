@@ -2,6 +2,7 @@
 //! command endpoint, owner grant, running intent or laptop start permit.
 mod engine;
 mod markers;
+pub mod offline_qualification;
 pub use engine::{
     NixHelperState, NixPreviousHelper, created_identity, diagnostics_tail, helper_state,
     image_supports_private_store,

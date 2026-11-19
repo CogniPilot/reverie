@@ -2,6 +2,7 @@
 //! grant, image proof, engine capability or admitted laptop start permit.
 mod error;
 pub mod guest;
+pub mod offline_qualification;
 mod selection;
 mod workflow;
 pub(crate) use workflow::Workflows;
