@@ -38,6 +38,7 @@ jobs:
         run: |
           nix build .#recoveryLedger --out-link "$RUNNER_TEMP/recovery-ledger"
           nix build .#workerExec --out-link "$RUNNER_TEMP/goal-worker-exec"
+          nix build .#checks.x86_64-linux.goalCustodyFixture --out-link "$RUNNER_TEMP/goal-custody-fixture"
       - name: Run every default web test and enforce source coverage
         working-directory: apps/web
         env:
@@ -50,6 +51,7 @@ jobs:
           nix develop --command env TMPDIR="$HOME/reverie-coverage-tmp" \
             NIX_TEST_RECOVERY_LEDGER="$RUNNER_TEMP/recovery-ledger/bin/reverie-recovery-ledger" \
             NIX_TEST_GOAL_WORKER_EXEC="$RUNNER_TEMP/goal-worker-exec/bin/reverie-worker-exec" \
+            NIX_TEST_GOAL_FIXTURE="$RUNNER_TEMP/goal-custody-fixture/bin/reverie-goal-custody-fixture" \
             npm run test:coverage
       - name: Preserve coverage even when tests or thresholds fail
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
