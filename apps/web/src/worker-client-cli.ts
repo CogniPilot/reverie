@@ -3,9 +3,13 @@ import { Command } from 'commander';
 import { workerCallback, workerHookSettings } from './worker-client-callback.js';
 import { workerClientStatus, workerCredentialStatus } from './worker-client-manifest.js';
 const program = new Command().name('reverie');
-if (!['worker-client', 'worker-callback', '--help', '-h'].includes(process.argv[2] ?? '')) {
-  const { registerAgentCommands } = await import('./cli-agent.js');
+if (!['worker-client', 'worker-callback'].includes(process.argv[2] ?? '')) {
+  const [{ registerAgentCommands }, { registerBoardCommands }] = await Promise.all([
+    import('./cli-agent.js'),
+    import('./cli-board.js'),
+  ]);
   registerAgentCommands(program);
+  registerBoardCommands(program);
 }
 const client = program
   .command('worker-client')
