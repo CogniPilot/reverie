@@ -21,6 +21,14 @@ fn native_recall_keeps_project_and_private_history_separate() {
     assert!(String::from_utf8_lossy(&refused.stderr).contains("private recall is unavailable"));
     let state = fixture.0.join("state");
     assert!(!state.exists());
+    let mut scoped = request;
+    scoped["project"] = json!("compiler");
+    assert_eq!(reply(fixture.bridge(&instance, scoped.clone())), json!([]));
+    assert_eq!(
+        fs::metadata(&state).unwrap().permissions().mode() & 0o777,
+        0o700
+    );
+    assert!(!state.join("memory.sqlite").exists());
     reply(fixture.bridge(
         &instance,
         json!({
@@ -33,8 +41,6 @@ fn native_recall_keeps_project_and_private_history_separate() {
         .remember("Public parity result", "Verified fixture")
         .unwrap();
     project.close().unwrap();
-    let mut scoped = request;
-    scoped["project"] = json!("compiler");
     let result = reply(fixture.bridge(&instance, scoped.clone()));
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(result[0]["text"], "Public parity result");

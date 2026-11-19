@@ -61,6 +61,7 @@ fn project_history(
     name: &str,
     query: &str,
 ) -> Result<Vec<MemoryView>> {
+    config.ensure_directories()?;
     let memory = ProjectMemory::open(config.native_path(MemoryPath::Data)?.join("projects"), name)?;
     let result = memory.lookup(query);
     let closed = memory.close();
