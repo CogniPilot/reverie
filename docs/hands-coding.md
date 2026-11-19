@@ -6,6 +6,9 @@ and hands off to the Hands loop. The terminal UI, input queue, and live model
 trace display run in Rust. Restarts preserve the saved
 memory configuration and state file.
 
+The `adminHarnessAddon` flake package provides the same native launcher and
+workspace tools for standalone installation.
+
 The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools
 read, list, search, edit and write workspace files, run commands and run a task's
 configured tests. The Rust dispatcher uses the existing version-one JSON request
