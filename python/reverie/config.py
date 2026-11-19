@@ -136,12 +136,6 @@ class Config:
     embed_doc_prefix: str = env_names.lookup("REVERIE_EMBED_DOC_PREFIX", "search_document: ")
     embed_query_prefix: str = env_names.lookup("REVERIE_EMBED_QUERY_PREFIX", "search_query: ")
 
-    # GPU lock (see reverie.gpu); chat waits at most this long for a lower-priority holder to yield
-    gpu_lock_wait: int = _env_int("REVERIE_GPU_LOCK_WAIT", 90)
-    gpu_lock_path: Path = Path(env_names.lookup("REVERIE_GPU_LOCK", CACHE / "gpu.lock"))
-    gpu_yield_path: Path = Path(env_names.lookup("REVERIE_GPU_YIELD", CACHE / "gpu.yield"))
-    gpu_activity_path: Path = Path(env_names.lookup("REVERIE_GPU_ACTIVITY", CACHE / "gpu.activity"))
-
     # files
     data_dir: Path = DATA_DIR
     db_path: Path = field(default_factory=lambda: DATA_DIR / "memory.sqlite")
@@ -157,7 +151,6 @@ class Config:
     recall_k: int = _env_int("REVERIE_RECALL_K", 6)                    # memories injected per turn
     recency_decay_per_hour: float = _env_float("REVERIE_RECENCY_DECAY", 0.995)
     default_importance: float = 3.0
-    joke_importance: float = 2.0
     profile_max_chars: int = 2000
 
     # daemon timing (seconds)
