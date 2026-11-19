@@ -320,6 +320,14 @@ retained. Normal conversation/memory writes do not train or change model weights
 
 ## Runtime selection and recovery
 
+Use **Company** and **Plans** to select an expert's runtime or recover an
+existing session. See the [models and plans handbook](../apps/web/src/web/public/handbook/models.md)
+and the [recovery handbook](../apps/web/src/web/public/handbook/recovery.md) for the
+supported Docker workflows.
+
+The following standalone watcher and handoff settings describe legacy deployments.
+The current office image does not include the Python watcher.
+
 The [reverie-runtime skill](../crates/reverie-admin-memory/opencode-assets/skills/reverie-runtime/SKILL.md) covers Reverie backend
 handoffs. Configure `examples/runtime-policy.json` outside the repository, with
 actual enabled model IDs and a verified adopted case. The generic image installs
@@ -357,6 +365,9 @@ or entire long-term stores. The coordinator improves selection from worker feedb
 quality and available evidence still limit how good a brief can be.
 
 ## Local GPU keep-alive
+
+The following standalone watcher and handoff settings describe legacy deployments.
+The current office image does not include the Python watcher.
 
 Users can select an OpenAI-compatible local GPU server, model ID, context limits and
 fallback profile. The default is `local_agent/qwen3.8-27b`, a Qwen local

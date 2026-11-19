@@ -101,7 +101,7 @@
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             chatLanguageTools = {
               python = pkgs.pyright;
               modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
@@ -112,12 +112,12 @@
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
           };
           workerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             worker = true;
           };
           workerPerfImageTransport = pkgs.skopeo;
@@ -127,13 +127,13 @@
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
-            inherit (packages) reverie console memory runtime entrypoint;
+            inherit (packages) reverie console runtime entrypoint;
             resourceReplacement = true;
           };
           resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
@@ -209,7 +209,7 @@
         let pkgs = pkgsFor system; packages = runtimePackages;
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs runtimePackages; src = source;
-          inherit (packages) reverie console memory runtime;
+          inherit (packages) reverie console runtime;
           entrypoint = self.packages.${system}.entrypoint;
           worker = true;
           inherit perfGuestCapsule;

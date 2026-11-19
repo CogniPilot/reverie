@@ -1,3 +1,5 @@
+> Historical instructions for a legacy deployment. See [runtime boundaries](host-runtime-retirement.md) for current Docker packaging.
+
 # Agent runtime watcher: keep-alive and binding restore
 
 `reverie-runtime --policy POLICY watch` supervises the one persistent agent runtime named

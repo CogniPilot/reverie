@@ -42,9 +42,12 @@ container image producers and actively referenced component fixtures remain.
 The retired owner-terminal package factories and their Python host executable
 have also been removed. Existing historical proofs still use the legacy
 protocol code.
-The workspace and Kokoro commands now use Rust. Memory and Hands still bring
-Python into the image. The remaining runtime and acceptance callers must
-migrate before the root `python/` tree can be retired.
+The ordinary Docker office uses the native memory, Hands, workspace and Kokoro
+commands. The old Python cycle, runtime watcher and stall-watch tools are
+available for legacy compatibility through the separate `memory` flake output.
+They are no longer part of the Docker office or the default application package.
+Retain old policy files, receipts and databases for migration. The legacy
+compatibility tests still require the root `python/` tree.
 
 The persistent OPS host installer has been removed from the source. The Docker
 runtime still ships the native headless OPS client. Legacy broker and model

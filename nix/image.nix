@@ -1,10 +1,9 @@
-{ pkgs, src, reverie, console, memory, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
+{ pkgs, src, reverie, console, runtime, entrypoint, runtimePackages ? null, worker ? false, browserRuntime ? null, chatLanguageTools ? null, rootlessDocker ? null, resourceReplacement ? false, memoryGuestCapsule ? null, perfGuestCapsule ? null }:
 let
   uid = if rootlessDocker == null then 2000 else rootlessDocker.uid;
   gid = if rootlessDocker == null then 2000 else rootlessDocker.gid;
   idmap = import ./worker-idmap.nix { inherit pkgs; };
   imageLaunchers = if worker then reverie.imageLaunchers else reverie;
-  imageRuntime = if worker then runtime.worker else runtime;
   laptopTools = if runtimePackages == null then import ./laptop-tools.nix { inherit pkgs src; }
     else runtimePackages.laptopTools;
   childArtifacts = if runtimePackages == null then import ./policy-artifacts.nix { inherit pkgs src; }
@@ -26,7 +25,7 @@ let
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/ssl/certs/ca-certificates.crt
     ln -s ${runtime.cacert}/etc/ssl/certs/ca-bundle.crt $out/etc/pki/tls/certs/ca-bundle.crt
   '';
-  baseContents = [ imageRuntime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
+  baseContents = [ runtime pkgs.dockerTools.binSh pkgs.dockerTools.usrBinEnv
     caCertificates pkgs.sudo pkgs.tini ]
     ++ pkgs.lib.optional (!worker) runtime.voiceService
     ++ pkgs.lib.optionals worker ([ pkgs.nix nixPrepare laptopTools ]
@@ -135,7 +134,6 @@ pkgs.dockerTools.buildLayeredImage rec {
     ln -s ${console}/lib/reverie opt/reverie/console
     mkdir -p opt/reverie/apps
     ln -s ${console}/lib/reverie opt/reverie/apps/web
-    ${pkgs.lib.optionalString (!worker) "ln -s ${memory} opt/reverie/python"}
     ln -s ${entrypoint} usr/local/bin/reverie-start
     ${pkgs.lib.optionalString (worker && claudeInterpreter != null) ''
       mkdir -p .${builtins.dirOf claudeInterpreter}
@@ -168,22 +166,22 @@ pkgs.dockerTools.buildLayeredImage rec {
       done
     ''}
     chmod 1777 tmp
-  '' + pkgs.lib.optionalString worker ''
-    mkdir -p etc/nix nix/store/.links target/nix
     if grep -E '/[^/]+-python[^/]*-reverie-memory-' ${nixClosure}/store-paths >&2; then
-      echo "Legacy Reverie Python package reached the worker closure" >&2
+      echo "Legacy Reverie Python package reached the image closure" >&2
       exit 1
     fi
     # The optional Chromium runtime still brings in Python through GStreamer.
     ${pkgs.lib.optionalString (browserRuntime == null) ''}
       if grep -E '/[^/]+-(python|pypy)[0-9.]*(-|$)' ${nixClosure}/store-paths >&2; then
-        echo "Python reached the worker image runtime closure" >&2
+        echo "Python reached the image runtime closure" >&2
         exit 1
       fi
     ''}
     for path in opt/reverie/python bin/{python,python3,${pkgs.python3.executable},pytest,py.test}; do
-      test ! -e "$path" && test ! -L "$path" || { echo "Unexpected worker image path: $path" >&2; exit 1; }
+      test ! -e "$path" && test ! -L "$path" || { echo "Unexpected image path: $path" >&2; exit 1; }
     done
+  '' + pkgs.lib.optionalString worker ''
+    mkdir -p etc/nix nix/store/.links target/nix
     cp ${nixClosure}/registration etc/reverie-nix-registration
     ln -s ${nixBase} etc/reverie-nix-base
     cat > etc/nix/nix.conf <<'NIXCONF'

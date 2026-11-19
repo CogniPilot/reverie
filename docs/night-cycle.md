@@ -1,3 +1,5 @@
+> Historical instructions for a legacy deployment. See [runtime boundaries](host-runtime-retirement.md) for current Docker packaging.
+
 # Night cycle: consolidation and dreams on the local GPU
 
 `reverie-cycle` can run **nights only**: no planning and no day work, only each persistent agent's

@@ -1,3 +1,5 @@
+> Historical instructions for a legacy deployment. See [runtime boundaries](host-runtime-retirement.md) for current Docker packaging.
+
 # Stall watchdog for the local OpenCode agent
 
 The runtime watcher (`docs/runtime-watcher.md`) restarts an agent that **crashed**. The stall watchdog

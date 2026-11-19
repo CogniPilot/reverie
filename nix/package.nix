@@ -704,9 +704,9 @@ let
     };
   });
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
-  mkRuntime = name: legacyPackages: pkgs.buildEnv {
-    inherit name;
-    paths = [ console ] ++ legacyPackages ++ [ memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+  runtime = (pkgs.buildEnv {
+    name = "reverie-runtime";
+    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -714,9 +714,7 @@ let
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
     passthru = { inherit adminMemory cacert memoryJournalCli voiceService workerChild; };
-  };
-  workerRuntime = mkRuntime "reverie-worker-runtime" [];
-  runtime = (mkRuntime "reverie-runtime" [ memory ]) // { worker = workerRuntime; };
+  }).overrideAttrs (_: { disallowedRequisites = [ pkgs.python3 ]; });
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
   requestUpdate = pkgs.writeShellApplication {
@@ -750,8 +748,8 @@ let
     export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
     exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else "unversioned")} "$@"
   '') [ "claude" "codex" "opencode" ];
-  launcher = runtimeBundle: pkgs.writeShellScript "reverie-launcher" ''
-    export PATH=${installClis}/bin:${runtimeBundle}/bin:$PATH
+  launcher = pkgs.writeShellScript "reverie-launcher" ''
+    export PATH=${installClis}/bin:${runtime}/bin:$PATH
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
@@ -773,8 +771,8 @@ let
     fi
     exec ${console}/bin/reverie "$@"
   '';
-  launchers = runtimeBundle: pkgs.linkFarm "reverie-image-launchers" [
-    { name = "bin/reverie"; path = launcher runtimeBundle; }
+  imageLaunchers = pkgs.linkFarm "reverie-image-launchers" [
+    { name = "bin/reverie"; path = launcher; }
     { name = "bin/reverie-request-update"; path = "${requestUpdate}/bin/reverie-request-update"; }
     { name = "bin/reverie-install-clis"; path = "${installClis}/bin/reverie-install-clis"; }
   ];
@@ -783,10 +781,11 @@ let
   reverie = pkgs.runCommand "reverie-${manifest.version}" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
-    passthru = { inherit console memory runtime; imageLaunchers = launchers workerRuntime; };
+    passthru = { inherit console runtime imageLaunchers; };
+    disallowedRequisites = [ pkgs.python3 ];
   } ''
     mkdir -p "$out/bin"
-    cp -P ${launchers runtime}/bin/* "$out/bin/"
+    cp -P ${imageLaunchers}/bin/* "$out/bin/"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
@@ -822,10 +821,6 @@ let
     ln -s ${routinesNative}/bin/reverie-routines "$out/bin/reverie-routines"
     # Terminal session tool (list, info, attach, kill); works with or without the console running.
     ln -s ${muxNative}/bin/reverie-mux "$out/bin/reverie-mux"
-    for command in ${memory}/bin/reverie-*; do
-      makeWrapper "$command" "$out/bin/$(basename "$command")" \
-        --prefix PATH : ${runtime}/bin
-    done
   '';
 
 in { inherit reverie console memory memoryPackage runtime containerRuntime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
