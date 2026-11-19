@@ -142,7 +142,9 @@ jobs:
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
           export TMPDIR="$HOME/scratch/reverie/tmp"
           nix flake check --print-build-logs
-          nix develop --command nix shell .#reverie.runtime.adminMemory --command node --test tests/*.mjs
+          # The voice workflow runs the inference tests with its pinned model files.
+          shopt -s extglob
+          nix develop --command nix shell .#reverie.runtime.adminMemory --command node --test tests/!(test_native_kokoro|test_native_voice_fixture).mjs
           nix develop --command node --experimental-strip-types --test scripts/build-boxed-worker-image.test.mts
           nix build .#default --out-link "$HOME/scratch/reverie/build/app"
           "$HOME/scratch/reverie/build/app/bin/reverie" --version
