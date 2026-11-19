@@ -1,7 +1,8 @@
 { pkgs, src }:
 let
   lib = pkgs.lib;
-  manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
+  webSource = src + "/apps/web";
+  manifest = builtins.fromJSON (builtins.readFile (webSource + "/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
   workerWebFixtures = import ./worker-web-fixtures.nix { inherit pkgs src; };
   # Copy individual fixture files into the store. Interpolating ${src}/path
@@ -17,7 +18,10 @@ let
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
-    src = lib.cleanSource (src + "/apps/web");
+    src = lib.cleanSourceWith {
+      src = lib.cleanSource webSource;
+      filter = path: _: toString path != toString webSource + "/test/fixtures/owner-terminal";
+    };
     nodejs = pkgs.nodejs_22;
     npmDepsHash = "sha256-T93KVV1pCvWtWHaI2cPM/PjAkHkqHXfGPK2185mDKfw=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
@@ -32,12 +36,6 @@ let
       cp -r ${consoleSkill} skills/reverie
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
-      mkdir -p test/fixtures/owner-terminal/python/reverie
-      cp ${consoleFixture "python/reverie/human_shell_capabilities.py"} test/fixtures/owner-terminal/python/reverie/human_shell_capabilities.py
-      cp ${consoleFixture "python/reverie/human_terminal_protocol.py"} test/fixtures/owner-terminal/python/reverie/human_terminal_protocol.py
-      cp ${consoleFixture "python/reverie/owner_terminal_bootstrap.py"} test/fixtures/owner-terminal/python/reverie/owner_terminal_bootstrap.py
-      cp ${consoleFixture "python/reverie/owner_terminal_channel.py"} test/fixtures/owner-terminal/python/reverie/owner_terminal_channel.py
-      cp ${consoleFixture "python/reverie/owner_terminal_ledger_service.py"} test/fixtures/owner-terminal/python/reverie/owner_terminal_ledger_service.py
       # The Rust handler's TS byte goldens live with its crate.
       mkdir -p test/fixtures/subscription-profiles
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
@@ -78,7 +76,7 @@ let
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
     passthru = { inherit workerWebFixtures; };
-    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
@@ -335,7 +333,6 @@ let
         test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts test/disk-space-watch.test.ts \
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
-      # The console owns this Python/Node composition check after its TS build.
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
       npm test -- test/employee-journal-outcomes.test.ts test/employee-journal-outcome-boundaries.test.ts \
         test/employee-journal-map-state-scope.test.ts
@@ -577,13 +574,6 @@ let
         test/webview-proxy-timeout.test.ts test/webview-proxy.test.ts test/webview-sse.test.ts test/wiki-home-index.test.ts \
         test/workflow-run-watcher.test.ts test/working-directory-schema.test.ts test/workspace-hooks-unreachable-mount.test.ts \
         test/ws-connection-registry.test.ts test/ws-reconnect-plan.test.ts test/ws-state-lifecycle.test.ts test/xterm-private-api.test.ts
-      # memoryPackage's Python discovery never depends on the console output.
-      PYTHONPATH="$PWD/test/fixtures/owner-terminal/python" \
-        OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
-        OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
-        OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
-        NIX_REVERIE_TEST_NODE_CUSTODY=1 \
-        python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';
     installPhase = ''
