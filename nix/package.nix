@@ -1,9 +1,10 @@
 { pkgs, src }:
 let
   lib = pkgs.lib;
-  manifest = builtins.fromJSON (builtins.readFile (src + "/apps/web/package.json"));
+  webSource = src + "/apps/web";
+  manifest = builtins.fromJSON (builtins.readFile (webSource + "/package.json"));
   consoleSkill = lib.cleanSource (src + "/skills/reverie");
-  goalPythonFixture = lib.cleanSource (src + "/python/reverie");
+  workerWebFixtures = import ./worker-web-fixtures.nix { inherit pkgs src; };
   # Copy individual fixture files into the store. Interpolating ${src}/path
   # otherwise makes every repository edit an input to the console derivation.
   # Use the original snapshot for the selected files so read-only flake check
@@ -17,7 +18,10 @@ let
   console = pkgs.buildNpmPackage {
     pname = "reverie-console";
     version = manifest.version;
-    src = lib.cleanSource (src + "/apps/web");
+    src = lib.cleanSourceWith {
+      src = lib.cleanSource webSource;
+      filter = path: _: toString path != toString webSource + "/test/fixtures/owner-terminal";
+    };
     nodejs = pkgs.nodejs_22;
     npmDepsHash = "sha256-T93KVV1pCvWtWHaI2cPM/PjAkHkqHXfGPK2185mDKfw=";
     nativeBuildInputs = [ pkgs.python3 pkgs.makeWrapper ];
@@ -32,11 +36,6 @@ let
       cp -r ${consoleSkill} skills/reverie
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
-      mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
-      cp -r ${goalPythonFixture} test/fixtures/goal-source/python/reverie
-      cp ${consoleFixture "tests/__init__.py"} test/fixtures/goal-source/tests/__init__.py
-      cp ${consoleFixture "tests/goal_private_fixture.py"} test/fixtures/goal-source/tests/goal_private_fixture.py
-      cp ${consoleFixture "tests/goal_broker_fixture.py"} test/fixtures/goal-source/tests/goal_broker_fixture.py
       # The Rust handler's TS byte goldens live with its crate.
       mkdir -p test/fixtures/subscription-profiles
       cp ${consoleFixture "crates/reverie-routes/tests/fixtures/subscription-profiles/cases.json"} test/fixtures/subscription-profiles/cases.json
@@ -76,10 +75,15 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    passthru = { inherit workerWebFixtures; };
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
       export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
+      export NIX_TEST_GOAL_WORKER_EXEC=${workerExec}/bin/reverie-worker-exec
+      export NIX_TEST_GOAL_FIXTURE=${workerWebFixtures}/bin/reverie-goal-custody-fixture
+      export NIX_TEST_VIEWER_FIXTURE=${workerWebFixtures}/bin/reverie-viewer-fixture
+      export NIX_TEST_VIEWER_WORKSPACES=${leaseCli}/bin/reverie-workspaces
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
@@ -237,7 +241,7 @@ let
         test/goal-canonical-authority.test.ts test/goal-manager-verification.test.ts \
         test/goal-broker-auth.test.ts test/goal-nonce-store.test.ts test/goal-nonce-independent.test.ts test/goal-nonce-successor.test.ts \
         test/cli-goal.test.ts test/goal-canonical-transport.test.ts test/goal-combined-server.test.ts test/goal-server-assembly.test.ts \
-        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts test/goal-source-fixture.test.ts \
+        test/goal-private-launch.test.ts test/goal-owner-only-launch.test.ts test/goal-human-policy-integration.test.ts test/goal-custody-channel.test.ts test/goal-bootstrap-order.test.ts \
         test/owner-auth-fresh-enforce.test.ts test/routines-owner-middleware.test.ts \
         test/routes/status-page-auth.test.ts test/routes/status-page-routes.test.ts test/routes/html-view-routes.test.ts \
         test/routine-announcement-room.test.ts test/routine-announcement-server.test.ts \
@@ -329,7 +333,6 @@ let
         test/bot-watches-runtime.test.ts test/bot-watch-durable-chat.test.ts test/bot-watch-state.test.ts test/disk-space-watch.test.ts \
         test/github-repository-watch-source.test.ts test/github-repository-watches.test.ts \
         test/github-repository-watch-routes.test.ts test/chat-bot-commit-authority.test.ts
-      # The console owns this Python/Node composition check after its TS build.
       npm test -- test/owner-terminal-routes.test.ts test/owner-terminal-ui.test.ts
       npm test -- test/employee-journal-outcomes.test.ts test/employee-journal-outcome-boundaries.test.ts \
         test/employee-journal-map-state-scope.test.ts
@@ -571,13 +574,6 @@ let
         test/webview-proxy-timeout.test.ts test/webview-proxy.test.ts test/webview-sse.test.ts test/wiki-home-index.test.ts \
         test/workflow-run-watcher.test.ts test/working-directory-schema.test.ts test/workspace-hooks-unreachable-mount.test.ts \
         test/ws-connection-registry.test.ts test/ws-reconnect-plan.test.ts test/ws-state-lifecycle.test.ts test/xterm-private-api.test.ts
-      # memoryPackage's Python discovery never depends on the console output.
-      PYTHONPATH="$PWD/test/fixtures/goal-source/python" \
-        OWN_TEST_NODE="${pkgs.nodejs_22}/bin/node" \
-        OWNER_TERMINAL_TEST_DIST="$PWD/dist" \
-        OWNER_TERMINAL_TEST_CONNECTOR="$PWD/scripts/connect-owner-terminal.mjs" \
-        NIX_REVERIE_TEST_NODE_CUSTODY=1 \
-        python3 -B test/fixtures/owner-terminal/test_bridge.py
       runHook postCheck
     '';
     installPhase = ''

@@ -4,26 +4,25 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Session } from './src/session.js';
-import { TmuxManager } from './src/tmux-manager.js';
-import { CompanyStore } from './src/company-store.js';
-import { CompanyService } from './src/company-service.js';
-import { WorkerViewerReconnect, registerWorkerViewerReconnect } from './src/worker-viewer-reconnect.js';
-import { ChatroomDelivery, WAKE_LINE } from './src/chatroom-delivery.js';
-import { PendingDeliveryStore } from './src/chatroom-pending-delivery.js';
-import { expertRuntimeRecipe } from './src/expert-runtime-recipe.js';
-import { recordOwnerStop, ownerStopPending, useOwnerStopJournal } from './src/owner-stop-journal.js';
+import { Session } from '../../src/session.js';
+import { TmuxManager } from '../../src/tmux-manager.js';
+import { CompanyStore } from '../../src/company-store.js';
+import { CompanyService } from '../../src/company-service.js';
+import { WorkerViewerReconnect, registerWorkerViewerReconnect } from '../../src/worker-viewer-reconnect.js';
+import { ChatroomDelivery, WAKE_LINE } from '../../src/chatroom-delivery.js';
+import { PendingDeliveryStore } from '../../src/chatroom-pending-delivery.js';
+import { expertRuntimeRecipe } from '../../src/expert-runtime-recipe.js';
+import { recordOwnerStop, ownerStopPending, useOwnerStopJournal } from '../../src/owner-stop-journal.js';
 const root = process.env.FIXTURE_ROOT!,
   out = process.env.FIXTURE_RESULT!,
   sid = process.env.FIXTURE_SID!;
 const tmux = process.env.FIXTURE_TMUX!,
-  python = process.env.FIXTURE_PYTHON!,
+  testBinary = process.env.FIXTURE_VIEWER_TEST_BIN!,
   outer = process.env.REVERIE_TMUX_SOCKET!;
 const name = 'reverie-' + sid.slice(0, 8),
   work = join(root, 'work');
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const trace: any = {
-  variant: process.env.FIXTURE_VARIANT,
   proofBoundary:
     'Real owned tmux/PTY + worker frame client/handler, deterministic interactive provider stand-in; metadata-only engine adapter. No actual Docker or authenticated commercial provider qualification.',
   events: [],
@@ -125,16 +124,17 @@ try {
     const pid = Number(native('display-message', '-p', '-t', name, '#{pane_pid}'));
     assert.notEqual(pid, providerPID);
     const start = birth(pid);
-    execFileSync(python, [
-      '-I',
-      '-B',
-      '-c',
-      'import os,signal,sys;pid=int(sys.argv[1]);expected=sys.argv[2];fd=os.pidfd_open(pid);assert open("/proc/"+str(pid)+"/stat").read().rsplit(")",1)[1].split()[19]==expected;signal.pidfd_send_signal(fd,signal.SIGTERM)',
-      String(pid),
-      start,
-    ]);
+    execFileSync(
+      testBinary,
+      [
+        '--ignored',
+        '--exact',
+        'worker_laptop::tests::existing_viewer::transport::web_fixture::stop_web_viewer_fixture_client',
+      ],
+      { env: { ...process.env, FIXTURE_VIEWER_PID: String(pid), FIXTURE_VIEWER_START: start }, timeout: 5000 }
+    );
     await wait(() => native('display-message', '-p', '-t', name, '#{pane_dead}') === '1', 5000, 'viewer exit');
-    session!.setPaneExit({ status: 143, at: Date.now() });
+    session!.setPaneExit({ status: 137, at: Date.now() });
     assert.equal(session!.runtimeHealth, 'disconnected');
     assert(health());
   };

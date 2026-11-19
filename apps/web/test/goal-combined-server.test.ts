@@ -4,10 +4,9 @@
  * No listener, actual worker launch, real credential or production bootstrap. */
 import * as nativeFs from 'node:fs';
 import fs from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { goalFixtureRepository } from './goal-source-fixture.js';
+import { syntheticGoalForward, syntheticGoalKey as key } from './helpers/goal-proof-fixture.js';
 import { Command } from 'commander';
 import type { FastifyInstance } from 'fastify';
 import rawInject from 'light-my-request';
@@ -26,7 +25,6 @@ import type { AgentDeps, RequestOptions } from '../src/cli-agent.js';
 import { registerGoalCommands } from '../src/cli-goal.js';
 import { goalClientTarget } from '../src/goal-client-target.js';
 
-const repository = goalFixtureRepository(import.meta.dirname);
 const worker = 'w:._-'.padEnd(100, 'w'),
   verifier = 'v:._-'.padEnd(100, 'v'),
   longGoal = 'g:._-'.padEnd(100, 'g'),
@@ -34,7 +32,6 @@ const worker = 'w:._-'.padEnd(100, 'w'),
 const workerSession = '11111111-2222-3333-4444-555555555555';
 const verifierSession = '66666666-7777-4888-8999-000000000000';
 const storeId = '11111111-2222-4333-8444-555555555555';
-const key = Buffer.from('not-a-deployment-key-synthetic-01!');
 const credentials = { username: 'SYNTHETIC_COMBINED_OWNER', password: 'synthetic-Owner!81-combined' };
 type Internal = {
   app: FastifyInstance;
@@ -43,13 +40,7 @@ type Internal = {
   chatroomService: { retired: { sessionId: string }[] };
   setupRoutes(): Promise<void>;
 };
-type Forwarded = {
-  method: 'GET' | 'POST';
-  target: string;
-  body: string;
-  headers: Record<string, string>;
-  refused?: number;
-};
+type Forwarded = ReturnType<typeof syntheticGoalForward<RequestOptions['method']>>;
 
 describe('combined actual Goal server with synthetic proof transport, durable ledger and supported CLI', () => {
   let root: string,
@@ -72,25 +63,15 @@ describe('combined actual Goal server with synthetic proof transport, durable le
     const query = new URLSearchParams();
     for (const [name, value] of Object.entries(options.query ?? {}))
       if (value !== undefined) query.set(name, String(value));
-    const result = spawnSync('python3', ['-m', 'tests.goal_broker_fixture', '--component-proof'], {
-      cwd: repository,
-      env: { PATH: process.env.PATH, PYTHONPATH: join(repository, 'python'), PYTHONDONTWRITEBYTECODE: '1' },
-      input: JSON.stringify({
-        sessionId,
-        generation: 1,
-        now: 100_000,
-        nonce: (++nonceSequence).toString(16).padStart(32, '0'),
-        method: options.method,
-        target: goalClientTarget(options) ?? options.path + (query.size ? '?' + query : ''),
-        body: options.body === undefined ? '' : JSON.stringify(options.body),
-        headers,
-      }),
-      encoding: 'utf8',
-      timeout: 8000,
-      maxBuffer: 128 * 1024,
+    return syntheticGoalForward({
+      sessionId,
+      generation: 1,
+      nonce: (++nonceSequence).toString(16).padStart(32, '0'),
+      method: options.method,
+      target: goalClientTarget(options) ?? options.path + (query.size ? '?' + query : ''),
+      body: options.body === undefined ? '' : JSON.stringify(options.body),
+      headers,
     });
-    expect(result.status, result.stderr).toBe(0);
-    return JSON.parse(result.stdout) as Forwarded;
   }
   const inject = (proof: Forwarded, extra: Record<string, string> = {}, body = proof.body) => {
     expect(proof.refused).toBeUndefined();
