@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { renderClaudeLaunch } from '../src/utils/claude-launch.js';
@@ -8,11 +8,11 @@ import { buildSpawnCommandFromRegistry } from '../src/session-cli-registry-bridg
 import { getCli, resolveRegistry } from '../src/config/cli-registry/registry.js';
 import { CliEntrySchema } from '../src/config/cli-registry/schema.js';
 import { claudeDockerPaneCommand } from '../src/tmux-manager.js';
+import { nativeClaudeBackend as native } from './helpers/capture-claude-launch.js';
 
 const SID = '00000008-0008-4000-8000-000000000008';
 const OLD = '00000009-0009-4000-8000-000000000009';
 const SEED = '00000010-0010-4000-8000-000000000010';
-const native = (process.env.PATH ?? '').split(delimiter).map((path) => join(path, 'reverie-backend')).find(existsSync);
 if (!native) throw new Error('Run Claude launch tests with the packaged reverie-backend on PATH');
 const quote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 let root: string, home: string, config: string, cwd: string, log: string;

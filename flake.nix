@@ -84,7 +84,10 @@
             peerArtifact = self.packages.${system}.leasePeer;
           };
           cleanupObservations = import ./nix/cleanup-observations.nix { inherit pkgs; src = source; };
-          adminHarnessAddon = import ./nix/admin-harness-addon.nix { inherit pkgs; src = source; };
+          adminHarnessAddon = import ./nix/admin-harness-addon.nix {
+            inherit pkgs;
+            inherit (packages) hands handsTools;
+          };
           ownerTerminalCore = import ./nix/owner-terminal-core.nix { inherit pkgs; src = source; };
           humanTerminalToolkit = import ./nix/human-terminal-toolkit.nix { inherit pkgs; src = source; };
           # Optional diagnostic candidate only; never part of default runtime/image.
@@ -117,7 +120,6 @@
             inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
           };
-          workerPython = import ./nix/worker-python.nix { inherit pkgs; };
           workerPerfImageTransport = pkgs.skopeo;
           browserRuntime = import ./nix/browser-runtime.nix { inherit pkgs; src = source; };
           workerGpuToolkit = pkgs.nvidia-container-toolkit;
@@ -248,6 +250,12 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update prune pruneR12 cleanupObservations ownerTerminalCore;
+          inherit (packages.console) workerWebFixtures;
+          ownerTerminalBridge = import ./nix/owner-terminal-bridge-check.nix {
+            inherit pkgs;
+            src = source;
+            inherit (packages) console ownerTerminalCore;
+          };
           # Legacy attach transport remains a component-only CI fixture.
           # It is not an installable public package, app or host module.
           nativeViewerFixtureImage = import ./nix/worker-viewer-image.nix {
@@ -270,7 +278,6 @@
 
           workerChildImageAnnexContexts = assert import ./tests/worker_child_image_annex_eval.nix;
             pkgs.runCommand "reverie-worker-child-annex-context-check" { } "touch $out";
-          workerPythonRuntime = import ./nix/worker-python-check.nix { inherit pkgs; python = packages.workerPython; };
           workerPerfTools = let perf = import ./nix/worker-perf.nix { inherit pkgs; };
             in assert builtins.elem perf (import ./nix/worker-base-tools.nix { inherit pkgs; });
               pkgs.runCommand "reverie-worker-perf-tool-check" { } ''
@@ -371,21 +378,15 @@
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
           '';
-          pillowSmoke = let
+          officePythonBoundary = let
             serviceClosure = pkgs.closureInfo { rootPaths = [ packages.memory ]; };
           in pkgs.runCommand "reverie-python-environment-boundary" { } ''
             for package in ${pkgs.python3Packages.pillow} ${pkgs.python3Packages.pytest}; do
               if grep -Fx "$package" "${serviceClosure}/store-paths"; then
-                echo "Laptop development package in the service Python closure" >&2
+                echo "Project development package in the office service Python closure" >&2
                 exit 1
               fi
             done
-            test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
-            test ! -e "${packages.workerPython}/${pkgs.python3.sitePackages}/reverie"
-            test ! -e "${packages.workerPython}/bin/reverie-runtime"
-            test ! -e "${packages.workerPython}/bin/reverie-cycle"
-            ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
-              -t "${source}" -s "${source}/tests" -p test_image_requirements.py
             touch "$out"
           '';
         });

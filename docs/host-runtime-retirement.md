@@ -21,6 +21,11 @@ its tests have been removed. Existing private data, account homes,
 journals, unknown operation fences and installed services are not altered by
 this source change. Actual deactivation needs a separate reviewed operation.
 
+The standalone controller that paused the website for an in-place host broker
+transport upgrade has also been removed. Existing maintenance policies,
+journals, and attempt records remain part of the old installation’s recovery
+history.
+
 The shared GPU publisher now lives at apps/container/gpu-telemetry.ts and is
 selected privately by the GPU image producer. CUDA/llama build inputs and the
 container supervisor remain. The reverie-local-model library still supplies

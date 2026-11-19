@@ -22,6 +22,18 @@ fn originals(fixture: &Fixture) -> Originals {
     originals_with_id(fixture, "existing-fixture")
 }
 fn originals_with_id(fixture: &Fixture, id: &str) -> Originals {
+    let (storage, plan, inspected) = observe_existing(fixture, id);
+    let request=WorkerRequest::decode(&serde_json::to_vec(&json!({"sessionId":SID,"cwd":"/workspace","command":"opencode","env":{},"cols":80,"rows":24})).unwrap(),&fixture.source).unwrap();
+    (storage, plan, request, inspected)
+}
+fn observe_existing(
+    fixture: &Fixture,
+    id: &str,
+) -> (
+    Box<LaunchStorage>,
+    ObservedCreatePlan,
+    ExistingLaptopInspection,
+) {
     let (storage, plan) = direct_resources(fixture);
     // The controlled engine answers the actual fixed derived-name inspect.
     // This file does not mint the sealed Host observation.
@@ -31,8 +43,7 @@ fn originals_with_id(fixture: &Fixture, id: &str) -> Originals {
         .inspect_existing(fixture.runtime(), end())
         .unwrap()
         .unwrap();
-    let request=WorkerRequest::decode(&serde_json::to_vec(&json!({"sessionId":SID,"cwd":"/workspace","command":"opencode","env":{},"cols":80,"rows":24})).unwrap(),&fixture.source).unwrap();
-    (storage, plan, request, inspected)
+    (storage, plan, inspected)
 }
 fn retain(fixture: &Fixture, originals: Originals) -> ExistingViewer {
     let (storage, plan, request, inspected) = originals;

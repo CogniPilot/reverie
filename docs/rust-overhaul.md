@@ -41,10 +41,11 @@ ability to use scientific Python inside an employee laptop.
 
 At `dcf331d29` the tracked tree contains 453 `.py` files. Of those, 204 are
 under `python/`, 226 are under `tests/`, and 23 are distributed across
-`scripts/`, `apps/`, `nix/` and `.github/`. The worker image still selects
-the compatibility interpreter in `nix/worker-python.nix`. Removing a console
-script registration alone leaves the interpreter and its other consumers in
-that image.
+`scripts/`, `apps/`, `nix/` and `.github/`. Project Python tools now belong in
+project development environments. The standard worker image checks its
+registered Nix closure for a bundled interpreter. The browser worker still
+has a transitive interpreter through Chromium's GStreamer dependency, and the
+legacy office image still has its own Python environment.
 
 ## Replacement cohorts
 
@@ -52,7 +53,7 @@ that image.
 | --- | --- | --- |
 | Memory-limit helper | `soft_limit_helper.py`, `worker_memory_authority.py`; fixed root socket protocol | Duplicate-key/input rejection, root policy custody, peer/PID/cgroup identity, bounded nonblocking write, uncertain effects; Nix selects Rust executable |
 | Shared host primitives | Linux file/descriptor custody, process identities, bounded observers and engine metadata | Typed native interfaces, narrowly reviewed unsafe wrappers, race/failure tests; reuse across services without weakening checks |
-| Broker and service lifecycle | `worker.py`, `worker_service.py`, transport upgrade/maintenance, resume and watchdog paths | Same admission and desired-running behavior, retained provider continuity, explicit upgrade and rollback/reconciliation; no generic command API |
+| Broker and service lifecycle | `worker.py`, `worker_service.py`, transport upgrade, resume and watchdog paths | Same admission and desired-running behavior, retained provider continuity, explicit upgrade and rollback/reconciliation; no generic command API |
 | Recovery attempt ledger | The Rust store and bounded Console child preserve the existing SQLite schema, timestamps, fingerprints and receipt fields | Retain one writer, the three-attempt rolling budget, restart reconciliation and unresolved-attempt fencing |
 | Resource operations and storage | `worker_resource_*`, `employee_resource_profiles.py`, `laptop_resource_operations.py`, home/Nix migration | Existing store schema/CAS/locks/leases/reservations, crash recovery, no replay of uncertain effects, no competing source of truth |
 | Leased task workspaces | The packaged Rust `reverie-workspaces` uses the existing operation locks, task metadata and lease records for allocation, supervised commands, handoff, renewal and guarded cleanup | Migrate the remaining Python imports in browser jobs, isolation and acceptance tooling before deleting `workspaces.py` |

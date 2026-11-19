@@ -301,6 +301,35 @@ fn actual_hook_checks_fixed_session_and_only_injects_host_secret_after_validatio
     assert!(!request.contains("forged"));
 }
 #[test]
+fn restricted_office_refuses_goal_routes_before_reading_credentials() {
+    let fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
+    fs::remove_file(fixture.root.join("console/.env")).unwrap();
+    let _phone = fixture.bind("phone");
+    for (method, target, body) in [
+        (
+            "GET",
+            "/api/goal-metadata/worker:sample?grantId=g:1",
+            "".as_bytes(),
+        ),
+        ("GET", "/api/goal-metadata/..?grantId=..", b""),
+        ("GET", "/api/goal-metadata/worker%3Asample", b""),
+        ("GET", "/api/goals/goal?owner=true", b""),
+        ("POST", "/api/goals", b"{}"),
+        ("POST", "/api/goals/goal/transitions", b"{}"),
+        ("POST", "/api/goal-grants/grant/revoke", b"{}"),
+        ("POST", "/api/goal-unblock-proofs/proof/revoke", b"{}"),
+    ] {
+        for headers in ["", "X-Reverie-Goal-Assertion: synthetic\r\n"] {
+            assert_eq!(
+                status(&fixture.request("phone", method, target, body, headers)),
+                403,
+                "{method} {target}"
+            );
+        }
+    }
+}
+
+#[test]
 fn unavailable_named_adapters_and_reserved_paths_never_read_host_credentials_or_forward() {
     let fixture = Fixture::new("127.0.0.1:9".parse().unwrap());
     fs::remove_file(fixture.root.join("console/.env")).unwrap();

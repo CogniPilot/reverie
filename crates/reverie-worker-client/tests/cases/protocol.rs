@@ -1,5 +1,7 @@
 use crate::support::*;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::{PermissionsExt, symlink};
@@ -12,6 +14,44 @@ fn storage_status_is_discoverable_without_connecting_or_selecting_a_session() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     assert!(help.contains("storage-status"));
+    tree.no_connection();
+}
+
+#[test]
+fn installed_manifest_matches_the_selected_immutable_elf() {
+    let Some(manifest) = std::env::var_os("NIX_REVERIE_TEST_RESOURCE_CLIENT_MANIFEST") else {
+        assert!(std::env::var_os("NIX_REVERIE_TEST_WORKER_EXEC").is_none());
+        return;
+    };
+    let selected = binary();
+    assert!(selected.starts_with("/nix/store"));
+    assert_eq!(selected.canonicalize().unwrap(), selected);
+    assert_eq!(
+        fs::metadata(selected).unwrap().permissions().mode() & 0o222,
+        0
+    );
+    let elf = fs::read(selected).unwrap();
+    assert!(elf.starts_with(b"\x7fELF"));
+    let manifest: Value = serde_json::from_slice(&fs::read(manifest).unwrap()).unwrap();
+    assert_eq!(
+        manifest,
+        json!({
+            "version": 2,
+            "purpose": "resource-replacement-native-client-v2",
+            "executable": selected,
+            "executableSHA256": format!("{:x}", Sha256::digest(&elf)),
+            "argvPrefix": [selected],
+            "brokerWireVersion": 1,
+        })
+    );
+    let tree = Tree::new();
+    let mut command = tree.command(&["--help"]);
+    command
+        .current_dir(&tree.root)
+        .env("PYTHONPATH", &tree.root)
+        .env("PYTHONHOME", &tree.root)
+        .env("PATH", "/unavailable");
+    assert!(Process::spawn(&mut command).wait().status.success());
     tree.no_connection();
 }
 
@@ -270,7 +310,7 @@ fn fragmented_custody_response_never_renews_fixed_deadline() {
 fn path_and_symlink_launches_normalize_exact_kernel_argv_without_new_pid() {
     let tree = Tree::new();
     let alias = tree.root.join("alias");
-    symlink(BIN, &alias).unwrap();
+    symlink(binary(), &alias).unwrap();
     for via_path in [false, true] {
         let mut command = if via_path {
             std::process::Command::new("alias")
@@ -293,12 +333,13 @@ fn path_and_symlink_launches_normalize_exact_kernel_argv_without_new_pid() {
         let proc = std::path::PathBuf::from(format!("/proc/{}", child.child.id()));
         assert_eq!(
             std::fs::read_link(proc.join("exe")).unwrap(),
-            std::fs::canonicalize(BIN).unwrap()
+            binary().canonicalize().unwrap()
         );
         let argv = std::fs::read(proc.join("cmdline")).unwrap();
         assert_eq!(
             argv.split(|b| *b == 0).next().unwrap(),
-            std::fs::canonicalize(BIN)
+            binary()
+                .canonicalize()
                 .unwrap()
                 .as_os_str()
                 .as_encoded_bytes()
