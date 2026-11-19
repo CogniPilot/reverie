@@ -34,7 +34,6 @@ UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 STORE = re.compile(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+")
 CID = re.compile(r"[0-9a-f]{64}")
 MAX_ENTRIES = 4096
-MAX_BYTES = 8 * 1024 * 1024
 GIB = 1024**3
 OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
 OFFLINE_EVIDENCE_SCOPE = "OFFLINE_IMAGE_TOOL_SHELL"
@@ -89,34 +88,6 @@ def _parent(path):
             os.close(fd)
 
 
-def _private_bytes(path, limit=MAX_BYTES):
-    path = Path(path)
-    need(path.is_absolute() and path == path.resolve(), "canonical private input required")
-    with _parent(path) as (parent, name):
-        return _private_at(parent, name, limit)
-
-
-def _private_at(parent, name, limit):
-    fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=parent)
-    try:
-        before = os.fstat(fd)
-        need(stat.S_ISREG(before.st_mode) and before.st_uid == os.getuid()
-             and before.st_nlink == 1 and stat.S_IMODE(before.st_mode) == 0o600
-             and before.st_size <= limit, "bounded owner0600 input required")
-        raw = bytearray()
-        while len(raw) <= limit:
-            part = os.read(fd, min(65536, limit + 1 - len(raw)))
-            if not part:
-                break
-            raw.extend(part)
-        stamp = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
-        need(len(raw) == before.st_size
-             and stamp(before) == stamp(os.fstat(fd)) == stamp(os.stat(name, dir_fd=parent, follow_symlinks=False)), "input changed")
-        return bytes(raw)
-    finally:
-        os.close(fd)
-
-
 def _json(raw):
     def unique(pairs):
         result = {}
@@ -129,11 +100,11 @@ def _json(raw):
 
 
 def _native_observation(action, **fields):
-    request = {"action": action, **fields}
+    request = {action: fields}
     try:
         result = subprocess.run(
             ["reverie-admin-memory", f"--offline-store-qualification-worker={os.getpid()}"],
-            input=json.dumps(request, allow_nan=False).encode(),
+            input=json.dumps(request, separators=(",", ":"), allow_nan=False).encode(),
             capture_output=True, check=True, start_new_session=True, timeout=20,
         )
         reply = _json(result.stdout)
@@ -141,10 +112,14 @@ def _native_observation(action, **fields):
         if "error" not in reply:
             return base64.b64decode(reply["bytes"], validate=True), reply
     except (OSError, subprocess.SubprocessError, ValueError, KeyError) as error:
-        raise Refused("native offline-store observation could not be completed") from error
+        raise Refused(f"native offline-store {action} observation could not be completed") from error
     if reply.get("errno") is not None:
         raise OSError(reply["errno"], os.strerror(reply["errno"]))
     raise Refused(reply["error"])
+
+
+def _native_path(path):
+    return base64.b64encode(os.fsencode(path)).decode("ascii")
 
 
 def _sync_parent(path):
@@ -345,32 +320,37 @@ class DockerEngine:
 
 
 class OfflineStoreMaintenance:
-    def __init__(self, config_path, target_path, *, engine=None, statvfs=os.statvfs,
+    def __init__(self, config_path, target_path, *, engine=None,
                  wall=time.time, clock=time.monotonic, sleep=time.sleep):
         self.config_path, self.target_path = Path(config_path), Path(target_path)
         self.engine = engine
-        self.statvfs, self.wall, self.clock, self.sleep = statvfs, wall, clock, sleep
+        self.wall, self.clock, self.sleep = wall, clock, sleep
 
     def _target(self):
-        raw, reply = _native_observation("target", target=str(self.target_path), now=self.wall())
+        raw, reply = _native_observation("target", target=_native_path(self.target_path), now=self.wall())
         need(sha(raw) == reply["targetDigest"], "qualified target bytes changed")
         target = _json(raw)
         need(target["expiresAtEpoch"] > self.wall(), "target qualification expired")
         return target, reply["targetDigest"], reply["evidencePaths"]
 
     def _budget(self, config, target):
-        b = target["budget"]
-        need(type(b) is dict and set(b) == {"fullClosureAllocatedBytes", "overheadBytes", "mainFloorBytes", "scratchFloorBytes"}
-             and all(type(v) is int and v > 0 for v in b.values()), "finite operator capacity model required")
-        charge = 3 * b["fullClosureAllocatedBytes"] * len(target["cohort"]) + b["overheadBytes"]
-        main = self.statvfs(config["stateRoot"]); scratch = self.statvfs(config["scratchRoot"])
-        need(main.f_bavail * main.f_frsize - charge >= b["mainFloorBytes"]
-             and scratch.f_bavail * scratch.f_frsize >= b["scratchFloorBytes"], "capacity model/floor unavailable")
-        return {"grossModelBytes": charge, "mainFloorBytes": b["mainFloorBytes"],
-                "scratchFloorBytes": b["scratchFloorBytes"], "enforcement": "MODEL_NOT_QUOTA_NO_GC_OR_DEDUP_CREDIT"}
+        raw, _ = _native_observation(
+            "capacity", budget=target["budget"], cohort_size=len(target["cohort"]),
+            state=_native_path(config["stateRoot"]), scratch=_native_path(config["scratchRoot"]),
+        )
+        return _json(raw)
+
+    def _cohort(self, config, config_digest, target_digest, employee=None):
+        raw, _ = _native_observation(
+            "cohort", company=_native_path(config["companyFile"]), employee=employee,
+            config={"path": _native_path(self.config_path), "digest": config_digest},
+            target={"path": _native_path(self.target_path), "digest": target_digest},
+        )
+        return _json(raw)
 
     def _snapshot(self, employee_id):
-        raw = _private_bytes(self.config_path)
+        raw, _ = _native_observation("config", config=_native_path(self.config_path))
+        config_digest = sha(raw)
         from .worker import validate_config
         config = validate_config(_json(raw))
         need(config.get("uid") == os.getuid() and os.getuid() != 0, "ordinary configured host owner required")
@@ -388,18 +368,7 @@ class OfflineStoreMaintenance:
              and self.engine.base_target(target["validationContainerId"]) == target["baseTarget"], "qualified image base changed")
         if target.get("validationScope") == OFFLINE_IMAGE_SCOPE:
             self._offline_image_validation(validation, config, target["engineSocket"])
-        company = read_metadata(config["companyFile"], config["uid"])
-        selected = None
-        for admitted in target["cohort"]:
-            matches = [e for e in company["employees"] if e.get("id") == admitted["employeeId"]]
-            need(len(matches) == 1, "current employee binding unavailable")
-            e = matches[0]
-            need(e.get("sessionId") == admitted["sessionId"] and e.get("sessionGeneration") == admitted["sessionGeneration"]
-                 and e.get("desiredRunning") is False and e.get("onVacation") is True
-                 and not e.get("bindingMigration") and sha(canonical(e)) == admitted["employeeDigest"], "offline employee/cohort changed")
-            if e["id"] == employee_id:
-                selected = e
-        need(selected is not None, "employee is outside the admitted offline cohort")
+        selected = self._cohort(config, config_digest, target_digest, employee_id)
         paths = storage_paths(config, selected["sessionId"])
         need(paths.kind == "employee" and paths.identity == employee_id, "current canonical employee store required")
         validate_storage(config, paths)
@@ -444,8 +413,8 @@ class OfflineStoreMaintenance:
         stopped = sorted(item["Id"] for item in containers
                          if any(m.get("Type") == "bind" and m.get("Source") in (str(paths.home), str(paths.nix))
                                 for m in item.get("Mounts", [])))
-        return config, target, paths, {"configDigest": sha(raw), "targetDigest": target_digest,
-            "employeeDigest": sha(canonical(selected)), "homeIdentity": _identity(paths.home.stat()),
+        return config, target, paths, {"configDigest": config_digest, "targetDigest": target_digest,
+            "employeeDigest": selected["employeeDigest"], "homeIdentity": _identity(paths.home.stat()),
             "nixIdentity": _identity(paths.nix.stat()), "lockIdentity": _identity(lock.lstat()),
             "sidLockIdentity": _identity(sid_lock.lstat()), "profiles": profiles, "budget": budget,
             "stoppedContainerIds": stopped,
@@ -492,20 +461,16 @@ class OfflineStoreMaintenance:
         config, target, paths, facts = self._snapshot(employee_id)
         audit = Path(config["stateRoot"]) / "offline-store-maintenance" / (operation_id + ".json")
         need(not audit.exists() and not audit.is_symlink(), "operation already recorded; never retry it")
-        body = {"version": 1, "kind": "reverie.offline-store.plan", "operationId": operation_id,
-                "employeeId": employee_id, "sessionId": paths.session, "imageId": target["imageId"], "facts": facts}
-        return dict(body, planDigest=sha(canonical(body)))
+        raw, _ = _native_observation(
+            "plan", employee=employee_id, operation=operation_id, session=paths.session,
+            image=target["imageId"], facts=facts,
+        )
+        return _json(raw)
 
     def _adjacent_admission(self, config, target, facts):
         """No fence resolver or engine call: repeat after slow native operations."""
         need(self.wall() < target["expiresAtEpoch"], "target qualification expired before effect")
-        need(sha(_private_bytes(self.config_path)) == facts["configDigest"]
-             and sha(_private_bytes(self.target_path)) == facts["targetDigest"], "adjacent target/config changed")
-        company = read_metadata(config["companyFile"], config["uid"])
-        for admitted in target["cohort"]:
-            rows = [e for e in company["employees"] if e.get("id") == admitted["employeeId"]]
-            need(len(rows) == 1 and sha(canonical(rows[0])) == admitted["employeeDigest"],
-                 "adjacent offline cohort changed")
+        self._cohort(config, facts["configDigest"], facts["targetDigest"])
         self._budget(config, target)
         need(self.wall() < target["expiresAtEpoch"], "target expired during admission")
 
@@ -568,13 +533,8 @@ class OfflineStoreMaintenance:
                     need(_identity(fence.lstat()) == marker_identity and read_metadata(fence, config["uid"]) == marker,
                          "own maintenance fence changed")
                     # Recheck real canonical flags without deleting/bypassing our own fence.
-                    company = read_metadata(config["companyFile"], config["uid"])
-                    for admitted in target["cohort"]:
-                        current = [e for e in company["employees"] if e.get("id") == admitted["employeeId"]]
-                        need(len(current) == 1 and sha(canonical(current[0])) == admitted["employeeDigest"], "offline intent or identity changed during seed")
-                    need(sha(_private_bytes(self.config_path)) == facts["configDigest"]
-                         and sha(_private_bytes(self.target_path)) == facts["targetDigest"]
-                         and self.wall() < target["expiresAtEpoch"], "target/config authority changed")
+                    self._cohort(config, facts["configDigest"], facts["targetDigest"])
+                    need(self.wall() < target["expiresAtEpoch"], "target qualification expired during seed")
                     self._budget(config, target)
                     state = self.engine.inspect(cid)
                     need(state.get("Id") == cid, "helper CID changed")
@@ -607,12 +567,7 @@ class OfflineStoreMaintenance:
                                 source = Path(m["Source"]).resolve()
                                 need(not any(_overlap(source, p, _mount_points()) for p in (paths.home, paths.nix)),
                                      "employee data acquired a foreign writer")
-                need(sha(_private_bytes(self.config_path)) == facts["configDigest"]
-                     and sha(_private_bytes(self.target_path)) == facts["targetDigest"], "final target/config changed")
-                final_company = read_metadata(config["companyFile"], config["uid"])
-                for admitted in target["cohort"]:
-                    rows = [e for e in final_company["employees"] if e.get("id") == admitted["employeeId"]]
-                    need(len(rows) == 1 and sha(canonical(rows[0])) == admitted["employeeDigest"], "final offline cohort changed")
+                self._cohort(config, facts["configDigest"], facts["targetDigest"])
                 result = {"version": 1, "kind": "reverie.offline-store.receipt", "state": "STORE_PREPARED",
                           "operationId": operation_id, "employeeId": employee_id, "sessionId": paths.session,
                           "imageId": target["imageId"], "helperContainerId": cid, "planDigest": plan["planDigest"],

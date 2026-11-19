@@ -21,7 +21,8 @@ Omitting the field preserves the existing current-agent validation mode.
 ## Qualification and private inputs
 
 Run on Linux as the configured non-root broker owner with the normal local Docker
-client. The installed command includes the Rust qualification worker. For source
+client. The installed command includes the Rust observer for qualification,
+private input reads, cohort and capacity admission, and plan digests. For source
 development, put the `runtime.adminMemory` Nix package on PATH when running
 `python -m reverie.worker_store_maintenance` in the native flake environment.
 There is no sudo, host-OS activation, image build/pull/load, or service restart.

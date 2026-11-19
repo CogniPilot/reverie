@@ -1,6 +1,8 @@
 //! Closed qualification evidence for the host's offline worker-store command.
+mod admission;
 mod evidence;
 mod profiles;
+pub use admission::{Capacity, CapacityBudget, CohortBinding, plan};
 pub use profiles::{InventoryError, ProfileEntry, ProfileInventory};
 
 use crate::legacy_json::decode_ops_private_bytes;
@@ -87,16 +89,24 @@ struct References {
 
 impl Target {
     pub fn decode(bytes: &[u8], now: f64) -> Result<Self> {
+        let target = Self::decode_qualified(bytes)?;
+        require(
+            now.is_finite() && target.expires_at_epoch.is_finite() && target.expires_at_epoch > now,
+            "target qualification expired",
+        )?;
+        Ok(target)
+    }
+
+    /// Structural reader for subsequent observations of the already pinned
+    /// target. The receipt commit still verifies the cohort after seed cleanup
+    /// even if the deadline for starting a new effect has passed.
+    pub fn decode_qualified(bytes: &[u8]) -> Result<Self> {
         let target: Self = decode(bytes, "closed validated target required")?;
         require(
             target.version == 1 && target.kind == "reverie.worker-store-target",
             "closed validated target required",
         )?;
         target.validate_image()?;
-        require(
-            now.is_finite() && target.expires_at_epoch.is_finite() && target.expires_at_epoch > now,
-            "target qualification expired",
-        )?;
         target.validate_cohort()?;
         Ok(target)
     }

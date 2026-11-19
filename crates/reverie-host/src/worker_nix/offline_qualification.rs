@@ -5,8 +5,10 @@ mod tests;
 use crate::native;
 pub use profiles::inventory;
 use reverie_contracts::worker_nix::offline_qualification::{
-    EvidenceKind, EvidenceReference, Receipt, Target,
+    Capacity, CapacityBudget, EvidenceKind, EvidenceReference, Receipt, Target,
 };
+use reverie_core::ids::ProfileEmployeeId;
+use reverie_store::storage_identity;
 use sha2::{Digest, Sha256};
 use std::{
     os::unix::fs::MetadataExt,
@@ -38,6 +40,58 @@ pub fn inspect(path: &Path, now: f64) -> Result<QualifiedTarget> {
         bytes,
         evidence_paths,
     })
+}
+
+pub fn config(path: &Path) -> Result<Vec<u8>> {
+    read(path, MAX_TARGET, nix::unistd::getuid().as_raw())
+}
+
+/// A path and the digest captured when the plan selected this control.
+pub struct ControlPin<'a> {
+    pub path: &'a Path,
+    pub digest: &'a str,
+}
+
+impl ControlPin<'_> {
+    fn read(self, uid: u32) -> Result<Vec<u8>> {
+        let bytes = read(self.path, MAX_TARGET, uid)?;
+        if format!("sha256:{:x}", Sha256::digest(&bytes)) != self.digest {
+            return Err("offline target/config changed".into());
+        }
+        Ok(bytes)
+    }
+}
+
+/// Reopen the pinned controls and trusted company metadata before
+/// admitting or rechecking the cohort. This issues no engine commands.
+pub fn cohort(
+    company: &Path,
+    config: ControlPin<'_>,
+    target: ControlPin<'_>,
+    employee: Option<&str>,
+) -> Result<Vec<u8>> {
+    let uid = nix::unistd::getuid().as_raw();
+    config.read(uid)?;
+    let target = Target::decode_qualified(&target.read(uid)?)?;
+    let company =
+        storage_identity::read_metadata(company, uid, storage_identity::DEFAULT_METADATA_LIMIT)?;
+    let employee = employee.map(ProfileEmployeeId::parse).transpose()?;
+    Ok(serde_json::to_vec(
+        &target.admit_cohort(&company, employee.as_ref())?,
+    )?)
+}
+
+pub fn capacity(
+    budget: CapacityBudget,
+    cohort_size: u8,
+    state: &Path,
+    scratch: &Path,
+) -> Result<Capacity> {
+    let available = |path: &Path| -> std::io::Result<u128> {
+        let sample = nix::sys::statvfs::statvfs(path)?;
+        Ok(u128::from(sample.blocks_available()) * u128::from(sample.fragment_size()))
+    };
+    Ok(budget.admit(cohort_size, available(state)?, available(scratch)?)?)
 }
 
 fn read(path: &Path, limit: usize, uid: u32) -> Result<Vec<u8>> {

@@ -1,15 +1,23 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use reverie_host::worker_nix::offline_qualification;
-use serde::Deserialize;
-use serde_json::{Value, json};
-use std::{io, path::PathBuf};
+use reverie_contracts::worker_nix::offline_qualification::{CapacityBudget, plan};
+use reverie_host::worker_nix::offline_qualification::{self, ControlPin};
+use serde::{Deserialize, Deserializer, de};
+use serde_json::{Value, json, value::RawValue};
+use std::{ffi::OsString, io, os::unix::ffi::OsStringExt, path::PathBuf};
 
+const PLAN_REQUEST_BOUND: usize = 16 * 1024 * 1024;
 const QUALIFICATION_REPLY_BOUND: usize = 16 * 1024 * 1024;
+const PLAN_REPLY_BOUND: usize = 17 * 1024 * 1024;
 
 #[derive(Deserialize)]
-#[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
+    Config {
+        #[serde(deserialize_with = "path")]
+        config: PathBuf,
+    },
     Target {
+        #[serde(deserialize_with = "path")]
         target: PathBuf,
         now: f64,
     },
@@ -18,23 +26,81 @@ enum Request {
         nix: Vec<u32>,
         entries: usize,
     },
+    Cohort {
+        #[serde(deserialize_with = "path")]
+        company: PathBuf,
+        config: Pin,
+        target: Pin,
+        employee: Option<String>,
+    },
+    Capacity {
+        budget: Box<RawValue>,
+        cohort_size: u8,
+        #[serde(deserialize_with = "path")]
+        state: PathBuf,
+        #[serde(deserialize_with = "path")]
+        scratch: PathBuf,
+    },
+    Plan {
+        operation: String,
+        employee: String,
+        session: String,
+        image: String,
+        facts: Box<RawValue>,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pin {
+    #[serde(deserialize_with = "path")]
+    path: PathBuf,
+    digest: String,
+}
+
+fn path<'de, D: Deserializer<'de>>(input: D) -> Result<PathBuf, D::Error> {
+    let encoded = String::deserialize(input)?;
+    let bytes = STANDARD.decode(encoded).map_err(de::Error::custom)?;
+    Ok(OsString::from_vec(bytes).into())
+}
+
+impl Pin {
+    fn as_pin(&self) -> ControlPin<'_> {
+        ControlPin {
+            path: &self.path,
+            digest: &self.digest,
+        }
+    }
 }
 
 pub(super) fn run(parent: i32) -> io::Result<()> {
-    let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
+    let input = crate::worker_input(parent, PLAN_REQUEST_BOUND)?;
     let request: Request = serde_json::from_slice(&input)?;
+    let bound = match request {
+        Request::Plan { .. } => PLAN_REPLY_BOUND,
+        _ if input.len() <= crate::REQUEST_BOUND => QUALIFICATION_REPLY_BOUND,
+        _ => return Err(crate::refused()),
+    };
     let reply = request.execute().unwrap_or_else(|error| {
-        let errno = error
-            .downcast_ref::<io::Error>()
-            .and_then(io::Error::raw_os_error);
+        let errno = io_errno(error.as_ref());
         json!({"error": error.to_string(), "errno": errno})
     });
-    crate::write_reply(&reply, QUALIFICATION_REPLY_BOUND)
+    crate::write_reply(&reply, bound)
+}
+
+fn io_errno(error: &(dyn std::error::Error + 'static)) -> Option<i32> {
+    std::iter::successors(Some(error), |cause| cause.source())
+        .find_map(|cause| cause.downcast_ref::<io::Error>()?.raw_os_error())
+}
+
+fn bytes(raw: Vec<u8>) -> Value {
+    json!({ "bytes": STANDARD.encode(raw) })
 }
 
 impl Request {
     fn execute(self) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
+            Self::Config { config } => Ok(bytes(offline_qualification::config(&config)?)),
             Self::Target { target, now } => {
                 let qualified = offline_qualification::inspect(&target, now)?;
                 Ok(json!({
@@ -43,9 +109,40 @@ impl Request {
                     "evidencePaths": qualified.evidence_paths,
                 }))
             }
-            Self::Profiles { home, nix, entries } => Ok(
-                json!({ "bytes": STANDARD.encode(offline_qualification::inventory(&home, &nix, entries)?) }),
-            ),
+            Self::Profiles { home, nix, entries } => Ok(bytes(offline_qualification::inventory(
+                &home, &nix, entries,
+            )?)),
+            Self::Cohort {
+                company,
+                config,
+                target,
+                employee,
+            } => Ok(bytes(offline_qualification::cohort(
+                &company,
+                config.as_pin(),
+                target.as_pin(),
+                employee.as_deref(),
+            )?)),
+            Self::Capacity {
+                budget,
+                cohort_size,
+                state,
+                scratch,
+            } => {
+                let budget = CapacityBudget::decode(&budget)?;
+                let admitted =
+                    offline_qualification::capacity(budget, cohort_size, &state, &scratch)?;
+                Ok(bytes(serde_json::to_vec(&admitted)?))
+            }
+            Self::Plan {
+                operation,
+                employee,
+                session,
+                image,
+                facts,
+            } => Ok(bytes(plan(
+                &operation, &employee, &session, &image, &facts,
+            )?)),
         }
     }
 }

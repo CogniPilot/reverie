@@ -42,6 +42,7 @@ profile_id!(ProfileSessionId);
 profile_id!(ChatRoomId);
 profile_id!(ChatMessageId);
 profile_id!(ChatImageFileId);
+profile_id!(OfflineStoreOperationId);
 
 /// A complete engine inventory reference, never process/effect authority.
 /// The legacy observer accepts the all-zero lexical ID as well.

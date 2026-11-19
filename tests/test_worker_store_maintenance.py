@@ -7,7 +7,6 @@ import socket
 from pathlib import Path
 import tempfile
 import sys
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -149,7 +148,7 @@ class OfflineStoreTests(unittest.TestCase):
         self.target_path=self.root/'target.json'; self.write(self.target_path,self.target)
         self.engine=Engine(self)
         self.maintenance=M.OfflineStoreMaintenance(self.config_path,self.target_path,engine=self.engine,
-            statvfs=lambda _:SimpleNamespace(f_bavail=10**12,f_frsize=1),wall=lambda:1800000000)
+            wall=lambda:1800000000)
     def bytes(self,path,raw): path.write_bytes(raw); path.chmod(0o600)
     def write(self,path,value): self.bytes(path,M.canonical(value))
     def plan(self): return self.maintenance.plan(EMP,OP)
@@ -228,6 +227,8 @@ class OfflineStoreTests(unittest.TestCase):
         before=set(self.state.rglob('*')); plan=self.plan()
         self.assertEqual(plan['imageId'],NEW); self.assertEqual(self.engine.calls,[])
         self.assertEqual(before,set(self.state.rglob('*')))
+        digest = plan.pop('planDigest')
+        self.assertEqual(digest, M.sha(M.canonical(plan)))
     def test_success_uses_both_real_locks_and_preserves_off_data_and_old_container(self):
         before=self.company_path.read_bytes(); config=self.config_path.read_bytes()
         result=self.apply()
@@ -387,7 +388,9 @@ class OfflineStoreTests(unittest.TestCase):
         self.assertEqual([call[0] for call in self.engine.calls],['create'])
         self.assertTrue(self.fence.exists())
     def test_capacity_has_no_gc_credit(self):
-        self.maintenance.statvfs=lambda _:SimpleNamespace(f_bavail=1,f_frsize=1)
+        space = os.statvfs(self.state)
+        self.target['budget']['fullClosureAllocatedBytes'] = space.f_bavail * space.f_frsize + 1
+        self.write(self.target_path, self.target)
         with self.assertRaisesRegex(M.Refused,'capacity'):self.plan()
     def test_private_fifo_and_profile_symlink_parent_refuse_without_hang(self):
         self.target_path.unlink();os.mkfifo(self.target_path,0o600)
