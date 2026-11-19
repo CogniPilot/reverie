@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from reverie import worker_store_maintenance as M
+from reverie.worker_nix import prepare_args
 from reverie.worker_storage import (storage_paths, storage_guard, prepare_storage,
                                     record_storage_binding, lock_paths)
 
@@ -227,6 +228,8 @@ class OfflineStoreTests(unittest.TestCase):
         before=set(self.state.rglob('*')); plan=self.plan()
         self.assertEqual(plan['imageId'],NEW); self.assertEqual(self.engine.calls,[])
         self.assertEqual(before,set(self.state.rglob('*')))
+        self.assertEqual((plan['facts']['helperName'], plan['facts']['helperArgs']),
+                         prepare_args(self.config, SID, self.paths.nix))
         digest = plan.pop('planDigest')
         self.assertEqual(digest, M.sha(M.canonical(plan)))
     def test_success_uses_both_real_locks_and_preserves_off_data_and_old_container(self):

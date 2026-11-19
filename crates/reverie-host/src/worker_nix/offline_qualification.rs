@@ -1,5 +1,6 @@
 //! Read pinned private qualification evidence without invoking Docker.
 mod profiles;
+mod seat;
 #[cfg(test)]
 mod tests;
 use crate::native;
@@ -9,6 +10,7 @@ use reverie_contracts::worker_nix::offline_qualification::{
 };
 use reverie_core::ids::ProfileEmployeeId;
 use reverie_store::storage_identity;
+pub use seat::{Seat, inspect_seat};
 use sha2::{Digest, Sha256};
 use std::{
     os::unix::fs::MetadataExt,

@@ -1,12 +1,18 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
-use reverie_contracts::worker_image_switch::WorkerImageId;
+use reverie_contracts::worker_nix::NixConfiguration;
 use reverie_contracts::worker_nix::offline_qualification::{CapacityBudget, plan};
-use reverie_core::ids::ContainerId;
+use reverie_contracts::{worker_config, worker_image_switch::WorkerImageId};
+use reverie_core::ids::{ContainerId, ProfileEmployeeId, ProfileSessionId};
 use reverie_host::worker_nix::offline_qualification::{self, ControlPin};
 use reverie_host::worker_nix::offline_store_engine::{self, Query};
 use serde::{Deserialize, Deserializer, de};
 use serde_json::{Value, json, value::RawValue};
-use std::{ffi::OsString, io, os::unix::ffi::OsStringExt, path::PathBuf};
+use std::{
+    ffi::OsString,
+    io,
+    os::unix::ffi::{OsStrExt, OsStringExt},
+    path::{Path, PathBuf},
+};
 
 const PLAN_REQUEST_BOUND: usize = 16 * 1024 * 1024;
 const QUALIFICATION_REPLY_BOUND: usize = 16 * 1024 * 1024;
@@ -24,6 +30,12 @@ enum Request {
     Config {
         #[serde(deserialize_with = "path")]
         config: PathBuf,
+    },
+    Seat {
+        config: Pin,
+        session: String,
+        employee: String,
+        recheck_session_fence: bool,
     },
     Target {
         #[serde(deserialize_with = "path")]
@@ -139,7 +151,18 @@ impl Request {
             Self::Engine { socket, query } => {
                 Ok(bytes(offline_store_engine::read(&socket, query.query()?)?))
             }
-            Self::Config { config } => Ok(bytes(offline_qualification::config(&config)?)),
+            Self::Config { config } => Ok(bytes(validated_config(&config)?)),
+            Self::Seat {
+                config,
+                session,
+                employee,
+                recheck_session_fence,
+            } => Ok(bytes(seat(
+                config.as_pin(),
+                &ProfileSessionId::parse(&session)?,
+                &ProfileEmployeeId::parse(&employee)?,
+                recheck_session_fence,
+            )?)),
             Self::Target { target, now } => {
                 let qualified = offline_qualification::inspect(&target, now)?;
                 Ok(json!({
@@ -184,4 +207,35 @@ impl Request {
             )?)),
         }
     }
+}
+
+fn validated_config(path: &Path) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let raw = offline_qualification::config(path)?;
+    let config = worker_config::decode_offline_store(&raw)?;
+    let verified = reverie_application::worker_validation::validate_captured(config)?;
+    let uid = nix::unistd::getuid().as_raw();
+    if uid == 0 || NixConfiguration::capture(verified.configuration()).uid()? != uid {
+        return Err("ordinary configured host owner required".into());
+    }
+    Ok(raw)
+}
+
+fn seat(
+    pin: ControlPin<'_>,
+    session: &ProfileSessionId,
+    employee: &ProfileEmployeeId,
+    recheck_session_fence: bool,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let seat = offline_qualification::inspect_seat(pin, session, employee, recheck_session_fence)?;
+    let encode = |path: &Path| STANDARD.encode(path.as_os_str().as_bytes());
+    Ok(serde_json::to_vec(&json!({
+        "session": seat.paths.session().as_str(),
+        "home": encode(seat.paths.home()),
+        "nix": encode(seat.paths.nix()),
+        "lock": encode(seat.locks.lock()),
+        "fence": encode(seat.locks.migration_fence()),
+        "session_lock": encode(&seat.session_lock),
+        "helper_name": seat.helper.name().codepoints(),
+        "helper_args": seat.helper.arguments().iter().map(|arg| arg.codepoints()).collect::<Vec<_>>(),
+    }))?)
 }

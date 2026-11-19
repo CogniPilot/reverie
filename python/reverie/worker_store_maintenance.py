@@ -20,12 +20,11 @@ import stat
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 import uuid
 
 from .worker_docker import require_image
-from .worker_nix import private_store, prepare_args
-from .worker_storage import (lock_paths, read_metadata, storage_paths,
-                             validate_storage)
+from .worker_storage import read_metadata
 
 IMAGE = re.compile(r"sha256:[0-9a-f]{64}")
 UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
@@ -335,12 +334,22 @@ class OfflineStoreMaintenance:
         )
         return _json(raw)
 
+    def _seat(self, config_digest, session, employee, *, recheck=False):
+        raw, _ = _native_observation(
+            "seat", session=session, employee=employee, recheck_session_fence=recheck,
+            config={"path": _native_path(self.config_path), "digest": config_digest},
+        )
+        seat = _json(raw)
+        for key in ("home", "nix", "lock", "fence", "session_lock"):
+            seat[key] = Path(os.fsdecode(base64.b64decode(seat[key], validate=True)))
+        seat["helper_name"] = "".join(map(chr, seat["helper_name"]))
+        seat["helper_args"] = ["".join(map(chr, arg)) for arg in seat["helper_args"]]
+        return SimpleNamespace(**seat)
+
     def _snapshot(self, employee_id):
         raw, _ = _native_observation("config", config=_native_path(self.config_path))
         config_digest = sha(raw)
-        from .worker import validate_config
-        config = validate_config(_json(raw))
-        need(config.get("uid") == os.getuid() and os.getuid() != 0, "ordinary configured host owner required")
+        config = _json(raw)
         target, target_digest, evidence_paths = self._target()
         if self.engine is None:
             self.engine = DockerEngine(target["engineSocket"])
@@ -356,22 +365,10 @@ class OfflineStoreMaintenance:
         if target.get("validationScope") == OFFLINE_IMAGE_SCOPE:
             self._offline_image_validation(validation, config, target["engineSocket"])
         selected = self._cohort(config, config_digest, target_digest, employee_id)
-        paths = storage_paths(config, selected["sessionId"])
-        need(paths.kind == "employee" and paths.identity == employee_id, "current canonical employee store required")
-        validate_storage(config, paths)
-        lock, fence = lock_paths(config, paths)
-        need(not fence.exists() and not fence.is_symlink(), "employee maintenance/migration remains fenced")
-        sid_lock = Path(config["stateRoot"]) / paths.session / "nix.lock"
-        for item in (lock, sid_lock):
-            s = item.lstat()
-            need(stat.S_ISREG(s.st_mode) and s.st_uid == config["uid"] and s.st_nlink == 1
-                 and stat.S_IMODE(s.st_mode) == 0o600,
-                 "both existing native locks required")
-        need(_identity(lock.lstat())[:2] != _identity(sid_lock.lstat())[:2], "distinct native lock inodes required")
+        paths = self._seat(config_digest, selected["sessionId"], employee_id)
         containers = self.engine.containers()
-        helper_name, args = prepare_args(config, paths.session, paths.nix)
-        need(not any(v.get("Name") == "/" + helper_name for v in containers), "existing helper must be reconciled, never removed by name")
-        private = [self.config_path.resolve(), self.target_path.resolve(), lock.parent.resolve(),
+        need(not any(v.get("Name") == "/" + paths.helper_name for v in containers), "existing helper must be reconciled, never removed by name")
+        private = [self.config_path.resolve(), self.target_path.resolve(), paths.lock.parent.resolve(),
                    (Path(config["stateRoot"]) / "offline-store-maintenance").resolve()]
         private.extend(Path(path) for path in evidence_paths)
         # Account paths are selected dynamically at normal launch. Exclude the
@@ -402,10 +399,10 @@ class OfflineStoreMaintenance:
                                 for m in item.get("Mounts", [])))
         return config, target, paths, {"configDigest": config_digest, "targetDigest": target_digest,
             "employeeDigest": selected["employeeDigest"], "homeIdentity": _identity(paths.home.stat()),
-            "nixIdentity": _identity(paths.nix.stat()), "lockIdentity": _identity(lock.lstat()),
-            "sidLockIdentity": _identity(sid_lock.lstat()), "profiles": profiles, "budget": budget,
+            "nixIdentity": _identity(paths.nix.stat()), "lockIdentity": _identity(paths.lock.lstat()),
+            "sidLockIdentity": _identity(paths.session_lock.lstat()), "profiles": profiles, "budget": budget,
             "stoppedContainerIds": stopped,
-            "helperArgs": args, "helperName": helper_name}
+            "helperArgs": paths.helper_args, "helperName": paths.helper_name}
 
     def _offline_image_validation(self, container, config, engine_socket):
         """Inspect actual isolated image-check context; never call it an agent shell."""
@@ -476,15 +473,15 @@ class OfflineStoreMaintenance:
         need(plan["planDigest"] == expected_plan_digest, "offline plan changed; no mutation attempted")
         config, target, paths, facts = self._snapshot(employee_id)
         need(facts == plan["facts"], "offline admission changed")
-        lock, fence = lock_paths(config, paths)
-        sid_lock = Path(config["stateRoot"]) / paths.session / "nix.lock"
+        lock, fence, sid_lock = paths.lock, paths.fence, paths.session_lock
         uncertain = False
         result = None
         marker = None
         marker_identity = None
         with _existing_lock(lock, config["uid"]) as check_storage_lock, _existing_lock(sid_lock, config["uid"]) as check_nix_lock:
             # Common installed resolver/fence checks run BEFORE our own marker exists.
-            need(private_store(config, paths.session) == paths.nix, "private store selection changed")
+            need(self._seat(facts["configDigest"], paths.session, employee_id, recheck=True) == paths,
+                 "private store selection changed")
             need(self._snapshot(employee_id)[3] == facts, "locked admission changed")
             marker = {"version": 1, "kind": "reverie.offline-store-maintenance", "operationId": operation_id,
                       "employeeId": employee_id, "sessionId": paths.session, "planDigest": plan["planDigest"],

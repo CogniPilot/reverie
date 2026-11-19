@@ -53,6 +53,7 @@ fn session_path(config: &NixConfiguration, session: &ProfileSessionId) -> Result
 fn session_directory(
     config: &NixConfiguration,
     session: &ProfileSessionId,
+    create: bool,
     effects: &mut bool,
 ) -> Result<Directory> {
     let root = lexical(&config.state_root()?)?;
@@ -77,14 +78,14 @@ fn session_directory(
     let base = Directory::nix_directory(
         &native::python_path(&root.codepoints())?,
         uid,
-        true,
+        create,
         effects,
     )?;
     let result = (|| {
         Ok(Directory::nix_directory(
             &session_path(config, session)?,
             uid,
-            true,
+            create,
             effects,
         )?)
     })();
@@ -132,7 +133,7 @@ impl NixStoreGuard {
         migration: bool,
         effects: &mut bool,
     ) -> Result<Self> {
-        let directory = session_directory(&config, &session, effects)?;
+        let directory = session_directory(&config, &session, true, effects)?;
         let file = match directory.lock_file(OsStr::new("nix.lock"), effects) {
             Ok(file) => file,
             Err(error) => {

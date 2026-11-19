@@ -88,7 +88,7 @@ pub(super) fn private_store(
     session: &ProfileSessionId,
     effects: &mut bool,
 ) -> Result<PathBuf> {
-    let directory = session_directory(config, session, effects)?;
+    let directory = session_directory(config, session, true, effects)?;
     let result = (|| {
         let paths = check_fences(config, session)?;
         let path_text = store_path_text(config, session)?;
