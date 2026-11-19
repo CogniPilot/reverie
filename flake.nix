@@ -248,7 +248,7 @@
           packages = self.packages.${system};
         in {
           inherit (packages) reverie memoryPackage start update prune pruneR12 cleanupObservations ownerTerminalCore;
-          inherit (packages.console) goalCustodyFixture;
+          inherit (packages.console) workerWebFixtures;
           # Legacy attach transport remains a component-only CI fixture.
           # It is not an installable public package, app or host module.
           nativeViewerFixtureImage = import ./nix/worker-viewer-image.nix {

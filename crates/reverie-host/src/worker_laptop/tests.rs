@@ -118,7 +118,14 @@ impl Fixture {
         Self::new_with_hooks(mode, crate::captured_client::test_hooks::Hooks::default())
     }
     fn new_with_hooks(mode: &str, hooks: crate::captured_client::test_hooks::Hooks) -> Self {
-        let _ = program();
+        Self::with_engine(mode, hooks, program(), Path::new("/workspace"))
+    }
+    fn with_engine(
+        mode: &str,
+        hooks: crate::captured_client::test_hooks::Hooks,
+        engine: &Path,
+        mount_target: &Path,
+    ) -> Self {
         let nonce = crate::resource_facts::fresh_owner_nonce().unwrap();
         // Keep the private socket path short, including Nix's TMPDIR prefix.
         let nonce = nonce.as_str().replace('-', "");
@@ -131,10 +138,10 @@ impl Fixture {
         fs::set_permissions(root.join("company.json"), fs::Permissions::from_mode(0o600)).unwrap();
         fs::create_dir(root.join("work")).unwrap();
         let info = fs::metadata(&root).unwrap();
-        let source=worker_config::decode(&serde_json::to_vec(&json!({"version":1,"deployment":"fixture","image":format!("sha256:{}","a".repeat(64)),"serverContainer":"fixture-server","socket":"/run/launch-order.sock","stateRoot":root.join("state"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"scratchRoot":root.join("scratch"),"apiSocketRoot":root.join("api"),"budgetMode":"pool","uid":info.uid(),"gid":info.gid(),"memoryMiB":0,"poolMemoryMiB":4096,"poolTasksMax":1024,"cgroupParent":"reverie-workers.slice","pidsLimit":128,"cpus":0,"maxWorkers":4,"mounts":[{"source":root.join("work"),"destination":"/workspace","readOnly":false}],"maintenanceSessions":[]})).unwrap()).unwrap();
+        let source=worker_config::decode(&serde_json::to_vec(&json!({"version":1,"deployment":"fixture","image":format!("sha256:{}","a".repeat(64)),"serverContainer":"fixture-server","socket":"/run/launch-order.sock","stateRoot":root.join("state"),"companyFile":root.join("company.json"),"companyRoot":root.join("company"),"scratchRoot":root.join("scratch"),"apiSocketRoot":root.join("api"),"budgetMode":"pool","uid":info.uid(),"gid":info.gid(),"memoryMiB":0,"poolMemoryMiB":4096,"poolTasksMax":1024,"cgroupParent":"reverie-workers.slice","pidsLimit":128,"cpus":0,"maxWorkers":4,"mounts":[{"source":root.join("work"),"destination":mount_target,"readOnly":false}],"maintenanceSessions":[]})).unwrap()).unwrap();
         let envelope = WorkerEnvelope::capture(source.clone()).unwrap();
         let mut bootstrap = EngineBootstrap::from_service(
-            program().as_os_str(),
+            engine.as_os_str(),
             BTreeMap::from([("LAPTOP_FIXTURE_MODE".into(), mode.into())]),
             root.clone(),
         )
