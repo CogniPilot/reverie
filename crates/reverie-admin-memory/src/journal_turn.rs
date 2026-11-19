@@ -1,12 +1,12 @@
 //! Own a Hands journal turn from source capture through bounded tool settlement.
 mod effects;
+pub(super) use effects::{EffectReply, NativeEffect, Settings};
 
 use crate::{
     RESPONSE_BOUND, TURN_CAPTURE_BOUND, refused, turn_capture, turn_context,
     turn_tool::{self, CallState, Merged, Outcome, Toolset},
     worker_channel::WorkerChannel,
 };
-use effects::{EffectReply, NativeEffect, Settings};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json, value::RawValue};
 use std::{
@@ -17,11 +17,11 @@ use std::{
 const UNAVAILABLE: &str = "\nJournal unavailable in this turn; no commit or recall command is offered. Do not claim a journal write.";
 const INVALID: &str = "invalid_arguments_or_source; compress text and use exact source IDs/quotes";
 
-type Effect<'a> = dyn FnMut(Value) -> io::Result<EffectReply> + 'a;
+pub(super) type Effect<'a> = dyn FnMut(Value) -> io::Result<EffectReply> + 'a;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Start {
+pub(super) struct Start {
     room: String,
     history: Box<RawValue>,
     message: Box<RawValue>,
@@ -39,13 +39,13 @@ enum Request {
 }
 
 #[derive(Default)]
-struct Turn {
+pub(super) struct Turn {
     active: Option<Active>,
-    context: String,
+    pub(super) context: String,
     recalled: String,
-    merged_recall: Option<String>,
+    pub(super) merged_recall: Option<String>,
     recall_context_status: &'static str,
-    replay: String,
+    pub(super) replay: String,
 }
 
 struct Active {
@@ -125,7 +125,27 @@ fn deadline(seconds: u64) -> Instant {
 }
 
 impl Turn {
-    fn start(job: Start, effect: &mut Effect<'_>) -> Self {
+    pub(super) fn tools(&self) -> &[Value] {
+        self.active
+            .as_ref()
+            .map_or(&[], |active| &active.toolset.tools)
+    }
+
+    pub(super) fn names(&self) -> Vec<String> {
+        self.active
+            .as_ref()
+            .filter(|active| active.calls.calls < active.toolset.call_limit)
+            .map_or_else(Vec::new, |active| {
+                active
+                    .toolset
+                    .accepted_calls
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect()
+            })
+    }
+
+    pub(super) fn start(job: Start, effect: &mut Effect<'_>) -> Self {
         Self::capture(job, effect).unwrap_or_else(|_| Self {
             context: UNAVAILABLE.into(),
             recall_context_status: "not_available",
@@ -214,7 +234,7 @@ impl Turn {
         merged.text
     }
 
-    fn invoke(&mut self, call: &Value, effect: &mut Effect<'_>) -> Value {
+    pub(super) fn invoke(&mut self, call: &Value, effect: &mut Effect<'_>) -> Value {
         let Some(active) = &mut self.active else {
             return json!({"status": "refused", "reason": "journal_unavailable"});
         };

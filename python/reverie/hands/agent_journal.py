@@ -129,6 +129,31 @@ def automatic_config(cfg):
     return {**{key: cfg[key] for key in keys}, 'journal_enabled': cfg.get('journal_enabled', False)}
 
 
+def journal_effect(operation, request, failures, write_started=False):
+    op = request.pop('op')
+    mark = len(failures)
+    result, invalid = None, False
+    try:
+        result = operation(op, **request)
+    except Exception as error:
+        invalid = isinstance(error, (ValueError, TypeError, KeyError))
+        if not invalid and not write_started:
+            raise
+    failure = failures[-1] if len(failures) > mark else None
+    frame = {'result': result, 'failure': failure, 'invalid': invalid}
+    if encode_memory_json(frame) is None and op == 'journal_status' and isinstance(result, dict):
+        frame['result'] = {**result, 'recall': None}
+    if encode_memory_json(frame) is None:
+        frame['result'] = None
+    return frame
+
+
+def journal_memory(cfg, room):
+    return {'config': automatic_config(cfg), 'status_timeout_s': cfg.get('journal_status_timeout_s', 5),
+            'command_timeout_s': cfg.get('journal_command_timeout_s', 8),
+            'suppress': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', [])}
+
+
 class Turn:
     """Compatibility client for the native journal turn and its room effects."""
 
@@ -153,10 +178,7 @@ class Turn:
             job.update(automatic=room not in cfg.get('journal_auto_recall_exclude_rooms', []),
                        clock_ms=time.time() * 1000 if now_ms is None else now_ms, evidence=evidence)
             if operation is None:
-                job['memory'] = {'config': automatic_config(cfg),
-                                 'status_timeout_s': cfg.get('journal_status_timeout_s', 5),
-                                 'command_timeout_s': cfg.get('journal_command_timeout_s', 8),
-                                 'suppress': room in cfg.get('dm_rooms', []) or room in cfg.get('_auto_dms', [])}
+                job['memory'] = journal_memory(cfg, room)
             self.worker = WorkerSocket('journal-turn-worker', job, startup_limit=TURN_CAPTURE_BYTES,
                                        environment=os.environ if operation is None else None)
             self.cleanup = finalize(self, self.worker.close, grace=0.1)
@@ -188,24 +210,8 @@ class Turn:
                 return reply
 
     def send_effect(self, request):
-        op = request.pop('op')
-        self.write_sent |= op == 'journal_commit'
-        mark = len(self.failures)
-        result, invalid = None, False
-        try:
-            result = self.operation(op, **request)
-        except Exception as error:
-            invalid = isinstance(error, (ValueError, TypeError, KeyError))
-            if not invalid and not self.write_sent:
-                self.close()
-                raise
-        failure = self.failures[-1] if len(self.failures) > mark else None
-        frame = {'result': result, 'failure': failure, 'invalid': invalid}
-        if encode_memory_json(frame) is None and op == 'journal_status' and isinstance(result, dict):
-            frame['result'] = {**result, 'recall': None}
-        if encode_memory_json(frame) is None:
-            frame['result'] = None
-        self.worker.send(frame)
+        self.write_sent |= request['op'] == 'journal_commit'
+        self.worker.send(journal_effect(self.operation, request, self.failures, self.write_sent))
 
     def request(self, action, **fields):
         self.worker.send({'action': action, **fields})

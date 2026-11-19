@@ -226,6 +226,11 @@ pub(super) fn chat(parent: i32) -> io::Result<()> {
     write_result(&serve(request, true))
 }
 
+pub(super) fn complete_chat(request: Value) -> io::Result<Value> {
+    let request: Request = serde_json::from_value(request)?;
+    Ok(serve(request, true))
+}
+
 fn write_result(result: &Value) -> io::Result<()> {
     use std::io::Write;
     let mut output = io::stdout().lock();

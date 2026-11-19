@@ -6,6 +6,7 @@ use serde_json::{Map, Value, json};
 use std::io;
 
 mod workspace;
+pub(crate) use workspace::call as workspace_call;
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]

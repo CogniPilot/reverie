@@ -37,10 +37,10 @@ struct Settings {
 }
 
 #[derive(Serialize, Default)]
-struct Reply {
-    parts: Vec<Value>,
-    notes: Vec<String>,
-    failures: Vec<(String, String)>,
+pub(super) struct Reply {
+    pub(super) parts: Vec<Value>,
+    pub(super) notes: Vec<String>,
+    pub(super) failures: Vec<(String, String)>,
 }
 
 #[derive(Clone, Copy)]
@@ -71,18 +71,28 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     let signals = scoped_image::bind_download_worker(parent)?;
     let data = crate::bounded_input(crate::TURN_CAPTURE_BOUND)?;
     let request: Request = serde_json::from_slice(&data)?;
-    let session = env::var("REVERIE_SESSION_ID").ok();
-    let scoped = env::var("REVERIE_WORKER").as_deref() == Ok("1");
-    let mode = mode(&request.settings, scoped, session.as_deref());
-    let reply = request.collect(mode, |file| {
-        signals.check()?;
-        request.read(mode, file, Path::new("/scratch/tmp"), &signals)
-    })?;
+    let reply = collect(&request, &signals)?;
     // Keep the existing independent image budgets. A single text-frame ceiling
     // on the aggregate base64 would refuse otherwise allowed images.
     let mut output = BufWriter::new(io::stdout().lock());
     serde_json::to_writer(&mut output, &reply)?;
     output.flush()
+}
+
+pub(super) fn prepare(request: Value) -> io::Result<Reply> {
+    let request = serde_json::from_value(request)?;
+    let signals = Signals::install()?;
+    collect(&request, &signals)
+}
+
+fn collect(request: &Request, signals: &Signals) -> io::Result<Reply> {
+    let session = env::var("REVERIE_SESSION_ID").ok();
+    let scoped = env::var("REVERIE_WORKER").as_deref() == Ok("1");
+    let mode = mode(&request.settings, scoped, session.as_deref());
+    request.collect(mode, |file| {
+        signals.check()?;
+        request.read(mode, file, Path::new("/scratch/tmp"), signals)
+    })
 }
 
 impl Request {

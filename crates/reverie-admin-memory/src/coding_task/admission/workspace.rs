@@ -69,7 +69,7 @@ fn addressed_peer(scope: &Scope, message: &Value, history: &[Value]) -> bool {
         .is_some_and(|(name, text)| mentioned(name, text))
 }
 
-pub(super) fn call(calls: &Value, bound: bool) -> Value {
+pub(crate) fn call(calls: &Value, bound: bool) -> Value {
     let Some(calls) = calls.as_array() else {
         return json!({});
     };

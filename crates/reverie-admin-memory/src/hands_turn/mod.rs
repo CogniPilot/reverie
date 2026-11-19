@@ -1,7 +1,9 @@
 //! Hands reply decisions. Office, model, and authorized tool effects stay with the caller.
+mod driver;
 #[cfg(test)]
 mod tests;
 mod web;
+pub(super) use driver::run_answer;
 
 use crate::{
     hands_settings::truthy,
@@ -38,7 +40,7 @@ const TRACE_TOOLS: &[&str] = &[
     "run_workspace_task",
 ];
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(deny_unknown_fields)]
 pub(super) struct WebPolicy {
     search: bool,
@@ -65,7 +67,7 @@ fn bounded_setting(value: &Value) -> usize {
         .expect("web settings validated before prompt budgeting")
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum Stage {
     Explore,

@@ -72,8 +72,17 @@ impl WorkerChannel {
         value: &impl Serialize,
         deadline: Option<Instant>,
     ) -> io::Result<()> {
+        self.write_bounded(value, deadline, FRAME_BYTES)
+    }
+
+    pub(crate) fn write_bounded(
+        &mut self,
+        value: &impl Serialize,
+        deadline: Option<Instant>,
+        limit: usize,
+    ) -> io::Result<()> {
         let mut raw = serde_json::to_vec(value)?;
-        if raw.len() > FRAME_BYTES {
+        if raw.len() > limit {
             return Err(crate::refused());
         }
         raw.push(b'\n');

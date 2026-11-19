@@ -32,7 +32,6 @@ A failed query reads nothing that tick. Membership is checked again right before
 no post. The same query gives the id of each room's newest message; a room is read again only when that id changed
 (or is missing), a claim is pending, or its last read stopped early. Each line of the prompt carries its time ("[5m ago]", "[9:16 AM EDT]").
 """
-from contextlib import ExitStack
 import json
 import math
 import os
@@ -142,22 +141,25 @@ class Chat:
         return self._call('rooms')
 
 
-def chat_model(cfg, messages, tools=None):
-    """One completion. Returns the message dict ({'content': ..., 'tool_calls': [...]})."""
-    req_body = {'model': cfg['model'], 'messages': messages, 'max_tokens': cfg['reply_max_tokens'], 'stream': False}
+def model_settings(cfg):
+    payload = {'model': cfg['model'], 'max_tokens': cfg['reply_max_tokens'], 'stream': False}
     if 'temperature' in cfg:
-        req_body['temperature'] = cfg['temperature']
-    if tools:
-        req_body['tools'] = tools
+        payload['temperature'] = cfg['temperature']
     meter = dict(cfg['token_meter']) if cfg.get('token_meter') else None
     if meter is not None and cfg.get('vision'):
         meter['image_tokens_per_image'] = cfg.get('image_tokens_per_image', 2048)
+    return {'api_base': cfg['api_base'], 'key_env': cfg.get('model_key_env'), 'timeout_s': cfg['model_timeout_s'],
+            'max_response_bytes': 262144, 'token_meter': meter, 'events_file': cfg.get('model_events_file'),
+            'payload': payload}
+
+
+def chat_model(cfg, messages, tools=None):
+    job = model_settings(cfg)
+    job['payload']['messages'] = messages
+    if tools:
+        job['payload']['tools'] = tools
     coding_chat.report_managed_context(cfg)
-    return coding_chat.model_completion({
-        'api_base': cfg['api_base'], 'key_env': cfg.get('model_key_env'), 'timeout_s': cfg['model_timeout_s'],
-        'max_response_bytes': 262144, 'token_meter': meter, 'events_file': cfg.get('model_events_file'),
-        'payload': req_body,
-    })
+    return coding_chat.model_completion(job)
 
 
 def web_request(action, *, timeout=3, **fields):
@@ -188,48 +190,9 @@ def append_diagnostic(path, record):
         raise OSError('Hands diagnostic log unavailable')
 
 
-def log_web(cfg, room, mid, query, tool='web_search'):
-    """Append one search to the owner-only web log before making its request."""
-    append_diagnostic(cfg.get('web_log'), {
-        'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'room': room, 'msg': mid,
-        'tool': tool, 'query': query,
-    })
-
-
-TRACE_VERBS = ('save', 'recall', 'source', 'receipt', 'map', 'help')
-
-
 def write_turn_trace(cfg, record):
     """Append one content-free turn record (owner-only, like web_log). No-op unless turn_trace_file is set."""
     append_diagnostic(cfg.get('turn_trace_file'), record)
-
-
-# Every persisted field is one of these closed vocabularies, else 'other' (None stays None). No free text is kept.
-TRACE_FINISH = ('stop', 'length', 'tool_calls', 'function_call', 'content_filter', 'end_turn', 'max_tokens', 'eos')
-TRACE_STATUS = ('available', 'committed', 'conflict', 'not_found', 'ok', 'refused', 'unavailable', 'unknown')
-TRACE_FAILURE = ('timeout', 'worker_error')
-TRACE_REASONS = {'journal_unavailable': 'journal_unavailable', 'map_result_budget': 'map_result_budget',
-                 'operation_payload_conflict': 'operation_payload_conflict', 'read_only_request': 'read_only_request',
-                 'save_needs_reason_this_turn': 'save_needs_reason_this_turn', 'source_budget': 'source_budget',
-                 'turn_budget': 'turn_budget', 'worker_unavailable': 'worker_unavailable',
-                 'write outcome unresolved': 'write_outcome_unresolved', 'source_unavailable': 'source_unavailable',
-                 'view_unavailable': 'view_unavailable', 'result_exceeds_budget': 'result_exceeds_budget',
-                 'invalid_arguments_or_source': 'invalid_arguments_or_source',
-                 'source_needs_message_id': 'source_needs_message_id', 'receipt_needs_message_id': 'receipt_needs_message_id'}
-
-
-def pick(value, vocab):
-    """value if it is exactly one of vocab; 'other' for anything else; None for no value."""
-    if value is None:
-        return None
-    return value if isinstance(value, str) and value in vocab else 'other'
-
-
-def reason_code(value):
-    """The fixed code for a journal reason; its free-text tail (after ';') is never kept."""
-    if value is None:
-        return None
-    return TRACE_REASONS.get(value.split(';')[0].strip(), 'other') if isinstance(value, str) else 'other'
 
 
 def hands_request(worker, payload):
@@ -301,15 +264,17 @@ def alert_allows(cfg, chat, room, msg):
         return True
 
 
+def image_settings(cfg):
+    return {'vision': bool(cfg.get('vision')), 'root': cfg.get('attachments_root'),
+            'session': cfg.get('self_session_id'), 'cli': cfg['cli'], 'max_images': cfg['max_images'],
+            'max_bytes': cfg['max_image_bytes'], 'timeout': cfg['cli_timeout_s']}
+
+
 def load_images(cfg, room, msg):
     if not msg.get('attachments'):
         return [], []
     reply = agent_journal.native_memory_json('hands-images-worker', {
-        'room': room, 'message': msg, 'settings': {
-            'vision': bool(cfg.get('vision')), 'root': os.fspath(cfg['attachments_root']) if cfg.get('attachments_root') else None,
-            'session': cfg.get('self_session_id'), 'cli': cfg['cli'],
-            'max_images': cfg['max_images'], 'max_bytes': cfg['max_image_bytes'], 'timeout': cfg['cli_timeout_s'],
-        },
+        'room': room, 'message': msg, 'settings': image_settings(cfg),
     }, agent_journal.TURN_CAPTURE_BYTES, timeout=14 * 20 + 3)
     if reply is None:
         raise ValueError('Hands image worker unavailable')
@@ -331,15 +296,18 @@ def request_chars(messages, tools=None):
     return measure_prompt(messages, tools)['characters']
 
 
-def turn_context(cfg, messages, tools=None):
-    """Refresh the request's ephemeral snapshots and return the measured size."""
+def pending_summary(cfg):
     try:
         source = cfg.get('_turn_summary')
         text = source() if callable(source) else Chat(cfg['cli'], min(cfg.get('cli_timeout_s', 60), 2)).turn_summary()
+        return text if isinstance(text, str) else None
     except Exception:
-        text = None
+        return None
+
+
+def turn_context(cfg, messages, tools=None):
     reply = measure_prompt(messages, tools, {
-        'text': text if isinstance(text, str) else None, 'prompt_cap': cfg['prompt_cap_chars'],
+        'text': pending_summary(cfg), 'prompt_cap': cfg['prompt_cap_chars'],
     })
     if reply['snapshot'] is not None:
         messages = messages[:2] + [reply['snapshot']] + messages[2:]
@@ -355,53 +323,21 @@ def web_policy(cfg):
             'max_calls': cfg['search_max_calls'], 'result_chars': cfg['search_result_chars']}
 
 
-def web_step(cfg, room, mid, search, fetch, step):
-    argument = step['argument']
-    kind = argument['kind']
-    if kind == 'invalid':
-        return step['invalid_result']
-    value = argument['value']
-    try:
-        if kind == 'fetch':
-            log_web(cfg, room, mid, value, tool='web_fetch')
-        else:
-            log_web(cfg, room, mid, value)
-    except OSError as error:
-        log('web log failed, search not run', room, mid, repr(error)[:200])
-        return 'Search unavailable: the search log could not be written.'
-    try:
-        return fetch(value) if kind == 'fetch' else search(cfg, value)
-    except Exception as error:
-        return 'Public web read unavailable.' if kind == 'fetch' else 'Search failed: ' + repr(error)[:200]
-
-
-def journal_step(journal, call, steps, tool):
-    invoked = journal.invoke(call)
-    if steps is not None:
-        try:
-            verb = (json.loads(call['function'].get('arguments') or '{}').get('command') or '').split()[:1]
-        except (ValueError, AttributeError):
-            verb = []
-        verb = verb[0] if verb and verb[0] in TRACE_VERBS else tool
-        done = invoked if isinstance(invoked, dict) else {}
-        steps.append({'journal': verb, 'status': pick(done.get('status'), TRACE_STATUS),
-                      'failure': pick(done.get('failure'), TRACE_FAILURE), 'reason': reason_code(done.get('reason'))})
-    return turn_request('journal_replay', call=call, arguments=journal.replay,
-                        result=agent_journal.encoded(invoked))['messages']
-
-
-def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled=""):
-    """Use native text framing and budgets, then attach the independently bounded image parts."""
+def prompt_job(cfg, history, msg, room, now, reserve, recalled, notes):
     settings = {key: cfg[key] for key in ('system_preamble', 'timezone', 'identity_cap_chars', 'memory_cap_chars',
                                         'message_cap_chars', 'prompt_cap_chars')}
     settings.update(reported_zone=cfg.get('_time_zone'), identity_file=cfg.get('identity_file'),
                     memory_file=cfg.get('memory_file'), recall_cap_chars=cfg.get('recall_cap_chars', 3000))
-    images, notes = load_images(cfg, room, msg) if room is not None else ([], [])
-    text = prompt_request('build', job={
+    return {
         'settings': settings, 'scope': wake_scope(cfg, room), 'room': room, 'history': history,
         'message': msg, 'notes': notes, 'now': time.time() if now is None else now,
         'reserve': reserve, 'recalled': recalled,
-    })
+    }
+
+
+def build_prompt(cfg, history, msg, room=None, now=None, reserve=0, recalled=""):
+    images, notes = load_images(cfg, room, msg) if room is not None else ([], [])
+    text = prompt_request('build', job=prompt_job(cfg, history, msg, room, now, reserve, recalled, notes))
     user = text['user']
     content = [{'type': 'text', 'text': user}] + images if images else user
     return [{'role': 'system', 'content': text['system']}, {'role': 'user', 'content': content}], text['characters']
@@ -413,18 +349,15 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
     started = time.monotonic()
     outcome = 'error'
     try:
-        with ExitStack() as cleanup:
-            result = _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, cleanup, journal_operation)
-        outcome = None
-        return result
+        result = _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, journal_operation)
+        outcome = result['outcome']
+        return result['answer'], result['characters'], result['searches']
     except BaseException as e:
         outcome = 'error:' + type(e).__name__
         raise
     finally:
         if cfg.get('turn_trace_file'):
             try:
-                if outcome is None:
-                    outcome = turn_request('reply_outcome', reply=result[0])['outcome']
                 write_turn_trace(cfg, {'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'room': room,
                                        'msg': msg.get('id'), 'outcome': outcome,
                                        'seconds': round(time.monotonic() - started, 2), 'steps': steps[:24]})
@@ -432,119 +365,111 @@ def answer(cfg, room, history, msg, model, search, timing=None, recalled="", fet
                 log('turn trace not written', type(e).__name__)
 
 
-def _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, cleanup, journal_operation):
-    """Prompt -> (optional web_search steps) -> reply text. Returns (reply, request_chars, searches), where
-    request_chars is the largest request actually sent.
+def _answer(cfg, room, history, msg, model, search, timing, recalled, fetch, steps, journal_operation):
+    start_task = cfg.get('_admin_start_task')
+    workspace_options = None
+    if start_task is not None:
+        controls = coding_chat.workspace_controls()
+        offered = getattr(start_task, 'tools', None)
+        workspace_options = {'tools': offered if isinstance(offered, list) else controls['tools'],
+                             'reserve_tools': controls['tools'], 'rule': controls['rule'],
+                             'cancel_rule': controls['cancel_rule']}
 
-    The prompt reserves room for search and every round's additions are capped, so each request fits
-    prompt_cap_chars. Each one is still measured before it is sent; one over the cap raises instead (a missed reply).
-
-    With search on: while searches remain, the tool is offered. When they are spent, or a reply is unusable (empty or
-    tool-call markup), the answer is finished without tools: FINAL_NOTE, then at most one retry with RETRY_NOTE in its
-    place, then FAIL_LINE. So there are at most search_max_calls + 2 model calls and never a search past the cap.
-    `timing`, if given, collects ('model'|'search', seconds, server timings) per step."""
     failures = []
-    cap = cfg.get('recall_cap_chars', 3000)
     if journal_operation is None and cfg.get('memory_worker_name', 'agent_memory_worker.py') != 'agent_memory_worker.py':
         def journal_operation(op, **payload):
             return memory_op(cfg, room, op, failures=failures, **payload)
-    journal = cleanup.enter_context(agent_journal.Turn(
-        cfg, room, history, msg, journal_operation, failures=failures,
-        evidence={'text': recalled, 'max_chars': cap}))
-    recalled = journal.merged_recall if journal.merged_recall is not None else journal.merge_recalled(recalled, cap)
-    start_task = cfg.get('_admin_start_task')
-    task_controls = coding_chat.workspace_controls() if start_task is not None else None
-    offered = getattr(start_task, 'tools', None)
-    task_tools = task_controls['tools'] if task_controls else []
-    if isinstance(offered, list):
-        task_tools = offered
-    web = web_policy(cfg)
-    reserve = prompt_request('reserve', job={
-        'web': web, 'cap': cfg['prompt_cap_chars'], 'journal': bool(journal.context),
-        'task': {key: task_controls[key] for key in ('rule', 'tools')} if task_controls else None,
-        'summary': bool(cfg.get('cli')) or callable(cfg.get('_turn_summary')),
-        'managed': bool(cfg.get('managed_context')),
-    })
-    try:
-        messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve['preferred'], recalled=recalled)
-    except ValueError:
-        # Optional pending context cannot displace required instructions or the current request.
-        messages, _ = build_prompt(cfg, history, msg, room, reserve=reserve['required'], recalled=recalled)
-    if task_controls:
-        accepts_start = any(tool['function']['name'] == coding_chat.WORKSPACE_TASK_NAME for tool in task_tools)
-        messages[0]['content'] += '\n' + task_controls['rule' if accepts_start else 'cancel_rule']
-    if journal.context:
-        messages[0]['content'] += journal.context
-    searches = largest = 0
-    stage = 'explore'
-    def ask(plan, journal_names):
-        nonlocal largest
-        tools = plan['tools']
-        charged_tools = (tools or None) if start_task is not None or web['fetch'] or journal.tools else None
-        request, size = turn_context(cfg, messages, charged_tools)
-        if size > cfg['prompt_cap_chars']:
-            raise RuntimeError(f'request of {size} chars is over prompt_cap_chars, not sent')
-        largest = max(largest, size)
-        terminal_event(cfg, 'model_start', chars=size)
-        t0 = time.monotonic()
-        out = model(cfg, request, tools)
-        out = {'content': out} if isinstance(out, str) else out
-        if out.get('_token_meter_status') == 'unavailable':
-            terminal_event(cfg, 'note', text='Token count unavailable: tokenizer timed out. Character, output and time limits still apply.')
-        elapsed = time.monotonic() - t0
-        decision_fields = {key: out.get(key) for key in ('content', 'tool_calls', '_context_overflow', '_finish_reason')}
-        settled = turn_request('settle', state={'phase': plan['phase'], 'web': web, 'searches': searches,
-                                               'journal_names': journal_names, 'output': decision_fields})
-        if steps is not None:
-            steps.append({'tools': bool(tools), 'finish': pick(out.get('_finish_reason'), TRACE_FINISH),
-                          'outcome': settled['outcome'], 'ms': int(elapsed * 1000), 'chars': size})
-        terminal_event(cfg, 'model_done', seconds=elapsed, model=out.get('_model'), usage=out.get('_usage'))
-        if timing is not None:
-            timing.append(('model', round(elapsed, 2), out.get('_timings')))
-        return out, settled
 
-    while True:
-        journal_open = bool(journal.tools) and journal.calls < journal.call_limit
-        plan = turn_request('plan', state={'stage': stage, 'web': web, 'searches': searches,
-                                           'journal_available': bool(journal.tools),
-                                           'journal_tools': journal.tools if journal_open else [],
-                                           'task_tools': task_tools if start_task is not None else None})
-        if plan['note'] is not None:
-            note = {'role': 'user', 'content': plan['note']}
-            if plan['replace_note']:
-                messages[-1] = note
+    memory = None
+    if room is not None and cfg.get('journal_enabled') and cfg.get('memory_instance'):
+        memory = {'automatic': room not in cfg.get('journal_auto_recall_exclude_rooms', []),
+                  'max_chars': cfg.get('recall_cap_chars', 3000),
+                  'native': agent_journal.journal_memory(cfg, room) if journal_operation is None else None}
+    job = {'prompt': prompt_job(cfg, history, msg, room, None, 0, recalled, []),
+           'web': web_policy(cfg), 'workspace': workspace_options, 'memory': memory,
+           'images': image_settings(cfg) if room is not None and msg.get('attachments') else None,
+           'prompt_cap': cfg['prompt_cap_chars'], 'managed': bool(cfg.get('managed_context')),
+           'summary': bool(cfg.get('cli')) or callable(cfg.get('_turn_summary')),
+           'runtime': reply_runtime(cfg, room, msg, model, search, fetch)}
+
+    def legacy_memory(event):
+        request = event['request']
+        return agent_journal.journal_effect(journal_operation, request, failures,
+                                            request['op'] in ('journal_commit', 'journal_receipt'))
+
+    def workspace(event):
+        call = event['call']
+        return {'reply': start_task.cancel() if call['action'] == 'cancel' else start_task(call['brief'])}
+
+    effects = {
+        'summary': lambda event: {'text': pending_summary(cfg)},
+        'model': lambda event: {'output': model(cfg, event['messages'], event['tools'])},
+        'web_fetch': lambda event: external_web(fetch, event['argument'], public=True),
+        'web_search': lambda event: external_web(search, cfg, event['argument']),
+        'memory': legacy_memory,
+        'workspace': workspace,
+    }
+    return drive_reply(cfg, job, effects, steps, timing)
+
+
+def reply_runtime(cfg, room, message, model, search, fetch):
+    managed = None
+    if cfg.get('managed_context'):
+        managed = {'state_file': cfg['state_file'], 'session': cfg['self_session_id'],
+                   'started': bool(cfg.get('_managed_context_started'))}
+    return {'cli': cfg.get('cli'), 'cli_timeout_s': cfg.get('cli_timeout_s', 60),
+            'provided_summary': callable(cfg.get('_turn_summary')) or model is not chat_model,
+            'managed': managed, 'model': model_settings(cfg) if model is chat_model else None,
+            'room': room, 'message_id': message.get('id'), 'web_log': cfg.get('web_log'),
+            'web_settings': {key: cfg[key] for key in SEARCH_SETTINGS},
+            'external_search': search is not searxng_search, 'external_fetch': fetch is not fetch_public_page}
+
+
+def external_web(callback, *args, public=False):
+    try:
+        return {'text': callback(*args)}
+    except Exception as error:
+        return {'text': 'Public web read unavailable.' if public else 'Search failed: ' + repr(error)[:200]}
+
+
+def drive_reply(cfg, job, effects, steps, timing):
+    bound = agent_journal.TURN_CAPTURE_BYTES
+    worker = WorkerSocket('hands-answer-worker', job, environment=os.environ,
+                          startup_limit=bound, reply_limit=bound)
+    try:
+        while True:
+            event = worker.wait(max(288, cfg.get('model_timeout_s', 300) + 5))
+            if 'effect' in event:
+                worker.send(effects[event['effect']](event))
+            elif 'error' in event:
+                error = TimeoutError if event.get('timeout') else RuntimeError
+                raise error(event['error'])
+            elif 'answer' in event:
+                return event
             else:
-                messages.append(note)
-        out, settled = ask(plan, journal.accepted_calls if journal_open else [])
-        if plan['phase'] in ('direct', 'tools'):
-            task_reply = coding_chat.invoke_workspace_tool(out, start_task)
-            if task_reply is not None:
-                return task_reply, largest, searches
-        step = settled['decision']
-        action = step['action']
-        if action == 'done':
-            if step['reason'] == 'limit' and plan['phase'] != 'direct':
-                attempts = {'finish': 'finishing=1', 'retry': 'finishing=2'}
-                extra = [attempts[plan['phase']]] if plan['phase'] in attempts else []
-                log('answer cut at reply limit', room, msg.get('id'), f'searches={searches}', *extra)
-            elif step['reason'] == 'unusable':
-                log('answer unusable', room, msg.get('id'), out.get('_finish_reason'))
-            elif step['reason'] == 'failed':
-                log('answer unusable after retry', room, msg.get('id'), f'searches={searches}', 'finishing=2')
-            return step['reply'], largest, searches
-        if action in ('finish', 'retry'):
-            stage = action
-        elif action == 'journal':
-            messages.extend(journal_step(journal, step['call'], steps, settled['outcome']))
-        else:
-            t0 = time.monotonic()
-            result = web_step(cfg, room, msg.get('id'), search, fetch, step)
-            if timing is not None:
-                timing.append(('search', round(time.monotonic() - t0, 2), None))
-            searches = step['searches']
-            replay = turn_request('web_replay', call=step['call'], argument=step['argument'],
-                                  visible=step['visible'], result=result, result_chars=web['result_chars'])
-            messages.extend(replay['messages'])
+                observe_reply(cfg, event, steps, timing)
+    finally:
+        worker.close(grace=0.1)
+
+
+def observe_reply(cfg, event, steps, timing):
+    if 'trace' in event and len(steps) < 24:
+        steps.append(event['trace'])
+    if 'timing' in event and timing is not None:
+        kind, elapsed, details = event['timing']
+        timing.append((kind, round(elapsed, 2), details))
+    if 'observe' in event:
+        terminal_event(cfg, event['observe'], **event['data'])
+    if 'log' in event:
+        log(*event['log'])
+    if update := event.get('managed'):
+        if 'started' in update:
+            cfg['_managed_context_started'] = True
+            cfg['_managed_context_pending'] = update.get('pending')
+        if 'reported' in update:
+            cfg.pop('_managed_context_pending', None)
+            if update['reported']:
+                cfg['_managed_context_reported'] = True
 
 
 def timing_text(timing):

@@ -23,26 +23,35 @@ pub(super) struct Preparation {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct PendingSummary {
-    text: Option<String>,
-    prompt_cap: usize,
+pub(crate) struct PendingSummary {
+    pub(crate) text: Option<String>,
+    pub(crate) prompt_cap: usize,
 }
 
 impl Preparation {
     pub(super) fn prepare(self) -> io::Result<Value> {
-        let mut characters = schema_chars(self.tools.as_deref())?;
-        for message in &self.messages {
-            characters += message_chars(message)?;
-        }
-        let snapshot = self.pending.and_then(|pending| pending.frame(characters));
-        if let Some(text) = &snapshot {
-            characters += chars(text);
-        }
-        Ok(json!({
-            "characters": characters,
-            "snapshot": snapshot.map(|text| json!({"role": "user", "content": text})),
-        }))
+        let (characters, snapshot) = estimate(&self.messages, self.tools.as_deref(), self.pending)?;
+        Ok(json!({ "characters": characters, "snapshot": snapshot }))
     }
+}
+
+pub(crate) fn estimate(
+    messages: &[Value],
+    tools: Option<&RawValue>,
+    pending: Option<PendingSummary>,
+) -> io::Result<(usize, Option<Value>)> {
+    let mut characters = schema_chars(tools)?;
+    for message in messages {
+        characters += message_chars(message)?;
+    }
+    let snapshot = pending.and_then(|pending| pending.frame(characters));
+    if let Some(text) = &snapshot {
+        characters += chars(text);
+    }
+    Ok((
+        characters,
+        snapshot.map(|text| json!({"role":"user","content":text})),
+    ))
 }
 
 impl PendingSummary {

@@ -68,7 +68,7 @@ class TurnSummaryTests(unittest.TestCase):
         def model(cfg, messages, tools):
             requests.append(copy.deepcopy(messages))
             return next(outputs)
-        with patch.object(loop.Chat, 'turn_summary', side_effect=['first', 'second', 'third']) as fetch, patch.object(loop, 'log_web'):
+        with patch.object(loop.Chat, 'turn_summary', side_effect=['first', 'second', 'third']) as fetch:
             reply, _, _ = loop.answer(cfg, None, [], msg, model, lambda cfg, query: 'result')
         self.assertEqual(reply, '[web] answer')
         self.assertEqual(fetch.call_count, 3)

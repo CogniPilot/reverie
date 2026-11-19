@@ -117,10 +117,11 @@ class BoundedProcess:
 
 
 class WorkerSocket:
-    def __init__(self, worker, initial, *, environment=None, terminal=False, startup_limit=FRAME_BYTES):
+    def __init__(self, worker, initial, *, environment=None, terminal=False, startup_limit=FRAME_BYTES, reply_limit=FRAME_BYTES):
         self.closed = False
         self.input = bytearray()
         self.output = self.packet(initial, startup_limit)
+        self.reply_limit = reply_limit
         self.connection, child = socket.socketpair()
         self.connection.setblocking(False)
         try:
@@ -159,12 +160,12 @@ class WorkerSocket:
                 frame = self.input[:boundary]
                 del self.input[:boundary + 1]
                 return json.loads(frame)
-            if len(self.input) > FRAME_BYTES:
+            if len(self.input) > self.reply_limit:
                 raise ValueError('worker event limit')
             if not budget:
                 return None
             try:
-                data = self.connection.recv(min(budget, 65536, FRAME_BYTES + 1 - len(self.input)))
+                data = self.connection.recv(min(budget, 65536, self.reply_limit + 1 - len(self.input)))
             except BlockingIOError:
                 return None
             if not data:

@@ -4,7 +4,8 @@ mod presentation;
 mod request;
 mod reserve;
 
-pub(super) use reserve::check_startup_budget;
+pub(super) use request::{PendingSummary, estimate};
+pub(super) use reserve::{Request as ReserveRequest, check_startup_budget};
 
 use crate::{
     TURN_CAPTURE_BOUND,
@@ -50,16 +51,16 @@ struct Settings {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Build {
+pub(super) struct Build {
     settings: Settings,
     scope: Scope,
-    room: Option<String>,
-    history: Vec<Value>,
-    message: Value,
-    notes: Vec<String>,
-    now: f64,
-    reserve: usize,
-    recalled: String,
+    pub(super) room: Option<String>,
+    pub(super) history: Vec<Value>,
+    pub(super) message: Value,
+    pub(super) notes: Vec<String>,
+    pub(super) now: f64,
+    pub(super) reserve: usize,
+    pub(super) recalled: String,
 }
 
 pub(super) fn run(parent: i32) -> io::Result<()> {
@@ -89,7 +90,7 @@ fn build_reply(job: &Build) -> Value {
     }
 }
 
-fn build(job: &Build) -> Result<(String, String), &'static str> {
+pub(super) fn build(job: &Build) -> Result<(String, String), &'static str> {
     let settings = &job.settings;
     if chars(&job.recalled) > settings.recall_cap_chars {
         return Err("recalled evidence exceeds configured cap");

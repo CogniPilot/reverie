@@ -1,6 +1,7 @@
 //! The isolated Hands task engine requests every model, authorization and
 //! tool effect from the existing controller. It has no network or tool client.
 mod admission;
+pub(super) use admission::workspace_call;
 mod channel;
 mod diagnostics;
 mod session;

@@ -13,6 +13,7 @@ use std::{
     process::{self, Command},
     time::{Duration, Instant},
 };
+pub(super) use wire::Stage as ContextStage;
 use wire::{Digest, Issued, Pending, Stage};
 
 const INPUT_LIMIT: usize = 65_536;
@@ -181,6 +182,20 @@ fn executable(program: &str) -> io::Result<PathBuf> {
             entry.is_file() && nix::unistd::access(entry, nix::unistd::AccessFlags::X_OK).is_ok()
         })
         .ok_or_else(|| io::ErrorKind::NotFound.into())
+}
+
+pub(super) fn snapshot(
+    cli: &Value,
+    state_file: &Path,
+    session_id: &str,
+    stage: Stage,
+    available: usize,
+) -> io::Result<Value> {
+    prepare(cli, state_file, session_id, stage, available)
+}
+
+pub(super) fn acknowledge(cli: &Value, pending: Value) -> bool {
+    serde_json::from_value(pending).is_ok_and(|pending| receipt(cli, &pending).is_ok())
 }
 
 pub(super) fn run(parent: i32) -> io::Result<()> {

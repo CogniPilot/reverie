@@ -14,7 +14,7 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case", deny_unknown_fields)]
-enum Request {
+pub(super) enum Request {
     ValidateTarget {
         url: String,
     },
@@ -33,7 +33,14 @@ enum Request {
 
 pub(crate) fn run(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
-    let result = match serde_json::from_slice(&input)? {
+    crate::write_reply(
+        &execute(serde_json::from_slice(&input)?)?,
+        crate::RESPONSE_BOUND,
+    )
+}
+
+pub(super) fn execute(request: Request) -> io::Result<Value> {
+    Ok(match request {
         Request::ValidateTarget { url } => json!({"valid": valid_target(&url)}),
         Request::Fetch { url } => {
             let text = fetch(&url)?.ok_or_else(crate::refused)?;
@@ -48,8 +55,7 @@ pub(crate) fn run(parent: i32) -> io::Result<()> {
             diagnostic::append(&path, line)?;
             json!({"ok": true})
         }
-    };
-    crate::write_reply(&result, crate::RESPONSE_BOUND)
+    })
 }
 
 pub(super) fn valid_target(url: &str) -> bool {

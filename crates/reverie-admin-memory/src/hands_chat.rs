@@ -55,6 +55,17 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
     crate::write_reply(&result, office::HISTORY_BYTES + 1024)
 }
 
+pub(super) fn summary(cli: Vec<String>, timeout_s: f64) -> Option<String> {
+    execute(&Request {
+        cli,
+        timeout_s,
+        operation: Operation::Summary,
+    })
+    .ok()?
+    .as_str()
+    .map(str::to_owned)
+}
+
 enum Error {
     NotFound,
     Timeout,

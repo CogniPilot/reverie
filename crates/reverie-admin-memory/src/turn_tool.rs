@@ -22,10 +22,10 @@ const COMMANDS: &[(&str, &str)] = &[
 
 #[derive(Serialize)]
 pub(super) struct Toolset {
-    tools: [Value; 1],
+    pub(super) tools: [Value; 1],
     offered: Vec<&'static str>,
-    call_limit: usize,
-    accepted_calls: Vec<&'static str>,
+    pub(super) call_limit: usize,
+    pub(super) accepted_calls: Vec<&'static str>,
 }
 
 pub(super) fn toolset(read_only: bool, needs_reason: bool) -> Toolset {

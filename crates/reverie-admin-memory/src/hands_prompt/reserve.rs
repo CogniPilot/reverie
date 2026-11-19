@@ -11,7 +11,7 @@ use std::io;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Request {
+pub(crate) struct Request {
     cap: usize,
     web: WebPolicy,
     journal: bool,
@@ -28,7 +28,7 @@ struct Task {
 }
 
 impl Request {
-    pub(super) fn calculate(self) -> io::Result<Value> {
+    pub(crate) fn calculate(self) -> io::Result<Value> {
         let required = tool_reserve(self.web, self.journal)
             .saturating_add(self.task.map_or(Ok(0), task_reserve)?);
         let summary = if self.summary {

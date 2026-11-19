@@ -5,7 +5,7 @@ const MAX_CONTEXT_BYTES: usize = 65_536;
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub(super) enum Stage {
+pub(crate) enum Stage {
     Startup,
     ModelRequest,
 }

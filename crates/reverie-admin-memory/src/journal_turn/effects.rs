@@ -5,7 +5,7 @@ use serde_json::{Value, json, value::to_raw_value};
 
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct EffectReply {
+pub(crate) struct EffectReply {
     pub(super) result: Option<Value>,
     failure: Option<save::Failure>,
     #[serde(default)]
@@ -163,7 +163,7 @@ fn unavailable(reason: &str) -> Value {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct Settings {
+pub(crate) struct Settings {
     config: Value,
     status_timeout_s: f64,
     command_timeout_s: f64,
@@ -171,17 +171,17 @@ pub(super) struct Settings {
 }
 
 /// Owns the same bounded Office/SQLite worker used by the legacy memory client.
-pub(super) struct NativeEffect {
+pub(crate) struct NativeEffect {
     room: String,
     settings: Settings,
 }
 
 impl NativeEffect {
-    pub(super) fn new(room: String, settings: Settings) -> Self {
+    pub(crate) fn new(room: String, settings: Settings) -> Self {
         Self { room, settings }
     }
 
-    pub(super) fn call(&self, request: Value) -> EffectReply {
+    pub(crate) fn call(&self, request: Value) -> EffectReply {
         if self.settings.suppress {
             return EffectReply::default();
         }

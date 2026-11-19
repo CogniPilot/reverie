@@ -8,6 +8,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[path = "support/hands_answer.rs"]
+mod hands_answer;
+
 fn worker(endpoint: &str, query: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_reverie-admin-memory"))
         .arg(format!("--hands-web-worker={}", std::process::id()))
