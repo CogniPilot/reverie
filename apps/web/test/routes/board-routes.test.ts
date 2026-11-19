@@ -82,6 +82,29 @@ describe('board routes', () => {
   const post = (url: string, payload: unknown, session?: string) => app.inject({ method: 'POST', url, payload: payload as object, headers: as(session) });
   const patch = (url: string, payload: unknown, session?: string) => app.inject({ method: 'PATCH', url, payload: payload as object, headers: as(session) });
 
+  it('adds a card to a board at the former issue limit and keeps its closed history on reload', async () => {
+    const history: Issue[] = Array.from({ length: 2_000 }, (_, index) => ({
+      id: `i-history-${index}`,
+      title: `Historical card ${index}`,
+      status: 'done',
+      tags: [],
+      links: [],
+      scale: 'day',
+      createdAt: NOW - 1000,
+      updatedAt: NOW - 1000,
+      doneAt: NOW - 1000,
+    }));
+    await store.update({}, (state) => {
+      state.issues = history;
+    });
+
+    const response = await post('/api/board/issues', { title: 'Continue the current work' }, COORD);
+    expect(response.statusCode, response.body).toBe(200);
+    const reloaded = new BoardStore(join(dir, 'board.json'));
+    await reloaded.init();
+    expect(reloaded.snapshot().issues).toEqual([...history, response.json().data.item]);
+  });
+
   it.each([undefined, BUILDER, STRANGER])('reads the same caller identity without loading Board state (%s)', async (session) => {
     const full = (await app.inject({ method: 'GET', url: '/api/board', headers: as(session) })).json().data.capabilities.identity;
     const snapshot = vi.spyOn(store, 'snapshot').mockImplementation(() => { throw new Error('Board must not be read'); });
