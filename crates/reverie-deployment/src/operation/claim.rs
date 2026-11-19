@@ -73,7 +73,7 @@ impl Operation {
             if let (Some(previous), Some(current_topology)) =
                 (&self.plan.network_topology, current_topology)
             {
-                previous.require_claim_successor(current_topology)?;
+                previous.require_claim_successor(current_topology, current, engine)?;
                 return self.plan.candidate_matches_topology(
                     current,
                     Some(current_topology),

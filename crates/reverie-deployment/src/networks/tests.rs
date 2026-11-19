@@ -117,7 +117,7 @@ fn ready_claim_handover_accepts_only_recreation_of_the_default_bridge() {
     facts[0]["Id"] = new_bridge;
     facts[0]["Created"] = json!("second");
     let current = Topology::observed(&source, facts.clone()).unwrap();
-    previous.require_claim_successor(&current).unwrap();
+    assert!(previous.claim_additions(&current).unwrap().is_empty());
     assert!(previous.require_container(&source).is_err());
     current.require_container(&source).unwrap();
 
@@ -135,10 +135,7 @@ fn ready_claim_handover_accepts_only_recreation_of_the_default_bridge() {
                 value;
         }
         let changed = Topology::observed(&changed_source, changed_facts).unwrap();
-        assert!(
-            previous.require_claim_successor(&changed).is_err(),
-            "{field}"
-        );
+        assert!(previous.claim_additions(&changed).is_err(), "{field}");
     }
 }
 
