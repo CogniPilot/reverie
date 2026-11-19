@@ -3,8 +3,8 @@ import hashlib,json,os,shutil,signal,subprocess,sys,time,uuid
 from pathlib import Path
 source=Path(sys.argv[1]).resolve();evidence=Path(sys.argv[3]).resolve()
 web_source=source/'apps/web' if (source/'apps/web/src').is_dir() else source
-python_source=source/'python' if (source/'python/reverie/worker.py').is_file() else web_source/'test/fixtures/goal-source/python'
-if not (python_source/'reverie/worker.py').is_file():raise RuntimeError('Native fixture requires repository Python sources or packaged goal-source fixture')
+python_source=source/'python' if (source/'python/reverie/worker.py').is_file() else web_source/'test/fixtures/viewer-source/python'
+if not (python_source/'reverie/worker.py').is_file():raise RuntimeError('Native fixture requires repository Python sources or the packaged viewer fixture')
 if sys.argv[2]=='@leased':
  sys.path.insert(0,str(python_source))
  os.environ.setdefault('REVERIE_LEASE_DIR',str(evidence.parent/'lease-registry'))
