@@ -58,7 +58,8 @@ fn names(bytes: &[u8], selected: &mut BTreeSet<String>) -> Result<(), String> {
 
 fn python(name: &str, prefix: &[u8]) -> bool {
     if Path::new(name).extension().is_some_and(|extension| {
-        ["py", "pyw", "pyi"].contains(&extension.to_string_lossy().to_ascii_lowercase().as_str())
+        ["py", "pyw", "pyi", "pyc", "pyo"]
+            .contains(&extension.to_string_lossy().to_ascii_lowercase().as_str())
     }) {
         return true;
     }
@@ -608,7 +609,12 @@ fn repository_reports_legacy_script_inventory_for_migration() {
     )
     .expect("source paths");
     let mut scripts = Vec::new();
+    let mut python_paths = Vec::new();
     for name in tracked {
+        if Path::new(&name).starts_with("python") || python(&name, &[]) {
+            python_paths.push(name);
+            continue;
+        }
         let path = root.join(&name);
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
@@ -618,11 +624,19 @@ fn repository_reports_legacy_script_inventory_for_migration() {
         if metadata.is_file()
             && let Some(language) = current_script(&root, &name).expect("read tracked source")
         {
-            scripts.push(format!("{language:?}: {name}"));
+            match language {
+                Language::Python => python_paths.push(name),
+                Language::Shell => scripts.push(format!("Shell: {name}")),
+            }
         }
     }
+    assert!(
+        python_paths.is_empty(),
+        "Tracked Python paths remain:\n{}",
+        python_paths.join("\n")
+    );
     let report = format!(
-        "## Legacy script migration debt\n\n{} tracked Python/shell scripts remain. These are not a deletion GO; new scripts are rejected separately.\n\n<details><summary>Script inventory</summary>\n\n```text\n{}\n```\n\n</details>\n",
+        "## Legacy script migration debt\n\nZero tracked Python paths. {} tracked shell scripts remain.\n\n<details><summary>Shell script inventory</summary>\n\n```text\n{}\n```\n\n</details>\n",
         scripts.len(),
         scripts.join("\n")
     );

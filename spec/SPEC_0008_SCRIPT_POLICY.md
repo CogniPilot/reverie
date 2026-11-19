@@ -17,7 +17,7 @@ First-party implementation and maintenance use Rust or TypeScript, with no new P
 | Cover executable extensions and extensionless interpreter shebangs | CI policy | Names cannot hide scripts |
 | Reject conversion of existing non-script code into a forbidden script | CI policy | No disguised additions |
 | Apply the same ratchet to staged, committed and untracked source | Local/CI | Consistent checks |
-| Report existing tracked script inventory as migration debt | CI summary | Visible remaining work |
+| Require zero tracked Python files and report remaining shell scripts | CI inventory | Verify the Python removal in the entire tree |
 | Retire legacy scripts when real consumers have accepted replacements | Owning lane | Preserve capabilities |
 | Include embedded/generated execution fragments in the migration inventory | Owning lane | Filename checks are insufficient |
 | Add no shell-evaluation strings to replace removed maintenance scripts | New code | No hidden workaround |
@@ -27,8 +27,7 @@ First-party implementation and maintenance use Rust or TypeScript, with no new P
 | Preserve explicitly scoped user-selected interactive shells | Terminal API | Existing office capability |
 
 The current automated ratchet recognizes Python-family extensions/interpreters
-and shell files including Bash, POSIX shell and PowerShell/batch variants. Legacy
-repairs and deletion remain possible while the port proceeds. This is not a
-claim that legacy scripts or embedded packaging fragments are already gone.
-Nix build phases and third-party tooling are inventoried separately; no new
-first-party maintenance workflow may hide in packaging glue.
+and shell files including Bash, POSIX shell and PowerShell/batch variants.
+The inventory checks the entire tracked tree for Python. Legacy shell repairs
+and deletion remain possible. Inventory Nix build phases and third-party
+tooling separately, and keep first-party maintenance in Rust and TypeScript.

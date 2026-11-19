@@ -52,8 +52,8 @@ reverie-buildenv --project rumoca --repo /scratch/repos/rumoca \
   - then +25%, at least 256 MiB.
 
   It refuses when there is no such run yet. Never lower an estimate to get past the gate.
-- **Heavy non-cargo steps** (installs, test runners) use
-  `python3 -m reverie.admission --expect SIZE -- CMD`. IO-heavy steps also fill the page cache.
+- **Heavy non-cargo steps** (installs, test runners) also use `reverie-buildenv`.
+  Set `--expect` and `--disk` for the command. IO-heavy steps also fill the page cache.
   The toolchain install hit the cgroup limit for 11 s (reclaim only, no kill) at a
   measured 522 MiB peak.
 - **OOM timeline:** `/scratch/profiles/oom-watch/oom-watch.sh` logs every
