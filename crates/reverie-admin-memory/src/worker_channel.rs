@@ -3,6 +3,7 @@ use nix::unistd::dup;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{
     io::{self, BufRead, BufReader, Write},
+    net::Shutdown,
     os::{fd::AsFd, unix::net::UnixStream},
     time::{Duration, Instant},
 };
@@ -13,9 +14,17 @@ pub(crate) struct WorkerChannel(BufReader<UnixStream>);
 
 impl WorkerChannel {
     pub(crate) fn open() -> io::Result<Self> {
-        let socket = UnixStream::from(dup(io::stdin().as_fd())?);
+        Self::from_fd(io::stdin())
+    }
+
+    pub(crate) fn from_fd(fd: impl AsFd) -> io::Result<Self> {
+        let socket = UnixStream::from(dup(fd)?);
         socket.peer_addr()?;
         Ok(Self(BufReader::new(socket)))
+    }
+
+    pub(crate) fn shutdown(&self) -> io::Result<()> {
+        self.0.get_ref().shutdown(Shutdown::Both)
     }
 
     pub(crate) fn read<T: DeserializeOwned>(

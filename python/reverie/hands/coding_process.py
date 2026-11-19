@@ -4,6 +4,7 @@ import selectors
 import signal
 import socket
 import subprocess
+import threading
 import time
 from dataclasses import asdict
 
@@ -116,7 +117,7 @@ class BoundedProcess:
 
 
 class WorkerSocket:
-    def __init__(self, worker, initial, *, environment=None):
+    def __init__(self, worker, initial, *, environment=None, terminal=False):
         self.closed = False
         self.input = bytearray()
         self.output = self.packet(initial)
@@ -126,7 +127,8 @@ class WorkerSocket:
             env = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
             env.update(environment or {})
             self.process = subprocess.Popen(native_memory_command(worker, resolve=True),
-                stdin=child, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                stdin=None if terminal else child, stdout=None if terminal else subprocess.DEVNULL,
+                stderr=child if terminal else subprocess.DEVNULL,
                 start_new_session=True, env=env)
         except BaseException:
             self.connection.close()
@@ -192,14 +194,96 @@ class WorkerSocket:
                 if remaining <= 0 or not selector.select(remaining):
                     raise TimeoutError('worker reply deadline')
 
-    def close(self):
+    def close(self, *, grace=0):
         if self.closed:
             return
         self.closed = True
         self.connection.close()
-        if self.process.poll() is None:
+        try:
+            self.process.wait(timeout=grace)
+            return
+        except subprocess.TimeoutExpired:
             self.process.kill()
         self.process.wait()
+
+
+class Terminal:
+    """Forward observations and local prompts across the native terminal boundary."""
+
+    def __init__(self, cfg, *, output=None, interactive=None):
+        self.cfg = cfg
+        self.output = output
+        self.interactive = interactive is not False
+        self.quit_requested = False
+        self.worker = None
+        self.lock = threading.RLock()
+
+    def start(self):
+        fields = ('api_base', 'model', 'self_name', 'poll_s', 'prompt_cap_chars',
+                  'reply_max_tokens', 'message_cap_chars')
+        settings = {key: self.cfg[key] for key in fields}
+        secrets = [os.environ[name] for name in (self.cfg.get('model_key_env'), 'REVERIE_PASSWORD')
+                   if name and os.environ.get(name)]
+        settings.update(interactive=self.interactive, capture=self.output is not None, secrets=secrets,
+                        coding=bool(self.cfg.get('coding')), search=bool(self.cfg.get('search')),
+                        memory=bool(self.cfg.get('memory_instance')), trace=self.cfg.get('model_events_file'))
+        try:
+            self.worker = WorkerSocket('hands-terminal-worker', settings, terminal=True,
+                                       environment={'TERM': os.environ.get('TERM', '')})
+            self._receive()
+        except (OSError, EOFError, ValueError):
+            self._close()
+            print('Terminal unavailable; the harness will continue.', file=self.output, flush=True)
+        return self
+
+    def _receive(self):
+        reply = self.worker.wait(2)
+        self.interactive = reply['interactive']
+        for line in reply['lines']:
+            print(line, file=self.output, flush=True)
+        return reply
+
+    def _request(self, action, **fields):
+        with self.lock:
+            if self.worker is not None:
+                try:
+                    self.worker.send({'action': action, **fields})
+                    return self._receive()
+                except (OSError, EOFError, ValueError):
+                    self._close()
+        return {}
+
+    def _close(self):
+        if self.worker is not None:
+            self.worker.close(grace=1)
+            self.worker = None
+        self.interactive = False
+
+    def event(self, kind, **data):
+        self._request('observe', event={'kind': kind, **data})
+
+    def log(self, *parts):
+        kind = 'error' if parts and ('failed' in str(parts[0]) or 'unavailable' in str(parts[0])) else 'note'
+        self.event(kind, text=' '.join(map(str, parts)))
+
+    def summary(self):
+        status = getattr(self.cfg.get('_attention'), 'status', 'not started')
+        return self._request('status', phone_wake=status).get('summary', 'Terminal unavailable')
+
+    def has_input(self):
+        return self.interactive and self._request('poll', take_input=False).get('pending', False)
+
+    def pending(self):
+        if self.interactive:
+            return self._request('poll', take_input=True).get('prompt')
+        return None
+
+    def clear(self):
+        self._request('clear')
+
+    def stop(self):
+        self._request('stop')
+        self._close()
 
 
 class ModelArbiter(WorkerSocket):

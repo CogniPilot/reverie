@@ -5,6 +5,7 @@ mod tests;
 
 use super::delta::{Display, DisplayKind};
 use file::{TRACE_BYTES, TraceFile};
+pub(crate) use reader::Reader as TraceReader;
 pub(crate) use reader::trace_worker;
 use regex_lite::Regex;
 use reverie_host::embeddings::model_api::Failure;
@@ -123,7 +124,7 @@ impl Writer {
     }
 }
 
-fn redact(value: &str) -> String {
+pub(crate) fn redact(value: &str) -> String {
     CREDENTIAL
         .replace_all(value, REDACTED)
         .chars()

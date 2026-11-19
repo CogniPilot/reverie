@@ -8,9 +8,9 @@ pub(super) trait Display {
     fn write(&mut self, kind: DisplayKind, value: &str) -> Result<(), Failure>;
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub(super) enum DisplayKind {
+pub(crate) enum DisplayKind {
     Thinking,
     Answer,
 }

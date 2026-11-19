@@ -2,7 +2,8 @@
 
 The packaged `reverie-hands` starts in Rust. It binds the exact Office
 employee to the selected model, prepares the private runtime configuration,
-and hands off to the existing Hands loop. Restarts preserve the saved
+and hands off to the Hands loop. The terminal UI, input queue, and live model
+trace display run in Rust. Restarts preserve the saved
 memory configuration and state file.
 
 The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools

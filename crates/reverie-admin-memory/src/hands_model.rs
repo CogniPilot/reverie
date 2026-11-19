@@ -5,8 +5,10 @@ mod stream;
 #[cfg(test)]
 mod tests;
 mod trace;
+pub(super) use delta::DisplayKind as TraceKind;
 pub(super) use slot::supervise;
 pub(super) use trace::trace_worker;
+pub(super) use trace::{TraceReader, redact as redact_trace};
 
 use crate::token_meter::{self, KeyName, Meter, Stats, credential};
 use reverie_host::embeddings::model_api::{Client, Failure, Route};

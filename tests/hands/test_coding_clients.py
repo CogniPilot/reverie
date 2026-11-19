@@ -10,7 +10,7 @@ import time
 import unittest
 
 from agent_journal import native_memory_command
-from debug_terminal import TraceReader
+from coding_process import WorkerSocket
 
 
 class ModelClientTests(unittest.TestCase):
@@ -74,9 +74,11 @@ class ModelClientTests(unittest.TestCase):
                     self.assertEqual(result['result']['content'], 'Final answer')
                     self.assertEqual(result['result']['reasoning_content'], thought + key)
                     self.assertNotIn(key, path.read_text())
-                    reader = TraceReader(path, from_end=False)
+                    reader = WorkerSocket('hands-trace-worker', {'path': str(path), 'from_end': False})
                     try:
-                        events = reader.poll()
+                        self.assertEqual(reader.wait(0.5), {'ready': True})
+                        reader.send('poll')
+                        events = reader.wait(0.5)
                     finally:
                         reader.close()
                     self.assertEqual(''.join(e['text'] for e in events if e['kind'] == 'thinking'),

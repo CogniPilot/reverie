@@ -108,7 +108,8 @@ class AttentionWakeTests(unittest.TestCase):
 
     def test_mentions_wake_the_serial_loop_while_the_coding_pump_remains_responsive(self):
         wake = AttentionWake(cfg_for('/unused'))
-        view = SimpleNamespace(inputs=queue.Queue(), quit_requested=False)
+        queued = queue.Queue()
+        view = SimpleNamespace(has_input=lambda: not queued.empty(), quit_requested=False)
         manager = SimpleNamespace(active=True, pump=Mock())
         timer = threading.Timer(0.06, wake.signal.set); timer.start()
         started = time.monotonic()
@@ -116,7 +117,7 @@ class AttentionWakeTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 0.5)
         self.assertGreater(manager.pump.call_count, 0)
         timer.join()
-        wake.signal.clear(); view.inputs.put('terminal prompt')
+        wake.signal.clear(); queued.put('terminal prompt')
         started = time.monotonic(); wait_for_scan(15, wake, view, manager)
         self.assertLess(time.monotonic() - started, 0.1)
 

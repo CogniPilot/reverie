@@ -45,8 +45,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import coding_chat
 from coding_manager import TaskManager
-from coding_process import WorkerSocket
-from debug_terminal import DebugTerminal
+from coding_process import Terminal, WorkerSocket
 import agent_journal
 
 _terminal = None
@@ -908,7 +907,7 @@ def wait_for_scan(seconds, wake, view, manager=None):
     """Accepted phone traffic wakes the serial loop; UI and coding work remain responsive."""
     until = time.monotonic() + seconds
     while time.monotonic() < until and not view.quit_requested:
-        if not view.inputs.empty() or wake.signal.is_set():
+        if view.has_input() or wake.signal.is_set():
             break
         if manager and manager.active:
             manager.pump()
@@ -927,7 +926,7 @@ def main(argv):
     coding_chat.interrupt_requests(initial.setdefault('_coding', {}), lambda: save_json(cfg['state_file'], initial))
     manager = TaskManager(sys.modules[__name__], cfg, chat) if cfg.get('coding') else None
     cfg['_coding_manager'] = manager
-    view = DebugTerminal(cfg, interactive=False if '--no-tui' in argv or once else None).start()
+    view = Terminal(cfg, interactive=False if '--no-tui' in argv or once else None).start()
     cfg['_terminal'] = view
     _terminal = view
     attention = AttentionWake(cfg, lambda text: terminal_event(cfg, 'note', text=text))

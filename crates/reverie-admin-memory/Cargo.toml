@@ -17,6 +17,7 @@ required-features = ["test-fixtures"]
 base64.workspace = true
 bytes.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 getrandom.workspace = true
 html5ever.workspace = true
 http.workspace = true
@@ -25,7 +26,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 idna.workspace = true
 jiff.workspace = true
-nix = { workspace = true, features = ["fs", "poll", "signal", "process", "user"] }
+nix = { workspace = true, features = ["fs", "poll", "signal", "process", "term", "user"] }
 regex-lite.workspace = true
 reverie-application.workspace = true
 reverie-contracts.workspace = true
@@ -42,6 +43,7 @@ serde_json.workspace = true
 sha2.workspace = true
 tokio.workspace = true
 tokio-rustls.workspace = true
+unicode-width.workspace = true
 
 [dev-dependencies]
 rusqlite.workspace = true

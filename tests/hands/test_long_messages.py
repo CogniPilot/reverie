@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 import agent_loop as loop
-from debug_terminal import DebugTerminal
+from coding_process import Terminal
 from test_coding_support import cfg_for
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'mark': 'owner_typed', 'authenticatedOwner': True}
@@ -70,7 +70,8 @@ class TerminalLongMessageTests(unittest.TestCase):
     def test_debug_terminal_input_reaches_the_model_whole(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
         cfg = cfg_for(directory.name)
-        cfg['_terminal'] = DebugTerminal(cfg, output=io.StringIO(), interactive=False).start()
+        cfg['_terminal'] = Terminal(cfg, output=io.StringIO(), interactive=False).start()
+        self.addCleanup(cfg['_terminal'].stop)
         text = 'line ' + 'w' * (cfg['message_cap_chars'] + 800) + ' END'
         seen = []
         def model(*args):

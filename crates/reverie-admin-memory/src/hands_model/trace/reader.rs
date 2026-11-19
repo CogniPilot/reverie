@@ -35,9 +35,9 @@ enum Message {
 }
 
 #[derive(Deserialize, Serialize)]
-struct Event {
-    kind: DisplayKind,
-    text: String,
+pub(crate) struct Event {
+    pub(crate) kind: DisplayKind,
+    pub(crate) text: String,
 }
 
 fn display_line(line: &[u8]) -> Option<Event> {
@@ -84,7 +84,7 @@ impl Generation {
     }
 }
 
-struct Reader {
+pub(crate) struct Reader {
     path: TracePath,
     generation: Option<Generation>,
     offset: u64,
@@ -92,7 +92,7 @@ struct Reader {
 }
 
 impl Reader {
-    fn new(path: &Path, from_end: bool) -> io::Result<Self> {
+    pub(crate) fn new(path: &Path, from_end: bool) -> io::Result<Self> {
         let path = TracePath::new(path)?;
         let mut reader = Self {
             path,
@@ -115,7 +115,7 @@ impl Reader {
         Ok(reader)
     }
 
-    fn poll(&mut self) -> io::Result<Vec<Event>> {
+    pub(crate) fn poll(&mut self) -> io::Result<Vec<Event>> {
         let Some(file) = self.path.read()? else {
             return Ok(Vec::new());
         };

@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest.mock import patch
 
 import agent_loop as loop
-from debug_terminal import DebugTerminal
+from coding_process import Terminal
 from test_coding_support import FakeChat, cfg_for
 
 
@@ -25,11 +25,12 @@ class TerminalTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.cfg = cfg_for(self.tmp.name)
         self.output = io.StringIO()
-        self.view = DebugTerminal(self.cfg, output=self.output, interactive=False).start()
+        self.view = Terminal(self.cfg, output=self.output, interactive=False).start()
+        self.addCleanup(self.view.stop)
         self.cfg['_terminal'] = self.view
 
     def test_shows_running_harness_and_distinguishes_configured_and_reported_model(self):
-        self.assertIn('Reverie Admin Harness / Python PID', self.output.getvalue())
+        self.assertIn('Reverie Admin Harness / PID', self.output.getvalue())
         self.assertIn('configured model: configured-model', self.output.getvalue())
         self.assertIn('API-reported model: unverified', self.output.getvalue())
         self.assertIn('60000 characters', self.output.getvalue())
@@ -40,31 +41,21 @@ class TerminalTests(unittest.TestCase):
         self.assertNotIn('extra', self.view.summary())
 
     def test_trace_is_coalesced_bounded_and_drained_before_model_done(self):
-        path = Path(self.tmp.name) / 'events.jsonl'
-        view = DebugTerminal(dict(self.cfg, model_events_file=str(path)), output=self.output, interactive=False)
-        self.addCleanup(view.stop)
+        path = Path(self.tmp.name) / "events.jsonl"
         path.touch(mode=0o600)
-
-        def emit(kind, text):
-            with path.open('a') as stream:
-                stream.write(json.dumps({'kind': kind, 'text': text}) + '\n')
-
-        emit('thinking', 'first ')
-        view.poll_trace()
-        emit('thinking', 'second')
-        emit('answer', 'final answer')
-        view.event('model_done', seconds=0.1)
-        self.assertEqual([record[1] for record in view.records], ['thinking', 'answer', 'model_done'])
-        self.assertEqual(view.records[0][2], 'Thinking\nfirst second')
-        self.assertEqual(view.records[1][2], 'Answer stream\nfinal answer')
-        for _ in range(10):
-            emit('thinking', 'x' * 4096); view.poll_trace()
-        self.assertLessEqual(len(view.records[-1][2]), 12009)
-        self.assertIn('earlier trace text omitted', view.records[-1][2])
-        self.assertEqual(view.replies, 0)
-        worker = view.trace.worker.process
+        view = Terminal(dict(self.cfg, model_events_file=str(path)), output=self.output, interactive=False).start()
+        self.addCleanup(view.stop)
+        with path.open("a") as stream:
+            for kind, text in (("thinking", "first "), ("thinking", "second"), ("answer", "final answer")):
+                stream.write(json.dumps({"kind": kind, "text": text}) + "\n")
+        view.event("model_done", seconds=0.1)
+        output = self.output.getvalue()
+        self.assertIn("Thinking: first second", output)
+        self.assertLess(output.index("Answer stream: final answer"), output.index("Model answered"))
+        self.assertIn("posted replies: 0", view.summary())
+        worker = view.worker.process
         view.stop()
-        self.assertIsNotNone(worker.poll())
+        self.assertEqual(worker.poll(), 0)
 
     def test_terminal_prompt_preempts_background_model_before_inference(self):
         observed = []
@@ -80,7 +71,8 @@ class TerminalTests(unittest.TestCase):
         with patch.dict(os.environ, {'FIXTURE_KEY': 'fixture-private-key', 'REVERIE_PASSWORD': 'fixture-password'}):
             cfg = dict(self.cfg, model_key_env='FIXTURE_KEY',
                        api_base='https://person:secret@model.invalid/v1?token=another-secret')
-            view = DebugTerminal(cfg, output=self.output, interactive=False).start()
+            view = Terminal(cfg, output=self.output, interactive=False).start()
+            self.addCleanup(view.stop)
         view.event('error', text='fixture-private-key fixture-password Bearer abc123 token=hidden '
                    '\x1b]52;c;clipboard-content\x07\x1b[31mRED\x1b[0m')
         text = self.output.getvalue()
@@ -89,7 +81,7 @@ class TerminalTests(unittest.TestCase):
             self.assertNotIn(secret, text)
         self.assertIn('https://model.invalid/v1', text)
         self.assertIn('RED', text)
-        self.assertEqual(view.errors, 1)
+        self.assertIn('errors: 1', view.summary())
 
     def test_terminal_conversation_is_bounded_and_does_not_post_to_chat(self):
         calls, history = [], []
@@ -101,7 +93,7 @@ class TerminalTests(unittest.TestCase):
             loop.terminal_prompt(self.cfg, 'second question', history, model=model)
         self.assertIn('first question', calls[1][1]['content'])
         self.assertIn('second question', calls[1][1]['content'])
-        self.assertEqual(self.view.replies, 0)
+        self.assertIn('posted replies: 0', self.view.summary())
         self.assertIn('Worker [terminal; terminal]', self.output.getvalue())
         state = Path(self.cfg['state_file'])
         state.write_text('{"room": "keep"}')
@@ -120,9 +112,6 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(history, [])
         self.assertIn('Unknown terminal command', self.output.getvalue())
         self.assertIn('Coding: off', self.output.getvalue())
-        for _ in range(300):
-            self.view.event('note', text='bounded')
-        self.assertEqual(len(self.view.records), 200)
 
     def test_room_transcript_is_linked_and_only_counts_confirmed_posts(self):
         chat = FakeChat()
@@ -131,7 +120,7 @@ class TerminalTests(unittest.TestCase):
         msg = chat.add('room', {'kind': 'user', 'name': 'Owner'}, 'Please answer.')
         loop.tick(self.cfg, chat, state, model=lambda *a: {'content': 'Confirmed answer.'})
         self.assertEqual(chat.ours('room')[0]['replyTo'], msg['id'])
-        self.assertEqual(self.view.replies, 1)
+        self.assertIn('posted replies: 1', self.view.summary())
         self.assertIn('Please answer.', self.output.getvalue())
         self.assertIn('Confirmed answer.', self.output.getvalue())
 
@@ -190,7 +179,6 @@ class TerminalPTYTests(unittest.TestCase):
                 os.close(master)
 
     def test_real_terminal_room_polling_local_input_resize_and_clean_exit(self):
-        import curses
         import fcntl
         import pty
         import termios
