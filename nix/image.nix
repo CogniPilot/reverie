@@ -172,6 +172,9 @@ pkgs.dockerTools.buildLayeredImage rec {
     fi
   '' + pkgs.lib.optionalString worker ''
     mkdir -p etc/nix nix/store/.links target/nix
+    for path in opt/reverie/python bin/{python,python3,${pkgs.python3.executable},pytest,py.test}; do
+      test ! -e "$path" && test ! -L "$path" || { echo "Unexpected worker image path: $path" >&2; exit 1; }
+    done
     cp ${nixClosure}/registration etc/reverie-nix-registration
     ln -s ${nixBase} etc/reverie-nix-base
     cat > etc/nix/nix.conf <<'NIXCONF'

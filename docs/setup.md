@@ -24,7 +24,9 @@ The current native runtime adapter uses OpenCode and its provider/model selectio
 The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
 Full automatic conversation ingestion for those other harnesses is future work;
 installing the skill alone does not hook every completed turn automatically.
-The [generic specialist profiles](../examples/specialist-profiles.json) remain available as data.
+The [generic specialist profiles](../examples/specialist-profiles.json) provide names, roles
+and persona starting points for an owner to use when creating an expert template. An owner
+chooses the launch mode and provider and stores the resulting template in the instance.
 Personal identities and their histories live in the ignored `local/` directory.
 Existing SQLite history columns are read compatibly during migration.
 

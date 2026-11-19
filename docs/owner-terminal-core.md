@@ -178,32 +178,12 @@ with byte/inode/IO/commit and active-object preservation.
 No accepted baseline suites, model calls, real credentials, host engine, PTY,
 provider, current thread or installed source were changed.
 
-## Canonical package and checks
+## Retired package and checks
 
-The shared Python modules are in `python/reverie/`. Canonical package imports
-use relative dependencies; fixed flat immutable bundles retain standalone
-imports. The only promotion changes to the accepted Python behavior are those
-import choices. `OwnerLaptopTerminalAuthority` and `OwnerLedgerBridge` are normal
-console TypeScript modules, with no server import/route/startup activation.
-The reviewed connector is `apps/web/scripts/connect-owner-terminal.mjs`.
-
-`nix build .#ownerTerminalCore` packages five inert Python modules, the connector
-and TS source with these integration notes. It has no executable/service or
-console dependency and performs only import/syntax checks. The normal console
-build compiles the TS modules and its check phase runs the17 composed owned
-Python/Node tests after compilation. Those tests are outside generic Python
-discovery; generic Python package checks require no console build. This avoids a
-Python-suite/console derivation cycle. Neither check invokes a host engine,
-provider, private instance, native H actor, PTY or installed listener.
-
-Native development uses `PYTHONPATH=python` for generic tests. To run the dedicated
-composition after building the two TS modules, set `OWN_TEST_NODE` to the actual
-Nix Node executable and optional `OWNER_TERMINAL_TEST_DIST` to that compiled
-directory, then run `apps/web/test/fixtures/owner-terminal/test_bridge.py`. Its
-engine/owner-session observations remain explicit owned fixtures. No test or
-package declaration qualifies installed mount/grant custody or opens a user
-terminal. All installer/HostConfig/Mounts/consumer-peer/entitlement/H scheduling
-and live owner/native acceptance gates above remain open.
+The experimental Python bridge, its `ownerTerminalCore` package and composed
+Python/Node fixtures are retired. The historical protocol and provenance below
+record the reviewed design. Current employee terminals use the Docker-contained
+office described in [Docker runtime boundaries](host-runtime-retirement.md).
 
 ## Source provenance
 
