@@ -1,5 +1,8 @@
 # Stall watchdog for the local OpenCode agent
 
+This document records the retired standalone watchdog. Current installations
+use the office's native runtime and recovery controls.
+
 The runtime watcher (`docs/runtime-watcher.md`) restarts an agent that **crashed**. The stall watchdog
 (`python/reverie/stall_watch.py`) handles one that is **alive but stuck**:
 - It never restarts anything and never starts a new session or thread.

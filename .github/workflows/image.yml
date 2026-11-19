@@ -142,7 +142,9 @@ jobs:
           mkdir -p "$HOME/scratch/reverie/build" "$HOME/scratch/reverie/tmp"
           export TMPDIR="$HOME/scratch/reverie/tmp"
           nix flake check --print-build-logs
-          nix develop --command node --test tests/*.mjs
+          # The voice workflow runs the inference tests with its pinned model files.
+          shopt -s extglob
+          nix develop --command nix shell .#reverie.runtime.adminMemory --command node --test tests/!(test_native_kokoro|test_native_voice_fixture).mjs
           nix develop --command node --experimental-strip-types --test scripts/build-boxed-worker-image.test.mts
           nix build .#default --out-link "$HOME/scratch/reverie/build/app"
           "$HOME/scratch/reverie/build/app/bin/reverie" --version
@@ -341,14 +343,11 @@ jobs:
           image=$(bash scripts/release-image.sh load docker bundle/extracted "$GITHUB_REPOSITORY_OWNER" "$version" "$(git rev-parse HEAD)")
           rm -rf bundle
           printf '%s\n' "$image" > "$RUNNER_TEMP/tested-image-id"
-      - name: Exercise real isolated workers using the tested image
+      - name: Qualify isolated worker workloads using the tested image
         run: |
           set -euo pipefail
           mkdir -p acceptance
-          laptop_tools=$(nix build .#laptopTools --no-link --print-out-paths)
-          nix develop --command "$laptop_tools/bin/reverie-buildenv" \
-            --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
-            -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
+          nix develop --command node .github/ci/worker-isolation-sandbox.mjs "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
       - name: Qualify the legacy attach-only component fixture without a public launcher
         env:

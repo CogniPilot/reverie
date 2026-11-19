@@ -1,5 +1,8 @@
 # Night cycle: consolidation and dreams on the local GPU
 
+This page records the retired host-managed night cycle and its backup format.
+For current GPU deployment, see [Container GPU](container-gpu.md).
+
 `reverie-cycle` can run **nights only**: no planning and no day work, only each persistent agent's
 consolidation (reflection over its episodes), one dream and sleep. Agents go one at a time on the
 local model, and only while the GPU is idle. A host timer runs one `tick` every 5 minutes, and each
@@ -57,24 +60,7 @@ The gate only reads `/slots` for a model that is already loaded, so it never mak
 
 Known residual: during one long agentic turn, `reverie_last_activity` changes only at its start and end, and `/slots` is idle between generations. So after 30 minutes one batch can overlap that turn. The late window makes this unlikely. The host's `gpu-idle-check` adds what only the host can see: GPU utilisation, other GPU processes, and `~/.config/reverie/gpu.hold`.
 
-## Install (host)
-1. Write the policy inside the container's instance data (for example
-   `/instances/<instance>/runtime/cycle/cycle-policy.json`) and check it with
-   `reverie-cycle --policy … status`. That first `status` creates the state dir and the ledger.
-2. Set up the host files:
-   ```
-   install -m 0755 scripts/gpu-idle-check ~/.local/libexec/reverie/gpu-idle-check
-   printf 'REVERIE_CYCLE_POLICY=/instances/<instance>/runtime/cycle/cycle-policy.json\n' > ~/.config/reverie/cycle.env
-   cp systemd/reverie-cycle.{service,timer} ~/.config/systemd/user/
-   systemctl --user daemon-reload
-   systemd-analyze --user verify ~/.config/systemd/user/reverie-cycle.service
-   ```
-3. Test both paths. **The idle case must be run with the model loaded and idle**: some drivers name the router process `[Not Found]`, which blocks every tick until `GPU_IDLE_ALLOW_UNNAMED=1` is set in the unit's environment:
-   - `~/.local/libexec/reverie/gpu-idle-check; echo $?` while idle (0)
-   - the same while the GPU is busy, or after `touch ~/.config/reverie/gpu.hold` (1)
-4. `systemctl --user enable --now reverie-cycle.timer`.
-
-## Operating
+## Historical operation
 - **Stop:** `reverie-cycle --policy … pause`. It takes effect at the next phase or batch boundary; `resume` undoes it.
   - `systemctl --user stop` only ends the podman client of a running tick.
   - `disable --now reverie-cycle.timer` prevents new ticks.
@@ -100,7 +86,7 @@ and `reverie-memory remember`. Restoring under them can corrupt the store or los
 4. Restore and check:
    ```
    install -m 0600 <backup_dir>/<agent>/<night>.sqlite memory.sqlite
-   python3 -c "import sqlite3; print(sqlite3.connect('memory.sqlite').execute('PRAGMA quick_check').fetchone()[0])"
+   sqlite3 -readonly memory.sqlite 'PRAGMA quick_check;'
    ```
    Then restore `profile.md` from `<night>.profile.md` with mode 0600.
 5. **Writes made after the backup are lost:** turns recorded during that day, and the night's

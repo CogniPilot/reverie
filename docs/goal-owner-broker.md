@@ -13,12 +13,10 @@ remain mandatory. No request supplies a path, key, generation or engine command.
 The response contains only version, config digest and the fixed fourteen private
 entry identities. It never contains key content or creates trust/state.
 
-The already packaged Python module supports
-`python3 -m reverie.worker client --goal-custody` and the bounded stream helper
-`python3 -m reverie.worker client --goal-custody-stream`. The existing worker
-executable packaging is in `nix/package.nix` (`workerExec`); this patch
-does not add or guess an installed host path. An operator must attest the actual
-immutable executable, ownership and execution context before provisioning.
+The packaged Rust worker client supports `reverie-worker-exec --goal-custody`
+and `reverie-worker-exec --goal-custody-stream`. The `workerExec` package is
+defined in `nix/package.nix`. An operator must attest the actual immutable
+executable, ownership and execution context before provisioning.
 
 Office HTTP forwarding always has an unavailable Goal signer, independently of
 configured mode. Reserved Goal requests are denied before upstream forwarding;

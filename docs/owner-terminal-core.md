@@ -1,5 +1,8 @@
 # Packaged owner-terminal core components
 
+This document records the legacy optional host implementation. Current employee
+terminals use the [Docker runtime](host-runtime-retirement.md).
+
 Source only. No installed issuer, permission, route, H operation, PTY, shell,
 service, provider/laptop action or production ledger write. The fixture's owner
 cookie, company identities and native observations are synthetic and never come
@@ -12,10 +15,8 @@ Source provenance is listed below.
 
 The host receives the already admitted **R2 Handoff** object. It constructs:
 
-```python
-service = LedgerService(admitted_channel, installed_private_ledger_directory,
-    native_target=fixed_native_target, consumer_verifier=fixed_broker_peer)
-```
+The archived ledger service combined the admitted channel with a private ledger
+directory, an independent native target observer, and a fixed consumer verifier.
 
 `native_target.observe(employeeId)` must synchronously return the ten exact
 accepted protocol CURRENT_KEYS, freshly produced from canonical owner intent,
@@ -113,11 +114,8 @@ returned as errors. Explicit owner status/revoke still uses the unchanged ledger
 
 On that SAME serialized host event loop, outside any concurrent `serve_once`:
 
-```python
-capability = service.for_consumer(reference, independently_verified_consumer_digest)
-channel = human_terminal_protocol.Channel(capability.request,
-    fixed_native_target.observe(employee_id), capability=capability)
-```
+The consumer obtained a capability from the ledger after checking its digest, then
+bound the channel to a fresh native target observation and the capability request.
 
 The existing LedgerCapability performs one durable consume and current
 owner/native/peer rechecks. A new shim cannot consume an already consumed record.
@@ -180,31 +178,12 @@ with byte/inode/IO/commit and active-object preservation.
 No accepted baseline suites, model calls, real credentials, host engine, PTY,
 provider, current thread or installed source were changed.
 
-## Canonical package and checks
+## Retired package and checks
 
-The shared Python modules are in `python/reverie/`. Canonical package imports
-use relative dependencies; fixed flat immutable bundles retain standalone
-imports. The only promotion changes to the accepted Python behavior are those
-import choices. `OwnerLaptopTerminalAuthority` and `OwnerLedgerBridge` are normal
-console TypeScript modules, with no server import/route/startup activation.
-The reviewed connector is `apps/web/scripts/connect-owner-terminal.mjs`.
-
-`nix build .#ownerTerminalCore` packages five inert Python modules, the connector
-and TS source with these integration notes. It has no executable/service or
-console dependency and performs only import and syntax checks. The dedicated
-`checks.x86_64-linux.ownerTerminalBridge` runs the composed Python/Node
-tests against the compiled console and the inert core bundle. The normal
-console build and generic Python package checks can run independently of this
-suite. The fixture uses owned synthetic processes and sockets.
-
-Native development uses `PYTHONPATH=python` for generic tests. To run the dedicated
-composition after building the two TS modules, set `OWN_TEST_NODE` to the actual
-Nix Node executable and optional `OWNER_TERMINAL_TEST_DIST` to that compiled
-directory, then run `apps/web/test/fixtures/owner-terminal/test_bridge.py`. Its
-engine/owner-session observations remain explicit owned fixtures. No test or
-package declaration qualifies installed mount/grant custody or opens a user
-terminal. All installer/HostConfig/Mounts/consumer-peer/entitlement/H scheduling
-and live owner/native acceptance gates above remain open.
+The experimental Python bridge, its `ownerTerminalCore` package and composed
+Python/Node fixtures are retired. The historical protocol and provenance below
+record the reviewed design. Current employee terminals use the Docker-contained
+office described in [Docker runtime boundaries](host-runtime-retirement.md).
 
 ## Source provenance
 

@@ -1,5 +1,8 @@
 # Agent runtime watcher: keep-alive and binding restore
 
+This page records the retired standalone watcher. Current employee lifecycle and
+recovery run through the [Docker office runtime](host-runtime-retirement.md).
+
 `reverie-runtime --policy POLICY watch` supervises the one persistent agent runtime named
 by the external policy. It never manages other agents, so intentionally stopped
 workers stay stopped. Each tick re-reads the controller state under a file lock.
@@ -66,10 +69,10 @@ or 5xx error is returned from `activate` with a `restore-bindings ID` retry, and
 missing snapshot is reported, not silent. Old sessions are never deleted
 automatically.
 
-## Supervision (design; templates in `systemd/`, not installed)
+## Historical supervision
 
 A watcher started manually in a shell session is lost when the container restarts.
-Use the reviewed user-service templates to supervise it independently of that session:
+The former user-service templates supervised it independently of that session:
 
 1. **Start with the container.** A host user unit, `reverie-watcher.service`, runs
    `reverie-container engine exec --user agent reverie-live reverie-runtime --policy ... watch`. It is

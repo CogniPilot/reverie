@@ -18,7 +18,7 @@ in {
       linger = true;
       # No wheel, docker, shared credentials or host sudo grant.
       extraGroups = [];
-      packages = with pkgs; [ git tmux python3 nodejs podman ];
+      packages = with pkgs; [ git tmux nodejs podman ];
     };
     virtualisation.podman = { enable = true; dockerCompat = false; dockerSocket.enable = false; };
     systemd.tmpfiles.rules = [

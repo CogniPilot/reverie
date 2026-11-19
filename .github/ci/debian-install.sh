@@ -3,7 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-apt-get install -y sudo python3
+apt-get install -y sudo
 useradd --create-home --shell /bin/bash installer
 printf 'installer ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/installer
 mkdir /home/installer/bundle
@@ -11,14 +11,26 @@ tar -xzf /input/reverie-*.tar.gz -C /home/installer/bundle
 chown -R installer:installer /home/installer/bundle
 # Execute the two command blocks from the shipped document, without copying
 # their commands into a second implementation.
-python3 - <<'PY'
-from pathlib import Path
-text = Path('/home/installer/bundle/INSTALL.md').read_text()
-blocks = [part.split('```', 1)[0] for part in text.split('```bash\n')[1:]]
-assert len(blocks) == 2
-for index, block in enumerate(blocks):
-    Path(f'/home/installer/step-{index}.sh').write_text('set -euo pipefail\ncd /home/installer/bundle\n' + block)
-PY
+awk '
+  /^```$/ && in_block {
+    close(step)
+    in_block = 0
+    next
+  }
+  /^```bash$/ && !in_block {
+    step = "/home/installer/step-" count++ ".sh"
+    print "set -euo pipefail\ncd /home/installer/bundle" > step
+    in_block = 1
+    next
+  }
+  in_block { print > step }
+  END {
+    if (in_block || count != 2) {
+      print "INSTALL.md must contain two complete Bash blocks" > "/dev/stderr"
+      exit 1
+    }
+  }
+' /home/installer/bundle/INSTALL.md
 su - installer -c 'bash /home/installer/step-0.sh'
 # Containers have no systemd. This is the only infrastructure substitution;
 # the packaged Debian daemon and client run entirely inside this container.

@@ -2,7 +2,7 @@
 
 ## Read current channel evidence
 
-Find channels with `reverie agent chat rooms --json`. Read history with `reverie agent chat read --room "<name or ID>" -n 20 --json`. Use IDs for ambiguous names. Read relevant channels and newer corrections before acting on old evidence. Membership limits access; titles grant none.
+List channels with `reverie agent chat rooms --json`. Read history with `reverie agent chat read --room "<name or ID>" -n 20 --json`. Use IDs for ambiguous names. Check relevant channels for newer corrections before acting. Membership controls access.
 
 Long previews include continuation commands. `reverie agent chat read --room ROOM_ID --message MESSAGE_ID` reads the full body; `--part N` selects 2400-code-point parts. Parts require `--message` and exclude `--json`. MCP `chat_read` accepts `message`/`part`. Reads never acknowledge automatically.
 
@@ -10,7 +10,7 @@ Reply with `reverie agent chat say --room "<name or ID>" -- "your update"`. Conv
 
 ## Clear a direct-message view
 
-Choose **Clear history…** from your direct message's menu, then confirm **Clear history**. Existing messages disappear from your view on every device. Stored messages and agent memory remain intact; new messages still appear. **Close DM** only hides the conversation from the sidebar.
+Choose **Clear history…** in the DM menu and confirm. Existing messages disappear from your view on every device. Stored messages and agent memory stay intact, and new messages appear. **Close DM** hides the sidebar entry.
 
 ## Reverie Admin Harness memory
 

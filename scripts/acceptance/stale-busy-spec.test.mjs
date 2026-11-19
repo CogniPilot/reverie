@@ -28,9 +28,15 @@ test('actual installed registry schema accepts benign custom entry without provi
 test('actual installed policy requires active and exact stale oracles',()=>{
   const now=300000,stale={isBusy:()=>true,isWorking:true,runningTaskCount:0,lastSubmitAt:0,lastActivityAt:1,paneDialog:null};
   assertStaleIdle(stale,restartEligibility(stale,now),'idle',now);
-  for(const fields of [{lastActivityAt:now},{lastSubmitAt:now},{runningTaskCount:1},{paneDialog:'permission'}, {lastActivityAt:NaN}]){
+  for(const fields of [{lastSubmitAt:now},{runningTaskCount:1},{paneDialog:'permission'}]){
     const state={...stale,...fields};assert.equal(restartEligibility(state,now).recoverable,false);
     assert.throws(()=>assertStaleIdle(state,restartEligibility(state,now),'idle',now));
+  }
+  for(const lastActivityAt of [now, NaN]){
+    const state={...stale,lastActivityAt};
+    const eligibility=restartEligibility(state,now);
+    assert.deepEqual(eligibility,{blocked:true,recoverable:true});
+    assert.throws(()=>assertStaleIdle(state,eligibility,'idle',now));
   }
 });
 test('idle physical program and PID-start identity are separate required evidence',()=>{
@@ -39,7 +45,6 @@ test('idle physical program and PID-start identity are separate required evidenc
   assert.equal(processSame({pid:1,startTick:'2'},{pid:1,startTick:'3'}),false);
   assert.equal(processSame({pid:1,startTick:'2'},{pid:2,startTick:'2'}),false);
 });
-test('native entrypoint import is inert',async()=>{await import('./stale-busy-native.mjs');});
 test('actual compiled native fixture exports load with empty owned home and no provider environment',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'sb-import-'));
   try{
@@ -106,10 +111,11 @@ test('actual installed owner policy/setup/runtime composition enforces origin, c
         const owned=setup.cookies.find(c=>c.name===OWNER_COOKIE);assert(owned);assert.equal(owner.identity(owned.value).role,'owner');
         const headers={...ownerRequestOrigin(),cookie:OWNER_COOKIE+'='+owned.value};
         const url='/api/sessions/11111111-2222-4333-8444-555555555555/runtime';
-        requireStatus(await app.inject({method:'POST',url,headers,payload:{}}),404);
-        requireStatus(await app.inject({method:'POST',url,headers:ownerRequestOrigin(),payload:{}}),401);
-        requireStatus(await app.inject({method:'POST',url,headers:{...headers,origin:'http://foreign.invalid'},payload:{}}),403);
-        requireStatus(await app.inject({method:'POST',url,headers:{...headers,'x-reverie-parent-session':'11111111-2222-4333-8444-555555555555'},payload:{}}),403);
+        const runtime={mode:'pi',source:{kind:'subscription',profileId:'synthetic'}};
+        requireStatus(await app.inject({method:'POST',url,headers,payload:runtime}),404);
+        requireStatus(await app.inject({method:'POST',url,headers:ownerRequestOrigin(),payload:runtime}),401);
+        requireStatus(await app.inject({method:'POST',url,headers:{...headers,origin:'http://foreign.invalid'},payload:runtime}),403);
+        requireStatus(await app.inject({method:'POST',url,headers:{...headers,'x-reverie-parent-session':'11111111-2222-4333-8444-555555555555'},payload:runtime}),403);
         assert.equal(sessions.size,0);console.log('ACTUAL_OWNER_SETUP_POLICY_RUNTIME_GATES_PASS_NO_NATIVE_START');
       }finally{await app.close();}`;
     const result=spawnSync(process.execPath,['--input-type=module','-e',program],{env:{HOME:path.join(root,'home'),REVERIE_DATA_DIR:path.join(root,'instance'),REVERIE_FLOCK_BIN:flock},encoding:'utf8',timeout:15000});

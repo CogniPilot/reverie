@@ -6,8 +6,6 @@
     "kokoro",
     "launch-guard",
     "lease",
-    "prune",
-    "prune-host",
     "start",
     "update"
   ],
@@ -20,8 +18,7 @@
     "workerRuntimePackages"
   ],
   "nixosModules": [
-    "reverieCollect",
-    "reveriePrune"
+    "reverieCollect"
   ],
   "packages": [
     "adminHarnessAddon",
@@ -54,13 +51,10 @@
     "kokoro",
     "laptopTools",
     "launchGuard",
-    "leaseAcceptance",
     "leaseCli",
     "leasePeer",
     "mcpNativeCli",
-    "memory",
     "memoryNativeCli",
-    "memoryPackage",
     "muxNative",
     "nativePerfGuestCapsule",
     "nativeWorkerPoolAnchorImage",
@@ -68,13 +62,7 @@
     "nativeWorkerResourceController",
     "nativeWorkerResourceControllerImage",
     "opsNativeCli",
-    "ownerTerminalCore",
     "policyArtifacts",
-    "prune",
-    "pruneDeclared",
-    "pruneHost",
-    "pruneR12",
-    "pruneSelftest",
     "recoveryLedger",
     "resourceActorImage",
     "resourceActorImageProvenance",

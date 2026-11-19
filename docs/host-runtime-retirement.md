@@ -21,6 +21,12 @@ its tests have been removed. Existing private data, account homes,
 journals, unknown operation fences and installed services are not altered by
 this source change. Actual deactivation needs a separate reviewed operation.
 
+This source tree retires the Python-backed host prune packages and systemd
+watcher, cycle and stall-watch templates. The native lease and task workspace
+commands still protect registered disposable work. The separately packaged
+observations tool can report disk use. Old deployment records remain useful
+for migration.
+
 The standalone controller that paused the website for an in-place host broker
 transport upgrade has also been removed. Existing maintenance policies,
 journals, and attempt records remain part of the old installation’s recovery
@@ -47,9 +53,10 @@ container image producers and actively referenced component fixtures remain.
 The retired owner-terminal package factories and their Python host executable
 have also been removed. Existing historical proofs still use the legacy
 protocol code.
-The workspace and Kokoro commands now use Rust. Memory and Hands still bring
-Python into the image. The remaining runtime and acceptance callers must
-migrate before the root `python/` tree can be retired.
+The workspace, Kokoro, memory and Hands commands use Rust. The first-party
+`python/` tree has been removed. The console build still uses the third-party
+`node-gyp` toolchain to compile `node-pty`. The image build checks the runtime
+closure for Python interpreters.
 
 The persistent OPS host installer has been removed from the source. The Docker
 runtime still ships the native headless OPS client. Legacy broker and model
