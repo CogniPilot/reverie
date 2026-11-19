@@ -2,6 +2,7 @@ from __future__ import annotations
 """Shared fakes: an in-memory LLM, a fake room, and a temporary Config."""
 
 import json
+import subprocess
 from contextlib import contextmanager
 import tempfile
 from pathlib import Path
@@ -9,6 +10,11 @@ from typing import Callable
 
 from reverie.config import ChatClient, Config
 from reverie.room import Room
+
+
+def install_opencode(workspace: Path, *options: str) -> None:
+    subprocess.run(["reverie-opencode", "--install", str(workspace), *options],
+                   capture_output=True, check=True, timeout=30)
 
 
 class FakeTransport:

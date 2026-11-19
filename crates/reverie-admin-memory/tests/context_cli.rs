@@ -140,3 +140,34 @@ fn scoped_cli_reads_legacy_data_without_rewriting_or_exposing_it_to_work() {
     assert_eq!(fs::read(path).unwrap(), original);
     assert!(!fixture.0.join("state/logs").exists());
 }
+
+#[test]
+fn work_context_uses_the_primary_sessions_tone() {
+    let fixture = Fixture::new();
+    populate(&fixture);
+    let directory = fixture.0.join(".opencode/interaction-state");
+    fs::create_dir_all(&directory).unwrap();
+    let database = rusqlite::Connection::open(fixture.0.join("state/memory.sqlite")).unwrap();
+    for (session, mode, expected) in [
+        ("ses_one", r#"{"mode":"coding"}"#, "Stay professional"),
+        ("ses_one", r#"{"mode":"chat"}"#, "Be yourself"),
+        ("ses_one", "{broken", "Be yourself"),
+        (
+            "../interaction-state/ses_one",
+            r#"{"mode":"coding"}"#,
+            "Be yourself",
+        ),
+    ] {
+        fs::write(directory.join("ses_one.json"), mode).unwrap();
+        let runtime = json!({"directory":fixture.0,"session_id":session});
+        database
+            .execute(
+                "INSERT OR REPLACE INTO state VALUES ('reverie_runtime', ?)",
+                [runtime.to_string()],
+            )
+            .unwrap();
+        let work = fixture.text(&["--channel", "work"]);
+        assert!(work.contains(expected), "{session} {mode}");
+        assert!(!work.contains("existing answer"));
+    }
+}

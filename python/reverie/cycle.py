@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import time
 import urllib.request
 from zoneinfo import ZoneInfo
@@ -17,10 +18,8 @@ from .cycle_runner import OpenCodeRunner
 from .reverie import Reverie, safeguards
 from .instance import initial_self_for
 from .memory import MemoryStore
-from .opencode import dispatch
-from .chat import Brain, Dreamer
+from .chat import Dreamer
 from .reflection import Reflector
-from .room import Room
 from .runtime import Reverie as Office
 from .hands.agent_journal import encode_memory_json, native_memory_request, project_memory_request
 from reverie import env_names
@@ -241,11 +240,14 @@ class Cycle:
 
     def wake(self,name,model,day):
         def waking(cfg,store,reverie,client):
-            # Loading identity/plan is CPU work. Model prefill is charged on the later request.
-            brain=Brain(cfg,store,None,Room('',cfg.hold_path))
-            packet=dispatch(brain,{'action':'context','channel':'work',
-                'context_window':self.models[model]['context_window'],
-                'output_tokens':self.models[model]['output_tokens']})
+            selected = self.models[model]
+            result = subprocess.run(
+                ['reverie-context', '--instance', str(cfg.instance_config), '--channel', 'work',
+                 '--context-window', str(selected['context_window']),
+                 '--output-tokens', str(int(selected['output_tokens']))],
+                stdin=subprocess.DEVNULL, capture_output=True, encoding='utf-8', timeout=60, check=True,
+            )
+            packet = result.stdout.removesuffix('\n')
             return {'model':model,'role':self.agents[name]['role'],'context':packet,
                     'note':'Project histories are available through explicit scoped lookup.'}
         self.phase(name,'waking',model,day,waking)

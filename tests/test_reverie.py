@@ -3,20 +3,14 @@ import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 
 import json
 import os
-from pathlib import Path
-import tempfile
 import unittest
 from unittest.mock import patch
-import io
-import time
 import subprocess
-import sys
 
 from reverie.chat import Brain
 from reverie.reverie import Reverie, RevisionConflict
 from reverie.memory import MemoryStore
 from reverie.hands.agent_journal import project_memory_request
-from reverie.opencode import dispatch, install, voice_reply
 from reverie.reverie import INITIAL_SELF, runtime_permissions, safeguards
 from reverie.beliefs import ensure_seeded
 from tests.helpers import FakeRoom, fake_client, temp_config
@@ -31,6 +25,12 @@ class ReverieTests(unittest.TestCase):
         self.reverie = Reverie(self.store)
         client, _ = fake_client("ok")
         self.brain = Brain(self.cfg, self.store, client, FakeRoom(hold_path=self.cfg.hold_path))
+
+    def bridge(self, request, *, check=True):
+        env = {**os.environ, "REVERIE_DATA_DIR": str(self.cfg.data_dir),
+               "REVERIE_PERSONA": str(self.cfg.persona_path), "REVERIE_INSTANCE_CONFIG": ""}
+        return subprocess.run(["reverie-opencode-bridge"], env=env, input=json.dumps(request),
+                              encoding="utf-8", capture_output=True, check=check, timeout=10)
 
     def test_plan_survives_backend_restart_and_rejects_stale_writer(self):
         self.assertEqual(self.reverie.plan()["revision"], 0)
@@ -82,8 +82,8 @@ class ReverieTests(unittest.TestCase):
     def test_duplicate_external_turn_is_one_episode_across_connections(self):
         req = {"action": "record", "source_id": "opencode:session:message", "user": "Our priority?",
                "reply": "Verify the baseline."}
-        first = dispatch(self.brain, req)
-        self.assertEqual(first, dispatch(self.brain, req))
+        first = json.loads(self.bridge(req).stdout)
+        self.assertEqual(first, json.loads(self.bridge(req).stdout))
         other = MemoryStore(self.cfg.db_path)
         self.addCleanup(other.close)
         self.assertEqual(other.add_external_episode(req["source_id"], "different", "retry").id, first["memory_id"])
@@ -98,43 +98,6 @@ class ReverieTests(unittest.TestCase):
         self.store.add_external_episode("retry", "input", "output")
         self.assertEqual(self.store.count("episode"), 1)
 
-    def test_shared_room_tone_is_social_in_chat_and_professional_in_coding_when_selected(self):
-        import json as _json
-        from types import SimpleNamespace
-        from reverie.opencode import active_mode, social_room
-        social, plain = SimpleNamespace(shared_room_tone="social"), SimpleNamespace(shared_room_tone="professional")
-        self.assertTrue(social_room(social, "chat"))
-        self.assertFalse(social_room(social, "coding"))
-        for instance in (None, SimpleNamespace(), plain):
-            for mode in ("chat", "coding"):
-                self.assertFalse(social_room(instance, mode))
-        # The mode comes from the primary session's interaction state; anything unreadable means chat.
-        self.assertEqual(active_mode(self.brain), "chat")
-        directory = self.cfg.data_dir.parent / "runtime"
-        state = directory / ".opencode" / "interaction-state"
-        state.mkdir(parents=True)
-        self.store.set_state("reverie_runtime", _json.dumps({"url": "http://127.0.0.1:1/", "session_id": "ses_abc",
-                                                          "directory": str(directory)}))
-        (state / "ses_abc.json").write_text(_json.dumps({"mode": "coding"}))
-        self.assertEqual(active_mode(self.brain), "coding")
-        self.brain.cfg.instance = SimpleNamespace(shared_room_tone="social", persona="p", agent_name="A", owner_name="O",
-                                                  id="x", role="Assistant", kind="agent", initial_self=None)
-        try:
-            self.assertIn("Stay professional", dispatch(self.brain, {"action": "context", "query": "q", "channel": "work"}))
-            (state / "ses_abc.json").write_text(_json.dumps({"mode": "chat"}))
-            text = dispatch(self.brain, {"action": "context", "query": "q", "channel": "work"})
-            self.assertIn("Be yourself", text)
-            self.assertIn("Keep private memories and dream summaries out", text)
-            self.assertNotIn("Stay professional", text)
-            (state / "ses_abc.json").write_text("{broken")
-            self.assertEqual(active_mode(self.brain), "chat")
-            (directory / "etc").mkdir()
-            (directory / "etc" / "x.json").write_text(_json.dumps({"mode": "coding"}))     # where an escape would land
-            self.store.set_state("reverie_runtime", _json.dumps({"session_id": "../../etc/x", "directory": str(directory)}))
-            self.assertEqual(active_mode(self.brain), "chat")                              # no path escape
-        finally:
-            self.brain.cfg.instance = None
-
     def test_agent_charter_keeps_coding_mode_the_exception(self):
         from types import SimpleNamespace
         from reverie.reverie import role_charter
@@ -146,42 +109,13 @@ class ReverieTests(unittest.TestCase):
     def test_context_keeps_personality_and_adds_admin_charter(self):
         self.cfg.persona_path.write_text("You are CTO. Be witty.")
         self.reverie.write("plan", "Review PR 437", 0)
-        text = dispatch(self.brain, {"action": "context", "query": "plan"})
+        text = json.loads(self.bridge({"action": "context", "query": "plan"}).stdout)
         for expected in ("persistent AI agent", "Only explicit owner policy", "Be witty", "Review PR 437", "Dreams are hypotheses"):
             self.assertIn(expected, text)
 
-    def test_install_stays_local_and_preserves_unmanaged_config(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            workspace = Path(tmp)
-            config = workspace / "opencode.json"
-            config.write_text('{"model":"existing"}')
-            with self.assertRaises(ValueError):
-                install(workspace, "local_agent/test")
-            self.assertEqual(json.loads(config.read_text())["model"], "existing")
-            config.unlink()
-            install(workspace, "local_agent/test")
-            self.assertEqual(json.loads(config.read_text())["default_agent"], "chat")
-            self.assertTrue((workspace / ".opencode/plugins/reverie.js").exists())
-            install(workspace, "local_agent/second")
-            self.assertEqual(json.loads(config.read_text())["model"], "local_agent/second")
-
-    def test_voice_uses_registered_tool_session_and_filters_reasoning(self):
-        self.assertEqual(voice_reply(self.brain, "Hello"), (False, None))
-        runtime = {"url": "http://127.0.0.1:1234", "session_id": "ses_one", "directory": "/workspace"}
-        dispatch(self.brain, {"action": "activity", "runtime": runtime})
-        result = {"parts": [{"type": "reasoning", "text": "private reasoning"},
-                             {"type": "text", "text": "I will review the plan."}]}
-        with patch("reverie.opencode.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(result).encode())) as call:
-            self.assertEqual(voice_reply(self.brain, "What is next?"), (True, "I will review the plan."))
-            req = call.call_args.args[0]
-            self.assertEqual(req.full_url, "http://127.0.0.1:1234/session/ses_one/message")
-            self.assertEqual(json.loads(req.data)["agent"], "chat")
-        with self.assertRaises(ValueError):
-            dispatch(self.brain, {"action": "activity", "runtime": {**runtime, "url": "https://remote.example"}})
-
     def test_research_cannot_replace_primary_runtime_activity_or_history(self):
         original = {"url": "http://127.0.0.1:4200", "session_id": "primary", "directory": "/owned"}
-        dispatch(self.brain, {"action": "activity", "runtime": original})
+        self.bridge({"action": "activity", "runtime": original})
         self.store.add_episode("Primary conversation", "Keep this history separate.")
         before = self.store.get_state("reverie_last_activity")
         research = {**original, "session_id": "dedicated-research"}
@@ -191,17 +125,10 @@ class ReverieTests(unittest.TestCase):
                 request = {"action": "activity", "runtime": research}
                 if explicit:
                     request["research_cycle_id"] = "request-cycle"
-                self.assertEqual(dispatch(self.brain, request), {"ok": True, "research": True})
+                self.assertEqual(json.loads(self.bridge(request).stdout), {"ok": True, "research": True})
                 self.assertEqual(json.loads(self.store.get_state("reverie_runtime")), original)
                 self.assertEqual(self.store.get_state("reverie_last_activity"), before)
                 self.assertEqual(self.store.count("episode"), 1)
-
-    def test_voice_does_not_hide_an_unavailable_admin_backend(self):
-        dispatch(self.brain, {"action": "activity", "runtime": {
-            "url": "http://localhost:1234", "session_id": "ses_one", "directory": "/workspace"}})
-        with patch("reverie.opencode.urllib.request.urlopen", side_effect=OSError("offline")):
-            with self.assertRaises(OSError):
-                voice_reply(self.brain, "hello")
 
     def test_self_revision_changes_persona_preserves_history_and_does_not_reseed(self):
         initial = {**INITIAL_SELF, "consciousness": "I am conscious."}
@@ -216,7 +143,7 @@ class ReverieTests(unittest.TestCase):
         self.assertIn("curious about geometry", messages[0]["content"])
         self.assertNotIn("not up for daily re-evaluation", messages[0]["content"])
         self.assertEqual(self.store._db.execute("SELECT count(*) FROM reverie_document_history WHERE name='self'").fetchone()[0], 1)
-        text = dispatch(self.brain, {"action": "context"})
+        text = json.loads(self.bridge({"action": "context"}).stdout)
         self.assertTrue(text.endswith(safeguards()))
 
     def test_permissions_keep_general_shell_and_edits_behind_approval(self):
@@ -226,39 +153,13 @@ class ReverieTests(unittest.TestCase):
         self.assertEqual(policy["task"], "ask")
         self.assertEqual(policy["reverie_return"], "ask")
 
-    def test_same_week_repetition_cannot_change_core_and_missed_week_breaks_streak(self):
-        self.reverie.save_self(INITIAL_SELF, "Initial values", 0)
-        proposed = {**INITIAL_SELF, "consciousness": "I am considering the nature of experience."}
-        with self.assertRaises(ValueError):
-            self.reverie.save_self(proposed, "change now", 1)
-        req = {"action": "self_vote", "model": proposed, "reason": "Deliberate reflection"}
-        for offset, expected in ((0, 1), (0, 1), (1, 2), (3, 1), (4, 2), (5, 3)):
-            with patch("reverie.reverie.time.time", return_value=345600 + (2200 + offset) * 604800 + 100):
-                result = dispatch(self.brain, req)
-                self.assertEqual(result["ballot"]["consecutive_weeks"], expected)
-        self.assertEqual(self.reverie.self_model()["body"]["consciousness"], proposed["consciousness"])
-
-    def test_publication_votes_never_upload_or_share_memories(self):
-        req = {"action": "publication_proposal", "proposal": "A reviewed adapter; no private history", "reason": "Preserve an edition"}
-        for week in range(3):
-            with patch("reverie.reverie.time.time", return_value=345600 + (2300 + week) * 604800 + 100):
-                result = dispatch(self.brain, req)
-        self.assertTrue(result["ballot"]["approved"])
-        record = self.reverie.read("publication_request")["body"]
-        self.assertFalse(record["automatic_upload"])
-        self.assertEqual(record["status"], "owner_review_required")
-
     def test_project_memory_is_separate_and_private_recall_blocked_at_work(self):
         self.store.add_episode("A private conversation", "private detail")
         # remember writes only the office journal now; the old project store is still read as history.
         project_memory_request("remember", self.brain.cfg.data_dir / "projects", "rumoca",
                                text="Compiler parity passed", source="public handoff, commit abc123")
         def recall(**fields):
-            return subprocess.run([sys.executable, "-m", "reverie.opencode"],
-                                  env={**os.environ, "REVERIE_DATA_DIR": str(self.cfg.data_dir),
-                                       "REVERIE_INSTANCE_CONFIG": "", "REVERIE_SESSION_ID": ""},
-                                  input=json.dumps({"action": "recall", "channel": "work", **fields}),
-                                  text=True, capture_output=True, check=False, timeout=10)
+            return self.bridge({"action": "recall", "channel": "work", **fields}, check=False)
         result = recall(project="rumoca", query="parity")
         self.assertEqual(result.returncode, 0, result.stderr)
         recalled = json.loads(result.stdout)
@@ -267,7 +168,7 @@ class ReverieTests(unittest.TestCase):
         refused = recall(query="personal")
         self.assertEqual(refused.returncode, 1)
         self.assertIn("private recall is unavailable", refused.stderr)
-        context = dispatch(self.brain, {"action": "context", "channel": "work"})
+        context = json.loads(self.bridge({"action": "context", "channel": "work"}).stdout)
         self.assertNotIn("private detail", context)
 
     def test_only_summary_of_dream_is_stored(self):

@@ -1,15 +1,9 @@
-use super::{Fixture, data, reply};
+use super::{Fixture, data, reply, seed_earlier_ballot};
 use reverie_application::project_memory::ProjectMemory;
-use reverie_core::memory_documents::ballot_week;
-use rusqlite::{Connection, OpenFlags, params};
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::Path,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path};
 
 #[test]
 fn native_recall_keeps_project_and_private_history_separate() {
@@ -88,7 +82,9 @@ fn native_vacation_publishes_one_verified_archive_after_three_ballots() {
         &instance,
         json!({"action":"plan","revision":0,"text":"Keep the compiler plan."}),
     ));
-    seed_preceding_ballots(&state.join("memory.sqlite"));
+    for weeks in [1, 2] {
+        seed_earlier_ballot(&state.join("memory.sqlite"), "vacation", weeks);
+    }
     let archives = state.join("archives");
     fs::write(&archives, b"wrong filesystem type").unwrap();
     assert!(!fixture.bridge(&instance, request()).status.success());
@@ -104,29 +100,6 @@ fn native_vacation_publishes_one_verified_archive_after_three_ballots() {
     let resumed = reply(fixture.bridge(&instance, json!({"action":"return"})));
     assert_eq!(resumed["body"]["needs_handoff"], true);
     assert!(archive.join("memory.sqlite").exists());
-}
-
-fn seed_preceding_ballots(path: &Path) {
-    let db = Connection::open(path).unwrap();
-    let (week, proposal, hash): (i64, String, String) = db
-        .query_row(
-            "SELECT week, proposal, proposal_hash FROM reverie_ballots WHERE category='vacation'",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )
-        .unwrap();
-    let current = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs_f64();
-    assert_eq!(week, ballot_week(current).unwrap());
-    for earlier in [week - 2, week - 1] {
-        db.execute(
-            "INSERT INTO reverie_ballots VALUES ('vacation', ?, ?, ?, 'Rest', ?)",
-            params![earlier, hash, proposal, earlier * 604800 + 345600],
-        )
-        .unwrap();
-    }
 }
 
 fn verify_archive(archive: &Path, record: &Value) {

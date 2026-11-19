@@ -94,6 +94,10 @@ automatic room replies rather than falling back to a local guess.
 - `reverie-opencode --install WORKSPACE` accepts `--model` or
   `REVERIE_MODEL`, with neutral fallback `local_agent/MODEL_ID`; configure a real
   provider/model identifier before installing. Bridge actions need no model flag.
+  Run the same installer inside the container with the existing instance and
+  model selections to refresh a managed workspace that uses the retired Python
+  bridge. The cycle scheduler uses `reverie-context` for work context and
+  `reverie-opencode --install` for disposable job workspaces.
 - Runtime policies select `backends.local.model` and `keep_alive.model_id`.
   `examples/runtime-policy.json` uses `MODEL_ID` placeholders; replace both.
 - `reverie-sleep` takes `--policy`; all chat database, state, instance and employee

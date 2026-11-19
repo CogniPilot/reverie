@@ -4,12 +4,10 @@ mod settings;
 pub(super) use files::rules;
 
 use clap::Parser;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     env,
     ffi::OsString,
-    io,
     path::{Path, PathBuf},
     process::ExitCode,
 };
@@ -18,8 +16,7 @@ const BRIDGE: &str = "reverie-opencode-bridge";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Parser, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Parser)]
 #[command(
     name = "reverie-opencode",
     about = "Install an OpenCode workspace for one persistent Reverie agent."
@@ -40,15 +37,6 @@ struct Install {
     output_tokens: u64,
     #[arg(long)]
     api_key_env: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Worker {
-    install: Install,
-    // Previously sent by the compatibility installer. It no longer selects a bridge.
-    #[serde(rename = "legacy")]
-    _legacy: Option<serde::de::IgnoredAny>,
 }
 
 pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
@@ -81,13 +69,6 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-pub(super) fn worker(parent: i32) -> io::Result<()> {
-    let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
-    let job: Worker = serde_json::from_slice(&input)?;
-    let output = install(job.install).unwrap_or_else(|error| json!({"error": error.to_string()}));
-    crate::write_reply(&output, crate::RESPONSE_BOUND)
 }
 
 fn install(args: Install) -> Result<Value> {

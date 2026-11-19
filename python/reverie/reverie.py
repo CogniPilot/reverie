@@ -129,7 +129,7 @@ class Reverie:
     def self_model(self) -> dict:
         return self.read("self", self.initial_self)
 
-    def save_self(self, model: dict, reason: str, revision: int, core_approved: bool = False) -> dict:
+    def save_self(self, model: dict, reason: str, revision: int) -> dict:
         if not isinstance(model, dict) or not isinstance(model.get("consciousness"), str):
             raise ValueError("self-model needs a consciousness statement")
         persona = model.get("persona", self.self_model()["body"].get("persona", DEFAULT_PERSONA))
@@ -142,7 +142,7 @@ class Reverie:
         if not reason.strip():
             raise ValueError("self revision requires a reason")
         current = self.self_model()
-        if current["revision"] and not core_approved and any(
+        if current["revision"] and any(
                 model.get(key) != current["body"].get(key) for key in ("consciousness", "directives")):
             raise ValueError("Core changes require action self_vote: three votes for the same proposal in consecutive weeks")
         # Revision + current beliefs + mode switch share a transaction. The old document

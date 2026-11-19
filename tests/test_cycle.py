@@ -79,8 +79,9 @@ class CycleTests(unittest.TestCase):
                            'usage':{'prompt_tokens':100,'completion_tokens':50,'total_tokens':150}}).encode()
 
     def test_complete_day_routes_child_verifies_work_consolidates_and_discards_raw_dream(self):
-        with self.cycle.agent('math') as (_,store,_):
+        with self.cycle.agent('math') as (_,store,reverie):
             store.add_episode('PRIVATE_INTERACTION_SENTINEL: please check small examples.','I will remember.')
+            reverie.write('plan', 'Verify native wake context.', 0)
         now=datetime(2026,10,15,12,tzinfo=timezone.utc)
         with patch('reverie.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
             result=self.cycle.run(now,force=True,available=self.cycle.models)
@@ -91,9 +92,14 @@ class CycleTests(unittest.TestCase):
         for name in ('cto','math'):
             phases={p['phase']:p['status'] for p in result['agents'][name]}
             self.assertEqual(phases['sleeping'],'completed')
-            with self.cycle.agent(name) as (_,store,_):
+            with self.cycle.agent(name) as (_,store,reverie):
                 dream=store.latest_dream(); self.assertTrue(dream.meta['summary_only'])
                 self.assertNotIn('lattice folds',dream.text)
+                wake=reverie.read('cycle:2026-10-15:waking')['body']
+                self.assertEqual((wake['model'], wake['role']), ('local', name))
+                self.assertNotIn('PRIVATE_INTERACTION_SENTINEL', wake['context'])
+                if name=='math':
+                    self.assertIn('Verify native wake context.', wake['context'])
         shared=MemoryStore(self.root/'projects/demo/memory.sqlite')
         try: self.assertNotIn('PRIVATE_INTERACTION_SENTINEL',json.dumps([m.as_dict() for m in shared.all()]))
         finally: shared.close()

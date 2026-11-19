@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+use rusqlite::{Connection, params};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -104,6 +105,19 @@ fn reply(output: Output) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn seed_earlier_ballot(path: &Path, category: &str, weeks: i64) {
+    let database = Connection::open(path).unwrap();
+    let inserted = database
+        .execute(
+            "INSERT INTO reverie_ballots
+             SELECT category, week - ?1, proposal_hash, proposal, reason, at - ?1 * 604800
+             FROM reverie_ballots WHERE category = ?2 ORDER BY week DESC LIMIT 1",
+            params![weeks, category],
+        )
+        .unwrap();
+    assert_eq!(inserted, 1);
 }
 
 #[test]
@@ -252,17 +266,69 @@ fn native_self_changes_still_require_recorded_core_ballots() {
     let mut other = model;
     other["consciousness"] = json!("Review plans.");
     assert!(!set(other.clone(), 2).status.success());
-    let vote = reply(fixture.bridge(
-        &instance,
-        json!({"action":"self_vote","model":other,"reason":"fixture"}),
-    ));
-    assert_eq!(vote["ballot"]["consecutive_weeks"], 1);
-    assert_eq!(vote["ballot"]["approved"], false);
-    assert_eq!(vote["self"], initialized);
+    let vote = || {
+        reply(fixture.bridge(
+            &instance,
+            json!({"action":"self_vote","model":other,"reason":"fixture"}),
+        ))
+    };
+    let first = vote();
+    assert_eq!(first["ballot"]["consecutive_weeks"], 1);
+    assert_eq!(first["ballot"]["approved"], false);
+    assert_eq!(first["self"], initialized);
+    assert_eq!(vote(), first);
     assert_eq!(
         reply(fixture.bridge(&instance, json!({"action":"votes"})))[0]["category"],
         "core"
     );
+    let database = fixture.0.join("state/memory.sqlite");
+    seed_earlier_ballot(&database, "core", 2);
+    assert_eq!(vote(), first);
+    seed_earlier_ballot(&database, "core", 1);
+    let approved = vote();
+    assert_eq!(approved["ballot"]["consecutive_weeks"], 3);
+    assert_eq!(approved["self"]["revision"], 3);
+    assert_eq!(
+        approved["self"]["body"]["consciousness"],
+        other["consciousness"]
+    );
+    assert_eq!(approved["self"]["body"]["persona"], other["persona"]);
+}
+
+#[test]
+fn native_publication_ballots_record_only_an_owner_review_request() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let proposal = "Review the public adapter. Exclude private history.";
+    let vote = || {
+        reply(fixture.bridge(
+        &instance,
+        json!({"action":"publication_proposal","proposal":proposal,"reason":"Consider a release"}),
+    ))
+    };
+    let first = vote();
+    assert_eq!(first["ballot"]["approved"], false);
+    let path = fixture.0.join("state/memory.sqlite");
+    let database = Connection::open(&path).unwrap();
+    let document = || {
+        database.query_row(
+            "SELECT body FROM reverie_documents WHERE name='publication_request'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+    };
+    assert!(matches!(
+        document(),
+        Err(rusqlite::Error::QueryReturnedNoRows)
+    ));
+    seed_earlier_ballot(&path, "publication", 1);
+    seed_earlier_ballot(&path, "publication", 2);
+    let approved = vote();
+    assert_eq!(approved["ballot"]["approved"], true);
+    let record: Value = serde_json::from_str(&document().unwrap()).unwrap();
+    assert_eq!(record["proposal"], proposal);
+    assert_eq!(record["status"], "owner_review_required");
+    assert_eq!(record["automatic_upload"], false);
 }
 
 #[test]

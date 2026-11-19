@@ -2,12 +2,13 @@ from __future__ import annotations
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from reverie.config import Config
 from reverie.chat import ChatDaemon
 from reverie.reverie import Reverie
-from reverie.opencode import dispatch, install
+from tests.helpers import install_opencode
 
 class InstanceTests(unittest.TestCase):
     def setUp(self):
@@ -45,7 +46,11 @@ class InstanceTests(unittest.TestCase):
         shared = self.daemon(self.instance("shared"))
         personal.brain.store.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")
         self.assertEqual(shared.brain.store.count("episode"), 0)
-        self.assertNotIn("PRIVATE_SENTINEL_739", dispatch(shared.brain, {"action":"context"}))
+        context = subprocess.check_output(
+            ["reverie-context", "--instance", str(shared.cfg.instance_config), "--channel", "private"],
+            text=True, timeout=10,
+        )
+        self.assertNotIn("PRIVATE_SENTINEL_739", context)
         self.assertNotEqual(personal.cfg.db_path, shared.cfg.db_path)
         for path in (shared.cfg.persona_path, shared.cfg.profile_path,
                      shared.cfg.legacy_history, shared.cfg.log_path):
@@ -63,8 +68,8 @@ class InstanceTests(unittest.TestCase):
         reverie.vote("publication", {"proposal":"A reviewed public package"}, "Deliberate first vote")
         before = (reverie.self_model(), reverie.plan(), reverie.ballot_history())
         workspace = self.root / "runtime"
-        install(workspace, "local/small", config)
-        install(workspace, "cloud/large", config)
+        install_opencode(workspace, "--model", "local/small", "--instance", str(config))
+        install_opencode(workspace, "--model", "cloud/large", "--instance", str(config))
         reopened = self.daemon(config)
         after = Reverie(reopened.brain.store)
         self.assertEqual(before, (after.self_model(), after.plan(), after.ballot_history()))
@@ -87,8 +92,9 @@ class InstanceTests(unittest.TestCase):
 
     def test_local_gpu_provider_uses_selected_endpoint_limits_and_environment_credential(self):
         workspace=self.root/"gpu-runtime"
-        install(workspace, "local_agent/qwen", self.instance("gpu"),
-                "http://gpu:8080/v1", 32768, 4096, "LOCAL_MODEL_KEY")
+        install_opencode(workspace, "--model", "local_agent/qwen", "--instance", str(self.instance("gpu")),
+                         "--api-base", "http://gpu:8080/v1", "--context-window", "32768",
+                         "--output-tokens", "4096", "--api-key-env", "LOCAL_MODEL_KEY")
         settings=json.loads((workspace/"opencode.json").read_text())
         provider=settings["provider"]["local_agent"]
         self.assertEqual(provider["options"]["apiKey"], "{env:LOCAL_MODEL_KEY}")
@@ -96,6 +102,6 @@ class InstanceTests(unittest.TestCase):
         self.assertEqual(provider["models"]["qwen"]["limit"], {"context":32768,"output":4096})
         self.assertTrue((workspace/".agents/skills/reverie-context/SKILL.md").exists())
         before=(workspace/"opencode.json").read_text()
-        with self.assertRaises(ValueError):
-            install(workspace,"local_agent/qwen",api_base="http://user:secret@gpu/v1")
+        with self.assertRaises(subprocess.CalledProcessError):
+            install_opencode(workspace, "--model", "local_agent/qwen", "--api-base", "http://user:secret@gpu/v1")
         self.assertEqual((workspace/"opencode.json").read_text(),before)

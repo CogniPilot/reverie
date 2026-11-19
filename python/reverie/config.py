@@ -180,8 +180,6 @@ class Config:
     reply_temperature: float = 0.9
     reply_max_words: int = _env_int("REVERIE_REPLY_MAX_WORDS", 150)        # 0 disables the trim
     reply_max_chars: int = _env_int("REVERIE_REPLY_MAX_CHARS", 1200)
-    voice_reply_max_tokens: int = _env_int("REVERIE_VOICE_REPLY_MAX_TOKENS", 600)
-    voice_reply_max_words: int = _env_int("REVERIE_VOICE_REPLY_MAX_WORDS", 0)  # spoken replies are never cut
 
     session_id: str = os.environ.get("REVERIE_SESSION_ID", "")
 

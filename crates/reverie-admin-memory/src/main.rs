@@ -220,7 +220,6 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-turn-worker" => journal_turn::run,
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
-        "--opencode-install-worker" => opencode_install::worker,
         "--embedding-worker" => embedding_worker::run,
         "--hands-images-worker" => hands_images::run,
         "--hands-model-worker" => hands_model::run,
