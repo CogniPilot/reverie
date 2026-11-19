@@ -166,7 +166,7 @@ class OfflineStoreTests(unittest.TestCase):
         self.engine.rows[VALIDATION].update(Config={'User':f'{os.getuid()}:{os.getgid()}'},
             HostConfig={'NetworkMode':'none','ReadonlyRootfs':True,'Privileged':False,
                 'CapAdd':None,'CapDrop':['ALL'],'SecurityOpt':['no-new-privileges:true'],
-                'Memory':4*M.GIB,'MemorySwap':4*M.GIB,'PidsLimit':256,'NanoCpus':2000000000})
+                'Memory':4*1024**3,'MemorySwap':4*1024**3,'PidsLimit':256,'NanoCpus':2000000000})
         self.write(self.target_path,self.target)
     def test_offline_image_scope_prepares_store_without_claiming_runtime_acceptance(self):
         self.offline_image_scope();before=self.company_path.read_bytes()
@@ -318,22 +318,14 @@ class OfflineStoreTests(unittest.TestCase):
     def test_foreign_writer_even_without_labels_refuses(self):
         self.engine.rows[STOPPED]['State']={'Running':True,'Pid':2}
         with self.assertRaisesRegex(M.Refused,'another running'):self.plan()
-    def test_physical_alias_of_control_or_nix_is_not_lexically_trusted(self):
-        alias=self.root/'bind-alias';alias.mkdir()
-        actual=M._inode
-        for protected in (self.paths.nix, self.lock.parent):
-            self.engine.rows['d'*64]={'Id':'d'*64,'State':{'Running':True,'Pid':9},
-                'Mounts':[{'Type':'bind','Source':str(alias),'RW':True}]}
-            def identity(path):return actual(protected) if Path(path)==alias else actual(path)
-            with self.subTest(protected=protected),patch.object(M,'_inode',identity):
-                with self.assertRaises(M.Refused):self.plan()
-        self.assertEqual(self.engine.calls,[])
-    def test_nested_host_mount_alias_under_public_bind_is_checked(self):
-        alias=self.public/'nested';alias.mkdir();actual=M._inode
-        def identity(path):return actual(self.root) if Path(path)==alias else actual(path)
-        with patch.object(M,'_mount_points',return_value=[alias]),patch.object(M,'_inode',identity):
-            with self.assertRaisesRegex(M.Refused,'control is exposed'):self.plan()
-        self.assertEqual(self.engine.calls,[])
+    def test_writer_appearing_during_seed_keeps_the_fence(self):
+        def start_writer():
+            self.engine.rows[STOPPED]['State'] = {'Running': True, 'Pid': 2}
+        self.engine.after_start = start_writer
+        with self.assertRaises(M.Unconfirmed):self.apply()
+        self.assertTrue(self.fence.exists())
+        self.assertEqual(self.engine.calls[-1], ('rm', HELPER))
+        self.assertFalse(list(self.state.glob('offline-store-maintenance/*.prepared-store.json')))
     def test_control_exposure_through_configured_future_mount_refuses(self):
         alias=self.public/'evidence'; self.target_path.rename(alias);self.target_path=alias
         self.maintenance.target_path=alias

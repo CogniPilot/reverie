@@ -113,7 +113,7 @@ without force, and never deletes a container by name. Existing laptop containers
 are retained. An existing helper, live alias writer, unexpected mount or unknown
 engine state refuses.
 
-Custody and writer checks compare physical device/inode ancestry as well as
+Rust custody and writer checks compare physical device/inode ancestry as well as
 canonical paths, including bounded nested mount points visible in the host
 process's current mount namespace. They refuse bind aliases of private data or
 control directories. They do not establish visibility into a different daemon

@@ -105,7 +105,7 @@ struct Pin {
     digest: String,
 }
 
-fn path<'de, D: Deserializer<'de>>(input: D) -> Result<PathBuf, D::Error> {
+pub(super) fn path<'de, D: Deserializer<'de>>(input: D) -> Result<PathBuf, D::Error> {
     let encoded = String::deserialize(input)?;
     let bytes = STANDARD.decode(encoded).map_err(de::Error::custom)?;
     Ok(OsString::from_vec(bytes).into())
@@ -129,7 +129,14 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
         _ if input.len() <= crate::REQUEST_BOUND => QUALIFICATION_REPLY_BOUND,
         _ => return Err(crate::refused()),
     };
-    let reply = request.execute().unwrap_or_else(|error| {
+    observation_reply(request.execute(), bound)
+}
+
+pub(super) fn observation_reply(
+    result: Result<Value, Box<dyn std::error::Error>>,
+    bound: usize,
+) -> io::Result<()> {
+    let reply = result.unwrap_or_else(|error| {
         let errno = io_errno(error.as_ref());
         json!({"error": error.to_string(), "errno": errno})
     });

@@ -1,4 +1,5 @@
 //! Read pinned private qualification evidence without invoking Docker.
+pub mod mount_custody;
 mod profiles;
 mod seat;
 #[cfg(test)]

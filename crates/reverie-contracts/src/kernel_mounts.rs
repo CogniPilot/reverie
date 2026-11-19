@@ -3,6 +3,7 @@
 use reverie_core::{decimal::UnsignedInteger, posix_path::PosixPath, worker_schema::MountTarget};
 use std::{collections::BTreeSet, fmt};
 pub const MAX_MOUNT_BYTES: usize = 1 << 20;
+pub const MAX_VISIBLE_MOUNT_BYTES: usize = 2 << 20;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MountTableError;
 impl fmt::Display for MountTableError {
@@ -117,6 +118,35 @@ impl MountTable {
     pub fn rows(&self) -> &[MountRow] {
         &self.rows
     }
+}
+
+/// Mount points visible in the observer's own namespace. Offline store
+/// custody uses the mount point and does not interpret mount lineage or the
+/// filesystem-relative root field.
+pub fn visible_mount_points(raw: &[u8]) -> Result<Vec<PosixPath>, MountTableError> {
+    if raw.len() > MAX_VISIBLE_MOUNT_BYTES {
+        return Err(MountTableError);
+    }
+    let text = std::str::from_utf8(raw).map_err(|_| MountTableError)?;
+    let points = text.chars().map(u32::from).collect::<Vec<_>>();
+    let lines = split_lines(&points);
+    if lines.len() > 4096 {
+        return Err(MountTableError);
+    }
+    lines.into_iter().map(visible_mount_point).collect()
+}
+
+fn visible_mount_point(line: &[u32]) -> Result<PosixPath, MountTableError> {
+    let fields = words(line);
+    if fields.len() < 10
+        || !fields[6..].contains(&[45].as_slice())
+        || !fields[..2]
+            .iter()
+            .all(|id| id.iter().all(|&cp| crate::rootless::is_digit(cp)))
+    {
+        return Err(MountTableError);
+    }
+    decode_path(fields[4])
 }
 fn integer(points: &[u32]) -> Result<UnsignedInteger, MountTableError> {
     crate::rootless::parse_python_digits(points).ok_or(MountTableError)

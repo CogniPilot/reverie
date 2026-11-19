@@ -2,6 +2,7 @@
 mod admission;
 pub mod engine;
 mod evidence;
+pub mod mounts;
 mod profiles;
 pub use admission::{Capacity, CapacityBudget, CohortBinding, plan};
 pub use profiles::{InventoryError, ProfileEntry, ProfileInventory};

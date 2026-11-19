@@ -75,20 +75,15 @@ fn session_directory(
         )?;
     }
     let uid = config.uid()?;
-    let base = Directory::nix_directory(
-        &native::python_path(&root.codepoints())?,
-        uid,
-        create,
-        effects,
-    )?;
-    let result = (|| {
-        Ok(Directory::nix_directory(
-            &session_path(config, session)?,
-            uid,
-            create,
-            effects,
-        )?)
-    })();
+    let mut open = |path: &std::path::Path| -> Result<Directory> {
+        if create {
+            Ok(Directory::nix_directory(path, uid, true, effects)?)
+        } else {
+            Ok(Directory::open(path, uid)?)
+        }
+    };
+    let base = open(&native::python_path(&root.codepoints())?)?;
+    let result = session_path(config, session).and_then(|path| open(&path));
     match (result, base.close().map_err(Into::into)) {
         (Ok(child), Ok(())) => Ok(child),
         (Ok(child), Err(error)) => finalized(Err(error), child.close().map_err(Into::into)),

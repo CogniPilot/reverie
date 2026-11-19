@@ -27,6 +27,7 @@ mod legacy_memory;
 mod managed_context;
 mod model_completion;
 mod office;
+mod offline_custody;
 mod offline_store;
 mod opencode_context;
 mod opencode_install;
@@ -221,6 +222,7 @@ fn worker_argument(value: &std::ffi::OsStr) -> Option<(Worker, i32)> {
         "--journal-context-worker" => journal_context_worker,
         "--opencode-context-worker" => opencode_context_worker,
         "--opencode-install-worker" => opencode_install::worker,
+        "--offline-store-custody-worker" => offline_custody::run,
         "--offline-store-qualification-worker" => offline_store::run,
         "--embedding-worker" => embedding_worker::run,
         "--hands-images-worker" => hands_images::run,

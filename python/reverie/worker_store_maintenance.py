@@ -31,7 +31,6 @@ UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 STORE = re.compile(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+")
 CID = re.compile(r"[0-9a-f]{64}")
 MAX_ENTRIES = 4096
-GIB = 1024**3
 OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
 OFFLINE_EVIDENCE_SCOPE = "OFFLINE_IMAGE_TOOL_SHELL"
 
@@ -96,11 +95,11 @@ def _json(raw):
                       parse_constant=lambda _: (_ for _ in ()).throw(Refused("non-finite JSON number")))
 
 
-def _native_observation(action, *, timeout=20, **fields):
+def _native_observation(action, *, timeout=20, worker="qualification", **fields):
     request = {action: fields}
     try:
         result = subprocess.run(
-            ["reverie-admin-memory", f"--offline-store-qualification-worker={os.getpid()}"],
+            ["reverie-admin-memory", f"--offline-store-{worker}-worker={os.getpid()}"],
             input=json.dumps(request, separators=(",", ":"), allow_nan=False).encode(),
             capture_output=True, check=True, start_new_session=True, timeout=timeout,
         )
@@ -177,55 +176,17 @@ def _profiles(paths):
 FOCUS = "nix:var/nix/gcroots/reverie-image"
 
 
-def _inode(path):
-    try:
-        info = Path(path).stat()
-        return info.st_dev, info.st_ino
-    except FileNotFoundError:
-        return None
-
-
-def _physical_overlap(left, right):
-    """Compare endpoint/ancestor identities, including bind aliases."""
-    left, right = Path(left), Path(right)
-    need(len(left.parts) <= 128 and len(right.parts) <= 128, "path depth bound")
-    a, b = _inode(left), _inode(right)
-    return ((b is not None and any(_inode(p) == b for p in (left, *left.parents)))
-            or (a is not None and any(_inode(p) == a for p in (right, *right.parents))))
-
-
-def _mount_points():
-    """Bounded host namespace mount metadata; no engine or privileged probe."""
-    fd = os.open('/proc/self/mountinfo', os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC)
-    try:
-        raw = bytearray()
-        while len(raw) <= 2*1024**2:
-            chunk = os.read(fd, min(65536, 2*1024**2+1-len(raw)))
-            if not chunk:
-                break
-            raw.extend(chunk)
-        need(len(raw) <= 2*1024**2, "mount metadata byte bound")
-    finally:
-        os.close(fd)
-    lines = raw.decode().splitlines()
-    need(len(lines) <= 4096, "mount metadata count bound")
-    points = []
-    for line in lines:
-        fields = line.split()
-        need(len(fields) >= 10 and fields[0].isdigit() and fields[1].isdigit()
-             and '-' in fields[6:] and fields[4].startswith('/'), "mount metadata unavailable")
-        path = fields[4]
-        for encoded, decoded in ((r'\040', ' '), (r'\011', '\t'), (r'\012', '\n'), (r'\134', '\\')):
-            path = path.replace(encoded, decoded)
-        points.append(Path(path))
-    return points
-
-
-def _overlap(source, protected, mount_points):
-    source, protected = Path(source).resolve(), Path(protected).resolve()
-    roots = [source] + [point for point in mount_points if point.is_relative_to(source)]
-    return any(root == protected or root.is_relative_to(protected) or protected.is_relative_to(root)
-               or _physical_overlap(root, protected) for root in roots)
+def _check_mounts(phase, containers, paths, *, controls=None, future=()):
+    stores = [_native_path(paths.home), _native_path(paths.nix)]
+    for offset in range(0, max(1, len(containers)), 32):
+        batch = containers[offset:offset + 32]
+        rows = [{"State": {"Running": row.get("State", {}).get("Running")},
+                 "Mounts": row.get("Mounts", [])} for row in batch]
+        fields = {} if controls is None else {
+            "controls": [_native_path(path) for path in controls],
+            "future": [_native_path(path) for path in future] if offset + 32 >= len(containers) else [],
+        }
+        _native_observation(phase, worker="custody", rows=rows, stores=stores, **fields)
 
 
 class DockerEngine:
@@ -368,9 +329,8 @@ class OfflineStoreMaintenance:
         paths = self._seat(config_digest, selected["sessionId"], employee_id)
         containers = self.engine.containers()
         need(not any(v.get("Name") == "/" + paths.helper_name for v in containers), "existing helper must be reconciled, never removed by name")
-        private = [self.config_path.resolve(), self.target_path.resolve(), paths.lock.parent.resolve(),
-                   (Path(config["stateRoot"]) / "offline-store-maintenance").resolve()]
-        private.extend(Path(path) for path in evidence_paths)
+        private = [self.config_path, self.target_path, paths.lock.parent,
+                   Path(config["stateRoot"]) / "offline-store-maintenance", *evidence_paths]
         # Account paths are selected dynamically at normal launch. Exclude the
         # whole source namespace rather than guessing today's selected profile.
         # Cold employee homes/stores can become future grants without an
@@ -378,18 +338,7 @@ class OfflineStoreMaintenance:
         future = [m["source"] for m in config["mounts"]] + [config["companyRoot"],
                   str(Path(config["stateRoot"])/"employees"),
                   str(Path(config["scratchRoot"])/"employees")]
-        exposed = containers + [{"Mounts": [{"Type": "bind", "Source": source} for source in future]}]
-        mount_points = _mount_points()
-        for item in exposed:
-            for mount in item.get("Mounts", []):
-                if mount.get("Type") != "bind":
-                    continue
-                source = Path(mount["Source"]).resolve()
-                need(not any(_overlap(source, p, mount_points) for p in private),
-                     "maintenance control is exposed through a container bind")
-                if mount.get("RW") and item.get("State", {}).get("Running"):
-                    need(not any(_overlap(source, p, mount_points) for p in (paths.home, paths.nix)),
-                         "another running container owns employee data")
+        _check_mounts("plan", containers, paths, controls=private, future=future)
         budget = self._budget(config, target)
         profiles = _profiles(paths)
         need(profiles.get(FOCUS, {}).get("type") == "link"
@@ -405,40 +354,12 @@ class OfflineStoreMaintenance:
             "helperArgs": paths.helper_args, "helperName": paths.helper_name}
 
     def _offline_image_validation(self, container, config, engine_socket):
-        """Inspect actual isolated image-check context; never call it an agent shell."""
-        host = container.get("HostConfig", {})
-        need(container.get("Config", {}).get("User") == f"{config['uid']}:{config['gid']}"
-             and host.get("NetworkMode") == "none" and host.get("ReadonlyRootfs") is True
-             and not host.get("Privileged") and not host.get("CapAdd")
-             and host.get("CapDrop") == ["ALL"]
-             and host.get("PidMode", "") == "" and host.get("IpcMode", "private") == "private"
-             and host.get("UsernsMode", "") == "" and not host.get("VolumesFrom")
-             and any(v in ("no-new-privileges", "no-new-privileges:true") for v in host.get("SecurityOpt", []))
-             and type(host.get("Memory")) is int and 0 < host["Memory"] <= 4*GIB
-             and host.get("MemorySwap") == host["Memory"]
-             and type(host.get("PidsLimit")) is int and 0 < host["PidsLimit"] <= 256
-             and type(host.get("NanoCpus")) is int and 0 < host["NanoCpus"] <= 2_000_000_000,
-             "offline image check sandbox differs")
-        points = _mount_points()
         private = [Path(config["companyRoot"]), Path(config["stateRoot"])/"employees",
                    Path(config["scratchRoot"])/"employees", Path(config["apiSocketRoot"]),
                    Path(config["socket"]), Path(engine_socket)]
-        for mount in container.get("Mounts", []):
-            if mount.get("Type") == "tmpfs":
-                continue
-            need(mount.get("Type") == "bind" and
-                 (mount.get("RW") is False or mount.get("Destination") == "/output"),
-                 "offline image check has unexpected writable grant")
-            destination = Path(mount["Destination"])
-            source = Path(mount["Source"]).resolve()
-            source_mode = source.stat().st_mode
-            need(stat.S_ISREG(source_mode) or stat.S_ISDIR(source_mode),
-                 "offline image check cannot borrow sockets or devices")
-            need(not any(destination == p or destination.is_relative_to(p)
-                         for p in map(Path, ("/home/agent", "/nix", "/instances", "/reverie_workspace", "/run"))),
-                 "offline image check cannot borrow private runtime mounts")
-            need(not any(_overlap(source, p, points) for p in private),
-                 "offline image check has private employee/account source")
+        _native_observation("validation", worker="custody", row=container,
+                            protected=[_native_path(path) for path in private],
+                            uid=config["uid"], gid=config["gid"])
 
     def plan(self, employee_id, operation_id):
         need(UUID.fullmatch(operation_id or "") and UUID.fullmatch(employee_id or ""), "exact operation/employee UUID required")
@@ -544,13 +465,7 @@ class OfflineStoreMaintenance:
                 final_containers = self.engine.containers()
                 need(not any(v.get("Id") == cid for v in final_containers), "helper removal unconfirmed")
                 need(set(facts["stoppedContainerIds"]) <= {v.get("Id") for v in final_containers}, "existing stopped container changed")
-                for v in final_containers:
-                    if v.get("State", {}).get("Running"):
-                        for m in v.get("Mounts", []):
-                            if m.get("Type") == "bind" and m.get("RW"):
-                                source = Path(m["Source"]).resolve()
-                                need(not any(_overlap(source, p, _mount_points()) for p in (paths.home, paths.nix)),
-                                     "employee data acquired a foreign writer")
+                _check_mounts("settled", final_containers, paths)
                 self._cohort(config, facts["configDigest"], facts["targetDigest"])
                 result = {"version": 1, "kind": "reverie.offline-store.receipt", "state": "STORE_PREPARED",
                           "operationId": operation_id, "employeeId": employee_id, "sessionId": paths.session,
