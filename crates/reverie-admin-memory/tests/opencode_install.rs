@@ -44,20 +44,33 @@ impl Fixture {
     }
 
     fn bridge(&self, instance: &Path, request: Value) -> Output {
-        let mut child = Command::new(self.0.join("reverie-opencode"))
+        self.bridge_with(instance, request, |_| ())
+    }
+
+    fn bridge_with(
+        &self,
+        instance: &Path,
+        request: Value,
+        configure: impl FnOnce(&mut Command),
+    ) -> Output {
+        let mut command = Command::new(self.0.join("reverie-opencode"));
+        command
             .env_clear()
             .env("REVERIE_ROOT", &self.0)
             .args(["--bridge", "--instance"])
             .arg(instance)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
+            .stderr(Stdio::piped());
+        configure(&mut command);
+        let mut child = command.spawn().unwrap();
         serde_json::to_writer(child.stdin.take().unwrap(), &request).unwrap();
         child.wait_with_output().unwrap()
     }
 }
+
+#[path = "support/opencode_memory.rs"]
+mod memory;
 
 impl Drop for Fixture {
     fn drop(&mut self) {

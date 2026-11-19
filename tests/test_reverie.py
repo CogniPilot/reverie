@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 import io
 import time
-import sqlite3
+import subprocess
+import sys
 
 from reverie.chat import Brain
 from reverie.reverie import Reverie, RevisionConflict
@@ -230,23 +231,6 @@ class ReverieTests(unittest.TestCase):
         text = dispatch(self.brain, {"action": "context"})
         self.assertTrue(text.endswith(safeguards()))
 
-    def test_vacation_archives_all_state_then_owner_confirmed_return_needs_handoff(self):
-        self.store.add_episode("A project fact", "verified")
-        self.store.add_dream("I imagine geometry folding into a lattice", "I dreamed about lattices", "strange", [1])
-        self.reverie.save_self(INITIAL_SELF, "initial", 0)
-        self.reverie.write("plan", "Current work is held by the compiler specialist", 0)
-        for week in range(3):
-            with patch("reverie.reverie.time.time", return_value=345600 + (2000 + week) * 604800 + 100):
-                result = dispatch(self.brain, {"action": "vacation", "reason": "Time to rest",
-                                               "handoff": "The compiler specialist owns the compiler; User appoints the interim admin."})
-        self.assertEqual(dispatch(self.brain, {"action": "mode"})["mode"], "vacation")
-        archive = Path(result["body"]["archive"])
-        with sqlite3.connect(archive / "memory.sqlite") as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM memories").fetchone()[0], 2)
-            self.assertEqual(json.loads(db.execute("SELECT body FROM reverie_documents WHERE name='plan'").fetchone()[0]),
-                             "Current work is held by the compiler specialist")
-        self.assertIn("needs_handoff", dispatch(self.brain, {"action": "return"})["body"])
-
     def test_permissions_keep_general_shell_and_edits_behind_approval(self):
         policy = runtime_permissions()
         self.assertEqual(policy["bash"], "ask")
@@ -300,11 +284,20 @@ class ReverieTests(unittest.TestCase):
         # remember writes only the office journal now; the old project store is still read as history.
         project_memory_request("remember", self.brain.cfg.data_dir / "projects", "rumoca",
                                text="Compiler parity passed", source="public handoff, commit abc123")
-        recalled = dispatch(self.brain, {"action": "recall", "project": "rumoca", "query": "parity", "channel": "work"})
+        def recall(**fields):
+            return subprocess.run([sys.executable, "-m", "reverie.opencode"],
+                                  env={**os.environ, "REVERIE_DATA_DIR": str(self.cfg.data_dir),
+                                       "REVERIE_INSTANCE_CONFIG": "", "REVERIE_SESSION_ID": ""},
+                                  input=json.dumps({"action": "recall", "channel": "work", **fields}),
+                                  text=True, capture_output=True, check=False, timeout=10)
+        result = recall(project="rumoca", query="parity")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        recalled = json.loads(result.stdout)
         self.assertEqual(len(recalled), 1)
         self.assertNotIn("private detail", json.dumps(recalled))
-        with self.assertRaises(ValueError):
-            dispatch(self.brain, {"action": "recall", "query": "personal", "channel": "work"})
+        refused = recall(query="personal")
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn("private recall is unavailable", refused.stderr)
         context = dispatch(self.brain, {"action": "context", "channel": "work"})
         self.assertNotIn("private detail", context)
 

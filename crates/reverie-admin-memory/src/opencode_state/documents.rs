@@ -96,11 +96,13 @@ impl Request {
 
 pub(super) fn initialized(
     store: &MemoryStore,
-    initial: DocumentBody,
+    initial: Option<DocumentBody>,
 ) -> Result<MemoryDocuments<'_>> {
-    let docs = store.documents(Some(initial.clone()));
+    let docs = store.documents(initial.clone());
     docs.initialize()?;
-    if docs.self_model()?.revision.value() == 0 {
+    if let Some(initial) = initial
+        && docs.self_model()?.revision.value() == 0
+    {
         store.atomic_immediate(|tx| {
             if tx.beliefs()?.is_empty() {
                 install_owner_identity(tx, &docs, initial)?;
@@ -111,22 +113,22 @@ pub(super) fn initialized(
     Ok(docs)
 }
 
-fn name(value: &str) -> DocumentName {
+pub(super) fn name(value: &str) -> DocumentName {
     DocumentName::from_scalar_text(value)
 }
 
-fn decode(value: &Value) -> Result<DocumentBody> {
+pub(super) fn decode(value: &Value) -> Result<DocumentBody> {
     Ok(DocumentBody::decode_json(&value.to_string())?)
 }
 
-fn body(value: DocumentEnvelope) -> Result<Value> {
+pub(super) fn body(value: &DocumentEnvelope) -> Result<Value> {
     Ok(serde_json::from_slice(&value.body.as_json())?)
 }
 
-fn envelope(value: DocumentEnvelope) -> Result<Value> {
+pub(super) fn envelope(value: DocumentEnvelope) -> Result<Value> {
     let revision = value.revision.value();
     let updated = value.updated_at;
-    let mut reply = json!({ "revision": revision, "body": body(value)? });
+    let mut reply = json!({ "revision": revision, "body": body(&value)? });
     if let Some(at) = updated {
         reply["updated_at"] = json!(at);
     }
@@ -208,7 +210,7 @@ fn votes(docs: &MemoryDocuments<'_>) -> Result<Value> {
     Ok(json!(history))
 }
 
-fn outcome(value: &BallotOutcome) -> Value {
+pub(super) fn outcome(value: &BallotOutcome) -> Value {
     json!({"category": value.category, "proposal_hash": value.proposal_hash,
            "consecutive_weeks": value.consecutive_weeks, "approved": value.approved,
            "next_week_at": value.next_week_at})

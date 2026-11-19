@@ -9,17 +9,14 @@ import re
 from pathlib import Path
 import sys
 import time
-import sqlite3
-import hashlib
 import subprocess
-import uuid
 import urllib.parse
 import urllib.request
 
 from .chat import ChatDaemon
 from .reverie import Reverie, native_context, violates
 from .persona import build_system_prompt
-from .hands.agent_journal import native_memory_json, project_memory_request
+from .hands.agent_journal import native_memory_json
 from .instance import initial_self_for, identity_context, primary_agent
 from reverie import env_names
 
@@ -127,31 +124,6 @@ def dispatch(brain, request: dict):
                         "votes": ballot, "automatic_upload": False}, current["revision"])
         return {"ballot": ballot, "next_action": "Ask the owner to review the concrete publication package" if
                 ballot["approved"] else "Reconsider explicitly in the next UTC calendar week; no upload is authorized"}
-    if action == "vacation":
-        reason, handoff = str(request.get("reason", "")).strip(), str(request.get("handoff", "")).strip()
-        if not reason or not handoff:
-            raise ValueError("vacation requires a reason and a final handoff")
-        current = reverie.read("lifecycle", {"mode": "active"})
-        if current["body"]["mode"] == "vacation":
-            return current
-        ballot = reverie.vote("vacation", {"mode": "vacation"}, reason)
-        if not ballot["approved"]:
-            return {"mode": "active", "ballot": ballot, "next_action": "Remain active; reconsider next week"}
-        archive = brain.cfg.data_dir / "archives" / ("vacation-" + uuid.uuid4().hex)
-        archive.mkdir(parents=True)
-        db_path = archive / "memory.sqlite"
-        with sqlite3.connect(db_path) as dest:
-            brain.store._db.backup(dest)
-            if dest.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
-                raise ValueError("archive integrity check failed; remaining active")
-        record = {"mode": "vacation", "reason": reason, "handoff": handoff,
-                  "archive": str(archive), "created_at": time.time(), "dreams_per_day": 1,
-                  "dream_budget_seconds": 120, "interim_admin": "the owner must appoint the interim admin"}
-        record["database_sha256"] = hashlib.sha256(db_path.read_bytes()).hexdigest()
-        (archive / "handoff.json").write_text(json.dumps(record, indent=2) + "\n")
-        db_path.chmod(0o444)
-        (archive / "handoff.json").chmod(0o444)
-        return reverie.write("lifecycle", record, current["revision"])
     if action == "return":
         # Exposed only through the plugin's owner-confirmed return action.
         current = reverie.read("lifecycle", {"mode": "active"})
@@ -181,27 +153,6 @@ def dispatch(brain, request: dict):
         memory = brain.store.add_external_episode(source, user, reply, request.get("visibility", "private"))
         brain.store.set_state("reverie_last_activity", str(time.time()))
         return {"memory_id": memory.id}
-    if action == "recall":
-        if request.get("project"):
-            legacy = project_memory_request("lookup", brain.cfg.data_dir / "projects",
-                                            request["project"], query=str(request.get("query", "")))
-        elif request.get("channel") == "work":
-            raise ValueError("private recall is unavailable in a shared work channel; select a project")
-        else:
-            legacy = [m.as_dict() for m in brain.store.retrieve(str(request.get("query", "")), k=8)]
-        if not env_names.get("SESSION_ID"):
-            return legacy
-        query = str(request.get("query", ""))
-        if not query.strip():
-            raise ValueError("recall needs a query")
-        project = request.get("project") or None
-        try:
-            result = office_journal({"action": "recall", "query": query, "private": project is None,
-                                     "project": project, "channel": request.get("channel")})
-        except RuntimeError as error:
-            result = {"journal": [],
-                      "note": f"journal lookup failed ({error}); these are only older, read-only results from the old store"}
-        return {**result, "legacy": legacy} if isinstance(result, dict) else legacy
     if action == "plan":
         if "text" in request:
             text = request["text"]
@@ -340,7 +291,14 @@ def main(argv=None) -> int:
             request = json.load(sys.stdin)
             if not isinstance(request, dict):
                 raise ValueError("request must be an object")
-            if request.get("action") == "remember":
+            action = request.get("action")
+            if action in ("recall", "vacation"):
+                command = ["reverie-opencode", "--bridge"]
+                if args.instance:
+                    command.extend(("--instance", str(args.instance)))
+                return subprocess.run(command, input=json.dumps(request), encoding="utf-8",
+                                      timeout=60, check=False).returncode
+            if action == "remember":
                 result = remember_on_office(request)
             else:
                 daemon = ChatDaemon()

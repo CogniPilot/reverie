@@ -294,6 +294,7 @@ pub(crate) fn run(
 pub(crate) struct Completed {
     pub(crate) success: bool,
     pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
 }
 
 pub(crate) fn completed(
@@ -330,14 +331,18 @@ pub(crate) fn supervised(
     let mut child = OwnedChild::spawn(command, limits.group())?;
     let output = collect(&mut child, request, &limits);
     let success = child.settle()?;
-    Ok(output.map(|stdout| Completed { success, stdout }))
+    Ok(output.map(|(stdout, stderr)| Completed {
+        success,
+        stdout,
+        stderr,
+    }))
 }
 
 fn collect(
     child: &mut OwnedChild,
     request: Option<&[u8]>,
     limits: &Limits<'_>,
-) -> io::Result<Vec<u8>> {
+) -> io::Result<(Vec<u8>, Vec<u8>)> {
     let mut pipes = Pipes::new(&mut child.child, request)?;
     loop {
         limits.check(child.pid)?;
@@ -349,7 +354,7 @@ fn collect(
             std::thread::sleep(TICK);
         }
     }
-    Ok(pipes.output)
+    Ok((pipes.output, pipes.diagnostics))
 }
 
 pub(crate) fn quiet_group(
