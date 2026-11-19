@@ -149,7 +149,6 @@ elif [ "$build" = 1 ]; then
     cp -a -- "$source_repo/$f" "$context/"
   done
   mkdir -p "$context/apps/web" "$context/python/reverie"
-  cp -a -- "$source_repo/python/experts" "$context/python/experts"
   cp -a -- "$source_repo/python/pyproject.toml" "$source_repo/python/README.md" "$source_repo/python/LICENSE" "$context/python/"
   (cd -- "$console_source" && tar --exclude=./node_modules --exclude=./.git -cf - .) | (cd -- "$context/apps/web" && tar -xf -)
   (cd -- "$reverie_source" && tar --exclude=__pycache__ -cf - .) | (cd -- "$context/python/reverie" && tar -xf -)

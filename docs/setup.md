@@ -24,7 +24,9 @@ The current native runtime adapter uses OpenCode and its provider/model selectio
 The portable memory CLI and skill also work from Codex, Claude Code and other CLIs.
 Full automatic conversation ingestion for those other harnesses is future work;
 installing the skill alone does not hook every completed turn automatically.
-The implementation lives in `python/reverie/`; generic specialist templates live in `python/experts/`.
+The [generic specialist profiles](../examples/specialist-profiles.json) provide names, roles
+and persona starting points for an owner to use when creating an expert template. An owner
+chooses the launch mode and provider and stores the resulting template in the instance.
 Personal identities and their histories live in the ignored `local/` directory.
 Existing SQLite history columns are read compatibly during migration.
 
@@ -270,9 +272,8 @@ existing host services and live sessions are untouched by an image build.
 Console state persists by default at `~/reverie/companies/development/data/console`,
 mounted privately at `/home/agent/.reverie`. Override `REVERIE_INSTANCE_DATA` for a separate
 instance before creating a new container. `REVERIE_DATA_DIR` configures other launches.
-The monorepo contains `apps/web` (TypeScript/JavaScript), `python/reverie` (the shared Python
-memory runtime), `python/experts` (specialist templates), `docker`, `scripts`, shared skills
-and their tests.
+The monorepo contains `apps/web` (TypeScript/JavaScript), `crates` (Rust),
+`python/reverie` (legacy runtime code), `docker`, `scripts`, shared skills and tests.
 
 Open **Company** to register permanent employees with names, icons, positions and
 expertise, invite experts into a room, and configure nightly research. Temporary
