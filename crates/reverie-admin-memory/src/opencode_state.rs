@@ -1,23 +1,25 @@
 //! Instance-owned OpenCode state on the existing SQLite memory store.
 mod activity;
 mod documents;
+mod journal;
 mod maintenance;
 pub(crate) use maintenance::reflection_worker;
 mod recall;
 mod record;
 mod vacation;
 
+use crate::context_cli::ContextOptions;
 use clap::Parser;
 use reverie_host::memory_configuration::{MemoryConfiguration, MemoryPath};
 use reverie_store::memory::{ContinuityScope, MemoryStore, NativeMemoryRead};
 use serde::Deserialize;
-use serde_json::{Value, json};
-use std::{ffi::OsString, path::PathBuf, process::ExitCode};
+use serde_json::{Map, Value, json, value::RawValue};
+use std::{collections::BTreeMap, ffi::OsString, path::PathBuf, process::ExitCode};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 #[derive(Parser)]
-#[command(name = "reverie-opencode --bridge")]
+#[command(name = "reverie-opencode-bridge")]
 struct Arguments {
     #[arg(long)]
     instance: Option<PathBuf>,
@@ -26,6 +28,7 @@ struct Arguments {
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum Request {
+    Context(ContextOptions),
     Activity(activity::Request),
     Recall(recall::Request),
     Record(record::Request),
@@ -33,6 +36,10 @@ enum Request {
     Vacation(vacation::Request),
     Mode,
     Rules,
+    Remember {
+        #[serde(flatten)]
+        fields: Map<String, Value>,
+    },
     #[serde(untagged)]
     Document(documents::Request),
 }
@@ -54,7 +61,9 @@ pub(super) fn entry(args: impl IntoIterator<Item = OsString>) -> ExitCode {
 }
 
 fn execute(args: Arguments, input: &[u8]) -> Result<Value> {
-    match serde_json::from_slice(input)? {
+    match decode(input)? {
+        Request::Context(request) => Ok(json!(request.render(&configuration(&args)?)?)),
+        Request::Remember { fields } => journal::remember(fields),
         Request::Rules => Ok(json!(super::opencode_install::rules())),
         Request::Mode => mode(&args),
         Request::Record(request) => request.save(&configuration(&args)?),
@@ -74,6 +83,15 @@ fn execute(args: Arguments, input: &[u8]) -> Result<Value> {
         Request::Document(request) => with_store(&args, |store, config| {
             request.apply(&document_store(store, config)?)
         }),
+    }
+}
+
+fn decode(input: &[u8]) -> Result<Request> {
+    let fields: BTreeMap<String, &RawValue> = serde_json::from_slice(input)?;
+    if fields.contains_key("action") {
+        Ok(serde_json::from_slice(input)?)
+    } else {
+        Ok(Request::Context(serde_json::from_slice(input)?))
     }
 }
 

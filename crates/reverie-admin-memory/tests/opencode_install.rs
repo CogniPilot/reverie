@@ -18,6 +18,11 @@ impl Fixture {
             path.join("reverie-opencode"),
         )
         .unwrap();
+        symlink(
+            env!("CARGO_BIN_EXE_reverie-admin-memory"),
+            path.join("reverie-opencode-bridge"),
+        )
+        .unwrap();
         Self(path)
     }
 
@@ -58,15 +63,21 @@ impl Fixture {
             .env_clear()
             .env("REVERIE_ROOT", &self.0)
             .args(["--bridge", "--instance"])
-            .arg(instance)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+            .arg(instance);
         configure(&mut command);
-        let mut child = command.spawn().unwrap();
-        serde_json::to_writer(child.stdin.take().unwrap(), &request).unwrap();
-        child.wait_with_output().unwrap()
+        send(command, &request)
     }
+}
+
+fn send(mut command: Command, request: &Value) -> Output {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    serde_json::to_writer(child.stdin.take().unwrap(), request).unwrap();
+    child.wait_with_output().unwrap()
 }
 
 #[path = "support/opencode_maintenance.rs"]
@@ -91,6 +102,51 @@ fn reply(output: Output) -> Value {
         String::from_utf8_lossy(&output.stderr)
     );
     serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[test]
+fn compatibility_alias_reads_default_context_without_initializing_a_store() {
+    let fixture = Fixture::new();
+    let data = fixture.0.join("existing-data");
+    let persona = fixture.0.join("existing-persona.txt");
+    fs::write(&persona, "Existing private persona.").unwrap();
+    let request = |input: Value| {
+        let mut command = Command::new(fixture.0.join("reverie-opencode-bridge"));
+        command
+            .env_clear()
+            .env("REVERIE_ROOT", &fixture.0)
+            .env("REVERIE_DATA_DIR", &data)
+            .env("REVERIE_PERSONA", &persona);
+        send(command, &input)
+    };
+    let context = reply(request(json!({})));
+    assert!(
+        context
+            .as_str()
+            .unwrap()
+            .contains("Existing private persona.")
+    );
+    let work = reply(request(json!({"action":"context","channel":"work"})));
+    let work = work.as_str().unwrap();
+    assert!(work.contains("shared work channel"));
+    assert!(!work.contains("Existing private persona."));
+    assert!(!data.exists());
+    assert!(!request(json!({"action":"unknown"})).status.success());
+}
+
+#[test]
+fn both_command_names_support_explicit_context_with_native_dispatch() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let request = json!({"action":"context","channel":"work"});
+    let modern = reply(fixture.bridge(&instance, request.clone()));
+    for name in ["reverie-opencode", "reverie-opencode-bridge"] {
+        let mut command = Command::new(fixture.0.join(name));
+        command.env_clear().args(["--instance"]).arg(&instance);
+        assert_eq!(reply(send(command, &request)), modern);
+    }
+    assert!(modern.as_str().unwrap().contains("Your name is Fixture."));
+    assert!(!fixture.0.join("state").exists());
 }
 
 #[test]

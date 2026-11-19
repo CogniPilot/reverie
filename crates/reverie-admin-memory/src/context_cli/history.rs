@@ -5,13 +5,13 @@ use reverie_store::memory::{Episode, PrivateContinuity};
 use std::{fs, time::UNIX_EPOCH};
 
 pub(super) fn messages(
-    directory: &Path,
+    config: &MemoryConfiguration,
     records: &mut PrivateContinuity,
     turns: i64,
 ) -> Result<Vec<Message>> {
     let mut episodes = std::mem::take(&mut records.episodes);
     if !records.history_imported && turns != 0 {
-        let mut older = legacy(&directory.join("legacy-history.json"))?;
+        let mut older = legacy(&config.native_path(MemoryPath::LegacyHistory)?)?;
         older.append(&mut episodes);
         older.sort_by(|a, b| b.created_at.total_cmp(&a.created_at));
         episodes = older;

@@ -52,58 +52,21 @@ const clockLine = (now = new Date(), timeZone) => {
   return `Current time: ${local}${fmt("UTC")}.`;
 };
 
-// Context needs only the configured instance and model limits. Conversation
-// text goes over stdin for the remaining bridge operations.
-const contextArgs = (instance, request) => [
-  "--instance", instance, "--channel", request.channel ?? "private",
-  "--context-window", String(request.context_window ?? 16384),
-  "--output-tokens", String(request.output_tokens ?? 4096),
-  "--occupied-tokens", String(request.occupied_tokens ?? 0),
-];
-
-const stateActions = new Set(["activity", "record", "mode", "rules", "plan", "profile", "profiles", "brief",
-  "self", "votes", "self_history", "self_vote", "publication_proposal", "return", "recall", "vacation", "maintenance"]);
-
 export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
   const researchCycle = envName("RESEARCH_CYCLE_ID");
   const settings = JSON.parse(await readFile(join(directory, ".reverie-instance"), "utf8"));
+  const bridgeArgs = settings.instance ? ["--bridge", "--instance", settings.instance] : ["--bridge"];
   const bridge = (request) => new Promise((resolve, reject) => {
-    const context = request.action === "context" && settings.instance;
-    const journal = request.action === "remember";
-    const packaged = settings.bridge === "reverie-opencode-bridge";
-    const state = stateActions.has(request.action) &&
-      (settings.instance || packaged || ["recall", "vacation", "maintenance"].includes(request.action));
-    let command = packaged ? "reverie-opencode-bridge" : settings.python;
-    let args = packaged ? [] : ["-m", "reverie.opencode"];
-    if (context) {
-      command = "reverie-context";
-      args = contextArgs(settings.instance, request);
-    } else if (state) {
-      command = "reverie-opencode";
-      args = settings.instance ? ["--bridge", "--instance", settings.instance] : ["--bridge"];
-    } else if (journal) {
-      command = "reverie-memory-journal";
-      args = ["--journal-only"];
-      const save = { action: "remember", private: !request.project };
-      for (const key of ["text", "project", "room", "turn", "tag", "quote", "source", "reason"]) {
-        if (key in request) save[key] = request[key];
-      }
-      request = save;
-    }
-    const legacySource = !context && !journal && !state && !packaged;
-    const child = execFile(command, args, {
-      cwd: legacySource ? settings.source : directory,
-      env: { ...process.env, ...(legacySource ? { PYTHONPATH: settings.source } : {}),
-        ...(settings.instance ? { REVERIE_INSTANCE_CONFIG: settings.instance } : {}) },
+    const child = execFile("reverie-opencode", bridgeArgs, {
+      cwd: directory,
       timeout: request.action === "maintenance" ? 120000 : 60000,
       maxBuffer: 1024 * 1024,
     }, (error, stdout, stderr) => {
       if (error) return reject(new Error(stderr.trim() || error.message));
-      if (context) return resolve(stdout.replace(/\n$/, ""));
       try { resolve(JSON.parse(stdout)); } catch (parseError) { reject(parseError); }
     });
     child.stdin.on("error", () => {});
-    child.stdin.end(context ? undefined : JSON.stringify(request));
+    child.stdin.end(JSON.stringify(request));
   });
   const log = async (message) => {
     await client.app.log({ body: { service: "reverie", level: "error", message: String(message) } });
@@ -254,7 +217,7 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
     },
     "experimental.chat.system.transform": async (input, output) => {
       const query = queries.get(input.sessionID) ?? "reverie priorities decisions";
-      const context = await bridge({ action: "context", query,
+      const context = await bridge({ action: "context",
         ...(input.model?.limit?.context ? {context_window: input.model.limit.context,
           output_tokens: input.model.limit.output ?? 4096,
           occupied_tokens: Buffer.byteLength([...output.system, query].join("\n"), "utf8")} : {}),
@@ -281,7 +244,7 @@ export const ReveriePlugin = async ({ client, directory, serverUrl }) => {
     },
     "experimental.session.compacting": async (input, output) => {
       const query = queries.get(input.sessionID) ?? "reverie handoff";
-      output.context.push(await bridge({ action: "context", query, channel: channelOf(query) === "work" ? "work" : "private" }));
+      output.context.push(await bridge({ action: "context", channel: channelOf(query) === "work" ? "work" : "private" }));
     },
     "tool.execute.after": async (input) => {
       if (WEB_TOOLS.has(input.tool)) {

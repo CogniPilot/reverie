@@ -280,7 +280,9 @@ fn main() -> ExitCode {
         .and_then(|name| name.to_str())
     {
         Some("reverie-context") => return context_cli::entry(),
-        Some("reverie-opencode") => return opencode_install::entry(argv),
+        Some("reverie-opencode" | "reverie-opencode-bridge") => {
+            return opencode_install::entry(argv);
+        }
         _ => {}
     }
     let mut args = argv.into_iter().skip(1);

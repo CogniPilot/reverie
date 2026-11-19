@@ -4,15 +4,14 @@ mod settings;
 pub(super) use files::rules;
 
 use clap::Parser;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
     env,
     ffi::OsString,
     io,
-    os::unix::process::CommandExt,
     path::{Path, PathBuf},
-    process::{Command, ExitCode},
+    process::ExitCode,
 };
 
 const BRIDGE: &str = "reverie-opencode-bridge";
@@ -43,18 +42,13 @@ struct Install {
     api_key_env: Option<String>,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacyBridge {
-    python: PathBuf,
-    source: PathBuf,
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Worker {
     install: Install,
-    legacy: LegacyBridge,
+    // Previously sent by the compatibility installer. It no longer selects a bridge.
+    #[serde(rename = "legacy")]
+    _legacy: Option<serde::de::IgnoredAny>,
 }
 
 pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
@@ -67,12 +61,7 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
                 .to_str()
                 .is_some_and(|arg| arg.starts_with("--install="))
     }) {
-        let failure = Command::new(BRIDGE).args(args.into_iter().skip(1)).exec();
-        eprintln!(
-            "{}",
-            json!({"error": format!("OpenCode compatibility bridge unavailable: {failure}")})
-        );
-        return ExitCode::FAILURE;
+        return crate::opencode_state::entry(args);
     }
     let explicit_model = args
         .iter()
@@ -85,9 +74,7 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
             .filter(|v| !v.is_empty())
             .unwrap_or(args.model);
     }
-    match install(args, None)
-        .and_then(|value| Ok(crate::write_reply(&value, crate::RESPONSE_BOUND)?))
-    {
+    match install(args).and_then(|value| Ok(crate::write_reply(&value, crate::RESPONSE_BOUND)?)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", json!({"error": error.to_string()}));
@@ -99,12 +86,11 @@ pub(super) fn entry(args: Vec<OsString>) -> ExitCode {
 pub(super) fn worker(parent: i32) -> io::Result<()> {
     let input = crate::worker_input(parent, crate::REQUEST_BOUND)?;
     let job: Worker = serde_json::from_slice(&input)?;
-    let output = install(job.install, Some(job.legacy))
-        .unwrap_or_else(|error| json!({"error": error.to_string()}));
+    let output = install(job.install).unwrap_or_else(|error| json!({"error": error.to_string()}));
     crate::write_reply(&output, crate::RESPONSE_BOUND)
 }
 
-fn install(args: Install, legacy: Option<LegacyBridge>) -> Result<Value> {
+fn install(args: Install) -> Result<Value> {
     let workspace = absolute_workspace(&args.install)?;
     let instance = args
         .instance
@@ -125,10 +111,7 @@ fn install(args: Install, legacy: Option<LegacyBridge>) -> Result<Value> {
                 .ok_or("instance path requires Unicode text")
         })
         .transpose()?;
-    let mut marker = match legacy {
-        Some(legacy) => serde_json::to_value(legacy)?,
-        None => json!({"bridge": BRIDGE}),
-    };
+    let mut marker = json!({"bridge": BRIDGE});
     marker["cycle_managed"] = json!(env::var("REVERIE_CYCLE_MANAGED").as_deref() == Ok("1"));
     if let Some(path) = &instance_path {
         marker["instance"] = json!(path);

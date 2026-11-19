@@ -9,4 +9,5 @@ in pkgs.runCommand "reverie-admin-memory" {
   ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
   ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-context"
   ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-opencode"
+  ln -s ${tools}/bin/reverie-admin-memory "$out/bin/reverie-opencode-bridge"
 ''

@@ -1,19 +1,22 @@
-//! The standalone continuation command selects one explicit local instance.
-//! It uses the OpenCode renderer with a read-only view of existing state.
+//! Standalone and OpenCode continuation use a read-only view of existing state.
 mod history;
 mod system;
 pub(crate) use system::render_beliefs;
 
 use crate::opencode_context::{Context, Limits};
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, ValueEnum};
 use reverie_contracts::{
     memory_documents::DocumentBody,
     memory_instance::{MemoryInstance, identity_context},
     storage_identity::MetadataText,
 };
-use reverie_core::{memory_documents::DEFAULT_PLAN, memory_instance::SharedRoomTone};
-use reverie_host::memory_instance::LoadedMemoryInstance;
+use reverie_core::{
+    memory_configuration::IntegerSetting, memory_documents::DEFAULT_PLAN,
+    memory_instance::SharedRoomTone,
+};
+use reverie_host::memory_configuration::{MemoryConfiguration, MemoryPath};
 use reverie_store::memory::{Continuity, ContinuityScope, NativeMemoryRead};
+use serde::Deserialize;
 use std::{
     env,
     fs::OpenOptions,
@@ -25,7 +28,8 @@ use std::{
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, Deserialize, ValueEnum)]
+#[serde(rename_all = "snake_case")]
 enum Channel {
     Work,
     Private,
@@ -40,6 +44,13 @@ struct Arguments {
     /// Explicit external instance configuration, or REVERIE_INSTANCE_CONFIG.
     #[arg(long)]
     instance: Option<PathBuf>,
+    #[command(flatten)]
+    context: ContextOptions,
+}
+
+#[derive(Args, Deserialize)]
+#[serde(default)]
+pub(super) struct ContextOptions {
     #[arg(long, value_enum, default_value = "work")]
     channel: Channel,
     #[arg(long, default_value_t = 16_384)]
@@ -50,15 +61,23 @@ struct Arguments {
     occupied_tokens: u64,
 }
 
+impl Default for ContextOptions {
+    fn default() -> Self {
+        Self {
+            channel: Channel::Private,
+            context_window: 16_384,
+            output_tokens: 4096,
+            occupied_tokens: 0,
+        }
+    }
+}
+
 pub(super) fn entry() -> ExitCode {
     use clap::CommandFactory;
-    let mut arguments = Arguments::parse();
-    if arguments.instance.is_none() {
-        arguments.instance = env::var_os("REVERIE_INSTANCE_CONFIG")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from);
-    }
-    if arguments.instance.is_none() {
+    let arguments = Arguments::parse();
+    if arguments.instance.is_none()
+        && env::var_os("REVERIE_INSTANCE_CONFIG").is_none_or(|value| value.is_empty())
+    {
         Arguments::command()
             .error(
                 clap::error::ErrorKind::MissingRequiredArgument,
@@ -66,7 +85,9 @@ pub(super) fn entry() -> ExitCode {
             )
             .exit();
     }
-    match prompt(arguments)
+    match MemoryConfiguration::capture_instance(arguments.instance.as_deref())
+        .map_err(Into::into)
+        .and_then(|configuration| arguments.context.render(&configuration))
         .and_then(|text| writeln!(io::stdout().lock(), "{text}").map_err(Into::into))
     {
         Ok(()) => ExitCode::SUCCESS,
@@ -77,68 +98,76 @@ pub(super) fn entry() -> ExitCode {
     }
 }
 
-fn prompt(arguments: Arguments) -> Result<String> {
-    let limits = Limits {
-        window: arguments.context_window,
-        output: arguments.output_tokens,
-        occupied: arguments.occupied_tokens,
-    };
-    if !(1024..=10_000_000).contains(&limits.window) {
-        return Err("unsupported context window".into());
+impl ContextOptions {
+    pub(super) fn render(self, config: &MemoryConfiguration) -> Result<String> {
+        let limits = Limits {
+            window: self.context_window,
+            output: self.output_tokens,
+            occupied: self.occupied_tokens,
+        };
+        if !(1024..=10_000_000).contains(&limits.window) {
+            return Err("unsupported context window".into());
+        }
+        let profile = match self.channel {
+            Channel::Work => None,
+            Channel::Private => read_text(&config.native_path(MemoryPath::Profile)?)?,
+        };
+        let turns = config
+            .settings()
+            .integer(IntegerSetting::ShortTermTurns)
+            .to_i64()
+            .unwrap_or(i64::MAX);
+        let scope = match self.channel {
+            Channel::Work => ContinuityScope::Shared,
+            Channel::Private => ContinuityScope::Private {
+                turns,
+                derive_profile: profile.is_none(),
+            },
+        };
+        let records =
+            NativeMemoryRead::read_continuity(&config.native_path(MemoryPath::Database)?, scope)?;
+        render(config, records, profile, turns, limits)
     }
-    let path = arguments
-        .instance
-        .as_deref()
-        .ok_or("select an explicit external instance")?;
-    let loaded = LoadedMemoryInstance::load(path)?;
-    let directory = loaded.native_data_directory()?;
-    let fields = loaded.configuration();
-    let profile = match arguments.channel {
-        Channel::Work => None,
-        Channel::Private => read_text(&directory.join("profile.md"))?,
-    };
-    let turns = env_number("REVERIE_SHORT_TERM_TURNS", 20);
-    let scope = match arguments.channel {
-        Channel::Work => ContinuityScope::Shared,
-        Channel::Private => ContinuityScope::Private {
-            turns,
-            derive_profile: profile.is_none(),
-        },
-    };
-    let records = NativeMemoryRead::read_continuity(&directory.join("memory.sqlite"), scope)?;
-    render(fields, records, &directory, profile, turns, limits)
 }
 
 fn render(
-    instance: &MemoryInstance,
+    config: &MemoryConfiguration,
     records: Continuity,
-    directory: &Path,
     profile: Option<String>,
     turns: i64,
     limits: Limits,
 ) -> Result<String> {
+    let instance = config.instance().map(|loaded| loaded.configuration());
     let initial = records.self_model.is_none();
-    let model = records
-        .self_model
-        .map_or_else(|| instance.initial_model(), Ok)?;
+    let model = match records.self_model {
+        Some(model) => model,
+        None => instance.map_or_else(
+            || Ok(DocumentBody::initial_self()),
+            MemoryInstance::initial_model,
+        )?,
+    };
     let (system, messages, social_room) = match records.private {
         Some(mut data) => {
-            let system = system::prompt(directory, instance, &model, profile, &data, initial)?;
-            let messages = history::messages(directory, &mut data, turns)?;
+            let system = system::prompt(config, instance, &model, profile, &data, initial)?;
+            let messages = history::messages(config, &mut data, turns)?;
             (system, messages, None)
         }
         None => (
             reverie_core::memory::trim_text(&scalar(&model.text_field("persona")?)?).to_owned(),
             Vec::new(),
             Some(
-                instance.shared_room_tone() == SharedRoomTone::Social
+                instance
+                    .is_some_and(|instance| instance.shared_room_tone() == SharedRoomTone::Social)
                     && !coding(records.runtime.as_deref()),
             ),
         ),
     };
     Context {
-        identity: scalar(&identity_context(Some(instance)))?,
-        role: scalar(instance.role())?,
+        identity: scalar(&identity_context(instance))?,
+        role: instance.map_or_else(
+            || Ok("Expert".to_owned()),
+            |instance| scalar(instance.role()),
+        )?,
         system,
         self_model: serde_json::from_slice(&model.as_json())?,
         plan: plan_text(records.plan)?,

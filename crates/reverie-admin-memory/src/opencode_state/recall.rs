@@ -1,6 +1,5 @@
 //! Keep Office journal results separate from older private or project history.
 use super::Result;
-use crate::capture::{self, Limits, Signals};
 use reverie_application::{memory_startup::StartedMemory, project_memory::ProjectMemory};
 use reverie_contracts::{memory::MemoryView, memory_cli::MemoryReply};
 use reverie_core::memory::trim_text;
@@ -8,11 +7,7 @@ use reverie_host::memory_configuration::{MemoryConfiguration, MemoryPath};
 use reverie_store::memory::RetrievalOptions;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::{
-    env, io,
-    process::Command,
-    time::{Duration, Instant},
-};
+use std::env;
 
 #[derive(Deserialize)]
 pub(super) struct Request {
@@ -44,7 +39,7 @@ impl Request {
         }
         let frame = json!({"action":"recall", "query":query, "private":project.is_none(),
                            "project":project, "channel":self.channel});
-        match office_history(&frame)? {
+        match super::journal::call(&frame, "journal lookup was not confirmed")? {
             Ok(Value::Object(mut result)) => {
                 result.insert("legacy".into(), legacy);
                 Ok(Value::Object(result))
@@ -84,36 +79,4 @@ fn private_history(config: &MemoryConfiguration, query: &str) -> Result<Vec<Memo
     let records = result?;
     closed?;
     Ok(records.iter().map(|record| record.as_dict()).collect())
-}
-
-fn office_history(frame: &Value) -> Result<std::result::Result<Value, String>> {
-    const UNCONFIRMED: &str = "journal lookup was not confirmed";
-    let signals = Signals::install()?;
-    let mut child = Command::new("reverie-memory-journal");
-    child.arg("--journal-only");
-    let request = serde_json::to_vec(frame)?;
-    let limits = Limits::worker(
-        Instant::now() + Duration::from_secs(45),
-        crate::OPENCODE_CONTEXT_BOUND,
-        &signals,
-    );
-    match capture::completed(child, Some(&request), limits) {
-        Ok(output) if output.success => {
-            Ok(serde_json::from_slice(&output.stdout).map_err(|_| UNCONFIRMED.to_owned()))
-        }
-        Ok(output) => Ok(Err(
-            journal_error(&output.stderr).unwrap_or_else(|| UNCONFIRMED.to_owned())
-        )),
-        Err(error) if error.kind() == io::ErrorKind::Interrupted => Err(error.into()),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Err(
-            "the packaged Office journal client is unavailable".into(),
-        )),
-        Err(_) => Ok(Err(UNCONFIRMED.into())),
-    }
-}
-
-fn journal_error(stderr: &[u8]) -> Option<String> {
-    let last_line = std::str::from_utf8(stderr).ok()?.lines().last()?;
-    let error: Value = serde_json::from_str(last_line).ok()?;
-    Some(error.get("error")?.as_str()?.to_owned())
 }

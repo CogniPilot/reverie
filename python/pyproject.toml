@@ -17,7 +17,6 @@ train = ["torch", "transformers", "peft", "bitsandbytes", "trl", "datasets", "ac
 [project.scripts]
 reverie-cycle = "reverie.cycle:main"
 reverie-runtime = "reverie.runtime:main"
-reverie-opencode-bridge = "reverie.opencode:main"
 reverie-chat = "reverie.chat:main"
 reverie-sleep = "reverie.sleep:main"
 reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"

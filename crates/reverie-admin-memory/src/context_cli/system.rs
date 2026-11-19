@@ -9,27 +9,31 @@ use reverie_store::memory::PrivateContinuity;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn prompt(
-    directory: &Path,
-    instance: &MemoryInstance,
+    config: &MemoryConfiguration,
+    instance: Option<&MemoryInstance>,
     model: &DocumentBody,
     profile: Option<String>,
     data: &PrivateContinuity,
     initial: bool,
 ) -> Result<String> {
-    let revisable = data.revisable || (initial && data.beliefs.is_empty());
+    let revisable = data.revisable || (instance.is_some() && initial && data.beliefs.is_empty());
     let persona = if revisable {
         scalar(&model.text_field("persona")?)?
     } else {
-        read_text(&directory.join("persona.txt"))?
-            .map(|text| {
+        match read_text(&config.native_path(MemoryPath::Persona)?)? {
+            Some(text) => {
                 let text = trim_text(&text);
                 if text.is_empty() {
                     DEFAULT_PERSONA.to_owned()
                 } else {
                     text.to_owned()
                 }
-            })
-            .map_or_else(|| scalar(instance.persona()), Ok)?
+            }
+            None => instance.map_or_else(
+                || Ok(DEFAULT_PERSONA.to_owned()),
+                |instance| scalar(instance.persona()),
+            )?,
+        }
     };
     let profile = profile.map_or_else(|| derived_profile(data), Ok)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();

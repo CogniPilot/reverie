@@ -1,7 +1,6 @@
 """JSON stdin bridge for the OpenCode plugin; no daemon, polling or reply generation."""
 from __future__ import annotations
 
-import argparse
 import os
 import json
 import re
@@ -12,7 +11,6 @@ import subprocess
 import urllib.parse
 import urllib.request
 
-from .chat import ChatDaemon
 from .reverie import Reverie, native_context, violates
 from .persona import build_system_prompt
 from .hands.agent_journal import native_memory_json
@@ -216,7 +214,6 @@ def install(workspace: Path, model: str, instance_config: Path | None = None,
                     "instance": str(instance_config) if instance_config else None,
                     "api_base": api_base, "context_window": context_window,
                     "output_tokens": output_tokens, "api_key_env": api_key_env},
-        "legacy": {"python": sys.executable, "source": str(Path(__file__).resolve().parent.parent)},
     }
     result = native_memory_json("opencode-install-worker", request, 32768, timeout=30)
     if result is None:
@@ -235,42 +232,10 @@ def native_state(request, instance=None, *, capture_output=False):
                           check=False, capture_output=capture_output)
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--install", type=Path, metavar="WORKSPACE")
-    parser.add_argument("--model", default=env_names.lookup("REVERIE_MODEL", "local_agent/MODEL_ID"))
-    parser.add_argument("--api-base", help="local OpenAI-compatible GPU model endpoint, including /v1")
-    parser.add_argument("--context-window", type=int, default=32768)
-    parser.add_argument("--output-tokens", type=int, default=4096)
-    parser.add_argument("--api-key-env", help="environment variable containing the model server credential")
-    parser.add_argument("--instance", type=Path, help="external instance configuration (identity and private state directory)")
-    args = parser.parse_args(argv)
-    daemon = None
-    try:
-        if args.install:
-            result = install(args.install.expanduser().resolve(), args.model, args.instance,
-                             args.api_base, args.context_window, args.output_tokens, args.api_key_env)
-        else:
-            request = json.load(sys.stdin)
-            if not isinstance(request, dict):
-                raise ValueError("request must be an object")
-            action = request.get("action")
-            if action in ("recall", "vacation", "maintenance"):
-                return native_state(request, args.instance).returncode
-            if action == "remember":
-                result = remember_on_office(request)
-            else:
-                daemon = ChatDaemon()
-                result = dispatch(daemon.brain, request)
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
-    except Exception as error:
-        print(json.dumps({"error": str(error)}), file=sys.stderr)
-        return 1
-    finally:
-        if daemon:
-            daemon.brain.store.close()
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    # Older source-installed OpenCode plugins invoked this module directly.
+    try:
+        os.execvp("reverie-opencode", ["reverie-opencode", *sys.argv[1:]])
+    except OSError as error:
+        print(json.dumps({"error": str(error)}), file=sys.stderr)
+        sys.exit(1)
