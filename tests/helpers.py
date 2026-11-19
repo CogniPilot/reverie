@@ -47,9 +47,6 @@ def temp_config() -> Config:
     cfg.legacy_history = d / "legacy-history.json"
     cfg.hold_path = d / "hold"
     cfg.log_path = d / "reverie.log"
-    cfg.gpu_lock_path = d / "gpu.lock"
-    cfg.gpu_yield_path = d / "gpu.yield"
-    cfg.gpu_activity_path = d / "gpu.activity"
     cfg.session_id = "me"
     cfg.ensure_dirs()
     return cfg

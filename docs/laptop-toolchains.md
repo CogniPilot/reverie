@@ -21,8 +21,9 @@ Packages may require additional native libraries beyond GCC and zlib. Those
 dependencies still need a suitable project environment; this does not make
 every binary wheel self-contained.
 
-The website's Python services use a smaller environment that omits Pillow and
-pytest. Updating deployed laptops requires the normal reviewed image rollout.
+The laptop interpreter includes Pillow and pytest for project work. The legacy
+Reverie Python package is confined to the website and compatibility tooling.
+Updating deployed laptops requires the normal reviewed image rollout.
 Recreate a virtual environment when it still points to the previous interpreter.
 
 The `workerPythonRuntime` flake check loads an extension with C++ and zlib

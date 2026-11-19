@@ -708,9 +708,9 @@ let
     };
   });
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
-  runtime = pkgs.buildEnv {
-    name = "reverie-runtime";
-    paths = [ console memory memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+  mkRuntime = name: legacyPackages: pkgs.buildEnv {
+    inherit name;
+    paths = [ console ] ++ legacyPackages ++ [ memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
@@ -719,6 +719,8 @@ let
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
     passthru = { inherit adminMemory cacert memoryJournalCli voiceService workerChild; };
   };
+  workerRuntime = mkRuntime "reverie-worker-runtime" [];
+  runtime = (mkRuntime "reverie-runtime" [ memory ]) // { worker = workerRuntime; };
   containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
   entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
   requestUpdate = pkgs.writeShellApplication {
@@ -752,8 +754,8 @@ let
     export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
     exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else "unversioned")} "$@"
   '') [ "claude" "codex" "opencode" ];
-  launcher = pkgs.writeShellScript "reverie-launcher" ''
-    export PATH=${installClis}/bin:${runtime}/bin:$PATH
+  launcher = runtimeBundle: pkgs.writeShellScript "reverie-launcher" ''
+    export PATH=${installClis}/bin:${runtimeBundle}/bin:$PATH
     export REVERIE_MANAGED_INSTALL=nix
     export REVERIE_OWNER_SETUP=1
     export REVERIE_NIX_LAUNCHER="$0"
@@ -775,17 +777,20 @@ let
     fi
     exec ${console}/bin/reverie "$@"
   '';
+  launchers = runtimeBundle: pkgs.linkFarm "reverie-image-launchers" [
+    { name = "bin/reverie"; path = launcher runtimeBundle; }
+    { name = "bin/reverie-request-update"; path = "${requestUpdate}/bin/reverie-request-update"; }
+    { name = "bin/reverie-install-clis"; path = "${installClis}/bin/reverie-install-clis"; }
+  ];
   # Runtime dependencies stay private so installing Reverie does not replace a
   # user's existing Node, Python, Codex, OpenCode, Git or compiler commands.
   reverie = pkgs.runCommand "reverie-${manifest.version}" {
     nativeBuildInputs = [ pkgs.makeWrapper ];
     meta = { mainProgram = "reverie"; license = lib.licenses.mit; platforms = lib.platforms.linux; };
-    passthru = { inherit console memory runtime; };
+    passthru = { inherit console memory runtime; imageLaunchers = launchers workerRuntime; };
   } ''
     mkdir -p "$out/bin"
-    ln -s ${launcher} "$out/bin/reverie"
-    ln -s ${requestUpdate}/bin/reverie-request-update "$out/bin/reverie-request-update"
-    ln -s ${installClis}/bin/reverie-install-clis "$out/bin/reverie-install-clis"
+    cp -P ${launchers runtime}/bin/* "$out/bin/"
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
