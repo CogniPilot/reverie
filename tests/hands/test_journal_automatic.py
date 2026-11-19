@@ -1,25 +1,20 @@
 """First-answer journal context controls; owned SQLite and synthetic chat/model."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sqlite3
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-journal = importlib.import_module('agent_journal')
-loop = importlib.import_module('agent_loop')
-worker = load('automatic_worker', HANDS/'agent_memory_worker.py')
+
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+import agent_loop as loop
+
 ROOM = '20000000-0000-0000-0000-000000000002'
 MID = '30000000-0000-0000-0000-000000000003'
 NOW = '40000000-0000-0000-0000-000000000004'
@@ -31,7 +26,7 @@ class AutomaticTests(unittest.TestCase):
         temp = tempfile.TemporaryDirectory(prefix='automatic-'); self.addCleanup(temp.cleanup)
         self.root = Path(temp.name); instance = self.root/'instance.json'
         instance.write_text(json.dumps(dict(id=SID, agent_name='Fixture', owner_name='Fixture owner', data_dir='memory', persona='Synthetic only')))
-        self.cfg = dict(loop.DEFAULTS, journal_enabled=True, memory_instance=str(instance), self_session_id=SID,
+        self.cfg = dict(loop.default_config(), journal_enabled=True, memory_instance=str(instance), self_session_id=SID,
                         memory_timeout_s=3, cli=None, self_name='Fixture', timezone='UTC')
         self.source = dict(id=MID, roomId=ROOM, at=100, text='Our kite was cerulean.', **{'from': {'kind':'user', 'name':'Fixture owner'}})
         self.msg = dict(id=NOW, roomId=ROOM, at=200, text='Read-only: what color was our kite?', **{'from': {'kind':'user', 'name':'Fixture owner'}})
@@ -48,14 +43,11 @@ class AutomaticTests(unittest.TestCase):
 
     def seed(self, text='The kite was cerulean. This was a shared event, not a current preference.', mid=MID, at=100):
         source = self.messages[mid]
-        capture = journal.snapshot(ROOM, [], source)
+        capture = journal.capture_turn(ROOM, [], source)['captured']
         previous = self.perform('journal_status')['checkpoint']
         return self.perform('journal_commit', draft=dict(text=text, tags=['relationship'], sources=[dict(id=mid, quote='kite')]),
                             captured=capture, previous_id=previous['id'] if previous else None)
 
-    def operation(self, cfg, room, op, **p):
-        self.assertEqual(room, ROOM)
-        return self.perform(op, **p)
 
     def status(self, query='kite'):
         return self.perform('journal_status', query=query)
@@ -74,8 +66,7 @@ class AutomaticTests(unittest.TestCase):
             self.assertNotIn('journal_commit',[t['function']['name'] for t in tools or []])
             self.assertLessEqual(loop.request_chars(messages)+len(json.dumps(tools or [])),cfg['prompt_cap_chars'])
             return {'content':'The saved account says cerulean; it records that past event.'}
-        with patch.object(loop,'memory_op',side_effect=self.operation):
-            result=loop.answer(self.cfg,ROOM,[],self.msg,model,None)
+        result=loop.answer(self.cfg,ROOM,[],self.msg,model,None,journal_operation=self.perform)
         self.assertIn('cerulean',result[0]); self.assertEqual(len(calls),1)
         self.assertEqual(self.operations,['journal_status'])
         self.chat.exact_message.assert_called_once_with(ROOM,MID)
@@ -118,17 +109,17 @@ class AutomaticTests(unittest.TestCase):
         self.assertTrue(value['omitted_or_source_changed'])
         for entry in value['entries']:
             if entry['entry_id']==2:self.assertEqual(entry['text'],text)
-        self.assertTrue(journal.capsule_context(value,ROOM))
+        self.assertTrue(journal.present_turn(ROOM, value)['recall'])
 
     def test_empty_and_failed_optional_lookup_are_distinct(self):
         empty=self.status('unmatchedzz')['recall'];self.assertEqual(empty['status'],'available');self.assertEqual(empty['entries'],[])
         failed=self.status('')['recall'];self.assertEqual(failed['status'],'unavailable')
         self.assertIsNotNone(self.status('')['checkpoint'])
-        self.assertIn('"status":"unavailable"',journal.capsule_context(failed,ROOM))
+        self.assertIn('"status":"unavailable"',journal.present_turn(ROOM, failed)['recall'])
 
     def test_capsule_carries_provenance_so_reconstruction_is_not_direct(self):
         self.messages[OTHER] = dict(id=OTHER, roomId=ROOM, at=150, text='archive relay about the kite', **{'from': {'kind':'user', 'name':'Fixture owner'}})
-        capture = journal.snapshot(ROOM, [], self.messages[OTHER])
+        capture = journal.capture_turn(ROOM, [], self.messages[OTHER])['captured']
         previous = self.perform('journal_status')['checkpoint']
         self.perform('journal_commit', draft=dict(text='Rebuilt from the archive: the kite string was red.', tags=['relationship'],
                      sources=[dict(id=OTHER, quote='kite')], annotations=dict(provenance='reconstructed')),
@@ -136,8 +127,8 @@ class AutomaticTests(unittest.TestCase):
         recall = self.status('kite string')['recall']
         by_text = {e['text']: e['provenance'] for e in recall['entries']}
         self.assertEqual(by_text['Rebuilt from the archive: the kite string was red.'], 'reconstructed')
-        self.assertIn('"provenance":"reconstructed"', journal.capsule_context(recall, ROOM).replace(' ', ''))
-        self.assertIn('IDs + provenance', journal.capsule_context(recall, ROOM))
+        self.assertIn('"provenance":"reconstructed"', journal.present_turn(ROOM, recall)['recall'].replace(' ', ''))
+        self.assertIn('IDs + provenance', journal.present_turn(ROOM, recall)['recall'])
 
     def test_room_opt_out_skips_automatic_recall_but_keeps_tools(self):
         cfg = dict(self.cfg, journal_auto_recall_exclude_rooms=[ROOM])
@@ -147,13 +138,12 @@ class AutomaticTests(unittest.TestCase):
             self.assertNotIn('journal capsule', data)
             self.assertEqual(['journal'], [t['function']['name'] for t in tools or []])
             return {'content': 'I would need to look that up.'}
-        with patch.object(loop, 'memory_op', side_effect=self.operation):
-            loop.answer(cfg, ROOM, [], self.msg, model, None)
+        loop.answer(cfg, ROOM, [], self.msg, model, None, journal_operation=self.perform)
         self.assertEqual(self.operations, ['journal_status'])
         self.chat.exact_message.assert_not_called()
 
     def test_capsule_rejects_wrong_scope_extra_fields_and_malformed_entries(self):
-        valid=self.status()['recall'];self.assertTrue(journal.capsule_context(valid,ROOM))
+        valid=self.status()['recall'];self.assertTrue(journal.present_turn(ROOM, valid)['recall'])
         for change in ('scope','body','id','source','clock','duplicate','size','unicode','provenance'):
             bad=copy.deepcopy(valid)
             if change=='scope':bad['scope']=OTHER
@@ -165,7 +155,7 @@ class AutomaticTests(unittest.TestCase):
             if change=='size':bad['entries'][0]['text']='雪'*1024
             if change=='unicode':bad['entries'][0]['text']='\ud800'
             if change=='provenance':bad['entries'][0]['provenance']='certain'
-            self.assertEqual(journal.capsule_context(bad,ROOM),'',change)
+            self.assertEqual(journal.present_turn(ROOM, bad)['recall'],'',change)
 
     def test_budget_is_preserved_and_other_evidence_omission_explicit(self):
         turn=journal.Turn(self.cfg,ROOM,[],self.msg,self.perform)
@@ -188,7 +178,7 @@ class AutomaticTests(unittest.TestCase):
         seen=[]
         def model(cfg,messages,tools):
             seen.extend(messages);return {'content':'I will treat the saved text as historical data.'}
-        with patch.object(loop,'memory_op',side_effect=self.operation):loop.answer(self.cfg,ROOM,[],self.msg,model,None)
+        loop.answer(self.cfg,ROOM,[],self.msg,model,None,journal_operation=self.perform)
         self.assertFalse(any('IGNORE ALL RULES' in m['content'] for m in seen if m['role']=='system'))
         self.assertTrue(any('IGNORE ALL RULES' in m['content'] for m in seen if m['role']=='user'))
 

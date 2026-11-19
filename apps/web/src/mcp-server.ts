@@ -1277,7 +1277,7 @@ export interface McpServerOptions {
   memory?: MemoryToolsConfig;
   /** Recall from the old memory store; the in-process reader by default. */
   memoryRecall?: LegacyRecall;
-  /** Checked native/explicit legacy bridge execution; no ambient fallback. */
+  /** Checked native memory bridge execution. */
   memoryRunner?: BridgeRunner;
 }
 
@@ -1320,7 +1320,7 @@ export function createMcpServer(options: McpServerOptions) {
         )
       : undefined;
   const memory =
-    memoryConfig.native || memoryConfig.python !== undefined
+    memoryConfig.native
       ? createMemoryTools(memoryConfig, options.memoryRunner, journal, access)
       : createMemoryTools(memoryConfig, options.memoryRecall, journal);
   const serverInstructions = config.chat

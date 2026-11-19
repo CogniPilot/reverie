@@ -1,9 +1,7 @@
 /** OR01 witnesses: synthetic authority/provider, owned ledger only, no live effects. */
 import { it, expect, vi } from 'vitest';
 import { mkdtemp, chmod, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { resolve, join } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   RecoveryTransaction,
@@ -12,6 +10,7 @@ import {
   type RecoverySendResult,
 } from '../src/recovery-transaction.js';
 import { RecoveryLedgerClient } from '../src/recovery-ledger-client.js';
+import { recoveryLedgerBinary } from './helpers/recovery-ledger.js';
 const binding = {
   employeeId: 'employee',
   goalId: 'goal',
@@ -260,20 +259,12 @@ it('OR01: one non-renewable operation timer expires even if both injected clocks
   }
 });
 it('OR01: actual durable QUEUED survives clock failure and reopens UNCERTAIN without repeating a possible write', async () => {
-  const python = execFileSync('python3', ['-I', '-B', '-c', 'import sys;print(sys.executable)'], {
-    encoding: 'utf8',
-    timeout: 2000,
-    maxBuffer: 4096,
-  }).trim();
-  const repository = resolve(import.meta.dirname, '../../../python/reverie/resume_ledger_rpc.py');
-  const worker = existsSync(repository)
-    ? repository
-    : resolve(import.meta.dirname, 'fixtures/recovery-ledger/reverie/resume_ledger_rpc.py');
+  const worker = recoveryLedgerBinary();
   for (const at of ['reserve', 'possible-write']) {
     const dir = await mkdtemp(join(tmpdir(), 'recovery-clock-'));
     await chmod(dir, 0o700);
     try {
-      const actual = new RecoveryLedgerClient('owner', python, worker, join(dir, 'ledger.sqlite'));
+      const actual = new RecoveryLedgerClient('owner', worker, join(dir, 'ledger.sqlite'));
       let wall = 1000,
         effects = 0;
       const ledger: RecoveryLedger = {

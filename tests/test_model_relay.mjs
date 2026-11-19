@@ -31,6 +31,17 @@ test('private socket relay preserves authenticated requests, streamed responses 
 });
 test('missing model socket returns a useful unavailable response', async () => {
  const root = await mkdtemp(join(tmpdir(), 'no-model-')), server = modelRelay(join(root, 'missing.sock'), 0); await once(server, 'listening');
- try { const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/models`); assert.equal(response.status, 503); assert.match((await response.json()).error.message, /Start reverie-local-model/); }
+ try { const response = await fetch(`http://127.0.0.1:${server.address().port}/v1/models`); assert.equal(response.status, 503); assert.match((await response.json()).error.message, /Docker local model service/); }
  finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); }
+});
+
+test('the office relay keeps its caller-selected unavailable response', async () => {
+ const message = 'Reverie office connection is unavailable.';
+ const root = await mkdtemp(join(tmpdir(), 'no-office-')), server = modelRelay(join(root, 'missing.sock'), 0, message);
+ await once(server, 'listening');
+ try {
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/health`);
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: { message } });
+ } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await rm(root, { recursive: true, force: true }); }
 });

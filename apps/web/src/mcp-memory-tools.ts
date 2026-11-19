@@ -4,8 +4,8 @@
  * Opt-in per agent. They exist only when this MCP server's own environment names an instance configuration
  * (`REVERIE_MCP_MEMORY_INSTANCE`, set in that agent's MCP entry). The caller is that instance: no tool argument
  * can select another agent's store. Ordinary opt-in recalls in-process (legacy-recall.ts).
- * Final-runtime bootstrap can supply a checked native bridge; an explicit legacy bridge remains
- * compatibility-only. Tool arguments select neither an executable nor caller scope.
+ * Final-runtime bootstrap can supply a checked native bridge.
+ * Tool arguments select neither an executable nor caller scope.
  * Hard floors always run in-process (memory-floors.ts).
  *
  * Scope: with `project`, the shared project store; without it, the caller's private store.
@@ -20,7 +20,7 @@ import { isAbsolute } from 'node:path';
 import type { AgentDeps } from './cli-agent.js';
 import { agentJournalRecall, agentJournalSave } from './cli-agent-journal.js';
 import type { ToolDefinition, ToolResult } from './mcp-server.js';
-import { environmentEntry, envValue } from './config/reverie-env.js';
+import { envValue } from './config/reverie-env.js';
 import type { InstalledMemoryBridge } from './installed-memory-bridge.js';
 import { MemoryProjectSchema } from './memory-scope-identifiers.js';
 import type { InstalledMemoryScope } from './installed-memory-context.js';
@@ -35,35 +35,19 @@ const QUERY_MAX = 500;
 const TEXT_MAX = 2000;
 const BRIDGE_TIMEOUT_MS = 60_000;
 
-type BridgeMemoryToolsConfig = {
+interface BridgeMemoryToolsConfig {
   /** Absolute path of the calling agent's instance configuration; unset = the tools do not exist. */
   instance?: string;
-} & (
-  | {
-      /** Final-runtime bootstrap only. Executable origin grants no caller scope.
-       * The legacy selector stays unchanged until the real installer supplies this. */
-      native: InstalledMemoryBridge;
-      installed?: InstalledMemoryScope;
-      python?: never;
-      source?: never;
-    }
-  | {
-      /** Existing selected adapter, retained until the real installed scope is available. */
-      native?: undefined;
-      installed?: never;
-      python: string;
-      source: string;
-    }
-);
+  /** Supplied by the final runtime. Executable origin grants no caller scope. */
+  native: InstalledMemoryBridge;
+  installed?: InstalledMemoryScope;
+}
 
-/** The ordinary path keeps main's in-process recall and floors. Only an explicit
- * bridge configuration selects the checked native or legacy bridge path. */
+/** Ordinary opt-in uses the in-process store reader and floors. */
 interface InProcessMemoryToolsConfig {
   instance?: string;
   native?: undefined;
   installed?: never;
-  python?: never;
-  source?: never;
 }
 export type MemoryToolsConfig = InProcessMemoryToolsConfig | BridgeMemoryToolsConfig;
 export type LegacyRecall = (instance: string, request: RecallRequest, signal?: AbortSignal) => Promise<string>;
@@ -247,8 +231,7 @@ export function createMemoryTools(
   policy?: InstalledMemoryAccess | MemoryScreen,
   bridgeScreen?: MemoryScreen
 ): MemoryToolSet {
-  const bridgeConfig: BridgeMemoryToolsConfig | undefined =
-    config.native || config.python !== undefined ? config : undefined;
+  const bridgeConfig = config.native ? config : undefined;
   const bridgeRunner = (bridgeConfig ? (port as BridgeRunner | undefined) : undefined) ?? runMemoryBridge;
   const legacyRecaller = (!bridgeConfig ? (port as LegacyRecall | undefined) : undefined) ?? defaultRecall;
   const access = bridgeConfig ? (policy as InstalledMemoryAccess | undefined) : undefined;
@@ -256,36 +239,13 @@ export function createMemoryTools(
   const enabled = Boolean(config.instance || config.installed);
 
   /** Only what the bridge needs: never forward this process's room or session credentials to it. */
-  function bridgeEnv(): NodeJS.ProcessEnv {
-    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
-    if (bridgeConfig.native)
-      return bridgeConfig.installed
-        ? bridgeConfig.native.installedEnvironment()
-        : bridgeConfig.instance
-          ? bridgeConfig.native.environment(bridgeConfig.instance)
-          : {};
-    const apiBase = envValue(process.env, 'API_BASE');
-    const embedUrl = envValue(process.env, 'EMBED_URL');
-    return {
-      PATH: process.env.PATH ?? '/usr/bin:/bin',
-      HOME: process.env.HOME ?? '/tmp',
-      PYTHONPATH: bridgeConfig.source,
-      ...(bridgeConfig.instance ? environmentEntry('INSTANCE_CONFIG', bridgeConfig.instance) : {}),
-      ...(apiBase ? environmentEntry('API_BASE', apiBase) : {}),
-      ...(embedUrl ? environmentEntry('EMBED_URL', embedUrl) : {}),
-    };
-  }
-
-  function bridge(input: string, signal?: AbortSignal) {
-    if (!bridgeConfig) throw new Error('Explicit memory bridge is not configured');
-    const options = { env: bridgeEnv(), input, timeoutMs: BRIDGE_TIMEOUT_MS, signal };
-    if (bridgeConfig.native)
-      return bridgeRunner(
-        bridgeConfig.native.executable,
-        bridgeConfig.installed ? ['--installed-context', '--expected-context', bridgeConfig.installed.fingerprint] : [],
-        options
-      );
-    return bridgeRunner(bridgeConfig.python, ['-m', 'reverie.memory_cli'], options);
+  function bridge({ native, installed, instance }: BridgeMemoryToolsConfig, input: string, signal?: AbortSignal) {
+    const env = installed ? native.installedEnvironment() : instance ? native.environment(instance) : {};
+    return bridgeRunner(
+      native.executable,
+      installed ? ['--installed-context', '--expected-context', installed.fingerprint] : [],
+      { env, input, timeoutMs: BRIDGE_TIMEOUT_MS, signal }
+    );
   }
 
   async function journalVerb(verb: (deps: AgentDeps) => Promise<number>, signal?: AbortSignal): Promise<unknown> {
@@ -398,7 +358,7 @@ export function createMemoryTools(
   async function recall(body: Record<string, unknown>, signal?: AbortSignal): Promise<ToolResult> {
     let legacy: string;
     if (bridgeConfig) {
-      const out = await bridge(JSON.stringify(body), signal);
+      const out = await bridge(bridgeConfig, JSON.stringify(body), signal);
       if (out.code !== 0) {
         let reason = out.stderr.trim();
         try {

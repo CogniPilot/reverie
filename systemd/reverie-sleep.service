@@ -1,4 +1,4 @@
-# Template, not installed. One nightly sleep tick: consolidate, reflect, dream (see python/reverie/sleep.py).
+# Template for a nightly consolidation, reflection and dream tick.
 [Unit]
 Description=Reverie nightly sleep tick (consolidation, reflection and dreams)
 After=reverie.service
@@ -9,8 +9,7 @@ Requisite=reverie.service
 Type=oneshot
 # Required: sets REVERIE_SLEEP_POLICY (the external sleep policy inside the container).
 EnvironmentFile=%h/reverie/runtime/config/sleep.env
-# The same interpreter and source the agent plugin's memory bridge uses.
-ExecStart=/bin/sh -c 'exec %h/reverie/runtime/bin/reverie-container engine exec --user agent reverie-live env PYTHONPATH=/workspace/python /opt/reverie/python/bin/python3 -m reverie.sleep tick --policy "$${REVERIE_SLEEP_POLICY}"'
+ExecStart=%h/reverie/runtime/bin/reverie-container engine exec --user agent reverie-live reverie-sleep tick --policy ${REVERIE_SLEEP_POLICY}
 # A pass stops starting new work after 8 minutes; a running model call finishes first.
 TimeoutStartSec=20min
 UMask=0077

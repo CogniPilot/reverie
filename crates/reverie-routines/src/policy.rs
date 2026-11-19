@@ -3,6 +3,7 @@
 use crate::json::{self, Json, py_repr};
 use jiff::civil::Time;
 use jiff::tz::TimeZone;
+pub use reverie_time_zone::load_zone;
 use std::path::Path;
 
 /// Minutes a retro or kickoff must keep from any addressed agent's wind-down and wake.
@@ -162,48 +163,6 @@ fn bounded(
         }
         Some(_) => Err(message()),
     }
-}
-
-/// Python's zoneinfo key rules: relative, already normalized, inside the zone directory.
-fn valid_zone_key(key: &str) -> bool {
-    !key.is_empty()
-        && !key.starts_with('/')
-        && !key.contains('\0')
-        && key
-            .split('/')
-            .all(|p| !p.is_empty() && p != "." && p != "..")
-}
-
-/// The zone by its IANA key: `TZDIR`, then the usual system directories, then the bundled database. As with python's
-/// zoneinfo, the key is exact (case included) and must name a TZif file.
-pub fn load_zone(key: &str) -> Option<TimeZone> {
-    if !valid_zone_key(key) {
-        return None;
-    }
-    let mut dirs: Vec<String> = std::env::var("TZDIR")
-        .ok()
-        .filter(|d| !d.is_empty())
-        .into_iter()
-        .collect();
-    dirs.extend(
-        [
-            "/usr/share/zoneinfo",
-            "/usr/lib/zoneinfo",
-            "/usr/share/lib/zoneinfo",
-            "/etc/zoneinfo",
-        ]
-        .map(String::from),
-    );
-    for dir in dirs {
-        let file = Path::new(&dir).join(key);
-        if file.is_file() {
-            return std::fs::read(&file)
-                .ok()
-                .and_then(|bytes| TimeZone::tzif(key, &bytes).ok());
-        }
-    }
-    let zone = jiff::tz::db().get(key).ok()?;
-    (zone.iana_name() == Some(key)).then_some(zone)
 }
 
 fn read_policy_text(path: &Path) -> Result<String, String> {

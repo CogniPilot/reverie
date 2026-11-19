@@ -5,7 +5,9 @@ arguments as `lib.workerDockerImage`: `system`, `uid`, `gid`, subordinate UID/GI
 starts and count, and optional `browser` (default `false`). It selects that
 factory's archive and static human toolkit itself; there is no caller-supplied
 archive, toolkit, command or qualification flag. The output is
-`share/reverie/worker-image.json`, purpose `worker-image-provenance-v1`.
+`share/reverie/worker-image.json`, purpose `worker-image-provenance-v2`.
+The readers still accept recorded v1 provenance. The child-image annex
+continues to pin the selected base receipt and its exact bytes.
 
 Save the selected factory arguments in an owner-private JSON file outside the
 checkout, with only `system`, `uid`, `gid`, `subuidStart`, `subgidStart`,
@@ -27,14 +29,13 @@ The facts reference the archive's immutable store path. No host account setup,
 image load, broker configuration write or laptop recreation occurs in this build.
 
 The producer binds the complete image Config/RootFS/platform/creation metadata,
-archive bytes, fixed factory/source inputs and exact static toolkit manifest. It
-retains the exact eleven legacy v1 selected-factory file pins inside the full
-immutable source path. Those files are rehashed even after their build entry
-points migrate to Rust. They do not identify the complete Rust producer or
-attest the entire Nix toolchain closure. The selected Rust package requires its
-own exact source, executable and Nix factory qualification; the legacy pin list
-cannot replace that association. Changing or deleting those legacy pin inputs
-requires a paired, versioned reader/producer migration.
+archive bytes, fixed factory/source inputs and exact static toolkit manifest.
+The v2 source path projects the files listed in
+`crates/reverie-contracts/src/resource_actor/provenance_build/worker-factory-v2.json`.
+The producer checks the inventory and hashes the selected native and Nix inputs.
+The checkout's full source tree is no longer retained by the source field.
+Qualifying the complete Nix factory still requires its exact source and
+executable association. Historical v1 receipts retain their original store paths.
 Complete Config/RootFS and archive verification remain separate required facts. It
 hashes the actual layer streams and verifies the final direct, root-owned mode
 0555 toolkit files and protected ancestors, including later replacements and

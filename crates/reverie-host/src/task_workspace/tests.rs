@@ -166,3 +166,78 @@ fn reserve_records_the_reservation_and_renews_only_an_existing_one() {
         ReservationState::InUse
     );
 }
+
+#[test]
+fn allocate_and_finish_use_the_existing_metadata_and_reservation_formats() {
+    let dir = scratch();
+    let base = LeaseBase::own(&dir.join("leases")).unwrap();
+    let workspaces = TaskWorkspaces::open(&dir.join("tasks")).unwrap();
+    let job = workspaces.create(&base, "job").unwrap();
+    let key = lease::key_of(&job).unwrap().unwrap();
+    let metadata = job.join(METADATA);
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(&metadata).unwrap()).unwrap();
+    assert_eq!(record["id"], "job");
+    assert_eq!(record["status"], "allocated");
+    assert!(record["created_at"].as_f64().unwrap() > 0.0);
+    assert_eq!(
+        lease::reservation_state(&base, &key),
+        ReservationState::InUse
+    );
+
+    workspaces
+        .write(
+            &job,
+            br#"{"id": "job", "status": "failed", "exit_code": 7, "notes": {"saved": true}}"#,
+        )
+        .unwrap();
+    workspaces.finish(&base, "job", "Saved results").unwrap();
+    let record: serde_json::Value = serde_json::from_slice(&fs::read(&metadata).unwrap()).unwrap();
+    assert_eq!(record["id"], "job");
+    assert_eq!(record["status"], "completed");
+    assert_eq!(record["handoff"], "Saved results");
+    assert!(record["completed_at"].as_f64().unwrap() > 0.0);
+    assert_eq!(record["exit_code"], 7);
+    assert_eq!(record["notes"]["saved"], true);
+    assert_eq!(
+        lease::reservation_state(&base, &key),
+        ReservationState::Free
+    );
+}
+
+#[test]
+fn failed_or_unverified_handoff_publication_preserves_the_reservation() {
+    let dir = scratch();
+    let base = LeaseBase::own(&dir.join("leases")).unwrap();
+    let workspaces = TaskWorkspaces::open(&dir.join("tasks")).unwrap();
+    let job = workspaces.create(&base, "job").unwrap();
+    let key = lease::key_of(&job).unwrap().unwrap();
+    let metadata = job.join(METADATA);
+    let allocated = fs::read(&metadata).unwrap();
+    assert!(matches!(
+        workspaces.finish(&base, "job", " "),
+        Err(WorkspaceError::Handoff)
+    ));
+
+    for status in ["running", "cleanup_unknown", "completed", "future"] {
+        let record = serde_json::json!({"id": "job", "status": status}).to_string();
+        workspaces.write(&job, record.as_bytes()).unwrap();
+        let before = fs::read(&metadata).unwrap();
+        assert!(matches!(
+            workspaces.finish(&base, "job", "Saved results"),
+            Err(WorkspaceError::Unsettled)
+        ));
+        assert_eq!(fs::read(&metadata).unwrap(), before);
+        assert_eq!(
+            lease::reservation_state(&base, &key),
+            ReservationState::InUse
+        );
+    }
+
+    workspaces.write(&job, &allocated).unwrap();
+    symlink(&metadata, job.join(".reverie-task.json.tmp")).unwrap();
+    assert!(workspaces.finish(&base, "job", "Saved results").is_err());
+    assert_eq!(
+        lease::reservation_state(&base, &key),
+        ReservationState::InUse
+    );
+}

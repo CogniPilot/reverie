@@ -77,7 +77,7 @@ impl BriefRequest {
         }
         let reserve = suffix(999999).len();
         if parts.join("\n\n").len() + reserve > self.budget {
-            return Err(DocumentCodecError::Brief);
+            return Err(DocumentCodecError::BriefEssentials);
         }
         let optional = self.optional(selected)?;
         let mut omitted = 0;

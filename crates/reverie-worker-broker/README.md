@@ -6,10 +6,9 @@ report registry, and published actual handler JoinHandles. It never executes
 itself or replaces its process image. Replacing this program invalidates its
 original-process delegation and requires supported registered bootstrap.
 
-The additive `nativeWorkerBroker` Nix output is explicitly selectable; the
-default `workerBroker` output still selects the legacy implementation. Supported
-native service install/upgrade can select a native package independently of that
-default. Check actual executable provenance separately from source availability.
+The Docker flake builds this crate through its native broker integration check.
+Host broker packages and their legacy Python launchers are retired from the
+product. The service commands below document the integration implementation.
 
 The service connects ordinary J preparation, Cold/Reuse viewer relay and
 all-outcome finalization, M/G consumers, Q fleet maintenance and pool B

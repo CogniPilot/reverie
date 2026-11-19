@@ -30,7 +30,7 @@ For explicit lookup, run:
 reverie-admin-memory --room "<name or ID>" --query "deployment decision and source receipt"
 ```
 
-The JSON result includes source message IDs. An empty result means nothing relevant was found in this harness's stored exchanges; read the channel and linked handoffs next. Memory can be incomplete or stale. Recall does not prove a change is deployed or a permission is still granted. Current permissions come from `reverie agent capabilities`.
+The JSON result includes source message IDs. The command checks current membership and reads the existing store without changing its contents. An empty result means nothing relevant was found in this harness's stored exchanges; read the channel and linked handoffs next. Memory can be incomplete or stale. Recall does not prove a change is deployed or a permission is still granted. Current permissions come from `reverie agent capabilities`.
 
 This command reads the Admin Harness channel store. Other harnesses use their own configured memory tools; it does not silently search another expert's private history. If the command is missing, report the installed harness/version rather than claiming that you searched memory.
 

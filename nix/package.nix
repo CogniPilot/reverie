@@ -11,6 +11,7 @@ let
   consoleFixture = relative: builtins.path { path = (src.origSrc or src) + "/${relative}"; };
   rustRouteHandler = import ./rust-route-handler.nix { inherit pkgs src; };
   rustFront = import ./rust-front.nix { inherit pkgs src; };
+  recoveryLedger = import ./recovery-ledger.nix { inherit pkgs src; };
   dockerViewerExecutables = pkgs.writeText "docker-viewer-executables.json"
     (builtins.toJSON (import ./docker-viewer-executables.nix { inherit pkgs; }));
   console = pkgs.buildNpmPackage {
@@ -29,10 +30,6 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
-      mkdir -p test/fixtures/recovery-ledger/reverie
-      cp ${consoleFixture "python/reverie/__init__.py"} test/fixtures/recovery-ledger/reverie/__init__.py
-      cp ${consoleFixture "python/reverie/resume_ledger.py"} test/fixtures/recovery-ledger/reverie/resume_ledger.py
-      cp ${consoleFixture "python/reverie/resume_ledger_rpc.py"} test/fixtures/recovery-ledger/reverie/resume_ledger_rpc.py
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
       mkdir -p test/fixtures/goal-source/python test/fixtures/goal-source/tests
@@ -79,9 +76,11 @@ let
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
     doCheck = true;
-    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
+    nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.python3 pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''
       runHook preCheck
+      export NIX_TEST_RECOVERY_LEDGER=${lib.getExe recoveryLedger}
+      export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
       # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
       # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
@@ -610,7 +609,7 @@ let
   interpreterReadyFixture = import ./interpreter-ready-fixture.nix { inherit pkgs src; };
   # Explicit noncircular ABI fixture: PATH may select the bare interpreter in
   # buildPythonPackage checks even while this environment runs the suite.
-  pythonCheckEnvironment = pkgs.python3.withPackages (ps: [ ps.pillow ps.aiohttp ]);
+  pythonCheckEnvironment = pkgs.python3.withPackages (_: []);
   memoryPackage = pkgs.python3Packages.buildPythonPackage {
     NIX_REVERIE_TEST_INTERPRETER_READY_WRAPPER = "${interpreterReadyFixture}/bin/python3";
     NIX_REVERIE_TEST_PYTHON_ENV_WRAPPER = "${pythonCheckEnvironment}/bin/python3";
@@ -618,9 +617,10 @@ let
     version = "0.1.0";
     inherit src;
     pyproject = true;
+    makeWrapperArgs = [ "--prefix" "PATH" ":" "${adminMemory}/bin" ];
     postUnpack = ''sourceRoot="$sourceRoot/python"'';
     build-system = [ pkgs.python3Packages.setuptools ];
-    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) pkgs.python3Packages.pillow pkgs.python3Packages.aiohttp ];
+    nativeCheckInputs = [ pkgs.bash pkgs.coreutils pkgs.git pkgs.nodejs_22 pkgs.tmux pkgs.jq (lib.getBin pkgs.util-linux) adminMemory ];
     postPatch = "patchShebangs ../scripts ../docker ../.github/ci";
     checkPhase = ''
       # The modules discovery would load (test*.py in tests/ and its packages), in chunks of 12, two unittest processes
@@ -638,38 +638,18 @@ let
       (cd ..; node --test tests/test_web_install_manifest.mjs tests/test_cli_installer.mjs tests/test_reverie_start.mjs tests/test_recovery_scripts.mjs tests/test_opencode_plugin.mjs tests/test_model_relay.mjs tests/test_voice_ci_launch.mjs)
     '';
   };
-  memory = pkgs.python3.withPackages (ps: [ memoryPackage ps.pillow ps.pytest ]);
-  kokoro = import ./kokoro.nix { inherit pkgs memoryPackage; };
-  hands = pkgs.writeShellApplication {
+  memory = pkgs.python3.withPackages (_: [ memoryPackage ]);
+  kokoro = import ./kokoro.nix { inherit pkgs src; };
+  voiceService = import ./voice-service.nix { inherit pkgs src; };
+  hands = (pkgs.writeShellApplication {
     name = "reverie-hands";
-    runtimeInputs = [ memory ];
-    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/launcher.py "$@"'';
-  };
-  adminMemory = pkgs.writeShellApplication {
-    name = "reverie-admin-memory";
-    runtimeInputs = [ memory ];
-    text = ''exec python3 -I -B ${memoryPackage}/${pkgs.python3.sitePackages}/reverie/hands/memory_access.py "$@"'';
-  };
-  handsToolchain = pkgs.buildEnv {
-    name = "reverie-hands-toolchain";
-    paths = [ pkgs.python3 pkgs.nodejs_22 pkgs.bashInteractive pkgs.coreutils
-      pkgs.git pkgs.ripgrep pkgs.findutils pkgs.gnused pkgs.gnugrep pkgs.gnumake ];
-    pathsToLink = [ "/bin" ];
-  };
-  handsToolsSource = pkgs.runCommand "reverie-hands-workspace-tools" { } ''
-    mkdir -p "$out"
-    cp ${src}/python/reverie/hands/laptop_tools.py "$out/laptop_tools.py"
-    cp ${src}/python/reverie/hands/workspace_dispatch.py "$out/workspace_dispatch.py"
-    cp ${src}/python/reverie/hands/coding_telemetry.py "$out/coding_telemetry.py"
-    cp ${src}/python/reverie/hands/command_telemetry.py "$out/command_telemetry.py"
-    cp ${src}/python/reverie/hands/command_catalog.py "$out/command_catalog.py"
-  '';
-  handsTools = pkgs.writeShellApplication {
-    name = "reverie-hands-tools";
-    runtimeInputs = [ pkgs.python3 ];
-    text = ''exec python3 -I -B ${handsToolsSource}/laptop_tools.py --tool-path ${handsToolchain}/bin "$@"'';
-  };
-  modelRelaySource = pkgs.writeText "reverie-model-relay.mjs" (builtins.readFile (src + "/apps/host/model-relay.mjs"));
+    text = ''
+      exec ${backendNativeCli}/bin/reverie-backend --hands-launch --native-runtime ${adminMemory}/bin/reverie-admin-memory "$@"
+    '';
+  }).overrideAttrs (_: { disallowedRequisites = [ pkgs.python3 ]; });
+  adminMemory = import ./admin-memory.nix { inherit pkgs src; };
+  handsTools = import ./hands-tools.nix { inherit pkgs src; };
+  modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   modelRelay = pkgs.writeShellApplication {
     name = "reverie-model-relay";
     runtimeInputs = [ pkgs.nodejs_22 ];
@@ -696,12 +676,20 @@ let
   workerNativeChild = import ./worker-child.nix { inherit pkgs src; };
   # Same fixed native helper selected by the worker image; no shell fallback.
   workerNativeNixStorePrepare = import ./nix-store-prepare.nix { inherit pkgs src; };
-  # Unselected until owner regex, installed lifecycle/auth and actual MCP/client
-  # consumers qualify together. No Python fallback inside this native package.
+  # The full installed-instance mode requires explicit lifecycle selection.
   memoryNativeCli = import ./memory-cli.nix { inherit pkgs src console; };
-  # The selected reverie-ops client (laptop runtime, console and opsCore).
+  memoryJournalCli = pkgs.runCommand "reverie-memory-journal" {} ''
+    mkdir -p "$out/bin"
+    ln -s ${memoryNativeCli}/bin/reverie-memory "$out/bin/reverie-memory-journal"
+    result=$(printf '%s' '{"action":"recall","private":true,"query":"smoke"}' \
+      | ${pkgs.coreutils}/bin/env -i "$out/bin/reverie-memory-journal" --journal-only)
+    test "$result" = '[]'
+  '';
+  # The selected reverie-ops client for the laptop runtime and console.
   # The OPS daemon and grants remain server-owned.
   opsNativeCli = import ./ops-cli.nix { inherit pkgs src; };
+  backendNativeCli = import ./backend-cli.nix { inherit pkgs src; };
+  leaseCli = import ./lease-cli.nix { inherit pkgs src; };
   mcpNativeCli = import ./mcp-cli.nix { inherit pkgs src console memoryNativeCli; };
   routinesNative = import ./routines.nix { inherit pkgs src; };
   muxNative = import ./mux.nix { inherit pkgs src; };
@@ -722,16 +710,17 @@ let
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memory kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memory memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd
       cacert lockTools ] ++ providerLaunchers;
     pathsToLink = [ "/bin" "/share" ];
     # The images' /etc/ssl/certs comes from this same bundle (nix/image.nix).
-    passthru = { inherit cacert workerChild; };
+    passthru = { inherit adminMemory cacert memoryJournalCli voiceService workerChild; };
   };
-  entrypoint = pkgs.writeShellScript "reverie-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  containerRuntime = import ./container-runtime.nix { inherit pkgs src; };
+  entrypoint = import ./container-entrypoint.nix { inherit pkgs containerRuntime; };
   requestUpdate = pkgs.writeShellApplication {
     name = "reverie-request-update";
     runtimeInputs = [ pkgs.coreutils ];
@@ -800,8 +789,17 @@ let
     ln -s ${kokoro}/bin/reverie-kokoro "$out/bin/reverie-kokoro"
     ln -s ${hands}/bin/reverie-hands "$out/bin/reverie-hands"
     ln -s ${adminMemory}/bin/reverie-admin-memory "$out/bin/reverie-admin-memory"
+    ln -s ${adminMemory}/bin/reverie-chat "$out/bin/reverie-chat"
+    ln -s ${adminMemory}/bin/reverie-context "$out/bin/reverie-context"
+    ln -s ${adminMemory}/bin/reverie-sleep "$out/bin/reverie-sleep"
+    ln -s ${adminMemory}/bin/reverie-opencode "$out/bin/reverie-opencode"
+    ln -s ${adminMemory}/bin/reverie-opencode-bridge "$out/bin/reverie-opencode-bridge"
+    ln -s ${memoryJournalCli}/bin/reverie-memory-journal "$out/bin/reverie-memory-journal"
     # The structured OPS client is native; no Python console command remains.
     ln -s ${opsNativeCli}/bin/reverie-ops "$out/bin/reverie-ops"
+    ln -s ${backendNativeCli}/bin/reverie-backend "$out/bin/reverie-backend"
+    ln -s ${backendNativeCli}/bin/reverie-cycle-demo "$out/bin/reverie-cycle-demo"
+    ln -s ${leaseCli}/bin/reverie-workspaces "$out/bin/reverie-workspaces"
     # reverie-memory is the console's `reverie agent memory`; skills and agents keep calling it by this name.
     makeWrapper ${console}/bin/reverie "$out/bin/reverie-memory" --add-flags "agent memory"
     # Run the installed reverie-memory as packaged, with no environment: it must reach `reverie agent memory` and refuse.
@@ -829,4 +827,4 @@ let
     done
   '';
 
-in { inherit reverie console memory memoryPackage runtime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli routinesNative muxNative laptopTools rustRouteHandler; }
+in { inherit reverie console memory memoryPackage runtime containerRuntime entrypoint kokoro hands handsTools workerExec workerResourceClientManifest workerNativeClient workerNativeClientManifest workerChild workerNativeChild workerNativeNixStorePrepare memoryNativeCli mcpNativeCli opsNativeCli backendNativeCli routinesNative muxNative laptopTools rustRouteHandler; }

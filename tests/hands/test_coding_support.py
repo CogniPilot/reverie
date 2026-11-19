@@ -1,5 +1,11 @@
 import copy
+import json
 import os
+from pathlib import Path
+import select
+import subprocess
+import tempfile
+import time
 from unittest.mock import patch
 
 import agent_loop
@@ -19,12 +25,76 @@ def without_seat_environment(test):
 
 
 def cfg_for(root, **settings):
-    config = dict(agent_loop.DEFAULTS)
+    config = agent_loop.default_config()
     config.update(rooms=['room'], dm_rooms=[], self_session_id=SELF['sessionId'], self_name=SELF['name'],
                   state_file=os.path.join(root, 'state.json'), api_base='http://unused.invalid/v1',
                   model='configured-model', cli=['unused'])
     config.update(settings)
     return config
+
+
+class ModelEndpoint:
+    def __init__(self, test, *, hold_first=False):
+        fixture = Path(__file__).parent / 'fixtures' / 'model_endpoint.mts'
+        self.process = subprocess.Popen(
+            ['node', '--experimental-strip-types', str(fixture), *(['--hold-first'] if hold_first else [])],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+        test.addCleanup(self.close)
+        self.url = self.read_event('ready')['url']
+
+    def read_event(self, kind, timeout=3):
+        pipe = self.process.stdout
+        if not select.select([pipe], [], [], timeout)[0]:
+            raise AssertionError(f'model fixture did not emit {kind}')
+        event = json.loads(pipe.readline())
+        if event['kind'] != kind:
+            raise AssertionError(f'model fixture emitted {event["kind"]} while waiting for {kind}')
+        return event
+
+    def receive(self):
+        event = self.read_event('request')
+        return event['path'], event['payload']
+
+    def wait_disconnected(self):
+        self.read_event('disconnected', 2)
+
+    def has_event(self):
+        return bool(select.select([self.process.stdout], [], [], 0)[0])
+
+    def close(self):
+        self.process.stdin.close()
+        try:
+            self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+        finally:
+            self.process.stdout.close()
+
+
+class ChatCliFixture:
+    def __init__(self, test, timeout=5):
+        directory = tempfile.TemporaryDirectory()
+        test.addCleanup(directory.cleanup)
+        self.settings = Path(directory.name) / 'response.json'
+        self.requests = Path(directory.name) / 'requests.jsonl'
+        fixture = Path(__file__).parent / 'fixtures' / 'chat_cli.mts'
+        self.chat = agent_loop.Chat(['node', '--experimental-strip-types', str(fixture), str(self.settings)], timeout)
+
+    def respond(self, stdout, status=0):
+        self.settings.write_text(json.dumps({'stdout': stdout, 'status': status, 'calls': str(self.requests)}))
+
+    def last_call(self):
+        return json.loads(self.requests.read_text().splitlines()[-1])
+
+
+def wait_model_reply(arbiter):
+    until = time.monotonic() + 4
+    while (result := arbiter.poll()) is None:
+        if time.monotonic() >= until:
+            raise AssertionError('model slot did not return a result')
+        time.sleep(.005)
+    return result
 
 
 class FakeChat:

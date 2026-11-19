@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! Opaque native Python re.I str compiler/matcher. No public
+//! Opaque native Python str regular expression compiler/matcher. No public
 //! bytecode factory, Python VM, generic executable or external pattern selector.
 mod ast;
 mod compiler;
@@ -17,8 +17,15 @@ pub struct CompiledPattern {
 }
 impl CompiledPattern {
     pub fn compile(pattern: PythonTextRef<'_>) -> Result<Self, RegexError> {
+        Self::with_flags(pattern, ast::IGNORE)
+    }
+    /// Compile with ordinary `re` defaults, including case-sensitive matching.
+    pub fn compile_case_sensitive(pattern: PythonTextRef<'_>) -> Result<Self, RegexError> {
+        Self::with_flags(pattern, 0)
+    }
+    fn with_flags(pattern: PythonTextRef<'_>, flags: u32) -> Result<Self, RegexError> {
         let source: Arc<[u32]> = pattern.codepoints().as_ref().into();
-        let parsed = parser::Parser::parse(source.clone())?;
+        let parsed = parser::Parser::parse(source.clone(), flags)?;
         Ok(Self {
             code: compiler::compile(&parsed, &source)?,
         })

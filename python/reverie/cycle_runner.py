@@ -9,7 +9,6 @@ import subprocess
 import tempfile
 import time
 from .cycle_budget import BudgetExhausted
-from .opencode import install
 from reverie import env_names
 
 
@@ -77,8 +76,12 @@ class OpenCodeRunner:
             raise ValueError("scheduled tool jobs require the reverie container")
         with tempfile.TemporaryDirectory(prefix="cycle-job-",dir=self.scratch) as directory:
             root=Path(directory); runtime=root/'runtime'
-            install(runtime,model['provider']+'/'+model['model'],instance,
-                    model['api_base'],model['context_window'],model['output_tokens'],model.get('api_key_env'))
+            command = ['reverie-opencode', '--install', str(runtime), '--instance', str(instance),
+                       '--model', model['provider']+'/'+model['model'], '--api-base', model['api_base'],
+                       '--context-window', str(model['context_window']), '--output-tokens', str(model['output_tokens'])]
+            if model.get('api_key_env'):
+                command.extend(('--api-key-env', model['api_key_env']))
+            subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=30, check=True)
             settings=json.loads((runtime/'opencode.json').read_text())
             permission=settings['permission']
             # All child jobs are brokered by the CTO schedule; no hidden harness task tree.

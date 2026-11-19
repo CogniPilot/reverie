@@ -45,19 +45,22 @@ loopback fixture containing the production voice routes and car playback code.
 Its agent replies are fixed synthetic text; its Kokoro synthesis and Whisper
 recognition are real. The CI-only adapter uses Kokoro for both route protocols;
 it does not qualify an operator's Piper service or deploy any speech service.
-Dependencies come from `flake.lock`. `nix/voice-ci.nix` pins each speech model by
-SHA256, including the upstream [Whisper tiny.en checkpoint](https://github.com/openai/whisper/blob/main/whisper/__init__.py).
-Kokoro uses the same model hashes and package as `reverie-kokoro`. Whisper is MIT
-licensed; Kokoro packaging retains its Apache-2.0 license metadata. These test
-models are separate from the production image.
+Dependencies come from `flake.lock`. The voice shell loads the SHA-256 pins
+from `crates/reverie-kokoro/model-files.json` and
+`scripts/voice-ci/whisper-model.json`. The Rust fixture shares the production
+Kokoro engine and runs CPU-only Whisper.cpp with the GGML Tiny.en checkpoint.
+The workflow also starts the packaged Rust `reverie-kokoro` service with the
+same pinned ONNX graph and voice archive and checks its HTTP and WAV responses.
+The test models are separate from the production image.
 
 From a clean checkout, install the locked JavaScript dependencies without browser
 downloads, then run the guarded harness with a **new** artifact directory:
 
 ```bash
 nix develop .#voice-ci --command npm ci --prefix apps/web --ignore-scripts
+nix develop --command node apps/web/scripts/fix-node-pty.mjs
 export REVERIE_VOICE_CI_ARTIFACTS=/scratch/build/voice-ci-run-001
-nix develop .#voice-ci --command python3 -m reverie.buildenv \
+nix develop .#voice-ci --command reverie-buildenv \
   --project voice-ci --repo "$PWD" --expect 4G --disk 2G --jobs 1 \
   -- bash scripts/test-voice-ci.sh
 ```
@@ -65,6 +68,8 @@ nix develop .#voice-ci --command python3 -m reverie.buildenv \
 The script clears inherited instance settings, uses a private fixture home and
 ephemeral loopback ports, and tears down only its own service processes. Those
 services remain in the resource guard's process group.
+The default development shell provides Python for the third-party node-gyp PTY
+build. The packaged speech fixture and voice shell run with native tools.
 The guard defaults to `/scratch` on laptops. Hosted CI explicitly uses
 `--scratch "$RUNNER_TEMP/voice-ci-build"`; it creates that task root and its temp
 directory before checking disk space. Memory/PID admission, disk reserve,

@@ -1,9 +1,12 @@
 use super::*;
 use reverie_application::memory_lifecycle::InstalledMemory;
-use reverie_contracts::memory_cli::MemoryRequest;
+use reverie_contracts::memory_cli::{JournalSaveRequest, MemoryRequest};
 use reverie_core::memory::{EmbeddingText, MemoryScope, ProjectName};
 use reverie_host::memory_screen::{MemoryScreen, memory_stdin_text};
 use std::io::Read;
+
+const JOURNAL_REQUEST_BYTES: u64 = 1024 * 1024;
+
 pub(super) fn run(
     arguments: &Arguments,
     installed: Option<&reverie_core::memory_context::InstalledMemoryContext>,
@@ -11,22 +14,39 @@ pub(super) fn run(
     if arguments.initialize {
         return initialize(arguments);
     }
-    let mut input = Vec::new();
-    io::stdin()
-        .lock()
-        .read_to_end(&mut input)
-        .map_err(Failure::display)?;
-    let text = memory_stdin_text(&input);
-    match MemoryRequest::decode(text.as_text_ref()).map_err(Failure::display)? {
+    let stdin = io::stdin().lock();
+    if arguments.journal_only {
+        return journal_only(stdin);
+    }
+    match read_request(stdin, u64::MAX)? {
         MemoryRequest::Screen { text } => Ok(MemoryReply::screened(screen(&text)?)),
         MemoryRequest::Recall { scope, query } => recall(arguments, installed, &scope, &query),
-        MemoryRequest::Remember { request } => {
-            if !screen(request.text())?.is_empty() {
-                return Err(Failure::text("memory is empty or crossed a hard floor"));
-            }
-            journal::save(&request)
-        }
+        MemoryRequest::Remember { request } => remember(&request),
     }
+}
+fn read_request(stdin: impl Read, bound: u64) -> Result<MemoryRequest> {
+    let mut input = Vec::new();
+    stdin
+        .take(bound.saturating_add(1))
+        .read_to_end(&mut input)
+        .map_err(Failure::display)?;
+    if input.len() as u64 > bound {
+        return Err(Failure::text("memory request is too large"));
+    }
+    MemoryRequest::decode(memory_stdin_text(&input).as_text_ref()).map_err(Failure::display)
+}
+fn journal_only(stdin: impl Read) -> Result<MemoryReply> {
+    match read_request(stdin, JOURNAL_REQUEST_BYTES)? {
+        MemoryRequest::Recall { scope, query } => journal::recall(&scope, &query, Vec::new()),
+        MemoryRequest::Remember { request } => remember(&request),
+        MemoryRequest::Screen { .. } => Err(Failure::text("expected a recall or remember request")),
+    }
+}
+fn remember(request: &JournalSaveRequest) -> Result<MemoryReply> {
+    if !screen(request.text())?.is_empty() {
+        return Err(Failure::text("memory is empty or crossed a hard floor"));
+    }
+    journal::save(request)
 }
 fn screen(text: &MetadataText) -> Result<&'static str> {
     MemoryScreen::capture_current()

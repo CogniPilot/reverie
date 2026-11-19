@@ -127,3 +127,17 @@ of this deployment and must not be required for container restart.
 Updates use Docker image replacement, retaining the same deployment definition
 and persistent volumes. A host update daemon and a writable host request mount
 are unnecessary. The container is not granted a Docker socket to replace itself.
+
+## Local speech for Office voice turns
+
+Set `REVERIE_VOICE_ENABLED=1` on the office container to run its loopback speech
+service on port 8090. Keep that port inside the container. An existing
+`REVERIE_VOICE_TURN_URL` continues to select the operator-configured service.
+
+Reuse the voice assets in the mounted console data directory under `voice/`,
+or set `REVERIE_VOICE_DIR` to their container path. The default files are
+`ggml-base.en.bin`, `en_US-amy-medium.onnx` and
+`en_US-amy-medium.onnx.json`. Set `REVERIE_WHISPER_MODEL` and `REVERIE_VOICE` to
+select other installed checkpoints. The service uses CPU inference, advertises
+installed Piper voices and keeps new reply audio in a bounded temporary cache.
+The Office API handles room membership, transcripts and linked employee replies.

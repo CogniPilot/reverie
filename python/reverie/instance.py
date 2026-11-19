@@ -74,14 +74,3 @@ def initial_self_for(instance: Instance | None) -> dict | None:
     model["persona"] = instance.persona
     model["reason"] = "Initial commitments from the owner-selected instance configuration."
     return model
-
-
-def identity_context(instance: Instance | None) -> str:
-    if instance is None:
-        return ""
-    return f"Instance: {instance.id}. Your name is {instance.agent_name}. Your owner is {instance.owner_name}. Your role is {instance.role}."
-
-
-def primary_agent(instance: Instance | None) -> str:
-    """Choose a harness profile independently of organizational authority."""
-    return "chat"

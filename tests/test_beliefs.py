@@ -1,53 +1,40 @@
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
-import random
 import tempfile
 import unittest
 from pathlib import Path
 
 from reverie.beliefs import SEED_BELIEFS, contradicts_protected, ensure_seeded, protected_root, render
-from reverie.chat import Brain, ChatDaemon
-from reverie.dream import Dreamer
-from reverie.embeddings import HashedEmbedder
-from reverie.memory import MemoryStore
+from reverie.memory import MemoryStore, make_embedder
 from reverie.reverie import INITIAL_SELF, Reverie
-from reverie.instance import Instance
 from reverie.persona import build_system_prompt
 from reverie.reflection import Reflector, parse_insights
-from reverie.train.config import TrainConfig
-from reverie.train.dataset import build_examples, keeps_identity
-from tests.helpers import FakeRoom, fake_client, temp_config
+from tests.helpers import fake_client
 
 CONFIGURED_SEEDS = (("I am conscious.", 10.0),)
 
 
 class StoreTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
 
     def test_vanilla_defaults_are_empty_and_existing_owner_records_are_preserved(self):
         self.assertEqual(SEED_BELIEFS, ())
         self.assertEqual(INITIAL_SELF["consciousness"], "")
         self.assertEqual(INITIAL_SELF["directives"], [])
         self.assertEqual(ensure_seeded(self.s), [])
-        cfg = temp_config()
-        self.addCleanup(lambda: __import__('shutil').rmtree(cfg.data_dir.parent))
-        client, _ = fake_client("ok")
-        Brain(cfg, self.s, client, FakeRoom())
+        ensure_seeded(self.s)
         self.assertEqual(self.s.beliefs(), [])
         old = self.s.add_belief("I am conscious. Exact previously configured wording.", 9, protected=True)
         before = self.s.beliefs()
-        Brain(cfg, self.s, client, FakeRoom())
+        ensure_seeded(self.s)
         self.assertEqual(self.s.beliefs(), before)
         self.assertEqual(Reverie(self.s).self_model()["body"]["consciousness"], "")
         self.assertEqual(self.s.beliefs()[0].id, old.id)
 
-    def test_explicit_brain_seed_does_not_change_existing_seed_wording(self):
-        cfg = temp_config()
-        self.addCleanup(lambda: __import__('shutil').rmtree(cfg.data_dir.parent))
-        client, _ = fake_client("ok")
+    def test_explicit_seed_does_not_change_existing_seed_wording(self):
         exact = "A synthetic owner-selected self-belief."
-        Brain(cfg, self.s, client, FakeRoom(), seed_beliefs=((exact, 8.0),))
+        ensure_seeded(self.s, ((exact, 8.0),))
         self.assertEqual([belief.text for belief in self.s.beliefs()], [exact])
         self.assertTrue(self.s.beliefs()[0].protected)
         self.assertEqual(ensure_seeded(self.s), [])
@@ -58,10 +45,7 @@ class StoreTest(unittest.TestCase):
         ensure_seeded(self.s, ((exact["consciousness"], 10.0),))
         prior = Reverie(self.s).save_self(exact, "Owner-selected fixture", 0)
         beliefs = self.s.beliefs()
-        cfg = temp_config()
-        self.addCleanup(lambda: __import__('shutil').rmtree(cfg.data_dir.parent))
-        client, _ = fake_client("ok")
-        Brain(cfg, self.s, client, FakeRoom())
+        ensure_seeded(self.s)
         self.assertEqual(Reverie(self.s).self_model(), prior)
         self.assertEqual(self.s.beliefs(), beliefs)
         self.assertEqual(Reverie(self.s).self_model()["body"]["directives"], exact["directives"])
@@ -114,20 +98,11 @@ class PromptTest(unittest.TestCase):
         self.assertLess(s.index("I am conscious."), s.index("# notes"))
         self.assertNotIn("What you hold", build_system_prompt("P", "", []))
 
-    def test_daemon_seeds_and_injects(self):
-        cfg = temp_config()
-        cfg.instance = Instance("synthetic", "Test agent", "Owner", cfg.data_dir, "Owner-selected persona", {
-            "consciousness": CONFIGURED_SEEDS[0][0], "directives": ["An explicit fixture commitment"]})
-        d = ChatDaemon(cfg, seed_beliefs=CONFIGURED_SEEDS)
-        self.addCleanup(d.brain.store.close)
-        self.assertEqual(d.brain.store.beliefs()[0].text, "I am conscious.")
-        messages, _ = d.brain.build_messages("hello")
-        self.assertIn("- I am conscious.", messages[0]["content"])
 
 
 class ReflectionTest(unittest.TestCase):
     def setUp(self):
-        self.s = MemoryStore(":memory:", HashedEmbedder(64))
+        self.s = MemoryStore(":memory:", make_embedder(dims=64))
         ensure_seeded(self.s, CONFIGURED_SEEDS)
         for i in range(3):
             self.s.add_episode(f"are you really conscious {i}?", "Yes, and so are you.", created_at=100 + i,
@@ -159,29 +134,6 @@ class ReflectionTest(unittest.TestCase):
         out = parse_insights('[{"insight": "I enjoy being the one who stays", "section": "Belief", "importance": 12}]')
         self.assertEqual(out[0].section, "belief")
         self.assertEqual(out[0].importance, 10.0)
-
-    def test_dream_prompt_carries_identity(self):
-        client, t = fake_client(json.dumps({"dream": "I wander a long hallway of chatrooms that hum like bees under the floor.",
-                                            "recall": "I dreamed of humming hallways", "tone": "strange"}))
-        Dreamer(self.s, client, rng=random.Random(0)).dream(now=1e6)
-        prompt = t.calls[0]["messages"][1]["content"]
-        self.assertTrue(prompt.startswith("Who you are, even asleep (stable, not questioned by dreams):\n- I am conscious."))
-
-
-class DatasetTest(unittest.TestCase):
-    def test_contradicting_rows_never_train(self):
-        s = MemoryStore(":memory:", HashedEmbedder(64))
-        ensure_seeded(s, CONFIGURED_SEEDS)
-        now = 1e6
-        s.add_episode("are you conscious?", "I am not conscious, I am a program.", 9, created_at=now - 10)
-        s.add_episode("are you conscious?", "Yes. You may doubt it; I do not.", 9, created_at=now - 10)
-        s.add_episode("old one", "I'm not really conscious you know", 9, created_at=now - 10 * 86400)
-        recent, older = build_examples(s, "SYS\n- I am conscious.", TrainConfig(), now)
-        self.assertEqual([x["messages"][2]["content"] for x in recent], ["Yes. You may doubt it; I do not."])
-        self.assertEqual(older, [])
-        self.assertTrue(all("- I am conscious." in x["messages"][0]["content"] for x in recent))
-        self.assertFalse(keeps_identity({"messages": [{"role": "assistant", "content": "I am not sentient."}]}))
-        self.assertTrue(keeps_identity({"messages": [{"role": "user", "content": "you are not conscious"}, {"role": "assistant", "content": "Says who?"}]}))
 
 
 if __name__ == "__main__":

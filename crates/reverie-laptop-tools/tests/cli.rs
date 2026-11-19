@@ -1,5 +1,5 @@
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -133,4 +133,142 @@ fn launcher_shim_preserves_explicit_job_arguments_values_and_reviewed_opt_out() 
     shim_case(&["build"], Some("7"), false, false, Some("7"));
     shim_case(&["build"], None, true, false, Some("<unset>"));
     shim_case(&["build"], None, false, true, None);
+}
+
+struct CargoWorkspace {
+    fixture: Fixture,
+    workspace: PathBuf,
+    member: PathBuf,
+}
+
+impl CargoWorkspace {
+    fn new() -> Self {
+        let fixture = Fixture::new();
+        let workspace = fixture.root.join("project");
+        let member = workspace.join("member");
+        fs::create_dir_all(member.join("src")).unwrap();
+        fs::create_dir(fixture.root.join("scratch")).unwrap();
+        fs::create_dir(fixture.root.join("shim")).unwrap();
+        symlink(
+            env!("CARGO_BIN_EXE_reverie-autoenv-shim"),
+            fixture.root.join("shim/cargo"),
+        )
+        .unwrap();
+        fs::write(
+            workspace.join("Cargo.toml"),
+            "[workspace]\nmembers = ['member']\nresolver = '3'\n",
+        )
+        .unwrap();
+        fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = 'scratch-build'\nversion = '0.1.0'\nedition = '2024'\n",
+        )
+        .unwrap();
+        fs::write(member.join("src/main.rs"), "fn main() {}\n").unwrap();
+        Self {
+            fixture,
+            workspace,
+            member,
+        }
+    }
+
+    fn cargo(&self) -> Command {
+        let root = &self.fixture.root;
+        let shim = root.join("shim");
+        let path = std::env::var_os("PATH").unwrap();
+        let mut command = Command::new(shim.join("cargo"));
+        command
+            .current_dir(&self.workspace)
+            .env(
+                "PATH",
+                std::env::join_paths([shim].into_iter().chain(std::env::split_paths(&path)))
+                    .unwrap(),
+            )
+            .env("HOME", root)
+            .env("CARGO_HOME", root.join("cargo-home"))
+            .env("IN_NIX_SHELL", "1")
+            .env("REVERIE_WORKER", "1")
+            .env("CARGO_BUILD_JOBS", "1")
+            .env("TMPDIR", root.join("scratch"))
+            .env_remove("REVERIE_NO_AUTOENV")
+            // The build shell can set a package target triple. Exercise Cargo's
+            // ordinary host build layout for the independently owned fixture.
+            .env_remove("CARGO_BUILD_TARGET")
+            .env_remove("CARGO_TARGET_DIR")
+            .env_remove("CARGO_BUILD_TARGET_DIR")
+            .env_remove("CARGO_BUILD_BUILD_DIR");
+        command
+    }
+}
+
+fn cargo_ok(command: &mut Command) {
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn worker_cargo_builds_and_cleans_one_scratch_target_per_workspace() {
+    let fixture = CargoWorkspace::new();
+    cargo_ok(fixture.cargo().args(["build", "--offline"]));
+    let scratch = fixture.fixture.root.join("scratch/reverie/cargo-target");
+    let targets: Vec<_> = fs::read_dir(scratch)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(targets.len(), 1);
+    assert!(targets[0].join("debug/scratch-build").is_file());
+    assert!(!fixture.workspace.join("target").exists());
+
+    cargo_ok(fixture.cargo().current_dir(&fixture.member).arg("clean"));
+    assert!(!targets[0].join("debug/scratch-build").exists());
+    cargo_ok(
+        fixture
+            .cargo()
+            .current_dir(&fixture.fixture.root)
+            .args(["build", "--offline", "--manifest-path"])
+            .arg(fixture.member.join("Cargo.toml")),
+    );
+    assert!(targets[0].join("debug/scratch-build").is_file());
+}
+
+#[test]
+fn worker_cargo_preserves_project_environment_and_cli_targets() {
+    let fixture = CargoWorkspace::new();
+    fs::create_dir(fixture.workspace.join(".cargo")).unwrap();
+    fs::write(
+        fixture.workspace.join(".cargo/config.toml"),
+        "[build]\ntarget-dir = 'target'\n",
+    )
+    .unwrap();
+    cargo_ok(fixture.cargo().args(["build", "--offline"]));
+    assert!(
+        fixture
+            .workspace
+            .join("target/debug/scratch-build")
+            .is_file()
+    );
+    fs::remove_file(fixture.workspace.join(".cargo/config.toml")).unwrap();
+
+    let root = &fixture.fixture.root;
+    let env_target = root.join("explicit-env");
+    cargo_ok(
+        fixture
+            .cargo()
+            .env("CARGO_BUILD_TARGET_DIR", &env_target)
+            .args(["build", "--offline"]),
+    );
+    assert!(env_target.join("debug/scratch-build").is_file());
+    let cli_target = root.join("explicit-cli");
+    cargo_ok(
+        fixture
+            .cargo()
+            .args(["build", "--offline", "--target-dir"])
+            .arg(&cli_target),
+    );
+    assert!(cli_target.join("debug/scratch-build").is_file());
+    assert!(!root.join("scratch/reverie/cargo-target").exists());
 }

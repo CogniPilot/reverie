@@ -39,6 +39,12 @@ PROC=Path('/proc')
 RUNTIME_ROOT=Path('/run/user')
 
 
+def quoted(value):
+    if type(value) is not str or not value.startswith('/') or any(c in value for c in '\n\r\0%'):
+        raise ValueError('Fixed absolute path required')
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
 def _sha(raw):return hashlib.sha256(raw).hexdigest()
 
 
@@ -476,7 +482,6 @@ class InitialInstallation:
                 'containerId':cid,'listenerState':'NOT_STARTED','workerEffects':False}
 
     def unit_text(self):
-        from .owner_terminal_install import quoted
         initial_sha=_sha(private_bytes(self.path)[0])
         from .owner_terminal_resource_binding import locking_paths,require_disjoint_roots
         config=private_document(self.value['workerConfig'])[0]

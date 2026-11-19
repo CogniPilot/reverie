@@ -5,11 +5,13 @@
 //! admission/authorization checks remain outside this crate.
 
 pub mod chat_images;
+pub mod cycle_plan;
 mod error;
 pub mod memory;
 pub mod operations;
 mod private_fs;
 pub mod profiles;
+pub mod recovery_ledger;
 pub mod storage_identity;
 mod transaction;
 pub mod worker_storage;

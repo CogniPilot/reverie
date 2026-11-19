@@ -93,12 +93,31 @@ impl MemoryScreen {
         })
     }
     pub fn check(&self, text: &MetadataText) -> Result<&'static str, ScreenError> {
+        self.check_with_names(text, &mut None)
+    }
+    /// Screen an ordered batch under one compiled policy and one lazy read of
+    /// protected names. A policy rejection takes precedence for each text.
+    pub fn check_many(&self, texts: &[MetadataText]) -> Result<Vec<&'static str>, ScreenError> {
+        let mut names = None;
+        texts
+            .iter()
+            .map(|text| self.check_with_names(text, &mut names))
+            .collect()
+    }
+    fn check_with_names(
+        &self,
+        text: &MetadataText,
+        names: &mut Option<Vec<PythonText>>,
+    ) -> Result<&'static str, ScreenError> {
         if self.policy.is_match(text.as_python_text_ref()) {
             return Ok("configured output policy");
         }
-        let names = read_names(&self.names)?;
+        if names.is_none() {
+            *names = Some(read_names(&self.names)?);
+        }
+        let names = names.as_deref().unwrap_or_default();
         Ok(
-            if targets_private_person(text.as_python_text_ref(), &names) {
+            if targets_private_person(text.as_python_text_ref(), names) {
                 "targeting a real private person"
             } else {
                 ""

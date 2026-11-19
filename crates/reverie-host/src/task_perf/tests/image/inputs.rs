@@ -31,8 +31,13 @@ impl Inputs {
         let provenance: Value =
             serde_json::from_slice(&immutable_file("REVERIE_PERF_FIXTURE_PROVENANCE", 65_536))
                 .unwrap();
-        assert_eq!(provenance["purpose"], "worker-image-provenance-v1");
-        assert_eq!(provenance["version"], 1);
+        assert!(
+            reverie_contracts::resource_actor::WorkerProvenanceVersion::parse(
+                provenance["version"].as_u64().unwrap(),
+                provenance["purpose"].as_str().unwrap(),
+            )
+            .is_some()
+        );
         for (key, value) in [
             ("uid", 1000),
             ("gid", 100),

@@ -71,10 +71,10 @@ An owner-appointed host operator verifies source/image, current base, tests, sca
 
 ## GitHub credentials
 
-Tokens: `$HOME/.config/reverie/credentials/github/<name>.token`, directory 0700, files 0600, lowercase/digits/hyphen names. Only owner/operators bind them to laptops. Host originals stay in private instance `credentials/github`, outside shared drives, source, scratch and images.
+Owners add named GitHub tokens with **Manage PATs** and grant them through **Publication credentials** on the employee profile. Employees can list their grants with `reverie agent credentials list --json` and install a granted name with `reverie agent credentials install "<name>" --json`.
 
-Capabilities lists names/paths, never values. Presence proves no scope; owners record intended repositories/actions and GitHub enforces scopes. PATs grant no task approval.
+Installed tokens use `$HOME/.config/reverie/credentials/github/<name>.token` in a mode-0700 directory, with mode-0600 files. Capabilities reports names and paths. GitHub enforces the token's actual repository and action scopes.
 
-Pass files to GitHub tooling; never expose tokens in URLs, arguments, chat, logs or briefs. Request credentials by name and repository/action. Preserve legacy paths privately and active work during migration.
+Pass the private files to GitHub tooling and keep token values out of URLs, arguments, chat, logs, and briefs. For existing private bindings, keep the token and metadata files together.
 
 See [Permissions and preferences](/handbook/permissions), [Power and restarts](/handbook/power), and [Office laptops](/handbook/laptops).

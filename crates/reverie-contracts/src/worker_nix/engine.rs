@@ -35,6 +35,14 @@ pub fn image_supports_private_store(raw: &[u8]) -> Result<bool> {
         &MetadataText::from_scalar_text("1"),
     ))
 }
+
+pub fn image_has_user(raw: &[u8], uid: u32, gid: u32) -> Result<bool> {
+    let image = first(raw)?;
+    let image = object(&image).ok_or(NixDataError::Image)?;
+    let config = required_object(field(image, "Config"))?;
+    let expected = MetadataText::from_scalar_text(&format!("{uid}:{gid}"));
+    Ok(equal_text(field(config, "User"), &expected))
+}
 /// Source helper ownership projection from the fixed installed-engine inspect.
 /// The service still owns the actual query origin and all effect decisions.
 pub struct NixPreviousHelper {

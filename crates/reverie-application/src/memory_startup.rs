@@ -3,7 +3,10 @@
 //! serialize this operation against active recall/other startup contexts.
 //! Configuration, readiness text and employee titles are never that authority.
 use crate::memory_import::migrate_history_atomic;
-use reverie_contracts::{memory_documents::SelfModelDraft, storage_identity::MetadataText};
+use reverie_contracts::{
+    memory_documents::{DocumentBody, SelfModelDraft},
+    storage_identity::MetadataText,
+};
 use reverie_core::shutdown::ShutdownStatus;
 use reverie_core::{
     PythonText,
@@ -16,7 +19,9 @@ use reverie_host::{
     memory_configuration::{MemoryConfiguration, MemoryPath},
     memory_profile::{ProfileError, ProfileFile, ProfileOutcome},
 };
-use reverie_store::memory::{MemoryError, MemoryStartupStore, MemoryStore, MemoryTransaction};
+use reverie_store::memory::{
+    MemoryDocuments, MemoryError, MemoryStartupStore, MemoryStore, MemoryTransaction,
+};
 use std::{
     collections::BTreeSet,
     fmt, io,
@@ -211,11 +216,7 @@ pub(crate) fn initialize_admitted(
         let seeded = ensure_seeds(tx, seeds)?;
         let mut created = false;
         if fresh && let Some(initial) = initial {
-            let model = SelfModelDraft::from_body(initial)?;
-            created = documents.in_transaction(tx)?.initialize_identity(
-                &model,
-                &MetadataText::from_scalar_text("Owner-selected initial instance identity"),
-            )?;
+            created = install_owner_identity(tx, &documents, initial)?;
         }
         Ok((seeded, created))
     })?;
@@ -238,6 +239,20 @@ pub(crate) fn initialize_admitted(
         embedding_fallback: fallback,
     })
 }
+/// Initialize the existing document in an acquired SQLite writer transaction.
+/// The caller checks its startup policy before passing the owner-selected body.
+pub fn install_owner_identity(
+    tx: &mut MemoryTransaction<'_>,
+    documents: &MemoryDocuments<'_>,
+    initial: DocumentBody,
+) -> Result<bool, MemoryError> {
+    let model = SelfModelDraft::from_body(initial)?;
+    documents.in_transaction(tx)?.initialize_identity(
+        &model,
+        &MetadataText::from_scalar_text("Owner-selected initial instance identity"),
+    )
+}
+
 fn ensure_seeds(
     tx: &mut MemoryTransaction<'_>,
     seeds: &[MemorySeed],
@@ -272,6 +287,21 @@ fn refresh_missing_profile(
     if profile.is_present()? {
         return Ok(ProfileOutcome::Existing);
     }
+    Ok(profile.ensure(&derive_profile(store, configuration)?)?)
+}
+
+pub fn refresh_memory_profile(
+    store: &MemoryStore,
+    configuration: &MemoryConfiguration,
+) -> Result<(), StartupError> {
+    let profile = ProfileFile::for_configuration(configuration)?;
+    Ok(profile.refresh(&derive_profile(store, configuration)?)?)
+}
+
+fn derive_profile(
+    store: &MemoryStore,
+    configuration: &MemoryConfiguration,
+) -> Result<PythonText, StartupError> {
     let entries = store
         .reflections()?
         .into_iter()
@@ -292,6 +322,5 @@ fn refresh_missing_profile(
         .integer(IntegerSetting::ProfileMaxCharacters)
         .to_i64()
         .expect("fixed profile bound");
-    let text = render_profile(&entries, maximum, &aliases).map_err(StartupError::Render)?;
-    Ok(profile.ensure(&text)?)
+    render_profile(&entries, maximum, &aliases).map_err(StartupError::Render)
 }

@@ -23,7 +23,7 @@ test("reverie_room passes the room to the chat CLI, and lists the agent's rooms"
     Object.assign(process.env, { PATH: join(dir, "bin") + ":" + process.env.PATH, REVERIE_HOME: dir, REVERIE_DATA_DIR: join(dir, "data"), REVERIE_EMBED_URL: "" });
     await mkdir(join(dir, "data"));
     await writeFile(join(dir, ".reverie-instance"), JSON.stringify({ python: "python3", source: join(root, "python") }));
-    const source = (await readFile(join(root, "python/reverie/plugins/reverie.mjs"), "utf8")).replace(
+    const source = (await readFile(join(root, "crates/reverie-admin-memory/opencode-assets/plugins/reverie.mjs"), "utf8")).replace(
       'import { tool } from "@opencode-ai/plugin";',
       'const tool = Object.assign((definition) => definition, {schema: {string: () => ({describe() {return this}, optional() {return this}}), enum: () => ({})}});');
     const { ReveriePlugin } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));

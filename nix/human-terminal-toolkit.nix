@@ -1,4 +1,10 @@
 { pkgs, src, artifacts ? import ./policy-artifacts.nix { inherit pkgs src; } }:
+let
+  programSource = builtins.path {
+    path = (src.origSrc or src) + "/nix/human-terminal-static.c";
+    name = "reverie-human-shell.c";
+  };
+in
 pkgs.pkgsStatic.stdenv.mkDerivation {
   pname = "reverie-human-terminal-toolkit";
   version = "1";
@@ -6,7 +12,7 @@ pkgs.pkgsStatic.stdenv.mkDerivation {
   nativeBuildInputs = [ pkgs.binutils artifacts ];
   buildPhase = ''
     $CC -std=c11 -O2 -Wall -Wextra -Werror -static -no-pie \
-      ${src}/python/reverie/human_terminal_static.c -o reverie-human-shell
+      ${programSource} -o reverie-human-shell
   '';
   installPhase = ''
     mkdir -p "$out/opt/reverie/human/bin" "$out/share/reverie-human-terminal"

@@ -1,6 +1,5 @@
 """Real worker/Turn/SQLite on owned synthetic fixtures; no live agent data."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -12,15 +11,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(ROOT / 'python/reverie/hands'), str(ROOT / 'python')]
 
-def module(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    loaded = importlib.util.module_from_spec(spec)
-    sys.modules[name] = loaded
-    spec.loader.exec_module(loaded)
-    return loaded
 
-journal = importlib.import_module('agent_journal')
-worker = module('tested_memory_worker', ROOT / 'python/reverie/hands/agent_memory_worker.py')
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+
 ROOM = '20000000-0000-0000-0000-000000000002'
 MID = '30000000-0000-0000-0000-000000000003'
 OLD = '40000000-0000-0000-0000-000000000004'
@@ -67,7 +61,7 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn(OLD, [e['id'] for e in turn.captured['events']])
         source = self.lookup(turn)
         self.assertEqual(source['text'], self.old['text'])
-        self.assertEqual(source['revision'], journal.revision(self.old, ROOM))
+        self.assertEqual(source['revision'], worker.revision(self.old, ROOM))
         self.assertEqual(self.commit(turn)['status'], 'committed')
         recalled = self.perform('journal_recall', query='freeform')
         self.assertEqual(len(recalled['entries']), 1)
@@ -129,7 +123,7 @@ class SourceTests(unittest.TestCase):
         self.assertTrue(result['truncated'])
         self.assertLessEqual(len(result['text'].encode()), journal.TEXT_BYTES)
         self.assertLessEqual(len(journal.encoded(result)), journal.RESULT_CHARS)
-        self.assertEqual(result['revision'], journal.revision(self.old, ROOM))
+        self.assertEqual(result['revision'], worker.revision(self.old, ROOM))
         self.assertIsNone(self.perform('journal_status')['checkpoint'])
 
     def test_model_cannot_select_room_or_path_and_turn_budget_stays_bounded(self):
@@ -142,7 +136,7 @@ class SourceTests(unittest.TestCase):
 
     def test_actual_answer_source_write_recall_within_existing_budget(self):
         import agent_loop as loop
-        cfg = dict(loop.DEFAULTS, **self.cfg, self_name='Fixture', timezone='UTC')
+        cfg = dict(loop.default_config(), **self.cfg, self_name='Fixture', timezone='UTC')
         calls = []
         def model(cfg, messages, tools):
             calls.append(1)
@@ -166,8 +160,7 @@ class SourceTests(unittest.TestCase):
                 self.assertTrue(any('source revisions checked' in m.get('content','') for m in messages))
                 return {'content':'Saved and recalled the stated preference; its source is checked, interpretation is not verified.'}
             return {'tool_calls':[{'id':f'call{len(calls)}', 'function':dict(name=name,arguments=json.dumps(args))}]}
-        with patch.object(loop, 'memory_op', side_effect=lambda cfg, room, op, **p:self.perform(op, **p)):
-            reply, _, _ = loop.answer(cfg, ROOM, [self.msg], self.msg, model, None)
+        reply, _, _ = loop.answer(cfg, ROOM, [self.msg], self.msg, model, None, journal_operation=self.perform)
         self.assertIn('Saved and recalled', reply)
         self.assertEqual(len(calls), journal.MAX_CALLS + 1)
         self.assertEqual(self.operations, ['journal_status','journal_source','journal_commit','journal_recall'])

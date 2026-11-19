@@ -63,7 +63,7 @@ impl EmbeddingResponse {
     }
     pub fn vector(&self) -> std::result::Result<Vec<f64>, EmbeddingContractError> {
         let values: std::result::Result<Vec<f64>, EmbeddingError> = match &self.vector.value.0 {
-            Node::Array(values) => values.iter().map(number).collect(),
+            Node::Array(values) => values.iter().map(legacy_float).collect(),
             Node::String(value) => value
                 .0
                 .iter()
@@ -92,27 +92,6 @@ fn child<'a>(
         return Err(EmbeddingContractError::Shape);
     };
     fields.get(&text(name)).ok_or(EmbeddingContractError::Shape)
-}
-fn number(value: &Value) -> std::result::Result<f64, EmbeddingError> {
-    match &value.0 {
-        Node::Bool(value) => Ok(f64::from(u8::from(*value))),
-        Node::Number(Number::Float(value)) => Ok(*value),
-        Node::Number(Number::Nan) => Ok(f64::NAN),
-        Node::Number(Number::PositiveInfinity) => Ok(f64::INFINITY),
-        Node::Number(Number::NegativeInfinity) => Ok(f64::NEG_INFINITY),
-        Node::Number(Number::Integer(value)) => {
-            let value = value
-                .parse::<f64>()
-                .map_err(|_| EmbeddingError::InvalidNumber)?;
-            if value.is_infinite() {
-                Err(EmbeddingError::InvalidNumber)
-            } else {
-                Ok(value)
-            }
-        }
-        Node::String(value) => parse_embedding_float_text(&value.0),
-        _ => Err(EmbeddingError::InvalidNumber),
-    }
 }
 pub fn encode_embedding_request(input: &str, model: &str) -> Vec<u8> {
     encode_embedding_request_text(

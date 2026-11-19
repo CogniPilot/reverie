@@ -94,11 +94,11 @@ pub(crate) struct Parsed {
     pub groups: Vec<Option<Width>>,
 }
 impl Parsed {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(flags: u32) -> Self {
         Self {
             arena: vec![Pattern::default()],
             root: 0,
-            flags: IGNORE,
+            flags,
             groups: vec![None],
         }
     }

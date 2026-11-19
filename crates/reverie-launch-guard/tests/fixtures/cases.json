@@ -1,0 +1,441 @@
+[
+  {
+    "name": "a-coordinator-after-go",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "COORDINATOR",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION",
+    "expected_snapshot_sha256": "def8fb0e8b1e2f723394769fbb48c0c7f9bb7cff4aa22488b7e0f01e0d3cfe1e",
+    "expected_receipt_id": "5a87e993d0291e5bc7f68b51ec27dbb506969c1ba421d2ccd04ec370b4803450"
+  },
+  {
+    "name": "b-user-after-go",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION",
+    "expected_snapshot_sha256": "0b58d2ea6eff241a6a68129e4a92e48cc9cae8d71f0758e78559a41f110e12c5",
+    "expected_receipt_id": "901f3782ce70644c1036835954911967f4db22e6fdbf6fcae5044562641b1717"
+  },
+  {
+    "name": "c-launcher-mentioned",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": true,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION",
+    "expected_snapshot_sha256": "cb984a421fa395a1daa992ec1b240244d1fa02fa07b0c9dac69bf7c52ae873e4",
+    "expected_receipt_id": "0e17f43ed98a08f6902bf8040a583b294e652d19c9fe3f9ea4e735878a713831"
+  },
+  {
+    "name": "d-unbound-room",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "unbound",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS",
+    "expected_snapshot_sha256": "4c94d51f9b3d2520a73daa634d38172d0b817cc6049802b62cd87f15d06d4d20",
+    "expected_receipt_id": "0450aafdb8ade2b016d6fb0a1db9b3fc0e425e00fd4a08d3bc8a1ff37d521553"
+  },
+  {
+    "name": "e-unrelated-bound-chatter",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": false,
+            "goId": null
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS",
+    "expected_snapshot_sha256": "c32596598592f1fa61ef61b0c36e51ae70ed5274905139e5123d7af24c7fde49",
+    "expected_receipt_id": "cc10ddeba5c5609c22a1c8e3120ce955596f7a4eba226db725150b33a672002e"
+  },
+  {
+    "name": "f-goal-generation-bumped",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 2,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_GEN_CHANGED",
+    "expected_snapshot_sha256": "d4c66f2ca02a2eb9ed979b707fd9f85dafd0c5b66492a894456c2fa9689c1ed2",
+    "expected_receipt_id": "a7ba10cb8a07fb2c7cd65a5f60cb183d2db2cd48d5eb824de4707aa122bfb457"
+  },
+  {
+    "name": "g-goal-not-active",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "HOLD",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_STATE_NOT_ACTIVE",
+    "expected_snapshot_sha256": "419490bc2ba4f30f6f41fb4b88e922d244768de4d53607287ca9f28d734acdf3",
+    "expected_receipt_id": "dbcc9183a6805b2fe24de1843da97cf834cc05b418987c5a5f69e88feddf75af"
+  },
+  {
+    "name": "h-stale-cursor-source-incomplete",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": false,
+        "observedAtMs": 100000,
+        "messages": []
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_API_UNAVAILABLE",
+    "expected_snapshot_sha256": "e36e272a50517d1b638127843d47998e14016ebcf7ee752f815639a46449849b",
+    "expected_receipt_id": "7d90290d03bddf5238e90d8612e7e93c272753fb1d627235ef4170b715f56804"
+  },
+  {
+    "name": "i-go-reference-before-cursor",
+    "request": {
+      "schema_version": 1,
+      "goId": "go-1",
+      "transitionId": "go-1",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 100000,
+        "messages": [
+          {
+            "id": "message-11",
+            "roomId": "room-1",
+            "sequence": 9,
+            "atMs": 99000,
+            "authorRole": "AGENT",
+            "mentionsLauncher": false,
+            "goId": "go-1"
+          }
+        ]
+      }
+    },
+    "now_ms": 100000,
+    "expected_result": "PASS",
+    "expected_code": "GUARD_PASS",
+    "expected_snapshot_sha256": "3f8082d70318dd7a4d3da89ed981ccc5430d1e982e0db038bfb8dcdc9b5399a5",
+    "expected_receipt_id": "cbf4323c737dcd7cabd962f951d9a8ff4d568deb4ff796f3aea3ba5287860040"
+  },
+  {
+    "name": "j-mp4-suspended-go-replay",
+    "request": {
+      "schema_version": 1,
+      "goId": "mp4-go",
+      "transitionId": "mp4-go",
+      "idempotencyKey": "attempt-1",
+      "goalId": "goal-1",
+      "goalGeneration": 1,
+      "currentGoalGeneration": 1,
+      "goalState": "ACTIVE",
+      "decisionId": null,
+      "decisionGeneration": null,
+      "sessionId": "session-1",
+      "sessionGeneration": 1,
+      "currentSessionGeneration": 1,
+      "employeeId": "employee-1",
+      "rooms": [
+        "room-1"
+      ],
+      "cursor": {
+        "room-1": 10
+      },
+      "source": {
+        "available": true,
+        "complete": true,
+        "observedAtMs": 1792799636000,
+        "messages": [
+          {
+            "id": "mp4-go-message",
+            "roomId": "room-1",
+            "sequence": 10,
+            "atMs": 1792799509000,
+            "authorRole": "USER",
+            "mentionsLauncher": false,
+            "goId": "mp4-go"
+          },
+          {
+            "id": "mp4-suspension",
+            "roomId": "room-1",
+            "sequence": 11,
+            "atMs": 1792799574000,
+            "authorRole": "COORDINATOR",
+            "mentionsLauncher": false,
+            "goId": "mp4-go"
+          }
+        ]
+      }
+    },
+    "now_ms": 1792799636000,
+    "expected_result": "REFUSE",
+    "expected_code": "GUARD_UNREAD_INSTRUCTION",
+    "expected_snapshot_sha256": "41131e1a7eb51af8cda4b1c0efb22d33d1b860ce943c2fb9f43aa95ea1e51c52",
+    "expected_receipt_id": "cb2d86969a94ff74a3879fc4fd13cfebcd5c5421b3ba0e88e2f221bdeac3aa2a"
+  }
+]

@@ -18,7 +18,7 @@ to each port. Agents can request a preview in chat; agent/service headers do not
 grant proxy management. GET/HEAD only: POST, WebSocket and live reload are not
 supported. Reserved runtime ports 8092 and 8093 cannot be exposed.
 
-## Host setup
+## Preview service configuration
 
 A separate preview **domain with wildcard DNS and a matching trusted certificate**
 is required, for example `*.preview.example.com`. Point the wildcard DNS record to
@@ -31,11 +31,13 @@ subdomains. A VPN alone also does not make an HTTP page a secure browser context
 Do not substitute a same-origin `/previews/...` HTML proxy or bypass certificate
 verification. Keep any other public services on their own origins.
 
-Build both artifacts from this repository:
+The boxed website connects to a configured preview service over the private
+control socket. The native `reverie-preview` binary implements the existing
+socket and HTTPS protocols for integration and development. The legacy host
+installer has been retired. Preview availability appears in the owner UI.
 
-```sh
-nix build .#previewProxy .#previewService --no-link
-```
+Build the native binary with `cargo build --locked -p reverie-preview`. Its
+`--config` option accepts the existing version 1 settings.
 
 Create a private JSON config outside the source checkout. All path values below
 must be expanded to absolute host paths; JSON does not expand `~` or `$HOME`.
@@ -56,34 +58,16 @@ The domain and office origin are examples to replace, not production defaults.
 }
 ```
 
-Use the deployment name from the broker config. The private control directory must
-be host-owned and writable only by the owner, never shared with laptops or scratch.
-Bind-mount it into **the website only**, at `/run/reverie-control` (or configure
-`REVERIE_PREVIEW_SOCKET` to its mounted socket path). Existing deployments can reuse
-their website-only control directory. Do not mount the Docker socket into the
-website/laptops. The host proxy uses only read-only Docker inspection to resolve
-labelled laptop containers and their dedicated networks; it cannot create workers.
-
-Put `REVERIE_PREVIEW_CONFIG=/absolute/private/preview.json` in
-`~/.config/reverie/preview-proxy.env` (mode 0600). Install the built
-`share/systemd/user/reverie-preview-proxy.service` into the owner's user service
-configuration, then enable/start it with `systemctl --user`. NixOS deployments may
-manage the equivalent user unit declaratively; retain the unit's resource limits.
-For a foreground smoke check:
-
-```sh
-nix run .#preview-proxy -- --config /absolute/private/preview.json
-```
+The website reads its configured `REVERIE_PREVIEW_SOCKET` or
+`/run/reverie-control/preview.sock`. The control directory is private to the
+service owner and the website. Docker lookups use read-only inspection and
+require a dedicated bridge with matching deployment and session labels.
 
 Allow only the intended client network to reach the configured TLS port. Do not
 Funnel or publish it globally by default. The service terminates TLS itself; there
 are no forwarded-identity/trusted-proxy headers. Certificate renewal must refresh
 the owner-managed files and restart this separate service (revoking previews).
-Keys stay on the host. There are no laptop/browser certificate installs.
-
-The optional service is disabled until configured. Missing configuration displays
-a useful unavailable message in the owner UI. Installing it does not require a
-laptop broker restart or migration.
+Keep the TLS key in the preview service's private storage.
 
 ## Security and limits
 

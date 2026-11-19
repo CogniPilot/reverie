@@ -82,6 +82,11 @@ same CPython/Unicode provenance as its existing text facts. Maintained
 the exact CPython algorithmic-name lexical check in Core. Its source-data-driven
 Rust code generator is build-time tooling, distinct from runtime name lookup.
 
+The optional voice acceptance environment uses Whisper.cpp (MIT) and its GGML
+conversion of OpenAI's Whisper Tiny.en weights (MIT). The Nix lock pins the
+native implementation and `scripts/voice-ci/whisper-model.json` pins the exact
+checkpoint published by the Whisper.cpp project.
+
 ## Rust front TLS dependencies
 
 The Rust TLS adapter uses rustls (Apache-2.0 OR ISC OR MIT), tokio-rustls
@@ -93,3 +98,21 @@ its once_cell-derived code uses Apache-2.0/MIT notices. See ring's LICENSE,
 LICENSE-BoringSSL, LICENSE-other-bits and src/polyfill/once_cell license files;
 these upstream notices remain applicable. The front
 selects ring explicitly and does not include a second TLS implementation.
+
+## Kokoro speech
+
+The vocabulary in `crates/reverie-kokoro/src/vocab.json` is the vocabulary from
+`kokoro-onnx` 0.6.1's `config.json`. The upstream MIT license is retained
+in `crates/reverie-kokoro/LICENSE-kokoro-onnx`. Inference calls Microsoft ONNX
+Runtime through the Rust `ort` binding (MIT or Apache-2.0). Nix supplies the native
+ONNX Runtime (MIT) and eSpeak NG (GPL-3.0-or-later) from the pinned package set.
+The eSpeak NG adapter uses the published C phoneme API in a subprocess. The existing Kokoro model and
+voices remain versioned, checksum-pinned downloads.
+
+## Docker speech recognition and Piper
+
+The optional loopback speech service uses Whisper.cpp and FFmpeg from the
+pinned Nix package set. The native C++ CLI is built from the GPL-3.0-only
+[OHF-Voice Piper v1.8.0 source](https://github.com/OHF-Voice/piper1-gpl/releases/tag/v1.8.0).
+Piper and Kokoro share Nix's ONNX Runtime and eSpeak NG libraries.
+Voice and recognition checkpoints are selected separately by the operator.

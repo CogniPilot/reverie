@@ -3,6 +3,7 @@
 //! model, owner, execution or persistence authority.
 mod http;
 pub(crate) mod idna;
+pub mod model_api;
 mod policy;
 mod redirect;
 #[cfg(test)]

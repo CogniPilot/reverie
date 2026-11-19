@@ -14,8 +14,8 @@
         let
           pkgs = pkgsFor system;
           packages = import ./nix/package.nix { inherit pkgs; src = source; };
-          workerImageArtifacts = import ./nix/worker-image-artifacts.nix {
-            inherit pkgs; src = source; inherit (packages) console;
+          workerImageArtifacts = import ./nix/native-worker-packages.nix {
+            inherit pkgs; src = source;
           };
           container-memory = pkgs.writeShellApplication {
             name = "container-memory";
@@ -51,6 +51,8 @@
             name = "reverie-boxed-recovery-helper";
           };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
+          recoveryLedger = import ./nix/recovery-ledger.nix { inherit pkgs; src = source; };
+          imageCheck = import ./nix/image-check.nix { inherit pkgs; src = source; };
           # Unselected native front; qualified together with its TS adapter.
           rustFront = import ./nix/rust-front.nix { inherit pkgs; src = source; };
           deployment = import ./nix/deployment.nix { inherit pkgs; src = source; };
@@ -96,24 +98,23 @@
           dockerImageWithChatLanguages = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             chatLanguageTools = {
               python = pkgs.pyright;
               modelica = import ./nix/chat-modelica-lsp.nix { inherit pkgs; };
             };
           };
           inherit container-memory start update;
-          containerRuntime = import ./nix/container-runtime.nix { inherit pkgs; src = source; };
           launchGuard = import ./nix/launch-guard.nix { inherit pkgs; src = source; };
           dockerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
           };
           workerImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
           };
           workerPython = import ./nix/worker-python.nix { inherit pkgs; memory = packages.memory; };
@@ -124,13 +125,13 @@
           workerBrowserImage = import ./nix/image.nix {
             inherit pkgs;
             src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             worker = true;
             browserRuntime = self.packages.${system}.browserRuntime;
           };
           resourceActorImage = import ./nix/image.nix {
             inherit pkgs; src = source;
-            inherit (packages) reverie console memory runtime;
+            inherit (packages) reverie console memory runtime entrypoint;
             resourceReplacement = true;
           };
           resourceActorImageProvenance = import ./nix/website-image-provenance.nix {
@@ -168,10 +169,7 @@
           pkgs = pkgsFor system;
           src = source;
           inherit baseImage baseConfig;
-          inherit (self.packages.${system}) containerRuntime;
-          gpuTelemetry = import ./nix/container-gpu-telemetry.nix {
-            pkgs = pkgsFor system; src = source;
-          };
+          inherit (self.packages.${system}) containerRuntime entrypoint;
           inferenceRuntime = import ./nix/local-model-runtime.nix {
             nixpkgs = toString llama-nixpkgs;
             inherit system capability;
@@ -183,6 +181,7 @@
             inherit config lib pkgs;
             pruneHostPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneDeclared;
             prunePackage = self.packages.${pkgs.stdenv.hostPlatform.system}.pruneR12;
+            pruneReportPackage = self.packages.${pkgs.stdenv.hostPlatform.system}.cleanupObservations;
           })
           (import ./nix/prune-selftest-service.nix {
             inherit config lib pkgs;
@@ -209,6 +208,7 @@
         in assert builtins.isBool browser; import ./nix/image.nix {
           inherit pkgs runtimePackages; src = source;
           inherit (packages) reverie console memory runtime;
+          entrypoint = self.packages.${system}.entrypoint;
           worker = true;
           inherit perfGuestCapsule;
           rootlessDocker = { inherit uid gid subuidStart subgidStart subidCount; };
@@ -296,6 +296,7 @@
               pruneHostPackage = packages.pruneDeclared;
               prunePackage = packages.pruneR12;
               legacyPrunePackage = packages.prune;
+              pruneReportPackage = packages.cleanupObservations;
             };
           in pkgs.runCommand "reverie-prune-service-evaluation" {
             checks = builtins.toJSON evaluated.checks;
@@ -321,6 +322,7 @@
               selftestPackage = packages.pruneSelftest;
               prunePackage = packages.pruneR12;
               pruneHostPackage = packages.pruneDeclared;
+              pruneReportPackage = packages.cleanupObservations;
               pruneModule = self.nixosModules.reveriePrune;
             };
           in pkgs.runCommand "reverie-prune-selftest-evaluation" {
@@ -369,16 +371,18 @@
             ${packages.reverie}/bin/reverie owner status | ${pkgs.jq}/bin/jq -e '.configured and .username == "owner" and .mustChange'
             touch "$out"
           '';
-          pillowSmoke = pkgs.runCommand "reverie-pillow-smoke" { } ''
-            ${packages.memory}/bin/python3 -I - <<'PYTHON'
-            from PIL import Image, ImageDraw
-            im = Image.new("RGBA", (64, 64))
-            ImageDraw.Draw(im).ellipse((8, 8, 56, 56), fill=(90, 60, 30, 255))
-            for extension in ("png", "webp"):
-                name = "smoke." + extension
-                im.save(name)
-                assert Image.open(name).size == (64, 64)
-            PYTHON
+          pillowSmoke = let
+            serviceClosure = pkgs.closureInfo { rootPaths = [ packages.memory ]; };
+          in pkgs.runCommand "reverie-python-environment-boundary" { } ''
+            for package in ${pkgs.python3Packages.pillow} ${pkgs.python3Packages.pytest}; do
+              if grep -Fx "$package" "${serviceClosure}/store-paths"; then
+                echo "Laptop development package in the service Python closure" >&2
+                exit 1
+              fi
+            done
+            test -f "${packages.workerPython}/${pkgs.python3.sitePackages}/PIL/__init__.py"
+            ${packages.workerPython}/bin/python3 -I -B -m unittest discover \
+              -t "${source}" -s "${source}/tests" -p test_image_requirements.py
             touch "$out"
           '';
         });
@@ -388,19 +392,21 @@
             inherit pkgs;
             kokoro = self.packages.${system}.kokoro;
             voiceVerifier = self.packages.${system}.voiceCiVerifier;
+            laptopTools = self.packages.${system}.laptopTools;
           };
           # The same Rust as CI (.github/workflows: toolchain 1.95.0), so local clippy, rustfmt and
           # tests run the toolchain CI runs. A nixpkgs update that moves it fails here, not in review.
           default = let ciRust = "1.95.0"; in assert pkgs.lib.assertMsg (pkgs.rustc.version == ciRust)
             "the reverie dev shell must carry CI's Rust ${ciRust} (found ${pkgs.rustc.version})";
             pkgs.mkShell {
-            packages = [ (pkgs.python3.withPackages (ps: [ ps.pillow ps.setuptools ps.aiohttp ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
+            packages = [ (pkgs.python3.withPackages (ps: [ ps.setuptools ])) pkgs.nodejs_22 pkgs.git pkgs.tmux pkgs.gcc pkgs.gnumake pkgs.curl pkgs.openssl pkgs.rustc pkgs.cargo pkgs.clippy pkgs.rustfmt
               # CI's test runner and same-host timing for performance changes.
               pkgs.cargo-nextest pkgs.hyperfine
               # getfattr and getfacl: deployment snapshot tests read extended attributes and ACLs.
               pkgs.gnutar pkgs.attr pkgs.acl pkgs.which pkgs.bash (pkgs.lib.getBin pkgs.util-linux)
             ] ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.iproute2 pkgs.bubblewrap ];
             SHELL = "${pkgs.bash}/bin/bash";
+            npm_config_nodedir = "${pkgs.nodejs_22}";
             LOCALE_ARCHIVE = pkgs.lib.optionalString pkgs.stdenv.isLinux "${pkgs.glibcLocales}/lib/locale/locale-archive";
             REVERIE_FIXED_BUILD_GNUTAR = "${pkgs.gnutar}/bin/tar";
             REVERIE_FIXED_BUILD_TIMEOUT = "${pkgs.coreutils}/bin/timeout";

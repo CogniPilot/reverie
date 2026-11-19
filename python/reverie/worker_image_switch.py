@@ -23,6 +23,8 @@ FACTORY_FILES = frozenset({'flake.nix', 'nix/image.nix', 'nix/human-terminal-too
     'python/reverie/human_terminal_static.c', 'python/reverie/worker_image_provenance.py',
     'python/reverie/website_image_provenance.py', 'python/reverie/__init__.py',
     'nix/worker-image-provenance.nix'})
+NATIVE_FACTORY_INVENTORY = 'crates/reverie-contracts/src/resource_actor/provenance_build/worker-factory-v2.json'
+NATIVE_FACTORY_INVENTORY_SHA256 = '86f0fe65119c1f0c702fd7c3d4efd7b6f94b2ba4d4debd90189021a2a674e521'
 MANAGER_FIELDS = ('Id', 'LoadState', 'ActiveState', 'SubState', 'MainPID', 'ControlPID', 'Job',
                   'FragmentPath', 'DropInPaths', 'NeedDaemonReload', 'ExecStartPre', 'ExecStart')
 
@@ -334,8 +336,9 @@ class WorkerImageSwitch:
         value = decode(raw)
         need(type(value) is dict and set(value) == {'version', 'purpose', 'archiveConfigSHA256',
              'imageSpec', 'archive', 'factory', 'source', 'toolkit'} and
-             type(value['version']) is int and value['version'] == 1 and
-             value['purpose'] == 'worker-image-provenance-v1', 'WORKER_IMAGE_FIXED_PROVENANCE_REQUIRED')
+             type(value['version']) is int and (value['version'], value['purpose']) in
+             ((1, 'worker-image-provenance-v1'), (2, 'worker-image-provenance-v2')),
+             'WORKER_IMAGE_FIXED_PROVENANCE_REQUIRED')
         factory = value['factory']
         need(type(factory) is dict and set(factory) == {'name', 'system', 'uid', 'gid',
              'subuidStart', 'subgidStart', 'subidCount', 'browser'} and
@@ -386,8 +389,14 @@ class WorkerImageSwitch:
         need(type(source) is dict and set(source) == {'path', 'factoryFiles'} and
              type(source['path']) is str and Path(source['path']).is_relative_to('/nix/store') and
              Path(source['path']).resolve(strict=True) == Path(source['path']) and
-             type(source['factoryFiles']) is dict and set(source['factoryFiles']) == FACTORY_FILES,
+             type(source['factoryFiles']) is dict,
              'WORKER_IMAGE_SOURCE_BINDING')
+        expected_files = FACTORY_FILES
+        if value['version'] == 2:
+            inventory = immutable(Path(source['path']) / NATIVE_FACTORY_INVENTORY, 4096).read_bytes()
+            need(digest(inventory) == NATIVE_FACTORY_INVENTORY_SHA256, 'WORKER_IMAGE_SOURCE_BINDING')
+            expected_files = frozenset(decode(inventory))
+        need(set(source['factoryFiles']) == expected_files, 'WORKER_IMAGE_SOURCE_BINDING')
         leaves = {}; total = 0
         for name, pin in source['factoryFiles'].items():
             need(type(name) is str, 'WORKER_IMAGE_SOURCE_BINDING')

@@ -17,6 +17,12 @@ hyper.workspace = true
 hyper-util.workspace = true
 http-body-util.workspace = true
 bytes.workspace = true
+getrandom.workspace = true
+nix = { workspace = true, features = ["time"] }
+reverie-kokoro = { path = "../reverie-kokoro" }
+reverie-speech = { path = "../reverie-speech" }
+serde.workspace = true
+sha2.workspace = true
 
 [lints]
 workspace = true

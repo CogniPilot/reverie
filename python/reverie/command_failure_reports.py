@@ -6,7 +6,7 @@ and recheck its caller. No submitted command text or diagnostic is published.
 """
 import json
 
-from .hands.command_catalog import CATALOG
+from .hands.command_telemetry import COMMAND_KEYS
 from .worker_storage import require_uuid
 
 MAX_EMPLOYEES = 64
@@ -99,7 +99,7 @@ def build_report(collector, employees):
     selected = selected_employees(list(employees) if type(employees) is tuple else employees)
     _need(type(collector.enabled) is bool)
     keys = frozenset(collector.keys) | {'UNKNOWN_COMMAND'}
-    _need(keys <= frozenset(CATALOG) | {'UNKNOWN_COMMAND'})
+    _need(keys <= frozenset(COMMAND_KEYS) | {'UNKNOWN_COMMAND'})
     rows, totals = [], {}
     for employee in selected:
         status, counts, counters = 'disabled', [], dict(evicted=0, expired=0, dropped=0)
@@ -168,7 +168,7 @@ def decode_report(raw, employees):
             _need(type(row['truncated']) is bool and type(row['counts']) is list and len(row['counts']) <= VISIBLE_GROUPS)
             _counts({'v': 1, 'employee_id': employee, 'harness': 'hands', 'counts': row['counts'],
                      'evicted': row['evicted'], 'expired': row['expired'], 'dropped': row['dropped'],
-                     'provenance': PROVENANCE}, employee, frozenset(CATALOG) | {'UNKNOWN_COMMAND'})
+                     'provenance': PROVENANCE}, employee, frozenset(COMMAND_KEYS) | {'UNKNOWN_COMMAND'})
             if row['status'] != 'ready':
                 _need(not row['counts'] and not row['truncated'] and
                       all(row[key] == 0 for key in ('evicted', 'expired', 'dropped')))
@@ -176,7 +176,7 @@ def decode_report(raw, employees):
         seen = set()
         for row in value['top_repeats']:
             _closed(row, ('tool', 'category', 'exit', 'count', 'employee_count'))
-            _need(type(row['tool']) is str and row['tool'] in (*CATALOG, 'UNKNOWN_COMMAND'))
+            _need(type(row['tool']) is str and row['tool'] in (*COMMAND_KEYS, 'UNKNOWN_COMMAND'))
             code = row['exit']
             _need(type(code) is int and -255 <= code <= 255 and code != 0)
             _need(row['category'] == ('COMMAND_NOT_FOUND' if code == 127 else 'SIGNAL' if code < 0 else 'NONZERO'))

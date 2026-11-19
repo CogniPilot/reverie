@@ -16,7 +16,19 @@ use std::fmt;
 
 pub fn decode(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
     std::str::from_utf8(raw).map_err(|_| WorkerConfigError::InvalidJson)?;
-    let value = legacy_json::decode_ordered_utf8(raw).map_err(|error| match error {
+    decode_ordered(legacy_json::decode_ordered_utf8(raw))
+}
+
+/// Private offline-store config used strict JSON bytes, including UTF-8,
+/// UTF-16 and UTF-32 decoding, duplicate refusal and original object order.
+pub fn decode_offline_store(raw: &[u8]) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
+    decode_ordered(legacy_json::decode_ops_private_bytes(raw))
+}
+
+fn decode_ordered(
+    value: Result<legacy_json::ordered::OrderedValue, legacy_json::Error>,
+) -> Result<EffectiveWorkerConfig, WorkerConfigError> {
+    let value = value.map_err(|error| match error {
         legacy_json::Error::InvalidJson => WorkerConfigError::InvalidJson,
         legacy_json::Error::DuplicateKey => WorkerConfigError::DuplicateKey,
     })?;

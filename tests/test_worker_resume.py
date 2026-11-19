@@ -3,8 +3,7 @@
 Website/program metadata is controlled in transaction fixtures. These tests do
 not turn a source fixture into native registration or running-provider proof.
 """
-from contextlib import contextmanager,redirect_stderr,redirect_stdout
-import io
+from contextlib import contextmanager
 import copy
 import fcntl
 import hashlib
@@ -13,7 +12,6 @@ import os
 from pathlib import Path
 import shutil
 import socket
-import struct
 import subprocess
 import sys
 import tempfile
@@ -489,43 +487,6 @@ class ResumeTransactions(unittest.TestCase):
         self.assertEqual(self.calls,[])
 
 
-class EmployeeSelectionCLI(unittest.TestCase):
-    def test_only_prepare_accepts_distinct_bounded_canonical_employee_ids_before_config_io(self):
-        from reverie import worker_resume_client as C
-        common=['--config','/never-read-config']
-        prepared=['prepare','--operation',OP,'--deployment','/never-read-deployment','--snapshot-sha256','a'*64]
-        vectors=[['describe','--employee',F.EID],['status','--operation',OP,'--employee',F.EID],
-            ['apply','--operation',OP,'--plan-sha256','a'*64,'--employee',F.EID],
-            [*prepared,'--employee','NOT-A-UUID'],[*prepared,'--employee',F.EID,'--employee',F.EID],
-            [*prepared,*sum((['--employee',str(uuid.uuid4())] for _ in range(17)),[])]]
-        with patch.object(C,'load_config',side_effect=AssertionError('CONFIG_IO_FORBIDDEN')) as load:
-            for args in vectors:
-                with self.subTest(args=args),redirect_stderr(io.StringIO()),self.assertRaises(SystemExit) as error:
-                    C.main([*common,*args])
-                self.assertEqual(error.exception.code,2)
-            load.assert_not_called()
-
-    def test_prepare_canonical_selection_uses_existing_host_channel_and_default_omits_field(self):
-        from reverie import worker_resume_client as C
-        other='ffffffff-ffff-4fff-8fff-ffffffffffff';body=json.dumps({'version':1,'purpose':M.PURPOSE,'state':'RESUME_PREPARED'}).encode()
-        for chosen in ([other,F.EID],None):
-            proof=Mock();proof.credentials=(os.getpid(),os.getuid(),os.getgid());frames=[]
-            args=['--config','/owned/config','prepare','--operation',OP,'--deployment','/owned/deployment','--snapshot-sha256','a'*64]
-            if chosen:args+=sum((['--employee',eid]for eid in chosen),[])
-            with patch.object(C,'load_config',return_value={'uid':os.getuid()}),\
-                 patch.object(C,'WorkerService',return_value=object()),\
-                 patch.object(C,'RegisteredTransport',return_value=proof),\
-                 patch.object(C,'host_peer'),\
-                 patch.object(C,'take',side_effect=[b'HOST_RESUME_OWNER_READY\n',b'J'+struct.pack('!I',len(body)),body]),\
-                 patch.object(C,'send_frame',side_effect=lambda _,kind,raw:frames.append((kind,json.loads(raw)))),\
-                 redirect_stdout(io.StringIO()):
-                self.assertEqual(C.main(args),0)
-            self.assertEqual(frames[0],(b'C',{'action':'worker-resume-channel'}))
-            expected={'action':'prepare-worker-resume','operationId':OP,'deploymentPath':'/owned/deployment','expectedSnapshotDigest':'a'*64}
-            if chosen:expected['employeeIds']=sorted(chosen)
-            self.assertEqual(frames[1],(b'C',expected));proof.finalize.assert_called_once();proof.close.assert_not_called()
-
-
 class ActualHostCredentials(unittest.TestCase):
     def setUp(self):
         self.enterContext(patch.object(Broker,'run_engine',side_effect=AssertionError('REAL_ENGINE_FORBIDDEN')))
@@ -589,14 +550,9 @@ class FixedEndpoint(unittest.TestCase):
         item=copy.deepcopy(self.item);item['Config']['Env']*=2
         with self.assertRaisesRegex(ValueError,'SOCKET_ENV'):P.socket_mount(item,self.config)
 
-    def test_socket_metadata_drift_and_absolute_client_deadline_refuse(self):
+    def test_socket_metadata_drift_refuses(self):
         self.path.chmod(0o666)
         with self.assertRaisesRegex(ValueError,'SOCKET_CUSTODY'):P.socket_mount(self.item,self.config)
-        from reverie.worker_resume_client import take
-        reader=Mock();reader.recv.return_value=b'a'
-        with patch('reverie.worker_resume_client.time.monotonic',side_effect=[0,3]),self.assertRaises(TimeoutError):
-            take(reader,2,2)
-        reader.recv.assert_called_once_with(2)
 
     def test_program_facts_bind_real_readonly_bytes_and_refuse_writable_files(self):
         from reverie.worker_resume_program import file_fact,immutable

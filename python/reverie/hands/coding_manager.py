@@ -5,14 +5,10 @@ import sys
 import time
 from dataclasses import asdict, replace
 
-from coding_arbiter import ModelArbiter
-from coding_chat import RULES, authorize_task, read_tool_specs, validate_settings
-from coding_diagnostics import runner_report
-from coding_process import BoundedProcess
-from coding_tasks import (Limits, begin_request, checked_result, control_request,
-                          encoded, permitted_sender, reserve_chars)
-from coding_worker import CodingWorker
-import managed_context
+from coding_chat import (RULES, Limits, authorize_task, begin_request, control_request, encoded,
+                         inject_managed_context, permitted_sender, read_tool_specs,
+                         report_managed_context, reserve_chars, runner_outcome, validate_settings)
+from coding_process import BoundedProcess, CodingWorker, ModelArbiter
 
 
 class TaskManager:
@@ -178,10 +174,10 @@ class TaskManager:
         """Also runs on resume after preemption. Current authorization follows every context IO."""
         cfg = dict(self.cfg, prompt_cap_chars=min(self.cfg['prompt_cap_chars'], self.active['limits'].prompt_chars))
         request = dict(payload)
-        request['messages'] = managed_context.inject(cfg, payload['messages'],
-            len(json.dumps(payload.get('tools') or [])), self.loop.request_chars)
+        used = self.loop.request_chars(payload['messages'], payload.get('tools') or [])
+        request['messages'], _ = inject_managed_context(cfg, payload['messages'], used)
         self.cfg['_managed_context_started'] = cfg['_managed_context_started']
-        managed_context.report(cfg)
+        report_managed_context(cfg)
         if cfg.get('_managed_context_reported'): self.cfg['_managed_context_reported'] = True
         denied = self.authorization()
         if denied: raise ValueError('Current coding authorization refused')
@@ -194,10 +190,9 @@ class TaskManager:
             self.loop.log('coding controller failed')
             self.finish({'status': 'stopped', 'reason': 'controller_failed'})
 
-    def record_runner_report(self, process):
+    def record_runner_report(self, report):
         job = self.active
         row = job['journal'][job['key']]
-        report = runner_report(getattr(process, 'stderr_tail', b''))
         if report is None:
             row['runner_reports_unavailable'] = row.get('runner_reports_unavailable', 0) + 1
             self.loop.log('coding runner', job['task_id'], 'report_unavailable')
@@ -233,17 +228,13 @@ class TaskManager:
                 process = job['runner']
                 if not process.poll():
                     return
-                self.record_runner_report(process)
-                if process.error:
-                    reason = {'timeout': 'runner_timeout', 'output_limit': 'output_limit'}.get(process.error, 'runner_crash')
+                result, report = runner_outcome(process, job['limits'])
+                self.record_runner_report(report)
+                if process.error or result is None:
+                    reason = {'timeout': 'runner_timeout', 'output_limit': 'output_limit', None: 'invalid_output'}.get(
+                        process.error, 'runner_crash')
                     result = {'version': 1, 'ok': False, 'output': '', 'error': reason,
                               'truncated': False, 'exit_code': None}
-                else:
-                    try:
-                        result, _ = checked_result(bytes(process.output), job['limits'])
-                    except Exception:
-                        result = {'version': 1, 'ok': False, 'output': '', 'error': 'invalid_output',
-                                  'truncated': False, 'exit_code': None}
                 request = event['payload']['request']
                 entry = {'tool': request['name'], 'ok': result['ok'], 'exit_code': result['exit_code']}
                 path = request.get('args', {}).get('path')
@@ -282,10 +273,6 @@ class TaskManager:
                 job['worker'].reply(event['sequence'], error=denied)
                 return
             payload = event['payload']
-            timeout = int(min(payload['timeout'], job['deadline'] - self.clock()))
-            if timeout < 1:
-                self.finish({'status': 'stopped', 'reason': 'time_limit'})
-                return
             tool_request = dict(payload['request'])
             allowance = min(job['limits'].output_chars, (payload['cap'] - 1024) // 6)
             if allowance < 500:
@@ -293,14 +280,18 @@ class TaskManager:
                     'error': 'output_limit', 'truncated': False, 'exit_code': None})
                 return
             tool_request['max_output_chars'] = allowance
+            from coding_chat import office_environment
+            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
+            environment.update(office_environment(self.cfg, job['task_id']))
+            timeout = int(min(payload['timeout'], job['deadline'] - self.clock()))
+            if timeout < 1:
+                self.finish({'status': 'stopped', 'reason': 'time_limit'})
+                return
             argv = job['settings']['runner_argv'] + ['--task-dir',
                     os.path.join(job['settings']['root'], job['task_id']),
                     '--timeout-s', str(timeout), '--max-output-bytes', str(payload['cap'])]
             if job['settings'].get('failure_telemetry') is True:
                 argv += ['--command-telemetry']
-            from coding_chat import office_environment
-            environment = {'PATH': os.defpath, 'LANG': 'C.UTF-8'}
-            environment.update(office_environment(self.cfg, job['task_id']))
             job['runner'] = self.process_factory(argv, encoded(tool_request).encode('utf-8'),
                 timeout, payload['cap'], environment=environment)
             job['pending'] = event

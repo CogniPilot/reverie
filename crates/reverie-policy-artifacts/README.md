@@ -131,13 +131,12 @@ direct root-owned regular 0555 files under protected directories.
 
 The shared ELF bundler validates all ELF64 program/dynamic headers, target
 machine and bounds, requires a load segment and rejects interpreters and
-dynamic dependencies. It executes neither terminal program. The Nix producer
-still writes worker-image-provenance-v1 plus the existing native-child annex.
-Its eleven source pins remain the exact legacy v1 selected-factory inputs,
-including the old Python files. Those files cannot yet be deleted. This pin
-set is not complete Rust source provenance; qualification must separately bind
-the exact Rust source, tool ELF and selected Nix factory. Native runtime image,
-custody, canary, resource, ownership and consent checks remain unchanged.
+dynamic dependencies. It inspects both terminal programs as ELF data. The Nix
+producer writes worker-image-provenance-v2 with a projected native factory
+inventory. Both v1 and v2 base receipts can be linked to the existing child
+annex. Complete qualification also binds the selected Rust executable and Nix
+factory to the actual image and verifies runtime custody, canaries, capacity and
+owner consent.
 
 `human-terminal-manifest --root PATH --system SYSTEM` replaces the inline
 Python manifest generator in the static human-terminal toolkit recipe. It

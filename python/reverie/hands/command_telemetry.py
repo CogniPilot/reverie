@@ -15,6 +15,9 @@ import time
 import uuid
 
 
+COMMAND_KEYS = ('shell', 'python', 'git', 'zip')
+
+
 @dataclass(frozen=True)
 class Principal:
     """Trusted in-process binding supplied by the existing authenticated runtime.
@@ -235,17 +238,3 @@ class FailureLog:
         return {'v': 1, 'employee_id': self.principal.employee_id, 'harness': self.principal.harness, 'counts': counts,
                 'evicted': _counter(counters.get('evicted')), 'expired': _counter(counters.get('expired')),
                 'dropped': _counter(self.dropped)}
-
-
-
-@contextlib.contextmanager
-def execution_observer(log):
-    """Bind one outer invocation in trusted code, never from model/tool JSON."""
-    execution_id = str(uuid.uuid4())
-    def report(executable, exit_code):
-        if log is not None:
-            try:
-                log.observe(executable, exit_code, execution_id)
-            except Exception:
-                pass
-    yield report

@@ -2,6 +2,8 @@
 //! grant, image proof, engine capability or admitted laptop start permit.
 mod error;
 pub mod guest;
+pub mod offline_qualification;
+pub mod offline_store_engine;
 mod selection;
 mod workflow;
 pub(crate) use workflow::Workflows;
@@ -51,6 +53,7 @@ fn session_path(config: &NixConfiguration, session: &ProfileSessionId) -> Result
 fn session_directory(
     config: &NixConfiguration,
     session: &ProfileSessionId,
+    create: bool,
     effects: &mut bool,
 ) -> Result<Directory> {
     let root = lexical(&config.state_root()?)?;
@@ -72,20 +75,15 @@ fn session_directory(
         )?;
     }
     let uid = config.uid()?;
-    let base = Directory::nix_directory(
-        &native::python_path(&root.codepoints())?,
-        uid,
-        true,
-        effects,
-    )?;
-    let result = (|| {
-        Ok(Directory::nix_directory(
-            &session_path(config, session)?,
-            uid,
-            true,
-            effects,
-        )?)
-    })();
+    let mut open = |path: &std::path::Path| -> Result<Directory> {
+        if create {
+            Ok(Directory::nix_directory(path, uid, true, effects)?)
+        } else {
+            Ok(Directory::open(path, uid)?)
+        }
+    };
+    let base = open(&native::python_path(&root.codepoints())?)?;
+    let result = session_path(config, session).and_then(|path| open(&path));
     match (result, base.close().map_err(Into::into)) {
         (Ok(child), Ok(())) => Ok(child),
         (Ok(child), Err(error)) => finalized(Err(error), child.close().map_err(Into::into)),
@@ -130,7 +128,7 @@ impl NixStoreGuard {
         migration: bool,
         effects: &mut bool,
     ) -> Result<Self> {
-        let directory = session_directory(&config, &session, effects)?;
+        let directory = session_directory(&config, &session, true, effects)?;
         let file = match directory.lock_file(OsStr::new("nix.lock"), effects) {
             Ok(file) => file,
             Err(error) => {

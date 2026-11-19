@@ -1,17 +1,12 @@
 /**
- * @fileoverview GPU load published by the host.
+ * @fileoverview Reads GPU telemetry published by the GPU container runtime.
  *
- * The console runs where it cannot see the GPU, so a host-side publisher writes a small read-only JSON file and the console only
- * reads it: `{ "updatedAt": <epoch ms>, "gpus": [ { "name": "...", "utilization": 0-100, "memoryUsedMb": n, "memoryTotalMb": n } ] }`
- * (a single GPU may also be given as those fields at the top level). A file older than GPU_STALE_MS, from the future, missing or
- * malformed means "no GPU reading": the page hides the readout rather than show a number nobody is updating. The file is opened without
- * following links and without blocking, and read through the open handle, so nothing placed at that path can stall the console.
+ * The runtime writes a bounded JSON snapshot with the timestamp and GPU readings.
+ * Missing, stale, future-dated and malformed snapshots hide the console readout.
  */
 import { constants, promises as fs } from 'node:fs';
-import { resolve } from 'node:path';
-import { getDataDir } from './config/instance.js';
 
-/** A reading older than this is not shown (the host publishes about every 30 s). */
+/** The GPU runtime publishes every 15 seconds. Hide readings older than one minute. */
 export const GPU_STALE_MS = 60_000;
 /** A timestamp this far ahead of the clock cannot be trusted. */
 const FUTURE_SLACK_MS = 60_000;
@@ -29,25 +24,13 @@ export interface HostGpu {
 
 const NONE: HostGpu = { available: false, utilization: null, memoryUsedMb: null, memoryTotalMb: null, count: 0 };
 
-/** The directory the host mounts read-only into the container, and the file in it. */
-export const HOST_PUBLISHED_GPU_FILE = '/host-published/gpu.json';
-
-/**
- * Where to look, in order: REVERIE_GPU_STATUS_FILE alone when set; otherwise the read-only host mount, then `host/gpu.json` next to
- * the console's data directory (the location used until the mount exists).
- */
-export function gpuStatusFiles(env: Record<string, string | undefined> = process.env): string[] {
-  const chosen = env.REVERIE_GPU_STATUS_FILE?.trim();
-  return chosen ? [chosen] : [HOST_PUBLISHED_GPU_FILE, resolve(getDataDir(), '..', 'host', 'gpu.json')];
-}
-
-/** The first place that has a fresh reading wins; none means no reading. */
-export async function readHostGpuFrom(files: string[], now = Date.now()): Promise<HostGpu> {
-  for (const file of files) {
-    const reading = await readHostGpu(file, now);
-    if (reading.available) return reading;
-  }
-  return NONE;
+/** The container runtime sets the path when it starts the publisher. */
+export async function readConfiguredGpu(
+  env: Record<string, string | undefined> = process.env,
+  now = Date.now(),
+): Promise<HostGpu> {
+  const path = env.REVERIE_GPU_STATUS_FILE?.trim();
+  return path ? readHostGpu(path, now) : NONE;
 }
 
 const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);

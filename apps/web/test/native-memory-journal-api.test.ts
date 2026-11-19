@@ -259,7 +259,11 @@ function environment(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     ...extra,
   };
 }
-function invoke(extra: NodeJS.ProcessEnv = {}, changes: Record<string, string> = {}): Promise<Result> {
+function invoke(
+  extra: NodeJS.ProcessEnv = {},
+  changes: Record<string, string> = {},
+  argsForNative: string[] = []
+): Promise<Result> {
   const body = {
     action: 'remember',
     private: true,
@@ -272,7 +276,7 @@ function invoke(extra: NodeJS.ProcessEnv = {}, changes: Record<string, string> =
   };
   const env = environment(extra);
   const candidate = process.env.NIX_REVERIE_TEST_MEMORY_CLI;
-  if (candidate) return run(candidate, [], env, JSON.stringify(body));
+  if (candidate) return run(candidate, argsForNative, env, JSON.stringify(body));
   const args = [
     '--import',
     'tsx',
@@ -337,6 +341,31 @@ describe('native memory supported TypeScript journal path', () => {
       expect((await invoke({}, changes)).code).not.toBe(0);
     expect(journal.receipt(ALICE, SID, unreadable)).toMatchObject({ status: 'not_found' });
   });
+
+  it.skipIf(!process.env.NIX_REVERIE_TEST_MEMORY_CLI)(
+    'serves the OpenCode journal without opening legacy memory',
+    async () => {
+      const noInstance = { REVERIE_INSTANCE_CONFIG: undefined };
+      const message = chat.post(room, { kind: 'user', name: 'Synthetic user' }, `Remember this: ${QUOTE}.`, 'all', {
+        deliver: false,
+      });
+      const result = saved(await invoke(noInstance, { turn: message.id }, ['--journal-only']));
+      expect(result).toMatchObject({ turnId: message.id, replayed: false });
+      expect((await invoke(noInstance, { turn: unreadable }, ['--journal-only'])).code).not.toBe(0);
+      const recall = await run(
+        process.env.NIX_REVERIE_TEST_MEMORY_CLI!,
+        ['--journal-only'],
+        environment(noInstance),
+        JSON.stringify({ action: 'recall', private: true, query: 'Synthetic records' })
+      );
+      expect(recall.code, recall.stderr).toBe(0);
+      expect(JSON.parse(recall.stdout)).toMatchObject({
+        journal: expect.arrayContaining([expect.objectContaining({ entryId: result.entryId })]),
+        legacy: [],
+      });
+      await expect(stat(join(directory, 'caller-state'))).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
 
   it('uses the supported per-field credential file fallback without putting a password in argv', async () => {
     const home = join(directory, 'fallback-home');

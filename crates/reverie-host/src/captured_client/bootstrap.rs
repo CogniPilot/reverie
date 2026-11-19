@@ -17,6 +17,13 @@ pub(crate) struct InstalledCommand {
     pub(crate) hooks: super::test_hooks::Hooks,
 }
 impl InstalledCommand {
+    /// Keep a resolved CLI executable when the owner-facing caller uses the
+    /// canonical path as both its program and argv[0].
+    pub(crate) fn canonicalize(mut self) -> Option<Self> {
+        self.program = self.program.canonicalize().ok()?;
+        self.argv0 = self.program.as_os_str().to_owned();
+        Some(self)
+    }
     pub(crate) fn from_service(
         program: &OsStr,
         environment: BTreeMap<OsString, OsString>,

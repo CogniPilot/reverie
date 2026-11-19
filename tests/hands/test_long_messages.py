@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 import agent_loop as loop
-from debug_terminal import DebugTerminal
+from coding_process import Terminal
 from test_coding_support import cfg_for
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'mark': 'owner_typed', 'authenticatedOwner': True}
@@ -36,7 +36,7 @@ class LongMessageTests(unittest.TestCase):
         self.assertGreater(len(text), self.cfg['message_cap_chars'])
         messages, size = loop.build_prompt(self.cfg, [], message(text))
         # Whole, with each line break continued on an indented line so no line of it can pose as a message row.
-        self.assertIn(loop.framed(text), user_text(messages))
+        self.assertIn(text.replace('\n', '\n  '), user_text(messages))
         self.assertEqual(missing(user_text(messages)), [])
         self.assertLessEqual(size, self.cfg['prompt_cap_chars'])
 
@@ -70,7 +70,8 @@ class TerminalLongMessageTests(unittest.TestCase):
     def test_debug_terminal_input_reaches_the_model_whole(self):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
         cfg = cfg_for(directory.name)
-        cfg['_terminal'] = DebugTerminal(cfg, output=io.StringIO(), interactive=False).start()
+        cfg['_terminal'] = Terminal(cfg, output=io.StringIO(), interactive=False).start()
+        self.addCleanup(cfg['_terminal'].stop)
         text = 'line ' + 'w' * (cfg['message_cap_chars'] + 800) + ' END'
         seen = []
         def model(*args):

@@ -11,27 +11,15 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = []
 
-[project.optional-dependencies]
-train = ["torch", "transformers", "peft", "bitsandbytes", "trl", "datasets", "accelerate"]
-
 [project.scripts]
-reverie-cycle-demo = "reverie.cycle_demo:main"
 reverie-cycle = "reverie.cycle:main"
-reverie-backend = "reverie.backend:main"
-reverie-context = "reverie.context_cli:main"
 reverie-runtime = "reverie.runtime:main"
-reverie-workspaces = "reverie.workspaces:main"
-reverie-credentials = "reverie.github_credentials:main"
-reverie-opencode = "reverie.opencode:main"
-reverie-chat = "reverie.chat:main"
-reverie-sleep = "reverie.sleep:main"
-reverie-worker-store-maintenance = "reverie.worker_store_maintenance:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
 
 [tool.setuptools.package-data]
-reverie = ["plugins/*.mjs", "rules.md", "skills/*/SKILL.md", "ops-core*.schema.json", "ops-classifier-pin.json"]
+reverie = ["ops-core*.schema.json", "ops-classifier-pin.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

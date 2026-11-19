@@ -1,32 +1,20 @@
 mod fixture;
 mod transport;
 
-use serde_json::Value;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     path::Path,
     process::{Command, Output},
 };
 
 #[test]
-fn native_acceptance_and_refusal_match_the_unchanged_oracle() {
-    // Optional parent oracle is the existing, unchanged Python entry point.
-    // CI always executes the native cases; a local retirement qualification
-    // additionally sets REVERIE_VOICE_CI_PARENT to the exact parent checkout.
-    let parent = std::env::var_os("REVERIE_VOICE_CI_PARENT");
-    for case in [
-        "pass",
-        "voice",
-        "timing",
-        "browser",
-        "silent",
-        "short",
-        "endpoint",
-        "http",
-        "json",
-        "empty-asr",
-        "asr-negative",
-    ] {
+fn native_acceptance_and_refusal_match_the_recorded_contract() {
+    let expected: BTreeMap<&str, &str> =
+        serde_json::from_str(include_str!("fixture/acceptance-contract.json")).unwrap();
+    for (case, digest) in expected {
         let server = transport::Server::start(case);
         let native = fixture::Artifacts::new(case, &server.url());
         let result = Command::new(env!("CARGO_BIN_EXE_reverie-voice-ci-verify"))
@@ -41,23 +29,9 @@ fn native_acceptance_and_refusal_match_the_unchanged_oracle() {
         );
         assert_eq!(native.path.join("acceptance.json").exists(), case == "pass");
         retain(&native.path, &result);
-        if let Some(parent) = &parent {
-            let oracle = fixture::Artifacts::new(case, &server.url());
-            let before = Command::new("python3")
-                .arg(Path::new(parent).join("scripts/voice-ci/verify.py"))
-                .arg("--artifacts")
-                .arg(&oracle.path)
-                .output()
-                .expect("parent oracle");
-            assert_eq!(
-                before.status.success(),
-                result.status.success(),
-                "oracle {case}: {before:?}"
-            );
-            compare(&native.path, &oracle.path, &result, &before);
-            retain(&oracle.path, &before);
-            eprintln!("parent/native parity PASS: {case}");
-        }
+        let observed = contract(&native.path, &result);
+        let actual = hash(&serde_json::to_vec(&observed).unwrap());
+        assert_eq!(actual, digest, "{case}: {observed}");
     }
 }
 
@@ -74,49 +48,53 @@ fn retain(root: &Path, output: &Output) {
     .unwrap();
 }
 
-fn compare(native: &Path, oracle: &Path, result: &Output, before: &Output) {
-    for name in ["acceptance.json", "audio-report.json"] {
-        let left = native.join(name);
-        let right = oracle.join(name);
-        assert_eq!(left.exists(), right.exists(), "{name}");
-        if left.exists() {
-            assert_eq!(
-                without_time(json_file(&left)),
-                without_time(json_file(&right)),
-                "{name}"
-            );
-        }
-    }
-    for name in [
+fn contract(root: &Path, output: &Output) -> Value {
+    let files: BTreeMap<_, _> = [
         "speak.wav.transcript.txt",
         "turn.wav.transcript.txt",
         "negative-ten-seconds.wav",
         "negative-ten-seconds.transcript.txt",
-    ] {
-        let left = native.join(name);
-        let right = oracle.join(name);
-        assert_eq!(left.exists(), right.exists(), "{name}");
-        if left.exists() {
-            assert_eq!(fs::read(left).unwrap(), fs::read(right).unwrap(), "{name}");
-        }
-    }
-    let phases = |out: &Output| -> Vec<Value> {
-        String::from_utf8_lossy(&out.stdout)
-            .lines()
-            .map(|line| without_time(serde_json::from_str(line).expect("progress JSON")))
-            .collect()
-    };
-    assert_eq!(phases(result), phases(before));
+    ]
+    .into_iter()
+    .map(|name| (name, root.join(name)))
+    .filter(|(_, path)| path.exists())
+    .map(|(name, path)| (name, hash(&fs::read(path).unwrap())))
+    .collect();
+    let progress: Vec<Value> = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("progress JSON"))
+        .collect();
+    let mut value = without_time(json!({
+        "success": output.status.success(),
+        "receipt": json_file(&root.join("acceptance.json")),
+        "report": json_file(&root.join("audio-report.json")),
+        "progress": progress,
+        "files": files,
+    }));
+    value.sort_all_objects();
+    value
 }
 
 fn json_file(path: &Path) -> Value {
-    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    if path.exists() {
+        serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+    } else {
+        Value::Null
+    }
+}
+
+fn hash(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn without_time(mut value: Value) -> Value {
     match &mut value {
         Value::Object(object) => {
             object.remove("recognitionMs");
+            for value in object.values_mut() {
+                *value = without_time(value.take());
+            }
         }
         Value::Array(values) => {
             for value in values {

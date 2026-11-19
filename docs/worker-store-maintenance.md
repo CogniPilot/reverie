@@ -21,8 +21,9 @@ Omitting the field preserves the existing current-agent validation mode.
 ## Qualification and private inputs
 
 Run on Linux as the configured non-root broker owner with the normal local Docker
-client. Use the installed Python console script, or run
-`python -m reverie.worker_store_maintenance` in the native flake environment.
+client. The native command in the `runtime.adminMemory` Nix package provides
+qualification, planning and apply. Apply repeats the same plan checks under both
+existing broker locks before seeding the store.
 There is no sudo, host-OS activation, image build/pull/load, or service restart.
 
 The config and qualification bundle must be canonical owner-only 0600 regular
@@ -110,7 +111,7 @@ without force, and never deletes a container by name. Existing laptop containers
 are retained. An existing helper, live alias writer, unexpected mount or unknown
 engine state refuses.
 
-Custody and writer checks compare physical device/inode ancestry as well as
+Rust custody and writer checks compare physical device/inode ancestry as well as
 canonical paths, including bounded nested mount points visible in the host
 process's current mount namespace. They refuse bind aliases of private data or
 control directories. They do not establish visibility into a different daemon

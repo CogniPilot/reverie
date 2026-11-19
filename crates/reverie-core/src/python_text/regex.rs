@@ -7,6 +7,9 @@ pub fn word(point: u32) -> bool {
 pub fn space(point: u32) -> bool {
     super::space_point(point)
 }
+pub fn printable(character: char) -> bool {
+    super::contains(super::printable::PRINTABLE, character)
+}
 pub fn decimal(point: u32) -> bool {
     super::decimal_point(point)
 }

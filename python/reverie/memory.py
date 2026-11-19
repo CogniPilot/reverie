@@ -16,24 +16,134 @@ terms is available via ``combine="product"``.
 """
 from __future__ import annotations
 
+import array
 import json
+import os
 import sqlite3
+import subprocess
+import sys
 import threading
 import time
 import weakref
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Protocol, Sequence
 
-from .embeddings import Embedder, HashedEmbedder, cosine, pack, unpack
+from .hands.agent_journal import dream_memory_request, legacy_memory_request
 
 EPISODE = "episode"
 REFLECTION = "reflection"
 DREAM = "dream"
 SCHEMA_VERSION = 1
+MOOD_STATE = "mood"
+LEGACY_HISTORY_STATE = "migrated_legacy_history"
 # The retired column name is retained only for existing-store interoperability.
 LEGACY_ASSISTANT_COLUMN = bytes.fromhex("6a696e785f74657874").decode("ascii")
+
+
+class Embedder(Protocol):
+    name: str
+    dims: int
+
+    def embed(self, text: str, kind: str = "document") -> list[float]: ...
+
+
+def _write_embedding_request(process: subprocess.Popen, request: dict) -> None:
+    process.stdin.write(json.dumps(request).encode("ascii") + b"\n")
+    process.stdin.flush()
+
+
+def _stop_embedding_worker(process: subprocess.Popen, owner: int) -> None:
+    if os.getpid() == owner:
+        process.kill()
+        process.wait()
+        with suppress(BrokenPipeError):
+            process.stdin.close()
+        process.stdout.close()
+
+
+class _NativeEmbedder:
+    """Keep one native worker per legacy embedder, opening it on first use."""
+
+    def __init__(self, dims: int = 1024):
+        self.dims = dims
+        self.name = f"hashed-v1-{dims}"
+        self._dimensions = str(dims)
+        self._owner = os.getpid()
+        self._lock = threading.Lock()
+        self._process = None
+
+    def _start(self, endpoint: dict | None = None) -> subprocess.Popen:
+        process = subprocess.Popen(
+            ["reverie-admin-memory", f"--embedding-worker={self._owner}"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True,
+        )
+        self._stop = weakref.finalize(self, _stop_embedding_worker, process, self._owner)
+        try:
+            _write_embedding_request(process, {"dimensions": self._dimensions, "endpoint": endpoint})
+            points, dimensions = json.loads(process.stdout.readline())
+            self.name = "".join(map(chr, points))
+            if self.name.startswith("llama:"):
+                self.dims = dimensions
+        except BaseException:
+            self._stop()
+            raise
+        self._process = process
+        return process
+
+    def embed(self, text: str, kind: str = "document") -> list[float]:
+        if os.getpid() != self._owner:
+            raise RuntimeError("embedding worker belongs to another process")
+        with self._lock:
+            process = self._process or self._start()
+            _write_embedding_request(process, {"text": list(map(ord, text)), "query": kind == "query"})
+            header = process.stdout.read(8)
+            if len(header) != 8:
+                raise RuntimeError("native embedding worker stopped")
+            count = int.from_bytes(header, "little")
+            if count == (1 << 64) - 1:
+                raise RuntimeError("embedding backend failed")
+            vector = array.array("d")
+            vector.fromfile(process.stdout, count)
+            if sys.byteorder == "big":
+                vector.byteswap()
+            if self.name.startswith("llama:"):
+                self.dims = count
+            return vector.tolist()
+
+
+def make_embedder(embed_url: str = "", embed_model: str = "", dims: int = 1024,
+                  doc_prefix: str = "search_document: ", query_prefix: str = "search_query: ") -> Embedder:
+    embedder = _NativeEmbedder(dims)
+    if embed_url:
+        embedder._start({
+            "url": list(map(ord, embed_url)),
+            "model": list(map(ord, embed_model)),
+            "document_prefix": list(map(ord, doc_prefix)),
+            "query_prefix": list(map(ord, query_prefix)),
+        })
+    return embedder
+
+
+# SQLite still uses float32 blobs while this legacy store owns its rows.
+def pack(vec: Iterable[float]) -> bytes:
+    return array.array("f", vec).tobytes()
+
+
+def unpack(blob: bytes | None) -> list[float]:
+    if not blob:
+        return []
+    vec = array.array("f")
+    vec.frombytes(blob)
+    return vec.tolist()
+
+
+def cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    if len(a) != len(b) or not a:
+        return 0.0
+    return sum(x * y for x, y in zip(a, b))
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -117,6 +227,10 @@ class Memory:
         """The one-line waking recall of a dream (its text for other kinds)."""
         return str(self.meta.get("recall") or self.text)
 
+    def waking_recall(self) -> str:
+        reply = dream_memory_request("recall", text=self.text, meta=json.dumps(self.meta))
+        return "".join(map(chr, reply["points"]))
+
     def as_dict(self) -> dict:
         d = self.__dict__.copy()
         d.pop("embedding", None)
@@ -151,6 +265,13 @@ def score_memory(
     return (w_rel * rel + w_rec * rec + w_imp * imp) / total
 
 
+def describe_mood(raw: str | None, now: float) -> str:
+    reply = legacy_memory_request("mood_view", raw=raw, now=now)
+    if reply is None:
+        raise RuntimeError("native mood description is unavailable")
+    return reply["description"]
+
+
 class MemoryStore:
     """Thread-safe wrapper around one SQLite file."""
 
@@ -158,7 +279,7 @@ class MemoryStore:
         self.path = Path(path)
         if str(self.path) != ":memory:":
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.embedder: Embedder = embedder or HashedEmbedder()
+        self.embedder: Embedder = embedder or make_embedder()
         self.decay_per_hour = decay_per_hour
         self._lock = threading.RLock()
         self._atomic_depth = 0  # > 0 inside atomic(): writes join that one transaction
@@ -234,6 +355,29 @@ class MemoryStore:
         with self._lock:
             self._db.execute("INSERT OR REPLACE INTO state(key, value) VALUES (?, ?)", (key, str(value)))
             self._commit()
+
+    def import_legacy_history(self, path: Path, importance: float = 3.0) -> int:
+        if self.get_state(LEGACY_HISTORY_STATE):
+            return 0
+        reply = legacy_memory_request("history", timeout=None, path=list(map(ord, os.fspath(path))))
+        if reply is None:
+            raise RuntimeError("native legacy history capture is unavailable")
+        episodes = reply["episodes"]
+        with self.atomic():
+            self._db.execute("BEGIN IMMEDIATE")
+            if self.get_state(LEGACY_HISTORY_STATE):
+                return 0
+            if self._db.execute("SELECT 1 FROM memories WHERE kind='episode' AND importance_source='migrated' LIMIT 1").fetchone():
+                raise RuntimeError("partial legacy history import requires recovery")
+            if episodes is None:
+                self.set_state(LEGACY_HISTORY_STATE, "missing")
+                return 0
+            for entry in episodes:
+                self.add_episode("".join(map(chr, entry["user"])), "".join(map(chr, entry["assistant"])),
+                                 importance, "migrated", created_at=entry["created_at"],
+                                 meta={"idle": entry["idle"], "legacy": True})
+            self.set_state(LEGACY_HISTORY_STATE, str(len(episodes)))
+            return len(episodes)
 
     # ---- idempotency per source message ------------------------------------
     def claim_message(self, source_id: str, now: float | None = None) -> bool:

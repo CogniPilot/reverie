@@ -2,11 +2,18 @@
 mod backup;
 mod beliefs;
 mod claims;
+mod continuity;
+pub use continuity::{Continuity, ContinuityScope, Episode, PrivateContinuity};
 mod documents;
 mod error;
+mod journal;
 pub use documents::{
     BallotHistory, BallotOutcome, DocumentEnvelope, DocumentHistory, MemoryDocuments,
     RecordedBallot, TransactionDocuments,
+};
+pub use journal::{
+    CORRECTION_LIMIT, JournalCheckpoint, JournalEntryId, JournalKey, JournalReader, JournalReceipt,
+    JournalRow, JournalWriteReceipt, PAGE_SIZE,
 };
 mod query;
 mod reader;

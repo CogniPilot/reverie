@@ -28,9 +28,18 @@ checks approval and the current flake key, then replaces itself with the real
 tool. It strips its directory from PATH and retains argument bytes. Missing or
 invalid caches use the plain tool; `REVERIE_AUTOENV_QUIET` suppresses diagnostics.
 `IN_NIX_SHELL` and `REVERIE_AUTOENV_ACTIVE` prevent reactivation.
-`REVERIE_NO_AUTOENV=1` also skips the jobs policy. Existing job settings and
+`REVERIE_NO_AUTOENV=1` also skips the jobs and scratch defaults. Existing job settings and
 `-j`/`--jobs` arguments remain authoritative. PATH components retain their normal
 empty-component meaning, and aliases to the native shim are never executed again.
+
+On a worker, the Cargo shim defaults build commands, `clean`, and `metadata`
+to a target directory under `/tmp/reverie/cargo-target`, keyed by Cargo's
+canonical workspace root. An explicit absolute `TMPDIR` selects a different
+temporary root, including the one supplied by a leased task workspace. Cargo
+target environment variables, command-line overrides, and Cargo configuration
+that specifies a target directory retain their normal behavior. Commands
+invoked through a plain Cargo binary can use a leased workspace or set
+`CARGO_TARGET_DIR` explicitly.
 
 The cache retains the legacy NUL-separated `KEY=VALUE` format and companion
 `repo`, `attr`, `commands`, `key`, `vars` JSON diagnostics. Both producer and
@@ -60,8 +69,9 @@ build RSS. The existing launcher shim preserves an explicit `CARGO_BUILD_JOBS`,
 direct helper invocation always prints a default.
 
 `reverie-cargo-defaults` inserts Cargo's optional intermediate build directory
-under `/tmp/reverie/cargo-build/{workspace-path-hash}`. Final artifacts remain in
-the project's normal target directory. It preserves an existing `build-dir` and
+under `/tmp/reverie/cargo-build/{workspace-path-hash}`. The Cargo launcher and
+the caller's target settings select where final artifacts go. The helper
+preserves an existing `build-dir` and
 unrelated configuration bytes, including comments. Legacy `config`, malformed
 or unsupported TOML layouts, unsafe paths and oversized files refuse unchanged.
 Existing build settings must use an explicit `[build]` table when inserting the

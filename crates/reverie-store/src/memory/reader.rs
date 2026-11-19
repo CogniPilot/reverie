@@ -1,6 +1,8 @@
 //! Existing-memory observations. Opening never creates/migrates tables, selects
 //! another model, imports history, seeds beliefs, or touches access timestamps.
 use super::*;
+use reverie_contracts::memory::channel::ChannelEvidence;
+use reverie_core::ids::ChatRoomId;
 use reverie_core::shutdown::ShutdownStatus;
 use rusqlite::OptionalExtension;
 mod native;
@@ -100,6 +102,26 @@ impl MemoryReader {
     pub fn retrieve(&self, text: &str, options: RetrievalOptions<'_>) -> Result<Vec<Memory>> {
         self.retrieve_text(EmbeddingText::from_scalar_text(text), options)
     }
+    /// Rank the unsuperseded evidence from one SQLite snapshot of this room.
+    /// The caller checks membership and selects the room's existing file.
+    pub fn recall_channel(
+        &self,
+        room: &ChatRoomId,
+        text: &str,
+        max_chars: usize,
+    ) -> Result<ChannelEvidence> {
+        self.session(|db| {
+            query::recall_channel(
+                db,
+                room,
+                text,
+                max_chars,
+                self.embedder.as_ref(),
+                self.decay_per_hour,
+            )
+            .map(|recalled| recalled.evidence)
+        })
+    }
     pub fn get_state(&self, key: &str) -> Result<Option<String>> {
         self.session(|db| state(db, key))
     }
@@ -183,7 +205,7 @@ fn open_existing(path: &Path) -> Result<Connection> {
     }
     Ok(db)
 }
-fn state(db: &Connection, key: &str) -> Result<Option<String>> {
+pub(super) fn state(db: &Connection, key: &str) -> Result<Option<String>> {
     Ok(db
         .query_row("SELECT value FROM state WHERE key=?", [key], |row| {
             row.get(0)

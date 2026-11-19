@@ -229,8 +229,8 @@ impl Directory {
             Ok(names)
         })
     }
-    /// Original image cache opens do not repair permissions masked by umask.
-    pub(crate) fn create_image_file(&self, leaf: &str) -> Result<File> {
+    /// Exclusive creation without repairing permissions masked by umask.
+    pub(crate) fn create_exclusive(&self, leaf: &str) -> Result<File> {
         open_at(
             self.file.as_raw_fd(),
             OsStr::new(leaf),
@@ -241,7 +241,7 @@ impl Directory {
     }
     pub(crate) fn lock_images(&self) -> Result<File> {
         let name = ".chat-image-custody.lock";
-        let file = match self.create_image_file(name) {
+        let file = match self.create_exclusive(name) {
             Ok(file) => file,
             Err(StoreError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
                 self.read_write_lock(name)?

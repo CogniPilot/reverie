@@ -220,7 +220,8 @@ jobs:
           docker tag "reverie:$GITHUB_SHA" "$image:$version"
           docker tag "reverie:$GITHUB_SHA" "$image:latest"
           docker save "$image:latest" "$image:$version" --output "$image_archive"
-          "$HOME/scratch/reverie/build/memory/bin/python3" -I -m reverie.image_check "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
+          scanner=$(nix build .#imageCheck --no-link --print-out-paths)
+          "$scanner/bin/reverie-image-check" "$image_archive" --allow docker/image-check-allow.tsv --json image-check.json
           mkdir -p offline-bundle
           mv "$image_archive" offline-bundle/reverie-image.tar
           cp scripts/setup.sh offline-bundle/setup.sh
@@ -250,18 +251,8 @@ jobs:
           done
           echo "without the owner password: ${code:-none}"
           [ "$code" = 401 ] && ok=1
-          # Under enforce, the console (Basic) password alone must NOT reach an owner route:
-          # the signed-in owner session is required. Present it through a netrc file (so it never
-          # appears in a command line) and require a 401. The full owner sign-in 200 path is covered
-          # by the owner-auth-fresh-enforce unit test and the image acceptance checks.
-          docker exec boot bash -c 'umask 077; printf "machine 127.0.0.1 login owner password %s\n" \
-            "$(cat /instances/default/owner-password)" > "$TMPDIR/netrc"' || ok=
-          code=$(status --netrc-file /scratch/tmp/netrc)
-          echo "with the console password alone (must be refused under enforce): $code"
-          [ "$code" = 401 ] || ok=
-          # Full built-image owner-login acceptance: bootstrap, one-time sign-in, password
-          # change, owner route 200, and the refusals. The one-time password stays in 0600 files.
-          docker exec -i boot bash -s < .github/ci/boot-owner.sh || ok=
+          # Exercise bootstrap, recovery, password change and Basic-auth refusals.
+          docker exec -i boot node --input-type=module < .github/ci/boot-owner.mjs || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
           docker exec boot env REVERIE_INSTALL_CLIS=none reverie-install-clis || ok=
           docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=
@@ -353,7 +344,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p acceptance
-          nix develop --command python3 -m reverie.buildenv \
+          laptop_tools=$(nix build .#laptopTools --no-link --print-out-paths)
+          nix develop --command "$laptop_tools/bin/reverie-buildenv" \
             --project integration-workers --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- python3 .github/ci/worker-isolation-smoke.py --image "$(cat "$RUNNER_TEMP/tested-image-id")" \
             2>&1 | tee acceptance/worker-smoke.log
@@ -407,7 +399,8 @@ jobs:
           export REVERIE_BROWSER_ARTIFACTS="$PWD/acceptance/browser"
           export TEST_BROWSER_COVERAGE_DIR="$REVERIE_BROWSER_ARTIFACTS/raw-coverage"
           df -h /
-          nix develop --command python3 -m reverie.buildenv \
+          laptop_tools=$(nix build .#laptopTools --no-link --print-out-paths)
+          nix develop --command "$laptop_tools/bin/reverie-buildenv" \
             --project integration-browser --repo "$PWD" --expect 2G --disk 1G --jobs 1 \
             -- bash -euo pipefail -c 'node .github/ci/company-office-browser.mjs; node .github/ci/laptop-power-browser.mjs' \
             2>&1 | tee acceptance/browser.log

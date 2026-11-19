@@ -7,6 +7,18 @@ pub(crate) struct OfficePhone {
     port: u16,
 }
 impl OfficePhone {
+    pub(crate) fn for_browser_job(raw: &str) -> Result<Self> {
+        // The browser client only accepted an empty URL fragment. Other Office
+        // URL parsing rules are shared with the OPS command.
+        if raw
+            .split_once('#')
+            .is_some_and(|(_, fragment)| fragment.chars().any(|c| !matches!(c, '\t' | '\r' | '\n')))
+        {
+            return Err(Unavailable);
+        }
+        Self::parse(raw)
+    }
+
     pub(crate) fn parse(raw: &str) -> Result<Self> {
         // Python urlsplit removes leading C0/space and embedded TAB/CR/LF.
         let raw = raw

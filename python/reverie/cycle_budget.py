@@ -4,10 +4,9 @@ import json
 import math
 import sqlite3
 import time
-import urllib.request
 import uuid
 from pathlib import Path
-from .llm import ChatClient, LLMError
+from .config import ChatClient, model_completion
 
 
 class Deferred(RuntimeError):
@@ -101,14 +100,7 @@ class MeteredClient(ChatClient):
         self.last_usage=None
 
     def http(self, url, body, timeout):
-        import os
-        headers={"Content-Type":"application/json"}
-        if self.profile.get("api_key_env"):
-            token=os.environ.get(self.profile["api_key_env"])
-            if not token: raise LLMError("model credential is unavailable")
-            headers["Authorization"]="Bearer "+token
-        with urllib.request.urlopen(urllib.request.Request(url,data=body,headers=headers),timeout=timeout) as r:
-            return r.read()
+        return model_completion(url, body, timeout, self.profile.get("api_key_env") or None)
 
     def metered_transport(self, url, body, timeout):
         request=json.loads(body)

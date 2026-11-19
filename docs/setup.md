@@ -300,13 +300,13 @@ Account activation and runtime cutover are separate from creating the container.
 From an environment where this package and OpenCode are installed:
 
 ```bash
-python3 -m reverie.opencode --install /path/to/runtime \
+reverie-opencode --install /path/to/runtime \
   --instance /path/to/instance/config/instance.json --model provider/model
 ```
 
 The installer copies the memory skill into `.agents/skills`, `.claude/skills` and
 `.opencode/skills`, and records the explicit instance path in bridge metadata.
-Read [reverie-memory](../python/reverie/skills/reverie-memory/SKILL.md) for the portable lookup/write
+Read [reverie-memory](../crates/reverie-admin-memory/opencode-assets/skills/reverie-memory/SKILL.md) for the portable lookup/write
 workflow. Use concise, verified project handoffs with source receipts. Private
 notes stay private; dream ideas are unverified hypotheses until checked.
 
@@ -316,11 +316,10 @@ Dreams are off by default: set `REVERIE_DREAMS_PER_SLEEP=1` (and enable `dreamin
 on the expert profile) to turn them on. Full dream narratives are temporary; only
 bounded summaries and candidate ideas are
 retained. Normal conversation/memory writes do not train or change model weights.
-Optional training tools are not run by installation.
 
 ## Runtime selection and recovery
 
-The [reverie-runtime skill](../python/reverie/skills/reverie-runtime/SKILL.md) covers Reverie backend
+The [reverie-runtime skill](../crates/reverie-admin-memory/opencode-assets/skills/reverie-runtime/SKILL.md) covers Reverie backend
 handoffs. Configure `examples/runtime-policy.json` outside the repository, with
 actual enabled model IDs and a verified adopted case. The generic image installs
 `reverie-backend`; configure Reverie's per-mode commands to `reverie-backend opencode`,
@@ -341,15 +340,15 @@ reserves appointing a room coordinator for the owner; this code respects that ga
 Keep the watcher and its authority-bearing state outside writable agent mounts.
 
 Model weights remain fixed. There is no nightly backpropagation or automatic
-fine-tuning. Reflection and dreaming write external agent memory. Optional legacy
-training tools are retained for compatibility but are outside the runtime workflow.
+fine-tuning. Reflection and dreaming write external agent memory. The former standalone
+training and adapter-swap utilities have been retired.
 
 ## Agent context preparation
 
 An owner-appointed coordinator with explicit orchestration permission curates each
 worker's short-term context: task, acceptance checks, constraints,
 verified findings with sources, relevant files/tools and targeted memory queries.
-Use [reverie-context](../python/reverie/skills/reverie-context/SKILL.md) and `reverie_tools` action `brief`.
+Use [reverie-context](../crates/reverie-admin-memory/opencode-assets/skills/reverie-context/SKILL.md) and `reverie_tools` action `brief`.
 The builder budgets against model context/output limits and occupied prompt space,
 preserves complete required instructions, and reports omitted optional items. If the
 essentials do not fit, split or shorten the task. It never injects private histories
@@ -413,9 +412,11 @@ it does not perform global Docker/Podman pruning or run a nightly scheduler.
 
 ## Validation
 
+Run these checks inside `nix develop`.
+
 ```bash
-python3 -m unittest discover -s tests
-node --test tests/test_opencode_plugin.mjs
+nix shell .#reverie.runtime.adminMemory -c python3 -m unittest discover -s tests
+nix shell .#reverie.runtime.adminMemory -c node --test tests/test_opencode_plugin.mjs
 ```
 
 Tests cover memory, reflection, dreams, deliberate values, scope isolation, lifecycle

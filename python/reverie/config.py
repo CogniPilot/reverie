@@ -1,9 +1,13 @@
 """Paths, endpoints and tunables. Everything can be overridden with REVERIE_* environment variables."""
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from .hands.agent_journal import (
+    TURN_CAPTURE_BYTES, encode_memory_json, legacy_memory_request, native_memory_json, native_memory_output,
+)
 from .instance import Instance, load_instance
 from reverie import env_names
 
@@ -14,6 +18,80 @@ DATA_DIR = Path(env_names.lookup("REVERIE_DATA_DIR", ROOT / "companies" / "defau
 
 
 DEPRECATIONS: list[str] = []
+
+
+class LLMError(RuntimeError):
+    pass
+
+
+def model_completion(url, body, timeout, key_env=None):
+    frame = encode_memory_json({
+        "action": "complete", "url": url, "body": body.decode("ascii"),
+        "timeout": timeout, "key_env": key_env,
+    })
+    if frame is not None:
+        response = native_memory_output("model-completion-worker", frame, TURN_CAPTURE_BYTES, timeout=timeout + 3)
+        if response is not None:
+            return response
+    raise LLMError("chat request failed at the native model endpoint")
+
+
+def _format_reply(action, text, limit):
+    if not isinstance(text, str):
+        raise LLMError("model completion content must be text")
+    response = native_memory_json("model-completion-worker", {
+        "action": action, "points": list(map(ord, text)), "limit": limit,
+    }, TURN_CAPTURE_BYTES)
+    if response is None:
+        raise LLMError("native model reply formatting failed")
+    return "".join(map(chr, response["points"]))
+
+
+def limit_words(text, max_words):
+    return _format_reply("limit_words", text, max_words)
+
+
+class ChatClient:
+    """Compatibility binding for callers that still own model request orchestration."""
+
+    def __init__(self, api_base, model, timeout=240, transport=None):
+        self.api_base = api_base.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+        self._transport = transport or model_completion
+
+    def chat(self, messages, max_tokens=220, temperature=0.9, max_chars=600, extra=None):
+        body = {
+            "model": self.model,
+            "messages": list(messages),
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        if extra:
+            body.update(extra)
+        try:
+            raw = self._transport(self.api_base + "/chat/completions", json.dumps(body).encode(), self.timeout)
+            content = json.loads(raw)["choices"][0]["message"].get("content") or ""
+        except (OSError, ValueError, KeyError, IndexError, TypeError) as error:
+            raise LLMError("chat request returned an invalid completion") from error
+        return _format_reply("clean", content, max_chars)
+
+    def rate(self, text, default=3.0):
+        prompt = legacy_memory_request("rating_prompt")
+        if prompt is None:
+            return default
+        messages = [
+            {"role": "system", "content": prompt["system"]},
+            {"role": "user", "content": text + prompt["suffix"]},
+        ]
+        try:
+            reply = self.chat(messages, max_tokens=prompt["max_tokens"],
+                              temperature=prompt["temperature"], max_chars=prompt["max_chars"])
+        except LLMError:
+            return default
+        result = legacy_memory_request("rating_score", points=list(map(ord, reply)))
+        return float(result["score"]) if result and result["score"] is not None else default
 
 
 def _path_fallback(env: str, new: Path, old: Path) -> Path:
@@ -89,7 +167,7 @@ class Config:
     reflect_min_episodes: int = _env_int("REVERIE_REFLECT_MIN_EPISODES", 3)
     rate_batch: int = 3                                              # importance ratings per idle pass
 
-    # dreams (see reverie.dream): only in the sleep window, i.e. no user activity for sleep_min_idle seconds
+    # dreams: only in the sleep window, i.e. no user activity for sleep_min_idle seconds
     sleep_min_idle: int = _env_int("REVERIE_SLEEP_MIN_IDLE", 1800)
     dreams_per_sleep: int = _env_int("REVERIE_DREAMS_PER_SLEEP", 0)   # off unless the owner turns it on
     dream_spacing: int = _env_int("REVERIE_DREAM_SPACING", 3600)
@@ -102,8 +180,6 @@ class Config:
     reply_temperature: float = 0.9
     reply_max_words: int = _env_int("REVERIE_REPLY_MAX_WORDS", 150)        # 0 disables the trim
     reply_max_chars: int = _env_int("REVERIE_REPLY_MAX_CHARS", 1200)
-    voice_reply_max_tokens: int = _env_int("REVERIE_VOICE_REPLY_MAX_TOKENS", 600)
-    voice_reply_max_words: int = _env_int("REVERIE_VOICE_REPLY_MAX_WORDS", 0)  # spoken replies are never cut
 
     session_id: str = os.environ.get("REVERIE_SESSION_ID", "")
 

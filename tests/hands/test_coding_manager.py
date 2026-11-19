@@ -114,10 +114,10 @@ class ManagerTests(unittest.TestCase):
         self.assertEqual(self.state['_coding']['room:' + source['id']]['reason'], 'revoked')
 
     def test_natural_task_keeps_original_source_and_dispatches_bounded_runner(self):
-        import admin_task
+        from coding_chat import workspace_callback
         self.cfg['admin_task'] = 'fixture'
         source = self.chat.add('room', copy.deepcopy(OWNER), '@' + self.cfg['self_name'] + ' Implement and test the requested function.')
-        start = admin_task.callback(self.cfg, self.manager, self.state, 'room', [], source)
+        start = workspace_callback(self.cfg, self.manager, self.state, 'room', [], source)
         self.assertIn('queued', start('Implement the function and run its tests.'))
         self.assertEqual(self.manager.active['source']['text'], source['text'])
         self.assertIsNot(self.manager.active['source'], source)

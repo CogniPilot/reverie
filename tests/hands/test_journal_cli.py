@@ -11,6 +11,13 @@ from test_journal_structured import ROOM, journal
 SAVE = 'save --text "Rory named me Lantern Keeper." --tag relationship --source {id} "Lantern Keeper"'
 
 
+def help_text(topic, read_only):
+    step = journal.journal_tool_request(
+        'invoke', read_only=read_only, state={'calls': 0, 'help_shown': False},
+        name='journal', arguments=json.dumps({'command': f'help {topic}'}))
+    return step['reply']['help']
+
+
 class CliTests(unittest.TestCase):
     # Borrow the owned SQLite/worker fixture without inheriting the structured test cases.
     setUp, op = base.StructuredTests.setUp, base.StructuredTests.op
@@ -61,7 +68,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(turn.calls, 1)
         self.assertIn('A missing receipt is not proof the write never happened', self.run_cli(turn, 'help receipt')['help'])
         for topic in ('', 'save', 'recall', 'source', 'receipt', 'map'):
-            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': journal.help_text(topic, False)})), journal.RESULT_CHARS)
+            self.assertLessEqual(len(journal.encoded({'status': 'ok', 'help': help_text(topic, False)})), journal.RESULT_CHARS)
         self.assertIn('read-only', self.run_cli(self.turn(2, 'Read-only lookup'), 'help save')['help'])
 
     def test_save_then_recall_returns_guaranteed_fields(self):
@@ -84,7 +91,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual([(e['entry_id'], e['supersedes']) for e in found], [(fix['entry_id'], [old])])
         capsule = self.op('journal_status', query='Lantern Keeper')['recall']
         self.assertEqual(capsule['entries'][0]['supersedes'], [old])
-        self.assertIn('"supersedes":[%d]' % old, journal.capsule_context(capsule, ROOM).replace(' ', ''))
+        self.assertIn('"supersedes":[%d]' % old, journal.present_turn(ROOM, capsule)['recall'].replace(' ', ''))
 
     def test_related_links_keep_both_current_and_reach_recall_capsule_and_map(self):
         question = self.saved(1, ' --tag open-question')
@@ -99,27 +106,29 @@ class CliTests(unittest.TestCase):
         self.assertEqual((view[question]['currentness'], view[answer['entry_id']]['currentness']), ('current', 'current'))
         self.assertEqual(view[answer['entry_id']]['related'], [question])
         capsule = self.op('journal_status', query='tin tithe')['recall']
-        self.assertTrue(journal.capsule_context(capsule, ROOM))
+        self.assertTrue(journal.present_turn(ROOM, capsule)['recall'])
         self.assertEqual(capsule['entries'][0]['related'], [question])
         mapped = self.run_cli(self.turn(7, 'map'), 'map')
         self.assertIn({'id': answer['entry_id'], 'related': [question]},
                       [{k: e[k] for k in ('id', 'related')} for e in mapped['entries']])
 
     def test_tags_and_topics_have_separate_documented_jobs(self):
-        detail = journal.help_text('save', False)
+        detail = help_text('save', False)
         self.assertIn('What kind of note this is', detail)
         self.assertIn('What it is about', detail)
-        self.assertTrue(set(t.lower() for t in journal.TOPICS).isdisjoint({'preferences', 'promises', 'lessons'}))
+        topics = detail.split('1-6 of: ')[-1].splitlines()[0].lower().split(', ')
+        self.assertTrue(set(topics).isdisjoint({'preferences', 'promises', 'lessons'}))
+        self.assertIn('games and play', topics)
 
     def test_empty_or_incomplete_save_refused_before_worker(self):
         # Asked in review: "does the new build refuse a save missing required fields before anything runs?"
         src = self.message(101, 'Rory: All hail the Lantern Keeper.', at=999)
-        turn = self.turn(1, history=[src])
         for command in ('save', 'save --tag lesson', 'save --text "no source" --tag lesson',
                         f'save --text "no tag" --source {src["id"]} "Lantern Keeper"'):
+            turn = self.turn(1, history=[src])
             self.assertEqual(self.run_cli(turn, command)['status'], 'refused', command)
-            turn.calls = 0
         for raw in ('{}', None):
+            turn = self.turn(1, history=[src])
             call = {'function': {'name': 'journal_commit', **({} if raw is None else {'arguments': raw})}}
             self.assertEqual(turn.invoke(call)['status'], 'refused')
         self.assertNotIn('journal_commit', self.ops)
@@ -132,22 +141,21 @@ class CliTests(unittest.TestCase):
         self.assertIn('recall needs search words', bare['reason'])
         self.assertNotIn('journal_recall', self.ops)
         for raw in ('{}', None, '{"query":""}', '{"query":"   "}'):
-            turn.calls = 0
+            turn = self.turn(2, 'What do you remember?')
             call = {'function': {'name': 'journal_recall', **({} if raw is None else {'arguments': raw})}}
             result = turn.invoke(call)
             self.assertEqual(result['status'], 'refused', raw)
             self.assertNotIn('entries', result)
 
     def test_replayed_call_shows_the_bounded_command(self):
-        call = {'function': {'name': 'journal', 'arguments': json.dumps({'command': 'save --text "crown" --tag lesson'})}}
-        self.assertEqual(json.loads(journal.replay_arguments(call)), {'command': 'save --text "crown" --tag lesson'})
-        long = {'function': {'name': 'journal', 'arguments': json.dumps({'command': 'recall ' + '雪' * 600})}}
-        replay = journal.replay_arguments(long)
-        self.assertLessEqual(len(replay.encode()), journal.REPLAY_BYTES + 64)
-        self.assertTrue(json.loads(replay)['command'].endswith('[truncated]'))
-        for bad in ({'function': {'name': 'journal', 'arguments': '<markup>'}},
-                    {'function': {'name': 'journal_commit', 'arguments': '{"text":"x"}'}}, {}):
-            self.assertEqual(journal.replay_arguments(bad), '{}')
+        turn = self.turn(1, 'What do you remember?')
+        self.run_cli(turn, 'save --text "crown" --tag lesson')
+        self.assertEqual(json.loads(turn.replay), {'command': 'save --text "crown" --tag lesson'})
+        self.run_cli(turn, 'recall ' + '雪' * 600)
+        self.assertLessEqual(len(turn.replay.encode()), 1024 + 64)
+        self.assertTrue(json.loads(turn.replay)['command'].endswith('[truncated]'))
+        turn.invoke({'function': {'name': 'journal', 'arguments': '<markup>'}})
+        self.assertEqual(turn.replay, '{}')
 
     def test_unprompted_save_needs_a_stored_reason(self):
         self.saved(1)  # first entry: the bootstrap turn needs no reason
@@ -162,7 +170,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(saved['status'], 'committed', saved)
         found = self.run_cli(self.turn(3, 'lunch?'), 'recall lunch noon')['entries']
         self.assertEqual(found[0]['annotations']['reason'], 'postmortem: entry 9 receipt confirmed')
-        self.assertIn('--reason', journal.help_text('save', False))
+        self.assertIn('--reason', help_text('save', False))
         for text in ('Please remember this: lunch is at noon.', 'Note that the kite was green.',
                      "Don't forget the tin tithe.", 'Add this to your journal.'):
             self.assertFalse(self.turn(4, text).needs_reason, text)
@@ -186,7 +194,6 @@ class CliTests(unittest.TestCase):
             self.assertEqual(result['status'], 'refused', command)
             self.assertIn('run: help', result['reason'])
         self.assertEqual(turn.calls, journal.MAX_CALLS)
-        self.assertFalse(turn.handles({'function': {'name': 'journal', 'arguments': '{"command":"help"}'}}))
         self.assertEqual(self.run_cli(turn, 'recall x'), {'status': 'refused', 'reason': 'turn_budget'})
 
     def test_bad_supersedes_and_topics_are_refused_without_writing(self):

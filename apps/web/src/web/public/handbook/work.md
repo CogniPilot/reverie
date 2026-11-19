@@ -37,6 +37,8 @@ Check sharing permission and use a real file path. The message gets a download c
 
 Use task-specific `/tmp/<task>` for temporary builds, disposable checkouts, caches and regenerable downloads. Check shared disk capacity before heavy work. Temporary storage may be wiped: recreate and verify source revisions, input hashes and tools each run. Use normal project commands and provided defaults. See [Laptop storage](/handbook/laptops) for the full rule.
 
+The laptop's packaged Cargo launcher puts default build outputs in scratch. For scripts that invoke Cargo directly, use a leased task workspace or set `CARGO_TARGET_DIR` under the task's scratch directory. Copy selected artifacts to durable storage before releasing the task.
+
 Keep unique data, unpushed or uncommitted work, cited evidence, results and one-attempt latches durable. Configuration, credentials and installed tools stay outside disposable roots. Save and verify a handoff before cleanup; remove task-owned registered outputs after sealing. Registration, names and gitignore alone do not prove disposability. Respect live leases; protect sockets and runtime state. Never move a cache in use or a live socket by hand.
 
 Owners may select another drive through deployment configuration or a mount. On the host, derive paths from HOME.

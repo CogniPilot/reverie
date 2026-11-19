@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -13,6 +14,8 @@ from test_coding_support import FakeChat, cfg_for
 
 OWNER = {'kind': 'user', 'name': 'Owner', 'mark': 'owner_typed', 'authenticatedOwner': True}
 DELEGATE = {'kind': 'agent', 'sessionId': 'session-operator', 'name': 'Operator'}
+MEMORY_SESSION = '10000000-0000-0000-0000-000000000001'
+MEMORY_ROOM = '20000000-0000-0000-0000-000000000002'
 
 
 class AuthorizationTests(unittest.TestCase):
@@ -148,6 +151,43 @@ class AuthorizationTests(unittest.TestCase):
         self.assertIsNone(self.authorize())
         self.assertEqual(self.chat.timeout, 60)
 
+
+class HarnessConfigurationTests(unittest.TestCase):
+    def test_scoped_task_keeps_launcher_data_root_and_rejects_competing_config(self):
+        import coding_chat
+        with tempfile.TemporaryDirectory() as directory:
+            env={'REVERIE_SESSION_ID':MEMORY_SESSION,'REVERIE_DATA_DIR':str(Path(directory)/'selected'),
+                 'REVERIE_AGENT_HOME':str(Path(directory)/'home'),'HOME':directory,
+                 'REVERIE_API_URL':'http://127.0.0.1:12345','PATH':os.environ.get('PATH', os.defpath)}
+            selected=Path(env['REVERIE_DATA_DIR'])/'hands'/MEMORY_SESSION/'agent.json'
+            cfg={'self_session_id':MEMORY_SESSION,'_config_path':str(selected),'coding':{'tasks':{'fixture':{'office_access':True}}}}
+            with patch.dict(os.environ,env,clear=True):
+                scoped=coding_chat.office_environment(cfg,'fixture')
+                self.assertEqual(scoped['REVERIE_DATA_DIR'],env['REVERIE_DATA_DIR'])
+                self.assertEqual(scoped['REVERIE_AGENT_HOME'],env['REVERIE_AGENT_HOME'])
+                cfg['_config_path']=str(Path(directory)/'.reverie/hands'/MEMORY_SESSION/'agent.json')
+                with self.assertRaises(ValueError): coding_chat.office_environment(cfg,'fixture')
+
+    def test_config_alias_and_other_session_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env={'REVERIE_DATA_DIR':directory,'REVERIE_SESSION_ID':MEMORY_ROOM,
+                 'REVERIE_API_URL':'http://127.0.0.1:12345','PATH':os.environ.get('PATH', os.defpath)}
+            cfg={'self_session_id':MEMORY_SESSION,'coding':{'tasks':{'fixture':{'office_access':True}}}}
+            with patch.dict(os.environ,env,clear=True), self.assertRaises(ValueError):
+                coding_chat.office_environment(cfg,'fixture')
+            alias=Path(directory)/'alias'; alias.symlink_to(directory, target_is_directory=True)
+            env.update(REVERIE_SESSION_ID=MEMORY_SESSION,REVERIE_DATA_DIR=str(alias))
+            with patch.dict(os.environ,env,clear=True), self.assertRaises(ValueError):
+                coding_chat.office_environment(cfg,'fixture')
+
+    def test_external_marker_does_not_grant_authority(self):
+        message = {'text': '[external agent] /code example Fix it. @Jester',
+                   'from': {'kind': 'agent', 'sessionId': 'external'}}
+        self.assertEqual(coding_chat.control_request(message)['task_id'], 'example')
+        settings = {'tasks': {'example': {'rooms': ['room'], 'delegate_sessions': []}}}
+        self.assertFalse(coding_chat.permitted_sender(settings, 'room', 'example', message))
+        settings['tasks']['example']['delegate_sessions'] = ['external']
+        self.assertTrue(coding_chat.permitted_sender(settings, 'room', 'example', message))
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,469 @@
+#![cfg(unix)]
+
+use rusqlite::{Connection, params};
+use serde_json::{Value, json};
+use std::{
+    fs,
+    os::unix::fs::symlink,
+    path::{Path, PathBuf},
+    process::{Command, Output, Stdio},
+};
+
+struct Fixture(PathBuf);
+impl Fixture {
+    fn new() -> Self {
+        let path =
+            nix::unistd::mkdtemp(&std::env::temp_dir().join("rv-oc-install-XXXXXX")).unwrap();
+        symlink(
+            env!("CARGO_BIN_EXE_reverie-admin-memory"),
+            path.join("reverie-opencode"),
+        )
+        .unwrap();
+        symlink(
+            env!("CARGO_BIN_EXE_reverie-admin-memory"),
+            path.join("reverie-opencode-bridge"),
+        )
+        .unwrap();
+        Self(path)
+    }
+
+    fn run(&self, workspace: &Path, flags: &[&str]) -> Output {
+        Command::new(self.0.join("reverie-opencode"))
+            .env_clear()
+            .arg("--install")
+            .arg(workspace)
+            .args(flags)
+            .output()
+            .unwrap()
+    }
+
+    fn instance(&self) -> PathBuf {
+        let instance = self.0.join("instance.json");
+        fs::write(
+            &instance,
+            json!({"id": "fixture", "agent_name":"Fixture", "owner_name":"Owner",
+                   "persona":"Check sources.", "data_dir":"state"})
+            .to_string(),
+        )
+        .unwrap();
+        instance
+    }
+
+    fn bridge(&self, instance: &Path, request: Value) -> Output {
+        self.bridge_with(instance, request, |_| ())
+    }
+
+    fn bridge_with(
+        &self,
+        instance: &Path,
+        request: Value,
+        configure: impl FnOnce(&mut Command),
+    ) -> Output {
+        let mut command = Command::new(self.0.join("reverie-opencode"));
+        command
+            .env_clear()
+            .env("REVERIE_ROOT", &self.0)
+            .args(["--bridge", "--instance"])
+            .arg(instance);
+        configure(&mut command);
+        send(command, &request)
+    }
+}
+
+fn send(mut command: Command, request: &Value) -> Output {
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    serde_json::to_writer(child.stdin.take().unwrap(), request).unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[path = "support/opencode_maintenance.rs"]
+mod maintenance;
+#[path = "support/maintenance_model.rs"]
+mod maintenance_model;
+#[path = "support/opencode_memory.rs"]
+mod memory;
+
+impl Drop for Fixture {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn data(path: impl AsRef<Path>) -> Value {
+    serde_json::from_slice(&fs::read(path).unwrap()).unwrap()
+}
+
+fn reply(output: Output) -> Value {
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+fn seed_earlier_ballot(path: &Path, category: &str, weeks: i64) {
+    let database = Connection::open(path).unwrap();
+    let inserted = database
+        .execute(
+            "INSERT INTO reverie_ballots
+             SELECT category, week - ?1, proposal_hash, proposal, reason, at - ?1 * 604800
+             FROM reverie_ballots WHERE category = ?2 ORDER BY week DESC LIMIT 1",
+            params![weeks, category],
+        )
+        .unwrap();
+    assert_eq!(inserted, 1);
+}
+
+#[test]
+fn compatibility_alias_reads_default_context_without_initializing_a_store() {
+    let fixture = Fixture::new();
+    let data = fixture.0.join("existing-data");
+    let persona = fixture.0.join("existing-persona.txt");
+    fs::write(&persona, "Existing private persona.").unwrap();
+    let request = |input: Value| {
+        let mut command = Command::new(fixture.0.join("reverie-opencode-bridge"));
+        command
+            .env_clear()
+            .env("REVERIE_ROOT", &fixture.0)
+            .env("REVERIE_DATA_DIR", &data)
+            .env("REVERIE_PERSONA", &persona);
+        send(command, &input)
+    };
+    let context = reply(request(json!({})));
+    assert!(
+        context
+            .as_str()
+            .unwrap()
+            .contains("Existing private persona.")
+    );
+    let work = reply(request(json!({"action":"context","channel":"work"})));
+    let work = work.as_str().unwrap();
+    assert!(work.contains("shared work channel"));
+    assert!(!work.contains("Existing private persona."));
+    assert!(!data.exists());
+    assert!(!request(json!({"action":"unknown"})).status.success());
+}
+
+#[test]
+fn both_command_names_support_explicit_context_with_native_dispatch() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let request = json!({"action":"context","channel":"work"});
+    let modern = reply(fixture.bridge(&instance, request.clone()));
+    for name in ["reverie-opencode", "reverie-opencode-bridge"] {
+        let mut command = Command::new(fixture.0.join(name));
+        command.env_clear().args(["--instance"]).arg(&instance);
+        assert_eq!(reply(send(command, &request)), modern);
+    }
+    assert!(modern.as_str().unwrap().contains("Your name is Fixture."));
+    assert!(!fixture.0.join("state").exists());
+}
+
+#[test]
+fn native_activity_refuses_remote_endpoints_and_isolates_research() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let request = |url| {
+        json!({"action":"activity","runtime":{
+            "url":url,"session_id":"ses_fixture","directory":"/workspace"
+        }})
+    };
+    for remote in [
+        "https://localhost:3000",
+        "http://example.org",
+        "http://user@localhost",
+    ] {
+        assert!(!fixture.bridge(&instance, request(remote)).status.success());
+    }
+    let result = reply(fixture.bridge(
+        &instance,
+        json!({"action":"activity","research_cycle_id":"research-fixture"}),
+    ));
+    assert_eq!(result, json!({"ok":true,"research":true}));
+    let mode = reply(fixture.bridge(&instance, json!({"action":"mode"})));
+    assert_eq!(mode, json!({"mode":"active"}));
+    assert!(!fixture.0.join("state").exists());
+    assert_eq!(
+        reply(fixture.bridge(&instance, request("http://[::1]:3000"))),
+        json!({"ok":true})
+    );
+    let store =
+        reverie_store::memory::MemoryStore::open(fixture.0.join("state/memory.sqlite")).unwrap();
+    let runtime = store.get_state("reverie_runtime", None).unwrap().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&runtime).unwrap(),
+        request("http://[::1]:3000")["runtime"]
+    );
+    assert!(
+        store
+            .get_state("reverie_last_activity", None)
+            .unwrap()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+            > 0.0
+    );
+    store.close().unwrap();
+}
+
+#[test]
+fn native_state_reuses_plan_revisions_profiles_and_briefing() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let initial = reply(fixture.bridge(&instance, json!({"action":"plan"})));
+    assert_eq!(initial["revision"], 0);
+    assert!(initial.get("updated_at").is_none());
+    let write = || {
+        fixture.bridge(
+            &instance,
+            json!({"action":"plan","revision":0,"text":"Keep the build green."}),
+        )
+    };
+    assert_eq!(reply(write())["revision"], 1);
+    assert!(!write().status.success());
+    assert_eq!(
+        reply(fixture.bridge(&instance, json!({"action":"plan"})))["body"],
+        "Keep the build green."
+    );
+    let profile = reply(fixture.bridge(&instance, json!({
+        "action":"profile","name":"compiler","revision":0,
+        "profile":{"role":"Compiler maintainer","short_term":"Check the parser","memory_queries":["grammar"]}
+    })));
+    let profiles = reply(fixture.bridge(&instance, json!({"action":"profiles"})));
+    assert_eq!(profiles["compiler"], profile);
+    let brief = reply(fixture.bridge(
+        &instance,
+        json!({
+            "action":"brief","names":["compiler"],"task":"Review the grammar"
+        }),
+    ));
+    assert!(brief.as_str().unwrap().contains("Compiler maintainer"));
+    assert!(brief.as_str().unwrap().contains("Review the grammar"));
+}
+
+#[test]
+fn native_self_changes_still_require_recorded_core_ballots() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let initial = reply(fixture.bridge(&instance, json!({"action":"self"})));
+    assert_eq!(initial["revision"], 1);
+    let mut model = initial["body"].clone();
+    model["persona"] = json!("I protect existing data.");
+    let set = |model, revision| {
+        fixture.bridge(
+            &instance,
+            json!({"action":"self","model":model,"reason":"fixture","revision":revision}),
+        )
+    };
+    let initialized = reply(set(model.clone(), 1));
+    assert_eq!(initialized["revision"], 2);
+    let mut other = model;
+    other["consciousness"] = json!("Review plans.");
+    assert!(!set(other.clone(), 2).status.success());
+    let vote = || {
+        reply(fixture.bridge(
+            &instance,
+            json!({"action":"self_vote","model":other,"reason":"fixture"}),
+        ))
+    };
+    let first = vote();
+    assert_eq!(first["ballot"]["consecutive_weeks"], 1);
+    assert_eq!(first["ballot"]["approved"], false);
+    assert_eq!(first["self"], initialized);
+    assert_eq!(vote(), first);
+    assert_eq!(
+        reply(fixture.bridge(&instance, json!({"action":"votes"})))[0]["category"],
+        "core"
+    );
+    let database = fixture.0.join("state/memory.sqlite");
+    seed_earlier_ballot(&database, "core", 2);
+    assert_eq!(vote(), first);
+    seed_earlier_ballot(&database, "core", 1);
+    let approved = vote();
+    assert_eq!(approved["ballot"]["consecutive_weeks"], 3);
+    assert_eq!(approved["self"]["revision"], 3);
+    assert_eq!(
+        approved["self"]["body"]["consciousness"],
+        other["consciousness"]
+    );
+    assert_eq!(approved["self"]["body"]["persona"], other["persona"]);
+}
+
+#[test]
+fn native_publication_ballots_record_only_an_owner_review_request() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let proposal = "Review the public adapter. Exclude private history.";
+    let vote = || {
+        reply(fixture.bridge(
+        &instance,
+        json!({"action":"publication_proposal","proposal":proposal,"reason":"Consider a release"}),
+    ))
+    };
+    let first = vote();
+    assert_eq!(first["ballot"]["approved"], false);
+    let path = fixture.0.join("state/memory.sqlite");
+    let database = Connection::open(&path).unwrap();
+    let document = || {
+        database.query_row(
+            "SELECT body FROM reverie_documents WHERE name='publication_request'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+    };
+    assert!(matches!(
+        document(),
+        Err(rusqlite::Error::QueryReturnedNoRows)
+    ));
+    seed_earlier_ballot(&path, "publication", 1);
+    seed_earlier_ballot(&path, "publication", 2);
+    let approved = vote();
+    assert_eq!(approved["ballot"]["approved"], true);
+    let record: Value = serde_json::from_str(&document().unwrap()).unwrap();
+    assert_eq!(record["proposal"], proposal);
+    assert_eq!(record["status"], "owner_review_required");
+    assert_eq!(record["automatic_upload"], false);
+}
+
+#[test]
+fn native_record_preserves_turn_identity_and_the_project_scope_on_retry() {
+    let fixture = Fixture::new();
+    let instance = fixture.instance();
+    let mut request = json!({"action":"record","source_id":"opencode:session:turn","user":"Build status?",
+                            "reply":"The test passed.","visibility":"project"});
+    let result = reply(fixture.bridge(&instance, request.clone()));
+    request["reply"] = json!("A second reply");
+    request["visibility"] = json!("private");
+    assert_eq!(reply(fixture.bridge(&instance, request)), result);
+
+    let store =
+        reverie_store::memory::MemoryStore::open(fixture.0.join("state/memory.sqlite")).unwrap();
+    let record = store.get(result["memory_id"].as_i64().unwrap()).unwrap();
+    let record: Value = serde_json::from_slice(record.as_dict().as_json()).unwrap();
+    assert_eq!(record["assistant_text"], "The test passed.");
+    assert_eq!(record["meta"]["visibility"], "project");
+    store.close().unwrap();
+}
+
+#[test]
+fn native_cli_installs_scoped_profiles_without_a_python_environment() {
+    let fixture = Fixture::new();
+    let workspace = fixture.0.join("workspace");
+    let instance = fixture.0.join("Jules' instance.json");
+    fs::write(
+        &instance,
+        json!({
+            "id":"employee-fixture", "agent_name":"Rêverie", "owner_name":"Owner",
+            "role":"Researcher","kind":"cto", "persona":"A bounded assistant.", "data_dir":"state",
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let output = fixture.run(
+        &workspace,
+        &[
+            "--instance",
+            instance.to_str().unwrap(),
+            "--model",
+            "local/model",
+            "--api-base",
+            "http://127.0.0.1:8888/v1/",
+            "--api-key-env",
+            "MODEL_KEY",
+        ],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["model"],
+        "local/model"
+    );
+    let marker = data(workspace.join(".reverie-instance"));
+    assert_eq!(marker["bridge"], "reverie-opencode-bridge");
+    assert!(marker.get("python").is_none() && marker.get("source").is_none());
+    assert_eq!(
+        marker["instance"],
+        instance.canonicalize().unwrap().to_str().unwrap()
+    );
+    let config = data(workspace.join("opencode.json"));
+    assert_eq!(config["default_agent"], "chat");
+    assert_eq!(
+        config["provider"]["local"]["options"]["apiKey"],
+        "{env:MODEL_KEY}"
+    );
+    assert_eq!(
+        config["provider"]["local"]["options"]["baseURL"],
+        "http://127.0.0.1:8888/v1"
+    );
+    assert_eq!(config["agent"]["chat"]["permission"]["*"], "deny");
+    assert_eq!(config["agent"]["coding"]["permission"]["bash"], "ask");
+    assert!(
+        config["agent"]["chat"]["prompt"]
+            .as_str()
+            .unwrap()
+            .contains("Rêverie")
+    );
+    let instructions = fs::read_to_string(workspace.join("AGENTS.md")).unwrap();
+    assert!(
+        instructions.contains("'Jules'\"'\"' instance.json")
+            || instructions.contains("/Jules'\"'\"' instance.json")
+    );
+    assert!(
+        workspace
+            .join(".claude/skills/reverie-memory/SKILL.md")
+            .is_file()
+    );
+    assert!(!fixture.0.join("state").exists());
+}
+
+#[test]
+fn native_install_respects_owner_policy_and_unmanaged_files() {
+    let fixture = Fixture::new();
+    let workspace = fixture.0.join("workspace");
+    fs::create_dir(&workspace).unwrap();
+    let config = workspace.join("opencode.json");
+    fs::write(&config, b"owner configuration").unwrap();
+    assert!(!fixture.run(&workspace, &[]).status.success());
+    assert_eq!(fs::read_to_string(&config).unwrap(), "owner configuration");
+    fs::remove_file(&config).unwrap();
+    assert!(
+        !fixture
+            .run(
+                &workspace,
+                &["--api-base", "https://user:password@example.org/v1"]
+            )
+            .status
+            .success()
+    );
+    assert!(!config.exists());
+    assert!(fixture.run(&workspace, &[]).status.success());
+    let policy = workspace.join(".opencode/interaction-policy.json");
+    fs::write(
+        &policy,
+        r#"{"enabled":false, "coding_agent":"owner-profile"}"#,
+    )
+    .unwrap();
+    let obsolete = workspace.join(".opencode/plugins/reverie.mjs");
+    fs::write(&obsolete, "legacy managed duplicate").unwrap();
+    assert!(
+        fixture
+            .run(&workspace, &["--model", "provider/model"])
+            .status
+            .success()
+    );
+    assert_eq!(
+        data(&policy),
+        json!({"enabled":false,"coding_agent":"owner-profile"})
+    );
+    assert!(!obsolete.exists());
+    assert_eq!(data(config)["model"], "provider/model");
+}

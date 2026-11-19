@@ -17,7 +17,7 @@ fn main() {
             println!("preserved existing build-dir")
         }
         Ok(reverie_laptop_tools::MergeOutcome::Merged) => {
-            println!("merged Cargo build-dir; final artifacts remain in ./target")
+            println!("merged Cargo build-dir; final artifacts follow the Cargo target directory")
         }
         Err(error) => {
             eprintln!("{error}");

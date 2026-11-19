@@ -1,0 +1,54 @@
+[package]
+name = "reverie-admin-memory"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+test-fixtures = []
+
+[[bin]]
+name = "reverie-room-fixture"
+path = "tests/support/office.rs"
+required-features = ["test-fixtures"]
+
+[dependencies]
+base64.workspace = true
+bytes.workspace = true
+clap.workspace = true
+crossterm.workspace = true
+getrandom.workspace = true
+html5ever.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+idna.workspace = true
+indexmap.workspace = true
+jiff.workspace = true
+nix = { workspace = true, features = ["fs", "poll", "signal", "process", "term", "user"] }
+regex-lite.workspace = true
+reverie-application.workspace = true
+reverie-contracts.workspace = true
+reverie-core.workspace = true
+reverie-host.workspace = true
+reverie-http.workspace = true
+reverie-python-regex.workspace = true
+reverie-store.workspace = true
+reverie-time-zone.workspace = true
+rusqlite.workspace = true
+rustls.workspace = true
+rustls-platform-verifier.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+unicode-width.workspace = true
+
+[dev-dependencies]
+tar.workspace = true
+
+[lints]
+workspace = true

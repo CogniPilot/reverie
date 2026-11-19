@@ -1,9 +1,10 @@
 /** Real TLS preview, real owner login and browser origin/storage isolation. Synthetic files only. */
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import { expect, it } from 'vitest';
@@ -16,61 +17,93 @@ import { registerOwnerPolicy } from '../src/owner-auth/policy.js';
 import { registerOwnerRoutes } from '../src/owner-auth/routes.js';
 import { registerPreviewRoutes } from '../src/web/routes/preview-routes.js';
 
+function previewFixture(task: string): string {
+  const prebuilt = process.env.TEST_PREVIEW_BROWSER_FIXTURE;
+  if (prebuilt) return prebuilt;
+  const crate = 'reverie-preview';
+  const binary = 'reverie-preview-browser-fixture';
+  const output = execFileSync(
+    'cargo',
+    ['build', '--locked', '-p', crate, '--features', 'browser-fixture', '--bin', binary, '--message-format=json'],
+    {
+      cwd: fileURLToPath(new URL('../../../', import.meta.url)),
+      env: { ...process.env, CARGO_TARGET_DIR: process.env.CARGO_TARGET_DIR ?? join(task, 'target') },
+      encoding: 'utf8',
+      timeout: 120_000,
+    }
+  );
+  for (const line of output.trim().split('\n')) {
+    const artifact = JSON.parse(line) as { reason?: string; target?: { name: string }; executable?: string };
+    if (artifact.reason === 'compiler-artifact' && artifact.target?.name === binary && artifact.executable)
+      return artifact.executable;
+  }
+  throw new Error('Cargo did not produce the preview browser fixture');
+}
+
 it('opens a real HTTPS agent page and WASM, blocks office API/storage access and revokes it', async () => {
   const task = await mkdtemp(join(tmpdir(), 'previews-browser-'));
-  execFileSync(
-    'openssl',
-    [
-      'req',
-      '-x509',
-      '-newkey',
-      'rsa:2048',
-      '-nodes',
-      '-days',
-      '1',
-      '-keyout',
-      join(task, 'key.pem'),
-      '-out',
-      join(task, 'cert.pem'),
-      '-subj',
-      '/CN=*.preview.test',
-      '-addext',
-      'subjectAltName=DNS:*.preview.test',
-    ],
-    { stdio: 'ignore' }
-  );
   const previous = process.env.REVERIE_PREVIEW_SOCKET;
-  process.env.REVERIE_PREVIEW_SOCKET = join(task, 'preview.sock');
-  const child = spawn('python3', [resolve('../../tests/fixtures/preview_browser.py'), task], {
-    env: { ...process.env, PYTHONPATH: resolve('../../python') },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  let child: ReturnType<typeof spawn> | undefined;
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
   const app = Fastify();
-  let errors = '';
-  child.stderr.on('data', (value) => {
-    errors += value;
-  });
-  const browser = await chromium.launch({
-    headless: true,
-    args: ['--host-resolver-rules=MAP *.preview.test 127.0.0.1', '--no-proxy-server'],
-    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
-      ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
-      : {}),
-  });
   try {
-    const started = await new Promise<{ upstreamPort: number }>((resolve, reject) => {
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-days',
+        '1',
+        '-keyout',
+        join(task, 'key.pem'),
+        '-out',
+        join(task, 'cert.pem'),
+        '-subj',
+        '/CN=*.preview.test',
+        '-addext',
+        'subjectAltName=DNS:*.preview.test',
+      ],
+      { stdio: 'ignore' }
+    );
+    process.env.REVERIE_PREVIEW_SOCKET = join(task, 'preview.sock');
+    const proxy = spawn(previewFixture(task), [task], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    child = proxy;
+    let errors = '';
+    proxy.stderr.on('data', (value) => {
+      errors += value;
+    });
+    const startup = new Promise<{ upstreamPort: number }>((resolve, reject) => {
       let output = '';
       const timer = setTimeout(() => reject(new Error('Preview fixture did not start: ' + errors)), 10000);
-      child.once('exit', () => {
+      const fail = (error: Error) => {
         clearTimeout(timer);
-        reject(new Error('Preview fixture exited: ' + errors));
-      });
-      child.stdout.on('data', (value) => {
+        reject(error);
+      };
+      proxy.once('error', fail);
+      proxy.once('exit', () => fail(new Error('Preview fixture exited: ' + errors)));
+      proxy.stdout.on('data', (value) => {
         output += value;
         if (!output.includes('\n')) return;
         clearTimeout(timer);
-        resolve(JSON.parse(output.trim()));
+        try {
+          resolve(JSON.parse(output.trim()));
+        } catch (error) {
+          reject(error);
+        }
       });
+    });
+    const started = await startup;
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--host-resolver-rules=MAP *.preview.test 127.0.0.1', '--no-proxy-server'],
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+        ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH }
+        : {}),
     });
     const store = new OwnerAuthStore(join(task, 'owner.json'));
     const password = (await bootstrap(store, 'fixture-owner')).oneTimePassword;
@@ -183,9 +216,9 @@ it('opens a real HTTPS agent page and WASM, blocks office API/storage access and
     await other.close();
     await context.close();
   } finally {
-    await browser.close();
+    await browser?.close();
     await app.close();
-    if (child.exitCode === null) {
+    if (child?.pid && child.exitCode === null && child.signalCode === null) {
       child.kill('SIGTERM');
       await once(child, 'exit');
     }
@@ -193,4 +226,4 @@ it('opens a real HTTPS agent page and WASM, blocks office API/storage access and
     else process.env.REVERIE_PREVIEW_SOCKET = previous;
     await rm(task, { recursive: true, force: true });
   }
-}, 30000);
+}, 150000);

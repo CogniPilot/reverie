@@ -11,8 +11,7 @@ import re
 import stat
 import threading
 
-from .hands.command_catalog import CATALOG
-from .hands.command_telemetry import FailureLog, Principal
+from .hands.command_telemetry import COMMAND_KEYS, FailureLog, Principal
 from .worker_storage import canonical, company_records, private_directory, require_uuid, storage_paths, storage_start_allowed
 
 PATH = '/api/command-telemetry/hands'
@@ -27,8 +26,8 @@ def configuration(config):
             type(value.get('enabled')) is not bool):
         raise ValueError('TELEMETRY_CONFIG_REFUSED')
     keys = value.get('keys', [])
-    if (not isinstance(keys, list) or len(keys) > len(CATALOG) or
-            any(type(key) is not str or key not in CATALOG for key in keys) or
+    if (not isinstance(keys, list) or len(keys) > len(COMMAND_KEYS) or
+            any(type(key) is not str or key not in COMMAND_KEYS for key in keys) or
             len(set(keys)) != len(keys) or (value['enabled'] and not keys)):
         raise ValueError('TELEMETRY_CONFIG_REFUSED')
     return value['enabled'], tuple(keys)

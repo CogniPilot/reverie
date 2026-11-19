@@ -10,7 +10,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { createRouteTestHarness } from './_route-test-utils.js';
 import { createMockSession, type MockRouteContext } from '../mocks/index.js';
@@ -27,8 +27,6 @@ import { ownerVerifier } from '../../src/owner-auth/marks.js';
 import * as admin from '../../src/owner-auth/admin.js';
 import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { goalFixtureRepository } from '../goal-source-fixture.js';
 
 const USER = 'owner-test';
 const NEW_PASSWORD = 'synthetic-correct-horse-42';
@@ -151,12 +149,19 @@ describe('chatroom owner marks', () => {
     const history = await app.inject({ url: `/api/chatrooms/${roomId}/messages`, headers });
     expect(history.json().data.messages.find((m: ChatMessage) => m.id === posted.id).from.authenticatedOwner).toBe(true);
     expect(service.room(roomId)!.messages.find(m => m.id === posted.id)!.from).not.toHaveProperty('authenticatedOwner');
-    const python = spawnSync('python3', ['-I', '-c',
-      'import json,sys; sys.path.insert(0,sys.argv[1]); from coding_tasks import permitted_sender; m=json.load(sys.stdin); print(json.dumps(permitted_sender({"tasks":{"workspace":{"rooms":[m["roomId"]]}}},m["roomId"],"workspace",m)))',
-      join(goalFixtureRepository(fileURLToPath(new URL('..', import.meta.url))), 'python/reverie/hands')],
-      { input: JSON.stringify(message), encoding: 'utf8', timeout: 5000 });
-    expect(python.status, python.stderr).toBe(0);
-    expect(JSON.parse(python.stdout)).toBe(true);
+    const target = resolve(import.meta.dirname, '../../../../', process.env.CARGO_TARGET_DIR ?? 'target');
+    const gate = spawnSync(
+      process.env.NIX_TEST_HANDS_ADMISSION ?? join(target, 'debug/reverie-admin-memory'),
+      [`--hands-coding-admission-worker=${process.pid}`],
+      {
+        input: JSON.stringify({ action: 'sender', room: roomId, rooms: [roomId], delegates: [], sender: message.from }),
+        encoding: 'utf8',
+        detached: true,
+        timeout: 5000,
+      }
+    );
+    expect(gate.status, gate.error?.message ?? gate.stderr).toBe(0);
+    expect(JSON.parse(gate.stdout)).toEqual({ permitted: true });
   });
 
   it('never turns an unmarked, limited-human or agent message into owner authority', async () => {

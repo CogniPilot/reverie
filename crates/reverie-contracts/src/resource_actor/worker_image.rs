@@ -1,6 +1,7 @@
 //! Worker factory/native child DATA. Native immutable input, actual engine,
 //! stopped-service and admitted maintenance owners remain independently required.
 use super::*;
+use sha2::{Digest, Sha256};
 pub(super) mod factory;
 pub struct WorkerImageProvenance {
     archive: JournalDigest,
@@ -12,7 +13,6 @@ pub struct WorkerImageProvenance {
 }
 impl WorkerImageProvenance {
     pub fn decode(base: &ArtifactReference, raw: &[u8], annex: &[u8]) -> Result<Self> {
-        use sha2::{Digest, Sha256};
         let before = decode(raw)?;
         let after = decode(annex)?;
         closed(
@@ -41,7 +41,11 @@ impl WorkerImageProvenance {
                 "workerChild",
             ],
         )?;
-        purpose(&before, "worker-image-provenance-v1")?;
+        let generation = WorkerProvenanceVersion::parse(
+            unsigned(field(&before, "version")?)?.to_u64().unwrap_or(0),
+            &scalar(field(&before, "purpose")?)?,
+        )
+        .ok_or(ResourceActorDataError("WORKER_IMAGE_PROFILE_PURPOSE"))?;
         purpose(&after, "worker-child-image-v1")?;
         let base_pin = code(field(&after, "baseProvenance")?)?;
         need(
@@ -62,26 +66,7 @@ impl WorkerImageProvenance {
         factory::validate(field(&before, "factory")?, field(&before, "imageSpec")?)?;
         factory::validate(field(&after, "factory")?, field(&after, "imageSpec")?)?;
         let toolkit = factory::toolkit(field(&before, "toolkit")?)?;
-        let source = field(&before, "source")?;
-        closed(source, &["path", "factoryFiles"])?;
-        need(
-            scalar(field(source, "path")?)?.starts_with("/nix/store/"),
-            "WORKER_IMAGE_SOURCE",
-        )?;
-        need(
-            !object(field(source, "factoryFiles")?)?.is_empty(),
-            "WORKER_IMAGE_SOURCE",
-        )?;
-        for value in object(field(source, "factoryFiles")?)?.values() {
-            closed(value, &["sha256", "bytes"])?;
-            digest(field(value, "sha256")?)?;
-            need(
-                unsigned(field(value, "bytes")?)?
-                    .to_u64()
-                    .is_some_and(|v| v > 0),
-                "WORKER_IMAGE_SOURCE",
-            )?;
-        }
+        source_pins(field(&before, "source")?, generation)?;
         let child = field(&after, "workerChild")?;
         closed(
             child,
@@ -185,6 +170,44 @@ fn purpose(value: &Value, expected: &str) -> Result<()> {
             && scalar(field(value, "purpose")?)? == expected,
         "WORKER_IMAGE_PROFILE_PURPOSE",
     )
+}
+fn source_pins(source: &Value, generation: WorkerProvenanceVersion) -> Result<()> {
+    closed(source, &["path", "factoryFiles"])?;
+    need(
+        scalar(field(source, "path")?)?.starts_with("/nix/store/"),
+        "WORKER_IMAGE_SOURCE",
+    )?;
+    let pins = object(field(source, "factoryFiles")?)?;
+    need(!pins.is_empty(), "WORKER_IMAGE_SOURCE")?;
+    if generation == WorkerProvenanceVersion::Native {
+        let expected = worker_factory_files();
+        need(
+            pins.len() == expected.len()
+                && expected.iter().all(|name| pins.contains_key(&key(name))),
+            "WORKER_IMAGE_SOURCE_INVENTORY",
+        )?;
+        let inventory = pins
+            .get(&key(WORKER_FACTORY_INVENTORY_PATH))
+            .ok_or(ResourceActorDataError("WORKER_IMAGE_SOURCE_INVENTORY"))?;
+        need(
+            scalar(field(inventory, "sha256")?)?
+                == format!("{:x}", Sha256::digest(WORKER_FACTORY_INVENTORY))
+                && unsigned(field(inventory, "bytes")?)?.to_u64()
+                    == Some(WORKER_FACTORY_INVENTORY.len() as u64),
+            "WORKER_IMAGE_SOURCE_INVENTORY",
+        )?;
+    }
+    for value in pins.values() {
+        closed(value, &["sha256", "bytes"])?;
+        digest(field(value, "sha256")?)?;
+        need(
+            unsigned(field(value, "bytes")?)?.to_u64().is_some_and(|v| {
+                v > 0 && (generation == WorkerProvenanceVersion::Legacy || v <= 1 << 20)
+            }),
+            "WORKER_IMAGE_SOURCE",
+        )?;
+    }
+    Ok(())
 }
 fn code(value: &Value) -> Result<CodeFile> {
     closed(value, &["path", "sha256", "bytes"])?;

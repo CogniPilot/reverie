@@ -4,8 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import test_journal_structured as base
-from test_journal_structured import journal
+from tests.hands import test_journal_structured as base
 
 DAY = 86400000
 
@@ -42,14 +41,14 @@ class RecallScoreTests(unittest.TestCase):
 
     def test_scores_combine_scaled_relevance_recency_and_importance(self):
         now = 100 * DAY
-        scores = journal.memory_scores([5.0, 1.0], [now - DAY, now - 29 * DAY], [None, None], now)
+        scores = base.memory_scores([5.0, 1.0], [now - DAY, now - 29 * DAY], [None, None], now)
         self.assertGreater(scores[0], scores[1])  # more relevant and newer
-        recent, old = journal.memory_scores([1.0, 1.0], [now, now - 14 * DAY], [None, None], now)
+        recent, old = base.memory_scores([1.0, 1.0], [now, now - 14 * DAY], [None, None], now)
         self.assertAlmostEqual(recent - old, 0.75)  # equal relevance: two half-lives apart
-        tied = journal.memory_scores([2.0, 2.0], [now, now], ['keystone', None], now)
+        tied = base.memory_scores([2.0, 2.0], [now, now], ['keystone', None], now)
         self.assertAlmostEqual(tied[0] - tied[1], 1.0)
-        self.assertEqual(journal.memory_scores([], [], [], now), [])
-        close = journal.memory_scores([1.0, 1.0], [now, now - 60000], [None, None], now)
+        self.assertEqual(base.memory_scores([], [], [], now), [])
+        close = base.memory_scores([1.0, 1.0], [now, now - 60000], [None, None], now)
         self.assertLess(abs(close[0] - close[1]), 0.001)  # saved a minute apart: no artificial recency gap
 
 

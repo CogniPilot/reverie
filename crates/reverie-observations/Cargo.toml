@@ -14,6 +14,10 @@ name = "reverie-prune-receipts"
 path = "src/bin/reverie-prune-receipts.rs"
 
 [[bin]]
+name = "reverie-prune-report-export"
+path = "src/bin/reverie-prune-report-export/main.rs"
+
+[[bin]]
 name = "reverie-collect"
 path = "src/bin/reverie-collect.rs"
 
@@ -26,11 +30,15 @@ name = "reverie-collect-state"
 path = "src/bin/reverie-collect-state.rs"
 
 [dependencies]
+chrono.workspace = true
 clap.workspace = true
+getrandom.workspace = true
 libc.workspace = true
 nix = { workspace = true, features = ["fs", "poll", "resource", "signal", "user"] }
 reverie-contracts.workspace = true
 reverie-core.workspace = true
+rustix = { workspace = true, features = ["fs"] }
+serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 

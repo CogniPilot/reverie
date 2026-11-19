@@ -12,7 +12,6 @@ from reverie.cycle import Cycle
 from reverie.cycle_budget import Ledger, BudgetExhausted, MeteredClient
 from reverie.cycle_runner import run_process
 from reverie.memory import MemoryStore
-from reverie.plan_usage import capacity
 
 
 class FakeRunner:
@@ -80,8 +79,9 @@ class CycleTests(unittest.TestCase):
                            'usage':{'prompt_tokens':100,'completion_tokens':50,'total_tokens':150}}).encode()
 
     def test_complete_day_routes_child_verifies_work_consolidates_and_discards_raw_dream(self):
-        with self.cycle.agent('math') as (_,store,_):
+        with self.cycle.agent('math') as (_,store,reverie):
             store.add_episode('PRIVATE_INTERACTION_SENTINEL: please check small examples.','I will remember.')
+            reverie.write('plan', 'Verify native wake context.', 0)
         now=datetime(2026,10,15,12,tzinfo=timezone.utc)
         with patch('reverie.cycle.Config',side_effect=lambda **kw:Config(dreams_per_sleep=1,**kw)):
             result=self.cycle.run(now,force=True,available=self.cycle.models)
@@ -92,9 +92,14 @@ class CycleTests(unittest.TestCase):
         for name in ('cto','math'):
             phases={p['phase']:p['status'] for p in result['agents'][name]}
             self.assertEqual(phases['sleeping'],'completed')
-            with self.cycle.agent(name) as (_,store,_):
+            with self.cycle.agent(name) as (_,store,reverie):
                 dream=store.latest_dream(); self.assertTrue(dream.meta['summary_only'])
                 self.assertNotIn('lattice folds',dream.text)
+                wake=reverie.read('cycle:2026-10-15:waking')['body']
+                self.assertEqual((wake['model'], wake['role']), ('local', name))
+                self.assertNotIn('PRIVATE_INTERACTION_SENTINEL', wake['context'])
+                if name=='math':
+                    self.assertIn('Verify native wake context.', wake['context'])
         shared=MemoryStore(self.root/'projects/demo/memory.sqlite')
         try: self.assertNotIn('PRIVATE_INTERACTION_SENTINEL',json.dumps([m.as_dict() for m in shared.all()]))
         finally: shared.close()
@@ -110,7 +115,7 @@ class CycleTests(unittest.TestCase):
             with self.subTest(dreaming=flag):
                 day=f'2026-01-{index+1:02d}'
                 if flag is not None: self.cycle.agents['math']['dreaming']=flag
-                with patch('reverie.cycle.Dreamer') as dreamer:
+                with patch('reverie.cycle.WorkerSocket') as dreamer:
                     self.cycle.night('math','local',day)
                 dreamer.assert_not_called()
                 self.assertEqual(self.calls,[])
@@ -175,14 +180,26 @@ class CycleTests(unittest.TestCase):
         self.assertLess(result['seconds'],4)
 
     def test_plan_reset_requires_fresh_reading_and_checks_both_windows(self):
-        now=1000
-        reading={'id':'example','status':'ready','updatedAt':now*1000,'usage':{
+        reading={'id':'example','status':'ready','updatedAt':1000*1000,'usage':{
             'fiveHour':{'usedPercentage':100,'resetAt':1100*1000},
             'sevenDay':{'usedPercentage':99,'resetAt':2000*1000}}}
-        value=capacity(reading,now)
-        self.assertFalse(value['available']); self.assertEqual(value['retry_at'],2000)
-        reading['updatedAt']=1200*1000
-        self.assertFalse(capacity(reading,1200)['available'])
-        reading['usage']['fiveHour']={'usedPercentage':0,'resetAt':1600*1000}
-        reading['usage']['sevenDay']={'usedPercentage':0,'resetAt':3000*1000}
-        self.assertTrue(capacity(reading,1200)['available'])
+        source={'api_url':'http://unused'}
+        with patch('reverie.cycle.Office') as office, patch('reverie.cycle.time.time', return_value=1000) as clock:
+            call=office.return_value.call
+            call.return_value={'accounts':[reading]}
+            value=self.cycle.refresh_plans(source)['example']
+            self.assertFalse(value['available']); self.assertEqual(value['retry_at'],2000)
+            with self.cycle.ledger.db:
+                self.cycle.ledger.db.execute('INSERT INTO plan_samples VALUES (?,?,?)',
+                                             ('expired',1200-30*86400-1,'{}'))
+            clock.return_value=1200
+            reading['updatedAt']=1200*1000
+            self.assertFalse(self.cycle.refresh_plans(source)['example']['available'])
+            reading['usage']['fiveHour']={'usedPercentage':0,'resetAt':1600*1000}
+            reading['usage']['sevenDay']={'usedPercentage':0,'resetAt':3000*1000}
+            good=self.cycle.refresh_plans(source)['example']
+            self.assertTrue(good['available'])
+            call.assert_called_with('GET','/api/subscription-profiles/usage')
+        rows=self.cycle.ledger.db.execute('SELECT sampled_at, body FROM plan_samples ORDER BY rowid').fetchall()
+        self.assertEqual([row[0] for row in rows],[1000,1200,1200])
+        self.assertEqual(json.loads(rows[-1][1]),good)

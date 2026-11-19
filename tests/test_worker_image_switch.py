@@ -3,7 +3,6 @@ import copy
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import unittest
@@ -104,30 +103,7 @@ class StartupFences(_Fixture):
             self.service.action('start')
         self.assertFalse(any(args[:3] == ['systemctl', '--user', 'start'] for args in self.calls))
 
-    def test_legacy_unit_precheck_remains_fenced_without_public_host_exports(self):
-        root = Path(__file__).parents[1]
-        flake = (root / 'flake.nix').read_text()
-        # Public packages expose only build-time image artifacts. The old host
-        # unit remains an explicit compatibility fixture, never a default export.
-        self.assertRegex(flake, r'workerImageArtifacts = import ./nix/worker-image-artifacts\.nix \{\s*'
-                               r'inherit pkgs; src = source; inherit \(packages\) console;\s*\};')
-        self.assertIn('in packages // workerImageArtifacts // {', flake)
-        self.assertNotIn('in packages // nativeWorkerPackages // {', flake)
-        artifacts = (root / 'nix/worker-image-artifacts.nix').read_text()
-        self.assertRegex(artifacts, r'inputs = import ./native-worker-packages\.nix \{ inherit pkgs src console; \};')
-        selected = re.search(r'inherit \(inputs\)([^;]+);', artifacts)
-        self.assertIsNotNone(selected)
-        self.assertEqual(set(selected.group(1).split()), {
-            'nativeWorkerPoolAnchorImage', 'nativeWorkerResourceController',
-            'nativeWorkerResourceControllerImage', 'nativeWorkerPoolImageInputs',
-            'nativePerfGuestCapsule', 'workerDockerSeccomp',
-            'workerTaskPerfPolicy', 'workerTaskPerfPolicyV2',
-        })
-        factory = (root / 'nix/native-worker-packages.nix').read_text()
-        self.assertIn('worker_service.py', factory)
-        self.assertRegex(factory, r'worker_service[^\n]*"\$@" check-backend')
-        self.assertIn('previousUnit = legacyWorkerService;', factory)
-        self.assertIn('ExecStartPre=${legacyWorkerServiceCheck}/bin/reverie-worker-service-check', factory)
+    def test_legacy_backend_check_refuses_durable_fence(self):
         self.fence()
         original = S.WorkerService.__init__
         fixture = self

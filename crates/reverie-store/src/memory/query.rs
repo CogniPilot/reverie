@@ -1,4 +1,6 @@
 use super::*;
+use reverie_contracts::memory::channel::{ChannelEvidence, ChannelRecords};
+use reverie_core::ids::ChatRoomId;
 use reverie_core::memory::{self, DREAM, EPISODE, EmbeddingKind, REFLECTION};
 use rusqlite::{params, params_from_iter};
 pub struct RetrievalOptions<'a> {
@@ -126,6 +128,16 @@ fn memories(mut rows: rusqlite::Rows<'_>) -> Result<Vec<Memory>> {
     }
     Ok(output)
 }
+pub(super) fn all_memories(db: &Connection, kind: Option<&str>) -> Result<Vec<Memory>> {
+    if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
+        let mut statement =
+            db.prepare("SELECT * FROM memories WHERE kind=? ORDER BY created_at, id")?;
+        memories(statement.query([kind])?)
+    } else {
+        let mut statement = db.prepare("SELECT * FROM memories ORDER BY created_at, id")?;
+        memories(statement.query([])?)
+    }
+}
 impl MemoryTransaction<'_> {
     pub fn get(&self, id: i64) -> Result<Memory> {
         let mut statement = self.db.prepare("SELECT * FROM memories WHERE id=?")?;
@@ -145,17 +157,7 @@ impl MemoryTransaction<'_> {
         })
     }
     pub fn all(&self, kind: Option<&str>) -> Result<Vec<Memory>> {
-        if let Some(kind) = kind.filter(|kind| !kind.is_empty()) {
-            let mut statement = self
-                .db
-                .prepare("SELECT * FROM memories WHERE kind=? ORDER BY created_at, id")?;
-            memories(statement.query([kind])?)
-        } else {
-            let mut statement = self
-                .db
-                .prepare("SELECT * FROM memories ORDER BY created_at, id")?;
-            memories(statement.query([])?)
-        }
+        all_memories(self.db, kind)
     }
     pub fn recent_episodes(&self, n: i64) -> Result<Vec<Memory>> {
         let mut statement = self.db.prepare(
@@ -230,6 +232,14 @@ pub(super) fn candidates(
     model: &MetadataText,
     options: &RetrievalOptions<'_>,
 ) -> Result<Vec<Memory>> {
+    candidates_where(db, model, options, |_| true)
+}
+pub(super) fn candidates_where(
+    db: &Connection,
+    model: &MetadataText,
+    options: &RetrievalOptions<'_>,
+    include: impl Fn(i64) -> bool,
+) -> Result<Vec<Memory>> {
     let model = model.scalar_text().ok_or(EmbeddingError::InvalidText)?;
     let placeholders = vec!["?"; options.kinds.len()].join(",");
     let sql = format!("SELECT * FROM memories WHERE kind IN ({placeholders}) AND embed_model=?");
@@ -239,7 +249,8 @@ pub(super) fn candidates(
     let mut rows = statement.query(params_from_iter(values))?;
     let mut candidates = Vec::new();
     while let Some(row) = rows.next()? {
-        if !options.exclude_ids.contains(&row.get::<_, i64>("id")?) {
+        let id = row.get::<_, i64>("id")?;
+        if !options.exclude_ids.contains(&id) && include(id) {
             candidates.push(memory(row)?);
         }
     }
@@ -295,5 +306,56 @@ impl MemoryStore {
             )?;
         }
         Ok(scored)
+    }
+}
+
+pub(super) struct ChannelRecall {
+    pub(super) evidence: ChannelEvidence,
+    accessed: Vec<i64>,
+    at: f64,
+}
+
+pub(super) fn recall_channel(
+    db: &Connection,
+    room: &ChatRoomId,
+    text: &str,
+    max_chars: usize,
+    embedder: &dyn Embedder,
+    decay: f64,
+) -> Result<ChannelRecall> {
+    let options = RetrievalOptions {
+        min_relevance: 0.15,
+        ..RetrievalOptions::default()
+    };
+    let query = prepare_query(EmbeddingText::from_scalar_text(text), &options, embedder)?;
+    let snapshot = db.unchecked_transaction()?;
+    let rows = all_memories(&snapshot, None)?;
+    let records = ChannelRecords::new(&rows, room);
+    let candidates =
+        candidates_where(&snapshot, &query.model, &options, |id| records.includes(id))?;
+    snapshot.commit()?;
+    let ranked = score(candidates, &query, &options, decay)?;
+    Ok(ChannelRecall {
+        evidence: records.render(&ranked, max_chars),
+        accessed: ranked.into_iter().map(|memory| memory.id).collect(),
+        at: query.now,
+    })
+}
+
+impl MemoryStore {
+    /// Automatic Hands recall retains the existing access timestamps.
+    pub fn recall_channel(
+        &self,
+        room: &ChatRoomId,
+        text: &str,
+        max_chars: usize,
+    ) -> Result<ChannelEvidence> {
+        self.session(|tx| {
+            let recalled = recall_channel(tx.db, room, text, max_chars, tx.embedder, tx.decay)?;
+            if !recalled.accessed.is_empty() {
+                tx.touch(&recalled.accessed, Some(recalled.at))?;
+            }
+            Ok(recalled.evidence)
+        })
     }
 }

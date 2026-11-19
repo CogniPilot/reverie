@@ -91,7 +91,7 @@ impl Directory {
         }
         Ok(result)
     }
-    pub(super) fn ensure(path: &Path, uid: u32, effects: &mut bool) -> Result<Self> {
+    pub(crate) fn ensure(path: &Path, uid: u32, effects: &mut bool) -> Result<Self> {
         reverie_store::storage_identity::canonical(path)?;
         let parent_path = path.parent().unwrap_or(Path::new("/"));
         let parent = walk(parent_path)?;
@@ -159,6 +159,14 @@ impl Directory {
         )
     }
     pub(super) fn publish(&self, name: &OsStr, bytes: &[u8], effects: &mut bool) -> Result<()> {
+        self.publish_with_identity(name, bytes, effects).map(|_| ())
+    }
+    pub(crate) fn publish_with_identity(
+        &self,
+        name: &OsStr,
+        bytes: &[u8],
+        effects: &mut bool,
+    ) -> Result<(u64, u64)> {
         self.check()?;
         *effects = true;
         let mut file = native::open_at_mode(
@@ -173,11 +181,36 @@ impl Directory {
             self.file_current(&file, name)?;
             #[cfg(test)]
             super::tests::publication_written(&self.path.join(name))?;
-            self.file_current(&file, name)
+            self.file_current(&file, name)?;
+            let metadata = file.metadata()?;
+            Ok((metadata.dev(), metadata.ino()))
         })();
-        finalized(result, close(file))?;
+        let identity = finalized(result, close(file))?;
+        sync(&self.file)?;
+        self.check()?;
+        Ok(identity)
+    }
+    pub(crate) fn existing_file(&self, name: &OsStr, flags: i32) -> Result<File> {
+        self.check()?;
+        Ok(native::open_at(
+            self.file.as_raw_fd(),
+            name,
+            flags | libc::O_NONBLOCK,
+        )?)
+    }
+    pub(crate) fn unlink(&self, name: &OsStr) -> Result<()> {
+        self.check()?;
+        native::unlink_child_record(&self.file, name)?;
         sync(&self.file)?;
         self.check()
+    }
+    pub(crate) fn mode(&self) -> Result<u32> {
+        self.check()?;
+        Ok(self.file.metadata()?.mode() & 0o7777)
+    }
+    pub(crate) fn entry(&self, name: &OsStr) -> Result<native::EntryStat> {
+        self.check()?;
+        Ok(native::entry_stat(&self.file, name)?)
     }
     pub(crate) fn close(self) -> Result<()> {
         close(self.file)

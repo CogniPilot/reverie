@@ -1,20 +1,18 @@
 """Lost response controls: actual owned SQLite worker, never a live journal."""
 import copy
-import importlib.util
 import json
 from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 HANDS = Path(__file__).resolve().parents[2] / 'python/reverie/hands'
 sys.path[:0] = [str(HANDS), str(HANDS.parents[1])]
-def load(name,path):
-    spec=importlib.util.spec_from_file_location(name,path);module=importlib.util.module_from_spec(spec)
-    sys.modules[name]=module;spec.loader.exec_module(module);return module
-journal=importlib.import_module('agent_journal')
-worker=load('recovery_worker',HANDS/'agent_memory_worker.py')
+
+import agent_journal as journal
+from tests.hands import test_journal_structured as worker
+
 ROOM='20000000-0000-0000-0000-000000000002'
 MID='30000000-0000-0000-0000-000000000003'
 SID='10000000-0000-0000-0000-000000000001'
@@ -147,7 +145,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_actual_answer_recovers_then_reads_receipt_and_recall(self):
         import agent_loop as loop
-        cfg=dict(loop.DEFAULTS,**self.cfg,self_name='Fixture',timezone='UTC')
+        cfg=dict(loop.default_config(),**self.cfg,self_name='Fixture',timezone='UTC')
         calls=[]
         def operation(cfg,room,op,**p):
             result=self.perform(op,**p)
@@ -166,8 +164,8 @@ class RecoveryTests(unittest.TestCase):
                 self.assertIsNone(tools)
                 return {'content':'The durable write receipt was recovered without repeating the write; the entry was recalled.'}
             return {'tool_calls':[{'id':str(len(calls)),'function':dict(name=name,arguments=json.dumps(args))}]}
-        with patch.object(loop,'memory_op',side_effect=operation):
-            reply,_,_=loop.answer(cfg,ROOM,[self.msg],self.msg,model,None)
+        reply,_,_=loop.answer(cfg,ROOM,[self.msg],self.msg,model,None,
+                             journal_operation=lambda op, **p: operation(cfg, ROOM, op, **p))
         self.assertIn('without repeating',reply)
         self.assertEqual(self.calls,['journal_status','journal_commit','journal_receipt','journal_receipt','journal_recall'])
         self.assertEqual(len(calls),journal.MAX_CALLS+1)

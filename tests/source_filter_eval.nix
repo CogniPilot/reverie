@@ -26,7 +26,7 @@ let
     fixtureBuild = keep "tests/fixtures/build/input.json" "regular";
     fixtureDist = keep "tests/fixtures/dist/input.json" "regular";
     similarlyNamed = keep "apps/web/dist-source/index.ts" "regular";
-    githubCI = keep ".github/ci/boot-owner.sh" "regular";
+    githubCI = keep ".github/ci/boot-owner.mjs" "regular";
     gitignore = keep ".gitignore" "regular";
     model = keep "apps/web/src/web/public/gesture/gesture_recognizer.task" "regular";
     wasm = keep "apps/web/src/web/public/gesture/wasm/vision_wasm_internal.wasm" "regular";

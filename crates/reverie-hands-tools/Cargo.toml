@@ -1,0 +1,20 @@
+[package]
+name = "reverie-hands-tools"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap.workspace = true
+getrandom.workspace = true
+nix = { workspace = true, features = ["fs", "resource"] }
+reverie-core.workspace = true
+reverie-python-regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

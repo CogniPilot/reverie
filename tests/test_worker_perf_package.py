@@ -22,7 +22,7 @@ class WorkerPerfPackageTests(unittest.TestCase):
                 target.mkdir()
                 for filename in ('Cargo.toml', 'Cargo.lock'):
                     shutil.copyfile(ROOT / filename, target / filename)
-                for crate_name in ('reverie-core', 'reverie-contracts', 'reverie-policy-artifacts'):
+                for crate_name in ('reverie-core', 'reverie-contracts', 'reverie-elf-bundle', 'reverie-policy-artifacts'):
                     shutil.copytree(ROOT / 'crates' / crate_name, target / 'crates' / crate_name)
                 for relative, extra in [('crates/reverie-policy-artifacts/src/main.rs', builder_extra),
                                         ('crates/reverie-core/src/task_perf.rs', module_extra)]:

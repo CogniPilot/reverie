@@ -1,5 +1,9 @@
 # Optional protected laptop terminal
 
+This page records the retired host installation and its protocol. Current
+employee terminals use the Docker-contained office. See the
+[Docker runtime boundaries](host-runtime-retirement.md).
+
 Production activation is not qualified for raw Docker restarts, daemon restarts
 or host boot. Those paths bypass the owner-local generation lifecycle and can
 leave the website without a fresh protected listener. Keep the normal website

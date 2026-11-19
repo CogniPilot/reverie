@@ -119,7 +119,7 @@ impl Custody {
         self.write_record(&name, raw, false)
     }
     fn write_record(&self, name: &str, raw: &[u8], replace: bool) -> Result<()> {
-        let mut file = self.state().create_image_file(name)?;
+        let mut file = self.state().create_exclusive(name)?;
         let mut stamp: Option<Stamp> = None;
         let result = (|| {
             stamp = Some(Stamp::from_metadata(

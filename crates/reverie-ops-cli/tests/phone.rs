@@ -289,3 +289,90 @@ fn help_is_available_without_installation_and_names_permissions_output_and_recov
     assert_eq!(output.status.code(), Some(3));
     assert_eq!(output.stdout, REFUSAL);
 }
+
+const MESSAGE: &str = "aBcD0000-1234-5678-9aBC-1234567890af";
+const BROWSER_REFUSAL: &[u8] = b"{\"success\":false,\"errorCode\":\"BROWSER_JOB_UNAVAILABLE\"}\n";
+
+#[test]
+fn browser_jobs_send_only_the_fixed_action_and_original_message_reference() {
+    for action in ["submit", "inspect", "cancel"] {
+        let body = serde_json::json!({"success": true, "data": {
+            "state": "ready", "requestMessageId": MESSAGE
+        }});
+        let (output, request) = roundtrip(
+            &["browser-job", action, MESSAGE],
+            b"",
+            reply("200 OK", &serde_json::to_vec(&body).unwrap()),
+        );
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap(),
+            body
+        );
+        assert!(
+            request
+                .head
+                .starts_with("POST /api/browser-jobs HTTP/1.1\r\n")
+        );
+        assert!(!request.head.to_ascii_lowercase().contains("authorization"));
+        assert!(!request.head.contains("caller-does-not-select-actor"));
+        let expected = serde_json::json!({"action": action, "requestMessageId": MESSAGE});
+        assert_eq!(request.body, serde_json::to_vec(&expected).unwrap());
+    }
+}
+
+#[test]
+fn browser_jobs_validate_reply_status_reference_and_bound() {
+    let args = ["browser-job", "inspect", MESSAGE];
+    let valid = serde_json::json!({"success": true, "data": {"requestMessageId": MESSAGE}});
+    let encoded = valid.to_string();
+    let wrong_message = valid.to_string().replace(MESSAGE, "foreign");
+    let extra = serde_json::json!({"success": true, "data": {
+        "requestMessageId": MESSAGE, "host": "foreign"
+    }})
+    .to_string();
+    let oversized = [encoded.as_bytes(), &vec![b' '; 16_384]].concat();
+    for response in [
+        reply("202 Accepted", encoded.as_bytes()),
+        reply("200 OK", wrong_message.as_bytes()),
+        reply("200 OK", extra.as_bytes()),
+        reply("200 OK", &oversized),
+    ] {
+        let (output, _) = roundtrip(&args, b"", response);
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stdout, BROWSER_REFUSAL);
+    }
+    let (output, _) = roundtrip(
+        &args,
+        b"",
+        reply(
+            "502 Bad Gateway",
+            br#"{"success":false,"errorCode":"BROWSER_JOB_UNCONFIRMED_INSPECT_BEFORE_RETRY"}"#,
+        ),
+    );
+    assert_eq!(output.status.code(), Some(3));
+    assert_eq!(
+        output.stdout,
+        b"{\"success\":false,\"errorCode\":\"BROWSER_JOB_UNCONFIRMED_INSPECT_BEFORE_RETRY\"}\n"
+    );
+}
+
+#[test]
+fn browser_job_rejects_invalid_ids_and_non_origin_phones_without_connecting() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    for (address, message) in [
+        (url.clone(), "not-a-message"),
+        (format!("{url}#fragment"), MESSAGE),
+        (format!("{url}/api/ops"), MESSAGE),
+        (format!("{url}/?actor=owner"), MESSAGE),
+    ] {
+        let output = cli(&address, &["browser-job", "submit", message], b"");
+        assert_eq!(output.status.code(), Some(3));
+        assert_eq!(output.stdout, BROWSER_REFUSAL);
+        assert!(
+            matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
+        );
+    }
+}

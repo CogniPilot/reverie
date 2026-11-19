@@ -2,9 +2,12 @@ import unittest
 from types import SimpleNamespace
 import tempfile
 from pathlib import Path
+import subprocess
 
-from reverie.reverie import CHARTER, role_charter
-from reverie.opencode import CHAT_TOOLS
+from reverie.reverie import role_charter
+from tests.helpers import install_opencode
+
+CHARTER = "You are a persistent AI agent and expert."
 
 
 class InteractionRoleTest(unittest.TestCase):
@@ -15,9 +18,7 @@ class InteractionRoleTest(unittest.TestCase):
 
     def test_local_agent_has_no_organizational_authority_and_installs_both_modes(self):
         import json
-        from reverie.instance import load_instance, primary_agent
-        from reverie.opencode import install
-        from reverie.backend import argv_for
+        from reverie.instance import load_instance
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             config = root / "instance.json"
@@ -29,52 +30,32 @@ class InteractionRoleTest(unittest.TestCase):
             self.assertIn("Conversation is first class", charter)
             self.assertIn("Only the owner controls your permissions", charter)
             self.assertNotIn("The CTO controls model selection", charter)
-            self.assertEqual(primary_agent(instance), "chat")
-            self.assertEqual(argv_for("opencode", "local/model", primary_agent(instance)),
-                ["opencode", "--agent", "chat", "--model", "local/model"])
-            import io
-            from types import SimpleNamespace
-            from unittest.mock import patch
-            from reverie.opencode import voice_reply
-            class Store:
-                def get_state(self, key):
-                    return json.dumps({"url": "http://localhost:4096", "session_id": "native-session", "directory": str(root)})
-            brain = SimpleNamespace(store=Store(), cfg=SimpleNamespace(instance=instance, request_timeout=2))
-            requests = []
-            def reply(request, **kwargs):
-                requests.append(json.loads(request.data))
-                return io.BytesIO(b'{"parts":[{"type":"text","text":"Hello"}]}')
-            with patch("reverie.opencode.urllib.request.urlopen", side_effect=reply):
-                self.assertEqual(voice_reply(brain, "Hello"), (True, "Hello"))
-            self.assertEqual(requests[0]["agent"], "chat")
             workspace = root / "workspace"
-            install(workspace, "local/model", config)
+            install_opencode(workspace, "--model", "local/model", "--instance", str(config))
             settings = json.loads((workspace / "opencode.json").read_text())
             self.assertEqual(settings["default_agent"], "chat")
             self.assertEqual(set(settings["agent"]), {"chat", "coding"})
             chat, coding = settings["agent"]["chat"], settings["agent"]["coding"]
             self.assertEqual(chat["permission"]["*"], "deny")                       # conversation is lean
-            self.assertEqual({k for k, v in chat["permission"].items() if v == "allow"}, set(CHAT_TOOLS))
+            self.assertEqual({k for k, v in chat["permission"].items() if v == "allow"}, {"interaction_mode", "reverie_memory", "reverie_room", "agent_profile"})
             self.assertNotEqual(coding["permission"].get("*"), "deny")              # the coding agent keeps the toolset
             self.assertEqual(coding["steps"], 24)
             policy = workspace / ".opencode/interaction-policy.json"
             self.assertTrue(json.loads(policy.read_text())["enabled"])
             self.assertEqual(json.loads(policy.read_text())["coding_agent"], "coding")
             policy.write_text('{"enabled": false}')                                   # an older owner-edited policy
-            install(workspace, "local/model", config)
+            install_opencode(workspace, "--model", "local/model", "--instance", str(config))
             kept = json.loads(policy.read_text())
             self.assertFalse(kept["enabled"])
             self.assertEqual(kept["coding_agent"], "coding")                        # upgraded, never stranded
             policy.write_text('{"enabled": true, "coding_agent": "ops"}')             # an explicit owner choice stays
-            install(workspace, "local/model", config)
+            install_opencode(workspace, "--model", "local/model", "--instance", str(config))
             self.assertEqual(json.loads(policy.read_text())["coding_agent"], "ops")
 
     def test_all_titles_and_legacy_kinds_share_memory_and_tool_gates(self):
         import json
         from reverie.config import Config
-        from reverie.chat import ChatDaemon
-        from reverie.instance import load_instance, primary_agent
-        from reverie.opencode import install
+        from reverie.memory import MemoryStore
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -84,19 +65,20 @@ class InteractionRoleTest(unittest.TestCase):
                 config = root / (role + ".json")
                 config.write_text(json.dumps({"id": role, "agent_name": role, "owner_name": "Owner",
                     "data_dir": role + "-memory", "persona": "Be curious.", "role": role, "kind": kind}))
-                instance = load_instance(config)
-                self.assertEqual(primary_agent(instance), "chat")
-                brain = ChatDaemon(cfg=Config(instance_config=config)).brain
+                subprocess.run(["reverie-chat", "--instance", str(config), "--profile"],
+                               capture_output=True, check=True, timeout=10)
+                database = Config(instance_config=config).db_path
+                store = MemoryStore(database)
                 try:
-                    brain.store.add_episode(role + " private memory", "Keep this private.")
-                    self.assertEqual(brain.store.count("episode"), 1)
-                    stores.append(brain.cfg.db_path)
+                    store.add_episode(role + " private memory", "Keep this private.")
+                    self.assertEqual(store.count("episode"), 1)
+                    stores.append(database)
                 finally:
-                    brain.store.close()
+                    store.close()
                 workspace = root / (role + "-workspace")
                 # A container marker is deployment context, not an owner grant.
                 with patch.dict("os.environ", {"REVERIE_CONTAINER": "1"}):
-                    install(workspace, "local/model", config)
+                    install_opencode(workspace, "--model", "local/model", "--instance", str(config))
                 settings = json.loads((workspace / "opencode.json").read_text())
                 policies.append(settings["agent"]["coding"]["permission"])
                 self.assertEqual(settings["default_agent"], "chat")
@@ -107,9 +89,9 @@ class InteractionRoleTest(unittest.TestCase):
 
     def test_chat_tools_match_the_plugin_allowlist(self):
         import re
-        source = (Path(__file__).resolve().parent.parent / "python/reverie/plugins/interaction.mjs").read_text()
+        source = (Path(__file__).resolve().parent.parent / "crates/reverie-admin-memory/opencode-assets/plugins/interaction.mjs").read_text()
         allowed = re.search(r"const allowed = \[([^\]]*)\]", source).group(1)
-        self.assertEqual(set(re.findall(r"'([a-z_]+)'", allowed)), set(CHAT_TOOLS))
+        self.assertEqual(set(re.findall(r"'([a-z_]+)'", allowed)), {"interaction_mode", "reverie_memory", "reverie_room", "agent_profile"})
 
     def test_cto_defaults_keep_their_charter(self):
         self.assertIn(CHARTER, role_charter())
@@ -125,7 +107,7 @@ class InteractionRoleTest(unittest.TestCase):
     def test_default_prompt_sources_do_not_assign_a_privileged_title(self):
         from reverie.persona import DEFAULT_PERSONA
         root = Path(__file__).resolve().parent.parent
-        rules = (root / "python/reverie/rules.md").read_text()
+        rules = (root / "crates/reverie-admin-memory/opencode-assets/rules.md").read_text()
         self.assertNotIn("You are the CTO", DEFAULT_PERSONA + CHARTER + rules)
         self.assertIn("titles grant no permissions", rules)
         for role in ("CTO", "COO", "Researcher"):
@@ -134,10 +116,9 @@ class InteractionRoleTest(unittest.TestCase):
             self.assertIn("Only explicit owner policy grants permissions", charter)
 
     def test_installer_deploys_the_plugin_and_its_resolvable_core(self):
-        from reverie.opencode import install
         with tempfile.TemporaryDirectory() as tmp:
             workspace = Path(tmp) / "workspace"
-            install(workspace, "provider/model")
+            install_opencode(workspace, "--model", "provider/model")
             plugin = workspace / ".opencode/plugins/zz-interaction.js"
             self.assertIn("../lib/interaction.mjs", plugin.read_text())
             self.assertTrue((plugin.parent / "../lib/interaction.mjs").resolve().is_file())

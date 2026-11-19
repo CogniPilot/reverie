@@ -10,8 +10,12 @@ use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+mod run;
 #[cfg(test)]
 mod tests;
+mod workflow;
+
+pub use run::RunOutcome;
 
 /// The marker that makes a root this module's own.
 pub const OWNED_MARKER: &str = ".reverie-owned";
@@ -30,6 +34,14 @@ pub enum WorkspaceError {
     Symlink(PathBuf),
     /// Another operation holds this workspace's lock.
     Busy(String),
+    /// The workspace record does not describe this task.
+    Record,
+    /// The record has no verified terminal state.
+    Unsettled,
+    /// Cleanup requires an explicit record of preserved work.
+    Handoff,
+    /// A checkout is present and needs to be preserved before cleanup.
+    Checkout(PathBuf),
     Io(io::Error),
     Lease(LeaseError),
 }
@@ -46,6 +58,10 @@ impl std::fmt::Display for WorkspaceError {
             Self::Identifier(name) => write!(f, "invalid workspace identifier: {name:?}"),
             Self::Symlink(path) => write!(f, "workspace must not be a symlink: {}", path.display()),
             Self::Busy(name) => write!(f, "another operation holds workspace {name}"),
+            Self::Record => f.write_str("invalid workspace record"),
+            Self::Unsettled => f.write_str("workspace has no verified terminal state"),
+            Self::Handoff => f.write_str("save a handoff receipt before cleanup"),
+            Self::Checkout(path) => write!(f, "source checkout found: {}", path.display()),
             Self::Io(error) => error.fmt(f),
             Self::Lease(error) => error.fmt(f),
         }

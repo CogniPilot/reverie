@@ -1,6 +1,6 @@
 mod timing;
 use crate::{
-    Result,
+    FIXTURE, Result,
     audio::{self, Wav},
     need, recognize, transcript,
 };
@@ -12,8 +12,6 @@ use std::{
     path::Path,
     time::Instant,
 };
-
-const FIXTURE: &str = include_str!("../../../scripts/voice-ci/fixtures.json");
 
 pub(crate) async fn run(root: &Path) -> Result<()> {
     let fixture: Value = serde_json::from_str(FIXTURE)?;

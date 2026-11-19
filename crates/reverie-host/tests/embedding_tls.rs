@@ -6,9 +6,8 @@ use std::{
     fs,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    path::PathBuf,
     process::Command,
-    sync::{Arc, mpsc},
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -170,7 +169,6 @@ fn embedding_tls_child() {
 struct Qualification {
     config: Arc<rustls::ServerConfig>,
     ca: OsString,
-    python: OsString,
 }
 impl Qualification {
     fn load() -> Self {
@@ -192,10 +190,9 @@ impl Qualification {
         Self {
             config: Arc::new(config),
             ca: std::env::var_os("REVERIE_TEST_TLS_CA_PEM").unwrap(),
-            python: std::env::var_os("REVERIE_TEST_PYTHON").unwrap(),
         }
     }
-    fn client(&self, mode: Mode, address: SocketAddr, native: bool) {
+    fn client(&self, mode: Mode, address: SocketAddr) {
         let endpoint = mode.endpoint(address);
         let proxy = mode.proxy(address);
         let trust = if mode == Mode::Untrusted {
@@ -203,22 +200,17 @@ impl Qualification {
         } else {
             self.ca.clone()
         };
-        let executable = if native {
-            std::env::current_exe().unwrap().into_os_string()
-        } else {
-            self.python.clone()
-        };
+        let executable = std::env::current_exe().unwrap().into_os_string();
         let mut command = configured_command(executable, &trust, &endpoint, proxy.as_deref());
         mode.configure(&mut command, address);
-        if native {
-            native_command(&mut command, mode);
-        } else {
-            python_command(&mut command, mode);
+        command.args(["--ignored", "--exact", "embedding_tls_child", "--nocapture"]);
+        if mode == Mode::Untrusted {
+            command.env("REVERIE_TEST_TLS_REFUSE", "1");
         }
         let result = command.output().unwrap();
         assert!(
             result.status.success(),
-            "native={native}, mode={mode:?}: {}{}",
+            "mode={mode:?}: {}{}",
             String::from_utf8_lossy(&result.stdout),
             String::from_utf8_lossy(&result.stderr)
         );
@@ -228,32 +220,10 @@ impl Qualification {
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let config = Arc::clone(&self.config);
-        let (sender, receiver) = mpsc::channel();
-        let server = thread::spawn(move || {
-            for _ in 0..2 {
-                sender.send(serve(&listener, &config, mode)).unwrap();
-            }
-        });
-        self.client(mode, address, true);
-        self.client(mode, address, false);
-        server.join().unwrap();
-        for _ in 0..2 {
-            verify(mode, address, receiver.recv().unwrap());
-        }
+        let server = thread::spawn(move || serve(&listener, &config, mode));
+        self.client(mode, address);
+        verify(mode, address, server.join().unwrap());
     }
-}
-fn native_command(command: &mut Command, mode: Mode) {
-    command.args(["--ignored", "--exact", "embedding_tls_child", "--nocapture"]);
-    if mode == Mode::Untrusted {
-        command.env("REVERIE_TEST_TLS_REFUSE", "1");
-    }
-}
-fn python_command(command: &mut Command, mode: Mode) {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../python");
-    command.args(["-B", "-c", ORACLE]).arg(source).env(
-        "REVERIE_TEST_TLS_REFUSE",
-        if mode == Mode::Untrusted { "1" } else { "" },
-    );
 }
 fn serve(
     listener: &TcpListener,
@@ -331,8 +301,8 @@ fn verify(mode: Mode, address: SocketAddr, (connect, inner): (Option<String>, Op
     }
 }
 #[test]
-#[ignore = "requires task-owned CA/cert/key and explicit REVERIE_TEST_PYTHON; local servers only"]
-fn qualifies_native_and_actual_python_tls_connect_proxy_and_untrusted_refusal() {
+#[ignore = "requires task-owned CA/cert/key; local servers only"]
+fn qualifies_tls_connect_proxy_and_untrusted_refusal() {
     let qualification = Qualification::load();
     for mode in [
         Mode::Direct,
@@ -350,14 +320,3 @@ fn qualifies_native_and_actual_python_tls_connect_proxy_and_untrusted_refusal() 
         qualification.run(mode);
     }
 }
-const ORACLE: &str = r#"
-import os,sys
-sys.path.insert(0,sys.argv[1])
-from reverie.embeddings import LlamaEmbedder
-try: result=LlamaEmbedder(os.environ['REVERIE_TEST_TLS_ENDPOINT'],'model').embed('TLS qualification')
-except Exception:
- if not os.environ.get('REVERIE_TEST_TLS_REFUSE'): raise
-else:
- assert not os.environ.get('REVERIE_TEST_TLS_REFUSE')
- assert result==[0.6,0.8]
-"#;

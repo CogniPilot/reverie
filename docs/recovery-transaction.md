@@ -63,8 +63,8 @@ future authenticated observation must append the supported existing stages.
 
 Commit can run only once and is closed before target release. Late prepare/commit
 callbacks cannot create new effects. Requests have a fixed five-second authority
-window; each owned local ledger child has a four-second bound, isolated Python
-flags, sanitized environment, fixed trusted paths, bounded input/output and fixed
+window. Each owned native ledger child has a four-second bound, a sanitized
+environment, fixed trusted paths, bounded input/output and fixed
 error strings. Separate uncertainty-recording cleanup is bounded to five seconds.
 Expired authority is not extended. A timeout cannot prove remote effect cleanup;
 provider cancellation/conditional-write evidence remains a required adapter gate.
@@ -79,12 +79,14 @@ submission adapter implementing the callback protocol. None is guessed from
 current live metadata or replaced with a synthetic positive outside tests.
 Existing owner-only Goal and original-program observer holds remain unchanged.
 
-The local ledger client DOES invoke the unchanged accepted Python SQLite ledger;
-owned tests prove append-before-effect, limits and restart fencing across actual
-separate child processes. This is not installed custody, capacity/latency,
-provider/auth, image or full-day report-only acceptance. Maximum ledger cost,
-private directory and packaged interpreter/helper custody, same-store wiring,
-report-only/dry/canary stages and explicit operator activation remain open.
+The local ledger client starts the Rust `reverie-recovery-ledger` executable with
+the existing SQLite schema. Owned tests exercise append-before-effect, limits
+and restart fencing across separate child processes. Installed custody,
+capacity and latency, provider authorization, image validation and full-day
+report-only acceptance still require qualification. The remaining work includes
+measuring maximum ledger cost, qualifying private directory and executable
+custody, wiring the canonical stores and testing report-only, dry and canary
+operations before explicit activation.
 
 No host, model, real resume, grant, configuration or image action is authorized
 by this source. New files are not imported by any production entrypoint. Broad
@@ -92,13 +94,11 @@ repository/native/image checks are not replaced by the focused tests.
 
 ## Focused qualification layout
 
-The Nix console source is flattened to apps/web. Its postPatch copies exactly the
-accepted ledger, new RPC transport and inert package initializer into an owned
-test fixture; four named suites are added to the existing gate without removing
-any. Repository tests use their sibling Python source; flattened tests must use
-that explicit packaged fixture. No third source/search fallback is used. Tests
-resolve the build-tool Python executable rather than assume a host /bin path.
-Both layouts are exercised locally; this is not Nix evaluation/build acceptance.
+The Nix Console checks and web coverage workflow select the same packaged Rust
+executable for the ledger integration suites. In a development checkout, build
+`reverie-recovery-ledger` under the selected `CARGO_TARGET_DIR` before running the
+ledger and clock suites. Both layouts create fresh private synthetic databases.
+The tests also replay version-one database rows recorded from the former owner.
 
 The new outer algorithm, metadata policy and RPC client are source ready for
 review. The actual same-store selector, authenticated resume principal/grant,

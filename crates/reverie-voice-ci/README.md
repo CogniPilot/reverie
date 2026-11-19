@@ -18,9 +18,15 @@ uses a loopback address, no redirects, and small JSON responses. Timing counters
 are nonnegative `u64` nanoseconds; the former Python control accepted unbounded
 integers. JSON formatting is semantic, not byte-identical to Python serialization.
 
-This tool performs acceptance, not speech inference. The surviving Python
-`service.py` and `audio.py`, real Whisper/Kokoro engines, and shell orchestrator
-remain separate migration work. A Rust verifier does not remove those dependencies.
+`reverie-voice-ci-serve` supplies real speech inference for the browser and
+verifier. It uses the production Rust Kokoro engine and checks the ONNX graph
+and voice archive before publishing readiness. Recognition uses a separately
+serialized CPU-only Whisper.cpp process. The service verifies its Tiny.en
+checkpoint and normalizes bounded WAV inputs to 16 kHz with FFmpeg. The
+`voice-ci` flake shell supplies the pinned engines and model files.
+
+The package depends on native speech libraries and executables. The separate
+Console PTY build uses the default development shell for node-gyp.
 
 The native integration control runs the real CLI against an owned deterministic
 HTTP fixture. It checks successful acceptance and refusals for voice, timing,
@@ -28,10 +34,10 @@ browser duration, silence, short audio, missing endpoints, HTTP failure, invalid
 JSON, empty recognition and an escaped ASR negative control. The test server
 models transport responses; it does not qualify real speech recognition.
 
-For migration parity, set `REVERIE_VOICE_CI_PARENT` to the unchanged parent
-checkout when running the acceptance test. Each case also runs that checkout's
-existing verifier, comparing exit success, receipt/report JSON, progress events,
-transcripts and the exact ten-second PCM bytes. Only measured `recognitionMs`
-values are excluded. Set `REVERIE_VOICE_CI_EVIDENCE` to a fresh existing directory
-to retain each case's artifacts and raw verifier stdout, stderr and exit record.
-Real-model acceptance remains the voice-CI workflow gate.
+Every case checks a recorded contract digest for exit success, receipt and report
+JSON, progress events, transcripts, and the exact ten-second PCM bytes. The
+digests were captured from the original verifier at `dc07eb49e^` and validated
+against the Rust CLI for all 11 cases. They sort JSON object keys and omit
+measured `recognitionMs` values. Set `REVERIE_VOICE_CI_EVIDENCE` to a fresh existing
+directory to retain each case's artifacts and raw verifier stdout, stderr and exit
+record. Real-model acceptance remains the voice-CI workflow gate.

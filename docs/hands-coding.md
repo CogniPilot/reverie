@@ -1,9 +1,15 @@
 # Coding with the Reverie Admin Harness
 
+The packaged `reverie-hands` starts in Rust. It binds the exact Office
+employee to the selected model, prepares the private runtime configuration,
+and hands off to the Hands loop. The terminal UI, input queue, and live model
+trace display run in Rust. Restarts preserve the saved
+memory configuration and state file.
+
 The `handsTools` flake package provides `reverie-hands-tools`. Its seven tools
 read, list, search, edit and write workspace files, run commands and run a task's
-configured tests. The dispatcher comes from the pre-integration Hands tools r1
-implementation (SHA256 aec37a11815390dc7372d9e371838429ad1516dfe8cd37b9b05de3794c3d08cb).
+configured tests. The Rust dispatcher uses the existing version-one JSON request
+and result format, including file, time and output limits.
 
 The existing laptop container is the execution boundary. Commands have that
 laptop's ordinary filesystem grants and network access. File-tool path checks
@@ -44,10 +50,11 @@ so every model request reserves output tokens and fails closed if it will not fi
 
 The Reverie Admin Harness keeps vision enabled when the laptop masks the server's
 attachment directory. It uses `reverie agent chat fetch` with the exact room and
-file IDs, the configured image byte limit, and a short deadline. Downloads go to
-a fresh private directory under `/scratch/tmp`, are checked for image type and
-magic bytes, and are removed after conversion to model input. A membership or
-download refusal never falls back to reading the server's filesystem path.
+file IDs, the configured image byte limit, and a short deadline. The Rust helper
+owns the download process and its private directory under `/scratch/tmp`. It
+verifies the file and removes the directory before handing bytes to Hands for
+image type and magic-byte checks. A refusal leaves the attachment out of the
+model input.
 
 Native configurations outside a laptop retain their explicitly configured
 `attachments_root/<room-id>` filesystem reader. Image-count and byte limits apply

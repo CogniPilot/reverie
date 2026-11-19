@@ -41,13 +41,10 @@ owner's `deployment.json` under the selected deployment root (normally `~/reveri
 The field is optional and defaults to `false`; strings and numbers are rejected.
 `reverie-start` passes the exact activation value only from this validated field;
 setting a similarly named variable in the calling host shell does not opt in.
-Changing this startup setting does not mutate a running container. For an existing
-isolated deployment, select it before the paired `reverie-isolate prepare` and
-`activate` workflow. The prepared plan records the choice and activation refuses a
-changed choice before stopping the console. The non-isolated `reverie-update`
-workflow also refreshes activation from the same durable setting and refuses a
-selection changed during its build. Both replace stale phone activation overrides
-while preserving the other instance settings. A missing deployment file or field
+The Docker container reads this setting at startup. The `reverie-update`
+workflow refreshes it from the same durable setting and refuses a selection
+changed during its build. It replaces stale phone activation overrides while
+preserving the other instance settings. A missing deployment file or field
 selects OFF, including when the old container had an enabled override.
 The bootstrap retains its existing refusal to silently replace a changed deployment;
 use the applicable reviewed update workflow for a running installation. Existing
@@ -91,12 +88,25 @@ automatic room replies rather than falling back to a local guess.
   Section names never grant identity or authorization.
 - `reverie.beliefs` reads the optional `REVERIE_AGENT_ALIASES` list for historical
   self references. Its neutral default is empty; personal names stay in the overlay.
-- `reverie.cycle_demo` requires `--model`. `reverie.opencode` accepts `--model` or
+- `reverie-cycle-demo` takes `--directory`, `--api-base`, and `--model`. It
+  creates a synthetic trial in an empty owned directory. The sample task uses
+  the packaged Node runtime for verification.
+- `reverie-chat` starts the registered employee's native Office room loop.
+  It uses the existing instance or legacy memory location. Supply `--instance`
+  to select an existing external instance configuration explicitly. The
+  maintenance flags, including `--dream`, `--reflect` and `--recall`, use
+  the same memory selection. The Office room loop replies to accepted
+  deliveries. The old standalone daemon's idle jokes have been retired.
+- `reverie-opencode --install WORKSPACE` accepts `--model` or
   `REVERIE_MODEL`, with neutral fallback `local_agent/MODEL_ID`; configure a real
   provider/model identifier before installing. Bridge actions need no model flag.
+  Run the same installer inside the container with the existing instance and
+  model selections to refresh a managed workspace that uses the retired Python
+  bridge. The cycle scheduler uses `reverie-context` for work context and
+  `reverie-opencode --install` for disposable job workspaces.
 - Runtime policies select `backends.local.model` and `keep_alive.model_id`.
   `examples/runtime-policy.json` uses `MODEL_ID` placeholders; replace both.
-- `reverie.sleep` takes `--policy`; all chat database, state, instance and employee
+- `reverie-sleep` takes `--policy`; all chat database, state, instance and employee
   selection values are supplied by that private policy. `examples/sleep.json` is
   dry-run only, with a generic instance path and a synthetic employee identifier.
 
@@ -143,26 +153,11 @@ protected resource launches and office control continue through
 the existing connection path. The published-image Docker installer and its
 one-command default setup are unchanged.
 
-## Training any expert
+## Local model serving
 
-Training and adapter serving are shared tools for any expert, regardless of
-organizational role. CTO and COO are roles of the same generic AI agent, and each
-agent has its own memory. A title never grants orchestration or tool permission.
-Select the expert's private instance with
-`REVERIE_INSTANCE_CONFIG`. Give each expert a separate training JSON, dataset and
-adapter output directory; set `dataset_path`, `output_root` and `run_name`
-explicitly rather than sharing their defaults.
-
-- [Training configuration](../python/reverie/train/config.py): set `base_model` in the
-  training JSON; its neutral default is `MODEL_ID`. The public candidate list is
-  informational; the owner selects the expert's model.
-- [Adapter serving](../python/reverie/train/serve.py): `REVERIE_GGUF` defaults to
-  `~/reverie/runtime/models/model.gguf`, `REVERIE_MODEL` to `MODEL_ID`, and
-  `REVERIE_SERVE_PORT` to 8081. Set them for the selected expert's server and model
-  file. Use a separate serving JSON with its own `state_path`, and distinct ports
-  when running multiple servers.
-  Snapshot metadata uses `snapshot-base.json`. `REVERIE_SNAPSHOT_MARKER` optionally
-  names an older snapshot marker in the instance overlay; it defaults to empty.
+Choose each employee's model through its provider plan. Follow the
+[Docker GPU deployment guide](container-gpu.md) to serve an operator-selected
+model inside Docker or connect an existing provider endpoint.
 
 ## User service templates
 

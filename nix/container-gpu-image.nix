@@ -1,8 +1,8 @@
 # Optional GPU/model overlay. The base image and selected CUDA runtime are
 # immutable build inputs; this image needs no host Reverie packages or services.
-{ pkgs, src, baseImage, baseConfig, containerRuntime, gpuTelemetry, inferenceRuntime }:
+{ pkgs, src, baseImage, baseConfig, containerRuntime, entrypoint, inferenceRuntime }:
 let
-  entrypoint = pkgs.writeShellScript "reverie-container-start" (builtins.readFile (src + "/docker/entrypoint.sh"));
+  modelRelaySource = import ./model-relay-source.nix { inherit pkgs src; };
   tailscale = import ./tailscale-serve.nix { inherit pkgs; };
 in
 assert builtins.isAttrs baseConfig && builtins.isList baseConfig.Entrypoint;
@@ -14,7 +14,7 @@ pkgs.dockerTools.buildLayeredImage rec {
   maxLayers = 125 - 2;
   fromImage = baseImage;
   passthru.reverieConfig = config;
-  contents = [ containerRuntime gpuTelemetry inferenceRuntime tailscale.package ];
+  contents = [ containerRuntime inferenceRuntime tailscale.package ];
   extraCommands = ''
     mkdir -p usr/local/bin
     ln -s ${entrypoint} usr/local/bin/reverie-start
@@ -29,9 +29,9 @@ pkgs.dockerTools.buildLayeredImage rec {
     ];
     Env = (baseConfig.Env or []) ++ [
       "REVERIE_LLAMA_SERVER=${inferenceRuntime}/bin/llama-server"
-      "REVERIE_GPU_PUBLISHER=${gpuTelemetry}/bin/reverie-container-gpu-telemetry"
+      "REVERIE_GPU_PUBLISHER=${containerRuntime}/bin/reverie-gpu-publisher"
       "REVERIE_MODEL_RELAY=${pkgs.nodejs_22}/bin/node"
-      "REVERIE_MODEL_RELAY_SCRIPT=${src}/apps/host/model-relay.mjs"
+      "REVERIE_MODEL_RELAY_SCRIPT=${modelRelaySource}"
     ];
   };
 }

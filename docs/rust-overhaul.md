@@ -39,6 +39,13 @@ dependencies, and build-time dependencies separately from Reverie's first-party
 implementation. Removing first-party Python must not silently remove an owner's
 ability to use scientific Python inside an employee laptop.
 
+At `dcf331d29` the tracked tree contains 453 `.py` files. Of those, 204 are
+under `python/`, 226 are under `tests/`, and 23 are distributed across
+`scripts/`, `apps/`, `nix/` and `.github/`. The worker image still selects
+the compatibility interpreter in `nix/worker-python.nix`. Removing a console
+script registration alone leaves the interpreter and its other consumers in
+that image.
+
 ## Replacement cohorts
 
 | Cohort | Existing code and boundary | Required acceptance |
@@ -46,11 +53,14 @@ ability to use scientific Python inside an employee laptop.
 | Memory-limit helper | `soft_limit_helper.py`, `worker_memory_authority.py`; fixed root socket protocol | Duplicate-key/input rejection, root policy custody, peer/PID/cgroup identity, bounded nonblocking write, uncertain effects; Nix selects Rust executable |
 | Shared host primitives | Linux file/descriptor custody, process identities, bounded observers and engine metadata | Typed native interfaces, narrowly reviewed unsafe wrappers, race/failure tests; reuse across services without weakening checks |
 | Broker and service lifecycle | `worker.py`, `worker_service.py`, transport upgrade/maintenance, resume and watchdog paths | Same admission and desired-running behavior, retained provider continuity, explicit upgrade and rollback/reconciliation; no generic command API |
+| Recovery attempt ledger | The Rust store and bounded Console child preserve the existing SQLite schema, timestamps, fingerprints and receipt fields | Retain one writer, the three-attempt rolling budget, restart reconciliation and unresolved-attempt fencing |
 | Resource operations and storage | `worker_resource_*`, `employee_resource_profiles.py`, `laptop_resource_operations.py`, home/Nix migration | Existing store schema/CAS/locks/leases/reservations, crash recovery, no replay of uncertain effects, no competing source of truth |
+| Leased task workspaces | The packaged Rust `reverie-workspaces` uses the existing operation locks, task metadata and lease records for allocation, supervised commands, handoff, renewal and guarded cleanup | Migrate the remaining Python imports in browser jobs, isolation and acceptance tooling before deleting `workspaces.py` |
 | Terminals, devices and scoped Office transport | `owner_terminal_*`, `worker_*` launch/Office/device paths, GPU/browser components | Same scoped grants, peer provenance, terminal/session identity and device selection; no engine socket in clients |
 | Memory and agent runtime | `memory.py`, `project_memory.py`, `runtime.py`, `sleep.py`, context/identity/governance and plugin/CLI adapters | Existing SQLite data remains readable, tested write/migration semantics, conversation/account/model behavior preserved, CLI/plugin compatibility |
 | Backend application services | Current TypeScript owner/company/plan/resource services | Preserve documented HTTP envelopes, status/error codes, authentication, scoped grants and GUI behavior; one authoritative implementation per operation |
-| Numerical/model adapters and tooling | `embeddings.py`, `kokoro.py`, training adapters, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
+| Numerical/model adapters and tooling | Native hash and HTTP(S) embeddings, build/CI/acceptance tools | Numerical/output compatibility where applicable, measured resource cost, named third-party dependencies and equivalent acceptance coverage |
+| Kokoro speech | Docker's `reverie-kokoro` and the instrumented Rust voice-CI fixture share the native ONNX Runtime and eSpeak NG engine. The Docker speech service and fixture share the CPU-only Whisper.cpp recognizer | Keep real-model browser, timing, voice-ID, transcript and truncated-audio acceptance in the voice workflow |
 
 The narrow helper and active Cargo-default/build-job laptop tools now have Rust
 source/package replacements. The workspace uses the shared xtask runner, strict
@@ -82,11 +92,11 @@ service boundary and compatibility evidence.
 The memory persistence cohort adds native MemoryStore/ProjectMemory and history
 import libraries plus the configured HTTP(S)/hashed embedding adapters. Synthetic
 legacy databases, reverse-language writes, all-table backup/restore and model/
-vector/ranking fixtures qualify source compatibility. The active Python callers
-remain selected; employee namespaces, authorization, consistent live snapshots
-and single-writer cutover still belong to the coordinated service migration.
-Incidental non-HTTP urllib endpoint schemes need a supported-settings inventory
-and named adapter or explicit compatibility decision before that selection.
+vector/ranking fixtures qualify source compatibility. The legacy memory store
+uses the Rust embedding backends, including startup probing and hashed fallback.
+Configured endpoints use HTTP(S). The legacy caller still writes SQLite rows
+and ranks recall results. Employee namespaces, authorization, consistent live
+snapshots and single-writer cutover still belong to the service migration.
 
 The TypeScript resource diagnostics correction remains compatible with the
 later Rust backend. Remaining cohorts are pending; no source result here
@@ -115,17 +125,13 @@ ordinary Cold/Reuse launch handlers, detached supervision, and fixed C controls.
 The Rust client library uses the same checked exchange as the CLI. Its reply is
 data, not proof that a requested effect succeeded or its resources were released.
 
-Package selection is a separate migration boundary: `nativeWorkerBroker` is
-currently an explicit integration output, while `workerBroker` still selects
-the legacy implementation in `nix/native-worker-packages.nix`. Protected resume,
-launch and maintenance consumers must be paired with their correct program
-provenance before changing that default. An explicitly installed native service
-does not change what a fresh default installation selects. The rows below track
-the ownership boundaries to preserve, rather than a percentage-complete estimate.
-Their final column is the original integration contract, not a list of absent
-implementations: service startup, ordinary Cold/Reuse handlers and counted
-shutdown now connect several of those boundaries. Current missing dispatch and
-deployment capabilities are identified above and in the native broker README.
+The Docker flake exposes the worker image inputs from
+`nix/native-worker-packages.nix`. The host broker, service setup, resume and
+perf client packages are retired. The native broker build remains available to
+the integration check. The table records the original integration contracts for
+the broker and its consumers. Service startup, ordinary Cold/Reuse handlers and
+counted shutdown now connect several of those boundaries. See the native broker
+README for the remaining dispatch gaps.
 
 | Operation | Existing Rust owner | Integration contract |
 | --- | --- | --- |
@@ -133,7 +139,7 @@ deployment capabilities are identified above and in the native broker README.
 | Running-laptop recovery | `InstallingBroker::recover_laptops`; ordered census/memory/budget checks, all storage claims before phones, atomic registry publication and retained cleanup owners; actual configured-Gate transaction controls | Actual listener/service invocation and real running-container canary |
 | Office phone | `OfficeService::from_worker` and `bind_worker_retained`; captured worker socket root, constructor-selected session and same-runtime native request jobs | Actual new-laptop producer and complete shutdown joins |
 | Accepted worker connections | `accept_worker_connection` dispatches actual T/J sockets with peer UID checked before frame handling; `ReceivedWorkerLaunch::begin_ordinary` performs image refresh, queued GPU cold boundary and optional admission | Complete listener/handler lifecycle and remaining protocol verbs |
-| OPS command client | The runtime, console and opsCore packages select the native `reverie-ops`; the Python client and console registration are removed, with a retirement-closure policy in xtask | Python OPS daemon/installer replacement and live installed acceptance |
+| OPS command client | The runtime and console packages select the native `reverie-ops`. The Python client, console registration and retired host installer have been removed | Python OPS daemon migration and installed-service acceptance |
 | Ordinary launch preparation | `prepare_prefix` and `classify_existing` retain the same actual J, counted hold, storage, admission and lifecycle guard through the original wait, first inspect, running policy/memory, runtime/exit, pane/attach, process capture and budget sequence; closed cold targets retain original observations | Ordinary stop, whole cold/Nix/body continuation, actual admission release, registration and viewer |
 | Running replacement stop ownership | `OrdinaryReplacementStop` shares the private exact-process algorithm with the protected stop owner; `retain_replacement_stop` retains the same box/plan/incarnation in the App registry and restores that original box only after known stop | Actual cold/J admission and late-policy caller, dead-pane repeat, stopped legacy/name/network stop, and complete cleanup/finalization |
 | Failure reports | `handle_command_failure_report` and `close_command_telemetry`; fixed T operation, actual Unix peer identity and retained bounded connection/store owners | Caller-owned handler joins and global stop acknowledgement |

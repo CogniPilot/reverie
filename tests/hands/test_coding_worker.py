@@ -2,8 +2,8 @@ import json
 import time
 import unittest
 
-from coding_tasks import Limits
-from coding_worker import CodingWorker
+from coding_chat import Limits
+from coding_process import CodingWorker
 from test_coding_tasks import MESSAGES, TOOLS, call, response
 
 
@@ -77,7 +77,7 @@ class WorkerTests(unittest.TestCase):
     def test_close_kills_and_reaps_worker(self):
         worker = self.worker()
         worker.close()
-        self.assertFalse(worker.process.is_alive())
+        self.assertIsNotNone(worker.process.poll())
         worker.close()
 
     def test_stale_task_epoch_cannot_grant_permission(self):
@@ -91,8 +91,8 @@ class WorkerTests(unittest.TestCase):
             time.sleep(0.002)
         self.assertIsNotNone(event)
         self.assertEqual(event['kind'], 'authorize')
-        worker.connection.send_bytes(json.dumps({'epoch': worker.epoch + 1,
-            'sequence': event['sequence'], 'ok': True, 'result': None}).encode())
+        worker.connection.sendall(json.dumps({'epoch': worker.epoch + 1,
+            'sequence': event['sequence'], 'ok': True, 'result': None}).encode() + b'\n')
         while time.monotonic() < deadline:
             event = worker.poll()
             if event:

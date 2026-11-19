@@ -1,7 +1,7 @@
 """Persona core (user-owned, never rewritten) and the evolving profile (derived from reflections).
 
 Tone is governed by the persona file alone; the package appends no guardrail text. The
-only screening is the configured output checks and privacy safeguards in :mod:`reverie.floors`.
+only screening is the configured output checks and private-person protection.
 
 The profile is rendered from stored reflections, grouped into three fixed sections,
 highest importance first, and bounded to ``max_chars``. When the rendering is too
@@ -112,8 +112,7 @@ def build_system_prompt(persona: str, profile: str, memories: Sequence[Memory], 
             if m.kind == "reflection":
                 lines.append(f"- You concluded earlier: {m.text.strip()}")
             elif m.kind == "dream":
-                from .dream import waking_recall
-                lines.append(f"- A dream you had (not something that happened): {waking_recall(m)}")
+                lines.append(f"- A dream you had (not something that happened): {m.waking_recall()}")
             else:
                 lines.append("- " + m.text.strip().replace("\n", " / "))
         parts.append("Things you remember from earlier conversations (use them naturally, do not list them):\n" + "\n".join(lines))

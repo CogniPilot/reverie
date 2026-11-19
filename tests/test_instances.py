@@ -2,13 +2,13 @@ from __future__ import annotations
 import tests  # noqa: F401  isolates REVERIE_* before reverie is imported
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from reverie.config import Config
-from reverie.chat import ChatDaemon
-from reverie.context_budget import memory_byte_budget, recent_exchanges
+from reverie.memory import MemoryStore
 from reverie.reverie import Reverie
-from reverie.opencode import dispatch, install
+from tests.helpers import install_opencode
 
 class InstanceTests(unittest.TestCase):
     def setUp(self):
@@ -24,10 +24,13 @@ class InstanceTests(unittest.TestCase):
                              "directives": ["Be honest and inquisitive."]}}))
         return path
 
-    def daemon(self, path):
-        daemon = ChatDaemon(cfg=Config(instance_config=path))
-        self.addCleanup(daemon.brain.store.close)
-        return daemon
+    def memory(self, path):
+        subprocess.run(["reverie-chat", "--instance", str(path), "--profile"],
+                       capture_output=True, check=True, timeout=10)
+        cfg = Config(instance_config=path)
+        store = MemoryStore(cfg.db_path)
+        self.addCleanup(store.close)
+        return cfg, store
 
     def test_shared_room_tone_defaults_to_professional_and_is_validated(self):
         from reverie.instance import load_instance
@@ -42,40 +45,44 @@ class InstanceTests(unittest.TestCase):
                     load_instance(path)
 
     def test_shared_instance_does_not_share_memories_or_legacy_paths(self):
-        personal = self.daemon(self.instance("personal"))
-        shared = self.daemon(self.instance("shared"))
-        personal.brain.store.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")
-        self.assertEqual(shared.brain.store.count("episode"), 0)
-        self.assertNotIn("PRIVATE_SENTINEL_739", dispatch(shared.brain, {"action":"context"}))
-        self.assertNotEqual(personal.cfg.db_path, shared.cfg.db_path)
-        for path in (shared.cfg.persona_path, shared.cfg.profile_path,
-                     shared.cfg.legacy_history, shared.cfg.log_path):
-            self.assertTrue(path.is_relative_to(shared.cfg.data_dir))
-        self.assertEqual(Reverie(shared.brain.store).self_model()["body"]["consciousness"],
+        personal_cfg, personal = self.memory(self.instance("personal"))
+        shared_cfg, shared = self.memory(self.instance("shared"))
+        personal.add_episode("PRIVATE_SENTINEL_739", "Only for personal history.")
+        self.assertEqual(shared.count("episode"), 0)
+        context = subprocess.check_output(
+            ["reverie-context", "--instance", str(shared_cfg.instance_config), "--channel", "private"],
+            text=True, timeout=10,
+        )
+        self.assertNotIn("PRIVATE_SENTINEL_739", context)
+        self.assertNotEqual(personal_cfg.db_path, shared_cfg.db_path)
+        for path in (shared_cfg.persona_path, shared_cfg.profile_path,
+                     shared_cfg.legacy_history, shared_cfg.log_path):
+            self.assertTrue(path.is_relative_to(shared_cfg.data_dir))
+        self.assertEqual(Reverie(shared).self_model()["body"]["consciousness"],
                          "Consciousness is an open question.")
-        self.assertEqual(shared.brain.store.beliefs(), [])
+        self.assertEqual(shared.beliefs(), [])
 
     def test_model_switch_preserves_history_self_model_plan_and_ballots(self):
         config = self.instance("personal")
-        daemon = self.daemon(config)
-        daemon.brain.store.add_episode("My ongoing task", "Validate the compiler.")
-        reverie = Reverie(daemon.brain.store)
+        _, store = self.memory(config)
+        store.add_episode("My ongoing task", "Validate the compiler.")
+        reverie = Reverie(store)
         reverie.write("plan", "Continue the experiment", 0)
         reverie.vote("publication", {"proposal":"A reviewed public package"}, "Deliberate first vote")
         before = (reverie.self_model(), reverie.plan(), reverie.ballot_history())
         workspace = self.root / "runtime"
-        install(workspace, "local/small", config)
-        install(workspace, "cloud/large", config)
-        reopened = self.daemon(config)
-        after = Reverie(reopened.brain.store)
+        install_opencode(workspace, "--model", "local/small", "--instance", str(config))
+        install_opencode(workspace, "--model", "cloud/large", "--instance", str(config))
+        _, reopened = self.memory(config)
+        after = Reverie(reopened)
         self.assertEqual(before, (after.self_model(), after.plan(), after.ballot_history()))
-        self.assertEqual(reopened.brain.store.count("episode"), 1)
+        self.assertEqual(reopened.count("episode"), 1)
         self.assertEqual(json.loads((workspace/".reverie-instance").read_text())["instance"], str(config.resolve()))
         self.assertEqual(json.loads((workspace/"opencode.json").read_text())["model"], "cloud/large")
         self.assertTrue((workspace/".agents/skills/reverie-memory/SKILL.md").is_file())
         self.assertTrue((workspace/".claude/skills/reverie-runtime/SKILL.md").is_file())
         instructions = (workspace/"AGENTS.md").read_text()
-        self.assertIn("reverie.context_cli", instructions)
+        self.assertIn("reverie-context --instance", instructions)
         self.assertEqual(instructions.count("<!-- reverie:begin -->"), 1)
 
     def test_invalid_or_missing_config_never_falls_back_to_personal_data(self):
@@ -86,25 +93,11 @@ class InstanceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Config(instance_config=path)
 
-    def test_context_budget_scales_and_reserves_tools_and_output(self):
-        small = memory_byte_budget(8192, 2048, 1000, "fixed rules")
-        large = memory_byte_budget(131072, 8192, 1000, "fixed rules")
-        self.assertGreater(large, small)
-        messages = []
-        for i in range(30):
-            messages.extend([{"role":"user", "content":str(i)+"x"*100},
-                             {"role":"assistant", "content":"y"*100}])
-        self.assertLessEqual(len(recent_exchanges(messages, small).encode()), small)
-        self.assertIn("user: 29", recent_exchanges(messages, small))
-        self.assertEqual(recent_exchanges(messages, 0), "")
-        self.assertEqual(memory_byte_budget(8192, 8192), 0)
-        with self.assertRaises(ValueError):
-            memory_byte_budget(-1)
-
     def test_local_gpu_provider_uses_selected_endpoint_limits_and_environment_credential(self):
         workspace=self.root/"gpu-runtime"
-        install(workspace, "local_agent/qwen", self.instance("gpu"),
-                "http://gpu:8080/v1", 32768, 4096, "LOCAL_MODEL_KEY")
+        install_opencode(workspace, "--model", "local_agent/qwen", "--instance", str(self.instance("gpu")),
+                         "--api-base", "http://gpu:8080/v1", "--context-window", "32768",
+                         "--output-tokens", "4096", "--api-key-env", "LOCAL_MODEL_KEY")
         settings=json.loads((workspace/"opencode.json").read_text())
         provider=settings["provider"]["local_agent"]
         self.assertEqual(provider["options"]["apiKey"], "{env:LOCAL_MODEL_KEY}")
@@ -112,6 +105,6 @@ class InstanceTests(unittest.TestCase):
         self.assertEqual(provider["models"]["qwen"]["limit"], {"context":32768,"output":4096})
         self.assertTrue((workspace/".agents/skills/reverie-context/SKILL.md").exists())
         before=(workspace/"opencode.json").read_text()
-        with self.assertRaises(ValueError):
-            install(workspace,"local_agent/qwen",api_base="http://user:secret@gpu/v1")
+        with self.assertRaises(subprocess.CalledProcessError):
+            install_opencode(workspace, "--model", "local_agent/qwen", "--api-base", "http://user:secret@gpu/v1")
         self.assertEqual((workspace/"opencode.json").read_text(),before)

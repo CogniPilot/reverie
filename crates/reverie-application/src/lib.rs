@@ -9,6 +9,7 @@ pub mod memory_import;
 pub mod memory_lifecycle;
 pub mod memory_recall;
 pub mod memory_startup;
+pub mod offline_worker_store;
 pub mod project_memory;
 pub mod reservation_gate;
 pub mod reservation_observer;

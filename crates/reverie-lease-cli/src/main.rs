@@ -2,19 +2,17 @@
 //! (contract r10), over `reverie_host::lease`. Liveness is only a kernel
 //! lock or a reservation window, never a PID, heartbeat or metadata.
 use clap::{Parser, Subcommand};
-use nix::sys::signal::{SigSet, SigmaskHow, Signal, killpg, pthread_sigmask};
-use nix::unistd::Pid;
+use nix::sys::signal::Signal;
 use reverie_contracts::lease_records::{check_report_bytes, gc_report_bytes, json_string_bytes};
 use reverie_host::lease::{
-    self, CheckState, LeaseBase, LeaseCode, LeaseError, Listing, spawn_new_session,
+    self, CheckState, LeaseBase, LeaseCode, LeaseError, Listing, Signals, end_by, exit_status,
 };
 use serde_json::value::RawValue;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const EXIT_CODES: &str = "EXIT CODES:\n  run: the command's code. check: 0 free, 1 in use, 2 unknown.\n  hold/run: 3 busy barrier or replaced dir. Other lease errors: 2.\n\nLEASE DIR:\n  Holders use the first --leases-dir, else $REVERIE_LEASE_DIR, else\n  ~/.local/state/reverie/leases; `check` checks every --leases-dir given.";
 
@@ -86,16 +84,9 @@ fn wait(seconds: f64) -> Duration {
 
 /// `leases_dir()`: the holder's own lease dir, created when missing.
 fn own_base(cli: &Cli) -> Result<LeaseBase, LeaseError> {
-    let path = cli.leases_dir.first().cloned().or_else(|| {
-        std::env::var_os("REVERIE_LEASE_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-    });
-    let path = path.unwrap_or_else(|| {
-        PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
-            .join(".local/state/reverie/leases")
-    });
-    LeaseBase::own(&path)
+    cli.leases_dir
+        .first()
+        .map_or_else(LeaseBase::current_user, |path| LeaseBase::own(path))
 }
 
 fn text(path: &Path) -> Vec<u32> {
@@ -140,109 +131,37 @@ fn check(cli: &Cli, dir: &Path, root: Option<&Path>) -> Result<i32, LeaseError> 
     Ok(code)
 }
 
-/// End the command's session: SIGTERM, then SIGKILL, each awaited briefly.
-fn kill_session(group: Pid) {
-    for (signal, grace) in [(Signal::SIGTERM, 10), (Signal::SIGKILL, 5)] {
-        if killpg(group, signal).is_err() {
-            return;
-        }
-        let deadline = Instant::now() + Duration::from_secs(grace);
-        while Instant::now() < deadline {
-            if killpg(group, None).is_err() {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-    }
-}
-
-fn signals(names: &[Signal]) -> SigSet {
-    let mut set = SigSet::empty();
-    for signal in names {
-        set.add(*signal);
-    }
-    set
-}
-
-/// Termination state shared with the signal thread: the first signal taken
-/// before a command group exists, and that group once it does.
-#[derive(Default)]
-struct Stop {
-    pending: Option<Signal>,
-    group: Option<Pid>,
-}
-
-struct Signals(Mutex<Stop>, Condvar);
-impl Signals {
-    fn lock(&self) -> MutexGuard<'_, Stop> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-    fn pending(&self) -> Option<Signal> {
-        self.lock().pending
-    }
-}
-
-/// Block `set` and consume it on a thread from before acquisition starts, so
-/// a stop can cancel a busy-barrier wait and is never left pending. Once a
-/// command group is recorded, later signals are forwarded to it.
-fn take_signals(set: SigSet) -> Result<Arc<Signals>, LeaseError> {
-    pthread_sigmask(SigmaskHow::SIG_BLOCK, Some(&set), None).map_err(std::io::Error::from)?;
-    let state = Arc::new(Signals(Mutex::default(), Condvar::new()));
-    let shared = Arc::clone(&state);
-    std::thread::spawn(move || {
-        while let Ok(signal) = set.wait() {
-            let mut stop = shared.lock();
-            if let Some(group) = stop.group {
-                let _ = killpg(group, signal);
-            } else if stop.pending.is_none() {
-                stop.pending = Some(signal);
-                shared.1.notify_all();
-            }
-        }
-    });
-    Ok(state)
-}
-
-/// A stop before the lease was announced: every lock and record is already
-/// released, so end by that signal, as the default disposition would.
-fn end_by(signal: Signal) -> ! {
-    let _ = pthread_sigmask(SigmaskHow::SIG_UNBLOCK, Some(&signals(&[signal])), None);
-    // The signal is directed at this thread only, so the waiting thread cannot take it.
-    let _ = nix::sys::signal::raise(signal);
-    std::process::exit(128 + signal as i32)
-}
-
 /// `lease run`: forwarded SIGTERM/SIGINT/SIGHUP reach the command's group. A
 /// stop during acquisition cancels it, and a stop before the launch ends the
 /// command unstarted; both release everything and end by the signal.
 fn run(cli: &Cli, dirs: &[PathBuf], command: &[OsString]) -> Result<i32, LeaseError> {
-    let stops = take_signals(signals(&[Signal::SIGTERM, Signal::SIGINT, Signal::SIGHUP]))?;
+    let stops = Signals::take(&[Signal::SIGTERM, Signal::SIGINT, Signal::SIGHUP])?;
     let base = own_base(cli)?;
     let held =
         lease::hold_cancellable(&base, dirs, Path::new(&command[0]), wait(cli.wait), &|| {
             stops.pending().is_some()
         });
-    let mut stop = stops.lock();
-    if let Some(signal) = stop.pending {
+    if let Some(signal) = stops.pending() {
         drop(held);
         end_by(signal);
     }
-    let _held = held?;
-    // Spawned under the lock: a signal now waits until the group is recorded.
-    let mut child = spawn_new_session(Command::new(&command[0]).args(&command[1..]))?;
-    let group = Pid::from_raw(i32::try_from(child.id()).unwrap_or(i32::MAX));
-    stop.group = Some(group);
-    drop(stop);
-    let status = child.wait()?;
-    kill_session(group);
-    Ok(std::os::unix::process::ExitStatusExt::signal(&status)
-        .map_or_else(|| status.code().unwrap_or(0), |signal| -signal))
+    let held = held?;
+    let mut child = match stops.spawn(Command::new(&command[0]).args(&command[1..]))? {
+        Some(child) => child,
+        None => {
+            drop(held);
+            end_by(stops.pending().expect("recorded stop"));
+        }
+    };
+    let status = child.wait();
+    stops.close_group();
+    Ok(exit_status(status?))
 }
 
 /// `lease hold`: for supervisors that reap their own children. A stop before
 /// `LEASED` cancels like `run`; after it, the stop releases and exits 0.
 fn hold_until_term(cli: &Cli, dir: &Path) -> Result<i32, LeaseError> {
-    let stops = take_signals(signals(&[Signal::SIGTERM, Signal::SIGINT]))?;
+    let stops = Signals::take(&[Signal::SIGTERM, Signal::SIGINT])?;
     let base = own_base(cli)?;
     let held = lease::hold_cancellable(
         &base,
@@ -257,10 +176,7 @@ fn hold_until_term(cli: &Cli, dir: &Path) -> Result<i32, LeaseError> {
     }
     let held = held?;
     print(format!("LEASED {}\n", held.keys()[0]).as_bytes())?;
-    let mut stop = stops.lock();
-    while stop.pending.is_none() {
-        stop = stops.1.wait(stop).unwrap_or_else(PoisonError::into_inner);
-    }
+    stops.wait_for_stop();
     Ok(0)
 }
 

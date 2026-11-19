@@ -62,6 +62,26 @@ fn config(raw: &Value) -> EffectiveWorkerConfig {
 fn sid() -> ProfileSessionId {
     ProfileSessionId::parse(SID).unwrap()
 }
+
+#[test]
+fn existing_session_lookup_does_not_create_missing_directories() {
+    let tree = Tree::new();
+    let config = NixConfiguration::capture(&config(&tree.config()));
+    let state = tree.0.join("state");
+    let session = state.join(SID);
+    let mut effects = false;
+    assert!(session_directory(&config, &sid(), false, &mut effects).is_err());
+    assert!(!state.exists() && !effects);
+    tree.mkdir(&state);
+    assert!(session_directory(&config, &sid(), false, &mut effects).is_err());
+    assert!(!session.exists() && !effects);
+    tree.mkdir(&session);
+    session_directory(&config, &sid(), false, &mut effects)
+        .unwrap()
+        .close()
+        .unwrap();
+    assert!(!effects);
+}
 fn substitute(value: &mut Value, root: &Path) {
     match value {
         Value::String(v) => *v = v.replace("$ROOT", root.to_str().unwrap()),

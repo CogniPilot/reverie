@@ -2,19 +2,20 @@
 The pure reducer consumes metadata fixtures, not a live chat API. It has no network,
 credential, terminal, scheduler, model, provider, process-execution or host adapter.
 
-Run from the repository:
+Run from the repository with the native flake environment.
 ```sh
-PYTHONPATH=python python3 -m reverie.launch_guard < input.json
+nix develop --command cargo run --locked -q -p reverie-launch-guard < input.json
 ```
-Input is exactly {request, now_ms}; see tests/fixtures/launch_guard/cases.json for
-complete request examples. Output is a versioned LAUNCH_GUARD receipt; exit0 means
-predicate PASS, exit2 means refusal. Invalid JSON/schema produces a bounded refusal
+Input is exactly {request, now_ms}. The [compatibility fixtures](../crates/reverie-launch-guard/tests/fixtures/cases.json)
+include complete requests and the original receipt digests. Output is a versioned
+LAUNCH_GUARD receipt. Exit status 0 means predicate PASS and status 2 means refusal.
+Invalid JSON/schema produces a bounded refusal
 diagnostic (not a receipt with fabricated identities). Stdin is capped at65536bytes,
 messages256 and bound rooms16. No rejected content or exception text is echoed.
 
 Schema v1 uses closed fields, types, role/state/reason enums and opaque IDs; unknown
 future fields or schema versions refuse. JSON schema documents structural rules;
-the Python validator additionally checks identity pairing, GO=transition identity,
+the Rust validator additionally checks identity pairing, GO=transition identity,
 room maps, result/code agreement and receipt digest. The hash detects mutation,
 not authenticity: callers cannot treat a recomputable digest as a signature.
 
@@ -33,19 +34,15 @@ An eventual trusted adapter must authenticate metadata and current principal/GO,
 goal/session locks, verify cursor continuity and current generations and recheck immediately
 before effect. This pure function does not prove caller honesty, persistence, auth,
 permission grants or absence of changes after the supplied snapshot.
-ReceiptReplay is bounded in-memory synthetic idempotency only; durable server replay,
-journaling and restart reconciliation belong to later slices. Replaying a key returns the
-original receipt, never a freshly stamped PASS; reuse is not permission to execute again.
-Snapshots and returned receipts are copied; mutations cannot corrupt replay state.
+The bounded, in-memory replay fixture returns the original receipt for a repeat
+key and refuses conflicting snapshots. The command evaluates one snapshot per
+invocation and exposes only the metadata predicate and its receipt. Effect-class
+operations such as heavy jobs, compute leases, resume and publication need a
+separate trusted adapter and effect boundary.
 
-All four Phase0 effect signatures require guard_receipt: heavy_job, compute_lease,
-resume and publication_adjacent. They validate its shape and refuse ADAPTER_UNAVAILABLE
-even for PASS. No runtime imports, CLI registrations, daemon or service activation changes.
-Later receipt kinds, readiness/ledger/seal, compute/rest/watchers and durable goal APIs
-are separate increments; this slice implements only the envelope and LAUNCH_GUARD.
-
-Tests check the ten outcome+reason fixtures, privacy fields, generation/state/age boundaries,
-idempotency and tampering, bounded input, schema-forward rejection and AST effect/import scan.
+Tests check all ten original outcomes, reason codes and receipt digests, privacy
+fields, generation, state and age boundaries, replay, tampering, bounded input,
+schema-forward rejection and the executable's closed argument surface.
 Production deployment, shadow scheduling and any live input remain separate review gates.
 
 ## Optional managed command
@@ -76,7 +73,6 @@ If an existing element with this name is present, stop and plan its upgrade/roll
 separately rather than remove or overwrite it blindly. Keep other profile entries.
 No package build, installation or host rollout is implied by source-level checks.
 
-The wrapper runs the exact minimal source payload with Python `-I -B` and an
-explicit pinned import path, ignoring ambient PYTHONPATH and current-directory
-modules. It accepts only stdin mode, `--help`, or `--example`; there are no live
-chat, server, credential, provider, scheduler, resume or effect options.
+The native executable accepts stdin mode, `--help`, or `--example`. The example is
+embedded in the executable. The Nix package excludes the Python interpreter
+from its runtime closure.

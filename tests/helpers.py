@@ -2,14 +2,18 @@ from __future__ import annotations
 """Shared fakes: an in-memory LLM, a fake room, and a temporary Config."""
 
 import json
+import subprocess
 from contextlib import contextmanager
 import tempfile
 from pathlib import Path
 from typing import Callable
 
-from reverie.config import Config
-from reverie.llm import ChatClient
-from reverie.room import Room
+from reverie.config import ChatClient, Config
+
+
+def install_opencode(workspace: Path, *options: str) -> None:
+    subprocess.run(["reverie-opencode", "--install", str(workspace), *options],
+                   capture_output=True, check=True, timeout=30)
 
 
 class FakeTransport:
@@ -31,34 +35,6 @@ class FakeTransport:
 def fake_client(responder="ok") -> tuple[ChatClient, FakeTransport]:
     t = FakeTransport(responder)
     return ChatClient("http://test/v1", "test-model", 5, transport=t), t
-
-
-class FakeRoom(Room):
-    def __init__(self, session_id="me", hold_path: Path | None = None, busy=False):
-        super().__init__(session_id, hold_path or Path(tempfile.mkdtemp()) / "hold", runner=self._runner)
-        self.inbox: list[dict] = []
-        self.said: list[str] = []
-        self.busy = busy
-        self.ls_fails = False
-
-    def _runner(self, cmd, timeout):
-        cmd = list(cmd)
-        if cmd[:4] == ["reverie", "agent", "chat", "read"]:
-            return json.dumps({"messages": self.inbox})
-        if cmd[:4] == ["reverie", "agent", "chat", "say"]:
-            assert "--to" not in cmd, cmd
-            self.said.append(cmd[-1])
-            return ""
-        if cmd[:3] == ["reverie", "agent", "ls"]:
-            if self.ls_fails:
-                raise RuntimeError("down")
-            return "x review-gpu: standing [agent, busy]\n" if self.busy else "x review-gpu: standing [agent, idle]\n"
-        return ""
-
-    def post(self, text, kind="user", to="all", mid=None):
-        m = {"id": mid or f"m{len(self.inbox)+1}", "from": {"kind": kind, "name": "USER"}, "to": to, "text": text}
-        self.inbox.append(m)
-        return m
 
 
 def temp_config() -> Config:
@@ -88,9 +64,7 @@ def output_policy_terms() -> tuple[str, str]:
 def synthetic_output_policy():
     """Exercise output rejection without shipping a default topic policy."""
     import json
-    import re
     from unittest.mock import patch
     policy = json.dumps({"denied_patterns": [r"(?s)(?=.*\bpolicy_marker\b)(?=.*\brestricted_marker\b)"]})
-    with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": policy}), patch(
-            "reverie.floors._ABUSE", re.compile(r"\b(?:abuse_marker|lives at)\b", re.I)):
+    with patch.dict("os.environ", {"REVERIE_OUTPUT_POLICY": policy}):
         yield

@@ -1,12 +1,12 @@
 # Pure NixOS evaluation, with synthetic paths and no host activation.
-{ nixpkgs, pruneHostPackage, prunePackage, legacyPrunePackage, system ? builtins.currentSystem }:
+{ nixpkgs, pruneHostPackage, prunePackage, legacyPrunePackage, pruneReportPackage, system ? builtins.currentSystem }:
 let
   lib = nixpkgs.lib;
   evaluateWith = package: extra: import "${nixpkgs}/nixos/lib/eval-config.nix" {
     inherit system;
     modules = [
       ({ config, lib, pkgs, ... }: import ../nix/prune-service.nix {
-        inherit config lib pkgs pruneHostPackage;
+        inherit config lib pkgs pruneHostPackage pruneReportPackage;
         prunePackage = package;
       })
       { system.stateVersion = "26.05"; }
@@ -99,7 +99,7 @@ let
     rootIdentityRequired = failing noIdentity && failing subtreeIdentity;
     reportCopyOptIn = !(service.serviceConfig ? ExecStopPost);
     reportCopyAfterEveryRun = let post = reported.systemd.services.reverie-prune.serviceConfig.ExecStopPost; in
-      lib.hasPrefix "+\"" post && lib.hasInfix "report_export.py\" \"--state\" \"/var/lib/reverie-prune-declared\" \"--out\" \"/var/lib/reverie-prune-reports\" \"--uid\" \"1000\" \"--gid\" \"100\"" post &&
+      post == ''+"${pruneReportPackage}/bin/reverie-prune-report-export" "--state" "/var/lib/reverie-prune-declared" "--out" "/var/lib/reverie-prune-reports" "--uid" "1000" "--gid" "100"'' &&
       !(failing reported) && reported.systemd.services.reverie-prune.serviceConfig.ExecStartPre == service.serviceConfig.ExecStartPre;
     reportOutsideStateAndDisposable = failing reportInState && failing reportOnDisposable;
     reportNeedsNonRootWriter = failing reportNoUser;

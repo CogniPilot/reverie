@@ -131,7 +131,6 @@ function main() {
     add(join(config.companyRoot, 'data'), '/instances/default'); add(join(config.companyRoot, 'home'), '/home/agent');
     add(config.workspace, '/reverie_workspace'); add(config.scratch, '/scratch');
     add(join(root, 'runtime/passwd'), '/etc/passwd', true); add(join(root, 'runtime/group'), '/etc/group', true);
-    if (process.env.REVERIE_GPU_PUBLISHED_DIR) add(directory(process.env.REVERIE_GPU_PUBLISHED_DIR), '/host-published', true);
     if (source) add(source, '/workspace');
     for (const project of projects) add(project.path, '/projects/' + project.name);
     if (updates) add(join(root, 'runtime/control'), '/run/reverie-control');
@@ -156,6 +155,9 @@ function main() {
   function checkReplacement(candidate) {
     if (!/^[a-f0-9]{64}$/.test(candidate.Id) || candidate.State?.Running !== false || candidate.State?.Paused || candidate.State?.Restarting)
       fail('--force requires a stopped container. Stop Reverie and its agents first; nothing was replaced.');
+    if (candidate.HostConfig?.DeviceRequests?.length || candidate.HostConfig?.Devices?.length ||
+        candidate.Config?.Env?.some(value => value.startsWith('REVERIE_GPU_PUBLISHER=')))
+      fail('--force cannot replace a GPU or device-passthrough container. Use its existing Docker deployment definition.');
     if ((candidate.Config?.Labels?.['org.reverie.website.runtime'] ?? 'default') !== 'default' ||
         candidate.Config?.Env?.some(value => value.startsWith('REVERIE_WORKER_SOCKET=')))
       fail('--force cannot replace isolated-worker or optional website runtimes. Use the existing coordinated update workflow.');
@@ -266,12 +268,6 @@ function main() {
     intentMounts.push({ type: 'bind', source: realpathSync(src), destination: dst, readonly });
   }
   mount(data, '/instances/default'); mount(home, '/home/agent'); mount(config.workspace, '/reverie_workspace'); mount(config.scratch, '/scratch');
-  const gpu = process.env.REVERIE_GPU_PUBLISHED_DIR;
-  if (gpu) {
-    directory(gpu);
-    if (!statSync(gpu).isDirectory()) fail('GPU telemetry path must be a directory.');
-    mount(gpu, '/host-published', true);
-  }
   mount(join(identity, 'passwd'), '/etc/passwd', true); mount(join(identity, 'group'), '/etc/group', true);
   command.push('--env', 'REVERIE_CASES_PATH=/reverie_workspace/cases', '--env', 'REVERIE_RESEARCH_ROOT=/reverie_workspace/research');
   if (config.adminPhoneWake === true) command.push('--env', 'REVERIE_ADMIN_PHONE_WAKE=enabled');

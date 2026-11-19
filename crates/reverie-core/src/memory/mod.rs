@@ -1,17 +1,23 @@
 //! Existing memory retrieval and lexical embeddings. Data is not model authority.
+mod dream;
 mod embedding;
 mod embedding_text;
 mod float_text;
+mod importance;
+mod mood;
 mod numeric;
 use crate::python_text as text;
 mod ranking;
 mod startup;
+pub use dream::{DREAM_DRAWS, DreamEpisode, DreamTone, dream_sample};
 pub use embedding::{
     Embedder, EmbeddingError, EmbeddingKind, HashedEmbedder, cosine, normalize, pack, tokenize,
     unpack,
 };
 pub use embedding_text::EmbeddingText;
 pub use float_text::parse_embedding_float_text;
+pub use importance::{RATING_SUFFIX, RATING_SYSTEM, importance_rating};
+pub use mood::Mood;
 pub use numeric::{MemoryMathError, recency_score, score_memory};
 pub use ranking::{MemoryRank, MemoryRankError, memory_rank_order};
 pub use startup::{MemoryReadiness, MemoryReadinessError, MemoryStartupPhase};

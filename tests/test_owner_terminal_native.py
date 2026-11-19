@@ -17,7 +17,7 @@ from reverie import owner_terminal_native as N
 from reverie import owner_terminal_pty as H
 from reverie import website_peer_facts as F
 from reverie import human_terminal_protocol as P
-from reverie.owner_terminal_install import quoted, unit_text
+from reverie.owner_terminal_lifecycle import quoted
 
 EID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 SID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
@@ -61,12 +61,7 @@ class PrivatePolicyTests(unittest.TestCase):
         with self.assertRaises(OSError): N.private_document(alias/self.file.name)
         with self.assertRaises(ValueError): N.physical(alias)
 
-    def test_fixed_unit_no_automatic_start_or_restart(self):
-        policy = type('Policy', (), {'path': self.file, 'roots': {'control':self.root/'control', 'ledger':self.root/'ledger'}})()
-        raw = unit_text(policy, Path('/nix/store/fixed-host/bin/host'))
-        self.assertIn('Restart=no\n',raw)
-        self.assertIn('MemoryMax=256M\nMemorySwapMax=0\nTasksMax=64',raw)
-        self.assertIn('RestrictAddressFamilies=AF_UNIX',raw)
+    def test_quoted_service_path_refuses_expansion_and_newline(self):
         with self.assertRaises(ValueError): quoted('/private/%n')
         with self.assertRaises(ValueError): quoted('/private/x\nExecStart=/bad')
 

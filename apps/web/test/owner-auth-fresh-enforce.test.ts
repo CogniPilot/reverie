@@ -1,6 +1,6 @@
 /**
- * @fileoverview A fresh image volume starts in enforce: docker/entrypoint.sh writes the policy marker
- * `enforce` before any owner account exists, and bootstrap keeps it. Pins that the shared Basic
+ * @fileoverview Exercise an owner policy initialized in enforce mode before account setup.
+ * Pins that the shared Basic
  * password (REVERIE_PASSWORD, inherited by every process in the container) never reaches an owner
  * route on its own, that an agent header with it is refused, and that the signed-in owner gets through,
  * across a restart. Same hook order as server.ts: Basic auth, then the owner policy.

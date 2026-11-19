@@ -1,4 +1,4 @@
-"""Verify image-processing behavior supplied by the native Python environment."""
+"""Verify Pillow's PNG and WebP support in the laptop development environment."""
 import tests  # noqa: F401
 import io
 import unittest
@@ -9,7 +9,7 @@ except ImportError:
     Image = ImageDraw = None
 
 
-@unittest.skipIf(Image is None, "Pillow is supplied by the packaged Python environment")
+@unittest.skipIf(Image is None, "Pillow is supplied by the laptop development environment")
 class ImageRuntimeTests(unittest.TestCase):
     def test_drawing_and_png_webp_roundtrips(self):
         image = Image.new("RGB", (32, 24), "white")

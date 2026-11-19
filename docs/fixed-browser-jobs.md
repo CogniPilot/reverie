@@ -17,7 +17,7 @@ resource reservation policy; it never creates a second budget authority.
 
 After separately reviewed installation, the selected member posts the exact
 `/browser-job slam-office640` text through normal `reverie agent chat say`, as a
-reply to the selected standing cue. `python -m reverie.browser_job submit MID`
+reply to the selected standing cue. `reverie-ops browser-job submit MID`
 then sends only that canonical request reference over the existing office phone;
 `inspect` and `cancel` use the same reference. No caller-selected URL, source,
 actor, command, PID, credential, cookie, output path or browser endpoint exists.

@@ -2,9 +2,13 @@
 
 `reverie-memory` reads one path-free screen/recall/remember JSON request from
 stdin. Instance selection belongs to the installed bootstrap (`--instance` or
-`REVERIE_INSTANCE_CONFIG`), not the request. This candidate is not selected in
-the runtime package. Namespace observations and installed configuration do not
-authenticate a caller or grant access to another employee or project.
+`REVERIE_INSTANCE_CONFIG`), not the request. The runtime package selects the
+native `reverie-memory-journal --journal-only` path for OpenCode journal
+operations. That mode uses the authenticated Office session and opens no
+legacy instance store. The legacy OpenCode adapter still reads local history
+separately. The runtime's public `reverie-memory` alias still uses the console.
+Namespace observations and installed configuration grant no employee or project
+access.
 
 Recall requires explicit initialization. Missing state returns NotInitialized;
 recall does not import, seed, create profiles, reembed, or repair a selected model.

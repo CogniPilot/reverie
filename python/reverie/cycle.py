@@ -8,22 +8,20 @@ import json
 import os
 from pathlib import Path
 import re
+import subprocess
 import time
 import urllib.request
 from zoneinfo import ZoneInfo
-from .config import Config
+from .config import Config, LLMError
 from .cycle_budget import Ledger, MeteredClient, Deferred, BudgetExhausted
 from .cycle_runner import OpenCodeRunner
-from .dream import Dreamer
-from .reverie import Reverie, SAFEGUARDS
+from .reverie import Reverie, safeguards
 from .instance import initial_self_for
 from .memory import MemoryStore
-from .opencode import dispatch
-from .chat import Brain
-from .project_memory import ProjectMemory
 from .reflection import Reflector
-from .room import Room
-from .plan_usage import PlanMonitor
+from .runtime import Reverie as Office
+from .hands.agent_journal import encode_memory_json, native_memory_request, project_memory_request
+from .hands.coding_process import WorkerSocket
 from reverie import env_names
 
 PHASES=('waking','planning','research','implementation','reporting','consolidation','dreaming','sleeping')
@@ -152,8 +150,7 @@ class Cycle:
         source=self.policy.get('plan_usage')
         if source:
             try:
-                plans=PlanMonitor(source['api_url'],self.ledger,source.get('reserve_percent',5),
-                                  source.get('max_age_seconds',600)).refresh()
+                plans=self.refresh_plans(source)
             except Exception:
                 plans={}
         self.plan_capacity=plans
@@ -175,6 +172,19 @@ class Cycle:
             except (OSError,ValueError,TypeError): continue
         return result
 
+    def refresh_plans(self, source):
+        now=time.time()
+        response=Office(source['api_url']).call('GET','/api/subscription-profiles/usage')
+        frame=encode_memory_json({
+            'ledger':str(self.state/'cycle.sqlite'), 'now':now,
+            'accounts':response.get('accounts',[]),
+            'reserve_percent':source.get('reserve_percent',5), 'max_age_seconds':source.get('max_age_seconds',600),
+        })
+        result=native_memory_request('cycle-plan-worker',frame,4*1024*1024,timeout=35) if frame is not None else None
+        if result is None:
+            raise RuntimeError('the packaged cycle plan worker is unavailable')
+        return result['plans']
+
     def context(self, name, task):
         config=self.agents[name]
         # Project evidence is explicitly retrieved; another agent's personal store is never searched.
@@ -182,13 +192,10 @@ class Cycle:
                'Current style traits/tags (not capability claims): '+json.dumps(self.attributes(name)),task]
         root=self.resolve(self.policy['project_memory_dir'])
         for project in config.get('projects',[]):
-            memory=ProjectMemory(root,project)
-            try:
-                for query in config.get('memory_queries',config.get('interests',[]))[:3]:
-                    for item in memory.lookup(query)[:3]:
-                        parts.append(json.dumps({'project':project,'id':item['id'],'text':item['text'],
-                                                 'source':item['meta'].get('source','')})[:1600])
-            finally: memory.close()
+            for query in config.get('memory_queries',config.get('interests',[]))[:3]:
+                for item in project_memory_request('lookup',root,project,query=query)[:3]:
+                    parts.append(json.dumps({'project':project,'id':item['id'],'text':item['text'],
+                                             'source':item['meta'].get('source','')})[:1600])
         return '\n\n'.join(parts)[:10000]
 
     def client(self, name, phase, model_key, day):
@@ -233,11 +240,14 @@ class Cycle:
 
     def wake(self,name,model,day):
         def waking(cfg,store,reverie,client):
-            # Loading identity/plan is CPU work. Model prefill is charged on the later request.
-            brain=Brain(cfg,store,None,Room('',cfg.hold_path))
-            packet=dispatch(brain,{'action':'context','channel':'work',
-                'context_window':self.models[model]['context_window'],
-                'output_tokens':self.models[model]['output_tokens']})
+            selected = self.models[model]
+            result = subprocess.run(
+                ['reverie-context', '--instance', str(cfg.instance_config), '--channel', 'work',
+                 '--context-window', str(selected['context_window']),
+                 '--output-tokens', str(int(selected['output_tokens']))],
+                stdin=subprocess.DEVNULL, capture_output=True, encoding='utf-8', timeout=60, check=True,
+            )
+            packet = result.stdout.removesuffix('\n')
             return {'model':model,'role':self.agents[name]['role'],'context':packet,
                     'note':'Project histories are available through explicit scoped lookup.'}
         self.phase(name,'waking',model,day,waking)
@@ -309,7 +319,7 @@ class Cycle:
             prompt+='"task_ids":["approved-task-id"],"allow_subagents":true,"children":[{"task_id":"approved-task-id",'
             prompt+='"model":"model-key","role":"implementer"}]}],"notes":"why this allocation"}. '
             prompt+='Experts supervise coding children, may conduct research themselves, and report to you. '
-            prompt+='Use only configured agents, available authorized models and approved backlog IDs. Empty assignments are valid. '+SAFEGUARDS
+            prompt+='Use only configured agents, available authorized models and approved backlog IDs. Empty assignments are valid. '+safeguards()
             value=object_reply(client.chat([{'role':'system','content':'You are the configured coordinator allocating a reverie schedule. '+cfg.instance.persona},
                                             {'role':'user','content':prompt}],max_tokens=1800,max_chars=16000,temperature=.2))
             value['assignments']=self.validate_schedule(value,available)
@@ -372,10 +382,9 @@ class Cycle:
                                                       (status,json.dumps(receipt),task['id']))
             # Verified command receipts are shared. A model's narrative is not promoted as fact.
             if verified:
-                memory=ProjectMemory(self.resolve(self.policy['project_memory_dir']),task['project'])
-                try: memory.remember('Task '+task['id']+' verification commands passed: '+json.dumps(checks),
-                                      'cycle receipt '+task['id']+'; inspect project workspace '+task['workdir'])
-                finally: memory.close()
+                project_memory_request('remember',self.resolve(self.policy['project_memory_dir']),task['project'],
+                                       text='Task '+task['id']+' verification commands passed: '+json.dumps(checks),
+                                       source='cycle receipt '+task['id']+'; inspect project workspace '+task['workdir'])
         except BaseException:
             self.ledger.finish(key,status='interrupted_or_unknown')
             with self.ledger.db: self.ledger.db.execute('UPDATE jobs SET status=? WHERE id=?',('needs_review',task['id']))
@@ -388,7 +397,7 @@ class Cycle:
             text=self.context(name,'Review these approved tasks and prepare concise evidence-based context for implementers: '+
                 json.dumps([tasks[t] for t in assignment.get('task_ids',[]) if t in tasks]))
             return {'guidance':client.chat([{'role':'system','content':cfg.instance.persona+' Your role is '+self.agents[name]['role']},
-                {'role':'user','content':text+' State assumptions, relevant sources, acceptance checks and open questions. '+SAFEGUARDS}],
+                {'role':'user','content':text+' State assumptions, relevant sources, acceptance checks and open questions. '+safeguards()}],
                 max_tokens=900,max_chars=6000,temperature=.3)}
         if name!=self.coordinator: self.phase(name,'planning',model,day,analyze)
         children={c['task_id']:c for c in assignment.get('children',[])}
@@ -428,19 +437,40 @@ class Cycle:
         def dream(cfg,store,reverie,client):
             vacation=reverie.read('lifecycle',{'mode':'active'})['body']['mode']=='vacation'
             if vacation:
-                last=float(store.get_state('vacation_last_dream_attempt','0'))
-                if time.time()-last<86400: return {'skipped':'vacation daily limit'}
-                store.set_state('vacation_last_dream_attempt',str(time.time())); client.timeout=min(client.timeout,120)
-            dreamer=Dreamer(store,client,per_sleep=cfg.dreams_per_sleep)
-            # Shared technical context + this specialist's own experiences; no other private store.
-            dreamer.creative_context=lambda:self.context(name,'Questions you may freely explore: '+', '.join(self.agents[name].get('interests',[])))
-            dreamer.system_prompt_path=cfg.dream_prompt_path
-            memory=dreamer.dream()
-            if memory is None:
+                client.timeout=min(client.timeout,120)
+            creative = self.context(name,'Questions you may freely explore: '+', '.join(self.agents[name].get('interests',[])))[:8000]
+            worker = WorkerSocket('cycle-dream-worker', {
+                'instance': str(cfg.instance_config), 'database': str(cfg.db_path),
+                'creative': creative, 'vacation': vacation,
+            }, environment={key: os.environ[key] for key in
+                ('HOME', 'REVERIE_ROOT', 'REVERIE_OUTPUT_POLICY', 'REVERIE_PROTECTED_PEOPLE') if key in os.environ})
+            try:
+                event = worker.wait(45)
+                if event['action'] == 'busy':
+                    raise Deferred('another memory maintenance pass is running')
+                if event['action'] == 'vacation_limit':
+                    return {'skipped':'vacation daily limit'}
+                if event['action'] == 'prompt':
+                    prompt = event['prompt']
+                    try:
+                        reply = client.chat(
+                            [{'role':'system','content':prompt['system']}, {'role':'user','content':prompt['user']}],
+                            max_tokens=prompt['max_tokens'], temperature=prompt['temperature'], max_chars=prompt['max_chars'],
+                        )
+                    except LLMError:
+                        reply = None
+                    worker.send({'text':reply})
+                    event = worker.wait(45)
+                if event['action'] != 'finished':
+                    raise RuntimeError('dream persistence was not confirmed')
+                memory_id = event['memory_id']
+            finally:
+                worker.close(grace=1)
+            if memory_id is None:
                 failures=self.ledger.db.execute("SELECT COUNT(*) FROM usage WHERE day=? AND agent=? AND phase=? AND status!='completed'",
                                                 (day,name,'dreaming')).fetchone()[0]
                 if failures: raise RuntimeError('dream inference failed')
-            return {'dream_memory_id':memory.id if memory else None,'raw_narrative_retained':False}
+            return {'dream_memory_id':memory_id,'raw_narrative_retained':False}
         self.phase(name,'consolidation',model,day,consolidate)
         self.phase(name,'dreaming',model,day,dream)
         self.phase(name,'sleeping',model,day,lambda *args:{'state':'sleeping','background_inference':False})

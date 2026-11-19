@@ -29,9 +29,10 @@ pub use protocol::{
 mod provenance;
 mod provenance_build;
 pub use provenance_build::{
-    HUMAN_TERMINAL_FILES, WORKER_IMAGE_V1_FACTORY_FILES, WebsiteArchiveConfiguration,
-    WebsiteArchiveManifest, WebsiteProvenanceBuild, WebsiteStartupBuildGraph,
-    WorkerImageProvenanceBuild,
+    HUMAN_TERMINAL_FILES, WORKER_FACTORY_INVENTORY, WORKER_FACTORY_INVENTORY_PATH,
+    WebsiteArchiveConfiguration, WebsiteArchiveManifest, WebsiteProvenanceBuild,
+    WebsiteStartupBuildGraph, WorkerImageProvenanceBuild, WorkerProvenanceVersion,
+    worker_factory_files,
 };
 mod worker_image;
 pub use worker_image::WorkerImageProvenance;
