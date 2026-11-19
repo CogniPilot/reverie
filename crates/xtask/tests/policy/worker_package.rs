@@ -24,7 +24,7 @@ mod linux {
         );
         let bin = root.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        for name in ["nix", "python3"] {
+        for name in ["nix", "cargo"] {
             symlink(&executable, bin.join(name)).unwrap();
         }
         let temporary = root.path().join("temporary with spaces");
@@ -79,7 +79,7 @@ mod linux {
         assert_eq!(rows.len(), 3);
         assert!(rows[0].starts_with("nix\t.#workerExec\t"));
         assert!(rows[1].starts_with("nix\t.#workerResourceClientManifest\t"));
-        assert!(rows[2].starts_with("python3\t"));
+        assert!(rows[2].starts_with("cargo\t"));
         assert_only_outlinks_removed(&root, &temporary);
     }
     #[test]

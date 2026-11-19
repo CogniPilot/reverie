@@ -108,14 +108,14 @@ mod linux {
                 .join("share/reverie/resource-client.json"),
         )?;
         run_command(
-            Command::new("python3")
+            Command::new("cargo")
                 .args([
-                    "-B",
-                    "-m",
-                    "unittest",
-                    "tests.test_worker_resource_launcher_package",
-                    "tests.test_owner_goal_broker.OwnerGoalBrokerTests.test_goal_stream_uses_only_closed_g_and_fresh_response",
-                    "tests.test_owner_goal_broker.OwnerGoalBrokerTests.test_goal_stream_mixed_arguments_and_bad_or_oversized_replies_fail_closed",
+                    "test",
+                    "--locked",
+                    "-p",
+                    "reverie-worker-client",
+                    "--test",
+                    "client",
                 ])
                 .env("NIX_REVERIE_TEST_WORKER_EXEC", executable)
                 .env("NIX_REVERIE_TEST_RESOURCE_CLIENT_MANIFEST", manifest)

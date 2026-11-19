@@ -146,14 +146,14 @@ jobs:
           nix develop --command node --experimental-strip-types --test scripts/build-boxed-worker-image.test.mts
           nix build .#default --out-link "$HOME/scratch/reverie/build/app"
           "$HOME/scratch/reverie/build/app/bin/reverie" --version
-          nix build .#memory --out-link "$HOME/scratch/reverie/build/memory"
-          "$HOME/scratch/reverie/build/memory/bin/python3" -I -c 'import reverie, experts; from reverie.memory import MemoryStore; MemoryStore(":memory:").close()'
+          "$HOME/scratch/reverie/build/app/bin/reverie-hands" --help
+          "$HOME/scratch/reverie/build/app/bin/reverie-chat" --help
           nix build .#dockerImage --out-link "$HOME/scratch/reverie/build/docker-image"
           docker load --input "$HOME/scratch/reverie/build/docker-image"
           docker tag reverie:latest "reverie:$GITHUB_SHA"
           docker image inspect --format '{{.Id}}' "reverie:$GITHUB_SHA" | tee image-id.txt
           # The loaded image and offline artifact own the transport archive now.
-          # Retain the checked app and memory roots; let pre-save GC discard
+          # Retain the checked app root; let pre-save GC discard
           # old outputs and the multi-GB image tar instead of caching it twice.
           rm "$HOME/scratch/reverie/build/docker-image"
 
@@ -255,7 +255,8 @@ jobs:
           docker exec -i boot node --input-type=module < .github/ci/boot-owner.mjs || ok=
           test "$(docker exec boot stat -c %a /instances/default/owner-password)" = 600 || ok=
           docker exec boot env REVERIE_INSTALL_CLIS=none reverie-install-clis || ok=
-          docker exec boot /opt/reverie/python/bin/python3 -I -c 'import reverie, experts' || ok=
+          docker exec boot reverie-hands --help || ok=
+          docker exec boot reverie-chat --help || ok=
           docker inspect --format 'state {{.State.Status}}, exit code {{.State.ExitCode}}' boot
           docker logs boot 2>&1 | tail -n 40
           docker exec boot bash -c 'mkdir -p "$HOME/.config/reverie-ci"; printf preserved > "$HOME/.config/reverie-ci/home-marker"'

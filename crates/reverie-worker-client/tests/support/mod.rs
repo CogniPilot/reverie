@@ -3,14 +3,24 @@ use std::fs;
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicU64, Ordering},
+};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 pub(crate) const SID: &str = "11111111-2222-3333-4444-555555555555";
-pub(crate) const BIN: &str = env!("CARGO_BIN_EXE_reverie-worker-exec");
+pub(crate) fn binary() -> &'static Path {
+    static PATH: OnceLock<PathBuf> = OnceLock::new();
+    PATH.get_or_init(|| {
+        std::env::var_os("NIX_REVERIE_TEST_WORKER_EXEC")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_reverie-worker-exec")))
+    })
+}
 static NEXT: AtomicU64 = AtomicU64::new(0);
 pub(crate) struct Tree {
     pub(crate) root: PathBuf,
@@ -37,7 +47,7 @@ impl Tree {
         }
     }
     pub(crate) fn command(&self, args: &[&str]) -> Command {
-        let mut command = Command::new(BIN);
+        let mut command = Command::new(binary());
         command
             .args(args)
             .env_clear()
