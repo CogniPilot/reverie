@@ -347,6 +347,19 @@ async function child(program: string, args: string[], home: string, extra: NodeJ
   });
 }
 describe('actual standalone client bundle', () => {
+  it('lists the Board command and keeps Board requests scoped to a managed session', async () => {
+    const home = directory('bundle-board-');
+    const help = await child(bundle, ['--help'], home);
+    expect(help.status, help.stderr).toBe(0);
+    expect(help.stdout).toMatch(/^\s+board\b/m);
+    const boardHelp = await child(bundle, ['board', '--help'], home);
+    expect(boardHelp.status, boardHelp.stderr).toBe(0);
+    expect(boardHelp.stdout).toMatch(/\bshow\b/);
+    const read = await child(bundle, ['board', 'show', '--json'], home);
+    expect(read.status).not.toBe(0);
+    expect(read.stdout + read.stderr).toContain('Not inside a Reverie-managed session');
+  });
+
   it('prints new fixed roles without reading/quarantining private registry data', async () => {
     const home = directory('bundle-home-');
     fs.mkdirSync(join(home, 'instance'));
