@@ -191,12 +191,11 @@ The reviewed connector is `apps/web/scripts/connect-owner-terminal.mjs`.
 
 `nix build .#ownerTerminalCore` packages five inert Python modules, the connector
 and TS source with these integration notes. It has no executable/service or
-console dependency and performs only import/syntax checks. The normal console
-build compiles the TS modules and its check phase runs the17 composed owned
-Python/Node tests after compilation. Those tests are outside generic Python
-discovery; generic Python package checks require no console build. This avoids a
-Python-suite/console derivation cycle. Neither check invokes a host engine,
-provider, private instance, native H actor, PTY or installed listener.
+console dependency and performs only import and syntax checks. The dedicated
+`checks.x86_64-linux.ownerTerminalBridge` runs the composed Python/Node
+tests against the compiled console and the inert core bundle. The normal
+console build and generic Python package checks can run independently of this
+suite. The fixture uses owned synthetic processes and sockets.
 
 Native development uses `PYTHONPATH=python` for generic tests. To run the dedicated
 composition after building the two TS modules, set `OWN_TEST_NODE` to the actual
