@@ -436,3 +436,83 @@ fn restored_claim_never_hands_over_a_changed_original_network() {
         },
     );
 }
+
+#[test]
+fn ready_claim_preserves_a_new_employee_bridge_only_with_matching_live_members() {
+    namespace(
+        "ready_claim_preserves_a_new_employee_bridge_only_with_matching_live_members",
+        || {
+            let fixture = Fixture::new();
+            let console_id = "b".repeat(64);
+            fixture.operation.record(
+                "ready",
+                &json!({"mode":"hybrid-rust-front","brokerChanged":false,"containerId":console_id}),
+            ).unwrap();
+            let mut website = fixture.service.engine.container(&console_id).unwrap();
+            website["Name"] = json!("/fixture");
+            let (network, worker) = added_worker_bridge(&console_id);
+            let network_name = network["Name"].as_str().unwrap();
+            let network_id = network["Id"].as_str().unwrap();
+            let network_path = format!("/networks/{network_id}");
+            let worker_path = format!("/containers/{}/json", worker["Id"].as_str().unwrap());
+            website["NetworkSettings"]["Networks"][network_name] =
+                json!({"NetworkID":network_id,"Aliases":["fixture"]});
+            fixture.port.set(network_path.clone(), network.clone());
+            fixture.port.set(worker_path.clone(), worker.clone());
+            let engine = &fixture.service.engine;
+            let current = crate::networks::Topology::capture(&website, engine).unwrap();
+            let claim = || {
+                fixture
+                    .operation
+                    .claim_terminal(&website, Some(&current), engine)
+            };
+            assert_eq!(claim().unwrap(), "HYBRID_READY");
+            assert_eq!(
+                current.request().unwrap()["EndpointsConfig"][network_name]["NetworkID"],
+                network_id
+            );
+
+            let mut extra_member = network.clone();
+            extra_member["Containers"]["e".repeat(64)] = json!({"Name":"unrelated"});
+            fixture
+                .port
+                .set_sequence(network_path.clone(), vec![network.clone(), extra_member]);
+            assert_eq!(claim().unwrap_err().code(), "DEPLOYMENT_NETWORK_CHANGED");
+
+            fixture.port.set(network_path, network);
+            let mut foreign = worker.clone();
+            foreign["Config"]["Labels"]["reverie.boxed.instance"] = json!("different-office");
+            fixture.port.set(worker_path, foreign);
+            assert_eq!(claim().unwrap_err().code(), "DEPLOYMENT_NETWORK_CHANGED");
+
+            assert!(
+                fixture
+                    .port
+                    .calls()
+                    .iter()
+                    .all(|call| call.starts_with("GET "))
+            );
+            fixture.close();
+        },
+    );
+}
+
+fn added_worker_bridge(console_id: &str) -> (Value, Value) {
+    let id = "3".repeat(64);
+    let name = "reverie-boxed-api-12345678-bootstrap";
+    let employee = "12345678-1111-4111-8111-111111111111";
+    let operation = "22345678-2222-4222-8222-222222222222";
+    let worker_id = "d".repeat(64);
+    let box_id = "f".repeat(64);
+    let identity = serde_json::to_vec(&[box_id.as_str(), "destination", operation]).unwrap();
+    let worker_name = format!("reverie-boxed-{}", crate::installation::digest(&identity));
+    let network = json!({"Id":id,"Name":name,"Driver":"bridge","Scope":"local",
+        "Ingress":false,"ConfigOnly":false,"Labels":{"reverie.boxed.employee":employee},
+        "Containers":{console_id:{"Name":"fixture"},(&worker_id):{"Name":worker_name}}});
+    let worker = json!({"Id":worker_id,"Name":format!("/{worker_name}"),
+        "Config":{"Entrypoint":["/opt/reverie/perf/bin/reverie-worker-init"],
+            "Labels":{"reverie.boxed.instance":"fixture","reverie.boxed.employee":employee,
+                "reverie.boxed.operation":operation,"reverie.boxed.box":box_id}},
+        "NetworkSettings":{"Networks":{name:{"NetworkID":id}}}});
+    (network, worker)
+}

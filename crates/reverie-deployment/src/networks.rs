@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const INVALID: &str = "DEPLOYMENT_NETWORK_UNSUPPORTED";
 #[cfg(test)]
 mod tests;
+mod worker;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -309,17 +310,17 @@ impl Topology {
         Ok(())
     }
 
-    pub(super) fn require_claim_successor(&self, current: &Self) -> Result<()> {
+    fn claim_additions<'a>(&self, current: &'a Self) -> Result<Vec<&'a Endpoint>> {
         self.validate()?;
         current.validate()?;
         let changed = "DEPLOYMENT_NETWORK_CHANGED";
-        require(self.endpoints.len() == current.endpoints.len(), changed)?;
-        for (previous, current_endpoint) in self.endpoints.iter().zip(&current.endpoints) {
-            require(
-                previous.name == current_endpoint.name
-                    && previous.aliases == current_endpoint.aliases,
-                changed,
-            )?;
+        for previous in &self.endpoints {
+            let current_endpoint = current
+                .endpoints
+                .iter()
+                .find(|endpoint| endpoint.name == previous.name)
+                .ok_or_else(|| crate::DeploymentError::new(changed))?;
+            require(previous.aliases == current_endpoint.aliases, changed)?;
             let mut before =
                 configuration(self.configurations[&previous.network_id].clone(), previous)?;
             let mut after = configuration(
@@ -334,7 +335,11 @@ impl Topology {
             }
             require(before == after, changed)?;
         }
-        Ok(())
+        Ok(current
+            .endpoints
+            .iter()
+            .filter(|endpoint| !self.endpoints.iter().any(|old| old.name == endpoint.name))
+            .collect())
     }
 
     pub(super) fn request(&self) -> Result<Value> {
