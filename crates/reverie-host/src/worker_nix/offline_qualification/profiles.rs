@@ -15,13 +15,17 @@ const DIRECTORY: i32 = libc::O_RDONLY | libc::O_DIRECTORY;
 pub fn inventory(home: &[u32], nix: &[u32], entries: usize) -> Result<Vec<u8>> {
     let home = native::python_path(home)?;
     let nix = native::python_path(nix)?;
+    Ok(collect(&home, &nix, entries)?.bytes()?)
+}
+
+pub(super) fn collect(home: &Path, nix: &Path, entries: usize) -> Result<ProfileInventory> {
     let uid = ::nix::unistd::getuid().as_raw();
     let mut inventory = ProfileInventory::new(entries)?;
     for (root, prefix, relative) in [
-        (&nix, "nix", "var/nix/profiles"),
-        (&nix, "nix", "var/nix/gcroots"),
-        (&home, "home", ".nix-profile"),
-        (&home, "home", ".local/state/nix/profiles"),
+        (nix, "nix", "var/nix/profiles"),
+        (nix, "nix", "var/nix/gcroots"),
+        (home, "home", ".nix-profile"),
+        (home, "home", ".local/state/nix/profiles"),
     ] {
         let ancestors = Ancestors::open(root)?;
         let mut tree = Tree {
@@ -32,7 +36,7 @@ pub fn inventory(home: &[u32], nix: &[u32], entries: usize) -> Result<Vec<u8>> {
         let key = native::python_text(Path::new(&format!("{prefix}:{relative}")));
         tree.scope(ancestors, Path::new(relative), key)?;
     }
-    Ok(inventory.bytes()?)
+    Ok(inventory)
 }
 
 struct Ancestors {

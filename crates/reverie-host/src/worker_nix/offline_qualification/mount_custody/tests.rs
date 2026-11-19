@@ -52,7 +52,7 @@ fn native_plan_refuses_physical_store_and_control_aliases() {
             &controls,
             &stores,
             &[],
-            &observed_bind(source, running, writes),
+            &inspected_binds(&observed_bind(source, running, writes)).unwrap(),
         )
     };
     assert_eq!(
@@ -90,7 +90,7 @@ fn a_nested_host_mount_exposes_controls_through_a_future_bind() {
     ];
     let future = [PathBuf::from("/rv-test/public")];
     assert_eq!(
-        view.plan(&controls, &stores, &future, b"[]")
+        view.plan(&controls, &stores, &future, &[])
             .unwrap_err()
             .to_string(),
         "maintenance control is exposed through a container bind"

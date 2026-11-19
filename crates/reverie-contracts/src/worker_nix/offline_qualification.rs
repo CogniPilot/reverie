@@ -4,7 +4,7 @@ pub mod engine;
 mod evidence;
 pub mod mounts;
 mod profiles;
-pub use admission::{Capacity, CapacityBudget, CohortBinding, plan};
+pub use admission::{Capacity, CapacityBudget, CohortBinding, PlanFacts, plan, plan_text};
 pub use profiles::{InventoryError, ProfileEntry, ProfileInventory};
 
 use crate::legacy_json::decode_ops_private_bytes;
@@ -57,15 +57,13 @@ pub struct Target {
     kind: String,
     image_id: String,
     engine_id: String,
-    #[serde(rename = "engineSocket")]
-    _engine_socket: String,
+    engine_socket: String,
     validation_container_id: String,
     base_target: String,
     closure_paths: Vec<String>,
     expires_at_epoch: f64,
     cohort: Vec<Cohort>,
-    #[serde(rename = "budget")]
-    _budget: serde_json::Value,
+    budget: Box<serde_json::value::RawValue>,
     receipts: References,
     #[serde(default)]
     validation_scope: ValidationScope,
@@ -92,11 +90,40 @@ struct References {
 impl Target {
     pub fn decode(bytes: &[u8], now: f64) -> Result<Self> {
         let target = Self::decode_qualified(bytes)?;
-        require(
-            now.is_finite() && target.expires_at_epoch.is_finite() && target.expires_at_epoch > now,
-            "target qualification expired",
-        )?;
+        target.require_unexpired(now)?;
         Ok(target)
+    }
+
+    pub fn require_unexpired(&self, now: f64) -> Result<()> {
+        require(
+            now.is_finite() && self.expires_at_epoch.is_finite() && self.expires_at_epoch > now,
+            "target qualification expired",
+        )
+    }
+
+    pub fn engine_id(&self) -> &str {
+        &self.engine_id
+    }
+    pub fn engine_socket(&self) -> &std::path::Path {
+        std::path::Path::new(&self.engine_socket)
+    }
+    pub fn image_id(&self) -> &str {
+        &self.image_id
+    }
+    pub fn validation_container_id(&self) -> &str {
+        &self.validation_container_id
+    }
+    pub fn base_target(&self) -> &str {
+        &self.base_target
+    }
+    pub fn needs_isolated_image(&self) -> bool {
+        self.validation_scope == ValidationScope::OfflineImage
+    }
+    pub fn budget(&self) -> Result<(CapacityBudget, u8)> {
+        Ok((
+            CapacityBudget::decode(&self.budget)?,
+            u8::try_from(self.cohort.len()).expect("closed cohort bound"),
+        ))
     }
 
     /// Structural reader for subsequent observations of the already pinned

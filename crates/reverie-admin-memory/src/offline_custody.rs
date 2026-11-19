@@ -14,18 +14,6 @@ struct HostPath(#[serde(deserialize_with = "path")] PathBuf);
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
-    Plan {
-        rows: Box<RawValue>,
-        controls: Vec<HostPath>,
-        future: Vec<HostPath>,
-        stores: [HostPath; 2],
-    },
-    Validation {
-        row: Box<RawValue>,
-        protected: Vec<HostPath>,
-        uid: u32,
-        gid: u32,
-    },
     Settled {
         rows: Box<RawValue>,
         stores: [HostPath; 2],
@@ -41,33 +29,10 @@ pub(super) fn run(parent: i32) -> io::Result<()> {
 impl Request {
     fn inspect(self) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
-            Self::Plan {
-                rows,
-                controls,
-                future,
-                stores,
-            } => mount_custody::plan(
-                &paths(controls),
-                &stores.map(|path| path.0),
-                &paths(future),
-                rows.get().as_bytes(),
-            )?,
-            Self::Validation {
-                row,
-                protected,
-                uid,
-                gid,
-            } => {
-                mount_custody::isolated_image(&paths(protected), row.get().as_bytes(), uid, gid)?;
-            }
             Self::Settled { rows, stores } => {
                 mount_custody::settled(&stores.map(|path| path.0), rows.get().as_bytes())?;
             }
         }
         Ok(json!({"bytes": ""}))
     }
-}
-
-fn paths(data: Vec<HostPath>) -> Vec<PathBuf> {
-    data.into_iter().map(|path| path.0).collect()
 }

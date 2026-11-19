@@ -24,6 +24,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 /// Private file observations bound to the byte-exact target returned here.
 pub struct QualifiedTarget {
+    pub target: Target,
     pub bytes: Vec<u8>,
     pub digest: String,
     pub evidence_paths: Vec<PathBuf>,
@@ -39,6 +40,7 @@ pub fn inspect(path: &Path, now: f64) -> Result<QualifiedTarget> {
     let can = receipt(&target, can_kind, can_ref, uid, &mut evidence_paths)?;
     d2.match_employee(&can)?;
     Ok(QualifiedTarget {
+        target,
         digest: format!("sha256:{:x}", Sha256::digest(&bytes)),
         bytes,
         evidence_paths,
@@ -50,12 +52,25 @@ pub fn config(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// A path and the digest captured when the plan selected this control.
+#[derive(Clone, Copy)]
 pub struct ControlPin<'a> {
     pub path: &'a Path,
     pub digest: &'a str,
 }
 
+pub fn require_owner_uid(expected: u32) -> Result<()> {
+    let uid = nix::unistd::getuid().as_raw();
+    if expected != uid || uid == 0 {
+        return Err("ordinary configured host owner required".into());
+    }
+    Ok(())
+}
+
 impl ControlPin<'_> {
+    pub fn verify_current(self) -> Result<()> {
+        self.read(nix::unistd::getuid().as_raw()).map(|_| ())
+    }
+
     fn read(self, uid: u32) -> Result<Vec<u8>> {
         let bytes = read(self.path, MAX_TARGET, uid)?;
         if format!("sha256:{:x}", Sha256::digest(&bytes)) != self.digest {
@@ -63,6 +78,20 @@ impl ControlPin<'_> {
         }
         Ok(bytes)
     }
+}
+
+pub fn path(text: &reverie_contracts::storage_identity::MetadataText) -> std::io::Result<PathBuf> {
+    native::python_path(text.codepoints())
+}
+
+pub fn capture_profiles(home: &Path, nix: &Path) -> Result<Vec<u8>> {
+    let profiles = profiles::collect(home, nix, 4096)?;
+    profiles.require_image_root()?;
+    Ok(profiles.bytes()?)
+}
+
+pub fn path_text(path: &Path) -> Vec<u32> {
+    native::python_text(path)
 }
 
 /// Reopen the pinned controls and trusted company metadata before

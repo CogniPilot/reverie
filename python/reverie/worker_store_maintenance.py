@@ -21,14 +21,10 @@ import subprocess
 import sys
 import time
 from types import SimpleNamespace
-import uuid
 
-from .worker_docker import require_image
 from .worker_storage import read_metadata
 
 IMAGE = re.compile(r"sha256:[0-9a-f]{64}")
-UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
-STORE = re.compile(r"/nix/store/[a-z0-9]{32}-[A-Za-z0-9+._?=-]+")
 CID = re.compile(r"[0-9a-f]{64}")
 MAX_ENTRIES = 4096
 OFFLINE_IMAGE_SCOPE = "VALIDATED_OFFLINE_IMAGE_TOOL_SHELL"
@@ -176,17 +172,21 @@ def _profiles(paths):
 FOCUS = "nix:var/nix/gcroots/reverie-image"
 
 
-def _check_mounts(phase, containers, paths, *, controls=None, future=()):
+def _check_final_mounts(containers, paths):
     stores = [_native_path(paths.home), _native_path(paths.nix)]
-    for offset in range(0, max(1, len(containers)), 32):
+    for offset in range(0, len(containers), 32):
         batch = containers[offset:offset + 32]
         rows = [{"State": {"Running": row.get("State", {}).get("Running")},
                  "Mounts": row.get("Mounts", [])} for row in batch]
-        fields = {} if controls is None else {
-            "controls": [_native_path(path) for path in controls],
-            "future": [_native_path(path) for path in future] if offset + 32 >= len(containers) else [],
-        }
-        _native_observation(phase, worker="custody", rows=rows, stores=stores, **fields)
+        _native_observation("settled", worker="custody", rows=rows, stores=stores)
+
+
+def _decode_seat(seat):
+    for key in ("home", "nix", "lock", "fence", "session_lock"):
+        seat[key] = Path(os.fsdecode(base64.b64decode(seat[key], validate=True)))
+    seat["helper_name"] = "".join(map(chr, seat["helper_name"]))
+    seat["helper_args"] = ["".join(map(chr, arg)) for arg in seat["helper_args"]]
+    return SimpleNamespace(**seat)
 
 
 class DockerEngine:
@@ -237,12 +237,6 @@ class DockerEngine:
         raw, _ = _native_observation("engine", socket=self.socket_path, query={query: fields}, timeout=25)
         return _json(raw)
 
-    def identity(self):
-        return self._observe("identity")
-
-    def image(self, image):
-        return self._observe("image", image=image)[0]
-
     def containers(self):
         ids = self._observe("inventory")
         return [row for offset in range(0, len(ids), 32)
@@ -250,9 +244,6 @@ class DockerEngine:
 
     def inspect(self, cid):
         return self._observe("inspect", ids=[cid])[0]
-
-    def base_target(self, cid):
-        return self._observe("base", id=cid)
 
     def create(self, args):
         cid = self._run(args).decode().strip()
@@ -271,14 +262,8 @@ class OfflineStoreMaintenance:
                  wall=time.time, clock=time.monotonic, sleep=time.sleep):
         self.config_path, self.target_path = Path(config_path), Path(target_path)
         self.engine = engine
+        self.fixture_engine = engine is not None
         self.wall, self.clock, self.sleep = wall, clock, sleep
-
-    def _target(self):
-        raw, reply = _native_observation("target", target=_native_path(self.target_path), now=self.wall())
-        need(sha(raw) == reply["targetDigest"], "qualified target bytes changed")
-        target = _json(raw)
-        need(target["expiresAtEpoch"] > self.wall(), "target qualification expired")
-        return target, reply["targetDigest"], reply["evidencePaths"]
 
     def _budget(self, config, target):
         raw, _ = _native_observation(
@@ -300,77 +285,33 @@ class OfflineStoreMaintenance:
             "seat", session=session, employee=employee, recheck_session_fence=recheck,
             config={"path": _native_path(self.config_path), "digest": config_digest},
         )
-        seat = _json(raw)
-        for key in ("home", "nix", "lock", "fence", "session_lock"):
-            seat[key] = Path(os.fsdecode(base64.b64decode(seat[key], validate=True)))
-        seat["helper_name"] = "".join(map(chr, seat["helper_name"]))
-        seat["helper_args"] = ["".join(map(chr, arg)) for arg in seat["helper_args"]]
-        return SimpleNamespace(**seat)
+        return _decode_seat(_json(raw))
 
-    def _snapshot(self, employee_id):
-        raw, _ = _native_observation("config", config=_native_path(self.config_path))
-        config_digest = sha(raw)
-        config = _json(raw)
-        target, target_digest, evidence_paths = self._target()
-        if self.engine is None:
-            self.engine = DockerEngine(target["engineSocket"])
-        need(self.engine.identity() == target["engineId"], "validated engine identity changed")
-        need(config.get("image") == target["imageId"], "validated target must already be selected for normal next start")
-        image = self.engine.image(target["imageId"])
-        require_image(config, image)
-        need(image["Config"].get("User") == f"{config['uid']}:{config['gid']}"
-             and (image["Config"].get("Labels") or {}).get("reverie.worker.nix-store") == "1", "reviewed owner Nix image required")
-        validation = self.engine.inspect(target["validationContainerId"])
-        need(validation.get("Id") == target["validationContainerId"] and validation.get("Image") == target["imageId"]
-             and self.engine.base_target(target["validationContainerId"]) == target["baseTarget"], "qualified image base changed")
-        if target.get("validationScope") == OFFLINE_IMAGE_SCOPE:
-            self._offline_image_validation(validation, config, target["engineSocket"])
-        selected = self._cohort(config, config_digest, target_digest, employee_id)
-        paths = self._seat(config_digest, selected["sessionId"], employee_id)
-        containers = self.engine.containers()
-        need(not any(v.get("Name") == "/" + paths.helper_name for v in containers), "existing helper must be reconciled, never removed by name")
-        private = [self.config_path, self.target_path, paths.lock.parent,
-                   Path(config["stateRoot"]) / "offline-store-maintenance", *evidence_paths]
-        # Account paths are selected dynamically at normal launch. Exclude the
-        # whole source namespace rather than guessing today's selected profile.
-        # Cold employee homes/stores can become future grants without an
-        # existing container, so exclude those namespaces too.
-        future = [m["source"] for m in config["mounts"]] + [config["companyRoot"],
-                  str(Path(config["stateRoot"])/"employees"),
-                  str(Path(config["scratchRoot"])/"employees")]
-        _check_mounts("plan", containers, paths, controls=private, future=future)
-        budget = self._budget(config, target)
-        profiles = _profiles(paths)
-        need(profiles.get(FOCUS, {}).get("type") == "link"
-             and STORE.fullmatch(profiles[FOCUS].get("target", "")), "existing image GCroot required")
-        stopped = sorted(item["Id"] for item in containers
-                         if any(m.get("Type") == "bind" and m.get("Source") in (str(paths.home), str(paths.nix))
-                                for m in item.get("Mounts", [])))
-        return config, target, paths, {"configDigest": config_digest, "targetDigest": target_digest,
-            "employeeDigest": selected["employeeDigest"], "homeIdentity": _identity(paths.home.stat()),
-            "nixIdentity": _identity(paths.nix.stat()), "lockIdentity": _identity(paths.lock.lstat()),
-            "sidLockIdentity": _identity(paths.session_lock.lstat()), "profiles": profiles, "budget": budget,
-            "stoppedContainerIds": stopped,
-            "helperArgs": paths.helper_args, "helperName": paths.helper_name}
+    def _fixture(self):
+        raw, _ = _native_observation("target", target=_native_path(self.target_path), now=self.wall())
+        target = _json(raw)
+        cid = target["validationContainerId"]
+        return {"now": self.wall(), "identity": self.engine.identity(), "image": [self.engine.image(target["imageId"])],
+                "validation": self.engine.inspect(cid), "validation_id": cid, "base": self.engine.base_target(cid),
+                "inventory": [{"id": row["Id"], "data": row} for row in self.engine.containers()]}
 
-    def _offline_image_validation(self, container, config, engine_socket):
-        private = [Path(config["companyRoot"]), Path(config["stateRoot"])/"employees",
-                   Path(config["scratchRoot"])/"employees", Path(config["apiSocketRoot"]),
-                   Path(config["socket"]), Path(engine_socket)]
-        _native_observation("validation", worker="custody", row=container,
-                            protected=[_native_path(path) for path in private],
-                            uid=config["uid"], gid=config["gid"])
+    def _snapshot(self, employee_id, operation=None):
+        # Thirteen bounded engine reads may each take twenty seconds.
+        raw, _ = _native_observation(
+            "snapshot", worker="planner", timeout=300,
+            config=_native_path(self.config_path), target=_native_path(self.target_path),
+            employee=employee_id, operation=operation,
+            fixture=self._fixture() if self.fixture_engine else None,
+        )
+        snapshot = _json(raw)
+        if operation is not None:
+            return snapshot
+        config = _json(base64.b64decode(snapshot["config"], validate=True))
+        target = _json(base64.b64decode(snapshot["target"], validate=True))
+        return config, target, _decode_seat(snapshot["seat"]), snapshot["facts"]
 
     def plan(self, employee_id, operation_id):
-        need(UUID.fullmatch(operation_id or "") and UUID.fullmatch(employee_id or ""), "exact operation/employee UUID required")
-        config, target, paths, facts = self._snapshot(employee_id)
-        audit = Path(config["stateRoot"]) / "offline-store-maintenance" / (operation_id + ".json")
-        need(not audit.exists() and not audit.is_symlink(), "operation already recorded; never retry it")
-        raw, _ = _native_observation(
-            "plan", employee=employee_id, operation=operation_id, session=paths.session,
-            image=target["imageId"], facts=facts,
-        )
-        return _json(raw)
+        return self._snapshot(employee_id, operation_id or "")
 
     def _adjacent_admission(self, config, target, facts):
         """No fence resolver or engine call: repeat after slow native operations."""
@@ -394,6 +335,8 @@ class OfflineStoreMaintenance:
         need(plan["planDigest"] == expected_plan_digest, "offline plan changed; no mutation attempted")
         config, target, paths, facts = self._snapshot(employee_id)
         need(facts == plan["facts"], "offline admission changed")
+        if not self.fixture_engine:
+            self.engine = DockerEngine(target["engineSocket"])
         lock, fence, sid_lock = paths.lock, paths.fence, paths.session_lock
         uncertain = False
         result = None
@@ -465,7 +408,7 @@ class OfflineStoreMaintenance:
                 final_containers = self.engine.containers()
                 need(not any(v.get("Id") == cid for v in final_containers), "helper removal unconfirmed")
                 need(set(facts["stoppedContainerIds"]) <= {v.get("Id") for v in final_containers}, "existing stopped container changed")
-                _check_mounts("settled", final_containers, paths)
+                _check_final_mounts(final_containers, paths)
                 self._cohort(config, facts["configDigest"], facts["targetDigest"])
                 result = {"version": 1, "kind": "reverie.offline-store.receipt", "state": "STORE_PREPARED",
                           "operationId": operation_id, "employeeId": employee_id, "sessionId": paths.session,

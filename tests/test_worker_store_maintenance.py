@@ -363,9 +363,9 @@ class OfflineStoreTests(unittest.TestCase):
         plan=self.plan()
         real=self.maintenance._snapshot;count=0;now=1800000000
         self.maintenance.wall=lambda:now
-        def slow(employee):
+        def slow(employee, operation=None):
             nonlocal count,now
-            result=real(employee);count+=1
+            result=real(employee, operation);count+=1
             if count==3:now=2000000001
             return result
         with patch.object(self.maintenance,'_snapshot',slow):

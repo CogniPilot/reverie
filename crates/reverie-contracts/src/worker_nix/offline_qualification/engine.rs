@@ -70,10 +70,23 @@ pub fn check_base_target(target: &str) -> Result<()> {
     require(store_path(target), "image base must be an immutable link")
 }
 
+pub fn check_validation_image(raw: &[u8], cid: &ContainerId, image: &WorkerImageId) -> Result<()> {
+    let changed = QualificationError("qualified image base changed");
+    let row = decode_strict_bytes(raw).map_err(|_| changed)?;
+    require(
+        has_id(&row, cid.as_str()) && has_text(&row, "Image", image.as_str()),
+        changed.0,
+    )
+}
+
 fn has_id(row: &Value, id: &str) -> bool {
+    has_text(row, "Id", id)
+}
+
+fn has_text(row: &Value, key: &str, expected: &str) -> bool {
     let Node::Object(fields) = &row.0 else {
         return false;
     };
-    let key = Text(vec![u32::from(b'I'), u32::from(b'd')]);
-    matches!(fields.get(&key), Some(Value(Node::String(value))) if value.equals_ascii(id))
+    let key = Text(key.bytes().map(u32::from).collect());
+    matches!(fields.get(&key), Some(Value(Node::String(value))) if value.equals_ascii(expected))
 }

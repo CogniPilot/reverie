@@ -35,24 +35,77 @@ impl ImageBind {
 }
 
 pub fn inspected_binds(raw: &[u8]) -> Result<Vec<Bind>> {
-    let data = decode_strict_bytes(raw).map_err(|_| MALFORMED)?;
-    let Node::Array(rows) = &data.0 else {
-        return Err(MALFORMED);
-    };
-    require(rows.len() <= 32, MALFORMED.0)?;
+    let data = decode_rows(raw)?;
     let mut binds = Vec::new();
-    for row in rows {
+    for row in rows(&data) {
+        binds.extend(row_binds(object(row)?)?);
+    }
+    Ok(binds)
+}
+
+pub struct PlannedBinds {
+    pub binds: Vec<Bind>,
+    pub retained_ids: Vec<String>,
+}
+
+pub fn planned_binds(raw: &[u8], helper_name: &str, stores: [&[u32]; 2]) -> Result<PlannedBinds> {
+    let data = decode_rows(raw)?;
+    let mut binds = Vec::new();
+    let mut retained_ids = Vec::new();
+    for row in rows(&data) {
         let row = object(row)?;
-        let state = field(row, "State").map(object).transpose()?;
-        let running = truthy(state.and_then(|s| field(s, "Running")));
-        for mount in mounts(row)? {
-            let mount = object(mount)?;
-            if text_is(field(mount, "Type"), "bind") {
-                binds.push(Bind {
-                    source: text(field(mount, "Source"))?,
-                    writer: running && truthy(field(mount, "RW")),
-                });
-            }
+        require(
+            !text_is(field(row, "Name"), helper_name),
+            "existing helper must be reconciled, never removed by name",
+        )?;
+        let attached = row_binds(row)?;
+        if attached.iter().any(|bind| stores.contains(&bind.source())) {
+            let id = text(field(row, "Id"))?;
+            let id = id
+                .codepoints()
+                .iter()
+                .copied()
+                .map(char::from_u32)
+                .collect::<Option<String>>()
+                .ok_or(MALFORMED)?;
+            let id = reverie_core::ids::ContainerId::parse(&id).map_err(|_| MALFORMED)?;
+            retained_ids.push(id.as_str().to_owned());
+        }
+        binds.extend(attached);
+    }
+    Ok(PlannedBinds {
+        binds,
+        retained_ids,
+    })
+}
+
+fn decode_rows(raw: &[u8]) -> Result<Value> {
+    let data = decode_strict_bytes(raw).map_err(|_| MALFORMED)?;
+    require(
+        matches!(&data.0, Node::Array(rows) if rows.len() <= 32),
+        MALFORMED.0,
+    )?;
+    Ok(data)
+}
+
+fn rows(data: &Value) -> &[Value] {
+    let Node::Array(data) = &data.0 else {
+        unreachable!("checked inspection array")
+    };
+    data
+}
+
+fn row_binds(row: &Object) -> Result<Vec<Bind>> {
+    let state = field(row, "State").map(object).transpose()?;
+    let running = truthy(state.and_then(|s| field(s, "Running")));
+    let mut binds = Vec::new();
+    for mount in mounts(row)? {
+        let mount = object(mount)?;
+        if text_is(field(mount, "Type"), "bind") {
+            binds.push(Bind {
+                source: text(field(mount, "Source"))?,
+                writer: running && truthy(field(mount, "RW")),
+            });
         }
     }
     Ok(binds)

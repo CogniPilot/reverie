@@ -3,7 +3,7 @@ use super::Result;
 use crate::native;
 use reverie_contracts::{
     kernel_mounts::{MAX_VISIBLE_MOUNT_BYTES, visible_mount_points},
-    worker_nix::offline_qualification::mounts::{inspected_binds, isolated_image_binds},
+    worker_nix::offline_qualification::mounts::{Bind, inspected_binds, isolated_image_binds},
 };
 use std::{
     fs::{self, OpenOptions},
@@ -26,9 +26,9 @@ pub fn plan(
     controls: &[PathBuf],
     stores: &[PathBuf; 2],
     future: &[PathBuf],
-    rows: &[u8],
+    binds: &[Bind],
 ) -> Result<()> {
-    Mounts::read()?.plan(controls, stores, future, rows)
+    Mounts::read()?.plan(controls, stores, future, binds)
 }
 
 pub fn settled(stores: &[PathBuf; 2], rows: &[u8]) -> Result<()> {
@@ -95,9 +95,9 @@ impl Mounts<'_> {
         controls: &[PathBuf],
         stores: &[PathBuf; 2],
         future: &[PathBuf],
-        rows: &[u8],
+        binds: &[Bind],
     ) -> Result<()> {
-        for item in inspected_binds(rows)? {
+        for item in binds {
             let source = resolve(item.source())?;
             self.require_control_private(&source, controls)?;
             if item.running_writer() && self.overlaps_any(&source, stores)? {

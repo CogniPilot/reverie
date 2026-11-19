@@ -32,6 +32,16 @@ pub struct ProfileInventory {
 }
 
 impl ProfileInventory {
+    pub fn require_image_root(&self) -> super::Result<()> {
+        let key = ascii("nix:var/nix/gcroots/reverie-image");
+        super::require(
+            matches!(self.entries.get(&key), Some(ProfileEntry::Link(_, target))
+                if target.iter().copied().map(char::from_u32).collect::<Option<String>>()
+                    .is_some_and(|target| super::store_path(&target))),
+            "existing image GCroot required",
+        )
+    }
+
     pub fn new(limit: usize) -> std::result::Result<Self, InventoryError> {
         if limit > 4096 {
             return Err(InventoryError::Bound);

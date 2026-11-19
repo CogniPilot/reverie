@@ -1,5 +1,5 @@
 //! Resolve the existing employee store and its fixed preparation command.
-use super::{ControlPin, Result};
+use super::{ControlPin, Result, require_owner_uid};
 use crate::{
     native,
     worker_storage::{self, StorageLockPaths},
@@ -35,9 +35,7 @@ pub fn inspect_seat(
     let uid = nix::unistd::getuid().as_raw();
     let raw = pin.read(uid)?;
     let config = NixConfiguration::capture(&worker_config::decode_offline_store(&raw)?);
-    if uid == 0 || config.uid()? != uid {
-        return Err("ordinary configured host owner required".into());
-    }
+    require_owner_uid(config.uid()?)?;
     let paths = if recheck_session_fence {
         let directory = super::super::session_directory(&config, session, false, &mut false)?;
         let observed = super::super::selection::check_fences(&config, session);

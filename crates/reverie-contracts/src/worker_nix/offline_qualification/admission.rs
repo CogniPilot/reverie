@@ -7,7 +7,7 @@ use crate::{
 };
 use reverie_core::ids::{OfflineStoreOperationId, ProfileEmployeeId, ProfileSessionId};
 use serde::{Deserialize, Serialize};
-use serde_json::value::RawValue;
+use serde_json::value::{RawValue, to_raw_value};
 use sha2::{Digest, Sha256};
 
 #[cfg(test)]
@@ -79,6 +79,22 @@ pub struct CohortBinding<'a> {
     employee_digest: &'a str,
 }
 
+impl CohortBinding<'_> {
+    pub fn session(&self) -> &str {
+        self.session_id
+    }
+    pub fn digest(&self) -> &str {
+        self.employee_digest
+    }
+}
+
+/// Preserve escaped Unix path bytes in planned helper arguments.
+pub fn plan_text(value: &crate::storage_identity::MetadataText) -> Box<RawValue> {
+    let ascii = compact_data(&Value(Node::String(Text(value.codepoints().to_vec()))));
+    RawValue::from_string(String::from_utf8(ascii).expect("ASCII plan text"))
+        .expect("encoded plan text")
+}
+
 impl Target {
     /// Verify all members, including when only one employee is being prepared.
     /// A recheck compares complete employee digests. Initial selection also
@@ -146,6 +162,29 @@ fn current_row<'a>(employees: &'a [Value], id: &str) -> Result<&'a Value> {
     let employee = matches.next().ok_or(unavailable)?;
     require(matches.next().is_none(), unavailable.0)?;
     Ok(employee)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanFacts<'a> {
+    pub config_digest: &'a str,
+    pub target_digest: &'a str,
+    pub employee_digest: &'a str,
+    pub home_identity: [u64; 4],
+    pub nix_identity: [u64; 4],
+    pub lock_identity: [u64; 4],
+    pub sid_lock_identity: [u64; 4],
+    pub profiles: Box<RawValue>,
+    pub budget: Capacity,
+    pub stopped_container_ids: Vec<String>,
+    pub helper_args: Vec<Box<RawValue>>,
+    pub helper_name: Box<RawValue>,
+}
+
+impl PlanFacts<'_> {
+    pub fn encode(&self) -> Result<Box<RawValue>> {
+        to_raw_value(self).map_err(|_| QualificationError("offline plan facts unavailable"))
+    }
 }
 
 #[derive(Serialize)]
