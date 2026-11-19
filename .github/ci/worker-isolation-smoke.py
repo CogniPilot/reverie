@@ -41,6 +41,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='w-', dir=scratch) as temporary:
         root = Path(temporary)
         (root/'workspace').mkdir()
+        workload = root/'workspace'/'isolation-workload.mjs'
+        workload.write_bytes(Path(__file__).with_name('worker-isolation-workload.mjs').read_bytes())
+        workload.chmod(0o444)
         (root/'company.json').write_text('{"employees": []}')
         (root/'company/console').mkdir(parents=True)
         (root/'company/console/.env').write_text('REVERIE_USERNAME=synthetic\nREVERIE_PASSWORD=synthetic\n')
@@ -90,7 +93,9 @@ def main():
 
         try:
             engine('run', '--detach', '--init', '--name', server_name, '--label', 'reverie.smoke='+deployment,
-                '--memory', '128m', '--pids-limit', '64', '--entrypoint', '/bin/python3', image, '-m', 'http.server', '3000')
+                '--memory', '128m', '--pids-limit', '64',
+                '--mount', f'type=bind,src={workload},dst=/isolation-workload.mjs,readonly',
+                '--entrypoint', '/bin/node', image, '/isolation-workload.mjs', 'http')
             deadline = time.monotonic()+10
             while True:
                 try:
@@ -128,8 +133,7 @@ def main():
             print('PASS Unicode borders, non-ASCII text and UTF-8 terminal attach', flush=True)
             print('PASS terminal input, output, resize, shared project files, private homes, persistence and orphan reaping', flush=True)
 
-            full = "import threading,time,sys\nprint('PRESSURE_READY',flush=True)\nsys.stdin.readline()\ntry:\n for _ in range(200): threading.Thread(target=lambda:time.sleep(30),daemon=True).start()\nexcept RuntimeError:\n print('TASK_LIMIT_REACHED',flush=True)\nsys.stdin.readline()"
-            connection, thread = launch(sid1, 'python3 -c ' + "'" + full.replace("'", "'\\''") + "'")
+            connection, thread = launch(sid1, '/bin/node /workspace/isolation-workload.mjs tasks')
             # Establish this viewer before pressure; startup or reattachment at an
             # already exhausted task limit remains a separate product gap.
             until(connection, b'PRESSURE_READY')
@@ -144,7 +148,7 @@ def main():
             thread.join(10)
             print('PASS exhausted worker task limit while another agent and the server remained responsive', flush=True)
 
-            connection, thread = launch(sid3, "python3 -c 'a=[bytearray(32*1024*1024) for _ in range(24)]'")
+            connection, thread = launch(sid3, '/bin/node /workspace/isolation-workload.mjs memory')
             code, _ = until(connection)
             assert code == 137, code
             thread.join(10)
