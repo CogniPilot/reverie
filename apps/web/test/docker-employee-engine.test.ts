@@ -1719,7 +1719,7 @@ describe('read-only Docker provider health', () => {
     await f.health.refresh();
     expect(f.health.read(f.employee)).toBeUndefined();
   });
-  it('coalesces callers, limits two workers, refuses over64 and suppresses late publication after close', async () => {
+  it('shares queued probes, limits concurrent workers, refuses over64 and suppresses late publication after close', async () => {
     const f = await healthFixture();
     let release!: () => void;
     const pause = new Promise<void>((resolve) => {
@@ -1742,46 +1742,60 @@ describe('read-only Docker provider health', () => {
       throw Error('read only');
     });
     const first = f.health.refresh();
-    expect(f.health.refresh()).toBe(first);
-    expect(f.observe).toHaveBeenCalledTimes(2);
+    const second = f.health.refresh();
+    expect(f.observe).toHaveBeenCalledTimes(4);
     f.health.close();
     release();
-    await first;
-    expect(maximum).toBe(2);
-    expect(f.observe).toHaveBeenCalledTimes(2);
+    await Promise.all([first, second]);
+    expect(maximum).toBe(4);
+    expect(f.observe).toHaveBeenCalledTimes(4);
     expect(f.changed).not.toHaveBeenCalled();
     const g = await healthFixture();
     g.rows(Array.from({ length: 65 }, () => structuredClone(g.employee)));
     await g.health.refresh();
     expect(g.observe).not.toHaveBeenCalled();
   });
-  it('publishes a completed native fact without waiting for an unrelated slow worker', async () => {
-    const f = await healthFixture(),
-      other = {
-        ...structuredClone(f.employee),
-        id: '80000000-0000-4000-8000-000000000008',
-        sessionId: '90000000-0000-4000-8000-000000000009',
-      };
-    f.rows([f.employee, other]);
+  it('refreshes genuine health on later ticks while other Docker probes are still pending', async () => {
+    const f = await healthFixture();
+    const others = Array.from({ length: 3 }, (_, i) => ({
+      ...structuredClone(f.employee),
+      id: `80000000-0000-4000-8000-00000000000${i}`,
+      sessionId: `90000000-0000-4000-8000-00000000000${i}`,
+    }));
+    f.rows([...others, f.employee]);
     let release!: () => void;
     const pause = new Promise<void>((resolve) => {
       release = resolve;
     });
     f.observe.mockImplementation(async (employee, current) => {
-      if (employee.id === other.id) {
+      if (employee.id !== f.employee.id) {
         await pause;
         throw Error('unconfirmed');
       }
       return f.engine.captureProviderHealth(f.row, f.binding, current);
     });
-    const pending = f.health.refresh();
-    await vi.waitFor(() => {
-      expect(f.health.read(f.employee)?.state).toBe('healthy');
-      expect(f.changed).toHaveBeenCalled();
-    });
-    f.health.close();
-    release();
-    await pending;
+    const first = f.health.refresh();
+    let second: Promise<void> | undefined;
+    let third: Promise<void> | undefined;
+    try {
+      await vi.waitFor(() => {
+        expect(f.health.read(f.employee)).toMatchObject({ state: 'healthy', observedAtEpochMs: 10_000 });
+        expect(f.changed).toHaveBeenCalled();
+      });
+      f.advance(10_000);
+      second = f.health.refresh();
+      await vi.waitFor(() => expect(f.health.read(f.employee)?.observedAtEpochMs).toBe(20_000));
+      f.advance(10_000);
+      third = f.health.refresh();
+      await vi.waitFor(() => expect(f.health.read(f.employee)?.observedAtEpochMs).toBe(30_000));
+      f.advance(6_000);
+      expect(f.health.read(f.employee)).toMatchObject({ state: 'healthy', observedAtEpochMs: 30_000 });
+      expect(f.observe.mock.calls.filter(([e]) => e.id !== f.employee.id)).toHaveLength(3);
+    } finally {
+      f.health.close();
+      release();
+      await Promise.all([first, second, third]);
+    }
   });
   it('observes provider-issued live command without settling its lost completion acknowledgement', async () => {
     const f = await healthFixture();
