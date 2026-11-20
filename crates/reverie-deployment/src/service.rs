@@ -130,8 +130,24 @@ impl DeploymentService {
         self.installation.close()
     }
     pub fn capture(root: &Path) -> Result<Self> {
+        Self::capture_with(root, || Engine::new(Path::new("/var/run/docker.sock")))
+    }
+    /// Read the registered journal during Engine outages. Terminal readiness
+    /// still requires a fresh authenticated Engine observation.
+    pub fn registered_status(root: &Path, id: &str) -> Result<DeploymentStatus> {
+        Self::registered_status_with_socket(root, id, Path::new("/var/run/docker.sock"))
+    }
+    fn registered_status_with_socket(
+        root: &Path,
+        id: &str,
+        socket: &Path,
+    ) -> Result<DeploymentStatus> {
+        let mut service = Self::capture_with(root, || Engine::client(socket))?;
+        DeploymentError::finalized(service.status(id), service.close())
+    }
+    fn capture_with(root: &Path, connect: impl FnOnce() -> Result<Engine>) -> Result<Self> {
         let mut installation = Installation::capture(root)?;
-        let engine = match Engine::new(Path::new("/var/run/docker.sock")) {
+        let engine = match connect() {
             Ok(engine) => engine,
             Err(error) => return DeploymentError::finalized(Err(error), installation.close()),
         };
@@ -384,8 +400,14 @@ impl DeploymentService {
             "RESTORED" => self.observe_ready(&operation, false, deadline),
             _ => Ok(()),
         };
-        if observed.is_err() {
-            status.stage = "READINESS_UNCONFIRMED".into();
+        if let Err(error) = observed {
+            status.readiness_failure = Some(model::ReadinessFailure {
+                recorded_stage: std::mem::replace(
+                    &mut status.stage,
+                    "READINESS_UNCONFIRMED".into(),
+                ),
+                diagnostic: error.diagnostic(),
+            });
         }
         deadline.check()?;
         Ok(status)

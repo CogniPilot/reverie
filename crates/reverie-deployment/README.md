@@ -79,6 +79,14 @@ both containers, never bulk-wakes employees and never automatically restores dat
 An attempted effect is not automatically retried after a lost response. The
 registered active-operation fence and private receipts stay available for review.
 
+Run `reverie-deployment --root ROOT status OPERATION` after a lost response.
+The Rust client can read the registered journal while the Docker socket is
+unavailable. An outstanding stop attempt, for example, still reports
+`STOP_UNCONFIRMED`. If a terminal receipt exists but live verification fails,
+`stage` is `READINESS_UNCONFIRMED`, `readiness_failure.recorded_stage` gives
+the historical stage, and `readiness_failure.diagnostic.error.code` identifies
+the failed check. Reading status never repeats an operation.
+
 `confirm OPERATION` explicitly reinspects the recorded sleeping candidate after
 a refused validation. It does not repeat container creation. `activate-retained
 OPERATION --accept-unverified-backup` is an explicit owner fix-forward recovery

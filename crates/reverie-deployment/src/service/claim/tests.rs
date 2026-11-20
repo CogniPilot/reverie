@@ -7,6 +7,30 @@ use std::{
 mod fixture;
 use fixture::Fixture;
 
+#[test]
+fn reopened_status_preserves_journal_progress_without_an_engine_socket() {
+    let mut fixture = Fixture::new(false);
+    let root = fixture.service.installation.root.clone();
+    let absent = root.join("absent.sock");
+    fixture.next.attempt("stop-attempt").unwrap();
+    fixture.service.close().unwrap();
+    let read = |op: &Operation| {
+        DeploymentService::registered_status_with_socket(&root, &op.plan.operation, &absent)
+            .unwrap()
+    };
+    let pending = read(&fixture.next);
+    assert_eq!(pending.stage, "STOP_UNCONFIRMED");
+    assert!(pending.readiness_failure.is_none());
+    let historical = read(&fixture.previous);
+    assert_eq!(historical.stage, "READINESS_UNCONFIRMED");
+    assert_eq!(
+        historical.readiness_failure.unwrap().recorded_stage,
+        "HYBRID_READY"
+    );
+    assert_eq!(fixture.previous.status().unwrap().stage, "HYBRID_READY");
+    fixture.close();
+}
+
 fn snapshot_refusal() -> DeploymentError {
     DeploymentError::snapshot(
         "DEPLOYMENT_SNAPSHOT_REFUSED",

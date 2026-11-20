@@ -38,6 +38,14 @@ pub struct DeploymentStatus {
     pub backup_verified: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<Value>,
+    /// Last terminal receipt and current observation error, when live readiness is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub readiness_failure: Option<ReadinessFailure>,
+}
+#[derive(Serialize, Deserialize)]
+pub struct ReadinessFailure {
+    pub recorded_stage: String,
+    pub diagnostic: Value,
 }
 pub(super) fn cid(value: &str) -> Result<&str> {
     require(

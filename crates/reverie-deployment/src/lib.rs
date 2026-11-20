@@ -19,7 +19,7 @@ mod service;
 mod test_namespace;
 pub use adoption::{ClaimAdoptionPreview, DeploymentPreviewMode};
 pub use live_accounts::{LiveAccountDispositionPreview, LiveAccountWriterPreview};
-pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus};
+pub use model::{DeploymentPreview, DeploymentProfile, DeploymentStatus, ReadinessFailure};
 pub use rollout::{
     InitialWebsiteRolloutClosed, InitialWebsiteRolloutError, InitialWebsiteRolloutFailure,
     recover_uninstalled_website_actor, rollout_initial_website, update_uninstalled_website,

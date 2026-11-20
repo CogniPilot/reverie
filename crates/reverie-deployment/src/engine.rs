@@ -33,6 +33,9 @@ impl Engine {
             std::fs::metadata(socket)?.file_type().is_socket(),
             "DEPLOYMENT_ENGINE_SOCKET_REQUIRED",
         )?;
+        Self::client(socket)
+    }
+    pub(super) fn client(socket: &Path) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;

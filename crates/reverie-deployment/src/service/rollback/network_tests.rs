@@ -406,6 +406,12 @@ fn restored_status_is_unconfirmed_at_endpoint_drift_before_health_reads() {
                 .status(&fixture.operation.plan.operation)
                 .unwrap();
             assert_eq!(status.stage, "READINESS_UNCONFIRMED");
+            let failure = status.readiness_failure.unwrap();
+            assert_eq!(failure.recorded_stage, "RESTORED");
+            assert_eq!(
+                failure.diagnostic["error"]["code"],
+                "DEPLOYMENT_NETWORK_CHANGED"
+            );
             assert_eq!(
                 fixture.port.calls(),
                 vec![format!("GET /containers/{}/json", "a".repeat(64))]
