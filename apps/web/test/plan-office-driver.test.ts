@@ -43,6 +43,7 @@ import {
   parsePlanOfficeCpus,
   planOfficeInternalHostPreflight,
   planOfficeSession,
+  originalTerminalRecovered,
   planOfficeOriginalStatus,
   planOfficeSelfIdentityFile,
   planOfficePermissionProbeInput,
@@ -56,6 +57,28 @@ const sha = 'sha256:' + 'a'.repeat(64),
   eid = '22222222-2222-4222-8222-222222222222',
   thread = '33333333-3333-4333-8333-333333333333',
   oid = '44444444-4444-4444-8444-444444444444';
+it('requires a current usable view and the original turn on the authenticated terminal after restart', async () => {
+  const ready = { id: sid, status: 'idle', isWorking: false, dockerProviderViewCurrent: true,
+    providerInputHeld: false, viewerInputHeld: false };
+  const ok = (data: unknown) => Response.json({ success: true, data });
+  const route = '/api/sessions/' + sid;
+  for (const [state, terminal, expected] of [
+    [ready, 'original-turn', true],
+    [ready, 'other-turn', false],
+    [{ ...ready, viewerInputHeld: true }, 'original-turn', false],
+    [{ ...ready, dockerProviderViewCurrent: false }, 'original-turn', false],
+  ] as const) {
+    const get = vi.fn(async (url: string) => {
+      if (url === route) return ok(state);
+      expect(url).toBe(route + '/terminal');
+      return ok({ terminalBuffer: terminal });
+    });
+    expect(await originalTerminalRecovered(get, sid, 'original-turn')).toBe(expected);
+    expect(get).toHaveBeenCalledTimes(state === ready ? 2 : 1);
+  }
+  expect(await originalTerminalRecovered(async () => new Response(null, { status: 503 }), sid, 'turn')).toBe(false);
+  await expect(originalTerminalRecovered(async () => Response.json({}, { status: 403 }), sid, 'turn')).rejects.toThrow();
+});
 const employee = {
   employeeId: eid,
   sessionId: sid,

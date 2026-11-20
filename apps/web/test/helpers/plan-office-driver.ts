@@ -713,6 +713,23 @@ class Driver {
   }
 }
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+async function waitForControlOwner(transport: PlanOfficeControlTransport) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    transport.requireCurrent();
+    try {
+      const response = await fetch(transport.endpoint + '/api/owner/status', {
+        redirect: 'error',
+        signal: AbortSignal.timeout(1000),
+      });
+      await response.body?.cancel();
+      if (response.ok) return;
+    } catch {
+      // Retry only the read while the listener starts.
+    }
+    await wait(500);
+  }
+  throw Error('Ordinary control did not start');
+}
 class OwnerApiRefusal extends Error {
   constructor(
     readonly status: number,
@@ -739,6 +756,27 @@ export async function planOfficeTerminal(response: Response) {
     .object({ terminalBuffer: z.string().max(4 * 1024 ** 2) })
     .passthrough()
     .parse(value).terminalBuffer;
+}
+export async function originalTerminalRecovered(
+  request: (path: string) => Promise<Response>,
+  sessionId: string,
+  barrier: string
+) {
+  const route = '/api/sessions/' + sessionId;
+  const response = await request(route);
+  if (response.status === 503) {
+    await response.body?.cancel();
+    return false;
+  }
+  const session = await planOfficeSession(response, sessionId);
+  if (session.dockerProviderViewCurrent !== true || session.providerInputHeld !== false ||
+      session.viewerInputHeld !== false || session.isWorking !== false || session.status !== 'idle') return false;
+  const terminal = await request(route + '/terminal');
+  if (terminal.status === 503) {
+    await terminal.body?.cancel();
+    return false;
+  }
+  return (await planOfficeTerminal(terminal)).includes(barrier);
 }
 export async function planOfficeOriginalStatus(response: Response, operationId: string) {
   const selection = await data(response);
@@ -1074,22 +1112,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     transport = await driver.controlTransport(control);
     const endpoint = transport.endpoint;
     entered('driver-control-owner-preflight');
-    let responding = false;
-    for (let i = 0; i < 60; i++) {
-      transport.requireCurrent();
-      driver.owned(control, 'control');
-      try {
-        const r = await fetch(endpoint + '/api/owner/status', { redirect: 'error', signal: AbortSignal.timeout(1000) });
-        if (r.ok) {
-          responding = true;
-          break;
-        }
-      } catch {
-        // Read-only readiness remains unconfirmed; this never retries a mutation.
-      }
-      await wait(500);
-    }
-    assert.ok(responding, 'Ordinary control did not start');
+    await waitForControlOwner(transport);
     // Reject an incomplete fixture tool closure before consuming any provider intent.
     entered('driver-control-tools');
     const controlTools = [
@@ -1121,7 +1144,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     await planOfficeInternalHostPreflight(endpoint);
     evidence.save('internal-api-host-qualified', { control, host: 'reverie:3000', readOnly: true });
     entered('driver-owner-enrollment');
-    const owner = await enrollIsolatedPlanOfficeOwner(endpoint, path.join(evidence.root, 'auth'));
+    let owner = await enrollIsolatedPlanOfficeOwner(endpoint, path.join(evidence.root, 'auth'));
     evidence.save('owner-enrolled', { ownerSessionFile: owner.ownerSessionFile, requests: owner.requests() });
     for (const entry of sources) {
       entered('driver-original-policy');
@@ -1310,7 +1333,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
         target = input.bootstrap.employees[1]!;
       const callerHome = sources[0]!.home as string,
         targetHome = sources[1]!.home as string;
-      const controlEpoch = driver.owned(control, 'control').State as Json;
+      let controlEpoch = driver.owned(control, 'control').State as Json;
       const current = () => {
         evidence.current();
         const actual = driver.owned(control, 'control').State as Json;
@@ -1382,6 +1405,55 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       const originalCallerNative = await verifyNative(caller),
         originalTargetNative = await verifyNative(target);
       evidence.save('team-initial-native', { caller: originalCallerNative, target: originalTargetNative });
+      const workersBeforeRestart = epoch();
+      const turnReceipts = () => [callerHome, targetHome].map((home) => {
+        const directory = path.join(home, '.fixture');
+        return fs.readdirSync(directory).filter((name) => name.startsWith('plan-turn-')).sort()
+          .map((name) => [name, readPrivate(path.join(directory, name))]);
+      });
+      const turnsBeforeRestart = turnReceipts();
+      assert.ok(turnsBeforeRestart.every((turns) => turns.length > 0));
+      current();
+      evidence.save('team-control-restart-issued', { control, startedAt: controlEpoch.StartedAt });
+      await transport.close();
+      current();
+      driver.docker(['restart', control]);
+      const restarted = driver.owned(control, 'control').State as Json;
+      assert.equal(restarted.Running, true);
+      assert.notEqual(restarted.StartedAt, controlEpoch.StartedAt);
+      controlEpoch = restarted;
+      transport = await driver.controlTransport(control);
+      await waitForControlOwner(transport);
+      owner = await resumeIsolatedPlanOfficeOwner(transport.endpoint, path.join(evidence.root, 'auth'));
+      for (const [expert, native] of [[caller, originalCallerNative], [target, originalTargetNative]] as const) {
+        const originalTurn = turnsBeforeRestart.flat().map(([, value]) => value as Json).find(
+          (turn) => turn.sessionId === expert.sessionId && turn.providerThread === expert.nativeThreadId &&
+            turn.namespacePid === native.panePid && turn.state === 'idle' && turn.requestId === null
+        );
+        assert.ok(originalTurn);
+        const barrier = planFixtureTurnBarrier({
+          sessionId: expert.sessionId,
+          turnId: z.string().uuid().parse(originalTurn.turnId),
+          requestId: null,
+          state: 'idle',
+        });
+        let connected = false;
+        for (let attempt = 0; attempt < 120; attempt++) {
+          current();
+          if (await originalTerminalRecovered(owner.request, expert.sessionId, barrier)) {
+            connected = true;
+            break;
+          }
+          await wait(250);
+        }
+        assert.ok(connected, 'Original employee terminal did not recover after the control restart');
+        assert.deepEqual(await verifyNative(expert), native);
+      }
+      assert.deepEqual(epoch(), workersBeforeRestart);
+      assert.deepEqual(turnReceipts(), turnsBeforeRestart);
+      evidence.save('team-control-restart-recovered', {
+        control, startedAt: restarted.StartedAt, sessions: [caller.sessionId, target.sessionId],
+      });
       const originalCaller = epoch()[0];
       const completed = await runPlanOfficeTeamSequence({
         grant: async (enabled) => {
@@ -1602,7 +1674,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
     const result = {
       status: 0,
       purpose: 'reverie-ci-plan-office-baseline-v1',
-      endpoint,
+      endpoint: transport.endpoint,
       controlId: control,
       ownedSetupIds: driver.ids,
       ownerSessionFile: owner.ownerSessionFile,
