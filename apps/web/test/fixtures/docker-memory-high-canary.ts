@@ -464,16 +464,11 @@ class NativeCanary {
     assert.equal(observed.worker, null);
     return observed;
   }
-  private restartEmptyPool(
-    owned: Owned,
-    original: CanaryIdentity,
-    cpus: string,
-    before: ResourceObservation
-  ): CanaryIdentity {
+  private restartOwned(owned: Owned, original: CanaryIdentity): CanaryIdentity {
     const running = this.inspect(owned.id);
     requireOwned(running, owned, this.box);
     requireIdentity(this.identity(running), original);
-    this.command('stop-original-anchor', ['stop', '--time', '3', owned.id]);
+    this.command('stop-original-' + owned.role, ['stop', '--time', '3', owned.id]);
     const stopped = this.inspect(owned.id);
     requireOwned(stopped, owned, this.box);
     assert.equal(stopped.State.Status, 'exited');
@@ -485,10 +480,23 @@ class NativeCanary {
     owned.identity = restarted;
     assert.equal(restarted.id, original.id);
     assert.notEqual(restarted.start, original.start);
-    const after = this.configurePool('cold-pool', restarted, this.probe(restarted), cpus);
-    assert.deepEqual(after.resources, before.resources);
-    this.evidence.save('cold-pool-accepted', { before, after });
     return restarted;
+  }
+  private restoreWorkerHigh(owned: Owned, previous: CanaryIdentity, anchor: CanaryIdentity, cpus: string,
+    configured: ResourceObservation): CanaryIdentity {
+    const worker = this.restartOwned(owned, previous);
+    const fresh = this.probe(anchor, worker);
+    assert.equal(fresh.resources.memoryHigh, 'max');
+    const stale = this.write('cold-worker-stale-birth', this.writer, anchor, { ...worker, start: previous.start },
+      fresh, cpus, 67108864, 100, false) as Outcome;
+    assert.match(stale.stderr, /BOXED_RESOURCE_PID_CHANGED/u);
+    assert.deepEqual(this.probe(anchor, worker), fresh);
+    const ack = this.write('cold-worker-high', this.writer, anchor, worker, fresh, cpus, 67108864, 100);
+    const observed = this.probe(anchor, worker);
+    assert.deepEqual(ack, observed);
+    assert.deepEqual(observed.resources, configured.resources);
+    this.evidence.save('cold-worker-accepted', { previous, worker, fresh, observed });
+    return worker;
   }
   run(): void {
     const baseBefore = this.image(this.baseline);
@@ -515,7 +523,10 @@ class NativeCanary {
     const cpus = initial.resources.cpusetCpusEffective.split(',')[0].split('-')[0];
     assert.match(cpus, /^[0-9]+$/u);
     const configured = this.configurePool('pool', original, initial, cpus);
-    const anchor = this.restartEmptyPool(anchorOwned, original, cpus, configured);
+    const anchor = this.restartOwned(anchorOwned, original);
+    const after = this.configurePool('cold-pool', anchor, this.probe(anchor), cpus);
+    assert.deepEqual(after.resources, configured.resources);
+    this.evidence.save('cold-pool-accepted', { before: configured, after });
     const flags = this.common();
     flags[flags.indexOf('--memory') + 1] = '268435456';
     flags[flags.indexOf('--memory-swap') + 1] = '268435456';
@@ -526,7 +537,7 @@ class NativeCanary {
       ['--cgroup-parent', parent, '--cpuset-cpus', cpus],
       flags
     );
-    const worker = this.identity(this.start(workerOwned));
+    let worker = this.identity(this.start(workerOwned));
     workerOwned.identity = worker;
     this.evidence.save('worker-birth', worker);
     let current = this.probe(anchor, worker);
@@ -534,6 +545,8 @@ class NativeCanary {
     current = this.probe(anchor, worker);
     assert.equal(current.resources.memoryHigh, '67108864');
     assert.equal(current.resources.cpuWeight, '100');
+    worker = this.restoreWorkerHigh(workerOwned, worker, anchor, cpus, current);
+    current = this.probe(anchor, worker);
     this.write('cpu-calibration', this.baseline, anchor, worker, current, cpus, 67108864, 217);
     const before = this.probe(anchor, worker);
     assert.equal(before.resources.cpuWeight, '217');
