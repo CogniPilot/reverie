@@ -1,5 +1,6 @@
 { pkgs, src }:
 let
+  sourceFile = import ./source-file.nix src;
   workspace = import ./rust-workspace-source.nix {
     inherit pkgs src;
     members = [ "reverie-launch-guard" "reverie-contracts" "reverie-core" ];
@@ -14,8 +15,8 @@ in pkgs.rustPlatform.buildRustPackage {
   disallowedRequisites = [ pkgs.python3 ];
   postPatch = ''
     mkdir -p examples schemas
-    cp ${src}/examples/launch-guard-input.json examples/
-    cp ${src}/schemas/launch-guard-receipt-v1.json schemas/
+    cp ${sourceFile "examples/launch-guard-input.json"} examples/launch-guard-input.json
+    cp ${sourceFile "schemas/launch-guard-receipt-v1.json"} schemas/launch-guard-receipt-v1.json
   '';
   meta = {
     description = "Evaluate metadata-only launch guard fixtures without live effects";

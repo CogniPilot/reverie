@@ -1,11 +1,12 @@
 { pkgs, src, testRoots ? false }:
+let sourceFile = import ./source-file.nix src; in
 pkgs.pkgsStatic.stdenv.mkDerivation {
   pname = "reverie-acceptance-peer" + pkgs.lib.optionalString testRoots "-test-roots";
   version = "1";
   dontUnpack = true;
   buildPhase = ''
     $CC ${pkgs.lib.optionalString testRoots "-DREVERIE_TEST_ROOTS"} -std=c11 -Os -Wall -Wextra -Werror -static -no-pie \
-      ${src}/nix/lease-peer-static.c -lm -o reverie-acceptance-peer
+      ${sourceFile "nix/lease-peer-static.c"} -lm -o reverie-acceptance-peer
   '';
   installPhase = ''
     mkdir -p "$out/bin"

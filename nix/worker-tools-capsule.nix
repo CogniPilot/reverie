@@ -1,6 +1,7 @@
 # Checked runtime ELF closure outside writable private /nix; no host services.
 { pkgs, src }:
 let
+  sourceFile = import ./source-file.nix src;
   producer = import ./worker-tools-capsule-producer.nix { inherit pkgs src; };
   tmux = pkgs.tmux;
   locales = pkgs.glibcLocales.override { allLocales = false; locales = [ "C.UTF-8/UTF-8" "en_US.UTF-8/UTF-8" ]; };
@@ -13,8 +14,8 @@ let
   notices = pkgs.runCommand "reverie-worker-tools-notices" {} ''
     mkdir -p "$out"
     cp ${tmux.src}/COPYING "$out/tmux-COPYING"
-    cp ${src}/apps/web/LICENSE "$out/Reverie-LICENSE"
-    cp ${src}/THIRD_PARTY_NOTICES.md "$out/Reverie-THIRD-PARTY-NOTICES.md"
+    cp ${sourceFile "apps/web/LICENSE"} "$out/Reverie-LICENSE"
+    cp ${sourceFile "THIRD_PARTY_NOTICES.md"} "$out/Reverie-THIRD-PARTY-NOTICES.md"
   '';
 in pkgs.runCommand "reverie-worker-tools-capsule" {
   nativeBuildInputs = [ producer ];
