@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tar.workspace = true
+flate2.workspace = true
 libc.workspace = true
 getrandom.workspace = true
 # "signal" is for the lease CLI, which shares one Nix build with the other host tools: with it here every

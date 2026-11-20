@@ -3,6 +3,13 @@ use reverie_host::deployment_snapshot::{RehearsalRoot, SnapshotTools};
 use std::io::{Read, Write};
 mod live_accounts;
 mod retained_copy;
+
+#[derive(Clone, Copy)]
+enum BackupFormat {
+    Tar,
+    Gzip,
+}
+
 /// Ordinary legacy budgets remain unchanged. The whole initial owner passes
 /// its SAME original bound, never a new grace period or a writer exception.
 #[derive(Clone, Copy)]
@@ -185,7 +192,22 @@ impl DeploymentService {
     }
     /// Keep the archive in the operation and extract its rehearsal on the selected disk.
     pub fn apply_with_rehearsal_root(&self, id: &str, root: &Path) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Ordinary, false, Some(root))
+        self.apply_scoped(
+            id,
+            OperationDeadline::Ordinary,
+            false,
+            Some((root, BackupFormat::Tar)),
+        )
+    }
+
+    /// Stage the raw copy and extraction on the second disk, then verify a compressed durable archive.
+    pub fn apply_with_compressed_backup(&self, id: &str, root: &Path) -> Result<DeploymentStatus> {
+        self.apply_scoped(
+            id,
+            OperationDeadline::Ordinary,
+            false,
+            Some((root, BackupFormat::Gzip)),
+        )
     }
 
     /// Apply the prepared live-writer plan under its existing exact mount and
@@ -201,12 +223,12 @@ impl DeploymentService {
         id: &str,
         deadline: OperationDeadline,
         skip_live_backup: bool,
-        rehearsal_path: Option<&Path>,
+        rehearsal_path: Option<(&Path, BackupFormat)>,
     ) -> Result<DeploymentStatus> {
         deadline.check()?;
         let operation = self.effect_operation(id)?;
         let rehearsal = rehearsal_path
-            .map(|path| {
+            .map(|(path, format)| {
                 require(
                     operation.plan.live_account_writers.is_none(),
                     "DEPLOYMENT_VERIFIED_BACKUP_REQUIRED",
@@ -217,6 +239,7 @@ impl DeploymentService {
                     &operation.directory,
                     deadline.snapshot(),
                 )
+                .map(|root| (root, format))
                 .map_err(|error| {
                     DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_ROOT_REFUSED", error)
                 })
@@ -229,11 +252,11 @@ impl DeploymentService {
                 &pins,
                 deadline,
                 skip_live_backup,
-                rehearsal.as_ref(),
+                rehearsal.as_ref().map(|(root, format)| (root, *format)),
             );
             DeploymentError::finalized(applied, pins.close())
         })();
-        let closed = rehearsal.map_or(Ok(()), |root| {
+        let closed = rehearsal.map_or(Ok(()), |(root, _)| {
             root.close().map_err(|error| {
                 DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_CLOSE_UNCONFIRMED", error)
             })
@@ -254,7 +277,7 @@ impl DeploymentService {
         pins: &crate::pins::Pins,
         deadline: OperationDeadline,
         skip_live_backup: bool,
-        rehearsal: Option<&RehearsalRoot>,
+        rehearsal: Option<(&RehearsalRoot, BackupFormat)>,
     ) -> Result<DeploymentStatus> {
         self.claimed(operation)?;
         operation.prepared()?;
@@ -296,23 +319,13 @@ impl DeploymentService {
         self.source_current(operation, false)?;
         self.verify_effect_pins(operation, pins)?;
         let end = deadline.snapshot();
-        let mut snapshot = tools
-            .capture_console(&source_root, &operation.directory.join("snapshot"), end)
-            .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_REFUSED", error))?;
-        let verified = (|| {
-            self.source_current(operation, false)?;
-            snapshot
-                .verify_source(end)
-                .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CHANGED", error))?;
-            self.source_current(operation, false)?;
-            snapshot.rehearse_at(rehearsal, end).map_err(|error| {
-                DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
-            })?;
-            self.source_current(operation, false)?;
-            operation.record("snapshot", &json!({"archive":snapshot.archive_path(),"sha256":snapshot.archive_sha256(),
-            "entries":snapshot.entry_count(),"regularBytes":snapshot.regular_bytes(),"scope":snapshot.scope_note(),"manifestSHA256":snapshot.manifest_sha256()}))?;
-            Ok(())
-        })();
+        let destination = operation.directory.join("snapshot");
+        let mut snapshot = match rehearsal {
+            Some((root, BackupFormat::Gzip)) => root.capture(&tools, &source_root, end),
+            _ => tools.capture_console(&source_root, &destination, end),
+        }
+        .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_REFUSED", error))?;
+        let verified = self.verify_release_snapshot(operation, &mut snapshot, rehearsal, end);
         let closed = snapshot.close().map_err(|error| {
             DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED", error)
         });
@@ -320,6 +333,47 @@ impl DeploymentService {
         self.source_current(operation, false)?;
         self.swap_scoped(operation, &candidate, pins, deadline)?;
         operation.status()
+    }
+    fn verify_release_snapshot(
+        &self,
+        operation: &Operation,
+        snapshot: &mut reverie_host::deployment_snapshot::ConsoleSnapshot,
+        rehearsal: Option<(&RehearsalRoot, BackupFormat)>,
+        end: Instant,
+    ) -> Result<()> {
+        self.source_current(operation, false)?;
+        snapshot
+            .verify_source(end)
+            .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CHANGED", error))?;
+        self.source_current(operation, false)?;
+        snapshot
+            .rehearse_at(
+                match rehearsal {
+                    Some((root, BackupFormat::Tar)) => Some(root),
+                    _ => None,
+                },
+                end,
+            )
+            .map_err(|error| {
+                DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
+            })?;
+        self.source_current(operation, false)?;
+        let (archive, checksum) = if matches!(rehearsal, Some((_, BackupFormat::Gzip))) {
+            snapshot
+                .compressed_copy(&operation.directory.join("snapshot"), end)
+                .map_err(|error| {
+                    DeploymentError::snapshot("DEPLOYMENT_COMPRESSED_BACKUP_REFUSED", error)
+                })?
+        } else {
+            (
+                snapshot.archive_path(),
+                snapshot.archive_sha256().to_owned(),
+            )
+        };
+        self.source_current(operation, false)?;
+        operation.record("snapshot", &json!({"archive":archive,"sha256":checksum,"tarSha256":snapshot.archive_sha256(),
+            "entries":snapshot.entry_count(),"regularBytes":snapshot.regular_bytes(),"scope":snapshot.scope_note(),"manifestSHA256":snapshot.manifest_sha256()}))?;
+        Ok(())
     }
     fn swap(&self, operation: &Operation, candidate: &str, pins: &crate::pins::Pins) -> Result<()> {
         self.swap_scoped(operation, candidate, pins, OperationDeadline::Ordinary)

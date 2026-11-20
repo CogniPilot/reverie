@@ -381,3 +381,51 @@ fn separate_rehearsal_requires_private_disjoint_storage() {
     fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(open(&nested).err().unwrap().code(), "SNAPSHOT_MOUNT_ALIAS");
 }
+
+#[test]
+fn compressed_backup_verifies_the_rehearsed_raw_archive_on_separate_storage() {
+    use std::io::Read;
+    let fixture = Fixture::new();
+    fixture.separate();
+    let staging = fixture.0.join("staging");
+    fs::create_dir(&staging).unwrap();
+    fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
+    let selected = RehearsalRoot::open(
+        &staging,
+        &fixture.source(),
+        fixture.destination().parent().unwrap(),
+        fixture.end(),
+    )
+    .unwrap();
+    fs::write(fixture.source().join("console/example"), vec![b'A'; 65536]).unwrap();
+    let mut snapshot = selected
+        .capture(&tools(), &fixture.source(), fixture.end())
+        .unwrap();
+    assert!(
+        snapshot
+            .compressed_copy(&fixture.destination(), fixture.end())
+            .is_err()
+    );
+    snapshot.rehearse(fixture.end()).unwrap();
+    let (path, compressed_sha) = snapshot
+        .compressed_copy(&fixture.destination(), fixture.end())
+        .unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let mut decoded = Vec::new();
+    flate2::read::MultiGzDecoder::new(&bytes[..])
+        .read_to_end(&mut decoded)
+        .unwrap();
+    assert_eq!(decoded, fs::read(snapshot.archive_path()).unwrap());
+    assert!(bytes.len() < decoded.len());
+    assert_eq!(
+        compressed_sha,
+        manifest::file_digest(&File::open(path).unwrap(), fixture.end()).unwrap()
+    );
+    assert!(
+        snapshot
+            .compressed_copy(&fixture.destination(), fixture.end())
+            .is_err()
+    );
+    snapshot.close().unwrap();
+    selected.close().unwrap();
+}

@@ -4,6 +4,7 @@
 //! the same immutable container before and after each public operation.
 mod ancestors;
 mod attributes;
+mod compressed;
 mod directory;
 mod manifest;
 mod mounts;

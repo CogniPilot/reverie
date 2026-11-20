@@ -74,16 +74,18 @@ source, and only then swaps names and starts. Readiness requires the HTTP status
 and an actual Rust-front/Node process relationship. This remains hybrid readiness;
 the one-employee message, laptop, perf and restart trial is separate acceptance.
 
-Check free space before stopping the source. The registered workflow stores each
-backup under `runtime/update-state/console-deployments/<operation>/` in the
-installation. During a verified update, `snapshot/console.tar` and the extracted
-`snapshot/rehearsal/console/` coexist. To extract the rehearsal on another disk, use
-`apply OPERATION --rehearsal-root DIRECTORY`. Choose an empty, owner-only
-(mode 0700) directory outside the office data, deployment operation, and worker
-mounts. It will contain a private copy of the console, including account data.
-The archive stays in the operation directory. The retained-copy workflow
-writes `retained-copy/` under the same operation directory. The deployment CLI
-keeps that copy at the registered installation.
+Check free space before stopping the office. The operation directory is
+`runtime/update-state/console-deployments/<operation>/` under the installation.
+Ordinary apply keeps the archive and extracted rehearsal there. To put the
+extraction on a separate filesystem, pass `--rehearsal-root /absolute/private/directory`
+to apply. Choose an empty owner-only directory outside worker mounts.
+
+Add `--compress-backup` to stage both the raw tar and its extraction on the
+rehearsal disk. Budget for both copies there. The operation directory then
+holds `snapshot/console.tar.gz`. Before the swap, the updater reads back the
+complete gzip file and compares its decoded length and SHA-256 to the tar
+that passed the restore rehearsal. The snapshot receipt records both checksums.
+The retained-copy workflow still writes its copy under `retained-copy/`.
 
 An image archive can be staged on scratch. Importing it still requires space
 in Docker's image storage for new layers. When Docker and the operation directory

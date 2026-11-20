@@ -76,6 +76,9 @@ enum Action {
         /// Existing private directory for the extracted restore test.
         #[arg(long, conflicts_with = "skip_backup")]
         rehearsal_root: Option<PathBuf>,
+        /// Keep a verified gzip archive in the operation and stage the raw tar on the rehearsal disk.
+        #[arg(long, requires = "rehearsal_root")]
+        compress_backup: bool,
     },
     /// Report or clear the contents of this office's employee /tmp mounts.
     #[command(
@@ -218,10 +221,15 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 operation,
                 skip_backup,
                 rehearsal_root,
+                compress_backup,
             } => serde_json::to_value(if skip_backup {
                 service.apply_live_without_backup(&operation)?
             } else if let Some(root) = rehearsal_root {
-                service.apply_with_rehearsal_root(&operation, &root)?
+                if compress_backup {
+                    service.apply_with_compressed_backup(&operation, &root)?
+                } else {
+                    service.apply_with_rehearsal_root(&operation, &root)?
+                }
             } else {
                 service.apply(&operation)?
             })?,

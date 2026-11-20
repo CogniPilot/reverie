@@ -38,6 +38,20 @@ impl RehearsalRoot {
         }
     }
 
+    pub fn capture(
+        &self,
+        tools: &super::SnapshotTools,
+        source: &Path,
+        end: Instant,
+    ) -> Result<super::ConsoleSnapshot> {
+        self.0.check()?;
+        let snapshot = tools.capture_console(source, &self.0.path().join("snapshot"), end)?;
+        match self.0.check() {
+            Ok(()) => Ok(snapshot),
+            Err(error) => combine(Err(error), snapshot.close()),
+        }
+    }
+
     pub fn close(self) -> Result<()> {
         self.0.close()
     }
