@@ -1108,6 +1108,30 @@ describe('in-place Docker existing-view renewal', () => {
       expect(restored.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
     }
   );
+  it('drops a pending viewer repair when the Docker binding changes within the same session', async () => {
+    const f = await runtimeFixture();
+    native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+    const dockerReconnect = vi.fn(async () => 'connected' as const);
+    const close = vi.fn(), pause = vi.fn(() => () => {});
+    const watcher = new WorkerViewerReconnect({
+      company: f.company, session: id => f.sessions.get(id), ready: () => true,
+      providerHealthy: () => true, dockerReconnect, pause, publish: vi.fn(),
+      moveGuard: async () => {
+        await f.companyFile.update(state => {
+          state.employees[0]!.dockerBinding!.containerId = '7'.repeat(64);
+        });
+        return Object.assign(() => true, { close });
+      },
+    });
+    const originalStatus = watcher.captureStatusCurrent(eid, f.employee);
+    expect(originalStatus()).toBe(true);
+    expect(await watcher.reconnect(eid, f.employee, f.employee.owner, true)).toBe('changed');
+    expect(originalStatus()).toBe(false);
+    expect(dockerReconnect).not.toHaveBeenCalled();
+    expect(pause).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(watcher.status(eid, f.employee)).toMatchObject({ attempts: 0, retryAfterMs: 0 });
+  });
   it('automatically reconnects a lost boxed viewer once the original provider is healthy', async () => {
     installViewerCustody();
     const f = await runtimeFixture();

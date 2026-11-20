@@ -35,7 +35,7 @@ export type ViewerReconnectStatus = (
   observation?: Awaited<ReturnType<Session['inspectWorkerViewer']>>;
 };
 const bindingKey = (e: CompanyEmployee) => JSON.stringify([e.id,e.owner,e.sessionId,e.sessionGeneration,
-  e.desiredRunning,e.onVacation,e.bindingMigration,e.runtimeRecipe,e.permissions]);
+  e.desiredRunning,e.onVacation,e.bindingMigration,e.dockerBinding,e.runtimeRecipe,e.permissions]);
 export interface ViewerReconnectDeps {
   company: CompanyService;
   session(id: string): Session | undefined;
