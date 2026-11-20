@@ -130,6 +130,17 @@ impl SnapshotTools {
         destination: &Path,
         end: Instant,
     ) -> Result<ConsoleSnapshot> {
+        self.stage_console(source, destination, end)?.verify(end)
+    }
+
+    /// Stage the tar and its source manifest. Only verification or a complete
+    /// restore rehearsal can turn this into a usable snapshot.
+    pub fn stage_console(
+        &self,
+        source: &Path,
+        destination: &Path,
+        end: Instant,
+    ) -> Result<StagedConsoleSnapshot> {
         deadline(end)?;
         let mut partial = PartialCapture {
             source: SnapshotSource::observe(source)?,
@@ -141,7 +152,7 @@ impl SnapshotTools {
             Ok(details) => details,
             Err(error) => return combine(Err(error), partial.close()),
         };
-        let mut snapshot = ConsoleSnapshot {
+        Ok(StagedConsoleSnapshot(ConsoleSnapshot {
             tools: self.clone(),
             source: partial.source,
             destination: partial.destination.take().expect("captured directory"),
@@ -150,11 +161,7 @@ impl SnapshotTools {
             manifest: before,
             mounts,
             rehearsed: false,
-        };
-        match snapshot.verify_source(end) {
-            Ok(()) => Ok(snapshot),
-            Err(error) => combine(Err(error), snapshot.close()),
-        }
+        }))
     }
     fn populate(
         &self,
@@ -292,6 +299,34 @@ pub struct ConsoleSnapshot {
     manifest: Manifest,
     mounts: reverie_contracts::kernel_mounts::MountTable,
     rehearsed: bool,
+}
+
+pub struct StagedConsoleSnapshot(ConsoleSnapshot);
+
+impl StagedConsoleSnapshot {
+    fn verify(mut self, end: Instant) -> Result<ConsoleSnapshot> {
+        match self.0.verify_source(end) {
+            Ok(()) => Ok(self.0),
+            Err(error) => combine(Err(error), self.close()),
+        }
+    }
+
+    /// The rehearsal verifies the source and archive on both sides of the
+    /// actual extraction. A refusal always consumes the held descriptors.
+    pub fn rehearse(
+        mut self,
+        selected: Option<&RehearsalRoot>,
+        end: Instant,
+    ) -> Result<ConsoleSnapshot> {
+        match self.0.rehearse_at(selected, end) {
+            Ok(()) => Ok(self.0),
+            Err(error) => combine(Err(error), self.close()),
+        }
+    }
+
+    pub fn close(self) -> Result<()> {
+        self.0.close()
+    }
 }
 impl ConsoleSnapshot {
     pub fn archive_path(&self) -> PathBuf {

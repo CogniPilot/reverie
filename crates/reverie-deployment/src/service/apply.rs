@@ -320,12 +320,29 @@ impl DeploymentService {
         self.verify_effect_pins(operation, pins)?;
         let end = deadline.snapshot();
         let destination = operation.directory.join("snapshot");
-        let mut snapshot = match rehearsal {
-            Some((root, BackupFormat::Gzip)) => root.capture(&tools, &source_root, end),
-            _ => tools.capture_console(&source_root, &destination, end),
+        let staged = match rehearsal {
+            Some((root, BackupFormat::Gzip)) => root.stage(&tools, &source_root, end),
+            _ => tools.stage_console(&source_root, &destination, end),
         }
         .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_REFUSED", error))?;
-        let verified = self.verify_release_snapshot(operation, &mut snapshot, rehearsal, deadline);
+        if let Err(error) = self.source_current(operation, false) {
+            return DeploymentError::finalized(
+                Err(error),
+                staged.close().map_err(|error| {
+                    DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED", error)
+                }),
+            );
+        }
+        let mut snapshot = staged
+            .rehearse(
+                rehearsal
+                    .and_then(|(root, format)| matches!(format, BackupFormat::Tar).then_some(root)),
+                deadline.snapshot(),
+            )
+            .map_err(|error| {
+                DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
+            })?;
+        let verified = self.record_release_snapshot(operation, &mut snapshot, rehearsal, deadline);
         let closed = snapshot.close().map_err(|error| {
             DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED", error)
         });
@@ -334,27 +351,13 @@ impl DeploymentService {
         self.swap_scoped(operation, &candidate, pins, deadline)?;
         operation.status()
     }
-    fn verify_release_snapshot(
+    fn record_release_snapshot(
         &self,
         operation: &Operation,
         snapshot: &mut reverie_host::deployment_snapshot::ConsoleSnapshot,
         rehearsal: Option<(&RehearsalRoot, BackupFormat)>,
         deadline: OperationDeadline,
     ) -> Result<()> {
-        // The rehearsal verifies the stopped source and archive before extraction
-        // and again after comparing the restored tree.
-        self.source_current(operation, false)?;
-        snapshot
-            .rehearse_at(
-                match rehearsal {
-                    Some((root, BackupFormat::Tar)) => Some(root),
-                    _ => None,
-                },
-                deadline.snapshot(),
-            )
-            .map_err(|error| {
-                DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
-            })?;
         self.source_current(operation, false)?;
         let (archive, checksum) = if matches!(rehearsal, Some((_, BackupFormat::Gzip))) {
             snapshot

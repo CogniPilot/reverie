@@ -383,6 +383,23 @@ fn separate_rehearsal_requires_private_disjoint_storage() {
 }
 
 #[test]
+fn a_staged_archive_rechecks_the_source_before_extracting() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let path = fixture.source().join("console/example");
+    fs::write(&path, b"first").unwrap();
+    let stage = tools()
+        .stage_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    fs::write(path, b"later").unwrap();
+    assert_eq!(
+        stage.rehearse(None, fixture.end()).err().unwrap().code(),
+        "SNAPSHOT_SOURCE_CHANGED"
+    );
+    assert!(!fixture.destination().join("rehearsal").exists());
+}
+
+#[test]
 fn compressed_backup_verifies_the_rehearsed_raw_archive_on_separate_storage() {
     use std::io::Read;
     let fixture = Fixture::new();

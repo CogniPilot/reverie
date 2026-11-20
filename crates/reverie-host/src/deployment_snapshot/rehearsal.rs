@@ -52,6 +52,20 @@ impl RehearsalRoot {
         }
     }
 
+    pub fn stage(
+        &self,
+        tools: &super::SnapshotTools,
+        source: &Path,
+        end: Instant,
+    ) -> Result<super::StagedConsoleSnapshot> {
+        self.0.check()?;
+        let snapshot = tools.stage_console(source, &self.0.path().join("snapshot"), end)?;
+        match self.0.check() {
+            Ok(()) => Ok(snapshot),
+            Err(error) => combine(Err(error), snapshot.close()),
+        }
+    }
+
     pub fn close(self) -> Result<()> {
         self.0.close()
     }
