@@ -661,6 +661,11 @@ export class DockerEmployeeRuntime {
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
     return (await this.attachExistingEmployee(employee, allowed)) === 'attached';
   }
+  #currentViewer(actual: unknown, containerId: string): boolean {
+    return actual instanceof Session && actual.dockerContinuationViewCurrent &&
+      actual.pid != null && !actual.paneExit && !actual.providerInputHeld &&
+      !actual.terminalInputHeld && actual.docker?.containerName === containerId;
+  }
   async attachExistingEmployee(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome> {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
@@ -692,16 +697,7 @@ export class DockerEmployeeRuntime {
     catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const actual = a.ctx.sessions.get(employee.sessionId);
-    if (
-      actual instanceof Session &&
-      actual.dockerContinuationViewCurrent &&
-      actual?.pid !== null &&
-      actual?.pid !== undefined &&
-      !actual.paneExit &&
-      !actual.providerInputHeld &&
-      !actual.terminalInputHeld &&
-      actual.docker?.containerName === binding.containerId
-    ) { publication = 'published'; return 'attached'; }
+    if (this.#currentViewer(actual, binding.containerId)) { publication = 'published'; return 'attached'; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       await renewExistingDockerProviderView({
         company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
@@ -752,12 +748,20 @@ export class DockerEmployeeRuntime {
     this.#resourceTimer.unref();
   }
   async #reconcileTick(): Promise<void> {
-    const retryViewer = this.restorationReports.some(
-      (report) => report.state === 'held' &&
-        (report.code === 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' ||
-         report.code === 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' ||
-         report.code === 'DOCKER_CONTINUATION_DESTINATION_STOPPED')
-    );
+    const a = this.#attached;
+    if (!a) return;
+    const reports = new Map(this.restorationReports.map(report => [report.employeeId, report]));
+    const retryViewer = a.company.store.snapshot().employees.some(employee => {
+      const report = reports.get(employee.id);
+      if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true)
+        return !!report;
+      if (!report) return true;
+      if (report.state === 'attached')
+        return !this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId);
+      if (report.code !== 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') return true;
+      const phase = a.store.record(employee.id)?.phase;
+      return phase === 'ready' || phase === 'provider-issued';
+    });
     if (retryViewer) {
       // This pass already reconciles resources before checking the original provider.
       await this.restoreExistingViews();

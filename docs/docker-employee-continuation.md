@@ -50,6 +50,41 @@ callbacks live outside private /nix. No shared Basic or hook secret is provision
 
 ## Remaining integration and acceptance gates
 
+### Automatic recovery after a reboot
+
+The running office periodically compares each desired employee with its current
+session and binding. A missing or revoked viewer can be attached to the verified
+original provider. Returning from vacation or completing a pending original
+operation makes the employee eligible on the next pass. Operator wake and the
+periodic check use the same attachment service.
+
+Cold recovery still needs a durable Rust operation with the following behavior.
+
+1. Read the current desired state, session generation, account, provider thread
+   and storage binding. A vacation, revoked approval or superseding generation
+   ends eligibility. Group employees by their approved pool so one operation
+   restores and verifies the shared anchor.
+2. Find or create one recovery journal for the employee, generation, original
+   container and failed incarnation. Concurrent wake requests and office
+   restarts must join that operation. A running provider goes through ordinary
+   viewer attachment.
+3. For a verified stopped container, start only its inert init. Recheck its
+   actual storage and apply and read back its approved cgroup limits for the
+   new incarnation before enabling provider work.
+4. Record the intent to resume the original thread before dispatch. If the
+   office exits between dispatch and acknowledgment, inspect the original
+   operation and provider. A second dispatch requires proof the first could
+   never have started. An unknown thread requires an owner decision.
+5. Report working only after the bound provider and terminal are both ready.
+   Persist the pending reason, last observation and next retry time for the GUI
+   and headless clients. Back off transient observations independently per
+   employee so one unavailable account cannot delay the fleet.
+
+Qualification requires a real reboot, a concurrent manual wake and automatic
+tick, and an office crash at each effect boundary. Verify one pool restore, at
+most one provider dispatch per incarnation, the original thread and storage,
+and a usable terminal for each eligible employee.
+
 Source tests do not qualify an installed employee. The composed image, actual
 PTY-to-fixed-engine path, provider command, bound callback transport and
 owner-authenticated workflow need separate installed qualification. Normal wake
