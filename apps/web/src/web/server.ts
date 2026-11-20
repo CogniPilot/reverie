@@ -101,6 +101,7 @@ import fastifyMultipart from '@fastify/multipart';
 import { pasteImageDirInUseByOtherSession, startPasteImageGc, uploadDirs } from './paste-image-gc.js';
 import { CLEAN_EXIT_CLOSE_REASON, shouldCloseCleanlyExitedSession } from '../pane-exit-sweep.js';
 import { join, dirname } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -4985,9 +4986,11 @@ export class WebServer extends EventEmitter {
   private async planRebootRestoreOffer(dead: string[], livePaneCount: number): Promise<number> {
     if (dead.length === 0) return 0;
 
-    const persisted = this.store.getSessions();
-    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => saved && getCli(saved.mode ?? 'claude')?.capabilities.transcript === 'codex-rollout'
-      && legacyThreadBinding(saved.mode)?.kind === 'nested-resume');
+    const personal = dead.filter(id => this.companyService.allowsPersonalSessionRestore(id));
+    const initial = this.store.getSessions();
+    const codexRecords = personal.map(id => initial[id]).filter(saved => saved &&
+      getCli(saved.mode ?? 'claude')?.capabilities.transcript === 'codex-rollout' &&
+      legacyThreadBinding(saved.mode)?.kind === 'nested-resume').map(saved => structuredClone(saved));
     if (codexRecords.length) {
       const profiles = await readSubscriptionProfiles();
       const bindings = new Map<string | undefined, Map<string, string>>();
@@ -5005,13 +5008,14 @@ export class WebServer extends EventEmitter {
           );
         }
         const thread = bindings.get(profile)?.get(saved.id);
-        if (thread) {
+        if (thread && this.companyService.allowsPersonalSessionRestore(saved.id) &&
+            isDeepStrictEqual(this.store.getSessions()[saved.id], saved)) {
           const next = { ...saved, codexConfig: { ...saved.codexConfig, resumeSessionId: thread } };
-          persisted[saved.id] = next;
           this.store.setSession(saved.id, next);
         }
       }
     }
+    const persisted = this.store.getSessions();
     if (
       !looksLikeHostReboot({
         livePaneCount,
@@ -5027,8 +5031,8 @@ export class WebServer extends EventEmitter {
     }
 
     // Company recovery owns these sessions even if a later move releases the old ID.
-    const personal = dead.filter(id => this.companyService.allowsPersonalSessionRestore(id));
-    const { restore, skipped } = planRebootRestore(personal, persisted, (workingDir) => existsSync(workingDir));
+    const stillPersonal = personal.filter(id => this.companyService.allowsPersonalSessionRestore(id));
+    const { restore, skipped } = planRebootRestore(stillPersonal, persisted, (workingDir) => existsSync(workingDir));
     if (skipped.length > 0) {
       console.log(`[Server] Reboot restore is passing over ${skipped.length} dead session(s):`);
       for (const rejection of skipped) {

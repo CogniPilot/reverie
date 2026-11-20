@@ -110,6 +110,9 @@ it('reads only the selected account and declared rollout codec, without granting
     }) as SessionState;
   const rows = {
     selected: saved('selected', 'codex', 'selected'),
+    employee: saved('employee', 'codex', 'selected'),
+    claimed: saved('claimed', 'codex', 'selected'),
+    edited: saved('edited', 'codex', 'selected'),
     default: saved('default', 'codex'),
     missing: saved('missing', 'codex', 'missing'),
     foreign: saved('foreign', 'codex', 'foreign'),
@@ -130,7 +133,18 @@ it('reads only the selected account and declared rollout codec, without granting
     }
   ).planRebootRestoreOffer;
   // A surviving pane ensures the real method returns before any reboot offer/native recovery.
-  expect(await method.call({ store: { getSessions: () => rows, setSession } }, Object.keys(rows), 1)).toBe(0);
+  const employees = new Set(['employee']);
+  const pending = method.call({
+    store: { getSessions: () => rows, setSession },
+    companyService: { allowsPersonalSessionRestore: (id: string) => !employees.has(id) },
+  }, Object.keys(rows), 1);
+  employees.delete('employee');
+  employees.add('claimed');
+  rows.edited.codexConfig!.resumeSessionId = 'newer-thread';
+  expect(await pending).toBe(0);
+  expect(rows.employee.codexConfig?.resumeSessionId).toBe('preserved');
+  expect(rows.claimed.codexConfig?.resumeSessionId).toBe('preserved');
+  expect(rows.edited.codexConfig?.resumeSessionId).toBe('newer-thread');
   expect(rows.selected.codexConfig?.resumeSessionId).toBe('selected-selected');
   expect(rows.default.codexConfig?.resumeSessionId).toBe('default-default');
   expect(rows.custom.codexConfig?.resumeSessionId).toBe('selected-custom');
