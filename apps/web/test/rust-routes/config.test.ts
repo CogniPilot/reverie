@@ -1,6 +1,6 @@
 /** The moved-route list is read once at startup and refuses anything it cannot serve exactly. */
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ROUTE_MEDIA, ROUTE_STATUSES, rustRoutes } from '../../src/rust-routes/config.js';
@@ -19,7 +19,7 @@ function handler(): string {
   const dir = mkdtempSync(join(tmpdir(), 'rust-routes-config-'));
   dirs.push(dir);
   const path = join(dir, 'reverie-route-handler');
-  writeFileSync(path, '');
+  writeFileSync(path, '', { mode: 0o700 });
   return path;
 }
 
@@ -42,6 +42,12 @@ describe('rust route configuration', () => {
       expect(() => rustRoutes({ REVERIE_RUST_ROUTES: KEY, REVERIE_RUST_ROUTE_HANDLER: handlerPath })).toThrow(
         /absolute path/
       );
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a handler without execute permission at startup', () => {
+    const path = handler();
+    chmodSync(path, 0o600);
+    expect(() => rustRoutes({ REVERIE_RUST_ROUTES: KEY, REVERIE_RUST_ROUTE_HANDLER: path })).toThrow(/executable/);
   });
 
   it('serves the statuses and media of the shared route table', () => {

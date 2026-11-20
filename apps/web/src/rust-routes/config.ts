@@ -3,10 +3,10 @@
  * REVERIE_RUST_ROUTES to exact route keys; an unknown key, or a list without an absolute
  * REVERIE_RUST_ROUTE_HANDLER file, refuses to start, so a typo never leaves a route silently on TS.
  */
-import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { envValue } from '../config/reverie-env.js';
 import { ApiErrorCode, httpStatusForErrorCode } from '../types/api.js';
+import { isExecutableRegularFile } from '../utils/cli-executable-resolver.js';
 import { SETTINGS, SUBSCRIPTION_PROFILES, type Media } from './frames.js';
 
 /** 200, 400, 500 and every status the error-code table maps to, ascending. */
@@ -40,9 +40,9 @@ export function rustRoutes(env: NodeJS.ProcessEnv): RustRoutes | undefined {
       throw new Error(`REVERIE_RUST_ROUTES names an unknown route: ${JSON.stringify(key)}`);
   }
   const handlerPath = envValue(env, 'RUST_ROUTE_HANDLER');
-  if (!handlerPath || !isAbsolute(handlerPath) || !statSync(handlerPath, { throwIfNoEntry: false })?.isFile()) {
+  if (!handlerPath || !isAbsolute(handlerPath) || !isExecutableRegularFile(handlerPath)) {
     throw new Error(
-      'REVERIE_RUST_ROUTES is set, so REVERIE_RUST_ROUTE_HANDLER must be the absolute path of the handler binary'
+      'REVERIE_RUST_ROUTES is set, so REVERIE_RUST_ROUTE_HANDLER must be the absolute path of an executable handler file'
     );
   }
   return { moved, handlerPath };
