@@ -355,6 +355,13 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       // facts after it, retaining the same scope checks and five-second proof.
       const workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
       current();
+      if (input.forceBusy && input.fromAccount === input.toAccount) {
+        // A cold worker cannot supply a live storage observation after reservation.
+        // Check its retained mounts before taking the employee's move lock.
+        const helper = this.#d.recoveryHelper;
+        await this.#d.engine.planReplacementHome(selected.row, current, 'stopped', helper ? { helper } : undefined);
+        current();
+      }
       const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
       const observation = native.observation(selected.row, selected.binding);

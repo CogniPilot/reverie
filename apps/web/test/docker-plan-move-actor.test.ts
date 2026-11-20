@@ -986,6 +986,15 @@ async function publishedTargetFixture(
   };
 }
 describe('captured native plan actor before paid dispatch', () => {
+  it('rejects unconfirmed cold storage before reserving a same-plan worker recovery', async () => {
+    const f = await fixture(false);
+    f.liveHome.mockRejectedValueOnce(Error('Unconfirmed original storage'));
+    const before = await f.moves.dockerRecord(f.record.id);
+    const input = { ...f.input, fromAccount: f.input.toAccount };
+    await expect(f.freshActor().reserve(input, undefined, 'd'.repeat(64))).rejects.toThrow('Unconfirmed original storage');
+    expect(await f.moves.dockerRecord(f.record.id)).toEqual(before);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+  });
   it.each([true, false])('qualifies the target before fresh final source facts (running=%s)', async (running) => {
     const f = await fixture(running);
     let clock = performance.now();

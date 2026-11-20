@@ -63,6 +63,17 @@ failures with the same reason double the interval up to two minutes. Each
 employee has an independent interval. An explicit restore, a newly observed
 resource change, or a new session binding can trigger an earlier check.
 
+Same-plan recovery now checks the stopped worker’s HOME and Nix mounts before
+reserving a move. Linux can assign a different device number to the same ext4
+filesystem after a reboot. Legacy storage receipts identify a directory by its
+device number, inode, ownership and mode. When the device number changes, a
+stopped worker with only that receipt can remain held. Retrying its move cannot
+supply the missing filesystem identity. A durable replacement receipt needs a
+stable filesystem identifier for each mount as well as the original directory
+identity. Reboot qualification must cover both device renumbering on the same
+filesystem and a different filesystem mounted at the same path with matching
+inode numbers. Legacy receipts need a separate verified migration.
+
 Cold recovery still needs a durable Rust operation with the following behavior.
 
 1. Read the current desired state, session generation, account, provider thread
