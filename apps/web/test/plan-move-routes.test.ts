@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import { registerPlanMoveRoutes } from '../src/web/routes/plan-move-routes.js';
+import { DockerEmployeeContinuationError } from '../src/docker-employee-continuation.js';
 import { PlanMoveError, type PlanMoves } from '../src/plan-move.js';
 import type { AuthPort, AuthSessionRecord } from '../src/web/ports/auth-port.js';
 import { planMoveExecutor, type PlanMoveRuntime } from '../src/plan-move-runtime.js';
@@ -111,6 +112,11 @@ describe('owner browser plan move API', () => {
       undefined,
       executor
     );
+    moves.begin.mockRejectedValueOnce(new DockerEmployeeContinuationError('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED'));
+    const held = await app.inject({ method: 'POST', url: '/api/plans/moves/force', headers,
+      payload: { ...payload, id: 'held-move' } });
+    expect(held.statusCode).toBe(409);
+    expect(held.json()).toMatchObject({ success: false, reason: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED' });
     moves.begin.mockClear();
     for (const extra of [{ 'x-reverie-parent-session': 'source' }, { origin: 'https://other.test' }, { cookie: '' }]) {
       expect(
