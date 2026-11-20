@@ -1620,12 +1620,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     helper: DockerWorkerReattachHelper,
     current: () => void,
     canonicalAuthDigest?: string
-  ): Promise<DockerEmployeeProviderView | undefined> {
+  ): Promise<DockerEmployeeProviderView | 'stopped' | undefined> {
     current();
     const checked = DockerEmployeeContinuationRecord.parse(row);
     if (!checked.destination || !['ready', 'provider-issued'].includes(checked.phase)) return;
     const raw = await this.#boundDestination(checked, current, true);
-    if (!raw.State.Running) return;
+    if (!raw.State.Running) {
+      current();
+      return raw.State.Status === 'exited' && raw.State.Pid === 0 &&
+        !raw.State.Restarting && !raw.State.Paused && !raw.State.Dead ? 'stopped' : undefined;
+    }
     const state = containerReadState(raw);
     const home = await this.#storage.readExistingReference(checked, raw, (destination, seen) =>
       helper.storage(destination, seen, current), current);

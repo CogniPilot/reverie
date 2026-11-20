@@ -1854,7 +1854,7 @@ export class WebServer extends EventEmitter {
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
-      ...(dockerRuntime ? { dockerWake: (employee: CompanyEmployee, allowed: () => boolean) => dockerRuntime.wake(employee, allowed) } : {}),
+      ...(dockerRuntime ? { dockerWake: (employee: CompanyEmployee, allowed: () => boolean) => dockerRuntime.attachExistingEmployee(employee, allowed) } : {}),
       ...(process.env.REVERIE_WORKER_SOCKET ? { nativeHealth: (id: string) => {
         const employee=this.companyService.registeredEmployees().find(e=>e.sessionId===id);
         return employee ? this.workerProviderHealth?.read(employee)?.state ?? 'unknown' as const : 'unknown' as const;

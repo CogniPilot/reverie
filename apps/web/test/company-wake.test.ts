@@ -75,7 +75,7 @@ describe('company crash recovery selection', () => {
   it('leaves the wake budget intact when the saved record belongs to another session', async () => {
     const f = fixture();
     f.saved.set(f.root.sessionId, f.saved.get(f.report.sessionId)!);
-    const dockerWake = vi.fn(async () => true);
+    const dockerWake = vi.fn(async () => 'attached' as const);
     const result = await new CompanyWake({ ...f.deps, dockerWake }).wakeOne(f.root.id);
     expect(result.skipped).toEqual([{ employeeId: f.root.id, reason: 'no-owned-session-record' }]);
     expect(f.deps.claim).not.toHaveBeenCalled();
@@ -334,19 +334,25 @@ describe('company crash recovery selection', () => {
 });
 
 describe('exclusive Docker-bound wake',()=>{
+ it('returns the stopped destination as the reason for a held owner wake', async () => {
+   const f = fixture();
+   const report = await new CompanyWake({ ...f.deps, dockerWake: async () => 'stopped' }).wakeOne(f.root.id);
+   expect(report).toEqual({ awakened: [], skipped: [{ employeeId: f.root.id, reason: 'docker-destination-stopped' }] });
+   expect(f.deps.wake).not.toHaveBeenCalled();
+ });
  it('uses the boxed service even when native health is unknown and saved Docker is excluded by local reboot planner',async()=>{
   const f=fixture(),saved=f.saved.get(f.root.sessionId)!;saved.docker={containerName:'a'.repeat(64)} as never;
-  const dockerWake=vi.fn(async(_employee,allowed)=>allowed());
+  const dockerWake=vi.fn(async(_employee,allowed)=>allowed() ? 'attached' as const : 'unconfirmed' as const);
   const result=await new CompanyWake({...f.deps,nativeHealth:()=> 'unknown',dockerWake}).wakeOne(f.root.id);
   expect(result.awakened).toEqual([f.root.id]);expect(dockerWake).toHaveBeenCalledOnce();expect(f.deps.wake).not.toHaveBeenCalled();
  });
  it('a boxed refusal never starts a local/native provider, even with an alive legacy viewer',async()=>{
-  const f=fixture();f.live.add(f.root.sessionId);const dockerWake=vi.fn(async()=>false);
+  const f=fixture();f.live.add(f.root.sessionId);const dockerWake=vi.fn(async()=>'unconfirmed' as const);
   const result=await new CompanyWake({...f.deps,nativeHealth:()=> 'healthy',dockerWake}).wakeOne(f.root.id);
   expect(result.awakened).toEqual([]);expect(result.skipped).toEqual([{employeeId:f.root.id,reason:'wake-failed'}]);expect(f.deps.wake).not.toHaveBeenCalled();expect(f.deps.noteRunning).not.toHaveBeenCalled();
  });
  it('actual office revocation after the claim denies boxed effects too',async()=>{
-  const f=fixture(),dockerWake=vi.fn(async()=>true);f.deps.claim.mockImplementationOnce(async()=>{f.root.onVacation=true;return true;});
+  const f=fixture(),dockerWake=vi.fn(async()=>'attached' as const);f.deps.claim.mockImplementationOnce(async()=>{f.root.onVacation=true;return true;});
   await new CompanyWake({...f.deps,dockerWake}).wakeOne(f.root.id);expect(dockerWake).not.toHaveBeenCalled();expect(f.deps.wake).not.toHaveBeenCalled();
  });
 });

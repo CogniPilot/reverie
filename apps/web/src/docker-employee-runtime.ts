@@ -1,3 +1,4 @@
+import type { DockerWakeOutcome } from './company-wake.js';
 import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
@@ -196,6 +197,7 @@ export type DockerExistingViewRestoration = {
       readonly state: 'held';
       readonly code:
         | 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'
+        | 'DOCKER_CONTINUATION_DESTINATION_STOPPED'
         | 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED'
         | 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED';
     }
@@ -445,11 +447,12 @@ export class DockerEmployeeRuntime {
         if (!a.recoveryHelper) return;
         const policy = a.store.policy(row.employeeId);
         const policyDigest = dockerContinuationDigest(policy);
-        return a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, () => {
+        const view = await a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, () => {
           check();
           if (dockerContinuationDigest(a.store.policy(row.employeeId)) !== policyDigest)
             throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
         }, authDigest);
+        return view === 'stopped' ? undefined : view;
       },
       retain:actor=>this.#planActors.add(actor)});
   }
@@ -503,6 +506,12 @@ export class DockerEmployeeRuntime {
     });
   }
   async #observeRunningProviderView(
+    a: Attached, row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void
+  ) {
+    const observed = await this.#observeProvider(a, row, binding, current);
+    return observed === 'stopped' ? undefined : observed;
+  }
+  async #observeProvider(
     a: Attached,
     row: DockerEmployeeContinuationRecord,
     binding: DockerEmployeeBinding,
@@ -512,6 +521,7 @@ export class DockerEmployeeRuntime {
     try {
       const seen = await a.engine.observeDestination(row);
       current();
+      if (seen?.state === 'stopped' && seen.original?.containerId === binding.containerId) return 'stopped' as const;
       if (seen?.state === 'running' && seen.provider.kind === 'running' &&
         seen.provider.operationId === binding.operationId && seen.provider.sessionId === binding.sessionId &&
         a.engine.existingResourcePolicyCurrent(row, seen.resources))
@@ -649,11 +659,14 @@ export class DockerEmployeeRuntime {
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
+    return (await this.attachExistingEmployee(employee, allowed)) === 'attached';
+  }
+  async attachExistingEmployee(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome> {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
     const row = a.store.record(employee.id),
       binding = employee.dockerBinding;
-    if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
+    if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return 'unconfirmed';
     let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
@@ -688,7 +701,7 @@ export class DockerEmployeeRuntime {
       !actual.providerInputHeld &&
       !actual.terminalInputHeld &&
       actual.docker?.containerName === binding.containerId
-    ) { publication = 'published'; return true; }
+    ) { publication = 'published'; return 'attached'; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       await renewExistingDockerProviderView({
         company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
@@ -700,15 +713,15 @@ export class DockerEmployeeRuntime {
           this.#observeRunningProviderView(a, observedRow, observedBinding, admitted),
       }, row, actual, () => {current(); return true;}, () => {publication = 'published';});
       publication = 'published';
-      return true;
+      return 'attached';
     }
-    const view = await this.#observeRunningProviderView(a, row, binding, current);
+    const view = await this.#observeProvider(a, row, binding, current);
     current();
-    if (!view) { publication = 'failed'; return false; }
+    if (!view || view === 'stopped') { publication = 'failed'; return view ?? 'unconfirmed'; }
     await a.provider.attach(row, binding, current, view);
     current();
     publication = 'published';
-    return true;
+    return 'attached';
     } catch (cause) {
       publication = 'failed';
       throw cause;
@@ -742,7 +755,8 @@ export class DockerEmployeeRuntime {
     const retryViewer = this.restorationReports.some(
       (report) => report.state === 'held' &&
         (report.code === 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' ||
-         report.code === 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED')
+         report.code === 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' ||
+         report.code === 'DOCKER_CONTINUATION_DESTINATION_STOPPED')
     );
     if (retryViewer) {
       // This pass already reconciles resources before checking the original provider.
@@ -798,12 +812,13 @@ export class DockerEmployeeRuntime {
           reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' }));
           continue;
         }
-        const attached = await this.wake(employee, allowed);
+        const attached = await this.attachExistingEmployee(employee, allowed);
         reports.push(
           Object.freeze(
-            attached
+            attached === 'attached'
               ? { ...base, state: 'attached' }
-              : { ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' }
+              : { ...base, state: 'held', code: attached === 'stopped'
+                ? 'DOCKER_CONTINUATION_DESTINATION_STOPPED' : 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' }
           )
         );
       } catch (cause) {

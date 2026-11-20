@@ -1074,6 +1074,23 @@ describe('in-place Docker existing-view renewal', () => {
       return wire;
     };
   }
+  it('reports a stopped bound destination without opening a provider or launching one', async () => {
+    const f = await runtimeFixture();
+    f.sessions.delete(sid);
+    vi.mocked(DockerEmployeeEngine.prototype.observeDestination).mockResolvedValue({
+      original: f.row.destination!,
+      state: 'stopped',
+      provider: { kind: 'absent' },
+      resources: null,
+      credentialDigest: null,
+    });
+    expect(await f.runtime.restoreExistingViews()).toMatchObject([
+      { sessionId: sid, state: 'held', code: 'DOCKER_CONTINUATION_DESTINATION_STOPPED' },
+    ]);
+    expect(await f.runtime.wake(f.employee, () => true)).toBe(false);
+    expect(f.captured).not.toHaveBeenCalled();
+    expect(f.attach).not.toHaveBeenCalled();
+  });
   it('recomputes Docker view currency instead of adopting a forged saved observation', async () => {
     const f = await savedFixture();
     expect(f.session.toState().dockerProviderViewCurrent).toBe(false);

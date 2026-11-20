@@ -3,6 +3,8 @@ import type { CompanyEmployee, CompanyState } from './company-types.js';
 import type { SessionState } from './types.js';
 import { planRebootRestore, type RebootRestoreEntry } from './reboot-restore.js';
 
+export type DockerWakeOutcome = 'attached' | 'stopped' | 'unconfirmed';
+
 export interface CompanyWakeDeps {
   company(): CompanyState;
   saved(sessionId: string): SessionState | undefined;
@@ -15,7 +17,7 @@ export interface CompanyWakeDeps {
   claim(employeeId: string, sessionId: string, now: number, automatic: boolean, stillCurrent?: () => boolean): Promise<boolean>;
   wake(entry: RebootRestoreEntry, allowed: () => boolean): Promise<boolean>;
   /** Exclusive explicit backend. Its refusal never invokes local/native restore. */
-  dockerWake?(employee:CompanyEmployee,allowed:()=>boolean):Promise<boolean>;
+  dockerWake?(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome>;
   now?(): number;
   kickoff?(employee: CompanyEmployee, allowed: () => boolean): Promise<void>;
 }
@@ -222,7 +224,7 @@ export class CompanyWake {
           skip('start-unconfirmed');
           continue;
         }
-        if (woke) {
+        if (woke === true || woke === 'attached') {
           report.awakened.push(employee.id);
           if (!manualId && allowed()) {
             try {
@@ -231,7 +233,7 @@ export class CompanyWake {
               skip('kickoff-failed');
             }
           }
-        } else skip('wake-failed');
+        } else skip(woke === 'stopped' ? 'docker-destination-stopped' : 'wake-failed');
       } catch {
         skip(attempted ? 'start-unconfirmed' : 'wake-failed');
       } finally {
