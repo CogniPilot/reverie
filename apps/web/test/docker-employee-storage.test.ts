@@ -271,7 +271,7 @@ describe('existing destination storage across an original holder exit', () => {
       ino: '5',
       originalHomeDev: '4',
     });
-    expect(verify).toHaveBeenCalledWith(f.existingDestination, f.destination);
+    expect(verify).toHaveBeenCalledWith(f.existingDestination, f.destination, undefined);
     expect(f.task).toEqual(task);
     expect(f.command.create).toHaveBeenCalledOnce();
     expect(vi.mocked(f.command.run).mock.calls.map(([args]) => args)).toEqual([
