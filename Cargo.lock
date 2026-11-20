@@ -1967,6 +1967,7 @@ dependencies = [
 name = "reverie-routes"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "reverie-contracts",
  "serde_json",
  "sha2",

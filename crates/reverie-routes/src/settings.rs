@@ -1,7 +1,6 @@
 //! `GET /api/settings`: read exactly the path TS computed, then answer as `settings_v1` does. A
 //! relative path resolves against this process's working directory, which it inherits from TS.
 use reverie_contracts::settings_v1::{self as v1, MAX_FILE_BYTES, Refusal, Response};
-use std::fs::File;
 use std::io::Read;
 
 pub fn answer(json: &[u8]) -> Result<Response, Refusal> {
@@ -12,7 +11,7 @@ pub fn answer(json: &[u8]) -> Result<Response, Refusal> {
 /// The file's bytes; `None` for any failure to open or read it (missing, unreadable, a directory),
 /// all of which TS answers with its default. Reads at most one byte past the bound.
 fn read(path: &str) -> Result<Option<Vec<u8>>, Refusal> {
-    let Ok(file) = File::open(path) else {
+    let Ok(file) = crate::config_file::open(path.as_ref()) else {
         return Ok(None);
     };
     let mut bytes = Vec::new();

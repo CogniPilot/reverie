@@ -173,6 +173,59 @@ mod posix {
     const ONE_PROFILE: &str = r#"[{"id": "p0", "label": "Plan 0", "provider": "anthropic", "configDir": "/accounts/p0", "openCodeDataDir": "/accounts/p0/opencode-data"}]"#;
 
     #[test]
+    fn special_files_return_route_specific_answers_and_leave_the_channel_available() {
+        use reverie_contracts::route_frames_v1::SETTINGS;
+        use std::process::Command;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = temp_root("pipe");
+        let pipe = root.join("data/subscription-profiles.json");
+        assert!(
+            Command::new("mkfifo")
+                .arg(&pipe)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let settings = |id, path: &Path| {
+            frame(
+                id,
+                Body::Request {
+                    route: SETTINGS.into(),
+                    json: json!({"settingsPath":path}).to_string().into_bytes(),
+                },
+            )
+        };
+        let ordinary = root.join("settings.json");
+        fs::write(&ordinary, b"{}").unwrap();
+        let input = [
+            request(1, &profiles_request(&root)),
+            settings(2, &pipe),
+            settings(3, &ordinary),
+        ];
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(run(&input));
+        });
+        let result = receiver.recv_timeout(Duration::from_secs(5));
+        fs::remove_dir_all(&root).unwrap();
+        let (outcome, replies) =
+            result.expect("configuration reads must complete without a FIFO writer");
+        assert_eq!(outcome, Ok(()));
+        assert_eq!(replies.len(), 3);
+        assert!(matches!(
+            replies[0].body,
+            Body::Response { status: 500, .. }
+        ));
+        assert_eq!(replies[1].body, replies[2].body);
+        assert!(matches!(
+            replies[2].body,
+            Body::TypedResponse { status: 200, .. }
+        ));
+    }
+
+    #[test]
     fn no_profiles_is_answered_without_an_observation() {
         let root = temp_root("none");
         let (outcome, frames) = run(&[request(1, &profiles_request(&root))]);
