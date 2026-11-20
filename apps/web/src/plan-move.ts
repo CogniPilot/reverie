@@ -198,6 +198,11 @@ export class PlanMoveError extends Error {
   }
 }
 
+/** A fresh, checked account snapshot differs from the immutable reservation. */
+export class PlanMoveAccountSnapshotChanged extends PlanMoveError {
+  constructor() { super('The selected account material changed after reservation', 409); }
+}
+
 /** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
 export class PlanMoveUnconfirmed extends PlanMoveError {}
 

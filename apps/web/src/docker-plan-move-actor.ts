@@ -42,6 +42,7 @@ import type { ChatroomService } from './chatroom-service.js';
 import type { PlanService, PlanAccount } from './plan-accounts.js';
 import type { PlanMoveStore } from './plan-move-store.js';
 import {
+  PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
   type PlanMoveInput,
@@ -688,7 +689,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const snapshot = await DockerPlanAccountSnapshot.capture(this.#d.plans, account.id, () => journal.current());
     if (snapshot.descriptor.canonicalSnapshotDigest !== seed.target.accountSnapshotDigest) {
       snapshot.close();
-      throw new PlanMoveError('The selected account material changed after reservation', 409);
+      journal.current();
+      throw new PlanMoveAccountSnapshotChanged();
     }
     return { account, snapshot };
   }
