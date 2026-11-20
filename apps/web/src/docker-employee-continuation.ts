@@ -78,7 +78,7 @@ export interface DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<DockerEmployeeWorkerImage>;
-  observeSource(subject: DockerContinuationSubject, containerId?: string): Promise<DockerSourceObservation>;
+  observeSource(subject: DockerContinuationSubject, containerId?: string, expected?: DockerEmployeeOriginal): Promise<DockerSourceObservation>;
   /** v3 source closure reads the retained OLD placement, not the target subject.
    * The owning Engine must validate its genuine boxed source and no-restart state. */
   observePlanReplacementSource?(
@@ -371,7 +371,7 @@ export class DockerEmployeeContinuation {
     const observation =
       row.version === 3
         ? await this.engine.observePlanReplacementSource!(row, current)
-        : await this.engine.observeSource(subject, row.original.containerId);
+        : await this.engine.observeSource(subject, row.original.containerId, row.original);
     current();
     if (
       observation.state !== 'stopped' ||
@@ -453,7 +453,8 @@ export class DockerEmployeeContinuation {
     }
     const subject = this.store.subject(employeeId);
     if (!subject || subject.owner !== authority.owner) refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    const seen = await this.engine.observeSource(subject);
+    const legacy = retained?.version === 3 ? undefined : retained?.original;
+    const seen = await this.engine.observeSource(subject, legacy?.containerId, legacy);
     authority.require();
     const current = this.store.subject(employeeId);
     if (

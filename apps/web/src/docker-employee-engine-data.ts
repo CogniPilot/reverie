@@ -132,11 +132,12 @@ export function historicalBoxedInspect(
   raw: DockerEmployeeInspect,
   subject: DockerContinuationSubject,
   deployment: string,
-  expected: DockerEmployeeOriginal
+  expected: DockerEmployeeOriginal,
+  boxed = true
 ): DockerEmployeeInspect {
   if (!Array.isArray(raw.HostConfig.Dns) || raw.HostConfig.Dns.length !== 0) return raw;
   const historical = { ...raw, HostConfig: { ...raw.HostConfig, Dns: null } };
-  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, true), expected)
+  return isDeepStrictEqual(boxedOriginal(historical, subject, deployment, boxed), expected)
     ? historical
     : raw;
 }

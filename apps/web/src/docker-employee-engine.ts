@@ -409,9 +409,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   async #source(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
     const inspected = await this.#inspect(row.original.containerId);
-    const raw = row.version === 3
-      ? historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original)
-      : inspected;
+    const raw = historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original, row.version === 3);
     if (
       raw.State.Running ||
       (row.version === 3 &&
@@ -797,7 +795,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async planReplacementOriginal(row: DockerEmployeeContinuationRecord, current: () => void) {
     return this.#planInstaller.original(row, current);
   }
-  async observeSource(subject: DockerContinuationSubject, containerId?: string) {
+  async observeSource(subject: DockerContinuationSubject, containerId?: string, expected?: DockerEmployeeOriginal) {
     const selected = await this.command.run([
       'container',
       'ls',
@@ -815,8 +813,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const cid = selected.trim();
     if (!/^[a-f0-9]{64}$/.test(cid) || (containerId !== undefined && cid !== containerId))
       refuse('DOCKER_CONTINUATION_UNIQUE_ORIGINAL_REQUIRED');
-    const raw = await this.#inspect(cid),
-      original = boxedOriginal(raw, subject, this.deployment);
+    const inspected = await this.#inspect(cid);
+    const raw = expected ? historicalBoxedInspect(inspected, subject, this.deployment, expected, false) : inspected;
+    const original = boxedOriginal(raw, subject, this.deployment);
     return {
       original,
       state: raw.State.Running ? ('running' as const) : ('stopped' as const),
@@ -1142,7 +1141,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (selected.trim() === '') return null;
     if (!/^[a-f0-9]{64}$/.test(selected.trim())) refuse('DOCKER_CONTINUATION_DESTINATION_AMBIGUOUS');
     const inspected = await this.#inspect(selected.trim());
-    const raw = row.destination && ['provider-issued', 'ready'].includes(row.phase)
+    const raw = row.destination
       ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
       : inspected;
     current();

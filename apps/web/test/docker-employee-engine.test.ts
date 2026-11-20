@@ -829,6 +829,19 @@ describe('Engine-owned existing Docker provider view', () => {
         })
       ).toThrow();
   });
+  it('matches Docker empty DNS to a retained legacy source only when the full fingerprint agrees', async () => {
+    const f = fixture();
+    f.source.HostConfig.Dns = null;
+    const historical = (await f.engine.observeSource(subject, cid)).original;
+    f.source.HostConfig.Dns = [];
+    expect((await f.engine.observeSource(subject, cid, historical)).original).toEqual(historical);
+    expect((await f.engine.observeSource(subject, cid)).original).not.toEqual(historical);
+    f.source.HostConfig.Dns = ['192.0.2.1'];
+    expect((await f.engine.observeSource(subject, cid, historical)).original).not.toEqual(historical);
+    f.source.HostConfig.Dns = [];
+    f.source.HostConfig.PidsLimit = 128;
+    expect((await f.engine.observeSource(subject, cid, historical)).original).not.toEqual(historical);
+  });
   it('keeps an already prepared identity destination on the selected image after its source retires', async () => {
     const f = await providerViewFixture();
     const engine = new DockerEmployeeEngine(f.command, 'fixture', f.resources,
