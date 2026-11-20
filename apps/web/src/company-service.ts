@@ -431,6 +431,9 @@ export class CompanyService {
   registeredEmployees() {
     return this.store.snapshot().employees;
   }
+  allowsPersonalSessionRestore(sessionId: string): boolean {
+    return this.store.allowsPersonalSessionRestore(sessionId);
+  }
 
   employeeForSession(sessionId: string, owner: string | undefined) {
     return this.store.employeeForSession(sessionId, owner);

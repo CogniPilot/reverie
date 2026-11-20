@@ -4,13 +4,32 @@ import { dirname, join } from 'node:path';
 import { getDataDir } from '../src/config/instance.js';
 import { getCli, registryFilePath, reloadCliRegistry } from '../src/config/cli-registry/registry.js';
 import { WebServer } from '../src/web/server.js';
+import { rebootRestoreRegistry } from '../src/web/reboot-restore-registry.js';
 import { rebootResumeTarget } from '../src/utils/native-thread-profile.js';
 import type { SessionState } from '../src/types.js';
 
 afterEach(() => {
+  rebootRestoreRegistry.reset();
   vi.unstubAllEnvs();
   rmSync(registryFilePath(), { force: true });
   reloadCliRegistry();
+});
+
+it('keeps the employee session out of the boot offer even if it is rebound later', async () => {
+  const state = (id: string) => ({
+    id, mode: 'claude', workingDir: process.cwd(), pid: 42, status: 'idle', createdAt: 1, lastActivityAt: 1,
+  } as SessionState);
+  const rows = { employee: state('employee'), personal: state('personal') };
+  const companySessions = new Set(['employee']);
+  const method = (WebServer.prototype as unknown as {
+    planRebootRestoreOffer(dead: string[], live: number): Promise<number>;
+  }).planRebootRestoreOffer;
+  expect(await method.call({
+    store: { getSessions: () => rows },
+    companyService: { allowsPersonalSessionRestore: (id: string) => !companySessions.has(id) },
+  }, Object.keys(rows), 0)).toBe(1);
+  companySessions.clear();
+  expect(rebootRestoreRegistry.list(() => true).map(entry => entry.sessionId)).toEqual(['personal']);
 });
 
 it('reads only the selected account and declared rollout codec, without granting restore eligibility', async () => {

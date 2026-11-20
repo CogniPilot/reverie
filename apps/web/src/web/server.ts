@@ -1541,7 +1541,7 @@ export class WebServer extends EventEmitter {
     registerScheduledRoutes(this.app, ctx, verifiedOwner);
     registerHookEventRoutes(this.app, ctx);
     registerApprovalRoutes(this.app, ctx);
-    registerRebootRestoreRoutes(this.app, ctx);
+    registerRebootRestoreRoutes(this.app, ctx, id => this.companyService.allowsPersonalSessionRestore(id));
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
     // The room and company services are created later in start-up; the report reads them per request.
@@ -4970,7 +4970,7 @@ export class WebServer extends EventEmitter {
       const result = await autoRestorePinnedIfEnabled(
         await this.readSettings(true),
         this.createRouteContext(),
-        new Set(this.companyService.registeredEmployees().map((e) => e.sessionId))
+        id => this.companyService.allowsPersonalSessionRestore(id)
       );
       if (!result) return;
       const { restored, skipped } = result;
@@ -5030,7 +5030,9 @@ export class WebServer extends EventEmitter {
       return 0;
     }
 
-    const { restore, skipped } = planRebootRestore(dead, persisted, (workingDir) => existsSync(workingDir));
+    // Company recovery owns these sessions even if a later move releases the old ID.
+    const personal = dead.filter(id => this.companyService.allowsPersonalSessionRestore(id));
+    const { restore, skipped } = planRebootRestore(personal, persisted, (workingDir) => existsSync(workingDir));
     if (skipped.length > 0) {
       console.log(`[Server] Reboot restore is passing over ${skipped.length} dead session(s):`);
       for (const rejection of skipped) {

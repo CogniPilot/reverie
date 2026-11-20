@@ -69,10 +69,12 @@ function toBannerItem(entry: RebootRestoreEntry) {
   };
 }
 
-export function registerRebootRestoreRoutes(app: FastifyInstance, ctx: RebootRestoreCtx): void {
+export function registerRebootRestoreRoutes(
+  app: FastifyInstance, ctx: RebootRestoreCtx, isPersonalSession: (sessionId: string) => boolean
+): void {
   const accessorFor = (req: Parameters<typeof getAuthUser>[0]) => {
     const user = getAuthUser(req);
-    return (owner: string | undefined) => canAccessOwned(user, owner);
+    return (owner: string | undefined, sessionId: string) => canAccessOwned(user, owner) && isPersonalSession(sessionId);
   };
 
   // ========== What is on offer ==========
@@ -100,15 +102,16 @@ export function registerRebootRestoreRoutes(app: FastifyInstance, ctx: RebootRes
     if (!rebootRestoreRegistry.beginSpending(owner)) {
       return reply.code(409).send(createErrorResponse(ApiErrorCode.CONFLICT, 'A reboot restore is already running'));
     }
-    const taken = rebootRestoreRegistry.take(canAccess, body.sessionIds, owner);
     // Entries nothing built a pane for, returned to the plan on every exit path
     // including a throw. Without this a failure between here and the loop would
     // spend the offer and rebuild nothing, and the plan cannot be rebuilt.
-    const unspent = new Set(taken);
+    const unspent = new Set<RebootRestoreEntry>();
 
     try {
+      const taken = rebootRestoreRegistry.take(canAccess, body.sessionIds, owner);
+      for (const entry of taken) unspent.add(entry);
       if (taken.length === 0) return { restored: [], skipped: [] };
-      return await spendRebootRestore(ctx, taken, unspent);
+      return await spendRebootRestore(ctx, taken, unspent, isPersonalSession);
     } finally {
       // Anything that never became a pane goes back on offer, including after a
       // throw, so a transient failure costs a retry rather than the whole plan.
@@ -137,7 +140,7 @@ export async function spendRebootRestore(
   ctx: RebootRestoreCtx,
   taken: readonly RebootRestoreEntry[],
   unspent: Set<RebootRestoreEntry>,
-  shouldRestore: () => boolean = () => true,
+  shouldRestore: (sessionId: string) => boolean,
   options: { attachOnly?: boolean } = {}
 ): Promise<{ restored: ReturnType<typeof toBannerItem>[]; skipped: RebootRestoreRejection[] }> {
   // The plan was built at boot and the board has moved on since. A conversation
@@ -228,6 +231,8 @@ export async function spendRebootRestore(
       // Revalidate the current protocol after awaited grant/config checks and
       // before constructing a session. The retained offer is not launch authority.
       const launch = rebootRestoreLaunchConfig(saved, entry.resumeConversationId);
+      if (!shouldRestore(entry.sessionId))
+        throw new Error('Recovery canceled before session construction');
       const session = new Session({
         // The old id is reused on purpose: a pinned record, subagent parents,
         // window states and the lifecycle log all key off it, and the unpinned
@@ -274,10 +279,10 @@ export async function spendRebootRestore(
       });
 
       builtSession = session;
-      if (!shouldRestore() || ctx.sessions.has(entry.sessionId))
+      if (!shouldRestore(entry.sessionId) || ctx.sessions.has(entry.sessionId))
         throw new Error('Recovery canceled or session replaced before registration');
       const assertCurrent = () => {
-        if (!shouldRestore() || ctx.sessions.get(entry.sessionId) !== session)
+        if (!shouldRestore(entry.sessionId) || ctx.sessions.get(entry.sessionId) !== session)
           throw new Error('Recovery canceled by current owner intent or session replacement');
       };
       await ctx.addSession(session);
@@ -396,30 +401,30 @@ export async function spendRebootRestore(
 export async function autoRestorePinnedIfEnabled(
   settings: Record<string, unknown>,
   ctx: RebootRestoreCtx,
-  excluded: ReadonlySet<string> = new Set()
+  isPersonalSession: (sessionId: string) => boolean
 ): Promise<{ restored: string[]; skipped: RebootRestoreRejection[] } | null> {
   if (settings.rebootRestoreAutoPinned !== true) return null;
-  return autoRestorePinnedSessions(ctx, excluded);
+  return autoRestorePinnedSessions(ctx, isPersonalSession);
 }
 
 export async function autoRestorePinnedSessions(
   ctx: RebootRestoreCtx,
-  excluded: ReadonlySet<string> = new Set()
+  isPersonalSession: (sessionId: string) => boolean
 ): Promise<{ restored: string[]; skipped: RebootRestoreRejection[] }> {
-  const everyone = () => true;
+  const eligible = (_owner: string | undefined, sessionId: string) => isPersonalSession(sessionId);
   const byOwner = new Map<string | undefined, string[]>();
-  for (const entry of autoRestorableEntries(rebootRestoreRegistry.list(everyone))) {
-    if (excluded.has(entry.sessionId)) continue;
+  for (const entry of autoRestorableEntries(rebootRestoreRegistry.list(eligible))) {
     byOwner.set(entry.owner, [...(byOwner.get(entry.owner) ?? []), entry.sessionId]);
   }
   const restored: string[] = [];
   const skipped: RebootRestoreRejection[] = [];
   for (const [owner, sessionIds] of byOwner) {
     if (!rebootRestoreRegistry.beginSpending(owner)) continue; // a click is already restoring for this owner
-    const taken = rebootRestoreRegistry.take(everyone, sessionIds, owner);
-    const unspent = new Set(taken);
+    const unspent = new Set<RebootRestoreEntry>();
     try {
-      const result = await spendRebootRestore(ctx, taken, unspent);
+      const taken = rebootRestoreRegistry.take(eligible, sessionIds, owner);
+      for (const entry of taken) unspent.add(entry);
+      const result = await spendRebootRestore(ctx, taken, unspent, isPersonalSession);
       restored.push(...result.restored.map((item) => item.id));
       skipped.push(...result.skipped);
     } catch (err) {

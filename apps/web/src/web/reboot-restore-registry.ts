@@ -37,6 +37,8 @@
 
 import type { RebootRestoreEntry } from '../reboot-restore.js';
 
+type SelectSession = (owner: string | undefined, sessionId: string) => boolean;
+
 /**
  * A plan older than this is dropped on read. A machine that rebooted yesterday
  * has moved on, and an offer nobody took by then is noise rather than a rescue.
@@ -84,9 +86,9 @@ export class RebootRestoreRegistry {
    *   an admin sees all. Applied here rather than in the route so the count the
    *   banner shows and the entries a click spends come from one filter.
    */
-  list(canAccess: (owner: string | undefined) => boolean): RebootRestoreEntry[] {
+  list(canAccess: SelectSession): RebootRestoreEntry[] {
     this.dropIfExpired();
-    return [...this.entries.values()].filter((entry) => canAccess(entry.owner));
+    return [...this.entries.values()].filter((entry) => canAccess(entry.owner, entry.sessionId));
   }
 
   /**
@@ -99,21 +101,19 @@ export class RebootRestoreRegistry {
    * @param sessionIds The ids to spend, or undefined for every visible entry.
    */
   take(
-    canAccess: (owner: string | undefined) => boolean,
+    canAccess: SelectSession,
     sessionIds: readonly string[] | undefined,
     spender: string | undefined
   ): RebootRestoreEntry[] {
     this.dropIfExpired();
     const wanted = sessionIds ? new Set(sessionIds) : undefined;
-    const taken: RebootRestoreEntry[] = [];
-    for (const entry of [...this.entries.values()]) {
-      if (wanted && !wanted.has(entry.sessionId)) continue;
-      if (!canAccess(entry.owner)) continue;
+    const taken = [...this.entries.values()].filter(entry =>
+      (!wanted || wanted.has(entry.sessionId)) && canAccess(entry.owner, entry.sessionId));
+    for (const entry of taken) {
       this.entries.delete(entry.sessionId);
       // Parked rather than forgotten: until this restore resolves the entry, a
       // dismiss still has to be able to reach and cancel it.
       this.parked.set(entry.sessionId, { entry, spender });
-      taken.push(entry);
     }
     return taken;
   }
@@ -145,20 +145,16 @@ export class RebootRestoreRegistry {
   }
 
   /** Drop the entries a viewer can see. Returns how many went. */
-  clear(canAccess: (owner: string | undefined) => boolean): number {
-    const removable = [...this.entries.values()].filter((entry) => canAccess(entry.owner));
-    for (const entry of removable) this.entries.delete(entry.sessionId);
+  clear(canAccess: SelectSession): number {
+    const removable = [...this.entries.values()].filter((entry) => canAccess(entry.owner, entry.sessionId));
     // Entries a restore is holding are dismissed by the same rule, so a dismiss
     // that lands mid-restore wins. Judged on the ENTRY's owner, exactly as above,
     // rather than on who happens to be restoring it.
-    let parkedRemoved = 0;
-    for (const [sessionId, held] of [...this.parked]) {
-      if (!canAccess(held.entry.owner)) continue;
-      this.parked.delete(sessionId);
-      parkedRemoved += 1;
-    }
+    const parked = [...this.parked.values()].filter(({ entry }) => canAccess(entry.owner, entry.sessionId));
+    for (const entry of removable) this.entries.delete(entry.sessionId);
+    for (const { entry } of parked) this.parked.delete(entry.sessionId);
     if (this.entries.size === 0) this.builtAt = 0;
-    return removable.length + parkedRemoved;
+    return removable.length + parked.length;
   }
 
   /**

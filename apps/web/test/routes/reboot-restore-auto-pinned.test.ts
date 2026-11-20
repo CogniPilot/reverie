@@ -68,13 +68,27 @@ afterEach(() => {
 });
 
 describe('autoRestorePinnedSessions', () => {
+  it('leaves the original offer intact when an employee takes a pinned session during startup', async () => {
+    const ctx = createMockRouteContext();
+    let personal = true;
+    ctx.getWorkspaceHooksEnabled.mockImplementationOnce(async () => {
+      personal = false;
+      return true;
+    });
+    offer([record({id: 'adopted', pinned: true})]);
+    const result = await autoRestorePinnedSessions(ctx as never, () => personal);
+    expect(result.restored).toEqual([]);
+    expect(built).toEqual([]);
+    expect(ctx.addSession).not.toHaveBeenCalled();
+    expect(rebootRestoreRegistry.list(() => true).map(e => e.sessionId)).toEqual(['adopted']);
+  });
   it('revalidates changed restore policy before constructing a provider or losing its retained offer', async () => {
     const ctx = createMockRouteContext();
     offer([record({id:'policy-changed',mode:'codex',pinned:true,codexConfig:{resumeSessionId:'native-thread'}})]);
     const path=registryFilePath();mkdirSync(dirname(path),{recursive:true});
     writeFileSync(path,JSON.stringify({schemaVersion:1,clis:{codex:{capabilities:{rebootRestore:'native-required'}}}}),{mode:0o600});
     reloadCliRegistry();
-    const result=await autoRestorePinnedSessions(ctx as never);
+    const result=await autoRestorePinnedSessions(ctx as never, () => true);
     expect(result.restored).toEqual([]);expect(result.skipped).toEqual([{sessionId:'policy-changed',reason:'rebuild-failed'}]);
     expect(built).toEqual([]);expect(ctx.addSession).not.toHaveBeenCalled();
     expect(rebootRestoreRegistry.list(()=>true).map(entry=>entry.sessionId)).toEqual(['policy-changed']);
@@ -91,7 +105,7 @@ describe('autoRestorePinnedSessions', () => {
       }),
       record({ id: 'worker-c' }),
     ]);
-    const result = await autoRestorePinnedSessions(ctx as never);
+    const result = await autoRestorePinnedSessions(ctx as never, () => true);
     expect(result.restored.sort()).toEqual(['agent-a', 'agent-b']);
     expect(built.map((c) => c.id).sort()).toEqual(['agent-a', 'agent-b']);
     const claude = built.find((c) => c.id === 'agent-a')!;
@@ -113,7 +127,7 @@ describe('autoRestorePinnedSessions', () => {
       record({ id: 'agent-a', pinned: true }),
       record({ id: 'agent-b', pinned: true, mode: 'opencode', openCodeConfig: { continueSession: 'ses_native' } }),
     ]);
-    const result = await autoRestorePinnedSessions(ctx as never);
+    const result = await autoRestorePinnedSessions(ctx as never, () => true);
     expect(result.restored).toEqual([]);
     expect(result.skipped.map((s) => [s.sessionId, s.reason]).sort()).toEqual([
       ['agent-a', 'already-live'],
@@ -126,7 +140,7 @@ describe('autoRestorePinnedSessions', () => {
     const ctx = createMockRouteContext();
     offer([record({ id: 'agent-a', pinned: true })]);
     expect(rebootRestoreRegistry.beginSpending(undefined)).toBe(true); // the click holds the flight
-    const result = await autoRestorePinnedSessions(ctx as never);
+    const result = await autoRestorePinnedSessions(ctx as never, () => true);
     rebootRestoreRegistry.endSpending(undefined);
     expect(result.restored).toEqual([]);
     expect(built).toEqual([]);
@@ -136,13 +150,13 @@ describe('autoRestorePinnedSessions', () => {
   it('is off unless the owner set rebootRestoreAutoPinned to exactly true', async () => {
     for (const settings of [{}, { rebootRestoreAutoPinned: false }, { rebootRestoreAutoPinned: 'true' }]) {
       offer([record({ id: 'agent-a', pinned: true })]);
-      expect(await autoRestorePinnedIfEnabled(settings, createMockRouteContext() as never)).toBeNull();
+      expect(await autoRestorePinnedIfEnabled(settings, createMockRouteContext() as never, () => true)).toBeNull();
       expect(built).toEqual([]);
       expect(rebootRestoreRegistry.list(() => true).map((e) => e.sessionId)).toEqual(['agent-a']);
       rebootRestoreRegistry.reset();
     }
     offer([record({ id: 'agent-a', pinned: true })]);
-    const on = await autoRestorePinnedIfEnabled({ rebootRestoreAutoPinned: true }, createMockRouteContext() as never);
+    const on = await autoRestorePinnedIfEnabled({ rebootRestoreAutoPinned: true }, createMockRouteContext() as never, () => true);
     expect(on?.restored).toEqual(['agent-a']);
   });
 
@@ -155,7 +169,7 @@ describe('autoRestorePinnedSessions', () => {
       return false;
     }) as never;
     offer([record({ id: 'first', pinned: true, owner: 'alice' }), record({ id: 'second', pinned: true, owner: 'bob' })]);
-    const result = await autoRestorePinnedSessions(ctx as never);
+    const result = await autoRestorePinnedSessions(ctx as never, () => true);
     expect(result.restored).toHaveLength(1);
     expect(result.skipped).toHaveLength(1);
     expect(result.skipped[0].reason).toBe('rebuild-failed');
@@ -167,7 +181,7 @@ describe('a session switched off OpenCode (POST /api/sessions/:id/mode)', () => 
   it('keeps its OpenCode config through a restore, so switching back resumes the same thread', async () => {
     const ctx = createMockRouteContext();
     offer([record({ id: 'switched', pinned: true, mode: 'claude', openCodeConfig: { continueSession: 'ses_kept' } })]);
-    const result = await autoRestorePinnedSessions(ctx as never);
+    const result = await autoRestorePinnedSessions(ctx as never, () => true);
     expect(result.restored).toEqual(['switched']);
     const built0 = built.find((c) => c.id === 'switched')!;
     expect(built0.mode).toBe('claude');

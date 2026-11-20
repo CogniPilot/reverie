@@ -88,7 +88,7 @@ function offerEntry(sessionId: string, owner?: string): RebootRestoreEntry {
 async function createHarness(ctx: ReturnType<typeof createMockRouteContext>): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
-  registerRebootRestoreRoutes(app, ctx as never);
+  registerRebootRestoreRoutes(app, ctx as never, () => true);
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);
     if (payload === null || typeof payload !== 'object') return done(null, payload);

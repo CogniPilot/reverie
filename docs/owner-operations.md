@@ -43,6 +43,12 @@ quiescence remains a product workflow requirement.
 
 ## Retained expert startup
 
+After a reboot, the ordinary session restore banner and its API offer personal
+sessions. The company lifecycle service owns recovery for employees, including
+employees on vacation. Retired employee sessions stay out of the offer. The
+automatic pinned-session restore checks this same boundary again before launch
+in case an employee acquired the session after the offer was created.
+
 The template-hiring API keeps employment (`active` or `retired`) separate from its
 startup journal. New hires move from `prepared` to a durably recorded `issued`
 before launch. `launch-returned` means the launch adapter returned; it is not
