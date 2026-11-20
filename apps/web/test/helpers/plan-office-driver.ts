@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { PlanOfficeBootstrap } from './plan-office-bootstrap.js';
-import { enrollIsolatedPlanOfficeOwner, resumeIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
+import { authenticateRestartedPlanOfficeOwner, enrollIsolatedPlanOfficeOwner, resumeIsolatedPlanOfficeOwner } from './docker-continuation-auth-canary.js';
 import { dockerContinuationDigest } from '../../src/docker-employee-continuation.js';
 import { nativeThreadProfile } from '../../src/utils/native-thread-profile.js';
 import { dockerPlanGeneration } from '../../src/docker-plan-install-data.js';
@@ -1424,7 +1424,7 @@ export async function runPlanOfficeBaseline(contractFile: string, entered: PlanO
       controlEpoch = restarted;
       transport = await driver.controlTransport(control);
       await waitForControlOwner(transport);
-      owner = await resumeIsolatedPlanOfficeOwner(transport.endpoint, path.join(evidence.root, 'auth'));
+      owner = await authenticateRestartedPlanOfficeOwner(transport.endpoint, path.join(evidence.root, 'auth'), control);
       for (const [expert, native] of [[caller, originalCallerNative], [target, originalTargetNative]] as const) {
         const originalTurn = turnsBeforeRestart.flat().map(([, value]) => value as Json).find(
           (turn) => turn.sessionId === expert.sessionId && turn.providerThread === expert.nativeThreadId &&
