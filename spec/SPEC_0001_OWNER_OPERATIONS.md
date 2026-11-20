@@ -23,7 +23,8 @@ knowledge of internal JSON files or a sequence reconstructed from chat history.
 
 | Layer | Preferred language | Responsibility |
 | --- | --- | --- |
-| GUI and clients | TypeScript | Owner controls, previews and progress using the documented API |
+| Website | TypeScript | Owner controls, previews and progress using the documented API |
+| Headless clients | Rust CLI or any HTTP client | Humans and agents use the same API with their own authenticated scope |
 | Core/backend and public API | Rust | Authentication, scoped grants, validation, desired configuration, rollout coordination and durable user-visible status |
 | Host runtime | Rust | Engine/process supervision, cgroup enforcement, privileged helpers, native identity checks and durable host operation execution |
 | Numerical and model computation | Rust for first-party code | Scientific algorithms and computation adapters behind a computation-specific interface |
@@ -57,6 +58,14 @@ progress and errors and submits explicit owner actions. Authentication,
 authorization, validation, capacity accounting, operation transitions and
 recovery decisions belong to the backend. A headless client must be able to
 perform the same permitted workflow without emulating browser logic.
+
+For a workflow to count as migrated, run the packaged Rust API in Docker with
+the website and Node.js absent. Exercise the public endpoint from a headless
+client using the supported authentication flow. Verify the owner result and,
+for a delegable operation, both the scoped agent result and refusal outside
+that scope. For an operation with durable effects, read its status through the
+API after a service restart and verify that observation did not repeat the effect.
+Run the website's compatibility checks against that same Rust service.
 
 Publish a versioned, machine-readable API contract from authoritative backend
 types. Use structured error codes and actionable messages, typed configuration
