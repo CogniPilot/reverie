@@ -36,6 +36,24 @@ Do not install a separate host broker or persistent terminal viewer. Historical
 isolated-worker instructions do not authorize recreating the retired host stack.
 See [Docker runtime boundaries](docs/host-runtime-retirement.md).
 
+## Use Reverie from a terminal
+
+On an employee laptop, run `reverie-ops status website` to ask the Office API
+which operations are available. After a submission, use
+`reverie-ops inspect website OPERATION_ID` to read its receipt. Both commands
+return JSON and use the identity of the installed Office phone. Humans and
+agents can call them without opening the website. See the
+[OPS client guide](crates/reverie-ops-cli/README.md).
+
+For a registered console deployment, the local owner can run
+`reverie-deployment --root ROOT status OPERATION` to inspect an update, even
+while Docker is unavailable. The result distinguishes the recorded stage from
+current readiness. See the [deployment guide](crates/reverie-deployment/README.md).
+
+The running office still uses TypeScript for HTTP authentication and routing.
+The [owner API specification](spec/SPEC_0001_OWNER_OPERATIONS.md) defines the
+acceptance checks for moving each workflow to the standalone Rust service.
+
 ## Automatic startup
 
 For Docker on a systemd Linux host, enable the engine at boot:
