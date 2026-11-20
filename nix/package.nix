@@ -158,7 +158,10 @@ let
       boxedSdkCredentialCheck() {
         # This suite checks real credential custody, expiry and process restart.
         # Isolate its short-lived test ledgers from competing image-build I/O.
-        TMPDIR="''${REVERIE_RECOVERY_TEST_TMP:-$TMPDIR}" npm test -- test/employee-recovery-authority.test.ts
+        (
+          export TMPDIR="''${REVERIE_RECOVERY_TEST_TMP:-$TMPDIR}"
+          npm test -- test/employee-recovery-authority.test.ts
+        )
         npm test -- test/boxed-plan-provider-entry.test.ts \
           test/plan-office-agent-force.test.ts \
           test/plan-office-viewer-repair.test.ts \
