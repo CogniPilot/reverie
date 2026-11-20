@@ -1,7 +1,9 @@
 { pkgs, src }:
 let
+  # Kokoro synthesizes audio with ONNX and uses only eSpeak phonemes.
+  espeak = pkgs.espeak-ng.override { mbrolaSupport = false; };
   phonemes = pkgs.runCommandCC "reverie-kokoro-phonemes" {
-    buildInputs = [ pkgs.espeak-ng ];
+    buildInputs = [ espeak ];
   } ''
     mkdir -p "$out/bin"
     cc -std=c17 -O2 -Wall -Wextra -Werror ${builtins.path {
@@ -11,7 +13,7 @@ let
   '';
 in {
   REVERIE_KOKORO_ONNX = "${pkgs.onnxruntime}/lib/libonnxruntime.so";
-  REVERIE_KOKORO_ESPEAK = "${pkgs.espeak-ng}/bin/espeak-ng";
+  REVERIE_KOKORO_ESPEAK = "${espeak}/bin/espeak-ng";
   REVERIE_KOKORO_PHONEMES = "${phonemes}/bin/reverie-kokoro-phonemes";
   REVERIE_KOKORO_CURL = "${pkgs.curl}/bin/curl";
 }

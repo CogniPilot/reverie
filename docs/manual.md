@@ -560,7 +560,7 @@ target, wake vacationing experts, or support Hands/custom harnesses.
 Older laptop CLIs need the scoped API bootstrap in the Models handbook; a website
 update alone does not add their `--restart` parser.
 
-Kokoro speech runs locally with Nix-managed Python, ONNX Runtime and espeak-ng.
+The Rust Kokoro service uses eSpeak NG for phonemes and ONNX Runtime for speech synthesis.
 The web launcher starts it in the background; its pinned, checksum-verified models
 are downloaded on first start into the instance's `data/voice/kokoro` directory.
 Once ready, its voices appear in **Expert profile → Voice**, with **Play sample**
