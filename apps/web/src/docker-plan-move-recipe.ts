@@ -16,7 +16,7 @@ export function dockerPlanMoveTargetRecipe(
   input: Readonly<PlanMoveInput>,
   target: { sessionId: string; owner: string | undefined; at: number },
   policy: RuntimeRefreshPolicy,
-  context: { kind: 'template' } | { kind: 'resolved'; nativeId: string | null }
+  context: { kind: 'template'; sourceState: 'running' | 'stopped' } | { kind: 'resolved'; nativeId: string | null }
 ) {
   const payload = planMoveAccountRecipe(source, account, input, policy),
     mode = planMoveHarness(account),
@@ -30,7 +30,11 @@ export function dockerPlanMoveTargetRecipe(
     if (!same && context.nativeId !== null)
       throw new PlanMoveError('A different provider cannot inherit a native identifier', 409);
     nativeId = context.nativeId ?? undefined;
-  } else if (same) nativeId = nativeThreadProfile(source.mode)?.read(source);
+  } else if (same) {
+    nativeId = nativeThreadProfile(source.mode)?.read(source);
+    if (context.sourceState === 'stopped' && !nativeId)
+      throw new PlanMoveError('The stopped source native conversation is unconfirmed', 409);
+  }
   const profile = payload.subscriptionProfileId
     ? { id: account.profile.id, label: account.profile.label, provider: account.provider }
     : undefined;

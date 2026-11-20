@@ -413,7 +413,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         input,
         { sessionId, owner: source.employee.owner, at: Date.now() },
         policy,
-        { kind: 'template' }
+        { kind: 'template', sourceState: observation.kind }
       );
     current();
     snapshot.require();
