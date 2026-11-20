@@ -9,9 +9,10 @@ application service and its scoped authority, rather than duplicate the workflow
 
 The default adapter supports an ordinary Docker console, default bridge
 networking and existing bind mounts. Other network and volume layouts refuse
-before the live stop. Preview explicitly refreshes image defaults while
-preserving old entries that differ from the old image defaults; it does not
-infer whether an equal-to-default value was explicitly selected historically.
+before the live stop. Preview carries forward the running office's private HTTPS
+enablement, hostname and web port, including values inherited from its image.
+For other environment settings, preview refreshes image defaults and preserves
+values that differed from the previous defaults.
 Private environment values remain in the owner-only operation record.
 
 The existing GPU image has one fixed entrypoint ABI: `tini -g -s --`, the

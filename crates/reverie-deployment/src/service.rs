@@ -224,11 +224,12 @@ impl DeploymentService {
     fn record_preview(
         &self,
         source: Value,
-        body: Value,
-        refreshed_environment_keys: Vec<String>,
+        mut body: Value,
+        mut refreshed_environment_keys: Vec<String>,
         profile: model::DeploymentProfile,
         grants: PreviewGrants,
     ) -> Result<DeploymentPreview> {
+        model::preserve_private_access(&source, &mut body, &mut refreshed_environment_keys)?;
         let PreviewGrants {
             networks: network_topology,
             writers: live_account_writers,
@@ -248,7 +249,7 @@ impl DeploymentService {
             source_id: model::string(&source, "Id")?.into(),
             source_image: model::string(&source, "Image")?.into(),
             candidate_image: model::string(&body, "Image")?.into(),
-            environment_policy: "refresh-image-defaults-preserve-differing-overrides".into(),
+            environment_policy: "refresh-image-defaults-preserve-overrides-and-private-access".into(),
             refreshed_environment_keys,
             broker_preserved: true,
             backup_metadata_scope:"console bytes and caller-visible metadata/ACLs/xattrs; no automatic live data restore".into(),

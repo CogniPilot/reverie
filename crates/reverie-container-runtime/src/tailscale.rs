@@ -1,6 +1,7 @@
 use crate::config::Result;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
+use reverie_core::private_access::{ENABLED, HOSTNAME, WEB_PORT};
 use serde_json::Value;
 use std::fs::{self, DirBuilder};
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -39,16 +40,15 @@ impl Settings {
         if !data.is_absolute() {
             return Err("the instance directory must be absolute".into());
         }
-        let port = std::env::var("REVERIE_TAILSCALE_WEB_PORT")
-            .unwrap_or_else(|_| "3000".into())
+        let port = std::env::var(WEB_PORT.key)
+            .unwrap_or_else(|_| WEB_PORT.default.into())
             .parse::<u16>()?;
         if port == 0 {
             return Err("the private HTTPS target needs a web port".into());
         }
         Ok(Self {
             data,
-            hostname: std::env::var("REVERIE_TAILSCALE_HOSTNAME")
-                .unwrap_or_else(|_| "reverie".into()),
+            hostname: std::env::var(HOSTNAME.key).unwrap_or_else(|_| HOSTNAME.default.into()),
             port,
         })
     }
@@ -71,7 +71,7 @@ impl Settings {
 }
 
 pub(crate) fn start(directory: &Path) -> Option<Access> {
-    if std::env::var("REVERIE_TAILSCALE").as_deref() != Ok("1") {
+    if std::env::var(ENABLED.key).as_deref() != Ok("1") {
         return None;
     }
     let (shutdown, stopping) = oneshot::channel();

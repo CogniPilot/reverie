@@ -1,4 +1,5 @@
 use super::*;
+use reverie_core::private_access::{ENABLED, HOSTNAME, WEB_PORT};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -123,24 +124,53 @@ fn supported_base_selection(
     )?;
     Ok(())
 }
-fn environment(config: &Value) -> Result<Vec<String>> {
+type Environment = BTreeMap<String, String>;
+
+fn wire_environment(values: Environment) -> Value {
+    json!(
+        values
+            .into_iter()
+            .map(|(key, value)| format!("{key}={value}"))
+            .collect::<Vec<_>>()
+    )
+}
+
+/// Apply instance access settings only when recording a new preview. A
+/// historical invalid-create receipt must still reconstruct its original body.
+pub(super) fn preserve_private_access(
+    source: &Value,
+    body: &mut Value,
+    refreshed: &mut Vec<String>,
+) -> Result<()> {
+    let selected = environment(&source["Config"])?;
+    let mut merged = environment(body)?;
+    for setting in [ENABLED, HOSTNAME, WEB_PORT] {
+        let value = selected.get(setting.key).map(String::as_str);
+        if value.is_some() || merged.contains_key(setting.key) {
+            merged.insert(setting.key.into(), value.unwrap_or(setting.default).into());
+        }
+        refreshed.retain(|key| key != setting.key);
+    }
+    body["Env"] = wire_environment(merged);
+    Ok(())
+}
+
+fn environment(config: &Value) -> Result<Environment> {
     let entries = config["Env"]
         .as_array()
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_ENV_REQUIRED"))?;
-    let mut keys = BTreeMap::new();
-    let mut output = Vec::new();
+    let mut output = Environment::new();
     for entry in entries {
         let entry = entry
             .as_str()
             .ok_or_else(|| DeploymentError::new("DEPLOYMENT_ENV_INVALID"))?;
-        let (key, _) = entry
+        let (key, value) = entry
             .split_once('=')
             .ok_or_else(|| DeploymentError::new("DEPLOYMENT_ENV_INVALID"))?;
         require(
-            !key.is_empty() && keys.insert(key, ()).is_none(),
+            !key.is_empty() && output.insert(key.into(), value.into()).is_none(),
             "DEPLOYMENT_ENV_DUPLICATE",
         )?;
-        output.push(entry.to_owned());
     }
     Ok(output)
 }
@@ -148,9 +178,7 @@ fn environment(config: &Value) -> Result<Vec<String>> {
 /// Absence is the legacy Node service; every explicit mode must select the front.
 pub(super) fn uses_front(config: &Value) -> Result<bool> {
     let env = environment(config)?;
-    let selected = env
-        .iter()
-        .find_map(|entry| entry.strip_prefix("REVERIE_NATIVE_FRONT="));
+    let selected = env.get("REVERIE_NATIVE_FRONT");
     require(
         selected.is_none_or(|value| value == "1"),
         "DEPLOYMENT_FRONT_MODE_UNSUPPORTED",
@@ -194,9 +222,8 @@ pub(super) fn create_body_selection(
     let selected = environment(&source["Config"])?;
     for entries in [&selected, &next] {
         require(
-            !entries.iter().any(|e| {
-                e.starts_with("REVERIE_FRONT_CHILD=") || e.starts_with("REVERIE_NATIVE_FRONT_BIN=")
-            }),
+            !entries.contains_key("REVERIE_FRONT_CHILD")
+                && !entries.contains_key("REVERIE_NATIVE_FRONT_BIN"),
             "DEPLOYMENT_INTERNAL_FRONT_OVERRIDE",
         )?;
     }
@@ -205,27 +232,17 @@ pub(super) fn create_body_selection(
         uses_front(&candidate["Config"])?,
         "DEPLOYMENT_IMAGE_FRONT_REQUIRED",
     )?;
-    let mut merged: BTreeMap<String, String> = next
-        .iter()
-        .map(|e| {
-            let (k, _) = e.split_once('=').expect("validated env");
-            (k.to_owned(), e.clone())
-        })
-        .collect();
-    for entry in selected {
-        let (key, _) = entry.split_once('=').expect("validated env");
-        if !previous.contains(&entry) && key != "REVERIE_NATIVE_FRONT" {
-            merged.insert(key.to_owned(), entry);
+    let mut merged = next.clone();
+    for (key, value) in selected {
+        if previous.get(&key) != Some(&value) && key != "REVERIE_NATIVE_FRONT" {
+            merged.insert(key, value);
         }
     }
-    merged.insert(
-        "REVERIE_NATIVE_FRONT".into(),
-        "REVERIE_NATIVE_FRONT=1".into(),
-    );
+    merged.insert("REVERIE_NATIVE_FRONT".into(), "1".into());
     let refreshed = previous
         .iter()
-        .filter(|entry| !next.contains(entry))
-        .map(|e| e.split_once('=').expect("validated env").0.to_owned())
+        .filter(|(key, value)| next.get(*key) != Some(value))
+        .map(|(key, _)| key.clone())
         .collect();
     let mut body = source["Config"].clone();
     add_image_label_defaults(&mut body, &candidate["Config"])?;
@@ -234,10 +251,7 @@ pub(super) fn create_body_selection(
         .ok_or_else(|| DeploymentError::new("DEPLOYMENT_CONFIG_REQUIRED"))?;
     fields.insert("Image".into(), candidate["Id"].clone());
     fields.insert("Entrypoint".into(), entrypoint);
-    fields.insert(
-        "Env".into(),
-        json!(merged.into_values().collect::<Vec<_>>()),
-    );
+    fields.insert("Env".into(), wire_environment(merged));
     fields.insert(
         "HostConfig".into(),
         profile::host(source, selected_profile)?,
