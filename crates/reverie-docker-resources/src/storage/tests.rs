@@ -52,9 +52,9 @@ fn filesystem_id_is_checked_on_the_open_directory() {
     let mut files = Files::new();
     let index = files.storage("/", false).unwrap();
     let descriptor = files.get(index);
-    let volume = nix::sys::statvfs::fstatvfs(descriptor).unwrap();
+    let volume = rustix::fs::fstatvfs(descriptor).unwrap();
     let metadata = nix::sys::statfs::fstatfs(descriptor).unwrap();
-    let expected = u64::try_from(u128::from(volume.filesystem_id())).unwrap();
+    let expected = volume.f_fsid;
     let ext = metadata.filesystem_type() == nix::sys::statfs::EXT4_SUPER_MAGIC;
     assert_eq!(
         verify_filesystem(&files, index, expected).is_ok(),

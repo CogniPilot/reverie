@@ -105,11 +105,11 @@ fn compared_reference(
 fn verify_filesystem(files: &Files, index: usize, expected: u64) -> Result<()> {
     let directory = files.get(index);
     let metadata = nix::sys::statfs::fstatfs(directory).map_err(std::io::Error::from)?;
-    let volume = nix::sys::statvfs::fstatvfs(directory).map_err(std::io::Error::from)?;
+    let volume = rustix::fs::fstatvfs(directory).map_err(std::io::Error::from)?;
     need(
         expected != 0
             && metadata.filesystem_type() == nix::sys::statfs::EXT4_SUPER_MAGIC
-            && u128::from(volume.filesystem_id()) == u128::from(expected),
+            && volume.f_fsid == expected,
         "BOXED_STORAGE_FILESYSTEM_CHANGED",
     )
 }
