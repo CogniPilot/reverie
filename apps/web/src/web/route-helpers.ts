@@ -6,7 +6,7 @@
  */
 
 import { dockerWorkerIdentityOf } from '../docker-worker-identity.js';
-import { join, resolve, relative, isAbsolute } from 'node:path';
+import { join, resolve, relative, isAbsolute, dirname } from 'node:path';
 import { realpathSync, existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import type { z } from 'zod';
@@ -41,6 +41,42 @@ import { AGENT_ORIGIN_SPAWNED_BY_SESSION, normalizeAgentOrigin } from '../agent-
 // resolves it too, and REVERIE_CASES_PATH must move both or neither.
 export const CASES_DIR = getCasesDir();
 export const SETTINGS_PATH = join(configuredDataDir(), 'settings.json');
+
+/** Serialize partial updates from this office process so each reads its predecessor's result. */
+let settingsWrite: Promise<void> = Promise.resolve();
+
+export function patchOfficeSettings(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
+  const write = settingsWrite.then(async () => {
+    let raw: string | undefined;
+    try {
+      raw = await fs.readFile(SETTINGS_PATH, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+
+    let previous: unknown = {};
+    if (raw !== undefined) {
+      try {
+        previous = JSON.parse(raw);
+      } catch {
+        throw new Error('Cannot update settings. Repair the invalid JSON in settings.json first.');
+      }
+    }
+    if (!previous || typeof previous !== 'object' || Array.isArray(previous))
+      throw new Error('Cannot update settings. settings.json must contain a JSON object.');
+
+    const merged = { ...previous, ...patch };
+    const dir = dirname(SETTINGS_PATH);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    await fs.writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    return merged;
+  });
+  settingsWrite = write.then(
+    () => {},
+    () => {}
+  );
+  return write;
+}
 
 /**
  * Validates that a path component doesn't escape the base directory.

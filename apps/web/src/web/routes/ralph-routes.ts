@@ -5,7 +5,7 @@
  */
 
 import { FastifyInstance } from 'fastify';
-import { join, dirname, resolve, relative, isAbsolute } from 'node:path';
+import { join, resolve, relative, isAbsolute } from 'node:path';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { ApiErrorCode, createErrorResponse, getErrorMessage, type ApiResponse } from '../../types.js';
@@ -19,7 +19,7 @@ import {
   ownerFor,
   resolveCasesDir,
   sessionCapacityMessage,
-  SETTINGS_PATH,
+  patchOfficeSettings,
   findSessionOrFail,
   parseBody,
 } from '../route-helpers.js';
@@ -465,16 +465,7 @@ export function registerRalphRoutes(
 
     // Save lastUsedCase
     try {
-      let settings: Record<string, unknown> = {};
-      try {
-        settings = JSON.parse(await fs.readFile(SETTINGS_PATH, 'utf-8'));
-      } catch {
-        /* ignore */
-      }
-      settings.lastUsedCase = caseName;
-      const dir = dirname(SETTINGS_PATH);
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-      fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2)).catch(() => {}); // Ignore - persisting lastUsedCase is non-critical
+      await patchOfficeSettings({ lastUsedCase: caseName });
     } catch {
       /* non-critical */
     }

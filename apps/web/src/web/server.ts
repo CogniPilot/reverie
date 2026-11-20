@@ -239,7 +239,7 @@ import { MAX_CONCURRENT_SESSIONS, MAX_SSE_CLIENTS } from '../config/map-limits.j
 import { MAX_PASTE_IMAGE_BYTES } from '../config/buffer-limits.js';
 import { resolveTerminalHistoryConfig } from '../config/terminal-history.js';
 import { SseEvent } from './sse-events.js';
-import { MAX_ROUTE_PARAM_LENGTH, ownerFor, resolveParentSessionId } from './route-helpers.js';
+import { MAX_ROUTE_PARAM_LENGTH, ownerFor, patchOfficeSettings, resolveParentSessionId } from './route-helpers.js';
 import { getLatestPlanUsage, setLatestCodexPlanUsage, setLatestAccountPlanUsage } from './plan-usage-latest.js';
 import { SubscriptionUsageReader } from '../subscription-usage.js';
 import { readSubscriptionProfiles } from '../subscription-profiles.js';
@@ -4852,16 +4852,12 @@ export class WebServer extends EventEmitter {
     // Tunnel only starts when user clicks the toggle in the UI — never on boot.
     // Reset persisted tunnelEnabled so the UI toggle reflects actual state.
     if (await this.isTunnelEnabled()) {
-      const settingsPath = dataPath('settings.json');
       try {
-        const content = await fs.readFile(settingsPath, 'utf-8');
-        const settings = JSON.parse(content);
-        settings.tunnelEnabled = false;
-        await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+        await patchOfficeSettings({ tunnelEnabled: false });
+        console.log('Cloudflare tunnel setting reset (tunnel only starts on explicit UI toggle)');
       } catch {
-        /* ignore */
+        console.warn('Could not reset the saved tunnel setting. The tunnel remains stopped.');
       }
-      console.log('Cloudflare tunnel setting reset (tunnel only starts on explicit UI toggle)');
     }
 
     // Start team watcher for agent team awareness (always on — lightweight polling)

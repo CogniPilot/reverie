@@ -50,6 +50,7 @@ import {
   readJsonConfig,
   toggleService,
   SETTINGS_PATH,
+  patchOfficeSettings,
 } from '../route-helpers.js';
 import { SseEvent } from '../sse-events.js';
 import { getInstallInfo, checkForUpdate, startUpdate, getUpdateStatusForApi } from '../self-update.js';
@@ -1032,21 +1033,10 @@ export function registerSystemRoutes(
     }
 
     try {
-      const dir = dirname(SETTINGS_PATH);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
-      let existing: Record<string, unknown> = {};
-      try {
-        existing = JSON.parse(await fs.readFile(SETTINGS_PATH, 'utf-8'));
-      } catch {
-        /* ignore */
-      }
       // acknowledgeUnauthTunnel is an ACTION field (not a stored setting) — strip
       // it before persisting so settings.json stays clean.
       const { acknowledgeUnauthTunnel, ...settingsToStore } = settings;
-      const merged = { ...existing, ...settingsToStore };
-      await fs.writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2));
+      const merged = await patchOfficeSettings(settingsToStore);
 
       // tmux 3.7+ resizes tracked panes; older versions apply this to new panes.
       // Already-evicted history cannot be recovered on either version.
@@ -1134,21 +1124,7 @@ export function registerSystemRoutes(
     const modelConfig = parseBody(ModelConfigUpdateSchema, req.body, 'Invalid model config') as Record<string, unknown>;
 
     try {
-      let existingSettings: Record<string, unknown> = {};
-      try {
-        const content = await fs.readFile(SETTINGS_PATH, 'utf-8');
-        existingSettings = JSON.parse(content);
-      } catch {
-        // File doesn't exist yet, start fresh
-      }
-
-      existingSettings.modelConfig = modelConfig;
-
-      const dir = dirname(SETTINGS_PATH);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
-      await fs.writeFile(SETTINGS_PATH, JSON.stringify(existingSettings, null, 2));
+      await patchOfficeSettings({ modelConfig });
 
       return {};
     } catch (err) {

@@ -62,6 +62,7 @@ import {
   ownerFor,
   resolveCasesDir,
   SETTINGS_PATH,
+  patchOfficeSettings,
   validatePathWithinBase,
   parseBody,
   readJsonConfig,
@@ -1680,18 +1681,7 @@ export function registerCaseRoutes(
     const { order } = parseBody(CaseOrderSchema, req.body, 'Invalid order data');
 
     try {
-      const dir = getDataDir();
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
-      }
-      let existing: Record<string, unknown> = {};
-      try {
-        existing = JSON.parse(await fs.readFile(SETTINGS_PATH, 'utf-8'));
-      } catch {
-        /* ignore */
-      }
-      const merged = { ...existing, caseOrder: order };
-      await fs.writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2));
+      await patchOfficeSettings({ caseOrder: order });
       ctx.broadcast(SseEvent.CaseOrderChanged, { order });
       return { success: true, data: { order } };
     } catch (err) {
