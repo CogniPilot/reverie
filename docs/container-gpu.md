@@ -109,7 +109,9 @@ old-worker compatibility acceptance.
 
 `nix build .#workerClientCapsule` exposes the same canonical capsule used by the
 website factory. Its manifest is at `opt/reverie-worker-client/manifest.json`;
-`workerNativeClient` is a different artifact. The maintainer adapter
+`workerNativeClient` is a different artifact. The capsule build selects Chalk,
+Commander and Zod from the web lockfile and bundles the worker CLI directly.
+It can build independently of the console and its browser assets. The maintainer adapter
 `scripts/build-boxed-worker-image.mts` replaces the whole client directory in an
 immutable worker base before copying the new capsule. Its fixed build-only
 root step runs `/bin/rm` with an exact argument vector, then restores the

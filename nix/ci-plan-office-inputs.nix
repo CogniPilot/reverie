@@ -3,7 +3,6 @@
 let
   clientCapsule = import ./worker-client-capsule.nix {
     inherit pkgs src;
-    console = dependencyConsole;
   };
   clientManifestDigest = builtins.hashFile "sha256" "${clientCapsule}/opt/reverie-worker-client/manifest.json";
   images = import ./ci-plan-office-images.nix {

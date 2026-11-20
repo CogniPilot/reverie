@@ -1,15 +1,10 @@
-# Explicit Console supplies immutable dependency modules only; new client source is bundled directly.
-{ pkgs, src, console }:
+# Immutable agent CLI, bundled independently of the office website.
+{ pkgs, src }:
 let
   producer = import ./worker-client-capsule-producer.nix { inherit pkgs src; };
   node = pkgs.nodejs-slim_22;
   entry = import ./worker-client-entry.nix { inherit pkgs src; };
-  bundle = pkgs.runCommand "reverie-worker-client-bundle" {} ''
-    ${node}/bin/node --experimental-strip-types ${src}/apps/web/scripts/build-worker-client.mts \
-      --entry ${src}/apps/web/src/worker-client-cli.ts \
-      --esbuild ${pkgs.esbuild}/bin/esbuild --node ${node}/bin/node --source ${src} \
-      --modules ${console}/lib/reverie/node_modules --output "$out"
-  '';
+  bundle = import ./worker-client-bundle.nix { inherit pkgs src; };
   notices = pkgs.runCommand "reverie-worker-client-notices" {
     nativeBuildInputs = [ pkgs.gnutar pkgs.xz ];
   } ''

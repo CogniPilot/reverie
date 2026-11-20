@@ -40,7 +40,6 @@
           workerClientCapsule = import ./nix/worker-client-capsule.nix {
             inherit pkgs;
             src = source;
-            console = packages.console;
           };
           docker-memory-high-helper = import ./nix/docker-resource-helper.nix { inherit pkgs; src = source; };
           docker-memory-high-helper-image = import ./nix/docker-memory-high-helper-image.nix { inherit pkgs; src = source; };
