@@ -82,29 +82,24 @@ impl Installation {
         let pm = self.parent.as_ref().expect("adopted parent").metadata()?;
         self.parent_identity = (pm.dev(), pm.ino());
         let lock_path = self.state.join("update.lock");
-        self.lock = Some(
-            OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create(true)
-                .truncate(false)
-                .mode(0o600)
-                .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
-                .open(&lock_path)?,
-        );
-        let lock = self.lock.as_ref().expect("adopted lock");
-        let m = lock.metadata()?;
-        self.lock_identity = (m.dev(), m.ino());
-        require(
-            m.uid() == geteuid().as_raw()
-                && m.is_file()
-                && m.nlink() == 1
-                && m.mode() & 0o077 == 0
-                && m.len() == 0,
-            "DEPLOYMENT_LOCK_OWNER",
-        )?;
-        lock.try_lock()
-            .map_err(|_| DeploymentError::new("DEPLOYMENT_BUSY"))?;
+        let lock = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+            .open(&lock_path)?;
+        self.lock_identity = match acquire_lock(&lock) {
+            Ok(identity) => identity,
+            Err(error) => {
+                return DeploymentError::finalized(
+                    Err(error),
+                    close(lock, "DEPLOYMENT_LOCK_CLOSE_UNCONFIRMED"),
+                );
+            }
+        };
+        self.lock = Some(lock);
         self.current()
     }
     pub(super) fn current(&self) -> Result<()> {
@@ -150,8 +145,7 @@ impl Installation {
     pub(super) fn close(&mut self) -> Result<()> {
         let mut result = Ok(());
         if let Some(file) = self.lock.take() {
-            result = nix::unistd::close(file)
-                .map_err(|_| DeploymentError::new("DEPLOYMENT_LOCK_CLOSE_UNCONFIRMED"));
+            result = release_lock(file);
         }
         let parent = self
             .parent
@@ -160,6 +154,28 @@ impl Installation {
             .unwrap_or(Ok(()));
         DeploymentError::finalized(result, parent)
     }
+}
+fn acquire_lock(file: &File) -> Result<(u64, u64)> {
+    let m = file.metadata()?;
+    require(
+        m.uid() == geteuid().as_raw()
+            && m.is_file()
+            && m.nlink() == 1
+            && m.mode() & 0o077 == 0
+            && m.len() == 0,
+        "DEPLOYMENT_LOCK_OWNER",
+    )?;
+    file.try_lock()
+        .map_err(|_| DeploymentError::new("DEPLOYMENT_BUSY"))?;
+    Ok((m.dev(), m.ino()))
+}
+fn release_lock(file: File) -> Result<()> {
+    // A concurrent fork can retain a duplicate until exec. Release the lock on
+    // the shared open file description before consuming our descriptor.
+    let unlocked = file
+        .unlock()
+        .map_err(|_| DeploymentError::new("DEPLOYMENT_UNLOCK_UNCONFIRMED"));
+    DeploymentError::finalized(unlocked, close(file, "DEPLOYMENT_LOCK_CLOSE_UNCONFIRMED"))
 }
 pub(super) fn valid_name(name: &str) -> bool {
     !name.is_empty()
@@ -243,4 +259,36 @@ pub(super) fn sync_directory(path: &Path) -> Result<()> {
 }
 fn close(file: File, code: &'static str) -> Result<()> {
     nix::unistd::close(file).map_err(|_| DeploymentError::new(code))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_releases_the_update_lock_even_while_a_duplicate_is_open() {
+        let mut random = [0u8; 16];
+        getrandom::getrandom(&mut random).unwrap();
+        let path =
+            std::env::temp_dir().join(format!("deployment-lock-{:x}", u128::from_ne_bytes(random)));
+        let first = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(&path)
+            .unwrap();
+        let next = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        std::fs::remove_file(&path).unwrap();
+        first.try_lock().unwrap();
+        let duplicate = first.try_clone().unwrap();
+        assert!(next.try_lock().is_err());
+        release_lock(first).unwrap();
+        next.try_lock().unwrap();
+        drop(duplicate);
+    }
 }
