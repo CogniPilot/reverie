@@ -44,6 +44,8 @@ vi.mock('node:fs', async (importOriginal) => {
   };
 });
 
+vi.mock('../../src/web/office-settings-file.js', () => import('../helpers/mock-office-settings-file.js'));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     stat: vi.fn(),

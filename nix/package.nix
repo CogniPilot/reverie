@@ -310,7 +310,7 @@ let
       npm test -- test/rust-routes/frames.test.ts test/rust-routes/channel.test.ts test/rust-routes/config.test.ts \
         test/routes/subscription-profiles-forwarder.test.ts
       npm test -- test/rust-front/frames.test.ts
-      NIX_REVERIE_TEST_RUST_ROUTE_HANDLER=${rustRouteHandler}/bin/reverie-route-handler npm test -- test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
+      NIX_REVERIE_TEST_RUST_ROUTE_HANDLER=${rustRouteHandler}/bin/reverie-route-handler npm test -- test/office-settings-file.test.ts test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
         test/rust-routes/settings-fixtures.test.ts
       npm test -- test/rust-front/adapter.test.ts test/rust-front/fd-inheritance.test.ts test/rust-front/server-front.test.ts \
         test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts test/rust-front/direct-child.test.ts \

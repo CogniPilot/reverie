@@ -17,6 +17,8 @@ import { registerSystemRoutes } from '../../src/web/routes/system-routes.js';
 
 // Settings are written to disk via fs/promises — stub so the guard test never
 // touches the real settings.json, and so we can assert "not persisted on refusal".
+vi.mock('../../src/web/office-settings-file.js', () => import('../helpers/mock-office-settings-file.js'));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     readFile: vi.fn(async () => '{}'),

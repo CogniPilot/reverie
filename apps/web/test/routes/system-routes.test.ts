@@ -21,6 +21,8 @@ vi.mock('../../src/disk-stats.js', () => ({
   ] })),
 }));
 
+vi.mock('../../src/web/office-settings-file.js', () => import('../helpers/mock-office-settings-file.js'));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     readFile: vi.fn(async () => '{}'),

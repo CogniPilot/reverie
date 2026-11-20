@@ -6,6 +6,7 @@
  */
 
 import { dockerWorkerIdentityOf } from '../docker-worker-identity.js';
+import { readOfficeSettings, replaceOfficeSettings } from './office-settings-file.js';
 import { join, resolve, relative, isAbsolute, dirname } from 'node:path';
 import { realpathSync, existsSync, mkdirSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -47,13 +48,8 @@ let settingsWrite: Promise<void> = Promise.resolve();
 
 export function patchOfficeSettings(patch: Record<string, unknown>): Promise<Record<string, unknown>> {
   const write = settingsWrite.then(async () => {
-    let raw: string | undefined;
-    try {
-      raw = await fs.readFile(SETTINGS_PATH, 'utf-8');
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-
+    const file = await readOfficeSettings(SETTINGS_PATH);
+    const { raw } = file;
     let previous: unknown = {};
     if (raw !== undefined) {
       try {
@@ -68,7 +64,7 @@ export function patchOfficeSettings(patch: Record<string, unknown>): Promise<Rec
     const merged = { ...previous, ...patch };
     const dir = dirname(SETTINGS_PATH);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-    await fs.writeFile(SETTINGS_PATH, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    await replaceOfficeSettings(file, JSON.stringify(merged, null, 2));
     return merged;
   });
   settingsWrite = write.then(
