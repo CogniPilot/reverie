@@ -428,6 +428,68 @@ class NativeCanary {
     ]);
     return this.runHelper(owned, success);
   }
+  private configurePool(
+    role: string,
+    anchor: CanaryIdentity,
+    scope: ResourceObservation,
+    cpus: string
+  ): ResourceObservation {
+    const helper = this.create(
+      role,
+      this.baseline,
+      [
+        'configure-pool',
+        ...this.commonArgs(anchor),
+        '--parent-dev',
+        scope.parent.dev,
+        '--parent-ino',
+        scope.parent.ino,
+        '--memory-max',
+        '536870912',
+        '--swap-max',
+        '0',
+        '--pids-max',
+        '128',
+        '--cpu-weight',
+        '100',
+        '--cpuset-cpus',
+        cpus,
+      ],
+      [...this.hostView(), '--mount', `type=bind,src=/sys/fs/cgroup${scope.parent.path},dst=/run/reverie-box-pool`]
+    );
+    const ack = this.runHelper(helper);
+    const observed = this.probe(anchor);
+    assert.deepEqual(ack, observed);
+    assert.equal(observed.resources.memoryMax, '536870912');
+    assert.equal(observed.worker, null);
+    return observed;
+  }
+  private restartEmptyPool(
+    owned: Owned,
+    original: CanaryIdentity,
+    cpus: string,
+    before: ResourceObservation
+  ): CanaryIdentity {
+    const running = this.inspect(owned.id);
+    requireOwned(running, owned, this.box);
+    requireIdentity(this.identity(running), original);
+    this.command('stop-original-anchor', ['stop', '--time', '3', owned.id]);
+    const stopped = this.inspect(owned.id);
+    requireOwned(stopped, owned, this.box);
+    assert.equal(stopped.State.Status, 'exited');
+    assert.equal(stopped.State.Running, false);
+    assert.equal(stopped.State.Pid, 0);
+    const row = this.start(owned);
+    requireOwned(row, owned, this.box);
+    const restarted = this.identity(row);
+    owned.identity = restarted;
+    assert.equal(restarted.id, original.id);
+    assert.notEqual(restarted.start, original.start);
+    const after = this.configurePool('cold-pool', restarted, this.probe(restarted), cpus);
+    assert.deepEqual(after.resources, before.resources);
+    this.evidence.save('cold-pool-accepted', { before, after });
+    return restarted;
+  }
   run(): void {
     const baseBefore = this.image(this.baseline);
     requireHelperImage(baseBefore, this.baseline, false);
@@ -446,36 +508,14 @@ class NativeCanary {
       ['anchor'],
       [...this.hostView(), '--cgroup-parent', parent]
     );
-    const anchor = this.identity(this.start(anchorOwned));
-    anchorOwned.identity = anchor;
-    this.evidence.save('anchor-birth', anchor);
-    const initial = this.probe(anchor);
+    const original = this.identity(this.start(anchorOwned));
+    anchorOwned.identity = original;
+    this.evidence.save('anchor-birth', original);
+    const initial = this.probe(original);
     const cpus = initial.resources.cpusetCpusEffective.split(',')[0].split('-')[0];
     assert.match(cpus, /^[0-9]+$/u);
-    const pool = this.create(
-      'pool',
-      this.baseline,
-      [
-        'configure-pool',
-        ...this.commonArgs(anchor),
-        '--parent-dev',
-        initial.parent.dev,
-        '--parent-ino',
-        initial.parent.ino,
-        '--memory-max',
-        '536870912',
-        '--swap-max',
-        '0',
-        '--pids-max',
-        '128',
-        '--cpu-weight',
-        '100',
-        '--cpuset-cpus',
-        cpus,
-      ],
-      [...this.hostView(), '--mount', `type=bind,src=/sys/fs/cgroup${initial.parent.path},dst=/run/reverie-box-pool`]
-    );
-    this.runHelper(pool);
+    const configured = this.configurePool('pool', original, initial, cpus);
+    const anchor = this.restartEmptyPool(anchorOwned, original, cpus, configured);
     const flags = this.common();
     flags[flags.indexOf('--memory') + 1] = '268435456';
     flags[flags.indexOf('--memory-swap') + 1] = '268435456';
