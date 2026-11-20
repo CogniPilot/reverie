@@ -829,6 +829,22 @@ describe('Engine-owned existing Docker provider view', () => {
         })
       ).toThrow();
   });
+  it('keeps an already prepared identity destination on the selected image after its source retires', async () => {
+    const f = await providerViewFixture();
+    const engine = new DockerEmployeeEngine(f.command, 'fixture', f.resources,
+      { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [target] },
+      f.journal, helper, '7'.repeat(64), () => 'claude');
+    f.row.phase = 'identity-ready';
+    await expect(engine.image(f.row.original)).rejects.toThrow('SOURCE_IMAGE_UNSUPPORTED');
+    await expect(engine.preparedIdentityImage(f.row, () => {})).resolves.toEqual(f.row.workerImage);
+    f.row.phase = 'identity-issued';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).resolves.toEqual(f.row.workerImage);
+    f.row.phase = 'destination-issued';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).rejects.toThrow('WORKER_IMAGE_CHANGED');
+    f.row.phase = 'identity-ready';
+    f.observed.Config.User = '2000:2000';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).rejects.toThrow('DESTINATION_CHANGED');
+  });
   it('keeps a published image readable while selecting an independently built replacement', async () => {
     const f = await providerViewFixture(),
       next = 'sha256:' + '9'.repeat(64);

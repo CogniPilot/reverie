@@ -506,6 +506,29 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED');
     return this.#imagePair(original, this.workerImage, true);
   }
+  /** Resume an existing identity installation on the currently selected worker
+   * image. The old source image was admitted when this destination was created.
+   * Fresh placement continues to require today's source allowlist. */
+  async preparedIdentityImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
+    const row = DockerEmployeeContinuationRecord.parse(input);
+    const check = () => {
+      current();
+      if (!isDeepStrictEqual(row, input)) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+    };
+    check();
+    if (row.version === 3 || !['identity-ready', 'identity-issued'].includes(row.phase) ||
+      !row.destination || row.workerImage.imageId !== this.workerImage.imageId ||
+      row.workerImage.clientManifestDigest !== this.workerImage.clientManifestDigest)
+      refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+    const before = await this.#boundDestination(row, check, true);
+    const actual = await this.#imagePair(row.original, this.workerImage, true);
+    check();
+    if (!isDeepStrictEqual(actual, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+    const after = await this.#boundDestination(row, check, true);
+    if (!isDeepStrictEqual(containerReadState(before), containerReadState(after)))
+      refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+    return actual;
+  }
   /** Select the current qualified replacement without assuming independently
    * built images have a Docker layer ancestry relationship. */
   async replacementTargetImage(

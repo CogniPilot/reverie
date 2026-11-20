@@ -69,6 +69,7 @@ export interface DockerContainerObservation extends DockerSourceObservation {
 }
 export interface DockerContinuationEngine {
   image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage>;
+  preparedIdentityImage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage>;
   /** Re-earn the frozen published image. A newer launch selection must not
    * turn existing-provider reads into admission of that newer image. */
   existingImage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage>;
@@ -343,6 +344,14 @@ export class DockerEmployeeContinuation {
     current();
     return next;
   }
+  #legacyImage(original: DockerEmployeeOriginal, retained: DockerEmployeeContinuationRecord | undefined, current: () => void) {
+    if (retained && retained.version !== 3 && ['identity-ready', 'identity-issued'].includes(retained.phase) &&
+        this.engine.preparedIdentityImage) {
+      if (!isDeepStrictEqual(original, retained.original)) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+      return this.engine.preparedIdentityImage(retained, current);
+    }
+    return this.engine.image(original);
+  }
   async #source(
     subject: DockerContinuationSubject,
     row: DockerEmployeeContinuationRecord,
@@ -377,7 +386,7 @@ export class DockerEmployeeContinuation {
         ? await this.engine.existingImage(row, current)
         : row.version === 3
           ? await this.engine.imageForPlanReplacement!(row, current)
-          : await this.engine.image(row.original)
+          : await this.#legacyImage(row.original, row, current)
     );
     current();
     if (!isDeepStrictEqual(workerImage, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
@@ -456,7 +465,7 @@ export class DockerEmployeeContinuation {
       seen.original.sessionId !== subject.sessionId
     )
       refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    const workerImage = DockerEmployeeWorkerImage.parse(await this.engine.image(seen.original));
+    const workerImage = DockerEmployeeWorkerImage.parse(await this.#legacyImage(seen.original, retained, () => authority.require()));
     authority.require();
     return {
       destinationImageId: workerImage.imageId,
