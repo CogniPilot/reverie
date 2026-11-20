@@ -69,3 +69,24 @@ it.skipIf(process.platform === 'win32')(
     await expect(readOfficeSettings(path)).rejects.toThrow(/regular file/);
   }
 );
+
+it('can update again after the first publication was interrupted before unlink', async () => {
+  vi.spyOn(fs, 'rm').mockRejectedValueOnce(new Error('cleanup interrupted'));
+  await expect(replaceOfficeSettings(await readOfficeSettings(path), 'first')).rejects.toThrow('cleanup interrupted');
+  const [alias] = (await fs.readdir(dir)).filter((name) => name !== 'settings.json');
+  expect((await fs.stat(path)).nlink).toBe(2);
+  const retained = await readOfficeSettings(path);
+  expect(retained.raw).toBe('first');
+  await replaceOfficeSettings(retained, 'second');
+  expect(await fs.readFile(path, 'utf8')).toBe('second');
+  expect((await fs.stat(path)).nlink).toBe(1);
+  expect(await fs.readFile(join(dir, alias), 'utf8')).toBe('first');
+});
+
+it('preserves unrelated hard links even with a staged-looking symlink to the same file', async () => {
+  await fs.writeFile(path, 'original');
+  await fs.link(path, join(dir, 'another-config'));
+  await fs.symlink(path, join(dir, '.reverie-settings-12345678-1234-4321-8123-123456789abc.tmp'));
+  await expect(readOfficeSettings(path)).rejects.toThrow(/single hard link/);
+  expect(await fs.readFile(join(dir, 'another-config'), 'utf8')).toBe('original');
+});
