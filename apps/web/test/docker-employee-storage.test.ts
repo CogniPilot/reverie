@@ -227,6 +227,21 @@ describe('existing destination storage across an original holder exit', () => {
       code: 'DOCKER_STORAGE_DESTINATION_REPLACED',
     });
   });
+  it('can recheck a cold placement from the original holder header alone', async () => {
+    const f = fixture();
+    await f.service.prepare(f.row, current);
+    f.exitHolder();
+    const stopped = { ...f.existingDestination, State: { ...f.existingDestination.State, Running: false, Pid: 0 } };
+    const readReference = () => ({ ...f.destination, purpose: 'reverie-boxed-storage-reference-v1' });
+    const verify = vi.fn(async () => readReference());
+    const recover = () => f.service.readExistingReference(f.row, stopped, verify, current, 'original-reference');
+    vi.mocked(f.command.run).mockClear();
+    await expect(recover()).resolves.toMatchObject({ ino: f.destination.home.ino, dev: f.destination.home.dev });
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(f.command.run).mock.calls.some(([args]) => args.includes('probe-storage'))).toBe(false);
+    f.destination.home.dev = '18';
+    await expect(recover()).rejects.toMatchObject({ code: 'DOCKER_STORAGE_DESTINATION_REPLACED' });
+  });
   it('keeps live holder reads on the original path', async () => {
     const f = fixture(),
       verify = vi.fn();
