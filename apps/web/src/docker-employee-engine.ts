@@ -748,10 +748,11 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_STORAGE_HOLDER_UNCONFIRMED' ||
           !retained) throw error;
       let observed: DockerEmployeeStorageObservation | undefined;
-      home = await this.#storage.readExistingReference(row, before, (destination, seen) => {
+      home = await this.#storage.readExistingReference(row, before, (destination, seen, filesystemId) => {
         observed = seen;
-        return retained.helper.storage(destination, seen, check);
-      }, check, placement === 'stopped' ? retained.observed ?? 'original-reference' : undefined);
+        return retained.helper.storage(destination, seen, check, filesystemId);
+      }, check, placement === 'stopped' ? retained.observed ?? 'original-reference' : undefined,
+      original => retained.helper.stoppedReference(row, original));
       check();
       if (!home || !observed) throw error;
       if (placement === 'running') retained.observed = observed;

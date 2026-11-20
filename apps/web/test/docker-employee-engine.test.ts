@@ -480,8 +480,8 @@ async function retainedStoppedFixture(version: 1 | 2 = 2, ephemeral = false) {
     version: 1,
     purpose: 'reverie-boxed-storage-observation-v1',
     holderStartTicks: '123',
-    home: { dev: '4', ino: '5', uid: 1000, gid: 100, mode: 16832 },
-    nix: { dev: '4', ino: '6', uid: 1000, gid: 100, mode: 16832 },
+    home: { dev: '4', ino: '5', uid: 1000, gid: 100, mode: 448 },
+    nix: { dev: '4', ino: '6', uid: 1000, gid: 100, mode: 448 },
   };
   let holder: Record<string, unknown> | undefined;
   f.journal.read = (_row, role) => f.row.tasks?.find((t) => t.role === role);
@@ -683,6 +683,44 @@ describe('retained published plan source after historical source deletion', () =
       vi.mocked(f.command.run).mock.calls.some(([a]) => a[2] === cid || a[0] === 'image' || a[1] === 'start')
     ).toBe(false);
   });
+  it.each(['match', 'filesystem', 'inode', 'generation'] as const)(
+    'checks the approved filesystem on both reads of a renumbered stopped worker: %s', async (scenario) => {
+      const f = await retainedStoppedFixture();
+      f.holder().State = { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 };
+      const image = 'sha256:' + '8'.repeat(64);
+      const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); });
+      const approval = {
+        sessionId: f.row.request.sessionId, sessionGeneration: f.row.request.sessionGeneration,
+        operationId: f.row.request.operationId, containerId: f.row.destination!.containerId,
+        historicalDevice: '4', currentDevice: '7', filesystemId: '9988',
+        homeInode: f.storage.home.ino, nixInode: f.storage.nix.ino,
+      };
+      if (scenario === 'generation') {
+        expect(() => helper.approveStorage(f.row, { ...approval, sessionGeneration: approval.sessionGeneration+1 })).toThrow();
+        return;
+      }
+      helper.approveStorage(f.row, { ...approval, homeInode: scenario === 'inode' ? '88' : approval.homeInode });
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      let reads = 0;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        if (args[0] === 'image' && args.at(-1) === image) return JSON.stringify(image);
+        if (args[0] === 'run' && args.includes('verify-storage-reference')) {
+          reads++;
+          expect(args.slice(-2)).toEqual(['--filesystem-id','9988']);
+          expect(args).toContain('7:5:1000:100:448');
+          if (scenario === 'filesystem' && reads === 2) throw Error('BOXED_STORAGE_FILESYSTEM_CHANGED');
+          return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null,
+            home: { ...f.storage.home, dev: '7' }, nix: { ...f.storage.nix, dev: '7' } });
+        }
+        return original(args,input);
+      });
+      const result = f.engine.planReplacementHome(f.row, () => {}, 'stopped', { helper });
+      if (scenario === 'match') await expect(result).resolves.toMatchObject({ dev: '7', ino: '5' });
+      else await expect(result).rejects.toThrow();
+      expect(reads).toBe(scenario === 'inode' ? 0 : 2);
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
   it.each([1, 2] as const)('reads v%s exact stopped networks without its historical source', async (version) => {
     const f = await retainedStoppedFixture(version);
     await expect(f.engine.planReplacementNetworkIds(f.row, () => {})).resolves.toEqual([f.network]);

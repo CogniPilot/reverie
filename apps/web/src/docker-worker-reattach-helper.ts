@@ -1,4 +1,6 @@
 /** Transport for the pinned Rust verifier. It does not hold recovery state. */
+import { z } from 'zod';
+import type { DockerEmployeeStorageObservation } from './docker-employee-storage.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
@@ -14,7 +16,41 @@ const refuse = (): never => {
   throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_REATTACH_VERIFIER_UNCONFIRMED');
 };
 
+const positive = z.string().regex(/^[1-9][0-9]{0,19}$/).refine(value => BigInt(value) <= 0xffffffffffffffffn);
+export const StorageDeviceApproval = z.object({
+  sessionId: z.string().uuid(),
+  sessionGeneration: z.number().int().positive().safe(),
+  operationId: z.string().uuid(),
+  containerId: z.string().regex(/^[0-9a-f]{64}$/),
+  historicalDevice: positive, currentDevice: positive, filesystemId: positive,
+  homeInode: positive, nixInode: positive,
+}).strict().refine(value => value.historicalDevice !== value.currentDevice && value.homeInode !== value.nixInode);
+type StorageApproval = Readonly<z.infer<typeof StorageDeviceApproval>>;
+
 export class DockerWorkerReattachHelper {
+  readonly #approvals = new Map<string, StorageApproval>();
+
+  approveStorage(row: DockerEmployeeContinuationRecord, input: unknown): void {
+    const approval = StorageDeviceApproval.parse(input);
+    if (!this.#matches(row, approval)) return refuse();
+    this.#approvals.set(row.employeeId, Object.freeze(approval));
+  }
+
+  #matches(row: DockerEmployeeContinuationRecord, approval: StorageApproval): boolean {
+    return row.destination?.containerId === approval.containerId &&
+      row.request.sessionId === approval.sessionId && row.request.sessionGeneration === approval.sessionGeneration &&
+      row.request.operationId === approval.operationId;
+  }
+
+  stoppedReference(row: DockerEmployeeContinuationRecord, historical: DockerEmployeeStorageObservation) {
+    const approval = this.#approvals.get(row.employeeId);
+    if (!approval || !this.#matches(row, approval)) return { observation: historical };
+    if (historical.home.dev !== approval.historicalDevice || historical.nix.dev !== approval.historicalDevice ||
+        historical.home.ino !== approval.homeInode || historical.nix.ino !== approval.nixInode) return refuse();
+    return { observation: { ...historical, home: { ...historical.home, dev: approval.currentDevice },
+      nix: { ...historical.nix, dev: approval.currentDevice } }, filesystemId: approval.filesystemId };
+  }
+
   constructor(
     private readonly command: DockerEngineCommand,
     private readonly imageId: string,
@@ -49,7 +85,8 @@ export class DockerWorkerReattachHelper {
   storage(
     destination: DockerEmployeeInspect,
     seen: Readonly<{ home: Directory; nix: Directory }>,
-    current: () => void
+    current: () => void,
+    filesystemId?: string
   ): Promise<unknown> {
     const bind = (guest: string, target: string) => {
       const mounts = destination.Mounts.filter(mount => mount.Destination === guest);
@@ -63,7 +100,8 @@ export class DockerWorkerReattachHelper {
     };
     const expected = (value: Directory) => [value.dev, value.ino, value.uid, value.gid, value.mode].join(':');
     return this.#verify(
-      ['verify-storage-reference', '--home', expected(seen.home), '--nix', expected(seen.nix)],
+      ['verify-storage-reference', '--home', expected(seen.home), '--nix', expected(seen.nix),
+        ...(filesystemId === undefined ? [] : ['--filesystem-id', filesystemId])],
       destination.Config.User,
       [...bind('/home/agent', '/run/reverie-worker-home'), ...bind('/nix', '/run/reverie-worker-nix')],
       current

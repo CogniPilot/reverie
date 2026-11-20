@@ -32,6 +32,9 @@ pub(crate) enum Command {
         home: crate::storage::Directory,
         #[arg(long)]
         nix: crate::storage::Directory,
+        /// Owner-verified ext4 filesystem ID for both reference mounts, in decimal.
+        #[arg(long, value_parser=decimal)]
+        filesystem_id: Option<u64>,
     },
     /// Check an existing worker credential digest from one bounded private stdin record.
     VerifyWorkerCredential,

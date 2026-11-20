@@ -426,7 +426,8 @@ export class DockerEmployeeRuntime {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }),
       readLegacyDockerPolicyProposal,
-      a.pool
+      a.pool,
+      a.recoveryHelper
     );
   }
   /** Server composition only. Inert until the API supplies its genuine captured

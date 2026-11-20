@@ -72,7 +72,18 @@ supply the missing filesystem identity. A durable replacement receipt needs a
 stable filesystem identifier for each mount as well as the original directory
 identity. Reboot qualification must cover both device renumbering on the same
 filesystem and a different filesystem mounted at the same path with matching
-inode numbers. Legacy receipts need a separate verified migration.
+inode numbers. For legacy receipts on one ext4 filesystem, the signed-in owner can approve a
+verified device renumbering through
+`POST /api/company/employees/:id/docker-storage/device-approval`. Compare the
+pre-reboot mount inventory and kernel filesystem UUID with the current mounts
+before approval. The request selects the original session, generation, operation
+and container, both original directory inodes, the old and current device
+numbers, and the current kernel filesystem ID (unsigned decimal). The kernel
+filesystem ID is distinct from the ext4 UUID. The Rust verifier checks this ID
+on both read-only directory descriptors on each of the two reference reads.
+Ownership, mode and inode checks still apply. Approval lasts for this office
+process and applies only to the selected placement. A stopped source or an
+existing held move uses its ordinary owner recovery workflow after approval.
 
 Cold recovery still needs a durable Rust operation with the following behavior.
 
