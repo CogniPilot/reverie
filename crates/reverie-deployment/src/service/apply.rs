@@ -1,5 +1,5 @@
 use super::*;
-use reverie_host::deployment_snapshot::SnapshotTools;
+use reverie_host::deployment_snapshot::{RehearsalRoot, SnapshotTools};
 use std::io::{Read, Write};
 mod live_accounts;
 mod retained_copy;
@@ -181,27 +181,64 @@ impl DeploymentService {
     /// Execute the exact prepared release. The stopped-data copy and rehearsal
     /// must finish before the old container is renamed. No bulk employee wake.
     pub fn apply(&self, id: &str) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Ordinary, false)
+        self.apply_scoped(id, OperationDeadline::Ordinary, false, None)
     }
+    /// Keep the archive in the operation and extract its rehearsal on the selected disk.
+    pub fn apply_with_rehearsal_root(&self, id: &str, root: &Path) -> Result<DeploymentStatus> {
+        self.apply_scoped(id, OperationDeadline::Ordinary, false, Some(root))
+    }
+
     /// Apply the prepared live-writer plan under its existing exact mount and
     /// process pins, with explicit owner authorization to omit the data copy.
     pub fn apply_live_without_backup(&self, id: &str) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Ordinary, true)
+        self.apply_scoped(id, OperationDeadline::Ordinary, true, None)
     }
     pub(crate) fn apply_before(&self, id: &str, end: Instant) -> Result<DeploymentStatus> {
-        self.apply_scoped(id, OperationDeadline::Initial(end), false)
+        self.apply_scoped(id, OperationDeadline::Initial(end), false, None)
     }
     fn apply_scoped(
         &self,
         id: &str,
         deadline: OperationDeadline,
         skip_live_backup: bool,
+        rehearsal_path: Option<&Path>,
     ) -> Result<DeploymentStatus> {
         deadline.check()?;
         let operation = self.effect_operation(id)?;
-        let pins = self.pins(&operation)?;
-        let result = self.apply_pinned(&operation, &pins, deadline, skip_live_backup);
-        DeploymentError::finalized(result, pins.close()).map_err(|error| {
+        let rehearsal = rehearsal_path
+            .map(|path| {
+                require(
+                    operation.plan.live_account_writers.is_none(),
+                    "DEPLOYMENT_VERIFIED_BACKUP_REQUIRED",
+                )?;
+                RehearsalRoot::open(
+                    path,
+                    &self.data_source(&operation)?,
+                    &operation.directory,
+                    deadline.snapshot(),
+                )
+                .map_err(|error| {
+                    DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_ROOT_REFUSED", error)
+                })
+            })
+            .transpose()?;
+        let result = (|| {
+            let pins = self.pins(&operation)?;
+            let applied = self.apply_pinned(
+                &operation,
+                &pins,
+                deadline,
+                skip_live_backup,
+                rehearsal.as_ref(),
+            );
+            DeploymentError::finalized(applied, pins.close())
+        })();
+        let closed = rehearsal.map_or(Ok(()), |root| {
+            root.close().map_err(|error| {
+                DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_CLOSE_UNCONFIRMED", error)
+            })
+        });
+        DeploymentError::finalized(result, closed).map_err(|error| {
             if !error.has_snapshot() {
                 return error;
             }
@@ -217,6 +254,7 @@ impl DeploymentService {
         pins: &crate::pins::Pins,
         deadline: OperationDeadline,
         skip_live_backup: bool,
+        rehearsal: Option<&RehearsalRoot>,
     ) -> Result<DeploymentStatus> {
         self.claimed(operation)?;
         operation.prepared()?;
@@ -267,7 +305,7 @@ impl DeploymentService {
                 .verify_source(end)
                 .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CHANGED", error))?;
             self.source_current(operation, false)?;
-            snapshot.rehearse(end).map_err(|error| {
+            snapshot.rehearse_at(rehearsal, end).map_err(|error| {
                 DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
             })?;
             self.source_current(operation, false)?;

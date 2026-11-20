@@ -432,7 +432,12 @@ fn wait(
                 )?;
             }
         }
-        std::thread::sleep(Duration::from_millis(2));
+        // Attribute tools often exit within this interval. Wake on their pidfd
+        // while retaining the same frequency of output and deadline checks.
+        match owned_process::poll(&[pidfd], 2) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        }
     }
 }
 fn close_files(files: Vec<File>) -> Result<()> {

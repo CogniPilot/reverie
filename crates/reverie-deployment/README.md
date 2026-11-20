@@ -77,9 +77,13 @@ the one-employee message, laptop, perf and restart trial is separate acceptance.
 Check free space before stopping the source. The registered workflow stores each
 backup under `runtime/update-state/console-deployments/<operation>/` in the
 installation. During a verified update, `snapshot/console.tar` and the extracted
-`snapshot/rehearsal/console/` coexist. Budget for both. The retained-copy workflow
+`snapshot/rehearsal/console/` coexist. To extract the rehearsal on another disk, use
+`apply OPERATION --rehearsal-root DIRECTORY`. Choose an empty, owner-only
+(mode 0700) directory outside the office data, deployment operation, and worker
+mounts. It will contain a private copy of the console, including account data.
+The archive stays in the operation directory. The retained-copy workflow
 writes `retained-copy/` under the same operation directory. The deployment CLI
-uses this fixed location for both workflows.
+keeps that copy at the registered installation.
 
 An image archive can be staged on scratch. Importing it still requires space
 in Docker's image storage for new layers. When Docker and the operation directory

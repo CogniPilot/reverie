@@ -308,3 +308,76 @@ fn ambiguous_xattr_dump_cannot_forge_verified_values() {
             .is_err()
     );
 }
+
+#[test]
+fn separate_rehearsal_root_retains_the_archive_in_the_operation() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let root = fixture.0.join("restore");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let selected = RehearsalRoot::open(
+        &root,
+        &fixture.source(),
+        fixture.destination().parent().unwrap(),
+        fixture.end(),
+    )
+    .unwrap();
+    fs::write(fixture.source().join("console/hello"), b"hello").unwrap();
+    let mut snapshot = tools()
+        .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    snapshot
+        .rehearse_at(Some(&selected), fixture.end())
+        .unwrap();
+    assert!(snapshot.restore_rehearsed());
+    assert!(fixture.destination().join("console.tar").is_file());
+    assert!(!fixture.destination().join("rehearsal").exists());
+    assert_eq!(
+        fs::read(root.join("rehearsal/console/hello")).unwrap(),
+        b"hello"
+    );
+    selected.close().unwrap();
+    snapshot.close().unwrap();
+    assert!(
+        RehearsalRoot::open(
+            &root,
+            &fixture.source(),
+            fixture.destination().parent().unwrap(),
+            fixture.end()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn separate_rehearsal_requires_private_disjoint_storage() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let root = fixture.0.join("restore");
+    fs::create_dir(&root).unwrap();
+    let open = |path: &Path| {
+        RehearsalRoot::open(
+            path,
+            &fixture.source(),
+            fixture.destination().parent().unwrap(),
+            fixture.end(),
+        )
+    };
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        open(&root).err().unwrap().code(),
+        "SNAPSHOT_DESTINATION_CUSTODY"
+    );
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let alias = fixture.0.join("alias");
+    symlink(&root, &alias).unwrap();
+    assert_eq!(
+        open(&alias).err().unwrap().code(),
+        "SNAPSHOT_REHEARSAL_ROOT"
+    );
+    let nested = fixture.source().join("private");
+    fs::create_dir(&nested).unwrap();
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(open(&nested).err().unwrap().code(), "SNAPSHOT_MOUNT_ALIAS");
+}

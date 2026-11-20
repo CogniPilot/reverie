@@ -73,6 +73,9 @@ enum Action {
         /// Activate a prepared live-account deployment without copying console data.
         #[arg(long)]
         skip_backup: bool,
+        /// Existing private directory for the extracted restore test.
+        #[arg(long, conflicts_with = "skip_backup")]
+        rehearsal_root: Option<PathBuf>,
     },
     /// Report or clear the contents of this office's employee /tmp mounts.
     #[command(
@@ -214,8 +217,11 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
             Action::Apply {
                 operation,
                 skip_backup,
+                rehearsal_root,
             } => serde_json::to_value(if skip_backup {
                 service.apply_live_without_backup(&operation)?
+            } else if let Some(root) = rehearsal_root {
+                service.apply_with_rehearsal_root(&operation, &root)?
             } else {
                 service.apply(&operation)?
             })?,

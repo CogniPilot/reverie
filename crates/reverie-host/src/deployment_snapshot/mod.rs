@@ -9,6 +9,8 @@ mod manifest;
 mod mounts;
 mod observed;
 mod process;
+mod rehearsal;
+pub use rehearsal::RehearsalRoot;
 #[cfg(test)]
 mod tests;
 
@@ -338,9 +340,18 @@ impl ConsoleSnapshot {
     /// Extracts into a NEW empty private child. Numeric ownership restoration
     /// failure is a refusal, including when the invoking service lacks privilege.
     pub fn rehearse(&mut self, end: Instant) -> Result<()> {
+        self.rehearse_at(None, end)
+    }
+
+    pub fn rehearse_at(&mut self, selected: Option<&RehearsalRoot>, end: Instant) -> Result<()> {
         self.verify_source(end)?;
-        let rehearsal = Arc::new(self.destination.create_child("rehearsal")?);
-        let result = (|| {
+        let parent = selected.map_or(self.destination.as_ref(), RehearsalRoot::directory);
+        if selected.is_some() {
+            mounts::disjoint(self.source.root.path(), parent.path(), &self.mounts)?;
+            mounts::disjoint(self.destination.path(), parent.path(), &self.mounts)?;
+        }
+        let rehearsal = Arc::new(parent.create_child("rehearsal")?);
+        let result = parent.check().and_then(|()| {
             self.tools
                 .0
                 .extract(&rehearsal, &self.destination, &self.archive, end)?;
@@ -354,9 +365,8 @@ impl ConsoleSnapshot {
             )?;
             self.verify_source(end)?;
             rehearsal.sync()?;
-            self.destination.sync()?;
-            Ok(())
-        })();
+            self.destination.sync()
+        });
         combine(result, close_directory(rehearsal))?;
         self.rehearsed = true;
         Ok(())
