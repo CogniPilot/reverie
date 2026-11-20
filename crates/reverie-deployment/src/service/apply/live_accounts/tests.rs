@@ -328,13 +328,6 @@ fn live_copy_is_explicitly_unverified_and_precedes_the_single_website_stop() {
 }
 
 #[test]
-fn bounded_copy_child_fixture() {
-    if std::env::var_os("NIX_REVERIE_DEPLOYMENT_COPY_SLEEP").is_some() {
-        std::thread::sleep(Duration::from_secs(10));
-    }
-}
-
-#[test]
 fn version_five_disposition_cannot_be_downgraded_or_partially_stripped() {
     namespace(
         "version_five_disposition_cannot_be_downgraded_or_partially_stripped",
@@ -471,27 +464,6 @@ fn final_ready_writer_rechecks_the_approved_employee_inventory() {
             f.close();
         },
     );
-}
-
-#[test]
-fn expired_copy_deadline_joins_the_original_child_without_swap() {
-    let mut child = std::process::Command::new(std::env::current_exe().unwrap());
-    child
-        .args([
-            "--exact",
-            "service::apply::live_accounts::tests::bounded_copy_child_fixture",
-        ])
-        .env("NIX_REVERIE_DEPLOYMENT_COPY_SLEEP", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    let child = child.spawn().unwrap();
-    let pid = child.id();
-    assert_eq!(
-        join_copy(child, Instant::now()).unwrap_err().code(),
-        "DEPLOYMENT_RETAINED_COPY_DEADLINE"
-    );
-    assert!(!Path::new(&format!("/proc/{pid}")).exists());
 }
 
 #[test]

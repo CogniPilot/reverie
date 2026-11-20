@@ -2,6 +2,7 @@ use super::*;
 use reverie_host::deployment_snapshot::SnapshotTools;
 use std::io::{Read, Write};
 mod live_accounts;
+mod retained_copy;
 /// Ordinary legacy budgets remain unchanged. The whole initial owner passes
 /// its SAME original bound, never a new grace period or a writer exception.
 #[derive(Clone, Copy)]
@@ -78,8 +79,7 @@ impl DeploymentService {
                     && actual["State"]["Status"] == "created",
                 "DEPLOYMENT_CANDIDATE_NOT_SLEEPING",
             )?;
-            let copy = option_env!("REVERIE_DEPLOYMENT_COPY")
-                .ok_or_else(|| DeploymentError::new("DEPLOYMENT_COPY_UNINSTALLED"))?;
+            let copy = retained_copy::program()?;
             let source = self.data_source(&operation)?.join("console");
             let destination = operation.directory.join("retained-copy");
             require(!destination.try_exists()?, "DEPLOYMENT_COPY_OCCUPIED")?;
@@ -87,15 +87,12 @@ impl DeploymentService {
                 self.stop_for_retained_copy(&operation, &pins)?;
             }
             operation.attempt("retained-copy-attempt")?;
-            let status = std::process::Command::new(copy)
-                .args(["--archive", "--reflink=auto", "--no-target-directory", "--"])
-                .arg(source)
-                .arg(&destination)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()?;
-            require(status.success(), "DEPLOYMENT_RETAINED_COPY_UNCONFIRMED")?;
+            retained_copy::run(
+                copy,
+                &source,
+                &destination,
+                OperationDeadline::Ordinary.snapshot(),
+            )?;
             self.verify_effect_pins(&operation, &pins)?;
             self.source_current(&operation, false)?;
             operation.record(

@@ -87,6 +87,7 @@ impl Tools {
         let arguments = strings(&[
             "--create",
             "--format=pax",
+            "--sparse",
             "--numeric-owner",
             "--acls",
             "--xattrs",

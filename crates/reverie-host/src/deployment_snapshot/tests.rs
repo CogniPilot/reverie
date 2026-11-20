@@ -134,6 +134,30 @@ fn complete_owned_copy_restores_bytes_modes_acl_xattrs_hardlinks_and_symlinks() 
 }
 
 #[test]
+fn capture_and_rehearsal_preserve_sparse_file_holes() {
+    use std::os::unix::fs::{FileExt, MetadataExt};
+
+    let fixture = Fixture::new();
+    fixture.separate();
+    let path = fixture.source().join("console/sparse");
+    let length = 8 << 20;
+    let file = File::create_new(path).unwrap();
+    file.write_all_at(b"start", 0).unwrap();
+    file.write_all_at(b"end", length - 3).unwrap();
+    drop(file);
+
+    let mut snapshot = tools()
+        .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    assert!(fs::metadata(snapshot.archive_path()).unwrap().len() < length / 2);
+    snapshot.rehearse(fixture.end()).unwrap();
+    let restored = fs::metadata(fixture.destination().join("rehearsal/console/sparse")).unwrap();
+    assert_eq!(restored.len(), length);
+    assert!(restored.blocks() * 512 < length / 2);
+    snapshot.close().unwrap();
+}
+
+#[test]
 fn source_content_and_archive_replacement_are_refusals() {
     let fixture = Fixture::new();
     fixture.separate();
