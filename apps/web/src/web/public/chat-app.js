@@ -654,6 +654,19 @@ function caProviderPlacement(employee) {
 function caProviderContext(employee) {
   return caProviderBinding(employee) + '\0' + (caProviderPlacement(employee) ?? '');
 }
+function caLastRecoveryCheck(company, employee) {
+  if (!employee?.dockerBinding || employee.bindingMigration || !employee.desiredRunning ||
+      employee.onVacation || !Array.isArray(company?.boxedViewRestorations)) return;
+  const report = company.boxedViewRestorations.find(value => value?.state === 'held' &&
+    value.employeeId === employee.id && value.sessionId === employee.sessionId &&
+    value.sessionGeneration === employee.sessionGeneration && value.operationId === employee.dockerBinding.operationId);
+  switch (report?.code) {
+    case 'DOCKER_CONTINUATION_DESTINATION_STOPPED': return 'Last check found the worker container stopped';
+    case 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING': return 'Waiting for the original recovery operation';
+    case 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED': return 'Last check could not verify the agent process';
+    case 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED': return 'Last check could not reconnect the terminal';
+  }
+}
 function caBoxedProvider(employee, session, member) {
   return (
     !!employee?.dockerBinding ||
@@ -10291,9 +10304,12 @@ class ReverieChatApp {
                     : state === 'working'
                       ? 'Working…'
                       : m.progress || m.goal || (caFocusLine(m) && `${caFocusLine(m)} (from the Board)`);
-    if (sub) text.append(this.el('span', 'ca-member-sub', sub));
     const employee = this.company?.employees?.find((e) => e.sessionId === m.sessionId);
     const health = this.employeeHealth(employee || { sessionId: m.sessionId }, m);
+    const recovery = ['dead', 'disconnected', 'unknown', 'viewer-unavailable'].includes(state) &&
+      caLastRecoveryCheck(this.company, employee);
+    if (recovery || sub) text.append(this.el('span', 'ca-member-sub', recovery || sub));
+    if (recovery) b.setAttribute('aria-label', `${b.getAttribute('aria-label')}, ${recovery}`);
     if (state === 'unknown') b.title = `${b.title || m.name} · ${health.detail}`;
     if (health.providerConfirmedHealthy && health.viewerUnavailable) {
       const warning = this.el('span', 'ca-viewer-warning', 'Viewer unavailable');

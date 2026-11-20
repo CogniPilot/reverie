@@ -37,6 +37,20 @@ it('shows confirmed provider death as red dead status on cards, members and prof
  expect(h.document.querySelector('.ca-expert-profile .ca-runtime-health.is-dead').textContent).toBe('Dead pane');
 });
 
+it('shows the last boxed recovery check only for the current employee binding', async () => {
+ const {h,employee}=await fixture();
+ Object.assign(employee,{dockerBinding:{operationId:'original'},sessionGeneration:3});
+ const report={employeeId:employee.id,sessionId:SID,sessionGeneration:3,operationId:'original',
+  state:'held',code:'DOCKER_CONTINUATION_DESTINATION_STOPPED'};
+ h.shell.company.boxedViewRestorations=[report];
+ h.shell.renderMembers();
+ expect(h.document.querySelector('.ca-member').textContent).toContain('worker container stopped');
+ expect(h.document.querySelector('.ca-member').getAttribute('aria-label')).toContain('worker container stopped');
+ report.operationId='prior';
+ h.shell.renderMembers();
+ expect(h.document.querySelector('.ca-member').textContent).not.toContain('worker container stopped');
+});
+
 it('offers the canonical owner restart for a dead pane without requiring stalled recovery or changing intent',async()=>{
  const{h,employee,posts}=await fixture();await h.shell.openCompany();
  const button=h.document.querySelector('.ca-company-person .ca-dead-pane-restart');expect(button.disabled).toBe(false);
