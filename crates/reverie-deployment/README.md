@@ -74,6 +74,17 @@ source, and only then swaps names and starts. Readiness requires the HTTP status
 and an actual Rust-front/Node process relationship. This remains hybrid readiness;
 the one-employee message, laptop, perf and restart trial is separate acceptance.
 
+Check free space before stopping the source. The registered workflow stores each
+backup under `runtime/update-state/console-deployments/<operation>/` in the
+installation. During a verified update, `snapshot/console.tar` and the extracted
+`snapshot/rehearsal/console/` coexist. Budget for both. The retained-copy workflow
+writes `retained-copy/` under the same operation directory. The deployment CLI
+uses this fixed location for both workflows.
+
+An image archive can be staged on scratch. Importing it still requires space
+in Docker's image storage for new layers. When Docker and the operation directory
+share a filesystem, leave room for the image import and the backup together.
+
 Rollback addresses only the original retained container identities. It retains
 both containers, never bulk-wakes employees and never automatically restores data.
 An attempted effect is not automatically retried after a lost response. The
