@@ -292,6 +292,7 @@ it('keeps every known viewer reason meaningful and unknown pressure-like or prot
   ['binding-or-authority-changed',/session or your recovery access changed/],['authority-changed',/recovery access changed/],
   ['admission-unavailable',/current session could not be verified/],['server-not-ready',/server is not ready/],
   ['not-running',/employee is not set to run/],['viewer-unavailable',/no current terminal viewer/],
+  ['viewer-disconnected',/terminal viewer disconnected again/],
   ['not-attempted',/reconnect has not been attempted/],['viewer-not-disconnected',/not reported a disconnected viewer/],
   ['connected',/viewer connection was confirmed/],['viewer-endpoint-custody-unavailable',/original terminal connection could not be verified/],
   ['viewer-endpoint-configuration-invalid',/viewer configuration is invalid/],

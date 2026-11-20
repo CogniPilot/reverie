@@ -9143,6 +9143,7 @@ class ReverieChatApp {
       'server-not-ready': 'The server is not ready to check terminal viewers. Try again shortly.',
       'not-running': 'The employee is not set to run. This check did not start them.',
       'viewer-unavailable': 'The website has no current terminal viewer to check.',
+      'viewer-disconnected': 'The terminal viewer disconnected again after its last repair.',
       'not-attempted': 'A viewer reconnect has not been attempted.',
       'viewer-not-disconnected': 'The website has not reported a disconnected viewer.',
       connected: 'The viewer connection was confirmed.',
