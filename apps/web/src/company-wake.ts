@@ -167,7 +167,7 @@ export class CompanyWake {
         continue;
       }
       const saved = this.deps.saved(employee.sessionId);
-      if (!saved || saved.owner !== employee.owner) {
+      if (!saved || saved.id !== employee.sessionId || saved.owner !== employee.owner) {
         skip('no-owned-session-record');
         continue;
       }

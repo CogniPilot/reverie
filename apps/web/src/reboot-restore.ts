@@ -185,8 +185,8 @@ export function planRebootRestore(
 
   for (const sessionId of deadSessionIds) {
     const state = persisted[sessionId];
-    if (!state) {
-      // An unpinned kill already deleted the record, so absence IS the guard.
+    if (!state || state.id !== sessionId) {
+      // Only the record for the selected session can authorize rebuilding it.
       skipped.push({ sessionId, reason: 'no-persisted-record' });
       continue;
     }

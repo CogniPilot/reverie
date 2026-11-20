@@ -72,6 +72,15 @@ function fixture() {
 }
 
 describe('company crash recovery selection', () => {
+  it('leaves the wake budget intact when the saved record belongs to another session', async () => {
+    const f = fixture();
+    f.saved.set(f.root.sessionId, f.saved.get(f.report.sessionId)!);
+    const dockerWake = vi.fn(async () => true);
+    const result = await new CompanyWake({ ...f.deps, dockerWake }).wakeOne(f.root.id);
+    expect(result.skipped).toEqual([{ employeeId: f.root.id, reason: 'no-owned-session-record' }]);
+    expect(f.deps.claim).not.toHaveBeenCalled();
+    expect(dockerWake).not.toHaveBeenCalled();
+  });
   it.each([false, true])('native healthy provider with a dead viewer is preserved for delegated/automatic wake (%s)', async automatic => {
     const f = fixture();
     const recovery = new CompanyWake({...f.deps, nativeHealth: () => 'healthy' as const});

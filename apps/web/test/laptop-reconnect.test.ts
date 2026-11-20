@@ -36,6 +36,22 @@ describe('website reconnects existing laptops', () => {
     f.deps.restore.mockImplementation(async (_entry, allowed) => { f.employee.desiredRunning = false; return allowed(); });
     expect((await reattachLaptops(f.deps)).failed).toEqual([f.sid]);
   });
+  it('skips a saved record with another session identity', async () => {
+    const f = fixture();
+    f.saved.id = '11111111-1111-4111-8111-111111111111';
+    await reattachLaptops(f.deps);
+    expect(f.deps.restore).not.toHaveBeenCalled();
+  });
+  it.each(['generation', 'migration', 'vacation'])('withdraws pending attachment after a %s change', async (change) => {
+    const f = fixture();
+    f.deps.restore.mockImplementation(async (_entry, allowed) => {
+      if (change === 'generation') f.employee.sessionGeneration++;
+      if (change === 'migration') f.employee.bindingMigration = { id: 'move', from: 'first', to: 'second' };
+      if (change === 'vacation') f.employee.onVacation = true;
+      return allowed();
+    });
+    expect(await reattachLaptops(f.deps)).toEqual({ connected: [], failed: [f.sid] });
+  });
   it('fails closed against old or malformed broker inventories', async () => {
     const f = fixture(); f.deps.inventory.mockResolvedValue({ runningSessionIds: ['--bad'] });
     await expect(reattachLaptops(f.deps)).rejects.toThrow('verified session inventory');
