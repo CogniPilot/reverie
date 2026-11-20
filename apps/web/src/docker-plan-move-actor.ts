@@ -452,6 +452,25 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       requestDigest,
     });
   }
+  async #requireSourcePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    let observed;
+    try {
+      observed = await this.#d.engine.observePool(row);
+    } catch (error) {
+      current();
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_ANCHOR_REPLACED' ||
+          !this.#d.requireReconciledSourcePool) throw error;
+    }
+    current();
+    if (observed && same(observed, row.pool)) return;
+    // Reconciliation can establish a new kernel epoch of the original pool.
+    // A positive observation of a different placement or policy remains a conflict.
+    if (!this.#d.requireReconciledSourcePool || !row.pool ||
+        (observed && !same({ ...observed, physicalDigest: row.pool.physicalDigest }, row.pool)))
+      throw new PlanMoveError('The original shared pool must be reconciled first', 409);
+    await this.#d.requireReconciledSourcePool(row, current);
+    current();
+  }
   async prepare(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
     journal.current();
     requireCanonicalAccountSource(journal.read());
@@ -480,18 +499,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
     if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
       throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
-    try {
-      const pool = await this.#d.engine.observePool(state.seed.source.record);
-      journal.current();
-      if (!pool || !same(pool, state.seed.source.record.pool))
-        throw new PlanMoveError('The original shared pool must be reconciled first', 409);
-    } catch (error) {
-      journal.current();
-      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_ANCHOR_REPLACED' ||
-          !this.#d.requireReconciledSourcePool) throw error;
-      await this.#d.requireReconciledSourcePool(state.seed.source.record, () => journal.current());
-      journal.current();
-    }
+    await this.#requireSourcePool(state.seed.source.record, () => journal.current());
     const target = await this.#snapshot(record, journal);
     try {
       target.snapshot.selected(target.account);
