@@ -150,7 +150,18 @@ fn verify(portable: bool) -> Result<(), Box<dyn Error>> {
     if !portable {
         // Native fixtures own private children; keep their Unix socket paths
         // below SUN_LEN even when Nix/CI supplies a deeply nested temp root.
-        command.env("TMPDIR", "/tmp");
+        let temporary = Command::new("mktemp")
+            .args(["-d", "/tmp/rXXXXXX"])
+            .output()?;
+        if !temporary.status.success() {
+            return Err("could not allocate private verification directory".into());
+        }
+        let path = PathBuf::from(std::str::from_utf8(&temporary.stdout)?.trim_end());
+        command.env("TMPDIR", &path);
+        eprintln!("native test directory: {}", path.display());
+        run_command(&mut command)?;
+        std::fs::remove_dir_all(path)?;
+        return Ok(());
     }
     run_command(&mut command)
 }
