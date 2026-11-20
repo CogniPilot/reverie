@@ -85,6 +85,9 @@ rehearsal disk. Budget for both copies there. The operation directory then
 holds `snapshot/console.tar.gz`. Before the swap, the updater reads back the
 complete gzip file and compares its decoded length and SHA-256 to the tar
 that passed the restore rehearsal. The snapshot receipt records both checksums.
+For an ordinary update, capture, restore verification, and compressed publication
+each have up to 30 minutes. An explicit initial-operation deadline still limits
+the entire update.
 The retained-copy workflow still writes its copy under `retained-copy/`.
 
 An image archive can be staged on scratch. Importing it still requires space

@@ -325,7 +325,7 @@ impl DeploymentService {
             _ => tools.capture_console(&source_root, &destination, end),
         }
         .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_REFUSED", error))?;
-        let verified = self.verify_release_snapshot(operation, &mut snapshot, rehearsal, end);
+        let verified = self.verify_release_snapshot(operation, &mut snapshot, rehearsal, deadline);
         let closed = snapshot.close().map_err(|error| {
             DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CLOSE_UNCONFIRMED", error)
         });
@@ -339,12 +339,10 @@ impl DeploymentService {
         operation: &Operation,
         snapshot: &mut reverie_host::deployment_snapshot::ConsoleSnapshot,
         rehearsal: Option<(&RehearsalRoot, BackupFormat)>,
-        end: Instant,
+        deadline: OperationDeadline,
     ) -> Result<()> {
-        self.source_current(operation, false)?;
-        snapshot
-            .verify_source(end)
-            .map_err(|error| DeploymentError::snapshot("DEPLOYMENT_SNAPSHOT_CHANGED", error))?;
+        // The rehearsal verifies the stopped source and archive before extraction
+        // and again after comparing the restored tree.
         self.source_current(operation, false)?;
         snapshot
             .rehearse_at(
@@ -352,7 +350,7 @@ impl DeploymentService {
                     Some((root, BackupFormat::Tar)) => Some(root),
                     _ => None,
                 },
-                end,
+                deadline.snapshot(),
             )
             .map_err(|error| {
                 DeploymentError::snapshot("DEPLOYMENT_RESTORE_REHEARSAL_REFUSED", error)
@@ -360,7 +358,7 @@ impl DeploymentService {
         self.source_current(operation, false)?;
         let (archive, checksum) = if matches!(rehearsal, Some((_, BackupFormat::Gzip))) {
             snapshot
-                .compressed_copy(&operation.directory.join("snapshot"), end)
+                .compressed_copy(&operation.directory.join("snapshot"), deadline.snapshot())
                 .map_err(|error| {
                     DeploymentError::snapshot("DEPLOYMENT_COMPRESSED_BACKUP_REFUSED", error)
                 })?
