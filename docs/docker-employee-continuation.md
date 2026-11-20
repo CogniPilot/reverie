@@ -58,6 +58,11 @@ original provider. Returning from vacation or completing a pending original
 operation makes the employee eligible on the next pass. Operator wake and the
 periodic check use the same attachment service.
 
+The first failed attachment is retried on the next ten-second check. Repeated
+failures with the same reason double the interval up to two minutes. Each
+employee has an independent interval. An explicit restore, a newly observed
+resource change, or a new session binding can trigger an earlier check.
+
 Cold recovery still needs a durable Rust operation with the following behavior.
 
 1. Read the current desired state, session generation, account, provider thread

@@ -215,6 +215,8 @@ export class DockerEmployeeRuntime {
   #resourceConvergence?: ReturnType<DockerResourceRevisionService['convergeAll']>;
   #resourceTimer?: ReturnType<typeof setInterval>;
   #resourceTick?: Promise<void>;
+  #tick = 0;
+  #viewerRetries = new WeakMap<DockerExistingViewRestoration, { delay: number; due: number }>();
 
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
@@ -751,42 +753,51 @@ export class DockerEmployeeRuntime {
     const a = this.#attached;
     if (!a) return;
     const reports = new Map(this.restorationReports.map(report => [report.employeeId, report]));
-    const retryViewer = a.company.store.snapshot().employees.some(employee => {
-      const report = reports.get(employee.id);
-      if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true)
-        return !!report;
-      if (!report) return true;
-      if (report.state === 'attached')
-        return !this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId);
-      if (report.code !== 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') return true;
-      const phase = a.store.record(employee.id)?.phase;
-      return phase === 'ready' || phase === 'provider-issued';
+    this.#tick++;
+    const results = await this.#convergeResources().catch((error: unknown) => {
+      if (!this.current()) throw error;
+      return [];
     });
-    if (retryViewer) {
-      // This pass already reconciles resources before checking the original provider.
-      await this.restoreExistingViews();
-      return;
+    const changed = new Set(results.flatMap(result => result.status === 'fulfilled' &&
+      (result.value.state === 'observed' || result.value.state === 'applied') ? [result.value.employeeId] : []));
+    const keep = new Map<string, DockerExistingViewRestoration>();
+    for (const employee of a.company.store.snapshot().employees) {
+      const report = reports.get(employee.id);
+      if (!employee.dockerBinding || !report || changed.has(employee.id)) continue;
+      if (report.state === 'attached') {
+        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId))
+          keep.set(employee.id, report);
+      } else if (report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') {
+        const phase = a.store.record(employee.id)?.phase;
+        if (phase !== 'ready' && phase !== 'provider-issued') keep.set(employee.id, report);
+      } else if ((this.#viewerRetries.get(report)?.due ?? 0) > this.#tick) keep.set(employee.id, report);
     }
-    const results = await this.#convergeResources();
-    if (results.some(result => result.status === 'fulfilled' &&
-        (result.value.state === 'observed' || result.value.state === 'applied')))
-      await this.restoreExistingViews();
+    await this.#restore(keep);
   }
   restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    return this.#restore();
+  }
+  #restore(keep?: ReadonlyMap<string, DockerExistingViewRestoration>): Promise<readonly DockerExistingViewRestoration[]> {
     if (this.#restoring) return this.#restoring;
-    const work = this.#restoreExistingViews().then((reports) => {
+    const work = this.#restoreExistingViews(keep).then((reports) => {
       this.#restoring = undefined; this.#startResourceConvergence(); return reports;
     }, (cause: unknown) => { this.#restoring = undefined; throw cause; });
     this.#restoring = work; return work;
   }
-  async #restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+  async #restoreExistingViews(keep?: ReadonlyMap<string, DockerExistingViewRestoration>): Promise<readonly DockerExistingViewRestoration[]> {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
-    try { await this.#convergeResources(); }
+    try { if (!keep) await this.#convergeResources(); }
     catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
+    const previous = new Map(this.restorationReports.map(report => [report.employeeId, report]));
     for (const employee of a.company.store.snapshot().employees) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
+      const retained = keep?.get(employee.id);
+      if (retained && retained === previous.get(employee.id)) {
+        reports.push(retained);
+        continue;
+      }
       const base = {
         employeeId: employee.id,
         sessionId: employee.sessionId,
@@ -839,6 +850,14 @@ export class DockerEmployeeRuntime {
         }
         reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }));
       }
+    }
+    for (const report of reports) {
+      if (report.state !== 'held' || report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' ||
+          this.#viewerRetries.has(report)) continue;
+      const prior = previous.get(report.employeeId);
+      const delay = prior?.state === 'held' && prior.code === report.code
+        ? Math.min(12, (this.#viewerRetries.get(prior)?.delay ?? 1) * 2) : 1;
+      this.#viewerRetries.set(report, { delay, due: this.#tick + delay });
     }
     this.#restorationReports = Object.freeze(reports);
     return this.#restorationReports;

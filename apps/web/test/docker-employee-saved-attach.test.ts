@@ -1563,6 +1563,24 @@ describe('in-place Docker existing-view renewal', () => {
       vi.useRealTimers();
     }
   });
+  it('backs off repeated viewer failures while keeping an explicit restore immediately available', async () => {
+    const f = await runtimeFixture();
+    f.captured.mockRejectedValueOnce(Error('Unavailable')).mockRejectedValueOnce(Error('Still unavailable'));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      expect(await f.runtime.restoreExistingViews()).toMatchObject([{ state: 'held' }]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(f.captured).toHaveBeenCalledTimes(2));
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(f.captured).toHaveBeenCalledTimes(2);
+      expect(await f.runtime.restoreExistingViews()).toMatchObject([{ state: 'attached' }]);
+      expect(f.captured).toHaveBeenCalledTimes(3);
+      expect(native.writes).toHaveLength(f.before.writes);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
   it('attaches a newly desired employee without a resource change or provider launch', async () => {
     const f = await runtimeFixture();
     await f.companyFile.update(state => { state.employees[0]!.onVacation = true; });
