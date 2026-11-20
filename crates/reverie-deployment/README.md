@@ -89,6 +89,11 @@ receipt report `backup_verified: false` / `backupVerified: false`. No recovery
 path automatically extracts data onto the live company. Returning to an older
 console can fail after newer schema writes; this mode accepts fixing forward.
 
+For a fresh prepared operation, add `--stop-running-source` to that command
+to stop the running console before retaining the copy. The deployment tool
+checks the original container incarnation, candidate, bind grants and shared
+writers before recording and issuing the stop.
+
 The snapshot is a verified copy of the observed stopped console subtree. Other
 worker-writable account paths require an explicit writer/consistency disposition;
 the shared deployment lock alone does not establish whole-company quiescence.

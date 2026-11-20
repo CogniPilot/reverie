@@ -41,15 +41,30 @@ impl OperationDeadline {
     }
 }
 impl DeploymentService {
-    /// Explicit owner recovery after backup verification refused. Preserve a
-    /// full ordinary copy, with no claim that independently live writers paused.
+    /// Recover a stopped source after backup verification refused.
     pub fn activate_retained(&self, id: &str) -> Result<DeploymentStatus> {
+        self.activate_retained_scoped(id, false)
+    }
+
+    /// Stop a running source and retain an ordinary, unrehearsed copy.
+    pub fn activate_retained_from_running(&self, id: &str) -> Result<DeploymentStatus> {
+        self.activate_retained_scoped(id, true)
+    }
+
+    fn activate_retained_scoped(
+        &self,
+        id: &str,
+        stop_running_source: bool,
+    ) -> Result<DeploymentStatus> {
         let operation = self.effect_operation(id)?;
         self.claimed(&operation)?;
         operation.prepared()?;
-        self.source_current(&operation, false)?;
+        self.source_current(&operation, stop_running_source)?;
         require(
-            !operation.exists("old-rename-attempt") && !operation.exists("start-attempt"),
+            !operation.exists("old-rename-attempt")
+                && !operation.exists("start-attempt")
+                && !operation.exists("rollback-attempt")
+                && !operation.exists("retained-copy-attempt"),
             "DEPLOYMENT_SWAP_ALREADY_ATTEMPTED",
         )?;
         let pins = self.pins(&operation)?;
@@ -68,6 +83,9 @@ impl DeploymentService {
             let source = self.data_source(&operation)?.join("console");
             let destination = operation.directory.join("retained-copy");
             require(!destination.try_exists()?, "DEPLOYMENT_COPY_OCCUPIED")?;
+            if stop_running_source {
+                self.stop_for_retained_copy(&operation, &pins)?;
+            }
             operation.attempt("retained-copy-attempt")?;
             let status = std::process::Command::new(copy)
                 .args(["--archive", "--reflink=auto", "--no-target-directory", "--"])
@@ -91,6 +109,29 @@ impl DeploymentService {
             operation.status()
         })();
         DeploymentError::finalized(result, pins.close())
+    }
+
+    fn stop_for_retained_copy(
+        &self,
+        operation: &Operation,
+        pins: &crate::pins::Pins,
+    ) -> Result<()> {
+        require(
+            !operation.exists("stop-attempt") && operation.plan.live_account_writers.is_none(),
+            "DEPLOYMENT_RETAINED_STOP_NOT_ADMITTED",
+        )?;
+        let source = self.source_current(operation, true)?;
+        require(
+            source["Name"] == format!("/{}", operation.plan.container),
+            "DEPLOYMENT_SOURCE_NAME_CHANGED",
+        )?;
+        pins.running_mounts(&source)?;
+        self.refuse_shared_writers(&source)?;
+        self.verify_effect_pins(operation, pins)?;
+        operation.attempt("stop-attempt")?;
+        self.engine.stop(model::string(&source, "Id")?)?;
+        self.source_current(operation, false)?;
+        self.verify_effect_pins(operation, pins)
     }
     /// Explicit owner-selected update without a backup. All ordinary source,
     /// pins, candidate, writer exclusion and one-attempt swap guards still hold.

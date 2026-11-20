@@ -53,6 +53,9 @@ enum Action {
         /// Explicitly accept that the retained copy has not passed consistency checks.
         #[arg(long, required = true)]
         accept_unverified_backup: bool,
+        /// Stop the unchanged running source after checking the prepared candidate and bind grants.
+        #[arg(long)]
+        stop_running_source: bool,
     },
     /// Stop, verify backup/rehearsal, swap and check the Rust-front process tree.
     Apply {
@@ -181,7 +184,12 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
             Action::ActivateRetained {
                 operation,
                 accept_unverified_backup: _,
-            } => serde_json::to_value(service.activate_retained(&operation)?)?,
+                stop_running_source,
+            } => serde_json::to_value(if stop_running_source {
+                service.activate_retained_from_running(&operation)?
+            } else {
+                service.activate_retained(&operation)?
+            })?,
             Action::Apply {
                 operation,
                 skip_backup,
@@ -218,6 +226,28 @@ fn finish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stopping_the_source_for_a_retained_copy_requires_explicit_backup_acceptance() {
+        let args = [
+            "reverie-deployment",
+            "--root",
+            "/fixture",
+            "activate-retained",
+            "selected",
+            "--stop-running-source",
+        ];
+        assert!(Arguments::try_parse_from(args).is_err());
+        let mut accepted = args.to_vec();
+        accepted.push("--accept-unverified-backup");
+        assert!(matches!(
+            Arguments::try_parse_from(accepted).unwrap().action,
+            Action::ActivateRetained {
+                stop_running_source: true,
+                accept_unverified_backup: true,
+                ..
+            }
+        ));
+    }
     #[test]
     fn stale_claim_selection_requires_both_explicit_ids_and_default_stays_unchanged() {
         let image = format!("sha256:{}", "a".repeat(64));
