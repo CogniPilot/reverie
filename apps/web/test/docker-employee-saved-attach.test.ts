@@ -1474,6 +1474,41 @@ describe('in-place Docker existing-view renewal', () => {
     },
     VIEWER_CLI_TEST_MS
   );
+  it('recovers a transient viewer failure on the next tick with no resource revision', async () => {
+    const f = await runtimeFixture();
+    f.captured.mockRejectedValueOnce(Error('Engine temporarily unavailable'));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      expect(await f.runtime.restoreExistingViews()).toMatchObject([{ state: 'held' }]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(f.runtime.restorationReports).toMatchObject([{ state: 'attached' }]));
+      expect(f.session.dockerContinuationViewCurrent).toBe(true);
+      expect(f.captured).toHaveBeenCalledTimes(2);
+      expect(f.attach).not.toHaveBeenCalled();
+      expect(native.ptys).toHaveLength(f.before.ptys);
+      expect(native.writes).toHaveLength(f.before.writes);
+      expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+  it('honors a vacation requested between a failed viewer observation and its retry', async () => {
+    const f = await runtimeFixture();
+    f.captured.mockRejectedValueOnce(Error('Engine temporarily unavailable'));
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      expect(await f.runtime.restoreExistingViews()).toMatchObject([{ state: 'held' }]);
+      await f.companyFile.update(state => { state.employees[0]!.onVacation = true; });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await vi.waitFor(() => expect(f.runtime.restorationReports).toEqual([]));
+      expect(f.captured).toHaveBeenCalledOnce();
+      expect(f.attach).not.toHaveBeenCalled();
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
   it('actual Runtime.wake renews a revoked same-provider view after caller lease completion without another attach', async () => {
     const f = await runtimeFixture();
     let allowed = true;

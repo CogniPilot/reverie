@@ -732,13 +732,27 @@ export class DockerEmployeeRuntime {
     if (this.#resourceTimer || !this.current()) return;
     this.#resourceTimer = setInterval(() => {
       if (this.#resourceTick || this.#restoring || !this.current()) return;
-      this.#resourceTick = this.#convergeResources().then(async (results) => {
-        if (results.some((result) => result.status === 'fulfilled' &&
-            (result.value.state === 'observed' || result.value.state === 'applied')))
-          await this.restoreExistingViews();
-      }).then(() => {}, () => {}).finally(() => { this.#resourceTick = undefined; });
+      this.#resourceTick = this.#reconcileTick().catch(() => {
+        // A failed observation grants no authority. The next tick reads fresh state.
+      }).finally(() => { this.#resourceTick = undefined; });
     }, 10_000);
     this.#resourceTimer.unref();
+  }
+  async #reconcileTick(): Promise<void> {
+    const retryViewer = this.restorationReports.some(
+      (report) => report.state === 'held' &&
+        (report.code === 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' ||
+         report.code === 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED')
+    );
+    if (retryViewer) {
+      // This pass already reconciles resources before checking the original provider.
+      await this.restoreExistingViews();
+      return;
+    }
+    const results = await this.#convergeResources();
+    if (results.some(result => result.status === 'fulfilled' &&
+        (result.value.state === 'observed' || result.value.state === 'applied')))
+      await this.restoreExistingViews();
   }
   restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
     if (this.#restoring) return this.#restoring;
