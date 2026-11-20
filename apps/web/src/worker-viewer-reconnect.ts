@@ -155,7 +155,7 @@ export class WorkerViewerReconnect {
       (automatic && session.viewerInspectionRequested) ||
       (session.runtimeHealth !== 'disconnected' && (automatic || !session.viewerInputHeld)))
       return 'unavailable';
-    if (session.docker && (automatic || !d.dockerReconnect)) return 'unavailable';
+    if (session.docker && (!session.docker.continuation || !d.dockerReconnect)) return 'unavailable';
     const manualDiagnostic = !automatic && d.diagnosticViewer?.() === true && !!d.diagnosticMoveGuard;
     let diagnostic = !d.providerHealthy(original);
     if (diagnostic && !manualDiagnostic) return 'unavailable';

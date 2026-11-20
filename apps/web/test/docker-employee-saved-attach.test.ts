@@ -1108,6 +1108,35 @@ describe('in-place Docker existing-view renewal', () => {
       expect(restored.toPersistedState()).not.toHaveProperty('dockerProviderViewCurrent');
     }
   );
+  it('automatically reconnects a lost boxed viewer once the original provider is healthy', async () => {
+    installViewerCustody();
+    const f = await runtimeFixture();
+    native.exits.at(-1)!({ exitCode: 1, signal: 0 });
+    const pane = f.mux.getSession(sid)!;
+    vi.spyOn(f.mux, 'readPaneLiveness').mockResolvedValue({ state: 'live', pid: pane.pid });
+    let healthy = false;
+    const revalidate = vi.fn(async () => true);
+    const moveGuard = vi.fn(async () => Object.assign(() => true, { revalidate }));
+    const publish = vi.fn();
+    const watcher = new WorkerViewerReconnect({
+      company: f.company, session: id => f.sessions.get(id), ready: () => true,
+      providerHealthy: () => healthy, moveGuard, pause: () => () => {}, publish,
+      dockerReconnect: (employee, admitted, checkMove) =>
+        f.runtime.reconnectViewer(employee.id, employee, employee.owner, admitted, checkMove),
+    });
+    await watcher.tick();
+    expect(moveGuard).not.toHaveBeenCalled();
+    healthy = true;
+    await watcher.tick();
+    await watcher.tick();
+    expect(moveGuard).toHaveBeenCalledOnce();
+    expect(revalidate).toHaveBeenCalled();
+    expect(publish).toHaveBeenCalledExactlyOnceWith(f.session);
+    expect(f.session.dockerContinuationViewCurrent).toBe(true);
+    expect(native.ptys).toHaveLength(f.before.ptys + 1);
+    expect(native.writes).toHaveLength(f.before.writes);
+    expect(JSON.stringify(JSON.parse(readFileSync(f.path, 'utf8'))[PROVIDER_LAUNCH_DISK_KEY])).toBe(f.before.intent);
+  });
   it('repairs a naturally exited actual Docker Session viewer whose old private view was revoked', async () => {
     installViewerCustody();
     const f = await runtimeFixture();

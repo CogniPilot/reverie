@@ -6,7 +6,7 @@ A busy badge does not prove work. Check employee, session and activity. Preserve
 
 Open the employee profile and Debug terminal. An idle prompt is not failure. Native laptop evidence can show Online while its optional viewer is unavailable; observations expire within 25 seconds. Liveness and HTTP success do not prove model readiness or delivery.
 
-The signed-in owner can use **Status** for diagnostics and **Reconnect** to attach the existing server viewer. Browser attachment is separate. Neither replaces the provider, wakes someone off, clears drafts or resends uncertain input.
+If a Docker employee loses its server terminal connection, Reverie checks the original provider's health and tries to reconnect the viewer. It respects vacations, deliberate stops and session moves. The signed-in owner can use **Status** to see the reason for a delay and **Reconnect** to request a repair. Reconnecting preserves the conversation and pending input.
 
 **Restart session** preserves identity, memory and channel membership. Explicitly return an absent employee first. **Recover a stalled session** requires checking activity: running tasks, dialogs and input within two minutes block it; redraws alone do not. Verify readiness and request a brief chat acknowledgement afterward.
 
