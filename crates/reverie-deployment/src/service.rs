@@ -135,15 +135,23 @@ impl DeploymentService {
     /// Read the registered journal during Engine outages. Terminal readiness
     /// still requires a fresh authenticated Engine observation.
     pub fn registered_status(root: &Path, id: &str) -> Result<DeploymentStatus> {
-        Self::registered_status_with_socket(root, id, Path::new("/var/run/docker.sock"))
+        Self::registered_status_with_socket(root, Some(id), Path::new("/var/run/docker.sock"))
+    }
+    /// Inspect the operation holding the installation claim under the same update lock.
+    pub fn registered_active_status(root: &Path) -> Result<DeploymentStatus> {
+        Self::registered_status_with_socket(root, None, Path::new("/var/run/docker.sock"))
     }
     fn registered_status_with_socket(
         root: &Path,
-        id: &str,
+        id: Option<&str>,
         socket: &Path,
     ) -> Result<DeploymentStatus> {
         let mut service = Self::capture_with(root, || Engine::client(socket))?;
-        DeploymentError::finalized(service.status(id), service.close())
+        let status = match id {
+            Some(id) => service.status(id),
+            None => claim::active_status(&service),
+        };
+        DeploymentError::finalized(status, service.close())
     }
     fn capture_with(root: &Path, connect: impl FnOnce() -> Result<Engine>) -> Result<Self> {
         let mut installation = Installation::capture(root)?;

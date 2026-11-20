@@ -46,8 +46,9 @@ agents can call them without opening the website. See the
 [OPS client guide](crates/reverie-ops-cli/README.md).
 
 For a registered console deployment, the local owner can run
-`reverie-deployment --root ROOT status OPERATION` to inspect an update, even
-while Docker is unavailable. The result distinguishes the recorded stage from
+`reverie-deployment --root ROOT status` to inspect the claimed update, even
+while Docker is unavailable. Supply an operation ID to inspect a specific preview
+or historical update. The result distinguishes the recorded stage from
 current readiness. See the [deployment guide](crates/reverie-deployment/README.md).
 
 The running office still uses TypeScript for HTTP authentication and routing.

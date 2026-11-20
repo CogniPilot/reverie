@@ -18,7 +18,10 @@ struct Arguments {
 #[derive(Subcommand)]
 enum Command {
     /// Read durable operation status, including while Docker is unavailable.
-    Status { operation: String },
+    Status {
+        /// Operation ID. Omit to inspect the operation holding the registered deployment claim.
+        operation: Option<String>,
+    },
     #[command(flatten)]
     Online(Action),
 }
@@ -133,6 +136,9 @@ fn main() -> ExitCode {
 }
 fn recovery_message(code: &str) -> &'static str {
     match code {
+        "DEPLOYMENT_NO_ACTIVE_OPERATION" => {
+            "No operation holds the registered claim. For a preview, supply its operation ID to status."
+        }
         "DEPLOYMENT_SHARED_WRITABLE_MOUNT" => {
             "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
         }
@@ -151,7 +157,10 @@ fn recovery_message(code: &str) -> &'static str {
 fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
     let action = match args.action {
         Command::Status { operation } => {
-            let status = DeploymentService::registered_status(&args.root, &operation)?;
+            let status = match operation {
+                Some(id) => DeploymentService::registered_status(&args.root, &id)?,
+                None => DeploymentService::registered_active_status(&args.root)?,
+            };
             return Ok(serde_json::json!({"success":true,"data":status}));
         }
         Command::Online(action) => action,

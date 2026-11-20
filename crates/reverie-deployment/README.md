@@ -79,6 +79,11 @@ both containers, never bulk-wakes employees and never automatically restores dat
 An attempted effect is not automatically retried after a lost response. The
 registered active-operation fence and private receipts stay available for review.
 
+Run `reverie-deployment --root ROOT status` to inspect the operation holding
+the installation claim. This works after losing the operation ID. A preview
+without a claim still needs its explicit ID. An installation with no claim
+returns `DEPLOYMENT_NO_ACTIVE_OPERATION`.
+
 Run `reverie-deployment --root ROOT status OPERATION` after a lost response.
 The Rust client can read the registered journal while the Docker socket is
 unavailable. An outstanding stop attempt, for example, still reports
