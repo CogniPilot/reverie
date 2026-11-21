@@ -48,6 +48,9 @@ import { DurableCompanyResearchBackend } from '../company-research-backend.js';
 import { companySessionRuntime } from '../company-session-runtime.js';
 import { registerCompanyRoutes } from './routes/company-routes.js';
 import {EmployeeGpuClient, registerEmployeeGpuRoutes} from '../employee-gpu-access.js';
+import { EmployeeDiskBudgetService, caseFolderMeasurer } from '../employee-disk-budget-service.js';
+import { registerEmployeeDiskBudgetRoutes } from './routes/employee-disk-budget-routes.js';
+import { getCasesDir } from '../config/cases-dir.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
 import { registerEmbassyPairingRoutes } from './routes/embassy-pairing-routes.js';
@@ -1974,6 +1977,16 @@ export class WebServer extends EventEmitter {
     const employeeGpu = new EmployeeGpuClient(process.env.REVERIE_WORKER_SOCKET, ownerAuth);
     registerEmployeeGpuRoutes(this.app, this.companyService, employeeGpu, verifiedOwner);
     this.app.addHook('onClose', async () => employeeGpu.close());
+    // Per-employee disk budget: measures case folders in the background and tells an employee that is over.
+    const employeeDiskBudget = new EmployeeDiskBudgetService({
+      employees: () => this.companyService.registeredEmployees(),
+      workingDir: (id) => this.sessions.get(id)?.workingDir ?? this.store.getSession(id)?.workingDir,
+      session: (id) => this.sessions.get(id),
+      measure: caseFolderMeasurer(getCasesDir),
+    });
+    registerEmployeeDiskBudgetRoutes(this.app, this.companyService, employeeDiskBudget, verifiedOwner);
+    employeeDiskBudget.start();
+    this.app.addHook('onClose', async () => employeeDiskBudget.stop());
     registerCompanyRoutes(
       this.app,
       ctx,

@@ -41,6 +41,40 @@ pauses the selected container and excludes mounted-volume data, so an image
 commit cannot provide this shared-data backup. Coordinated shared-writer
 quiescence remains a product workflow requirement.
 
+## Employee disk budget
+
+Every employee has a fixed disk budget of 20 GiB for their case folder, the
+working directory of their saved session under the shared cases directory. Case
+folders hold cloned git repositories only. Useful work is pushed to GitHub.
+Anything kept permanently needs the owner's approval and goes on the shared
+company drive. The shared Nix store does not count against the budget.
+
+The office measures each registered employee's case folder every 30 minutes,
+starting about five minutes after it boots, one folder at a time with a
+low-priority `du` limited to that filesystem and to ten minutes. A folder is
+measured only when it is a real directory strictly under the cases directory;
+a symlinked, missing or unreachable folder, a failed or timed-out measurement
+and an employee whose cases live elsewhere (per-user case spaces in multi-user
+mode) read `unknown`, never empty. Entries `du` cannot read are left out of the
+total, so a reported size is a lower bound.
+
+An employee over budget is told in their own session, as one typed prompt, to
+clean up. The notice is sent when the folder newly goes over and then at most
+once every six hours while it stays over. It is typed only into a live session
+that is idle, not held and showing no dialog; otherwise the office tries again
+on the next cycle. Employees on vacation or stopped are measured but not told.
+Measurements and notice times are held in memory, so a restart measures again
+and repeats the notice for an employee still over budget.
+
+`GET /api/company/disk-budget` (owner only, read-only) returns the budget and,
+per employee, `usedBytes`, `measuredAt`, `state` (`ok`, `over` or `unknown`) and
+`lastNotifiedAt`. There is no write endpoint and the budget is not yet
+configurable.
+
+Current gaps: only the case folder is measured. An employee's private home and
+scratch storage are not measured and do not count yet, nothing is deleted or
+blocked automatically, and the owner is not alerted separately.
+
 ## Retained expert startup
 
 After a reboot, the ordinary session restore banner and its API offer personal

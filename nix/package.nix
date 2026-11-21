@@ -101,6 +101,7 @@ let
         test/docker-owner-stop-native.test.ts \
         test/docker-employee-continuation-http.test.ts \
         test/docker-absent-reprovision.test.ts \
+        test/employee-disk-budget.test.ts test/employee-disk-budget-service.test.ts \
         test/docker-employee-continuation.test.ts \
         test/docker-employee-source-correlation.test.ts \
         test/docker-employee-credential-installer.test.ts \
