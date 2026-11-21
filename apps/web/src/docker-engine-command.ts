@@ -24,6 +24,14 @@ export interface DockerEngineCommand {
   /** Removes one never-started reprovision source, never by force. The owning
    * workflow separately proves its labels, journal entry and that it is unused. */
   removeCreatedSource?(name: string, containerId: string, requireCurrent: () => void): Promise<void>;
+  /** Imports the worker image's registered closure into one private Nix store. */
+  prepareWorkerStore?(
+    name: string,
+    spec: Readonly<{ imageId: string; user: string; nixSource: string }>,
+    requireCurrent: () => void
+  ): Promise<void>;
+  /** Removes one recorded laptop container that hosts only its own init. */
+  removeIdleLaptop?(containerId: string, requireCurrent: () => void): Promise<void>;
 }
 const probeOrigin = Symbol('complete native read-only resource ESRCH');
 function probeArgs(args: readonly string[]): boolean {
@@ -119,6 +127,136 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
       state.Pid !== 0
     )
       throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_SOURCE_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** The broker's ordinary image preparation: the worker image's own fixed
+   * helper additively imports that image's registered closure into one
+   * employee's private Nix store. Networkless, read-only root, no capabilities,
+   * and only that store is writable. A prior helper under the same name is
+   * settled by observation, never rerun over an unknown outcome. */
+  async prepareWorkerStore(
+    name: string,
+    spec: Readonly<{ imageId: string; user: string; nixSource: string }>,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (
+      !/^reverie-boxed-nix-prepare-[a-f0-9]{32}$/.test(name) ||
+      !/^sha256:[a-f0-9]{64}$/.test(spec.imageId) ||
+      !/^[0-9]{1,9}:[0-9]{1,9}$/.test(spec.user) ||
+      !spec.nixSource.startsWith('/') ||
+      /[\0\r\n,]/.test(spec.nixSource) ||
+      spec.nixSource.split('/').includes('..')
+    )
+      throw Error('Fixed worker store preparation required');
+    const unconfirmed = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED');
+    };
+    const state = async (id: string) => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', id])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const value = row?.State as Record<string, unknown> | undefined;
+      const labels = (row?.Config as { Labels?: Record<string, string> } | undefined)?.Labels;
+      if (row?.Id !== id || row.Name !== '/' + name || row.Image !== spec.imageId || !value) return unconfirmed();
+      if (labels?.['org.reverie.purpose'] !== 'boxed-nix-prepare-v1') return unconfirmed();
+      return value;
+    };
+    requireCurrent();
+    const listed = (
+      await this.run([
+        'container',
+        'ls',
+        '--all',
+        '--no-trunc',
+        '--filter',
+        'name=^/' + name + '$',
+        '--format',
+        '{{.ID}}',
+      ])
+    )
+      .split('\n')
+      .filter((line) => line !== '');
+    if (listed.length > 1 || listed.some((id) => !/^[a-f0-9]{64}$/.test(id))) unconfirmed();
+    let id = listed[0];
+    if (!id) {
+      requireCurrent();
+      id = await this.create(
+        name,
+        {
+          Image: spec.imageId,
+          User: spec.user,
+          Entrypoint: ['/bin/reverie-nix-store-prepare'],
+          Cmd: [],
+          Env: ['HOME=/tmp/nix-bootstrap-home', 'TMPDIR=/tmp'],
+          Labels: { 'org.reverie.purpose': 'boxed-nix-prepare-v1' },
+          NetworkDisabled: true,
+          HostConfig: {
+            Init: true,
+            ReadonlyRootfs: true,
+            CapDrop: ['ALL'],
+            SecurityOpt: ['no-new-privileges'],
+            NetworkMode: 'none',
+            Memory: 512 * 1024 * 1024,
+            MemorySwap: 512 * 1024 * 1024,
+            PidsLimit: 128,
+            NanoCpus: 1_000_000_000,
+            Tmpfs: {
+              '/tmp': 'rw,nosuid,nodev,size=268435456,mode=1777',
+              '/nix/store/.links': 'rw,nosuid,nodev,size=1048576,mode=1777',
+            },
+            Mounts: [{ Type: 'bind', Source: spec.nixSource, Target: '/target/nix' }],
+          },
+        },
+        requireCurrent
+      );
+    }
+    let value = await state(id);
+    if (value.Status === 'created') {
+      requireCurrent();
+      await this.run(['container', 'start', id]);
+      value = await state(id);
+    }
+    // The helper carries the original five-minute budget itself.
+    const end = Date.now() + 330_000;
+    while (value.Running === true || value.Status === 'running') {
+      if (Date.now() >= end) unconfirmed();
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      value = await state(id);
+    }
+    if (value.Status !== 'exited' || value.ExitCode !== 0 || value.OOMKilled === true) unconfirmed();
+    await this.run(['container', 'rm', id]);
+  }
+  /** Removes one recorded laptop container that hosts no process beyond its
+   * own init, never by force. The owning workflow separately proves that the
+   * container is the employee's recorded one and that no provider ever ran. */
+  async removeIdleLaptop(containerId: string, requireCurrent: () => void): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) throw Error('Fixed laptop container required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE');
+    };
+    const inspect = async () => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const state = row?.State as Record<string, unknown> | undefined;
+      if (row?.Id !== containerId || !state || !/^\/reverie-boxed-(?:source-)?[a-f0-9]{64}$/.test(String(row.Name)))
+        return notRemovable();
+      return state;
+    };
+    requireCurrent();
+    let state = await inspect();
+    if (state.Paused === true || state.Restarting === true) notRemovable();
+    if (state.Running === true) {
+      const rows = (await this.run(['container', 'top', containerId, '-eo', 'pid']))
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line !== '');
+      // A header and the container's own init; anything else is a live tenant.
+      if (rows.length !== 2 || rows[0] !== 'PID' || rows[1] !== String(state.Pid)) notRemovable();
+      requireCurrent();
+      await this.run(['container', 'stop', '--time', '20', containerId]);
+      state = await inspect();
+    }
+    if (state.Running !== false || !['exited', 'created'].includes(String(state.Status))) notRemovable();
     requireCurrent();
     await this.run(['container', 'rm', containerId]);
   }

@@ -13,6 +13,7 @@ import { StateStore } from '../src/state-store.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import {
   DockerEmployeeContinuation,
+  DockerEmployeeContinuationError,
   dockerContinuationDigest,
   type DockerContinuationAuthority,
   type DockerContinuationEngine,
@@ -168,6 +169,25 @@ class FakeEngine {
     });
     if (this.createOutcome === 'lost-reply') throw Error('synthetic lost create reply');
     return id;
+  }
+  readonly prepared: Array<{ name: string; spec: Json; sources: number }> = [];
+  prepareOutcome: 'ok' | 'failed' = 'ok';
+  /** The image's own helper; the fake records the request and the inventory it ran against. */
+  async prepareWorkerStore(name: string, spec: Json, current: () => void): Promise<void> {
+    current();
+    const sources = [...this.containers.values()].filter((row) => String(row.Name).startsWith('/reverie-boxed-source-'));
+    this.prepared.push({ name, spec: structuredClone(spec), sources: sources.length });
+    if (this.prepareOutcome === 'failed') throw Error('synthetic preparation failure');
+  }
+  readonly tenants = new Set<string>();
+  readonly discarded: string[] = [];
+  /** Same guard as the packaged command: nothing beyond the container's init. */
+  async removeIdleLaptop(id: string, current: () => void): Promise<void> {
+    current();
+    if (!this.containers.has(id)) throw Error('No such object');
+    if (this.tenants.has(id)) throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE');
+    this.discarded.push(id);
+    this.containers.delete(id);
   }
   readonly removed: string[] = [];
   removeOutcome: 'ok' | 'lost-reply' | 'not-sent' = 'ok';
@@ -1635,5 +1655,94 @@ describe('plan move abandonment', () => {
       'Terminal native plan history cannot dispatch'
     );
     expect(await moves.abandonAbsentDockerMoves(employee, owner, abandonment, () => {})).toEqual([]);
+  });
+});
+
+describe('worker store preparation', () => {
+  it('imports the worker image into the private store before the source exists', async () => {
+    const f = await fixture();
+    f.setLive({ inert: true });
+    await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(f.engine.prepared).toEqual([
+      {
+        name: 'reverie-boxed-nix-prepare-' + retireOperation.replaceAll('-', ''),
+        spec: { imageId: workerImage, user: template.user, nixSource: f.engine.prepared[0]!.spec.nixSource },
+        sources: 0,
+      },
+    ]);
+    expect(String(f.engine.prepared[0]!.spec.nixSource)).toMatch(/\/nix$/);
+    expect(f.engine.created).toHaveLength(1);
+  });
+  it('creates no source after an unconfirmed preparation and repeats it on the same operation', async () => {
+    const f = await fixture();
+    f.setLive({ inert: true });
+    const request = await f.request();
+    f.engine.prepareOutcome = 'failed';
+    await expect(f.service.reprovision(employeeId, request, f.authority)).resolves.toMatchObject({
+      state: 'held',
+      code: 'DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED',
+    });
+    expect(f.engine.created).toHaveLength(0);
+    expect(f.entry()).toMatchObject({ source: { phase: 'issued' } });
+    f.engine.prepareOutcome = 'ok';
+    await expect(f.service.reprovision(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.prepared).toHaveLength(2);
+    expect(f.engine.created).toHaveLength(1);
+  });
+});
+describe('a laptop whose provider never started', () => {
+  const issued = () => DockerEmployeeContinuationRecord.parse({ ...v2Row('ready'), phase: 'provider-issued' });
+  const present = (f: Fixture, running = true) => {
+    f.engine.container(originalCid, {});
+    f.engine.container(destinationCid, {}, running);
+  };
+  it('discards the idle recorded containers and reprovisions', async () => {
+    const f = await fixture({ row: issued() });
+    present(f);
+    f.setLive({ inert: true });
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      mode: 'retire',
+      present: [destinationCid, originalCid].sort(),
+      discard: [destinationCid, originalCid].sort(),
+      allowedActions: ['reprovision'],
+    });
+    expect(preview).not.toHaveProperty('code');
+    const result = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(result).toMatchObject({ state: 'ready' });
+    expect(f.engine.discarded.sort()).toEqual([destinationCid, originalCid].sort());
+    expect(f.engine.prepared).toHaveLength(1);
+    expect(f.snapshot().dockerEmployeeContinuations).toEqual([]);
+  });
+  it('keeps a laptop with a tenant, a ready laptop and an unrecorded container', async () => {
+    const tenant = await fixture({ row: issued() });
+    present(tenant);
+    tenant.setLive({ inert: true });
+    tenant.engine.tenants.add(destinationCid);
+    const request = await tenant.request();
+    await expect(tenant.service.reprovision(employeeId, request, tenant.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE',
+    });
+    expect(tenant.engine.containers.has(destinationCid)).toBe(true);
+    expect(tenant.snapshot().dockerEmployeeContinuations).toHaveLength(1);
+
+    const ready = await fixture();
+    present(ready);
+    await expect(ready.service.preview(employeeId, template, ready.authority)).resolves.toMatchObject({
+      allowedActions: [],
+      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+      discard: [],
+    });
+
+    const foreign = await fixture({ row: issued() });
+    present(foreign);
+    foreign.engine.container('7'.repeat(64), {
+      'reverie.boxed.employee': employeeId,
+      'reverie.boxed.instance': deployment,
+    });
+    await expect(foreign.service.preview(employeeId, template, foreign.authority)).resolves.toMatchObject({
+      allowedActions: [],
+      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+    });
   });
 });

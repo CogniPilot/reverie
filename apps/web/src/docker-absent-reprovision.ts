@@ -564,6 +564,14 @@ export class DockerAbsentReprovision {
     if (open.some((move) => !move.docker || move.busy)) refuse('DOCKER_REPROVISION_PLAN_MOVE_ACTIVE');
     const present = await this.#present(facts.ids, employeeId);
     current();
+    // A continuation that issued its one provider launch and never reached
+    // ready has no retry. Its recorded containers may be discarded once each
+    // is proven to host nothing beyond its own init.
+    const discardable =
+      present.length > 0 &&
+      facts.row.phase === 'provider-issued' &&
+      present.every((id) => facts.ids.includes(id)) &&
+      !!this.command.removeIdleLaptop;
     const image = await this.#image();
     current();
     const { network, names } = await this.#network(employeeId, template.network);
@@ -607,6 +615,7 @@ export class DockerAbsentReprovision {
       storage,
       open,
       present,
+      discardable,
       image,
       network,
       names,
@@ -668,8 +677,12 @@ export class DockerAbsentReprovision {
       planMoves: scope.kind === 'absent' ? scope.open.map((move) => move.id) : [],
       templateDigest: scope.templateDigest,
       scopeDigest: scope.scopeDigest,
-      allowedActions: scope.present.length ? [] : (['reprovision'] as const),
-      ...(scope.present.length ? { code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' } : {}),
+      discard: scope.kind === 'absent' && scope.discardable ? scope.present : [],
+      allowedActions:
+        scope.present.length && !(scope.kind === 'absent' && scope.discardable) ? [] : (['reprovision'] as const),
+      ...(scope.present.length && !(scope.kind === 'absent' && scope.discardable)
+        ? { code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' }
+        : {}),
     };
   }
   async reprovision(
@@ -691,8 +704,10 @@ export class DockerAbsentReprovision {
           input.sessionGeneration !== scope.facts.employee.sessionGeneration
         )
           refuse('DOCKER_REPROVISION_TARGET_CHANGED');
-        if (scope.present.length) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
+        if (scope.present.length && !(scope.kind === 'absent' && scope.discardable))
+          refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
         if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
+        if (scope.kind === 'absent' && scope.present.length) await this.#discard(scope.present, scope.current);
         entry =
           scope.kind === 'absent'
             ? await this.#retire(employeeId, input, authority, scope)
@@ -708,6 +723,19 @@ export class DockerAbsentReprovision {
       return await this.#resume(entry, authority);
     } finally {
       this.#flights.delete(employeeId);
+    }
+  }
+  /** Each container is removed only after the Engine shows it hosts no process
+   * beyond its own init, and never by force. Home, Nix and scratch are binds. */
+  async #discard(ids: readonly string[], current: () => void): Promise<void> {
+    for (const id of ids) {
+      current();
+      try {
+        await this.command.removeIdleLaptop!(id, current);
+      } catch (cause) {
+        if (cause instanceof DockerEmployeeContinuationError) throw cause;
+        refuse('DOCKER_REPROVISION_REMOVAL_UNCONFIRMED', cause);
+      }
     }
   }
   /** Effect A. Intent (the retirement entry) is canonical before any state
@@ -1020,6 +1048,26 @@ export class DockerAbsentReprovision {
     if (seen.length > 1) refuse('DOCKER_REPROVISION_SOURCE_AMBIGUOUS');
     // The deterministic name is unique in the Engine, so a positively empty
     // listing after an issued intent cannot hide an earlier success.
+    if (!seen.length) {
+      // The broker's ordinary image preparation, before the laptop exists:
+      // the destination image's tools resolve only inside this private store.
+      if (!this.command.prepareWorkerStore) return refuse('DOCKER_REPROVISION_STORE_PREPARATION_UNAVAILABLE');
+      try {
+        await this.command.prepareWorkerStore(
+          'reverie-boxed-nix-prepare-' + entry.operationId.replaceAll('-', ''),
+          {
+            imageId: this.configuration.workerImageId,
+            user: entry.template.user,
+            nixSource: reprovisionStorage(basis, entry.template).nix,
+          },
+          current
+        );
+      } catch (cause) {
+        if (cause instanceof DockerEmployeeContinuationError) throw cause;
+        refuse('DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED', cause);
+      }
+      current();
+    }
     const id = seen[0] ?? (await this.command.create(name, configuration, current));
     current();
     const raw = await this.#inspect(id);

@@ -317,6 +317,16 @@ Calls, in order, for employee `EID`:
    `{ operationId, state, code?, sourceContainerId?, sourceImageId? }`.
    `ready` means the record is retired and one stopped source laptop exists.
    `held` names the refusing step; send the same body again to resume.
+   Before the source is created, the worker image's own networkless
+   `reverie-nix-store-prepare` helper additively imports that image's closure
+   into the employee's private Nix store, as the legacy broker's image
+   preparation did; without it the image's tools are dangling links behind the
+   store bind. The call can therefore take a few minutes.
+   A record that issued its one provider launch and never reached `ready`
+   (`provider-issued`) has no retry. For it the preview lists the recorded
+   containers under `discard` and still allows `reprovision`: each is removed,
+   never by force, only after the Engine shows it hosts nothing beyond its own
+   init. Home, Nix and scratch are binds and are kept.
 3. `GET /api/company/employees/EID/docker-policy`. It now reports
    `state: "stopped"`, `operationId: null`, the new `containerId`, `imageId`,
    `destinationImageId`, `policyDigest` and `allowedActions: ["continue"]`.
