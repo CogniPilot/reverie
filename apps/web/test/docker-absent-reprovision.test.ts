@@ -1758,6 +1758,14 @@ describe('a laptop whose provider never started', () => {
       };
     });
     f.engine.container(destinationCid, {}, true);
+    // The running laptop is still attached to the employee's office bridge.
+    const bridge = f.engine.networks.get('b'.repeat(64))!;
+    (bridge.Containers as Json)[destinationCid] = { Name: 'synthetic-laptop' };
+    const removeIdle = f.engine.removeIdleLaptop.bind(f.engine);
+    f.engine.removeIdleLaptop = async (id, current) => {
+      await removeIdle(id, current);
+      delete (bridge.Containers as Json)[id];
+    };
     const again = '88888888-8888-4888-8888-888888888888';
     const preview = await f.service.preview(employeeId, template, f.authority);
     expect(preview).toMatchObject({ mode: 'retire', discard: [source, destinationCid].sort(), allowedActions: ['reprovision'] });

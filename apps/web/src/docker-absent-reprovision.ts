@@ -197,7 +197,11 @@ export class DockerAbsentReprovision {
   }
   /** The surviving per-worker office API bridge gives the laptop its only
    * network, as on an ordinary boxed destination. This workflow creates none. */
-  async #network(employeeId: string, selected: string | undefined): Promise<{ network: Network; names: string[] }> {
+  async #network(
+    employeeId: string,
+    selected: string | undefined,
+    discarded: readonly string[] = []
+  ): Promise<{ network: Network; names: string[] }> {
     const rows = // Earlier bridge generations carry different labels; the name rule and
       // the inspected labels below bind each candidate to this employee.
       (await this.#listed('network', ['name=reverie-boxed-api-'], '{{.ID}} {{.Name}}')).map((line) => {
@@ -232,11 +236,12 @@ export class DockerAbsentReprovision {
       )
       .length(1)
       .safeParse(inspected);
-    // Exactly the office endpoint remains; another member is another laptop.
+    // Exactly the office endpoint remains; another member is another laptop,
+    // except the recorded containers this same operation is about to discard.
     if (
       !parsed.success ||
       !officeBridgeLabels(parsed.data[0]!.Labels, network.name, employeeId) ||
-      Object.keys(parsed.data[0]!.Containers).length !== 1
+      Object.keys(parsed.data[0]!.Containers).filter((id) => !discarded.includes(id)).length !== 1
     )
       refuse('DOCKER_REPROVISION_OFFICE_NETWORK_CHANGED');
     return { network, names };
@@ -586,7 +591,7 @@ export class DockerAbsentReprovision {
       !!this.command.removeIdleLaptop;
     const image = await this.#image();
     current();
-    const { network, names } = await this.#network(employeeId, template.network);
+    const { network, names } = await this.#network(employeeId, template.network, discardable ? present : []);
     current();
     const account = await this.#account(facts.row, facts.employee, template);
     current();
