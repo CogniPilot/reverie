@@ -137,7 +137,18 @@ if (mode === 'presence') {
     process.stdout.write('ABSENT\n');
     process.exit(0);
   }
-  const matches = tmux(['list-sessions', '-F', '#{session_name}']).split('\n')
+  // A socket file outlives its server across a container replacement or host
+  // restart. tmux names that exact condition; no provider can be attached to it.
+  const listed = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, 'list-sessions', '-F', '#{session_name}'],
+    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+  if (listed.error || listed.signal) refuse();
+  if (listed.status === 1 && listed.stdout === '' &&
+      listed.stderr === 'no server running on /tmp/tmux-' + process.getuid() + '/' + socketLabel + '\n') {
+    process.stdout.write('ABSENT\n');
+    process.exit(0);
+  }
+  if (listed.status !== 0) refuse();
+  const matches = listed.stdout.split('\n')
     .filter(value => value === 'reverie-dkr-' + sid);
   if (matches.length === 0) {
     process.stdout.write('ABSENT\n');
