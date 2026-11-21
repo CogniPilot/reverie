@@ -6,7 +6,12 @@ import { dockerContinuationDigest, DockerEmployeeContinuationError } from './doc
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import { DockerEmployeeInspect } from './docker-employee-engine-data.js';
 import { ephemeralProjection } from './docker-ephemeral-data.js';
-import { DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
+import {
+  DockerLaptopTemplate,
+  DockerReprovisionAccount,
+  REPROVISION_ACCOUNT_ROOT,
+} from './docker-absent-reprovision-data.js';
+import { dockerPlanGeneration } from './docker-plan-install-data.js';
 export const REPROVISION_OPERATION_LABEL = 'reverie.reprovision.operation';
 export const REPROVISION_PURPOSE_LABEL = 'reverie.reprovision.purpose';
 const WORKER_INIT = '/opt/reverie/perf/bin/reverie-worker-init';
@@ -109,6 +114,62 @@ export interface ReprovisionSourceInput {
   readonly imagePath: string;
   readonly network: string;
   readonly apiUrl: string;
+  /** Derived by `reprovisionAccount`; absent on entries that predate routing. */
+  readonly account?: DockerReprovisionAccount;
+}
+/** Provider account routing of the source, derived by the backend only.
+ * (a) A retired plan replacement keeps its in-home account generation as one
+ * Env entry. (b) A saved launch override that selects the employee's own
+ * subscription seat gets that seat as one read-write bind; the launch itself
+ * supplies the variable. (c) Otherwise nothing. */
+export function reprovisionAccount(
+  basis: DockerEmployeeContinuationRecord,
+  profileId: string | undefined,
+  overrides: Readonly<Record<string, string>> | undefined,
+  unchecked: DockerLaptopTemplate
+): DockerReprovisionAccount {
+  const template = DockerLaptopTemplate.parse(unchecked);
+  const done = (account: DockerReprovisionAccount) => {
+    if (template.accountSource !== undefined && account.kind !== 'seat-mount')
+      refuse('DOCKER_REPROVISION_ACCOUNT_SOURCE_UNUSED');
+    return DockerReprovisionAccount.parse(account);
+  };
+  if (basis.version === 3) {
+    const selected = basis.planReplacement.account;
+    return done({
+      kind: 'generation-env',
+      key: selected.provider === 'anthropic' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
+      path: dockerPlanGeneration({
+        operationId: basis.request.operationId,
+        projectionDigest: selected.projectionDigest,
+        provider: selected.provider,
+        containerId: basis.original.containerId,
+      }).configDir,
+    });
+  }
+  const seats = (['CLAUDE_CONFIG_DIR', 'CODEX_HOME'] as const).flatMap((key) => {
+    const path = overrides?.[key];
+    return typeof path === 'string' && path.startsWith(REPROVISION_ACCOUNT_ROOT) ? [{ key, path }] : [];
+  });
+  if (!seats.length) return done({ kind: 'none' });
+  const seat = seats[0]!,
+    id = seat.path.slice(REPROVISION_ACCOUNT_ROOT.length);
+  if (seats.length !== 1 || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || id !== profileId)
+    refuse('DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH');
+  const storage = reprovisionStorage(basis, template),
+    source = template.accountSource ?? posix.join(storage.home, '.reverie', 'seat-auth', id);
+  if (posix.basename(source) !== id) refuse('DOCKER_REPROVISION_ACCOUNT_SOURCE_MISMATCH');
+  const ephemeralRoot = posix.dirname(template.scratchRoot);
+  if (
+    within(source, ephemeralRoot) ||
+    within(ephemeralRoot, source) ||
+    within(storage.home, source) ||
+    within(storage.nix, source) ||
+    within(source, storage.nix) ||
+    template.mounts.some((mount) => !mount.readOnly && (within(source, mount.source) || within(mount.source, source)))
+  )
+    refuse('DOCKER_REPROVISION_TEMPLATE_STORAGE_OVERLAP');
+  return done({ kind: 'seat-mount', key: seat.key, path: seat.path, source });
 }
 /** Never started by this workflow: inert init, no command, no secret, no
  * Engine socket, no device request. The destination adds its own GPU profile. */
@@ -123,6 +184,9 @@ export function reprovisionSourceConfiguration(input: ReprovisionSourceInput): R
     bind(storage.scratch, '/scratch'),
     ...template.mounts.map((mount) => bind(mount.source, mount.destination, mount.readOnly)),
   ];
+  const account = DockerReprovisionAccount.parse(input.account ?? { kind: 'none' });
+  // The single writable path under the accounts root; a template mount cannot name one.
+  if (account.kind === 'seat-mount') mounts.push(bind(account.source, account.path));
   const workspace = template.mounts.find((mount) => mount.destination === '/reverie_workspace');
   if (template.workspaceAlias && workspace) mounts.push(bind(workspace.source, '/workspace', workspace.readOnly));
   if (workspace) mounts.push(attachments('/reverie_workspace/attachments'));
@@ -134,6 +198,7 @@ export function reprovisionSourceConfiguration(input: ReprovisionSourceInput): R
     'REVERIE_INSTALL_CLIS=none',
     ...temporaryEnvironment(),
     'REVERIE_API_URL=' + input.apiUrl,
+    ...(account.kind === 'generation-env' ? [account.key + '=' + account.path] : []),
   ];
   if (environment.some((value) => SECRET_ENV.test(value))) refuse('DOCKER_REPROVISION_SECRET_ENV_DENIED');
   return {

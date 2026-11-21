@@ -7,6 +7,7 @@ import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { DockerAbsentReprovision, type DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
+import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
@@ -422,6 +423,15 @@ export class DockerEmployeeRuntime {
             : undefined;
         },
         blocked: (id, owner) => ctx.store.dockerAbsentReprovisionBlocker(id, owner),
+        overrides: async (id) => {
+          const saved = ctx.store.getSession(id);
+          return saved
+            ? clampEnvOverridesForOwner(
+                saved.owner,
+                (saved as { __envOverrides?: Record<string, string> }).__envOverrides
+              )
+            : undefined;
+        },
         discard: (id) => ctx.discardPartiallyBuiltSession(id),
         clear: (proof) => ctx.store.commitDockerAbsentReprovision(proof),
       },

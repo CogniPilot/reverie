@@ -306,8 +306,9 @@ Preconditions, checked at preview and again at confirmation:
 Calls, in order, for employee `EID`:
 
 1. `POST /api/company/employees/EID/docker-absent/preview` with
-   `{ "template": TEMPLATE }`. It returns `sessionId`, `sessionGeneration`,
-   `record`, `absent`, `present`, `home`, `nixSource`, `scratchSource`,
+   `{ "template": TEMPLATE }`. It returns `mode`, `reason`, `sessionId`,
+   `sessionGeneration`, `record`, `absent`, `present`, `account`, `home`,
+   `nixSource`, `scratchSource`,
    `sourceImageId`, `network`, `networkCandidates`, `planMoves`,
    `templateDigest`, `scopeDigest` and `allowedActions`. It changes nothing.
 2. `POST /api/company/employees/EID/docker-absent/reprovision` with
@@ -377,9 +378,70 @@ A lost create reply leaves the operation `held`. Repeating the same request
 lists the source by its labels: an existing source is verified and recorded; a
 create is issued again only when the Engine positively lists none. A repeated
 request after `ready` returns the recorded result without Engine access. A
-different operation ID is then refused because no record remains to retire.
+different operation ID then previews as a source replacement, described below.
+
+### Provider account routing
+
+The backend derives the source's account routing; a request cannot choose it.
+The preview reports it as `account`, and it is part of `scopeDigest` and of the
+journal entry.
+
+- `generation-env`: the employee's first retired record was a plan
+  replacement. The source carries one variable, `CLAUDE_CONFIG_DIR` (Anthropic)
+  or `CODEX_HOME` (OpenAI), set to
+  `/home/agent/.reverie/plan-moves/<retired operationId>/generation-<projectionDigest>/<claude|codex>`
+  inside the private home. No mount is added.
+- `seat-mount`: the saved session's launch overrides, clamped as the provider
+  launch clamps them, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to
+  `/instances/default/console/accounts/<id>` and `<id>` is the employee's
+  current subscription profile. The source receives one read-write bind at that
+  exact path. Its host directory is `<home>/.reverie/seat-auth/<id>`, or the
+  template's `accountSource` when given; the directory name must be `<id>`. The
+  variable is not added to the source, because the launch supplies it. This is
+  the only writable path under the accounts root; `mounts` cannot name one.
+- `none`: neither applies.
+
+An override that names another profile, two seat overrides, or an
+`accountSource` with nothing to route is refused.
+
+### Replace an unused source
+
+The same two calls replace a source that was never started, for example one
+created before account routing existed. Use a new `operationId`. The preview
+reports `mode`:
+
+- `replace-source` (`reason: "source-replaced"`): the employee's newest journal
+  entry is complete and no continuation record exists.
+- `retire` with `reason: "source-superseded"`: one version 2 record was begun
+  from that source and never requested a destination (`staged` to
+  `pool-ready`, no destination, no binding, no saved boxed view). The record
+  moves verbatim into the journal entry.
+- `retire` with `reason: "recorded-containers-absent"`: the case above.
+
+For both replacement reasons the Engine must list exactly one container for the
+employee: the recorded source, with its recorded name, operation label, image
+and network, in state `created` with no start time. Any other container
+labelled for the employee, a started source, a later record phase, an open
+plan move or a storage holder the journal does not own is refused. The preview
+adds `previous: { operationId, sourceContainerId }` and `helpers`.
+
+Effects: a new journal entry naming the previous operation is recorded first.
+Then the old source is removed by ID, without force, and only while the Engine
+still reports it never started. Then the new source is created as above. A lost
+removal reply is settled by listing: an absent source is recorded as removed, a
+present one is re-proven unused before removal is requested again.
+
+A superseded record's storage holder (`reverie-boxed-storage-<digest>`,
+labels `reverie.box.storage.*`) and exited ephemeral helpers
+(`reverie-boxed-ephemeral-<digest>`, labels `reverie.box.ephemeral.*`) are left
+in place. No existing workflow stops a storage holder, so this one does not
+either. A holder keeps read-only directory handles and its name belongs to the
+retired operation, so the next continuation creates its own. The shared pool
+anchor and pool helpers are not touched; their lineage stays in
+`dockerSharedPoolLineages`.
 
 This workflow never starts a container, launches a provider, edits a resource
 policy, creates a network, deletes journal history, or changes an employee's
-identity, session, generation or account. Rebuilding deleted worker images is
-separate. Installed qualification on a real Engine is still required.
+identity, session, generation or account. It removes only a never-started
+reprovision source. Rebuilding deleted worker images is separate. Installed
+qualification on a real Engine is still required.

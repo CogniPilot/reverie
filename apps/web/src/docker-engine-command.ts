@@ -21,6 +21,9 @@ function createFailure(status?: number): DockerEmployeeContinuationError {
 export interface DockerEngineCommand {
   run(args: readonly string[], input?: string, timeoutMs?: number): Promise<string>;
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string>;
+  /** Removes one never-started reprovision source, never by force. The owning
+   * workflow separately proves its labels, journal entry and that it is unused. */
+  removeCreatedSource?(name: string, containerId: string, requireCurrent: () => void): Promise<void>;
 }
 const probeOrigin = Symbol('complete native read-only resource ESRCH');
 function probeArgs(args: readonly string[]): boolean {
@@ -99,6 +102,25 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
         child.stdin?.end(input);
       }
     });
+  }
+  async removeCreatedSource(name: string, containerId: string, requireCurrent: () => void): Promise<void> {
+    if (!/^reverie-boxed-source-[a-f0-9]{64}$/.test(name) || !/^[a-f0-9]{64}$/.test(containerId))
+      throw Error('Fixed reprovision source required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    const state = row?.State as Record<string, unknown> | undefined;
+    // Only the exact named container, and only before its first START.
+    if (
+      row?.Id !== containerId ||
+      row.Name !== '/' + name ||
+      state?.Status !== 'created' ||
+      state.Running !== false ||
+      state.Pid !== 0
+    )
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_SOURCE_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
   }
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string> {
     if (!/^reverie-boxed-(?:(?:storage|anchor|pool|leaf)-)?[a-z0-9-]{1,100}$/.test(name))

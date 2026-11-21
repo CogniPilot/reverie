@@ -25,9 +25,13 @@ import {
   DockerAbsentReprovisionRequest,
   DockerLaptopTemplate,
   allowedReprovisionTransition,
+  type DockerReprovisionAccount,
   type DockerReprovisionSourceCursor,
 } from './docker-absent-reprovision-data.js';
 import {
+  REPROVISION_OPERATION_LABEL,
+  REPROVISION_PURPOSE_LABEL,
+  reprovisionAccount,
   reprovisionSourceConfiguration,
   reprovisionSourceName,
   reprovisionStorage,
@@ -55,6 +59,8 @@ export interface DockerAbsentReprovisionSessions {
   live(sessionId: string): { readonly inert: boolean } | undefined;
   /** Why the saved launch denial could not be removed, before anything is retired. */
   blocked(sessionId: string, owner: string | undefined): string | undefined;
+  /** The saved launch overrides, clamped exactly as the provider launch clamps them. */
+  overrides(sessionId: string): Promise<Readonly<Record<string, string>> | undefined>;
   discard(sessionId: string): Promise<void>;
   clear(proof: unknown): Promise<'cleared' | 'unchanged'>;
 }
@@ -193,12 +199,12 @@ export class DockerAbsentReprovision {
    * network, as on an ordinary boxed destination. This workflow creates none. */
   async #network(employeeId: string, selected: string | undefined): Promise<{ network: Network; names: string[] }> {
     const rows = // Earlier bridge generations carry different labels; the name rule and
-    // the inspected labels below bind each candidate to this employee.
-    (await this.#listed('network', ['name=reverie-boxed-api-'], '{{.ID}} {{.Name}}')).map((line) => {
-      const [id, name, ...rest] = line.split(' ');
-      if (!id || !name || rest.length || !cid.test(id)) refuse('DOCKER_REPROVISION_OFFICE_NETWORK_UNCONFIRMED');
-      return { id: id!, name: name! };
-    });
+      // the inspected labels below bind each candidate to this employee.
+      (await this.#listed('network', ['name=reverie-boxed-api-'], '{{.ID}} {{.Name}}')).map((line) => {
+        const [id, name, ...rest] = line.split(' ');
+        if (!id || !name || rest.length || !cid.test(id)) refuse('DOCKER_REPROVISION_OFFICE_NETWORK_UNCONFIRMED');
+        return { id: id!, name: name! };
+      });
     const candidates = rows.filter((row) => workerBridgeName(row.name, employeeId)),
       names = candidates.map((row) => row.name).sort();
     if (!candidates.length) refuse('DOCKER_REPROVISION_OFFICE_NETWORK_REQUIRED');
@@ -306,7 +312,231 @@ export class DockerAbsentReprovision {
       savedContainer: stale ? saved!.docker!.containerName : null,
     };
   }
+  #head(employeeId: string, state = this.company.store.snapshot()) {
+    const entries = (state.retiredDockerEmployeeContinuations ?? []).filter((row) => row.employeeId === employeeId);
+    const heads = entries.filter((row) => !entries.some((other) => other.previous === row.operationId));
+    if (heads.length > 1) refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+    return heads[0];
+  }
+  /** The record every later source of one employee derives from. */
+  #basis(entry: DockerAbsentContinuationRetirement, state = this.company.store.snapshot()) {
+    let at = entry;
+    for (let depth = 0; depth < 256 && at.previous; depth++) {
+      const before = this.#entry(at.previous, state);
+      if (!before || before.employeeId !== entry.employeeId) refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+      at = before!;
+    }
+    if (at.previous || !at.record || at.reason !== 'recorded-containers-absent')
+      refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+    return DockerEmployeeContinuationRecord.parse(persisted(at.record!));
+  }
+  async #account(basis: DockerEmployeeContinuationRecord, employee: CompanyEmployee, template: DockerLaptopTemplate) {
+    return reprovisionAccount(
+      basis,
+      employee.runtimeRecipe?.subscriptionProfile?.id,
+      await this.sessions.overrides(employee.sessionId),
+      template
+    );
+  }
+  /** A completed entry whose source may be replaced, when no continuation
+   * record exists or the only one was begun from that exact source. */
+  #replaceable(employeeId: string): boolean {
+    const state = this.company.store.snapshot(),
+      head = this.#head(employeeId, state),
+      rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
+    if (!head || head.source.phase !== 'created') return false;
+    return rows.length === 0 || (rows.length === 1 && rows[0]!.original.containerId === head.source.containerId);
+  }
   async #scope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+    this.runtimeCurrent();
+    authority.require();
+    return this.#replaceable(employeeId)
+      ? this.replaceScope(employeeId, unchecked, authority)
+      : this.absentScope(employeeId, unchecked, authority);
+  }
+  #replaceFacts(employeeId: string, authority: DockerContinuationAuthority) {
+    this.runtimeCurrent();
+    authority.require();
+    if (this.company.store.publicationUnconfirmed) refuse('DOCKER_REPROVISION_PUBLICATION_UNCONFIRMED');
+    const state = this.company.store.snapshot(),
+      employee = this.#employee(employeeId, authority, state);
+    if (ownerStopPending(employee.sessionId)) refuse('DOCKER_REPROVISION_OWNER_STOP_PENDING');
+    if (!this.company.employeeRecoveryAvailable(employeeId, employee.owner, state))
+      refuse('DOCKER_REPROVISION_RECOVERY_PENDING');
+    if (this.continuationBusy(employeeId)) refuse('DOCKER_REPROVISION_BUSY');
+    const head = this.#head(employeeId, state);
+    if (
+      !head ||
+      head.source.phase !== 'created' ||
+      head.session.phase !== 'cleared' ||
+      (head.removal && head.removal.phase !== 'removed')
+    )
+      return refuse('DOCKER_REPROVISION_OPERATION_PENDING');
+    if (
+      head.owner !== employee.owner ||
+      head.sessionId !== employee.sessionId ||
+      head.sessionGeneration !== employee.sessionGeneration
+    )
+      refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+    if (employee.dockerBinding) refuse('DOCKER_REPROVISION_CONTINUATION_ADVANCED');
+    const rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [],
+      row = rows[0] ? DockerEmployeeContinuationRecord.parse(persisted(rows[0])) : null;
+    // Only a version 2 record that never requested a destination from this
+    // exact source may be superseded. Anything later keeps its own workflow.
+    if (
+      rows.length > 1 ||
+      (row &&
+        (row.version !== 2 ||
+          !['staged', 'office-issued', 'office-ready', 'pool-issued', 'pool-ready'].includes(row.phase) ||
+          row.destination ||
+          row.owner !== employee.owner ||
+          row.request.sessionId !== employee.sessionId ||
+          row.request.sessionGeneration !== employee.sessionGeneration ||
+          row.original.containerId !== head.source.containerId ||
+          row.tasks?.some((task) => !['storage-holder', 'anchor', 'pool-helper'].includes(task.role))))
+    )
+      refuse('DOCKER_REPROVISION_CONTINUATION_ADVANCED');
+    const saved = this.sessions.saved(employee.sessionId);
+    if (!saved || saved.id !== employee.sessionId || saved.owner !== employee.owner || saved.remote)
+      refuse('DOCKER_REPROVISION_SAVED_SESSION_REQUIRED');
+    if (saved!.nativePlanRetiredBy !== undefined) refuse('DOCKER_REPROVISION_SESSION_RETIRED');
+    if (saved!.docker) refuse('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN');
+    if (saved!.providerDispatchHeld || saved!.terminalInputHeld) refuse('DOCKER_REPROVISION_SESSION_HELD');
+    if (this.sessions.live(employee.sessionId)?.inert === false) refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
+    // Storage holders the journal already owns: this record's and retired ones'.
+    const holders = [row, ...(state.retiredDockerEmployeeContinuations ?? []).map((entry) => entry.record)]
+      .filter((value) => value?.employeeId === employeeId)
+      .flatMap((value) => value!.tasks ?? [])
+      .flatMap((task) => (task.role === 'storage-holder' && 'containerId' in task ? [task.containerId] : []));
+    return { employee, head, row, basis: this.#basis(head, state), holders: [...new Set(holders)].sort() };
+  }
+  /** Exactly the recorded source, never started. Its recorded name, operation
+   * label, image and network are the fingerprint of the entry that created it. */
+  async #unusedSource(head: DockerAbsentContinuationRetirement): Promise<void> {
+    if (head.source.phase !== 'created') return refuse('DOCKER_REPROVISION_OPERATION_PENDING');
+    let raw: DockerEmployeeInspect;
+    try {
+      raw = await this.#inspect(head.source.containerId);
+    } catch (cause) {
+      if (cause instanceof DockerEmployeeContinuationError) throw cause;
+      return refuse('DOCKER_REPROVISION_SOURCE_UNCONFIRMED', cause);
+    }
+    const state = raw.State as { Status?: unknown; Pid?: unknown; StartedAt?: unknown },
+      labels = raw.Config.Labels ?? {};
+    if (
+      (raw as { Name?: unknown }).Name !== '/' + head.source.name ||
+      raw.Image !== head.source.imageId ||
+      raw.HostConfig.NetworkMode !== head.source.network.name ||
+      labels[REPROVISION_OPERATION_LABEL] !== head.operationId ||
+      labels[REPROVISION_PURPOSE_LABEL] !== 'absent-laptop-source-v1' ||
+      labels['reverie.worker'] !== this.configuration.deployment ||
+      labels['reverie.employee'] !== head.employeeId ||
+      labels['reverie.session'] !== head.sessionId
+    )
+      refuse('DOCKER_REPROVISION_SOURCE_CHANGED');
+    if (
+      raw.State.Running ||
+      state.Status !== 'created' ||
+      state.Pid !== 0 ||
+      state.StartedAt !== '0001-01-01T00:00:00Z'
+    )
+      refuse('DOCKER_REPROVISION_SOURCE_STARTED');
+  }
+  /** Storage holders are labelled by employee. Each one must already belong to
+   * this journal; they hold read-only directory handles and are left in place. */
+  async #helpers(employeeId: string, known: readonly string[]): Promise<string[]> {
+    const listed = await this.#containers([
+      'label=reverie.box.storage.employee=' + employeeId,
+      'label=reverie.box.storage.box=' + this.configuration.boxId,
+    ]);
+    if (listed.some((id) => !known.includes(id))) refuse('DOCKER_REPROVISION_HELPER_FOREIGN');
+    return listed.sort();
+  }
+  private async replaceScope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+    const template = DockerLaptopTemplate.parse(unchecked),
+      facts = this.#replaceFacts(employeeId, authority);
+    const key = (value: typeof facts) =>
+      dockerContinuationDigest({
+        owner: value.employee.owner ?? null,
+        sessionId: value.employee.sessionId,
+        sessionGeneration: value.employee.sessionGeneration,
+        name: value.employee.name,
+        profile: value.employee.runtimeRecipe?.subscriptionProfile?.id ?? null,
+        head: value.head,
+        row: value.row,
+        holders: value.holders,
+      });
+    const factsDigest = key(facts);
+    const current = () => {
+      if (key(this.#replaceFacts(employeeId, authority)) !== factsDigest) refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+    };
+    const sourceId = (facts.head.source as { containerId: string }).containerId;
+    const storage = reprovisionStorage(facts.basis, template);
+    const moves = this.planMoves();
+    if (!moves) refuse('DOCKER_REPROVISION_PLAN_JOURNAL_UNAVAILABLE');
+    const open = await moves!.openMoves(employeeId, facts.employee.owner);
+    current();
+    if (open.length) refuse('DOCKER_REPROVISION_PLAN_MOVE_ACTIVE');
+    const listed = await this.#present([sourceId], employeeId);
+    current();
+    if (!listed.includes(sourceId)) refuse('DOCKER_REPROVISION_SOURCE_ABSENT');
+    const present = listed.filter((id) => id !== sourceId);
+    await this.#unusedSource(facts.head);
+    current();
+    const helpers = await this.#helpers(employeeId, facts.holders);
+    current();
+    const image = await this.#image();
+    current();
+    const { network, names } = await this.#network(employeeId, template.network);
+    current();
+    const account = await this.#account(facts.basis, facts.employee, template);
+    current();
+    requireReprovisionEphemeralLayout(
+      this.#input(facts.basis, template, '', facts.employee.name, image, network, account)
+    );
+    const templateDigest = dockerContinuationDigest(template);
+    const mode = facts.row ? ('retire' as const) : ('replace-source' as const),
+      reason = facts.row ? ('source-superseded' as const) : ('source-replaced' as const);
+    const scopeDigest = dockerContinuationDigest({
+      purpose: 'docker-absent-reprovision-scope-v1',
+      mode,
+      reason,
+      deployment: this.configuration.deployment,
+      boxId: this.configuration.boxId,
+      employeeId,
+      owner: facts.employee.owner ?? null,
+      sessionId: facts.employee.sessionId,
+      sessionGeneration: facts.employee.sessionGeneration,
+      previous: dockerContinuationDigest(facts.head),
+      record: dockerContinuationDigest(facts.row),
+      present,
+      helpers,
+      sourceImageId: image.imageId,
+      network,
+      storage,
+      account,
+      templateDigest,
+    });
+    return {
+      kind: 'replace' as const,
+      mode,
+      reason,
+      template,
+      templateDigest,
+      facts,
+      current,
+      storage,
+      present,
+      helpers,
+      image,
+      network,
+      names,
+      account,
+      sourceId,
+      scopeDigest,
+    };
+  }
+  private async absentScope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
     const template = DockerLaptopTemplate.parse(unchecked),
       facts = this.#facts(employeeId, authority);
     // Identity, record, binding and saved view; unrelated profile edits do not matter.
@@ -316,6 +546,7 @@ export class DockerAbsentReprovision {
         sessionId: value.employee.sessionId,
         sessionGeneration: value.employee.sessionGeneration,
         name: value.employee.name,
+        profile: value.employee.runtimeRecipe?.subscriptionProfile?.id ?? null,
         row: value.row,
         binding: value.binding,
         ids: value.ids,
@@ -337,10 +568,17 @@ export class DockerAbsentReprovision {
     current();
     const { network, names } = await this.#network(employeeId, template.network);
     current();
-    requireReprovisionEphemeralLayout(this.#input(facts.row, template, '', facts.employee.name, image, network));
+    const account = await this.#account(facts.row, facts.employee, template);
+    current();
+    requireReprovisionEphemeralLayout(
+      this.#input(facts.row, template, '', facts.employee.name, image, network, account)
+    );
     const templateDigest = dockerContinuationDigest(template);
     const scopeDigest = dockerContinuationDigest({
       purpose: 'docker-absent-reprovision-scope-v1',
+      mode: 'retire',
+      reason: 'recorded-containers-absent',
+      account,
       deployment: this.configuration.deployment,
       boxId: this.configuration.boxId,
       employeeId,
@@ -358,7 +596,23 @@ export class DockerAbsentReprovision {
       storage,
       templateDigest,
     });
-    return { template, templateDigest, facts, current, storage, open, present, image, network, names, scopeDigest };
+    return {
+      kind: 'absent' as const,
+      mode: 'retire' as const,
+      reason: 'recorded-containers-absent' as const,
+      template,
+      templateDigest,
+      facts,
+      current,
+      storage,
+      open,
+      present,
+      image,
+      network,
+      names,
+      account,
+      scopeDigest,
+    };
   }
   #input(
     row: DockerEmployeeContinuationRecord,
@@ -366,7 +620,8 @@ export class DockerAbsentReprovision {
     operationId: string,
     employeeName: string,
     image: { imageId: string; path: string },
-    network: Network
+    network: Network,
+    account: DockerReprovisionAccount | undefined
   ) {
     return {
       row,
@@ -378,26 +633,39 @@ export class DockerAbsentReprovision {
       imagePath: image.path,
       network: network.name,
       apiUrl: this.configuration.apiUrl,
+      ...(account ? { account } : {}),
     };
   }
   /** Read-only. The digest binds everything the confirmation will act on. */
   async preview(employeeId: string, template: unknown, authority: DockerContinuationAuthority) {
     const scope = await this.#scope(employeeId, template, authority),
-      { facts } = scope;
+      { facts } = scope,
+      basis = scope.kind === 'absent' ? scope.facts.row : scope.facts.basis;
     return {
+      mode: scope.mode,
+      reason: scope.reason,
       employeeId,
       sessionId: facts.employee.sessionId,
       sessionGeneration: facts.employee.sessionGeneration,
-      record: { version: facts.row.version, phase: facts.row.phase, operationId: facts.row.request.operationId },
-      absent: facts.ids.filter((id) => !scope.present.includes(id)),
+      record: facts.row
+        ? { version: facts.row.version, phase: facts.row.phase, operationId: facts.row.request.operationId }
+        : null,
+      ...(scope.kind === 'replace'
+        ? {
+            previous: { operationId: scope.facts.head.operationId, sourceContainerId: scope.sourceId },
+            helpers: scope.helpers,
+          }
+        : {}),
+      absent: scope.kind === 'absent' ? scope.facts.ids.filter((id) => !scope.present.includes(id)) : [],
       present: scope.present,
-      home: facts.row.original.home,
+      account: scope.account,
+      home: basis.original.home,
       nixSource: scope.storage.nix,
       scratchSource: scope.storage.scratch,
       sourceImageId: scope.image.imageId,
       network: scope.network,
       networkCandidates: scope.names,
-      planMoves: scope.open.map((move) => move.id),
+      planMoves: scope.kind === 'absent' ? scope.open.map((move) => move.id) : [],
       templateDigest: scope.templateDigest,
       scopeDigest: scope.scopeDigest,
       allowedActions: scope.present.length ? [] : (['reprovision'] as const),
@@ -416,8 +684,20 @@ export class DockerAbsentReprovision {
     this.#flights.add(employeeId);
     try {
       let entry = this.#entry(input.operationId);
-      if (!entry) entry = await this.#retire(employeeId, input, authority);
-      else if (
+      if (!entry) {
+        const scope = await this.#scope(employeeId, input.template, authority);
+        if (
+          input.sessionId !== scope.facts.employee.sessionId ||
+          input.sessionGeneration !== scope.facts.employee.sessionGeneration
+        )
+          refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+        if (scope.present.length) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
+        if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
+        entry =
+          scope.kind === 'absent'
+            ? await this.#retire(employeeId, input, authority, scope)
+            : await this.#replace(employeeId, input, authority, scope);
+      } else if (
         entry.employeeId !== employeeId ||
         entry.owner !== authority.owner ||
         entry.sessionId !== input.sessionId ||
@@ -435,14 +715,10 @@ export class DockerAbsentReprovision {
   async #retire(
     employeeId: string,
     input: DockerAbsentReprovisionRequest,
-    authority: DockerContinuationAuthority
+    authority: DockerContinuationAuthority,
+    scope: Awaited<ReturnType<DockerAbsentReprovision['absentScope']>>
   ): Promise<DockerAbsentContinuationRetirement> {
-    const scope = await this.#scope(employeeId, input.template, authority),
-      { facts } = scope;
-    if (input.sessionId !== facts.employee.sessionId || input.sessionGeneration !== facts.employee.sessionGeneration)
-      refuse('DOCKER_REPROVISION_TARGET_CHANGED');
-    if (scope.present.length) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
-    if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
+    const { facts } = scope;
     if (input.operationId === facts.row.request.operationId) refuse('DOCKER_REPROVISION_OPERATION_CHANGED');
     const at = this.now();
     let planMoveIds: readonly string[] = [];
@@ -477,6 +753,7 @@ export class DockerAbsentReprovision {
       templateDigest: scope.templateDigest,
       template: scope.template,
       absent: { containerIds: facts.ids, planMoveIds: [...planMoveIds].sort() },
+      account: scope.account,
       record: facts.row,
       binding: facts.binding,
       session: { phase: 'pending', containerName: facts.savedContainer },
@@ -506,9 +783,105 @@ export class DockerAbsentReprovision {
     }, authorityCurrent);
     return entry;
   }
+  /** Replace an unused source. The new entry (intent) is canonical before the
+   * old source is removed; a superseded record moves in the same transaction.
+   * Its storage holder and the shared pool anchor are not touched. */
+  async #replace(
+    employeeId: string,
+    input: DockerAbsentReprovisionRequest,
+    authority: DockerContinuationAuthority,
+    scope: Awaited<ReturnType<DockerAbsentReprovision['replaceScope']>>
+  ): Promise<DockerAbsentContinuationRetirement> {
+    const { facts } = scope,
+      head = facts.head;
+    if (head.source.phase !== 'created') return refuse('DOCKER_REPROVISION_OPERATION_PENDING');
+    if (input.operationId === facts.row?.request.operationId) refuse('DOCKER_REPROVISION_OPERATION_CHANGED');
+    // Bracket the canonical write with a second positive inventory.
+    const listed = await this.#present([scope.sourceId], employeeId);
+    scope.current();
+    if (listed.length !== 1 || listed[0] !== scope.sourceId) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
+    await this.#unusedSource(head);
+    scope.current();
+    const entry = DockerAbsentContinuationRetirement.parse({
+      version: 1,
+      purpose: 'docker-absent-continuation-retirement-v1',
+      retiredAt: this.now(),
+      operationId: input.operationId,
+      reason: scope.reason,
+      previous: head.operationId,
+      employeeId,
+      ...(facts.employee.owner === undefined ? {} : { owner: facts.employee.owner }),
+      sessionId: facts.employee.sessionId,
+      sessionGeneration: facts.employee.sessionGeneration,
+      scopeDigest: scope.scopeDigest,
+      templateDigest: scope.templateDigest,
+      template: scope.template,
+      absent: { containerIds: [], planMoveIds: [] },
+      account: scope.account,
+      removal: { phase: 'pending', name: head.source.name, containerId: scope.sourceId },
+      ...(facts.row ? { record: facts.row } : {}),
+      binding: null,
+      session: { phase: 'cleared', containerName: null },
+      source: { phase: 'pending' },
+    });
+    const authorityCurrent = () => {
+      this.runtimeCurrent();
+      authority.require();
+    };
+    await this.company.store.update((state) => {
+      authorityCurrent();
+      const employee = this.#employee(employeeId, authority, state),
+        rows = state.dockerEmployeeContinuations ?? [],
+        mine = rows.filter((value) => value.employeeId === employeeId),
+        actual = this.#head(employeeId, state);
+      if (
+        !actual ||
+        !isDeepStrictEqual(persisted(actual), persisted(head)) ||
+        employee.dockerBinding ||
+        employee.sessionId !== entry.sessionId ||
+        employee.sessionGeneration !== entry.sessionGeneration ||
+        mine.length !== (facts.row ? 1 : 0) ||
+        (facts.row && !isDeepStrictEqual(persisted(mine[0]), persisted(facts.row))) ||
+        this.#entry(entry.operationId, state)
+      )
+        refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+      if (facts.row) rows.splice(rows.indexOf(mine[0]!), 1);
+      (state.retiredDockerEmployeeContinuations ??= []).push(structuredClone(entry));
+    }, authorityCurrent);
+    return entry;
+  }
+  /** An issued removal is settled by a positive listing. The never-started
+   * source is re-proven immediately before each removal request. */
+  async #remove(
+    initial: DockerAbsentContinuationRetirement,
+    current: () => void
+  ): Promise<DockerAbsentContinuationRetirement> {
+    let entry = initial;
+    const removal = entry.removal!,
+      previous = this.#entry(entry.previous!);
+    if (!previous || previous.source.phase !== 'created' || previous.source.containerId !== removal.containerId)
+      return refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+    if (removal.phase === 'pending') {
+      await this.#unusedSource(previous);
+      current();
+      entry = await this.#publish(entry, { removal: { ...removal, phase: 'issued' } }, current);
+    }
+    if ((await this.#containers(['id=' + removal.containerId])).length) {
+      current();
+      await this.#unusedSource(previous);
+      current();
+      if (!this.command.removeCreatedSource) return refuse('DOCKER_REPROVISION_REMOVAL_UNAVAILABLE');
+      await this.command.removeCreatedSource(removal.name, removal.containerId, current);
+      current();
+      if ((await this.#containers(['id=' + removal.containerId])).length)
+        refuse('DOCKER_REPROVISION_REMOVAL_UNCONFIRMED');
+    }
+    current();
+    return this.#publish(entry, { removal: { ...removal, phase: 'removed' } }, current);
+  }
   async #publish(
     before: DockerAbsentContinuationRetirement,
-    change: Partial<Pick<DockerAbsentContinuationRetirement, 'session' | 'source'>>,
+    change: Partial<Pick<DockerAbsentContinuationRetirement, 'session' | 'source' | 'removal'>>,
     current: () => void
   ): Promise<DockerAbsentContinuationRetirement> {
     const next = DockerAbsentContinuationRetirement.parse({ ...before, ...change });
@@ -536,7 +909,12 @@ export class DockerAbsentReprovision {
         : {}),
     });
     // A completed operation replays its recorded result without new effects.
-    if (initial.session.phase === 'cleared' && initial.source.phase === 'created') return result(initial);
+    if (
+      initial.session.phase === 'cleared' &&
+      initial.source.phase === 'created' &&
+      (!initial.removal || initial.removal.phase === 'removed')
+    )
+      return result(initial);
     let entry = initial;
     const current = () => {
       this.runtimeCurrent();
@@ -555,6 +933,7 @@ export class DockerAbsentReprovision {
     try {
       current();
       if (entry.session.phase === 'pending') entry = await this.#clearSession(entry, current);
+      if (entry.removal && entry.removal.phase !== 'removed') entry = await this.#remove(entry, current);
       entry = await this.#source(entry, current);
       return result(entry);
     } catch (cause) {
@@ -618,7 +997,8 @@ export class DockerAbsentReprovision {
       image = { imageId: entry.source.imageId, path: path! };
       network = entry.source.network;
     }
-    const input = this.#input(entry.record, entry.template, entry.operationId, employee.name, image, network);
+    const basis = this.#basis(entry);
+    const input = this.#input(basis, entry.template, entry.operationId, employee.name, image, network, entry.account);
     const configuration = reprovisionSourceConfiguration(input),
       configurationDigest = dockerContinuationDigest(configuration);
     if (entry.source.phase === 'pending') {
@@ -650,7 +1030,7 @@ export class DockerAbsentReprovision {
       { employeeId: entry.employeeId, sessionId: entry.sessionId } as DockerContinuationSubject,
       this.configuration.deployment
     );
-    if (!isDeepStrictEqual(original.home, entry.record.original.home)) refuse('DOCKER_REPROVISION_SOURCE_CHANGED');
+    if (!isDeepStrictEqual(original.home, basis.original.home)) refuse('DOCKER_REPROVISION_SOURCE_CHANGED');
     if (entry.source.phase !== 'issued') refuse('DOCKER_REPROVISION_RETIREMENT_CHANGED');
     return this.#publish(entry, { source: { ...entry.source, phase: 'created', containerId: id } }, current);
   }

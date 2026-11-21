@@ -245,3 +245,56 @@ describe('fixed packaged Engine creation response', () => {
     expect(JSON.stringify(diagnostic)).not.toContain('message');
   });
 });
+describe('removal of a never-started reprovision source', () => {
+  const source = 'reverie-boxed-source-' + 'a'.repeat(64);
+  const setup = (row: Record<string, unknown> | null) => {
+    const command = new PackagedDockerEngineCommand(),
+      calls: string[][] = [];
+    command.run = async (args) => {
+      calls.push([...args]);
+      if (args[1] === 'inspect') {
+        if (!row) throw Error('No such container');
+        return JSON.stringify([row]);
+      }
+      return '';
+    };
+    return { command, calls };
+  };
+  const created = { Id: id, Name: '/' + source, State: { Status: 'created', Running: false, Pid: 0 } };
+  it('removes exactly the named created container, never by force', async () => {
+    const { command, calls } = setup(created);
+    const current = vi.fn();
+    await command.removeCreatedSource(source, id, current);
+    expect(calls).toEqual([
+      ['container', 'inspect', id],
+      ['container', 'rm', id],
+    ]);
+    expect(current).toHaveBeenCalledTimes(2);
+  });
+  it.each([
+    ['another name', { ...created, Name: '/reverie-boxed-' + 'a'.repeat(64) }],
+    ['another container', { ...created, Id: 'c'.repeat(64) }],
+    ['a running container', { ...created, State: { Status: 'running', Running: true, Pid: 7 } }],
+    ['an exited container', { ...created, State: { Status: 'exited', Running: false, Pid: 0 } }],
+  ])('refuses %s', async (_name, row) => {
+    const { command, calls } = setup(row);
+    await expect(command.removeCreatedSource(source, id, () => {})).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_NOT_REMOVABLE',
+    });
+    expect(calls).toEqual([['container', 'inspect', id]]);
+  });
+  it('refuses any other container family and revoked authority before the Engine', async () => {
+    for (const other of [name, 'reverie-boxed-storage-' + 'a'.repeat(64), 'reverie-boxed-source-short']) {
+      const { command, calls } = setup(created);
+      await expect(command.removeCreatedSource(other, id, () => {})).rejects.toThrow('Fixed reprovision source');
+      expect(calls).toEqual([]);
+    }
+    const { command, calls } = setup(created);
+    await expect(
+      command.removeCreatedSource(source, id, () => {
+        throw Error('revoked');
+      })
+    ).rejects.toThrow('revoked');
+    expect(calls).toEqual([]);
+  });
+});

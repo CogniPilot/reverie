@@ -135,7 +135,15 @@ class FakeEngine {
       Id: id,
       Name: '/' + name,
       Image: configuration.Image,
-      State: { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'created', Pid: 0 },
+      State: {
+        Running: false,
+        Paused: false,
+        Restarting: false,
+        Dead: false,
+        Status: 'created',
+        Pid: 0,
+        StartedAt: '0001-01-01T00:00:00Z',
+      },
       Config: {
         User: configuration.User,
         Entrypoint: configuration.Entrypoint,
@@ -160,6 +168,20 @@ class FakeEngine {
     });
     if (this.createOutcome === 'lost-reply') throw Error('synthetic lost create reply');
     return id;
+  }
+  readonly removed: string[] = [];
+  removeOutcome: 'ok' | 'lost-reply' | 'not-sent' = 'ok';
+  /** Same guard as the packaged command: the named, never-started source only. */
+  async removeCreatedSource(name: string, id: string, current: () => void): Promise<void> {
+    current();
+    const row = this.containers.get(id),
+      state = row?.State as Json | undefined;
+    if (!/^reverie-boxed-source-[a-f0-9]{64}$/.test(name) || row?.Name !== '/' + name || state?.Status !== 'created')
+      throw Error('synthetic removal refused');
+    this.removed.push(id);
+    if (this.removeOutcome === 'not-sent') throw Error('synthetic removal transport failure');
+    this.containers.delete(id);
+    if (this.removeOutcome === 'lost-reply') throw Error('synthetic lost removal reply');
   }
 }
 const cleanups: Array<() => Promise<void> | void> = [];
@@ -270,6 +292,9 @@ interface Options {
   launchIntent?: boolean;
   launchTransport?: string;
   employee?: Record<string, unknown>;
+  /** The employee's current subscription profile ID and saved launch overrides. */
+  profile?: string;
+  overrides?: Record<string, string>;
   moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown } | null;
 }
 async function fixture(options: Options = {}) {
@@ -308,7 +333,13 @@ async function fixture(options: Options = {}) {
         createdAt: 1,
         onVacation: false,
         desiredRunning: true,
-        runtimeRecipe: { mode: 'claude', workingDir: '/reverie_workspace/cases/demo' },
+        runtimeRecipe: {
+          mode: 'claude',
+          workingDir: '/reverie_workspace/cases/demo',
+          ...(options.profile
+            ? { subscriptionProfile: { id: options.profile, label: 'Synthetic seat', provider: 'anthropic' } }
+            : {}),
+        },
         dockerResourcePolicy: policy,
         ...(bound ? { dockerBinding: binding } : {}),
         ...options.employee,
@@ -328,6 +359,7 @@ async function fixture(options: Options = {}) {
     status: 'idle',
     pid: 4242,
     ...conversation,
+    ...(options.overrides ? { __envOverrides: options.overrides } : {}),
     ...((options.savedDocker ?? bound)
       ? {
           docker: {
@@ -420,6 +452,8 @@ async function fixture(options: Options = {}) {
       saved: (id) => state.getSession(id) ?? undefined,
       live: () => live,
       blocked: (id, owner) => state.dockerAbsentReprovisionBlocker(id, owner),
+      overrides: async (id) =>
+        (state.getSession(id) as { __envOverrides?: Record<string, string> } | null)?.__envOverrides,
       discard: async (id) => {
         discarded.push(id);
         live = undefined;
@@ -450,7 +484,12 @@ async function fixture(options: Options = {}) {
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 /** The existing continuation over the REAL Engine adapter for source reads. */
+const continuations = new WeakMap<Fixture, ReturnType<typeof newContinuation>>();
 function continuation(f: Fixture) {
+  if (!continuations.has(f)) continuations.set(f, newContinuation(f));
+  return continuations.get(f)!;
+}
+function newContinuation(f: Fixture) {
   const revisions = new DockerResourceRevisionStore(join(f.directory, 'resource-revisions'));
   cleanups.push(() => revisions.close());
   const resources = new DockerContainedResources(
@@ -492,8 +531,9 @@ function continuation(f: Fixture) {
   const service = new DockerEmployeeContinuation(f.store, engine, { async launch() {} }, { issue: () => 'unused' });
   return { service, effects };
 }
-async function beginsAgain(f: Fixture, sourceContainerId: string) {
+async function beginsAgain(f: Fixture, sourceContainerId: string, nextOperation = '77777777-7777-4777-8777-777777777777') {
   const { service, effects } = continuation(f);
+  effects.length = 0;
   const selection = await service.selection(employeeId, f.authority);
   expect(selection).toMatchObject({
     state: 'stopped',
@@ -941,7 +981,7 @@ describe('retirement and replacement source', () => {
     ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_OPERATION_CHANGED' });
     await expect(
       f.service.reprovision(employeeId, { ...input, operationId: nextOperation }, f.authority)
-    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_RECORD_REQUIRED' });
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_SCOPE_CHANGED' });
     expect(f.snapshot().retiredDockerEmployeeContinuations).toHaveLength(1);
   });
   it('observes a create whose reply was lost instead of repeating it', async () => {
@@ -1052,6 +1092,459 @@ describe('retirement and replacement source', () => {
     } as SessionState);
     await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
       code: 'DOCKER_REPROVISION_SESSION_VIEW_FOREIGN',
+    });
+  });
+});
+
+const seat = 'anthropic-26494e93';
+const seatPath = '/instances/default/console/accounts/' + seat;
+const seatFixture = (options: Options = {}) =>
+  fixture({ profile: seat, overrides: { CLAUDE_CONFIG_DIR: seatPath, CLAUDE_CODE_EFFORT: 'high' }, ...options });
+const mountsOf = (f: Fixture, index = 0) =>
+  ((f.engine.created[index]!.configuration.HostConfig as Json).Mounts as Json[]).filter((mount) =>
+    String(mount.Target).startsWith('/instances/default/console/accounts')
+  );
+const envOf = (f: Fixture, index = 0) =>
+  (f.engine.created[index]!.configuration.Env as string[]).filter((value) => /^(CLAUDE_CONFIG_DIR|CODEX_HOME)=/.test(value));
+
+describe('provider account routing', () => {
+  it('mounts the employee seat that the saved launch override selects', async () => {
+    const f = await seatFixture();
+    const account = {
+      kind: 'seat-mount',
+      key: 'CLAUDE_CONFIG_DIR',
+      path: seatPath,
+      source: `${homeSource}/.reverie/seat-auth/${seat}`,
+    };
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview.account).toEqual(account);
+    const result = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(result.state).toBe('ready');
+    expect(f.entry()!.account).toEqual(account);
+    // One read-write bind at the exact path; the launch supplies the variable.
+    expect(mountsOf(f)).toEqual([
+      { Type: 'bind', Source: account.source, Target: seatPath, BindOptions: { Propagation: 'rprivate' } },
+    ]);
+    expect(envOf(f)).toEqual([]);
+    // The destination builder keeps it and the capsule guard admits it.
+    const raw = DockerEmployeeInspect.parse(f.engine.containers.get(result.sourceContainerId!));
+    expect(boxedMountConfiguration(raw)).toContainEqual({
+      Type: 'bind',
+      Source: account.source,
+      Target: seatPath,
+      BindOptions: { Propagation: 'rprivate' },
+    });
+    await beginsAgain(f, result.sourceContainerId!);
+  });
+  it('routes a codex seat and an explicitly supplied seat directory', async () => {
+    const id = 'openai-ed0348c4',
+      path = '/instances/default/console/accounts/' + id;
+    const f = await fixture({ profile: id, overrides: { CODEX_HOME: path } });
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual({
+      kind: 'seat-mount',
+      key: 'CODEX_HOME',
+      path,
+      source: `${homeSource}/.reverie/seat-auth/${id}`,
+    });
+    const explicit = { ...template, accountSource: '/synthetic-seats/' + id };
+    const preview = await f.service.preview(employeeId, explicit, f.authority);
+    expect(preview.account).toMatchObject({ kind: 'seat-mount', source: '/synthetic-seats/' + id });
+    expect(preview.scopeDigest).not.toBe((await f.service.preview(employeeId, template, f.authority)).scopeDigest);
+    await f.service.reprovision(employeeId, await f.request(retireOperation, explicit), f.authority);
+    expect(mountsOf(f)).toEqual([
+      { Type: 'bind', Source: '/synthetic-seats/' + id, Target: path, BindOptions: { Propagation: 'rprivate' } },
+    ]);
+  });
+  it.each([
+    ['another profile', { profile: 'anthropic-00000000', overrides: { CLAUDE_CONFIG_DIR: seatPath } }, template],
+    ['no current profile', { overrides: { CLAUDE_CONFIG_DIR: seatPath } }, template],
+    [
+      'a nested account path',
+      { profile: seat, overrides: { CLAUDE_CONFIG_DIR: seatPath + '/inner' } },
+      template,
+    ],
+    [
+      'two seat overrides',
+      { profile: seat, overrides: { CLAUDE_CONFIG_DIR: seatPath, CODEX_HOME: seatPath } },
+      template,
+    ],
+  ])('refuses a seat override for %s', async (_name, options, body) => {
+    const f = await fixture(options as Options);
+    await expect(f.service.preview(employeeId, body, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH',
+    });
+  });
+  it('refuses a seat directory with another name, inside scratch, or with nothing to route', async () => {
+    const f = await seatFixture();
+    await expect(
+      f.service.preview(employeeId, { ...template, accountSource: '/synthetic-seats/other' }, f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_ACCOUNT_SOURCE_MISMATCH' });
+    await expect(
+      f.service.preview(employeeId, { ...template, accountSource: '/synthetic-scratch/laptops/' + seat }, f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_TEMPLATE_STORAGE_OVERLAP' });
+    const none = await fixture();
+    await expect(
+      none.service.preview(employeeId, { ...template, accountSource: '/synthetic-seats/' + seat }, none.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_ACCOUNT_SOURCE_UNUSED' });
+    // The accounts root is never template data.
+    for (const destination of [seatPath, '/instances/default/console/accounts'])
+      expect(
+        DockerLaptopTemplate.safeParse({
+          ...template,
+          mounts: [...template.mounts, { source: '/synthetic-seats/' + seat, destination, readOnly: false }],
+        }).success
+      ).toBe(false);
+    expect(DockerLaptopTemplate.safeParse({ ...template, accountSource: 'relative/' + seat }).success).toBe(false);
+  });
+  it('adds nothing without a seat override', async () => {
+    const f = await fixture({ profile: seat, overrides: { CLAUDE_CONFIG_DIR: '/home/agent/.claude-alternate' } });
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual({ kind: 'none' });
+    await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(mountsOf(f)).toEqual([]);
+    expect(envOf(f)).toEqual([]);
+    expect(f.entry()!.account).toEqual({ kind: 'none' });
+  });
+  it('keeps a retired plan replacement on its in-home account generation', async () => {
+    const f = await fixture({ row: v3Row() });
+    const account = {
+      kind: 'generation-env',
+      key: 'CLAUDE_CONFIG_DIR',
+      path: `/home/agent/.reverie/plan-moves/${priorOperation}/generation-${'1'.repeat(64)}/claude`,
+    };
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual(account);
+    await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(envOf(f)).toEqual(['CLAUDE_CONFIG_DIR=' + account.path]);
+    expect(mountsOf(f)).toEqual([]);
+    expect(f.entry()!.account).toEqual(account);
+    const codex = v3Row();
+    const row = DockerEmployeeContinuationRecord.parse({
+      ...codex,
+      planReplacement: { ...(codex as { planReplacement: Json }).planReplacement, account: { id: 'synthetic-account', provider: 'openai', projectionDigest: '1'.repeat(64), contextDigest: '2'.repeat(64) } },
+    });
+    const openai = await fixture({ row });
+    expect((await openai.service.preview(employeeId, template, openai.authority)).account).toEqual({
+      kind: 'generation-env',
+      key: 'CODEX_HOME',
+      path: `/home/agent/.reverie/plan-moves/${priorOperation}/generation-${'1'.repeat(64)}/codex`,
+    });
+  });
+});
+
+const replaceOperation = '88888888-8888-4888-8888-888888888888';
+const thirdOperation = '99999999-9999-4999-8999-999999999999';
+/** An employee already reprovisioned by the first release: a source without routing. */
+async function reprovisioned(options: Options = {}) {
+  const f = await fixture(options);
+  // Entries written before routing existed carry no account field.
+  const body = await f.request();
+  const first = await f.service.reprovision(employeeId, body, f.authority);
+  await f.companyStore.update((state) => {
+    delete state.retiredDockerEmployeeContinuations![0]!.account;
+  });
+  const replace = async (operationId = replaceOperation, bodyTemplate: Record<string, unknown> = template) => ({
+    operationId,
+    sessionId: sid,
+    sessionGeneration: 9,
+    expectedScopeDigest: (await f.service.preview(employeeId, bodyTemplate, f.authority)).scopeDigest,
+    template: bodyTemplate,
+  });
+  return { f, first, replace, entries: () => f.snapshot().retiredDockerEmployeeContinuations! };
+}
+
+describe('replace an unused source', () => {
+  it('removes the never-started source and creates a routed one under a new operation', async () => {
+    const { f, first, replace, entries } = await reprovisioned({
+      profile: seat,
+      overrides: { CLAUDE_CONFIG_DIR: seatPath },
+    });
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      mode: 'replace-source',
+      reason: 'source-replaced',
+      record: null,
+      previous: { operationId: retireOperation, sourceContainerId: first.sourceContainerId },
+      absent: [],
+      present: [],
+      helpers: [],
+      account: { kind: 'seat-mount', path: seatPath },
+      allowedActions: ['reprovision'],
+    });
+    const body = await replace();
+    const result = await f.service.reprovision(employeeId, body, f.authority);
+    expect(result).toEqual({
+      operationId: replaceOperation,
+      state: 'ready',
+      sourceContainerId: '2'.repeat(64),
+      sourceImageId: workerImage,
+    });
+    expect(f.engine.removed).toEqual([first.sourceContainerId]);
+    expect(f.engine.containers.has(first.sourceContainerId!)).toBe(false);
+    expect(entries()).toHaveLength(2);
+    expect(entries()[0]).toMatchObject({ operationId: retireOperation, source: { phase: 'created' } });
+    expect(entries()[1]).toMatchObject({
+      operationId: replaceOperation,
+      reason: 'source-replaced',
+      previous: retireOperation,
+      absent: { containerIds: [], planMoveIds: [] },
+      account: { kind: 'seat-mount', path: seatPath },
+      removal: { phase: 'removed', name: reprovisionSourceName(boxId, retireOperation), containerId: first.sourceContainerId },
+      binding: null,
+      session: { phase: 'cleared', containerName: null },
+      source: { phase: 'created', name: reprovisionSourceName(boxId, replaceOperation), containerId: '2'.repeat(64) },
+    });
+    expect(entries()[1]!.record).toBeUndefined();
+    expect(f.engine.created[1]!.configuration.Labels).toMatchObject({
+      'reverie.reprovision.operation': replaceOperation,
+      'reverie.session': sid,
+    });
+    expect(mountsOf(f, 1)).toHaveLength(1);
+    // Replay returns the recorded result; the ordinary flow then accepts the new source.
+    f.engine.failLists = true;
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toEqual(result);
+    f.engine.failLists = false;
+    await beginsAgain(f, '2'.repeat(64));
+  });
+  it('replaces again from the newest entry and keeps the plan replacement basis', async () => {
+    const { f, replace, entries } = await reprovisioned({ row: v3Row() });
+    await f.service.reprovision(employeeId, await replace(), f.authority);
+    const result = await f.service.reprovision(employeeId, await replace(thirdOperation), f.authority);
+    expect(result).toMatchObject({ state: 'ready', sourceContainerId: '3'.repeat(64) });
+    expect(entries().map((entry) => [entry.reason, entry.previous])).toEqual([
+      ['recorded-containers-absent', undefined],
+      ['source-replaced', retireOperation],
+      ['source-replaced', replaceOperation],
+    ]);
+    expect(envOf(f, 2)).toEqual([
+      `CLAUDE_CONFIG_DIR=/home/agent/.reverie/plan-moves/${priorOperation}/generation-${'1'.repeat(64)}/claude`,
+    ]);
+    expect([...f.engine.containers.keys()].filter((id) => /^[123]{64}$/.test(id))).toEqual(['3'.repeat(64)]);
+  });
+  it.each([
+    ['running', { Running: true, Status: 'running', Pid: 4242, StartedAt: '2026-11-21T00:00:00Z' }],
+    ['exited after a start', { Running: false, Status: 'exited', Pid: 0, StartedAt: '2026-11-21T00:00:00Z' }],
+    ['created with a start time', { Running: false, Status: 'created', Pid: 0, StartedAt: '2026-11-21T00:00:00Z' }],
+  ])('refuses a source that is %s', async (_name, state) => {
+    const { f, first, replace } = await reprovisioned();
+    const body = await replace();
+    Object.assign(f.engine.containers.get(first.sourceContainerId!)!.State as Json, state);
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_STARTED',
+    });
+    await expect(f.service.reprovision(employeeId, body, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_STARTED',
+    });
+    expect(f.engine.removed).toEqual([]);
+    expect(f.snapshot().retiredDockerEmployeeContinuations).toHaveLength(1);
+  });
+  it('refuses a changed, missing or accompanied source and a foreign storage holder', async () => {
+    const changed = await reprovisioned();
+    ((changed.f.engine.containers.get('1'.repeat(64))!.Config as Json).Labels as Json)['reverie.reprovision.operation'] =
+      thirdOperation;
+    await expect(changed.f.service.preview(employeeId, template, changed.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_CHANGED',
+    });
+    const missing = await reprovisioned();
+    missing.f.engine.containers.delete('1'.repeat(64));
+    await expect(missing.f.service.preview(employeeId, template, missing.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SOURCE_ABSENT',
+    });
+    const extra = await reprovisioned();
+    const body = await extra.replace();
+    extra.f.engine.container('4'.repeat(64), { 'reverie.boxed.employee': employeeId, 'reverie.boxed.instance': deployment });
+    expect(await extra.f.service.preview(employeeId, template, extra.f.authority)).toMatchObject({
+      present: ['4'.repeat(64)],
+      allowedActions: [],
+    });
+    await expect(extra.f.service.reprovision(employeeId, body, extra.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+    });
+    expect(extra.f.engine.removed).toEqual([]);
+    const holder = await reprovisioned();
+    holder.f.engine.container('5'.repeat(64), {
+      'reverie.box.storage.employee': employeeId,
+      'reverie.box.storage.box': boxId,
+    });
+    await expect(holder.f.service.preview(employeeId, template, holder.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_HELPER_FOREIGN',
+    });
+  });
+  it('observes a removal whose reply was lost', async () => {
+    const { f, replace, entries } = await reprovisioned();
+    const body = await replace();
+    f.engine.removeOutcome = 'lost-reply';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toEqual({
+      operationId: replaceOperation,
+      state: 'held',
+      code: 'DOCKER_REPROVISION_EFFECT_UNCONFIRMED',
+    });
+    expect(entries()[1]).toMatchObject({ removal: { phase: 'issued' }, source: { phase: 'pending' } });
+    f.engine.removeOutcome = 'ok';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({
+      state: 'ready',
+      sourceContainerId: '2'.repeat(64),
+    });
+    expect(f.engine.removed).toHaveLength(1);
+    expect(f.engine.created).toHaveLength(2);
+  });
+  it('re-issues a removal only while the Engine still lists the unused source', async () => {
+    const { f, replace, entries } = await reprovisioned();
+    const body = await replace();
+    f.engine.removeOutcome = 'not-sent';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({ state: 'held' });
+    f.engine.failLists = true;
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_REPROVISION_ABSENCE_UNCONFIRMED',
+    });
+    expect(f.engine.removed).toHaveLength(1);
+    f.engine.failLists = false;
+    // Started in the meantime: never removed, the operation stays held.
+    Object.assign(f.engine.containers.get('1'.repeat(64))!.State as Json, { Status: 'exited', StartedAt: '2026-11-21T00:00:00Z' });
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_REPROVISION_SOURCE_STARTED',
+    });
+    expect(f.engine.removed).toHaveLength(1);
+    Object.assign(f.engine.containers.get('1'.repeat(64))!.State as Json, { Status: 'created', StartedAt: '0001-01-01T00:00:00Z' });
+    f.engine.removeOutcome = 'ok';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({ state: 'ready' });
+    expect(f.engine.removed).toHaveLength(2);
+    expect(entries()[1]).toMatchObject({ removal: { phase: 'removed' }, source: { phase: 'created' } });
+  });
+  it('observes a create whose reply was lost after the removal', async () => {
+    const { f, replace } = await reprovisioned();
+    const body = await replace();
+    f.engine.createOutcome = 'lost-reply';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({ state: 'held' });
+    f.engine.createOutcome = 'ok';
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({
+      state: 'ready',
+      sourceContainerId: '2'.repeat(64),
+    });
+    expect(f.engine.created).toHaveLength(2);
+    expect(f.engine.removed).toHaveLength(1);
+    await beginsAgain(f, '2'.repeat(64));
+  });
+  it('requires an unfinished earlier operation to be resumed first', async () => {
+    const f = await fixture();
+    const body = await f.request();
+    f.engine.createOutcome = 'not-sent';
+    await f.service.reprovision(employeeId, body, f.authority);
+    f.engine.createOutcome = 'ok';
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_RECORD_REQUIRED',
+    });
+    expect(await f.service.reprovision(employeeId, body, f.authority)).toMatchObject({ state: 'ready' });
+  });
+});
+
+describe('a continuation that never requested its destination', () => {
+  /** A fresh version 2 record parked at pool-issued on a source without routing. */
+  async function parked(options: Options = { row: v3Row() }) {
+    const r = await reprovisioned(options);
+    await beginsAgain(r.f, r.first.sourceContainerId!);
+    const row = r.f.store.record(employeeId)!;
+    const holder = {
+      role: 'storage-holder',
+      name: 'reverie-boxed-storage-' + 'a'.repeat(64),
+      imageId: helperImage,
+      configurationDigest: 'b'.repeat(64),
+      phase: 'running',
+      containerId: '6'.repeat(64),
+      initPid: 42,
+      initStartTicks: '1234',
+    };
+    await r.f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations![0] = DockerEmployeeContinuationRecord.parse({ ...row, tasks: [holder] });
+    });
+    r.f.engine.container('6'.repeat(64), {
+      'reverie.box.storage.employee': employeeId,
+      'reverie.box.storage.box': boxId,
+      'reverie.box.storage.operation': row.request.operationId,
+    }, true);
+    return { ...r, row: r.f.store.record(employeeId)! };
+  }
+  it('supersedes the record, replaces its source and leaves its helpers in place', async () => {
+    const { f, first, replace, entries, row } = await parked();
+    expect(row).toMatchObject({ version: 2, phase: 'pool-issued', original: { containerId: first.sourceContainerId } });
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      mode: 'retire',
+      reason: 'source-superseded',
+      record: { version: 2, phase: 'pool-issued', operationId: nextOperation },
+      previous: { operationId: retireOperation, sourceContainerId: first.sourceContainerId },
+      present: [],
+      helpers: ['6'.repeat(64)],
+      account: { kind: 'generation-env', key: 'CLAUDE_CONFIG_DIR' },
+    });
+    const result = await f.service.reprovision(employeeId, await replace(), f.authority);
+    expect(result).toMatchObject({ state: 'ready', sourceContainerId: '2'.repeat(64) });
+    expect(f.store.record(employeeId)).toBeUndefined();
+    expect(f.snapshot().employees[0]!.dockerBinding).toBeUndefined();
+    expect(entries()[1]).toMatchObject({
+      reason: 'source-superseded',
+      previous: retireOperation,
+      record: row,
+      removal: { phase: 'removed', containerId: first.sourceContainerId },
+      source: { phase: 'created' },
+    });
+    // The routing still derives from the original plan replacement, not the superseded row.
+    expect(envOf(f, 1)).toEqual([
+      `CLAUDE_CONFIG_DIR=/home/agent/.reverie/plan-moves/${priorOperation}/generation-${'1'.repeat(64)}/claude`,
+    ]);
+    // The storage holder is left running; no other container was removed.
+    expect(f.engine.removed).toEqual([first.sourceContainerId]);
+    expect(f.engine.containers.has('6'.repeat(64))).toBe(true);
+    await beginsAgain(f, '2'.repeat(64), thirdOperation);
+    // A later replacement still accounts for the retired record's holder.
+    expect(f.store.record(employeeId)).toMatchObject({ request: { operationId: thirdOperation } });
+  });
+  it.each(['destination-issued', 'destination-ready', 'identity-ready', 'ready'] as const)(
+    'refuses a record at %s',
+    async (phase) => {
+      const { f, row } = await parked();
+      await f.companyStore.update((state) => {
+        state.dockerEmployeeContinuations![0] = DockerEmployeeContinuationRecord.parse({
+          ...row,
+          phase,
+          pool: { containerId: '9'.repeat(64), cgroupParent: 'synthetic.slice', policyDigest: dockerContinuationDigest(policy.pool), physicalDigest: 'f'.repeat(64) },
+          ...(phase === 'destination-issued' ? {} : { destination: { ...row.original, containerId: destinationCid } }),
+        });
+      });
+      await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+        code: 'DOCKER_REPROVISION_CONTINUATION_ADVANCED',
+      });
+      expect(f.engine.removed).toEqual([]);
+    }
+  );
+  it('refuses a foreign container, a foreign holder, a later helper and a busy continuation', async () => {
+    const foreign = await parked();
+    const body = await foreign.replace();
+    foreign.f.engine.container('4'.repeat(64), { 'reverie.employee': employeeId, 'reverie.worker': deployment });
+    await expect(foreign.f.service.reprovision(employeeId, body, foreign.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+    });
+    expect(foreign.f.store.record(employeeId)).toEqual(foreign.row);
+    const holder = await parked();
+    holder.f.engine.container('5'.repeat(64), { 'reverie.box.storage.employee': employeeId, 'reverie.box.storage.box': boxId });
+    await expect(holder.f.service.preview(employeeId, template, holder.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_HELPER_FOREIGN',
+    });
+    const helper = await parked();
+    await helper.f.companyStore.update((state) => {
+      const current = state.dockerEmployeeContinuations![0]!;
+      state.dockerEmployeeContinuations![0] = DockerEmployeeContinuationRecord.parse({
+        ...current,
+        tasks: [...current.tasks!, { ...current.tasks![0], role: 'leaf-helper', name: 'reverie-boxed-leaf-helper-x' }],
+      });
+    });
+    await expect(helper.f.service.preview(employeeId, template, helper.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_CONTINUATION_ADVANCED',
+    });
+    const busy = await parked();
+    busy.f.setBusy(true);
+    await expect(busy.f.service.preview(employeeId, template, busy.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_BUSY',
     });
   });
 });

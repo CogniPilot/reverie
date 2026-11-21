@@ -77,6 +77,9 @@ export const DockerLaptopTemplate = z
       .string()
       .regex(/^reverie-boxed-api-[a-z0-9-]{1,64}$/)
       .optional(),
+    /** Host directory of the employee's own subscription seat, when it is not
+     * the default inside the private home. Its basename is the profile ID. */
+    accountSource: hostPath.optional(),
   })
   .strict()
   .superRefine((template, context) => {
@@ -111,13 +114,55 @@ export const DockerReprovisionSourceCursor = z.discriminatedUnion('phase', [
   z.object({ phase: z.literal('created'), ...sourceIntent, containerId: digest }).strict(),
 ]);
 export type DockerReprovisionSourceCursor = z.infer<typeof DockerReprovisionSourceCursor>;
+/** Same closed ID rule as a subscription profile. */
+export const REPROVISION_ACCOUNT_ROOT = '/instances/default/console/accounts/';
+const accountKey = z.enum(['CLAUDE_CONFIG_DIR', 'CODEX_HOME']);
+/** Backend-derived provider account routing of one source. DATA only: no
+ * credential value, and never a free-form path chosen by a request. */
+export const DockerReprovisionAccount = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('none') }).strict(),
+  z
+    .object({
+      kind: z.literal('generation-env'),
+      key: accountKey,
+      path: z
+        .string()
+        .regex(/^\/home\/agent\/\.reverie\/plan-moves\/[0-9a-f-]{36}\/generation-[a-f0-9]{64}\/(claude|codex)$/),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('seat-mount'),
+      key: accountKey,
+      path: z.string().regex(/^\/instances\/default\/console\/accounts\/[a-z0-9][a-z0-9_-]{0,63}$/),
+      source: hostPath,
+    })
+    .strict(),
+]);
+export type DockerReprovisionAccount = z.infer<typeof DockerReprovisionAccount>;
+/** Removal of one never-started earlier source. Intent precedes the effect and
+ * an issued removal is settled only by a positive Engine listing. */
+export const DockerReprovisionRemovalCursor = z
+  .object({
+    phase: z.enum(['pending', 'issued', 'removed']),
+    name: z.string().regex(/^reverie-boxed-source-[a-f0-9]{64}$/),
+    containerId: digest,
+  })
+  .strict();
+export type DockerReprovisionRemovalCursor = z.infer<typeof DockerReprovisionRemovalCursor>;
 export const DockerAbsentContinuationRetirement = z
   .object({
     version: z.literal(1),
     purpose: z.literal('docker-absent-continuation-retirement-v1'),
     retiredAt: z.number().int().nonnegative().safe(),
     operationId: uuid,
-    reason: z.literal('recorded-containers-absent'),
+    /** `source-replaced` swaps an unused source and retires no record.
+     * `source-superseded` also retires a continuation that never requested a
+     * destination. Both name the entry whose source they replace. */
+    reason: z.enum(['recorded-containers-absent', 'source-replaced', 'source-superseded']),
+    previous: uuid.optional(),
+    account: DockerReprovisionAccount.optional(),
+    removal: DockerReprovisionRemovalCursor.optional(),
     employeeId: uuid,
     owner: z.string().max(200).optional(),
     sessionId: uuid,
@@ -129,7 +174,6 @@ export const DockerAbsentContinuationRetirement = z
       .object({
         containerIds: z
           .array(digest)
-          .min(1)
           .max(8)
           .refine((ids) => ids.every((id, index) => index === 0 || ids[index - 1]! < id)),
         /** Active native plan moves closed as abandoned by this operation. */
@@ -137,7 +181,7 @@ export const DockerAbsentContinuationRetirement = z
       })
       .strict(),
     /** The removed continuation row and published binding, verbatim. */
-    record: DockerEmployeeContinuationRecord,
+    record: DockerEmployeeContinuationRecord.optional(),
     binding: DockerEmployeeBinding.nullable(),
     /** Stale saved boxed view reference removed through the state service. */
     session: z.object({ phase: z.enum(['pending', 'cleared']), containerName: digest.nullable() }).strict(),
@@ -146,15 +190,37 @@ export const DockerAbsentContinuationRetirement = z
   .strict()
   .refine(
     (entry) =>
-      entry.record.employeeId === entry.employeeId &&
-      entry.record.owner === entry.owner &&
-      entry.record.request.sessionId === entry.sessionId &&
-      entry.record.request.sessionGeneration === entry.sessionGeneration &&
-      entry.record.request.operationId !== entry.operationId &&
+      (!entry.record ||
+        (entry.record.employeeId === entry.employeeId &&
+          entry.record.owner === entry.owner &&
+          entry.record.request.sessionId === entry.sessionId &&
+          entry.record.request.sessionGeneration === entry.sessionGeneration &&
+          entry.record.request.operationId !== entry.operationId)) &&
       (!entry.binding || entry.binding.sessionId === entry.sessionId) &&
-      (entry.source.phase === 'pending' || entry.session.phase === 'cleared'),
+      (entry.source.phase === 'pending' ||
+        (entry.session.phase === 'cleared' && (!entry.removal || entry.removal.phase === 'removed'))),
     'Retirement must bind its original employee, session and record'
-  );
+  )
+  .refine((entry) => {
+    if (entry.reason === 'recorded-containers-absent')
+      return !!entry.record && !entry.previous && !entry.removal && entry.absent.containerIds.length > 0;
+    const replaced =
+      !!entry.previous &&
+      entry.previous !== entry.operationId &&
+      !!entry.removal &&
+      !entry.binding &&
+      entry.session.phase === 'cleared' &&
+      entry.session.containerName === null &&
+      entry.absent.containerIds.length === 0 &&
+      entry.absent.planMoveIds.length === 0;
+    if (entry.reason === 'source-replaced') return replaced && !entry.record;
+    return (
+      replaced &&
+      entry.record?.version === 2 &&
+      !entry.record.destination &&
+      entry.record.original.containerId === entry.removal!.containerId
+    );
+  }, 'Retirement reason must match its recorded shape');
 export type DockerAbsentContinuationRetirement = z.infer<typeof DockerAbsentContinuationRetirement>;
 /** Append-only: entries are never removed; only their own cursors advance. */
 export const DockerAbsentContinuationRetirements = z
@@ -166,8 +232,21 @@ export function allowedReprovisionTransition(
   next: DockerAbsentContinuationRetirement
 ): boolean {
   const fixed = (entry: DockerAbsentContinuationRetirement) =>
-    JSON.stringify({ ...entry, session: undefined, source: undefined });
+    JSON.stringify({ ...entry, session: undefined, source: undefined, removal: undefined });
   if (fixed(before) !== fixed(next) || before.session.containerName !== next.session.containerName) return false;
+  const steps = { pending: 0, issued: 1, removed: 2 } as const,
+    from = before.removal,
+    to = next.removal;
+  if (!from !== !to) return false;
+  if (
+    from &&
+    to &&
+    (from.name !== to.name ||
+      from.containerId !== to.containerId ||
+      steps[to.phase] < steps[from.phase] ||
+      steps[to.phase] > steps[from.phase] + 1)
+  )
+    return false;
   const session =
     before.session.phase === next.session.phase ||
     (before.session.phase === 'pending' && next.session.phase === 'cleared');

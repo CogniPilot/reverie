@@ -148,6 +148,18 @@ per-laptop source bridge is not recreated. A retired plan replacement (version
 3) record becomes history; its open native move is closed as abandoned in the
 PlanMoves journal and the new operation is an ordinary version 2 continuation.
 
+The source also carries the employee's provider account routing, derived by the
+backend: a retired plan replacement keeps its in-home account generation as one
+`CLAUDE_CONFIG_DIR` or `CODEX_HOME` entry, and a saved launch override that
+selects the employee's own subscription seat gets that seat as one read-write
+bind at `/instances/default/console/accounts/<id>`. The destination copies both
+from the source.
+
+A source that was never started can be replaced under a new operation ID. The
+same workflow also supersedes a version 2 record that was begun from that
+source and never requested a destination. A record at `destination-issued` or
+later is not accepted. The record's storage holder is left in place.
+
 The workflow does not start containers, launch providers or create a fresh
 employee. A laptop with any surviving recorded container stays with the
 workflows above.
