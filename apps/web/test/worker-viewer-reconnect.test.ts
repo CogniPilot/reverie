@@ -699,6 +699,14 @@ it('carries independent native health through the real server SSE projection and
  expect(h.app._chatEls.input.value).toBe('retained unsent draft');expect(f.mux.sendInput).not.toHaveBeenCalled();
 });
 
+it('reports a new disconnect even when the last repair succeeded on the same session', async () => {
+  const f = await fixture();
+  expect(await f.controller.reconnect(f.employee.id, f.expected, undefined)).toBe('connected');
+  expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({ state: 'connected', reason: 'connected' });
+  f.session.setPaneExit({ status: 1, at: 456 });
+  expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({ state: 'blocked', reason: 'viewer-disconnected' });
+});
+
 it('reports bounded native-health, retry, readiness and exact-binding diagnostics', async () => {
   const f = await fixture();
   f.health(false); expect(f.controller.status(f.employee.id, f.expected)).toMatchObject({reason:'native-health-unavailable',attempts:0});
@@ -854,6 +862,18 @@ it('does not publish a responsive read after a real PlanMoves preparation invali
   expect(response.json().data.reconnect.observation).toBeUndefined();
   expect(f.mux.respawnPane).not.toHaveBeenCalled();expect(f.mux.sendInput).not.toHaveBeenCalled();
   expect(save).not.toHaveBeenCalled();
+});
+
+it('returns current terminal status when publishing a repair fails after attachment', async () => {
+  const f = await fixture(), app = Fastify();
+  cleanups.push(() => app.close());
+  registerWorkerViewerReconnect(app, f.controller, () => true);
+  f.deps.publish.mockImplementationOnce(() => { throw Error('fixture publication failure'); });
+  const reply = await app.inject({ method: 'POST', url: `/api/company/employees/${f.employee.id}/reconnect`, payload: f.expected });
+  expect(reply.statusCode).toBe(503);
+  expect(reply.json().reconnect).toMatchObject({ state: 'idle', reason: 'viewer-not-disconnected' });
+  expect(f.session.runtimeHealth).not.toBe('disconnected');
+  expect(f.mux.respawnPane).toHaveBeenCalledOnce();
 });
 
 it.each(['current','revoked','moved'] as const)('sanitizes a failed repair with %s authority and binding',async change=>{

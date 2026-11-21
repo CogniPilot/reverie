@@ -100,6 +100,12 @@ function ownerCookie(response: Response): string {
   if (cookies.length !== 1) throw Error('Actual owner login cookie absent');
   return cookies[0].split(';')[0];
 }
+function isSignedInFixtureOwner(status: Json): boolean {
+  const identity = status.identity as Json | undefined;
+  return status.configured === true && status.signedIn === true && status.policy === 'enforce' &&
+    status.mustChange === false && status.username === 'canary-owner' &&
+    identity?.role === 'owner' && identity.primary === true;
+}
 async function authenticate(
   request: ReturnType<typeof client>,
   directory: string
@@ -126,7 +132,7 @@ async function signIn(
   if (result.next !== 'done') throw Error('Canary owner login is not complete');
   const sessionFile = await privateRecord(directory, sessionName, { cookie });
   const current = await success(await request('/api/owner/status', 'GET', undefined, { cookie }));
-  if (current.configured !== true || current.signedIn !== true || current.policy !== 'enforce')
+  if (!isSignedInFixtureOwner(current))
     throw Error('Actual owner session currentness refused');
   return { cookie, sessionFile };
 }
@@ -139,6 +145,11 @@ export async function enrollIsolatedPlanOfficeOwner(endpoint: string, directory:
   const requests: RecordedRequest[] = [];
   const send = client(url, requests),
     owner = await authenticate(send, directory);
+  return scopedOfficeOwner(url, requests, send, owner);
+}
+function scopedOfficeOwner(
+  url: URL, requests: RecordedRequest[], send: ReturnType<typeof client>, owner: { cookie: string; sessionFile: string }
+) {
   return {
     ownerSessionFile: owner.sessionFile,
     requests: () => structuredClone(requests),
@@ -316,55 +327,8 @@ export async function loginDockerCanaryOwner(
   contractFile?: string
 ) {
   const fixture = loadCanaryFixtureContract(contractFile);
-  if (!/^[a-f0-9]{64}$/.test(controlId) || !validCanaryCookieName(previousSessionName))
-    throw Error('Exact control CID and closed prior cookie filename required');
-  const url = target(endpoint);
-  await privateDirectory(directory);
-  const requests: RecordedRequest[] = [];
-  const request = client(url, requests);
-  await privateRecord(directory, 'owner-control-' + controlId + '-intent.json', {
-    controlId,
-    endpoint: url.origin,
-    previousSessionName,
-    at: new Date().toISOString(),
-  });
-  const previous = await privateSavedObject(directory, previousSessionName);
-  if (
-    Object.keys(previous).join(',') !== 'cookie' ||
-    typeof previous.cookie !== 'string' ||
-    !/^reverie_owner=[^;\r\n]+$/.test(previous.cookie)
-  )
-    throw Error('Prior cookie frame refused');
-  const status = await success(await request('/api/owner/status', 'GET', undefined, { cookie: previous.cookie }));
-  if (
-    status.configured !== true ||
-    status.setupAvailable !== false ||
-    status.policy !== 'enforce' ||
-    typeof status.signedIn !== 'boolean'
-  )
-    throw Error('Existing enforced canary owner account required');
-  let owner: { cookie: string; sessionFile: string },
-    loginIssued = false;
-  if (status.signedIn) {
-    if (
-      status.mustChange !== false ||
-      status.username !== 'canary-owner' ||
-      record(status.identity).role !== 'owner' ||
-      record(status.identity).primary !== true
-    )
-      throw Error('Prior session is not the unrestricted expected owner');
-    owner = { cookie: previous.cookie, sessionFile: join(directory, previousSessionName) };
-  } else {
-    const saved = await savedEnrollment(directory);
-    loginIssued = true;
-    owner = await signIn(
-      request,
-      directory,
-      saved.username,
-      saved.password,
-      'owner-session-control-' + controlId + '.json'
-    );
-  }
+  const { owner, requests, request, loginIssued, url } =
+    await currentOrLoginCanaryOwner(endpoint, directory, controlId, previousSessionName);
   await verifyFixture(request, owner.cookie, fixture);
   await refusalControls(request, owner.cookie, fixture);
   const report = {
@@ -400,28 +364,63 @@ export async function resumeIsolatedPlanOfficeOwner(endpoint: string, directory:
     send = client(url, requests),
     cookie = saved.cookie;
   const status = await success(await send('/api/owner/status', 'GET', undefined, { cookie }));
+  if (!isSignedInFixtureOwner(status))
+    throw Error('Current actual owner login required');
+  return scopedOfficeOwner(url, requests, send, {cookie, sessionFile: join(directory, 'owner-session.json')});
+}
+
+export async function authenticateRestartedPlanOfficeOwner(endpoint: string, directory: string, controlId: string) {
+  const { url, requests, request, owner } =
+    await currentOrLoginCanaryOwner(endpoint, directory, controlId, 'owner-session.json');
+  return scopedOfficeOwner(url, requests, request, owner);
+}
+
+async function currentOrLoginCanaryOwner(
+  endpoint: string, directory: string, controlId: string, previousSessionName: string
+) {
+  if (!/^[a-f0-9]{64}$/.test(controlId) || !validCanaryCookieName(previousSessionName))
+    throw Error('Exact control CID and closed prior cookie filename required');
+  const url = target(endpoint);
+  await privateDirectory(directory);
+  const requests: RecordedRequest[] = [];
+  const request = client(url, requests);
+  await privateRecord(directory, 'owner-control-' + controlId + '-intent.json', {
+    controlId,
+    endpoint: url.origin,
+    previousSessionName,
+    at: new Date().toISOString(),
+  });
+  const previous = await privateSavedObject(directory, previousSessionName);
+  if (
+    Object.keys(previous).join(',') !== 'cookie' ||
+    typeof previous.cookie !== 'string' ||
+    !/^reverie_owner=[^;\r\n]+$/.test(previous.cookie)
+  )
+    throw Error('Prior cookie frame refused');
+  const status = await success(await request('/api/owner/status', 'GET', undefined, { cookie: previous.cookie }));
   if (
     status.configured !== true ||
-    status.signedIn !== true ||
+    status.setupAvailable !== false ||
     status.policy !== 'enforce' ||
-    status.mustChange !== false
+    typeof status.signedIn !== 'boolean'
   )
-    throw Error('Current actual owner login required');
-  return {
-    ownerSessionFile: join(directory, 'owner-session.json'),
-    requests: () => structuredClone(requests),
-    request: async (path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', body?: Json) => {
-      const next = new URL(path, url);
-      if (
-        !path.startsWith('/api/') ||
-        !next.pathname.startsWith('/api/') ||
-        next.origin !== url.origin ||
-        next.username ||
-        next.password ||
-        next.hash
-      )
-        throw Error('Only this disposable office API may receive its owner credential');
-      return send(path, method, body, { cookie });
-    },
-  };
+    throw Error('Existing enforced canary owner account required');
+  let owner: { cookie: string; sessionFile: string },
+    loginIssued = false;
+  if (status.signedIn) {
+    if (!isSignedInFixtureOwner(status))
+      throw Error('Prior session is not the unrestricted expected owner');
+    owner = { cookie: previous.cookie, sessionFile: join(directory, previousSessionName) };
+  } else {
+    const saved = await savedEnrollment(directory);
+    loginIssued = true;
+    owner = await signIn(
+      request,
+      directory,
+      saved.username,
+      saved.password,
+      'owner-session-control-' + controlId + '.json'
+    );
+  }
+  return { url, requests, request, owner, loginIssued };
 }

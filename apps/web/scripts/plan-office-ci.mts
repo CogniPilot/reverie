@@ -374,6 +374,16 @@ export function requirePlanOfficeCiAcceptance(
     returnScenarioId: returned.id,
   };
 }
+/** Compare Docker UTC start times at their recorded precision, including fractional seconds. */
+function controlStart(receipt: Json, controlId: unknown): string {
+  assert.equal(receipt.control, controlId);
+  const time = receipt.startedAt;
+  assert.ok(typeof time === 'string' && Number.isFinite(Date.parse(time)));
+  const parts = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?Z$/.exec(time);
+  assert.ok(parts);
+  return parts[1] + '.' + (parts[2] ?? '').padEnd(9, '0');
+}
+
 /** Team permission scope is explicit: two denied API requests, two granted
  * read-only probes, one actual capsule request and physically verified target. */
 export function requirePlanOfficeCiTeamAcceptance(
@@ -424,6 +434,10 @@ export function requirePlanOfficeCiTeamAcceptance(
   assert.equal(p.callerSessionId, s.callerSessionId);
   assert.equal(p.callerSessionId, caller.sessionId);
   assert.notEqual(p.sessionId, p.callerSessionId);
+  const recovered = object(s.restartRecovered);
+  assert.match(String(r.controlId), /^[a-f0-9]{64}$/);
+  assert.ok(controlStart(recovered, r.controlId) > controlStart(object(s.restartIssued), r.controlId));
+  assert.deepEqual(recovered.sessions, [caller.sessionId, p.sessionId]);
   assert.equal(p.fromAccount, 'ci-plan-a');
   assert.equal(p.toAccount, 'ci-plan-b');
   assert.equal(p.realCapsuleHmac, true);
@@ -492,6 +506,7 @@ export function requirePlanOfficeCiTeamAcceptance(
     callerEmployeeId,
     teamAccepted: true,
     teamManagePlansGrantRevocationAccepted: true,
+    originalEmployeeTerminalsRecoveredAfterControlRestart: true,
     ordinarySelfAccepted: false,
     selfRoundtripAccepted: false,
     forceAccepted: false,
@@ -922,7 +937,11 @@ export async function runPlanOfficeCi(args: readonly string[], env = process.env
       assert.match(String(summary.id), uuid);
       acceptance = requirePlanOfficeCiTeamAcceptance(
         JSON.parse(stdout),
-        summary,
+        {
+          ...summary,
+          restartIssued: JSON.parse(fs.readFileSync(path.join(root, 'team-control-restart-issued.json'), 'utf8')),
+          restartRecovered: JSON.parse(fs.readFileSync(path.join(root, 'team-control-restart-recovered.json'), 'utf8')),
+        },
         JSON.parse(fs.readFileSync(path.join(root, 'team-move-' + summary.id + '-completed.json'), 'utf8')),
         JSON.parse(fs.readFileSync(path.join(root, 'physical-move-' + summary.id + '.json'), 'utf8')),
         root,

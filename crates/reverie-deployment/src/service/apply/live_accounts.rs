@@ -1,7 +1,6 @@
 //! Only the explicit original live-account disposition may enter this path.
 //! It does not pause workers, verify snapshot consistency or restore data.
 use super::*;
-use std::process::{Child, Command, Stdio};
 #[cfg(test)]
 mod tests;
 
@@ -56,40 +55,14 @@ impl DeploymentService {
     ) -> Result<Value> {
         let destination = operation.directory.join("retained-copy");
         require(!destination.try_exists()?, "DEPLOYMENT_COPY_OCCUPIED")?;
-        let copy = option_env!("REVERIE_DEPLOYMENT_COPY")
-            .ok_or_else(|| DeploymentError::new("DEPLOYMENT_COPY_UNINSTALLED"))?;
+        let copy = retained_copy::program()?;
         let console = self.data_source(operation)?.join("console");
         operation.attempt("retained-copy-attempt")?;
-        let child = Command::new(copy)
-            .args(["--archive", "--reflink=auto", "--no-target-directory", "--"])
-            .arg(console)
-            .arg(&destination)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        join_copy(child, deadline.snapshot())?;
+        retained_copy::run(copy, &console, &destination, deadline.snapshot())?;
         Ok(json!({
                 "backupVerified":false,"copy":destination,"copyExitSuccess":true,
                 "policy":"explicit-owner-live-accounts-fix-forward","sourceDataDeleted":false,
                 "codeRollbackGuaranteed":false,"automaticDataRestore":false
         }))
-    }
-}
-
-fn join_copy(mut child: Child, end: Instant) -> Result<()> {
-    loop {
-        if let Some(status) = child.try_wait()? {
-            return require(status.success(), "DEPLOYMENT_RETAINED_COPY_UNCONFIRMED");
-        }
-        if Instant::now() >= end {
-            let killed = child.kill().map_err(DeploymentError::from);
-            let joined = child.wait().map(|_| ()).map_err(DeploymentError::from);
-            return DeploymentError::finalized(
-                Err(DeploymentError::new("DEPLOYMENT_RETAINED_COPY_DEADLINE")),
-                DeploymentError::finalized(killed, joined),
-            );
-        }
-        std::thread::sleep(Duration::from_millis(25));
     }
 }

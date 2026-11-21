@@ -101,6 +101,7 @@ import fastifyMultipart from '@fastify/multipart';
 import { pasteImageDirInUseByOtherSession, startPasteImageGc, uploadDirs } from './paste-image-gc.js';
 import { CLEAN_EXIT_CLOSE_REASON, shouldCloseCleanlyExitedSession } from '../pane-exit-sweep.js';
 import { join, dirname } from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { existsSync, mkdirSync, readFileSync, chmodSync } from 'node:fs';
 import fs from 'node:fs/promises';
@@ -239,7 +240,7 @@ import { MAX_CONCURRENT_SESSIONS, MAX_SSE_CLIENTS } from '../config/map-limits.j
 import { MAX_PASTE_IMAGE_BYTES } from '../config/buffer-limits.js';
 import { resolveTerminalHistoryConfig } from '../config/terminal-history.js';
 import { SseEvent } from './sse-events.js';
-import { MAX_ROUTE_PARAM_LENGTH, ownerFor, resolveParentSessionId } from './route-helpers.js';
+import { MAX_ROUTE_PARAM_LENGTH, ownerFor, patchOfficeSettings, resolveParentSessionId } from './route-helpers.js';
 import { getLatestPlanUsage, setLatestCodexPlanUsage, setLatestAccountPlanUsage } from './plan-usage-latest.js';
 import { SubscriptionUsageReader } from '../subscription-usage.js';
 import { readSubscriptionProfiles } from '../subscription-profiles.js';
@@ -1541,7 +1542,7 @@ export class WebServer extends EventEmitter {
     registerScheduledRoutes(this.app, ctx, verifiedOwner);
     registerHookEventRoutes(this.app, ctx);
     registerApprovalRoutes(this.app, ctx);
-    registerRebootRestoreRoutes(this.app, ctx);
+    registerRebootRestoreRoutes(this.app, ctx, id => this.companyService.allowsPersonalSessionRestore(id));
     registerReadMyMindRoutes(this.app, ctx);
     registerGitStatusRoutes(this.app, ctx);
     // The room and company services are created later in start-up; the report reads them per request.
@@ -1854,7 +1855,7 @@ export class WebServer extends EventEmitter {
     this.companyWake = new CompanyWake({
       company: () => companyStore.snapshot(),
       saved: (id) => this.store.getSession(id) ?? undefined,
-      ...(dockerRuntime ? { dockerWake: (employee: CompanyEmployee, allowed: () => boolean) => dockerRuntime.wake(employee, allowed) } : {}),
+      ...(dockerRuntime ? { dockerWake: (employee: CompanyEmployee, allowed: () => boolean) => dockerRuntime.attachExistingEmployee(employee, allowed) } : {}),
       ...(process.env.REVERIE_WORKER_SOCKET ? { nativeHealth: (id: string) => {
         const employee=this.companyService.registeredEmployees().find(e=>e.sessionId===id);
         return employee ? this.workerProviderHealth?.read(employee)?.state ?? 'unknown' as const : 'unknown' as const;
@@ -4852,16 +4853,12 @@ export class WebServer extends EventEmitter {
     // Tunnel only starts when user clicks the toggle in the UI — never on boot.
     // Reset persisted tunnelEnabled so the UI toggle reflects actual state.
     if (await this.isTunnelEnabled()) {
-      const settingsPath = dataPath('settings.json');
       try {
-        const content = await fs.readFile(settingsPath, 'utf-8');
-        const settings = JSON.parse(content);
-        settings.tunnelEnabled = false;
-        await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2));
+        await patchOfficeSettings({ tunnelEnabled: false });
+        console.log('Cloudflare tunnel setting reset (tunnel only starts on explicit UI toggle)');
       } catch {
-        /* ignore */
+        console.warn('Could not reset the saved tunnel setting. The tunnel remains stopped.');
       }
-      console.log('Cloudflare tunnel setting reset (tunnel only starts on explicit UI toggle)');
     }
 
     // Start team watcher for agent team awareness (always on — lightweight polling)
@@ -4970,7 +4967,7 @@ export class WebServer extends EventEmitter {
       const result = await autoRestorePinnedIfEnabled(
         await this.readSettings(true),
         this.createRouteContext(),
-        new Set(this.companyService.registeredEmployees().map((e) => e.sessionId))
+        id => this.companyService.allowsPersonalSessionRestore(id)
       );
       if (!result) return;
       const { restored, skipped } = result;
@@ -4989,9 +4986,11 @@ export class WebServer extends EventEmitter {
   private async planRebootRestoreOffer(dead: string[], livePaneCount: number): Promise<number> {
     if (dead.length === 0) return 0;
 
-    const persisted = this.store.getSessions();
-    const codexRecords = dead.map((id) => persisted[id]).filter((saved) => saved && getCli(saved.mode ?? 'claude')?.capabilities.transcript === 'codex-rollout'
-      && legacyThreadBinding(saved.mode)?.kind === 'nested-resume');
+    const personal = dead.filter(id => this.companyService.allowsPersonalSessionRestore(id));
+    const initial = this.store.getSessions();
+    const codexRecords = personal.map(id => initial[id]).filter(saved => saved &&
+      getCli(saved.mode ?? 'claude')?.capabilities.transcript === 'codex-rollout' &&
+      legacyThreadBinding(saved.mode)?.kind === 'nested-resume').map(saved => structuredClone(saved));
     if (codexRecords.length) {
       const profiles = await readSubscriptionProfiles();
       const bindings = new Map<string | undefined, Map<string, string>>();
@@ -5009,13 +5008,14 @@ export class WebServer extends EventEmitter {
           );
         }
         const thread = bindings.get(profile)?.get(saved.id);
-        if (thread) {
+        if (thread && this.companyService.allowsPersonalSessionRestore(saved.id) &&
+            isDeepStrictEqual(this.store.getSessions()[saved.id], saved)) {
           const next = { ...saved, codexConfig: { ...saved.codexConfig, resumeSessionId: thread } };
-          persisted[saved.id] = next;
           this.store.setSession(saved.id, next);
         }
       }
     }
+    const persisted = this.store.getSessions();
     if (
       !looksLikeHostReboot({
         livePaneCount,
@@ -5030,7 +5030,9 @@ export class WebServer extends EventEmitter {
       return 0;
     }
 
-    const { restore, skipped } = planRebootRestore(dead, persisted, (workingDir) => existsSync(workingDir));
+    // Company recovery owns these sessions even if a later move releases the old ID.
+    const stillPersonal = personal.filter(id => this.companyService.allowsPersonalSessionRestore(id));
+    const { restore, skipped } = planRebootRestore(stillPersonal, persisted, (workingDir) => existsSync(workingDir));
     if (skipped.length > 0) {
       console.log(`[Server] Reboot restore is passing over ${skipped.length} dead session(s):`);
       for (const rejection of skipped) {

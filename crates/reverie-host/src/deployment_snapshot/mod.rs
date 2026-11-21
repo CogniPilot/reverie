@@ -4,11 +4,14 @@
 //! the same immutable container before and after each public operation.
 mod ancestors;
 mod attributes;
+mod compressed;
 mod directory;
 mod manifest;
 mod mounts;
 mod observed;
 mod process;
+mod rehearsal;
+pub use rehearsal::RehearsalRoot;
 #[cfg(test)]
 mod tests;
 
@@ -127,6 +130,17 @@ impl SnapshotTools {
         destination: &Path,
         end: Instant,
     ) -> Result<ConsoleSnapshot> {
+        self.stage_console(source, destination, end)?.verify(end)
+    }
+
+    /// Stage the tar and its source manifest. Only verification or a complete
+    /// restore rehearsal can turn this into a usable snapshot.
+    pub fn stage_console(
+        &self,
+        source: &Path,
+        destination: &Path,
+        end: Instant,
+    ) -> Result<StagedConsoleSnapshot> {
         deadline(end)?;
         let mut partial = PartialCapture {
             source: SnapshotSource::observe(source)?,
@@ -138,7 +152,7 @@ impl SnapshotTools {
             Ok(details) => details,
             Err(error) => return combine(Err(error), partial.close()),
         };
-        let mut snapshot = ConsoleSnapshot {
+        Ok(StagedConsoleSnapshot(ConsoleSnapshot {
             tools: self.clone(),
             source: partial.source,
             destination: partial.destination.take().expect("captured directory"),
@@ -147,11 +161,7 @@ impl SnapshotTools {
             manifest: before,
             mounts,
             rehearsed: false,
-        };
-        match snapshot.verify_source(end) {
-            Ok(()) => Ok(snapshot),
-            Err(error) => combine(Err(error), snapshot.close()),
-        }
+        }))
     }
     fn populate(
         &self,
@@ -290,6 +300,34 @@ pub struct ConsoleSnapshot {
     mounts: reverie_contracts::kernel_mounts::MountTable,
     rehearsed: bool,
 }
+
+pub struct StagedConsoleSnapshot(ConsoleSnapshot);
+
+impl StagedConsoleSnapshot {
+    fn verify(mut self, end: Instant) -> Result<ConsoleSnapshot> {
+        match self.0.verify_source(end) {
+            Ok(()) => Ok(self.0),
+            Err(error) => combine(Err(error), self.close()),
+        }
+    }
+
+    /// The rehearsal verifies the source and archive on both sides of the
+    /// actual extraction. A refusal always consumes the held descriptors.
+    pub fn rehearse(
+        mut self,
+        selected: Option<&RehearsalRoot>,
+        end: Instant,
+    ) -> Result<ConsoleSnapshot> {
+        match self.0.rehearse_at(selected, end) {
+            Ok(()) => Ok(self.0),
+            Err(error) => combine(Err(error), self.close()),
+        }
+    }
+
+    pub fn close(self) -> Result<()> {
+        self.0.close()
+    }
+}
 impl ConsoleSnapshot {
     pub fn archive_path(&self) -> PathBuf {
         self.destination.path().join("console.tar")
@@ -338,9 +376,18 @@ impl ConsoleSnapshot {
     /// Extracts into a NEW empty private child. Numeric ownership restoration
     /// failure is a refusal, including when the invoking service lacks privilege.
     pub fn rehearse(&mut self, end: Instant) -> Result<()> {
+        self.rehearse_at(None, end)
+    }
+
+    pub fn rehearse_at(&mut self, selected: Option<&RehearsalRoot>, end: Instant) -> Result<()> {
         self.verify_source(end)?;
-        let rehearsal = Arc::new(self.destination.create_child("rehearsal")?);
-        let result = (|| {
+        let parent = selected.map_or(self.destination.as_ref(), RehearsalRoot::directory);
+        if selected.is_some() {
+            mounts::disjoint(self.source.root.path(), parent.path(), &self.mounts)?;
+            mounts::disjoint(self.destination.path(), parent.path(), &self.mounts)?;
+        }
+        let rehearsal = Arc::new(parent.create_child("rehearsal")?);
+        let result = parent.check().and_then(|()| {
             self.tools
                 .0
                 .extract(&rehearsal, &self.destination, &self.archive, end)?;
@@ -354,9 +401,8 @@ impl ConsoleSnapshot {
             )?;
             self.verify_source(end)?;
             rehearsal.sync()?;
-            self.destination.sync()?;
-            Ok(())
-        })();
+            self.destination.sync()
+        });
         combine(result, close_directory(rehearsal))?;
         self.rehearsed = true;
         Ok(())

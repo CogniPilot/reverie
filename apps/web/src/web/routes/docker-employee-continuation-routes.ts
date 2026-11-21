@@ -1,3 +1,4 @@
+import type { DockerWorkerReattachHelper } from '../../docker-worker-reattach-helper.js';
 import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
@@ -15,6 +16,7 @@ import {
   DockerEmployeeResourcePolicy,
 } from '../../docker-employee-continuation-data.js';
 import { CompanyDockerContinuationStore } from '../../docker-employee-store.js';
+import { sameOrigin } from '../../owner-auth/policy.js';
 const uuid = z
   .string()
   .uuid()
@@ -49,7 +51,8 @@ export function registerDockerEmployeeContinuationRoutes(
   service: DockerEmployeeContinuation,
   auth: DockerContinuationRouteAuthentication,
   proposal?: (employeeId: string) => DockerPolicyProposal | undefined,
-  pool?: DockerPoolReconciliation
+  pool?: DockerPoolReconciliation,
+  recoveryHelper?: DockerWorkerReattachHelper
 ): void {
   const human = (req: FastifyRequest) =>
     req.headers['x-reverie-parent-session'] === undefined &&
@@ -97,7 +100,46 @@ export function registerDockerEmployeeContinuationRoutes(
         .send({ success: false, error: { code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: ['observe'] } });
     }
   };
+  if (recoveryHelper) {
+    app.post('/api/company/employees/:id/docker-storage/device-approval', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req)) throw new CompanyError('A signed-in owner is required', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        const authority = capture(req, id);
+        const employee = company.store.snapshot().employees.find(member => member.id === id);
+        const row = store.record(id);
+        if (!row || !employee || employee.owner !== authority.owner || row.owner !== authority.owner ||
+            employee.sessionId !== row.request.sessionId || employee.sessionGeneration !== row.request.sessionGeneration ||
+            employee.dockerBinding?.containerId !== row.destination?.containerId || !row.destination ||
+            !employee.desiredRunning || employee.onVacation) throw new CompanyError('Current worker binding required', 409);
+        authority.require();
+        recoveryHelper.approveStorage(row, req.body);
+        return { state: 'approved', operationId: row.request.operationId };
+      })
+    );
+  }
   if (pool) {
+    app.get('/api/company/employees/:id/docker-pool/cold-preview', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req)) throw new CompanyError('Verified owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        return pool.coldPreview(id, capture(req, id));
+      })
+    );
+    app.post('/api/company/employees/:id/docker-pool/cold-recover', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        const input = z.object({
+          operationId: uuid,
+          sessionId: uuid,
+          sessionGeneration: z.number().int().positive().safe(),
+          expectedScopeDigest: digest,
+        }).strict().parse(req.body);
+        return pool.coldRecover(id, input, capture(req, id));
+      })
+    );
     app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);

@@ -112,7 +112,7 @@ describe('immutable Docker target recipe DATA', () => {
         input,
         { sessionId: targetId, owner: undefined, at: 2 },
         {},
-        { kind: 'template' }
+        { kind: 'template', sourceState: 'stopped' }
       ),
       b = dockerPlanMoveTargetRecipe(
         source,
@@ -134,6 +134,16 @@ describe('immutable Docker target recipe DATA', () => {
         { kind: 'resolved', nativeId: null }
       )
     ).toThrow();
+  });
+  it('checks a stopped Codex conversation before reserving a same-provider move', () => {
+    const codex: PlanAccount = { ...account, provider: 'openai', profile: { ...account.profile, provider: 'openai' } };
+    const render = (sourceState: 'running' | 'stopped', resumeSessionId?: string) => dockerPlanMoveTargetRecipe(
+      { ...source, mode: 'codex', codexConfig: { resumeSessionId } },
+      codex, input, { sessionId: targetId, owner: undefined, at: 2 }, {}, { kind: 'template', sourceState }
+    );
+    expect(() => render('stopped')).toThrow('The stopped source native conversation is unconfirmed');
+    expect(render('stopped', native).saved.codexConfig?.resumeSessionId).toBe(native);
+    expect(render('running').saved.codexConfig?.resumeSessionId).toBeUndefined();
   });
   it('uses fresh provider-native configuration for a different provider instead of carrying Claude selectors', () => {
     const codex: PlanAccount = { ...account, provider: 'openai', profile: { ...account.profile, provider: 'openai' } };

@@ -5,7 +5,10 @@
  * session ended during the call.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { execFileSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { installResponseEnvelope } from '../../src/web/response-envelope.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
@@ -37,6 +40,10 @@ async function serve(script: Script, owner: () => boolean = () => true, settings
       return child as unknown as ChildProcessWithoutNullStreams;
     },
   });
+  return serveChannel(channel, owner, settingsPath);
+}
+
+async function serveChannel(channel: RouteChannel, owner: () => boolean, settingsPath: string) {
   app = Fastify();
   let sends = 0;
   app.addHook('onSend', async (_req, reply) => {
@@ -60,6 +67,37 @@ const typed =
   };
 
 describe('GET /api/settings forwarder', () => {
+  const packagedHandler = process.env.NIX_REVERIE_TEST_RUST_ROUTE_HANDLER;
+  it.skipIf(!packagedHandler)(
+    'serves defaults for a FIFO and reads subsequent settings through the packaged native child',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'settings-forwarder-'));
+      try {
+        const path = join(root, 'settings.json');
+        const channel = new RouteChannel({
+          handlerPath: packagedHandler!,
+          statuses: ROUTE_STATUSES,
+          media: ROUTE_MEDIA,
+          log: () => {},
+        });
+        const server = await serveChannel(channel, () => true, path);
+        execFileSync('mkfifo', [path]);
+        const defaults = await server.inject('/api/settings');
+        expect(defaults.statusCode).toBe(200);
+        expect(defaults.json()).toEqual({ success: true, data: {} });
+        rmSync(path);
+        for (const theme of ['dark', 'light']) {
+          writeFileSync(path, JSON.stringify({ theme }));
+          const reply = await server.inject('/api/settings');
+          expect(reply.statusCode).toBe(200);
+          expect(reply.json()).toEqual({ success: true, data: { theme } });
+        }
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   it('publishes the typed bytes once through the TS hooks, with no second envelope', async () => {
     const server = await serve(typed(1, '{"success":true,"data":{"theme":"dark"}}'));
     const reply = await server.inject('/api/settings');

@@ -1,3 +1,4 @@
+import { DockerWorkerReattachHelper } from '../src/docker-worker-reattach-helper.js';
 import { fixture as resourcePhysical, writer as highWriter } from './helpers/docker-resource-physical.js';
 import { resourceCapacityHistory } from './helpers/docker-resource-capacity.js';
 /** Actual HTTP authentication and canonical CompanyStore; engine ports are inert,
@@ -231,6 +232,10 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       admin: () => false,
     },
   });
+  const reattach = new DockerWorkerReattachHelper({
+    async run() { throw Error('No native operation during approval'); },
+    async create() { throw Error('No container creation during approval'); },
+  }, destinationImage, () => { throw Error('No token during approval'); });
   registerDockerEmployeeContinuationRoutes(
     app,
     company,
@@ -245,7 +250,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       () => {
         if (!runtimeCurrent) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }
-    )
+    ), undefined, undefined, reattach
   );
   let resourceReads = 0,
     beforeResourceRead: (() => Promise<void>) | undefined;
@@ -400,6 +405,28 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
 }
 
 describe('boxed recovery HTTP and canonical employee permissions', () => {
+  it('limits device migration to the signed-in owner, original binding and current desired employee', async () => {
+    const f = await fixture({ storedPolicy: true });
+    await f.bindResourceRow();
+    const payload = { operationId: f.request.operationId, sessionId: sid, sessionGeneration: 9,
+      containerId: '6'.repeat(64), historicalDevice: '4', currentDevice: '7', filesystemId: '9988',
+      homeInode: '5', nixInode: '6' };
+    const url = f.url + '/docker-storage/device-approval';
+    const post = (headers: Record<string,string>, body = payload) => f.app.inject({ method:'POST', url, headers, payload: body });
+    expect((await post(f.ownerHeaders)).statusCode).toBe(409);
+    await f.companyStore.update(state => {
+      const employee = state.employees.find(value => value.id === target)!;
+      employee.onVacation = false;
+      employee.desiredRunning = true;
+    });
+    expect((await post(f.workerHeaders)).statusCode).toBe(403);
+    expect((await post({...f.ownerHeaders, origin:'https://other.invalid'})).statusCode).toBe(403);
+    expect((await post(f.ownerHeaders, {...payload, sessionGeneration: 8})).statusCode).toBe(409);
+    const approved = await post(f.ownerHeaders);
+    expect(approved.statusCode, approved.body).toBe(200);
+    expect(approved.json().data).toEqual({ state:'approved', operationId:f.request.operationId });
+    expect(f.effects()).toBe(0);
+  });
   it.each(['owner', 'worker'] as const)(
     'revoked runtime origin refuses genuine %s before any observation or effect',
     async (caller) => {

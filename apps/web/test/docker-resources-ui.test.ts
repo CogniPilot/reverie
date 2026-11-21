@@ -22,6 +22,7 @@ async function fixture(
     rootFailure?: { status: number; error: unknown };
     approved?: boolean;
     owner?: boolean;
+    stoppedPool?: boolean;
     action?: string[];
     reply?: (path: string, body: unknown) => unknown | Promise<unknown>;
     malformed?: boolean;
@@ -142,9 +143,19 @@ async function fixture(
           data: {
             sessionId: employee.sessionId,
             sessionGeneration: employee.sessionGeneration,
-            state: 'reconciliation-required',
-            allowedActions: ['reconcile-pool'],
+            ...(options.stoppedPool
+              ? { state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', allowedActions: [] }
+              : { state: 'reconciliation-required', allowedActions: ['reconcile-pool'], scopeDigest: 'a'.repeat(64) }),
+          },
+        };
+      if (path === profileBase + '/docker-pool/cold-preview' && options.stoppedPool)
+        return {
+          ok: true,
+          data: {
+            sessionId: employee.sessionId,
+            sessionGeneration: employee.sessionGeneration,
             scopeDigest: 'a'.repeat(64),
+            policy: { memoryMaxBytes: high },
           },
         };
       return { ok: false, error: { code: 'FIXTURE_UNHANDLED_WRITE' } };
@@ -299,6 +310,28 @@ it('uses the exact API pool scope/currentSID/gen without requesting limits or st
   await f.click('Reconcile shared pool observation');
   expect(f.writes()).toHaveLength(1);
   expect(f.writes()[0]!.path).not.toMatch(/continuation|apply/);
+});
+it('requires explicit owner confirmation before submitting the stopped pool recovery preview', async () => {
+  const f = await fixture({
+    stoppedPool: true,
+    reply: async (path, body) => {
+      expect(path).toBe(base + '/docker-pool/cold-recover');
+      expect(body).toEqual({
+        operationId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+        sessionId: sid,
+        sessionGeneration: 9,
+        expectedScopeDigest: 'a'.repeat(64),
+      });
+      return { ok: true, data: { sessionId: sid, sessionGeneration: 9, state: 'retained' } };
+    },
+  });
+  await f.click('Review stopped pool recovery');
+  expect(f.writes()).toEqual([]);
+  const dialog = f.h.document.querySelector('.ca-company-confirm')!;
+  expect(dialog.textContent).toContain('48 GiB RAM ceiling');
+  (dialog.querySelector('[aria-label="Recover shared pool"]') as HTMLButtonElement).click();
+  await f.h.flush();
+  expect(f.writes()).toHaveLength(1);
 });
 it('refuses malformed binding and missing or malformed action lists without guessing permissions', async () => {
   const bad = await fixture({ malformed: true });

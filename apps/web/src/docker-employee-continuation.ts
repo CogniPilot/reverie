@@ -69,6 +69,7 @@ export interface DockerContainerObservation extends DockerSourceObservation {
 }
 export interface DockerContinuationEngine {
   image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage>;
+  preparedIdentityImage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage>;
   /** Re-earn the frozen published image. A newer launch selection must not
    * turn existing-provider reads into admission of that newer image. */
   existingImage?(row: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage>;
@@ -77,7 +78,7 @@ export interface DockerContinuationEngine {
     row: DockerEmployeeContinuationRecord,
     current: () => void
   ): Promise<DockerEmployeeWorkerImage>;
-  observeSource(subject: DockerContinuationSubject, containerId?: string): Promise<DockerSourceObservation>;
+  observeSource(subject: DockerContinuationSubject, containerId?: string, expected?: DockerEmployeeOriginal): Promise<DockerSourceObservation>;
   /** v3 source closure reads the retained OLD placement, not the target subject.
    * The owning Engine must validate its genuine boxed source and no-restart state. */
   observePlanReplacementSource?(
@@ -343,6 +344,14 @@ export class DockerEmployeeContinuation {
     current();
     return next;
   }
+  #legacyImage(original: DockerEmployeeOriginal, retained: DockerEmployeeContinuationRecord | undefined, current: () => void) {
+    if (retained && retained.version !== 3 && ['identity-ready', 'identity-issued'].includes(retained.phase) &&
+        this.engine.preparedIdentityImage) {
+      if (!isDeepStrictEqual(original, retained.original)) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+      return this.engine.preparedIdentityImage(retained, current);
+    }
+    return this.engine.image(original);
+  }
   async #source(
     subject: DockerContinuationSubject,
     row: DockerEmployeeContinuationRecord,
@@ -362,7 +371,7 @@ export class DockerEmployeeContinuation {
     const observation =
       row.version === 3
         ? await this.engine.observePlanReplacementSource!(row, current)
-        : await this.engine.observeSource(subject, row.original.containerId);
+        : await this.engine.observeSource(subject, row.original.containerId, row.original);
     current();
     if (
       observation.state !== 'stopped' ||
@@ -377,7 +386,7 @@ export class DockerEmployeeContinuation {
         ? await this.engine.existingImage(row, current)
         : row.version === 3
           ? await this.engine.imageForPlanReplacement!(row, current)
-          : await this.engine.image(row.original)
+          : await this.#legacyImage(row.original, row, current)
     );
     current();
     if (!isDeepStrictEqual(workerImage, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
@@ -444,7 +453,8 @@ export class DockerEmployeeContinuation {
     }
     const subject = this.store.subject(employeeId);
     if (!subject || subject.owner !== authority.owner) refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    const seen = await this.engine.observeSource(subject);
+    const legacy = retained?.version === 3 ? undefined : retained?.original;
+    const seen = await this.engine.observeSource(subject, legacy?.containerId, legacy);
     authority.require();
     const current = this.store.subject(employeeId);
     if (
@@ -456,7 +466,7 @@ export class DockerEmployeeContinuation {
       seen.original.sessionId !== subject.sessionId
     )
       refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    const workerImage = DockerEmployeeWorkerImage.parse(await this.engine.image(seen.original));
+    const workerImage = DockerEmployeeWorkerImage.parse(await this.#legacyImage(seen.original, retained, () => authority.require()));
     authority.require();
     return {
       destinationImageId: workerImage.imageId,

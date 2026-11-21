@@ -8,7 +8,7 @@ use reverie_contracts::subscription_profiles_v1::{
     Response,
 };
 use std::collections::HashSet;
-use std::fs::{self, File};
+use std::fs;
 use std::io::{ErrorKind, Read as _};
 use std::path::PathBuf;
 
@@ -191,7 +191,7 @@ impl Host<'_> {
         let Some(path) = self.path(path) else {
             return Ok(Contents::Missing);
         };
-        let file = match File::open(path) {
+        let file = match crate::config_file::open(&path) {
             Ok(file) => file,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Contents::Missing),
             Err(_) => return Ok(Contents::Failed),

@@ -50,6 +50,68 @@ callbacks live outside private /nix. No shared Basic or hook secret is provision
 
 ## Remaining integration and acceptance gates
 
+### Automatic recovery after a reboot
+
+The running office periodically compares each desired employee with its current
+session and binding. A missing or revoked viewer can be attached to the verified
+original provider. Returning from vacation or completing a pending original
+operation makes the employee eligible on the next pass. Operator wake and the
+periodic check use the same attachment service.
+
+The first failed attachment is retried on the next ten-second check. Repeated
+failures with the same reason double the interval up to two minutes. Each
+employee has an independent interval. An explicit restore, a newly observed
+resource change, or a new session binding can trigger an earlier check.
+
+Same-plan recovery now checks the stopped worker’s HOME and Nix mounts before
+reserving a move. Linux can assign a different device number to the same ext4
+filesystem after a reboot. Legacy storage receipts identify a directory by its
+device number, inode, ownership and mode. When the device number changes, a
+stopped worker with only that receipt can remain held. Retrying its move cannot
+supply the missing filesystem identity. A durable replacement receipt needs a
+stable filesystem identifier for each mount as well as the original directory
+identity. Reboot qualification must cover both device renumbering on the same
+filesystem and a different filesystem mounted at the same path with matching
+inode numbers. For legacy receipts on one ext4 filesystem, the signed-in owner can approve a
+verified device renumbering through
+`POST /api/company/employees/:id/docker-storage/device-approval`. Compare the
+pre-reboot mount inventory and kernel filesystem UUID with the current mounts
+before approval. The request selects the original session, generation, operation
+and container, both original directory inodes, the old and current device
+numbers, and the current kernel filesystem ID (unsigned decimal). The kernel
+filesystem ID is distinct from the ext4 UUID. The Rust verifier checks this ID
+on both read-only directory descriptors on each of the two reference reads.
+Ownership, mode and inode checks still apply. Approval lasts for this office
+process and applies only to the selected placement. A stopped source or an
+existing held move uses its ordinary owner recovery workflow after approval.
+
+Cold recovery still needs a durable Rust operation with the following behavior.
+
+1. Read the current desired state, session generation, account, provider thread
+   and storage binding. A vacation, revoked approval or superseding generation
+   ends eligibility. Group employees by their approved pool so one operation
+   restores and verifies the shared anchor.
+2. Find or create one recovery journal for the employee, generation, original
+   container and failed incarnation. Concurrent wake requests and office
+   restarts must join that operation. A running provider goes through ordinary
+   viewer attachment.
+3. For a verified stopped container, start only its inert init. Recheck its
+   actual storage and apply and read back its approved cgroup limits for the
+   new incarnation before enabling provider work.
+4. Record the intent to resume the original thread before dispatch. If the
+   office exits between dispatch and acknowledgment, inspect the original
+   operation and provider. A second dispatch requires proof the first could
+   never have started. An unknown thread requires an owner decision.
+5. Report working only after the bound provider and terminal are both ready.
+   Persist the pending reason, last observation and next retry time for the GUI
+   and headless clients. Back off transient observations independently per
+   employee so one unavailable account cannot delay the fleet.
+
+Qualification requires a real reboot, a concurrent manual wake and automatic
+tick, and an office crash at each effect boundary. Verify one pool restore, at
+most one provider dispatch per incarnation, the original thread and storage,
+and a usable terminal for each eligible employee.
+
 Source tests do not qualify an installed employee. The composed image, actual
 PTY-to-fixed-engine path, provider command, bound callback transport and
 owner-authenticated workflow need separate installed qualification. Normal wake

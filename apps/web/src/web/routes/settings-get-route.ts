@@ -21,8 +21,7 @@ export function registerSettingsGet(app: FastifyInstance, deps: SettingsGetDeps)
   app.get('/api/settings', async (req, reply) => {
     if (deps.rust) return forwardSettings(deps.rust, deps, req, reply);
     // A plain read. This route must NEVER write settings.json: readJsonConfig()
-    // answers `{}` for ANY read failure (a parse error, EACCES, EMFILE, a read
-    // that lands inside PUT's non-atomic write), not only for a missing file,
+    // answers `{}` for read failures including malformed JSON and permission errors,
     // and every page load calls this route, so a "persist the default when the
     // key is absent" reconcile here replaced a whole settings file with one key
     // on the first unlucky read. The plan-usage default is resolved by the

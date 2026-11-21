@@ -1,3 +1,4 @@
+import type { DockerWakeOutcome } from './company-wake.js';
 import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
@@ -5,6 +6,7 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
+import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -195,6 +197,7 @@ export type DockerExistingViewRestoration = {
       readonly state: 'held';
       readonly code:
         | 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'
+        | 'DOCKER_CONTINUATION_DESTINATION_STOPPED'
         | 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED'
         | 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED';
     }
@@ -212,6 +215,8 @@ export class DockerEmployeeRuntime {
   #resourceConvergence?: ReturnType<DockerResourceRevisionService['convergeAll']>;
   #resourceTimer?: ReturnType<typeof setInterval>;
   #resourceTick?: Promise<void>;
+  #tick = 0;
+  #viewerRetries = new WeakMap<DockerExistingViewRestoration, { delay: number; due: number }>();
 
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
@@ -296,6 +301,7 @@ export class DockerEmployeeRuntime {
       });
     const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
+    const coldPool = new DockerColdPoolJournal(join(dirname(company.store.file), 'docker-pool-cold-recovery.jsonl'));
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
         boxId,
@@ -303,6 +309,7 @@ export class DockerEmployeeRuntime {
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
+        requireColdPoolIdle: () => coldPool.requireIdle(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
@@ -384,7 +391,7 @@ export class DockerEmployeeRuntime {
     );
     const pool = new DockerPoolReconciliation(company,store,resources,()=>{
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
-    });
+    }, coldPool);
     const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
     const recoveryHelper = configuration.recoveryHelperImageId
       ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({
@@ -419,7 +426,8 @@ export class DockerEmployeeRuntime {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }),
       readLegacyDockerPolicyProposal,
-      a.pool
+      a.pool,
+      a.recoveryHelper
     );
   }
   /** Server composition only. Inert until the API supplies its genuine captured
@@ -442,11 +450,12 @@ export class DockerEmployeeRuntime {
         if (!a.recoveryHelper) return;
         const policy = a.store.policy(row.employeeId);
         const policyDigest = dockerContinuationDigest(policy);
-        return a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, () => {
+        const view = await a.engine.captureReattachedProviderView(row, policy, a.recoveryHelper, () => {
           check();
           if (dockerContinuationDigest(a.store.policy(row.employeeId)) !== policyDigest)
             throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_REATTACH_POLICY_UNCONFIRMED');
         }, authDigest);
+        return view === 'stopped' ? undefined : view;
       },
       retain:actor=>this.#planActors.add(actor)});
   }
@@ -500,6 +509,12 @@ export class DockerEmployeeRuntime {
     });
   }
   async #observeRunningProviderView(
+    a: Attached, row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void
+  ) {
+    const observed = await this.#observeProvider(a, row, binding, current);
+    return observed === 'stopped' ? undefined : observed;
+  }
+  async #observeProvider(
     a: Attached,
     row: DockerEmployeeContinuationRecord,
     binding: DockerEmployeeBinding,
@@ -509,6 +524,7 @@ export class DockerEmployeeRuntime {
     try {
       const seen = await a.engine.observeDestination(row);
       current();
+      if (seen?.state === 'stopped' && seen.original?.containerId === binding.containerId) return 'stopped' as const;
       if (seen?.state === 'running' && seen.provider.kind === 'running' &&
         seen.provider.operationId === binding.operationId && seen.provider.sessionId === binding.sessionId &&
         a.engine.existingResourcePolicyCurrent(row, seen.resources))
@@ -646,11 +662,19 @@ export class DockerEmployeeRuntime {
   /** Normal wake attaches only an actually matching already-running provider.
    * Missing containers/provider ACKs remain explicitly held; no local/native fallback. */
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
+    return (await this.attachExistingEmployee(employee, allowed)) === 'attached';
+  }
+  #currentViewer(actual: unknown, containerId: string): boolean {
+    return actual instanceof Session && actual.dockerContinuationViewCurrent &&
+      actual.pid != null && !actual.paneExit && !actual.providerInputHeld &&
+      !actual.terminalInputHeld && actual.docker?.containerName === containerId;
+  }
+  async attachExistingEmployee(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome> {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
     const row = a.store.record(employee.id),
       binding = employee.dockerBinding;
-    if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return false;
+    if (!row || !binding || !['ready', 'provider-issued'].includes(row.phase)) return 'unconfirmed';
     let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
@@ -676,16 +700,7 @@ export class DockerEmployeeRuntime {
     catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const actual = a.ctx.sessions.get(employee.sessionId);
-    if (
-      actual instanceof Session &&
-      actual.dockerContinuationViewCurrent &&
-      actual?.pid !== null &&
-      actual?.pid !== undefined &&
-      !actual.paneExit &&
-      !actual.providerInputHeld &&
-      !actual.terminalInputHeld &&
-      actual.docker?.containerName === binding.containerId
-    ) { publication = 'published'; return true; }
+    if (this.#currentViewer(actual, binding.containerId)) { publication = 'published'; return 'attached'; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       await renewExistingDockerProviderView({
         company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
@@ -697,15 +712,15 @@ export class DockerEmployeeRuntime {
           this.#observeRunningProviderView(a, observedRow, observedBinding, admitted),
       }, row, actual, () => {current(); return true;}, () => {publication = 'published';});
       publication = 'published';
-      return true;
+      return 'attached';
     }
-    const view = await this.#observeRunningProviderView(a, row, binding, current);
+    const view = await this.#observeProvider(a, row, binding, current);
     current();
-    if (!view) { publication = 'failed'; return false; }
+    if (!view || view === 'stopped') { publication = 'failed'; return view ?? 'unconfirmed'; }
     await a.provider.attach(row, binding, current, view);
     current();
     publication = 'published';
-    return true;
+    return 'attached';
     } catch (cause) {
       publication = 'failed';
       throw cause;
@@ -729,29 +744,61 @@ export class DockerEmployeeRuntime {
     if (this.#resourceTimer || !this.current()) return;
     this.#resourceTimer = setInterval(() => {
       if (this.#resourceTick || this.#restoring || !this.current()) return;
-      this.#resourceTick = this.#convergeResources().then(async (results) => {
-        if (results.some((result) => result.status === 'fulfilled' &&
-            (result.value.state === 'observed' || result.value.state === 'applied')))
-          await this.restoreExistingViews();
-      }).then(() => {}, () => {}).finally(() => { this.#resourceTick = undefined; });
+      this.#resourceTick = this.#reconcileTick().catch(() => {
+        // A failed observation grants no authority. The next tick reads fresh state.
+      }).finally(() => { this.#resourceTick = undefined; });
     }, 10_000);
     this.#resourceTimer.unref();
   }
+  async #reconcileTick(): Promise<void> {
+    const a = this.#attached;
+    if (!a) return;
+    const reports = new Map(this.restorationReports.map(report => [report.employeeId, report]));
+    this.#tick++;
+    const results = await this.#convergeResources().catch((error: unknown) => {
+      if (!this.current()) throw error;
+      return [];
+    });
+    const changed = new Set(results.flatMap(result => result.status === 'fulfilled' &&
+      (result.value.state === 'observed' || result.value.state === 'applied') ? [result.value.employeeId] : []));
+    const keep = new Map<string, DockerExistingViewRestoration>();
+    for (const employee of a.company.store.snapshot().employees) {
+      const report = reports.get(employee.id);
+      if (!employee.dockerBinding || !report || changed.has(employee.id)) continue;
+      if (report.state === 'attached') {
+        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId))
+          keep.set(employee.id, report);
+      } else if (report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') {
+        const phase = a.store.record(employee.id)?.phase;
+        if (phase !== 'ready' && phase !== 'provider-issued') keep.set(employee.id, report);
+      } else if ((this.#viewerRetries.get(report)?.due ?? 0) > this.#tick) keep.set(employee.id, report);
+    }
+    await this.#restore(keep);
+  }
   restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+    return this.#restore();
+  }
+  #restore(keep?: ReadonlyMap<string, DockerExistingViewRestoration>): Promise<readonly DockerExistingViewRestoration[]> {
     if (this.#restoring) return this.#restoring;
-    const work = this.#restoreExistingViews().then((reports) => {
+    const work = this.#restoreExistingViews(keep).then((reports) => {
       this.#restoring = undefined; this.#startResourceConvergence(); return reports;
     }, (cause: unknown) => { this.#restoring = undefined; throw cause; });
     this.#restoring = work; return work;
   }
-  async #restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
+  async #restoreExistingViews(keep?: ReadonlyMap<string, DockerExistingViewRestoration>): Promise<readonly DockerExistingViewRestoration[]> {
     const a = this.#attached;
     if (!a) throw Error('Boxed runtime is not attached');
-    try { await this.#convergeResources(); }
+    try { if (!keep) await this.#convergeResources(); }
     catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
+    const previous = new Map(this.restorationReports.map(report => [report.employeeId, report]));
     for (const employee of a.company.store.snapshot().employees) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
+      const retained = keep?.get(employee.id);
+      if (retained && retained === previous.get(employee.id)) {
+        reports.push(retained);
+        continue;
+      }
       const base = {
         employeeId: employee.id,
         sessionId: employee.sessionId,
@@ -781,12 +828,13 @@ export class DockerEmployeeRuntime {
           reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' }));
           continue;
         }
-        const attached = await this.wake(employee, allowed);
+        const attached = await this.attachExistingEmployee(employee, allowed);
         reports.push(
           Object.freeze(
-            attached
+            attached === 'attached'
               ? { ...base, state: 'attached' }
-              : { ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' }
+              : { ...base, state: 'held', code: attached === 'stopped'
+                ? 'DOCKER_CONTINUATION_DESTINATION_STOPPED' : 'DOCKER_CONTINUATION_EXISTING_PROVIDER_UNCONFIRMED' }
           )
         );
       } catch (cause) {
@@ -803,6 +851,14 @@ export class DockerEmployeeRuntime {
         }
         reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }));
       }
+    }
+    for (const report of reports) {
+      if (report.state !== 'held' || report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING' ||
+          this.#viewerRetries.has(report)) continue;
+      const prior = previous.get(report.employeeId);
+      const delay = prior?.state === 'held' && prior.code === report.code
+        ? Math.min(12, (this.#viewerRetries.get(prior)?.delay ?? 1) * 2) : 1;
+      this.#viewerRetries.set(report, { delay, due: this.#tick + delay });
     }
     this.#restorationReports = Object.freeze(reports);
     return this.#restorationReports;

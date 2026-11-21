@@ -14,15 +14,28 @@ import { dockerWorkerIdentityOf, dockerWorkerIdentityPresented, type DockerWorke
 
 const BACKOFF = [2_000, 5_000, 15_000, 30_000, 60_000] as const;
 export type ViewerReconnectResult = 'connected' | 'inspection-requested' | 'unavailable' | 'busy' | 'changed';
-export interface ViewerReconnectStatus {
-  state: 'idle' | 'connecting' | 'connected' | 'blocked';
-  reason: string;
+type RepairFailure =
+  | NonNullable<Session['workerViewerReconnectBlocker']>
+  | WorkerViewerEndpointCustodyError['reason']
+  | 'move-in-progress' | 'authority-changed' | 'binding-or-health-changed'
+  | 'binding-or-authority-changed' | 'admission-unavailable' | 'readiness-unconfirmed';
+type LastRepairReason = RepairFailure | 'connected' | 'diagnostic-requested-readiness-unconfirmed-input-held';
+type BlockedReason = Exclude<LastRepairReason, 'connected'>
+  | 'stale-binding' | 'server-not-ready' | 'binding-migration' | 'not-running'
+  | 'viewer-unavailable' | 'native-health-unavailable' | 'viewer-disconnected'
+  | 'not-attempted' | 'viewer-subject-changed' | 'pane-observation-unconfirmed';
+export type ViewerReconnectStatus = (
+  | { state: 'blocked'; reason: BlockedReason }
+  | { state: 'connected'; reason: 'connected' }
+  | { state: 'connecting'; reason: 'in-progress' }
+  | { state: 'idle'; reason: 'viewer-not-disconnected' }
+) & {
   attempts: number;
   retryAfterMs: number;
   observation?: Awaited<ReturnType<Session['inspectWorkerViewer']>>;
-}
+};
 const bindingKey = (e: CompanyEmployee) => JSON.stringify([e.id,e.owner,e.sessionId,e.sessionGeneration,
-  e.desiredRunning,e.onVacation,e.bindingMigration,e.runtimeRecipe,e.permissions]);
+  e.desiredRunning,e.onVacation,e.bindingMigration,e.dockerBinding,e.runtimeRecipe,e.permissions]);
 export interface ViewerReconnectDeps {
   company: CompanyService;
   session(id: string): Session | undefined;
@@ -46,7 +59,7 @@ export class WorkerViewerReconnect {
   private attempts = new Map<string, { key: string; count: number; next: number }>();
   private ticking = false;
   private lastAutomaticEmployeeId?: string;
-  private outcomes = new Map<string, { key: string; reason: string; connected: boolean }>();
+  private outcomes = new Map<string, { key: string; reason: LastRepairReason }>();
   constructor(private readonly deps: ViewerReconnectDeps) {}
 
   delegated(authority: RecoveryAuthority): () => boolean {
@@ -78,26 +91,30 @@ export class WorkerViewerReconnect {
 
   status(employeeId: string, expected: { sessionId: string; sessionGeneration: number }, owner?: string): ViewerReconnectStatus {
     const d = this.deps, employee = d.company.registeredEmployees().find(e => e.id === employeeId && e.owner === owner);
-    const result = (reason: string, state: ViewerReconnectStatus['state'] = 'blocked'): ViewerReconnectStatus => ({ state, reason, attempts: 0, retryAfterMs: 0 });
+    const result = (reason: BlockedReason): ViewerReconnectStatus => ({ state: 'blocked', reason, attempts: 0, retryAfterMs: 0 });
     if (!employee || employee.sessionId !== expected.sessionId || employee.sessionGeneration !== expected.sessionGeneration) return result('stale-binding');
     if (!d.ready()) return result('server-not-ready');
     if (employee.bindingMigration) return result('binding-migration');
     if (employee.desiredRunning !== true || employee.onVacation) return result('not-running');
     const session = d.session(employee.sessionId), key = bindingKey(employee);
     const previous = this.attempts.get(employeeId), outcome = this.outcomes.get(employeeId);
+    const lastReason = outcome?.key === key ? outcome.reason : undefined;
     if (session?.owner !== owner || !session) return result('viewer-unavailable');
-    if (session.viewerInspectionRequested && outcome?.key === key)
+    if (session.viewerInspectionRequested && lastReason)
       return result('diagnostic-requested-readiness-unconfirmed-input-held');
-    if (session.runtimeHealth !== 'disconnected') return result(outcome?.key === key && outcome.connected ? 'connected' : 'viewer-not-disconnected',
-      outcome?.key === key && outcome.connected ? 'connected' : 'idle');
+    if (session.runtimeHealth !== 'disconnected')
+      return lastReason === 'connected'
+        ? { state: 'connected', reason: 'connected', attempts: 0, retryAfterMs: 0 }
+        : { state: 'idle', reason: 'viewer-not-disconnected', attempts: 0, retryAfterMs: 0 };
     const attempts = previous?.key === key ? previous.count : 0;
     const retryAfterMs = previous?.key === key ? Math.max(0, Math.ceil(previous.next - (d.now ?? (() => performance.now()))())) : 0;
     if (this.flights.has(employeeId)) return { state: 'connecting', reason: 'in-progress', attempts, retryAfterMs };
     if (session.workerViewerReconnectBlocker) return { ...result(session.workerViewerReconnectBlocker), attempts, retryAfterMs };
-    if (outcome?.key === key && ['viewer-endpoint-custody-unavailable','viewer-endpoint-configuration-invalid'].includes(outcome.reason))
-      return { ...result(outcome.reason), attempts, retryAfterMs };
+    if (lastReason === 'viewer-endpoint-custody-unavailable' || lastReason === 'viewer-endpoint-configuration-invalid')
+      return { ...result(lastReason), attempts, retryAfterMs };
     if (!d.providerHealthy(employee)) return { ...result('native-health-unavailable'), attempts, retryAfterMs };
-    return { state: 'blocked', reason: outcome?.key === key ? outcome.reason : 'not-attempted', attempts, retryAfterMs };
+    const reason = lastReason === 'connected' ? 'viewer-disconnected' : lastReason ?? 'not-attempted';
+    return { state: 'blocked', reason, attempts, retryAfterMs };
   }
 
   /** Deny-only correlation for a read response, never attachment authority. */
@@ -155,7 +172,7 @@ export class WorkerViewerReconnect {
       (automatic && session.viewerInspectionRequested) ||
       (session.runtimeHealth !== 'disconnected' && (automatic || !session.viewerInputHeld)))
       return 'unavailable';
-    if (session.docker && (automatic || !d.dockerReconnect)) return 'unavailable';
+    if (session.docker && (!session.docker.continuation || !d.dockerReconnect)) return 'unavailable';
     const manualDiagnostic = !automatic && d.diagnosticViewer?.() === true && !!d.diagnosticMoveGuard;
     let diagnostic = !d.providerHealthy(original);
     if (diagnostic && !manualDiagnostic) return 'unavailable';
@@ -163,9 +180,9 @@ export class WorkerViewerReconnect {
     const fingerprint = bindingKey;
     const runtime = JSON.stringify(expertRuntimeRecipe(session));
     const key = fingerprint(original), previous = this.attempts.get(employeeId);
-    const outcome = (reason: string, result: ViewerReconnectResult) => {
+    const outcome = (reason: LastRepairReason, result: ViewerReconnectResult) => {
       if (this.outcomes.size >= 200 && !this.outcomes.has(employeeId)) this.outcomes.delete(this.outcomes.keys().next().value!);
-      this.outcomes.set(employeeId, { key, reason, connected: result === 'connected' });
+      this.outcomes.set(employeeId, { key, reason });
       return result;
     };
     if (automatic && previous?.key === key && now() < previous.next)
@@ -293,7 +310,7 @@ export function registerWorkerViewerReconnect(app: FastifyInstance, controller: 
         const fresh = controller.status(id, expected, ownerFor(req));
         // A failed repair is not evidence that the pane query itself timed out.
         // Preserve only independently current status, including custody codes.
-        if (fresh.reason !== 'stale-binding') reconnect = { ...fresh, state:'blocked' };
+        if (fresh.reason !== 'stale-binding') reconnect = fresh;
       } catch { /* No current status is disclosed when its read is unavailable. */ }
       return reply.code(503).send({ success: false, ...(reconnect ? { reconnect } : {}),
         error: 'The outer terminal viewer observation is unconfirmed. The employee was not restarted.' });

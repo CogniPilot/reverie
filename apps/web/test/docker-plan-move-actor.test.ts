@@ -496,7 +496,8 @@ async function fixture(
     current,
     configuration,
     resources,
-    actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration'], selectedEngine = engine) =>
+    actorWithConfiguration: (selected: DockerPlanMoveComposition['configuration'], selectedEngine = engine,
+      requireReconciledSourcePool?: DockerPlanMoveComposition['requireReconciledSourcePool']) =>
       new DockerPlanMoveActor({
         company,
         ctx,
@@ -505,6 +506,7 @@ async function fixture(
         chat: {} as DockerPlanMoveComposition['chat'],
         store: sourceStore,
         engine: selectedEngine,
+        requireReconciledSourcePool,
         provider,
         configuration: selected,
         boxId: '7'.repeat(64),
@@ -984,6 +986,15 @@ async function publishedTargetFixture(
   };
 }
 describe('captured native plan actor before paid dispatch', () => {
+  it('rejects unconfirmed cold storage before reserving a same-plan worker recovery', async () => {
+    const f = await fixture(false);
+    f.liveHome.mockRejectedValueOnce(Error('Unconfirmed original storage'));
+    const before = await f.moves.dockerRecord(f.record.id);
+    const input = { ...f.input, fromAccount: f.input.toAccount };
+    await expect(f.freshActor().reserve(input, undefined, 'd'.repeat(64))).rejects.toThrow('Unconfirmed original storage');
+    expect(await f.moves.dockerRecord(f.record.id)).toEqual(before);
+    expect(f.nativeCreate).not.toHaveBeenCalled();
+  });
   it.each([true, false])('qualifies the target before fresh final source facts (running=%s)', async (running) => {
     const f = await fixture(running);
     let clock = performance.now();
@@ -1947,6 +1958,29 @@ describe('prepaid installed original across website pair changes', () => {
     expect(f.run.mock.calls.some(([a]) => a[0] === 'container' && ['start', 'stop'].includes(a[1]!))).toBe(false);
   });
 
+  it.each(['missing', 'new-epoch', 'foreign', 'unconfirmed'] as const)(
+    'revalidates the original pool before continuing a plan move (%s)', async (mode) => {
+      const f = await fixture(true, false, true);
+      const row = f.journal.read().seed.source.record;
+      const pool = row.pool!;
+      vi.spyOn(planProtocol, 'requireDockerPlanProtocol').mockImplementation((_digest, current) => current());
+      vi.spyOn(f.engine, 'observePool').mockResolvedValue(
+        mode === 'missing' ? null : { ...pool, physicalDigest: 'e'.repeat(64),
+          containerId: mode === 'foreign' ? 'd'.repeat(64) : pool.containerId });
+      const verify = vi.fn(async (candidate: DockerEmployeeContinuationRecord, current: () => void) => {
+        current();
+        expect(candidate).toEqual(row);
+        if (mode === 'unconfirmed') throw Error('current pool has no verified receipt');
+      });
+      const actor = f.actorWithConfiguration(f.configuration, f.engine, verify);
+      const target = vi.spyOn(f.engine, 'replacementTargetImage').mockRejectedValue(Error('target preparation reached'));
+      await expect(actor.prepare(f.record, f.journal)).rejects.toThrow(
+        mode === 'foreign' ? 'original shared pool' : mode === 'unconfirmed' ? 'no verified receipt' : 'target preparation reached');
+      expect(verify).toHaveBeenCalledTimes(mode === 'foreign' ? 0 : 1);
+      expect(target).toHaveBeenCalledTimes(mode === 'missing' || mode === 'new-epoch' ? 1 : 0);
+      expect(f.nativeCreate).not.toHaveBeenCalled();
+    }
+  );
   it('validates current local/default pair and reads the immutable old target without changing any cursor', async () => {
     const f = await fixture(true, false, true);
     await issuedCheckpoint(f, undefined, 'published', true);

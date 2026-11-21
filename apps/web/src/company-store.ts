@@ -355,6 +355,12 @@ export class CompanyStore {
     this.refreshState();
     return structuredClone(this.state);
   }
+  allowsPersonalSessionRestore(sessionId: string): boolean {
+    if (this.writeUncertain) return false;
+    this.refreshState();
+    return !this.state.employees.some(e => e.sessionId === sessionId) &&
+      !this.state.retired.some(e => e.sessionId === sessionId);
+  }
   /** Permission and recovery reads join earlier writes under the canonical writer lock. */
   async employeeAfterPublications(employeeId: string, owner: string | undefined): Promise<CompanyEmployee | undefined> {
     const original = this.chain;

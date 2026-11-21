@@ -409,9 +409,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   async #source(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeInspect> {
     const inspected = await this.#inspect(row.original.containerId);
-    const raw = row.version === 3
-      ? historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original)
-      : inspected;
+    const raw = historicalBoxedInspect(inspected, sourceSubject(row), this.deployment, row.original, row.version === 3);
     if (
       raw.State.Running ||
       (row.version === 3 &&
@@ -506,6 +504,29 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       refuse('DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED');
     return this.#imagePair(original, this.workerImage, true);
   }
+  /** Resume an existing identity installation on the currently selected worker
+   * image. The old source image was admitted when this destination was created.
+   * Fresh placement continues to require today's source allowlist. */
+  async preparedIdentityImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
+    const row = DockerEmployeeContinuationRecord.parse(input);
+    const check = () => {
+      current();
+      if (!isDeepStrictEqual(row, input)) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+    };
+    check();
+    if (row.version === 3 || !['identity-ready', 'identity-issued'].includes(row.phase) ||
+      !row.destination || row.workerImage.imageId !== this.workerImage.imageId ||
+      row.workerImage.clientManifestDigest !== this.workerImage.clientManifestDigest)
+      refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+    const before = await this.#boundDestination(row, check, true);
+    const actual = await this.#imagePair(row.original, this.workerImage, true);
+    check();
+    if (!isDeepStrictEqual(actual, row.workerImage)) refuse('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED');
+    const after = await this.#boundDestination(row, check, true);
+    if (!isDeepStrictEqual(containerReadState(before), containerReadState(after)))
+      refuse('DOCKER_CONTINUATION_DESTINATION_CHANGED_DURING_READ');
+    return actual;
+  }
   /** Select the current qualified replacement without assuming independently
    * built images have a Docker layer ancestry relationship. */
   async replacementTargetImage(
@@ -546,8 +567,53 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   }
   /** Historical source DATA only. The SourceReader separately owns the exact
    * stopped source/requester proof; this cannot mint a provider view or launch. */
-  async existingPlanSourceImage(input: DockerEmployeeContinuationRecord, current: () => void): Promise<DockerEmployeeWorkerImage> {
-    return this.#existingImage(input, current, false);
+  async existingPlanSourceImage(
+    input: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<DockerEmployeeWorkerImage> {
+    try {
+      return await this.#existingImage(input, current, false);
+    } catch (error) {
+      current();
+      const row = DockerEmployeeContinuationRecord.parse(input);
+      if (row.version !== 3) throw error;
+      try {
+        if (!this.#publishedRead(row)) throw error;
+      } catch {
+        throw error;
+      }
+      const digest = dockerContinuationDigest(row);
+      const check = () => {
+        current();
+        if (dockerContinuationDigest(input) !== digest) refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+        this.#publishedRead(row);
+      };
+      if (!(await this.#historicalPlanContainerAbsent(row, check))) throw error;
+      const image = await this.#existingImage(row, check, true);
+      if (!(await this.#historicalPlanContainerAbsent(row, check)))
+        refuse('DOCKER_CONTINUATION_ORIGINAL_CHANGED');
+      return image;
+    }
+  }
+  /** A failed inspect conveys no absence. Confirm the full immutable ID in
+   * the same Docker engine's inventory before and after reading the binding. */
+  async #historicalPlanContainerAbsent(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<boolean> {
+    current();
+    const listed = await this.command.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'id=' + row.original.containerId,
+      '--format',
+      '{{.ID}}',
+    ]);
+    current();
+    return listed.trim() === '';
   }
   async #existingImage(
     input: DockerEmployeeContinuationRecord,
@@ -680,12 +746,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     } catch (error) {
       check();
       if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_STORAGE_HOLDER_UNCONFIRMED' ||
-          !retained || (placement === 'stopped' && !retained.observed)) throw error;
+          !retained) throw error;
       let observed: DockerEmployeeStorageObservation | undefined;
-      home = await this.#storage.readExistingReference(row, before, (destination, seen) => {
+      home = await this.#storage.readExistingReference(row, before, (destination, seen, filesystemId) => {
         observed = seen;
-        return retained.helper.storage(destination, seen, check);
-      }, check, placement === 'stopped' ? retained.observed : undefined);
+        return retained.helper.storage(destination, seen, check, filesystemId);
+      }, check, placement === 'stopped' ? retained.observed ?? 'original-reference' : undefined,
+      original => retained.helper.stoppedReference(row, original));
       check();
       if (!home || !observed) throw error;
       if (placement === 'running') retained.observed = observed;
@@ -729,7 +796,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   async planReplacementOriginal(row: DockerEmployeeContinuationRecord, current: () => void) {
     return this.#planInstaller.original(row, current);
   }
-  async observeSource(subject: DockerContinuationSubject, containerId?: string) {
+  async observeSource(subject: DockerContinuationSubject, containerId?: string, expected?: DockerEmployeeOriginal) {
     const selected = await this.command.run([
       'container',
       'ls',
@@ -747,8 +814,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     const cid = selected.trim();
     if (!/^[a-f0-9]{64}$/.test(cid) || (containerId !== undefined && cid !== containerId))
       refuse('DOCKER_CONTINUATION_UNIQUE_ORIGINAL_REQUIRED');
-    const raw = await this.#inspect(cid),
-      original = boxedOriginal(raw, subject, this.deployment);
+    const inspected = await this.#inspect(cid);
+    const raw = expected ? historicalBoxedInspect(inspected, subject, this.deployment, expected, false) : inspected;
+    const original = boxedOriginal(raw, subject, this.deployment);
     return {
       original,
       state: raw.State.Running ? ('running' as const) : ('stopped' as const),
@@ -1074,7 +1142,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     if (selected.trim() === '') return null;
     if (!/^[a-f0-9]{64}$/.test(selected.trim())) refuse('DOCKER_CONTINUATION_DESTINATION_AMBIGUOUS');
     const inspected = await this.#inspect(selected.trim());
-    const raw = row.destination && ['provider-issued', 'ready'].includes(row.phase)
+    const raw = row.destination
       ? historicalBoxedInspect(inspected, rowSubject(row), this.deployment, row.destination)
       : inspected;
     current();
@@ -1575,12 +1643,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     helper: DockerWorkerReattachHelper,
     current: () => void,
     canonicalAuthDigest?: string
-  ): Promise<DockerEmployeeProviderView | undefined> {
+  ): Promise<DockerEmployeeProviderView | 'stopped' | undefined> {
     current();
     const checked = DockerEmployeeContinuationRecord.parse(row);
     if (!checked.destination || !['ready', 'provider-issued'].includes(checked.phase)) return;
     const raw = await this.#boundDestination(checked, current, true);
-    if (!raw.State.Running) return;
+    if (!raw.State.Running) {
+      current();
+      return raw.State.Status === 'exited' && raw.State.Pid === 0 &&
+        !raw.State.Restarting && !raw.State.Paused && !raw.State.Dead ? 'stopped' : undefined;
+    }
     const state = containerReadState(raw);
     const home = await this.#storage.readExistingReference(checked, raw, (destination, seen) =>
       helper.storage(destination, seen, current), current);

@@ -21,6 +21,7 @@ pub mod plan_quota;
 pub mod posix_path;
 pub mod posix_text;
 pub mod privacy_floor;
+pub mod private_access;
 pub mod profiles;
 pub mod python_glob;
 pub(crate) mod python_text;

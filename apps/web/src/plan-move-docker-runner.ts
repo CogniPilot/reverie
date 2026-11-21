@@ -6,6 +6,7 @@ import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import type { PlanMoveDockerJournal, PlanMoveDockerJournalStore } from './plan-move-docker.js';
 import {
+  PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
   type PlanMoveInput,
@@ -252,9 +253,12 @@ export async function runDockerPlanMove(
         error: (error instanceof Error ? error.message : 'Previous terminal cleanup unavailable').slice(0, 4000),
       };
     }
-    const cancelledBeforeEffects =
-      flight.signal.aborted &&
-      record.phase === 'waiting' &&
+    // A changed credential snapshot cannot satisfy the original reservation.
+    // Release it only after the store's exact-cursor CAS confirms nothing was issued.
+    const failedBeforeEffects =
+      ((flight.signal.aborted && record.phase === 'waiting') ||
+        (error instanceof PlanMoveAccountSnapshotChanged && (mode === 'new' || mode === 'continue'))) &&
+      !cursor.material &&
       !cursor.sourceStop &&
       !cursor.sourceReader &&
       !cursor.work &&
@@ -271,7 +275,7 @@ export async function runDockerPlanMove(
         await store.phase(
           record.id,
           cursor,
-          { phase: cancelledBeforeEffects ? 'failed' : 'recovery-required', error: message },
+          { phase: failedBeforeEffects ? 'failed' : 'recovery-required', error: message },
           () => flight.current()
         )
       );

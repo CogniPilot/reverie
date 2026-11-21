@@ -10,6 +10,54 @@ fn source(env: Value) -> Value {
 }
 
 #[test]
+fn image_update_preserves_the_running_private_access_configuration() {
+    let access = [
+        "REVERIE_TAILSCALE=1",
+        "REVERIE_TAILSCALE_HOSTNAME=office",
+        "REVERIE_TAILSCALE_WEB_PORT=3111",
+    ];
+    let selected = source(json!(access));
+    let old = image(json!(access));
+    for candidate in [
+        json!(["REVERIE_NATIVE_FRONT=1"]),
+        json!([
+            "REVERIE_NATIVE_FRONT=1",
+            "REVERIE_TAILSCALE=0",
+            "REVERIE_TAILSCALE_HOSTNAME=other",
+            "REVERIE_TAILSCALE_WEB_PORT=3000"
+        ]),
+    ] {
+        let (mut body, mut refreshed) = create_body(&selected, &old, &image(candidate)).unwrap();
+        preserve_private_access(&selected, &mut body, &mut refreshed).unwrap();
+        for setting in access {
+            assert!(body["Env"].as_array().unwrap().contains(&json!(setting)));
+        }
+        assert!(refreshed.is_empty());
+    }
+}
+
+#[test]
+fn candidate_defaults_cannot_enable_private_access_for_an_existing_office() {
+    let selected = source(json!(["FEATURE=old"]));
+    let old = image(json!(["FEATURE=old"]));
+    let next = image(json!([
+        "FEATURE=new",
+        "REVERIE_NATIVE_FRONT=1",
+        "REVERIE_TAILSCALE=1",
+        "REVERIE_TAILSCALE_HOSTNAME=another-office",
+        "REVERIE_TAILSCALE_WEB_PORT=9999"
+    ]));
+    let (mut body, mut refreshed) = create_body(&selected, &old, &next).unwrap();
+    preserve_private_access(&selected, &mut body, &mut refreshed).unwrap();
+    let env = environment(&body).unwrap();
+    assert_eq!(env["REVERIE_TAILSCALE"], "0");
+    assert_eq!(env["REVERIE_TAILSCALE_HOSTNAME"], "reverie");
+    assert_eq!(env["REVERIE_TAILSCALE_WEB_PORT"], "3000");
+    assert_eq!(env["FEATURE"], "new");
+    assert_eq!(refreshed, ["FEATURE"]);
+}
+
+#[test]
 fn legacy_then_native_update_preserves_front_and_mounts() {
     let first = image(json!(["HOME=/home/agent", "REVERIE_NATIVE_FRONT=1"]));
     let old = image(json!(["HOME=/old"]));

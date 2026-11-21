@@ -13,7 +13,17 @@ struct Arguments {
     #[arg(long)]
     root: PathBuf,
     #[command(subcommand)]
-    action: Action,
+    action: Command,
+}
+#[derive(Subcommand)]
+enum Command {
+    /// Read durable operation status, including while Docker is unavailable.
+    Status {
+        /// Operation ID. Omit to inspect the operation holding the registered deployment claim.
+        operation: Option<String>,
+    },
+    #[command(flatten)]
+    Online(Action),
 }
 #[derive(Subcommand)]
 enum Action {
@@ -53,6 +63,9 @@ enum Action {
         /// Explicitly accept that the retained copy has not passed consistency checks.
         #[arg(long, required = true)]
         accept_unverified_backup: bool,
+        /// Stop the unchanged running source after checking the prepared candidate and bind grants.
+        #[arg(long)]
+        stop_running_source: bool,
     },
     /// Stop, verify backup/rehearsal, swap and check the Rust-front process tree.
     Apply {
@@ -60,9 +73,13 @@ enum Action {
         /// Activate a prepared live-account deployment without copying console data.
         #[arg(long)]
         skip_backup: bool,
+        /// Existing private directory for the extracted restore test.
+        #[arg(long, conflicts_with = "skip_backup")]
+        rehearsal_root: Option<PathBuf>,
+        /// Keep a verified gzip archive in the operation and stage the raw tar on the rehearsal disk.
+        #[arg(long, requires = "rehearsal_root")]
+        compress_backup: bool,
     },
-    /// Read durable operation status without replaying an effect.
-    Status { operation: String },
     /// Report or clear the contents of this office's employee /tmp mounts.
     #[command(
         long_about = "Report allocated bytes in the registered office's employee /tmp trees. With --apply, clear disposable entries after the office and overlapping Docker containers are stopped. Keep the mount directories. Stop host jobs that use these trees before applying."
@@ -97,7 +114,7 @@ fn main() -> ExitCode {
     let args = Arguments::parse();
     let storage = matches!(
         args.action,
-        Action::PruneScratch { .. } | Action::PruneWorkspace { .. }
+        Command::Online(Action::PruneScratch { .. } | Action::PruneWorkspace { .. })
     );
     let result = run(args);
     match result {
@@ -125,6 +142,9 @@ fn main() -> ExitCode {
 }
 fn recovery_message(code: &str) -> &'static str {
     match code {
+        "DEPLOYMENT_NO_ACTIVE_OPERATION" => {
+            "No operation holds the registered claim. For a preview, supply its operation ID to status."
+        }
         "DEPLOYMENT_SHARED_WRITABLE_MOUNT" => {
             "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
         }
@@ -141,9 +161,19 @@ fn recovery_message(code: &str) -> &'static str {
     }
 }
 fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
+    let action = match args.action {
+        Command::Status { operation } => {
+            let status = match operation {
+                Some(id) => DeploymentService::registered_status(&args.root, &id)?,
+                None => DeploymentService::registered_active_status(&args.root)?,
+            };
+            return Ok(serde_json::json!({"success":true,"data":status}));
+        }
+        Command::Online(action) => action,
+    };
     let mut service = DeploymentService::capture(&args.root)?;
     let result: Result<serde_json::Value, reverie_deployment::DeploymentError> = (|| {
-        let value = match args.action {
+        let value = match action {
             Action::Preview {
                 image,
                 profile,
@@ -181,16 +211,28 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
             Action::ActivateRetained {
                 operation,
                 accept_unverified_backup: _,
-            } => serde_json::to_value(service.activate_retained(&operation)?)?,
+                stop_running_source,
+            } => serde_json::to_value(if stop_running_source {
+                service.activate_retained_from_running(&operation)?
+            } else {
+                service.activate_retained(&operation)?
+            })?,
             Action::Apply {
                 operation,
                 skip_backup,
+                rehearsal_root,
+                compress_backup,
             } => serde_json::to_value(if skip_backup {
                 service.apply_live_without_backup(&operation)?
+            } else if let Some(root) = rehearsal_root {
+                if compress_backup {
+                    service.apply_with_compressed_backup(&operation, &root)?
+                } else {
+                    service.apply_with_rehearsal_root(&operation, &root)?
+                }
             } else {
                 service.apply(&operation)?
             })?,
-            Action::Status { operation } => serde_json::to_value(service.status(&operation)?)?,
             Action::PruneScratch {
                 apply,
                 force_read_only,
@@ -219,6 +261,28 @@ fn finish(
 mod tests {
     use super::*;
     #[test]
+    fn stopping_the_source_for_a_retained_copy_requires_explicit_backup_acceptance() {
+        let args = [
+            "reverie-deployment",
+            "--root",
+            "/fixture",
+            "activate-retained",
+            "selected",
+            "--stop-running-source",
+        ];
+        assert!(Arguments::try_parse_from(args).is_err());
+        let mut accepted = args.to_vec();
+        accepted.push("--accept-unverified-backup");
+        assert!(matches!(
+            Arguments::try_parse_from(accepted).unwrap().action,
+            Command::Online(Action::ActivateRetained {
+                stop_running_source: true,
+                accept_unverified_backup: true,
+                ..
+            })
+        ));
+    }
+    #[test]
     fn stale_claim_selection_requires_both_explicit_ids_and_default_stays_unchanged() {
         let image = format!("sha256:{}", "a".repeat(64));
         let base = [
@@ -244,14 +308,14 @@ mod tests {
             &current,
         ]);
         assert!(matches!(Arguments::try_parse_from(args).unwrap().action,
-            Action::Preview {adopt_stale_claim:Some(op),expected_current_container:Some(cid),..} if op==previous && cid==current));
+            Command::Online(Action::Preview {adopt_stale_claim:Some(op),expected_current_container:Some(cid),..}) if op==previous && cid==current));
         assert!(matches!(
             Arguments::try_parse_from(base).unwrap().action,
-            Action::Preview {
+            Command::Online(Action::Preview {
                 adopt_stale_claim: None,
                 expected_current_container: None,
                 ..
-            }
+            })
         ));
     }
     #[test]
@@ -268,20 +332,20 @@ mod tests {
         let default = Arguments::try_parse_from(base).unwrap();
         assert!(matches!(
             default.action,
-            Action::Preview {
+            Command::Online(Action::Preview {
                 preserve_network_grants: false,
                 ..
-            }
+            })
         ));
         let mut selected = base.to_vec();
         selected.push("--preserve-network-grants");
         let parsed = Arguments::try_parse_from(selected).unwrap();
         assert!(matches!(
             parsed.action,
-            Action::Preview {
+            Command::Online(Action::Preview {
                 preserve_network_grants: true,
                 ..
-            }
+            })
         ));
         let mut arbitrary = base.to_vec();
         arbitrary.extend(["--networks", "request-selected"]);
@@ -304,18 +368,18 @@ mod tests {
         unbound.push("--preserve-network-grants");
         assert!(matches!(
             Arguments::try_parse_from(unbound).unwrap().action,
-            Action::Preview {
+            Command::Online(Action::Preview {
                 preserve_network_grants: true,
                 live_account_writers_fix_forward: true,
                 ..
-            }
+            })
         ));
         assert!(matches!(
             Arguments::try_parse_from(base).unwrap().action,
-            Action::Preview {
+            Command::Online(Action::Preview {
                 live_account_writers_fix_forward: false,
                 ..
-            }
+            })
         ));
     }
     #[test]

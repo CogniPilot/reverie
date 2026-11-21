@@ -1,6 +1,7 @@
 use crate::config::Result;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
+use reverie_core::private_access::{ENABLED, HOSTNAME, WEB_PORT};
 use serde_json::Value;
 use std::fs::{self, DirBuilder};
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -39,16 +40,15 @@ impl Settings {
         if !data.is_absolute() {
             return Err("the instance directory must be absolute".into());
         }
-        let port = std::env::var("REVERIE_TAILSCALE_WEB_PORT")
-            .unwrap_or_else(|_| "3000".into())
+        let port = std::env::var(WEB_PORT.key)
+            .unwrap_or_else(|_| WEB_PORT.default.into())
             .parse::<u16>()?;
         if port == 0 {
             return Err("the private HTTPS target needs a web port".into());
         }
         Ok(Self {
             data,
-            hostname: std::env::var("REVERIE_TAILSCALE_HOSTNAME")
-                .unwrap_or_else(|_| "reverie".into()),
+            hostname: std::env::var(HOSTNAME.key).unwrap_or_else(|_| HOSTNAME.default.into()),
             port,
         })
     }
@@ -71,7 +71,7 @@ impl Settings {
 }
 
 pub(crate) fn start(directory: &Path) -> Option<Access> {
-    if std::env::var("REVERIE_TAILSCALE").as_deref() != Ok("1") {
+    if std::env::var(ENABLED.key).as_deref() != Ok("1") {
         return None;
     }
     let (shutdown, stopping) = oneshot::channel();
@@ -144,8 +144,13 @@ async fn wait_for_socket(path: &Path) -> Result<()> {
     Err("Tailscale did not open its private socket".into())
 }
 
-async fn cli(socket: &Path, operation: &str, arguments: &[String]) -> Result<()> {
-    let status = Command::new(Path::new(BINARIES).join("tailscale"))
+async fn cli(
+    executable: &Path,
+    socket: &Path,
+    operation: &str,
+    arguments: &[String],
+) -> Result<()> {
+    let status = Command::new(executable)
         .arg("--socket")
         .arg(socket)
         .arg(operation)
@@ -160,9 +165,10 @@ async fn cli(socket: &Path, operation: &str, arguments: &[String]) -> Result<()>
     Ok(())
 }
 
-async fn serve(socket: &Path, settings: &Settings) -> Result<()> {
+async fn serve(executable: &Path, socket: &Path, settings: &Settings) -> Result<()> {
     wait_for_socket(socket).await?;
     cli(
+        executable,
         socket,
         "up",
         &[
@@ -171,10 +177,9 @@ async fn serve(socket: &Path, settings: &Settings) -> Result<()> {
         ],
     )
     .await?;
-    if !owner_ready(settings.port).await {
-        return Err("Reverie owner authentication is unavailable".into());
-    }
+    wait_for_owner(settings.port).await;
     cli(
+        executable,
         socket,
         "serve",
         &[
@@ -199,9 +204,12 @@ async fn stop_daemon(daemon: &mut Child) {
 
 async fn wait_for_owner(port: u16) {
     if !owner_ready(port).await {
-        println!("[Tailscale] Set up the Reverie owner account locally to continue.");
-        while !owner_ready(port).await {
+        println!("[Tailscale] Waiting for the local office to confirm owner authentication.");
+        loop {
             sleep(Duration::from_secs(2)).await;
+            if owner_ready(port).await {
+                break;
+            }
         }
     }
 }
@@ -224,8 +232,9 @@ async fn run(directory: &Path, mut stopping: oneshot::Receiver<()>) -> Result<()
         .stdout(Stdio::null())
         .kill_on_drop(true)
         .spawn()?;
+    let executable = Path::new(BINARIES).join("tailscale");
     let result = tokio::select! {
-        result = serve(&socket, &settings) => result,
+        result = serve(&executable, &socket, &settings) => result,
         result = daemon.wait() => Err(format!("tailscaled exited with {}", result?).into()),
         _ = stopping => Ok(()),
     };
@@ -235,7 +244,53 @@ async fn run(directory: &Path, mut stopping: oneshot::Receiver<()>) -> Result<()
 
 #[cfg(test)]
 mod tests {
-    use super::owner_is_ready;
+    use super::{Settings, owner_is_ready, serve};
+    use crate::RuntimeDirectory;
+    use std::{path::Path, time::Duration};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::{TcpListener, UnixListener};
+
+    async fn reply(owner: &TcpListener, response: &str) {
+        let (stream, _) = owner.accept().await.unwrap();
+        let mut stream = BufReader::new(stream);
+        let mut request = String::new();
+        while !request.ends_with("\r\n\r\n") {
+            assert!(stream.read_line(&mut request).await.unwrap() > 0);
+        }
+        assert!(request.starts_with("GET /api/owner/status "));
+        stream
+            .get_mut()
+            .write_all(response.as_bytes())
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn serving_waits_out_a_transient_owner_failure_after_login() {
+        let directory = RuntimeDirectory::new().unwrap();
+        let socket = directory.0.join("daemon.sock");
+        let _daemon = UnixListener::bind(&socket).unwrap();
+        let owner = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let settings = Settings {
+            data: directory.0.clone(),
+            hostname: "fixture".into(),
+            port: owner.local_addr().unwrap().port(),
+        };
+        let replies = async {
+            reply(
+                &owner,
+                "HTTP/1.1 503 Unavailable\r\nConnection: close\r\n\r\n",
+            )
+            .await;
+            reply(&owner, "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n{\"success\":true,\"data\":{\"configured\":true,\"policy\":\"enforce\"}}").await;
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let (served, ()) = tokio::join!(serve(Path::new("true"), &socket, &settings), replies);
+            served.unwrap();
+        })
+        .await
+        .unwrap();
+    }
 
     #[test]
     fn serves_only_with_an_enforced_owner() {

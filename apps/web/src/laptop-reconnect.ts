@@ -19,18 +19,19 @@ export async function reattachLaptops(deps: LaptopReconnectDeps): Promise<{ conn
       !inventory.runningSessionIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id)))
     throw new Error('The laptop manager does not provide a verified session inventory');
   const running = new Set(inventory.runningSessionIds as string[]);
-  for (const planned of deps.employees()) {
-    const allowed = () => deps.employees().some(e => e.id === planned.id && e.owner === planned.owner &&
-      e.sessionId === planned.sessionId && e.desiredRunning === true && !e.onVacation);
-    if (!running.has(planned.sessionId) || !allowed() || deps.live(planned.sessionId)) continue;
-    const saved = deps.saved(planned.sessionId);
-    if (!saved || saved.owner !== planned.owner) continue;
-    const entry = planRebootRestore([saved.id], { [saved.id]: saved }, () => true, { allowMissingPid: true }).restore[0];
+  for (const { id, owner, sessionId, sessionGeneration } of deps.employees()) {
+    const allowed = () => deps.employees().some(e => e.id === id && e.owner === owner &&
+      e.sessionId === sessionId && e.sessionGeneration === sessionGeneration && e.desiredRunning === true &&
+      !e.onVacation && !e.bindingMigration && !e.dockerBinding);
+    if (!running.has(sessionId) || !allowed() || deps.live(sessionId)) continue;
+    const saved = deps.saved(sessionId);
+    if (!saved || saved.owner !== owner) continue;
+    const entry = planRebootRestore([sessionId], { [sessionId]: saved }, () => true, { allowMissingPid: true }).restore[0];
     if (!entry) continue;
     try {
-      if (await deps.restore(entry, allowed)) report.connected.push(saved.id);
-      else report.failed.push(saved.id);
-    } catch { report.failed.push(saved.id); }
+      if (await deps.restore(entry, allowed)) report.connected.push(sessionId);
+      else report.failed.push(sessionId);
+    } catch { report.failed.push(sessionId); }
   }
   return report;
 }

@@ -21,6 +21,8 @@ vi.mock('../../src/disk-stats.js', () => ({
   ] })),
 }));
 
+vi.mock('../../src/web/office-settings-file.js', () => import('../helpers/mock-office-settings-file.js'));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     readFile: vi.fn(async () => '{}'),
@@ -484,6 +486,38 @@ describe('system-routes', () => {
         const res = await ordinary.app.inject({ method: 'PUT', url: '/api/settings', payload: { displayName: 'Changed' } });
         expect(res.statusCode).toBe(403); expect(mockedWriteFile).not.toHaveBeenCalled();
       } finally { await ordinary.app.close(); vi.unstubAllEnvs(); }
+    });
+
+    it.each(['{', 'null', '[]', '"legacy"'])('preserves an invalid settings file (%s)', async (raw) => {
+      mockedReadFile.mockResolvedValue(raw);
+      const reply = await harness.app.inject({ method: 'PUT', url: '/api/settings', payload: { showCost: true } });
+      expect(reply.json()).toMatchObject({ success: false, errorCode: 'OPERATION_FAILED' });
+      expect(mockedWriteFile).not.toHaveBeenCalled();
+    });
+
+    it('preserves unreadable settings and accepts a later update after recovery', async () => {
+      mockedReadFile.mockRejectedValueOnce(Object.assign(new Error('read failed'), { code: 'EIO' }));
+      const request = () => harness.app.inject({ method: 'PUT', url: '/api/settings', payload: { showCost: true } });
+      expect((await request()).json()).toMatchObject({ success: false });
+      expect(mockedWriteFile).not.toHaveBeenCalled();
+      mockedReadFile.mockResolvedValue('{"language":"fr"}');
+      expect((await request()).json()).toEqual({});
+      expect(JSON.parse(String(mockedWriteFile.mock.calls[0][1]))).toEqual({ language: 'fr', showCost: true });
+    });
+
+    it('merges simultaneous model and office updates against the last completed write', async () => {
+      let persisted = '{"language":"fr"}';
+      mockedReadFile.mockImplementation(async () => persisted);
+      mockedWriteFile.mockImplementation(async (_path, data) => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        persisted = String(data);
+      });
+      const replies = await Promise.all([
+        harness.app.inject({ method: 'PUT', url: '/api/settings', payload: { showCost: true } }),
+        harness.app.inject({ method: 'PUT', url: '/api/execution/model-config', payload: { model: 'selected' } }),
+      ]);
+      expect(replies.map((reply) => reply.json())).toEqual([{}, {}]);
+      expect(JSON.parse(persisted)).toEqual({ language: 'fr', showCost: true, modelConfig: { model: 'selected' } });
     });
 
     it('saves valid settings', async () => {

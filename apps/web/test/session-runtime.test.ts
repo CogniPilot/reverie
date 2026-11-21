@@ -308,6 +308,12 @@ describe('explicit company restart', () => {
       const missing = await app.inject({ method: 'POST', url: '/api/company/employees/person/restart', payload: {} });
       expect(missing.statusCode).toBe(409);
       expect(missing.json().error).toContain('No saved runtime recipe');
+      expect(missing.json().code).toBe('EMPLOYEE_RUNTIME_RECIPE_MISSING');
+      Object.assign(employee, { runtimeRecipe: { mode: 'codex' } });
+      const detached = await app.inject({ method: 'POST', url: '/api/company/employees/person/restart' });
+      expect(detached.statusCode).toBe(409);
+      expect(detached.json().error).toContain('runtime settings are saved');
+      expect(detached.json().code).toBe('EMPLOYEE_SESSION_UNAVAILABLE');
       employee.onVacation = true;
       const vacation = await app.inject({ method: 'POST', url: '/api/company/employees/person/restart', payload: {} });
       expect(vacation.statusCode).toBe(409);

@@ -242,3 +242,40 @@ objects survive rollback, and runs Nix garbage collection with retained profile
 and sentinel roots. Its owned workspace retains logs and a handoff. This is
 filesystem/mount/recreation evidence; it does not reboot the host, activate the
 broker, or prove provider EOF behavior.
+
+## Image-backed shared base experiment
+
+Two fresh Docker workers can use the image's existing Nix store files as a
+read-only OverlayFS lower layer. In a disposable test with Nix 2.34.8, each
+worker built a different derivation referencing the image base. Recreating both
+containers with the same image and their original private directories preserved
+both outputs. Garbage collection removed an unrooted output from one worker.
+The other worker retained its rooted output and both could still read the base.
+
+The experiment used the following storage layout:
+
+- **Per image digest.** Import the image's `/etc/reverie-nix-registration` into
+  an isolated database once and close it before sharing it read-only. Bind the
+  image's original `/nix/store` at a second read-only path inside the worker's
+  mount namespace. The lower local store reads its database from the first
+  location and its files from the second. Its store directory needs a real
+  `.links` directory in the final packaged image.
+- **Per employee.** Persist the upper layer, overlay work directory, Nix state
+  and logs. The upper and work directories must reside on the same filesystem.
+  Initialize a worker-owned `.links` in the upper layer so Nix can optimize
+  private files. Root the base and live profiles in the employee's GC roots.
+- **Per launch.** Mount the merged view at `/nix/store` before launching
+  programs that resolve store paths. Select the Nix local overlay store with
+  the employee's state, log and upper directories and the read-only lower
+  store. Nix checks the mount configuration. The tested configuration uses
+  the experimental `local-overlay-store` and `read-only-local-store` features.
+
+The existing rootless Docker policy allowed an unprivileged mount namespace.
+A worker under the default Docker policy received `EPERM` at namespace
+creation. Enabling this in the product requires a supported mount owner for
+each worker policy and verification that terminal, build and recovery entry
+points all see the same mount. Keep the exact base image and registration
+available for the lifetime of every upper that references it. Image upgrades
+and migration from independent stores still need replacement and rollback
+tests. Measure freed space on the backing filesystem. In this experiment Nix
+reported terabytes freed while collecting tiny disposable outputs.

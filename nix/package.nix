@@ -156,6 +156,12 @@ let
       # credential ancestors. Map only this disposable owned root/fixture to
       # UID1; never replace the production reader or relax its custody checks.
       boxedSdkCredentialCheck() {
+        # This suite checks real credential custody, expiry and process restart.
+        # Isolate its short-lived test ledgers from competing image-build I/O.
+        (
+          export TMPDIR="''${REVERIE_RECOVERY_TEST_TMP:-$TMPDIR}"
+          npm test -- test/employee-recovery-authority.test.ts
+        )
         npm test -- test/boxed-plan-provider-entry.test.ts \
           test/plan-office-agent-force.test.ts \
           test/plan-office-viewer-repair.test.ts \
@@ -166,13 +172,15 @@ let
       }
       ${if pkgs.stdenv.isLinux then ''
         mkdir -p "$TMPDIR/boxed-sdk-check-root"/{nix,source,fixture,proc,dev,bin}
-        mkdir -p "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
+        mkdir -p "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp,recovery-tmp}
         chmod 700 "$TMPDIR/boxed-sdk-check-root" "$TMPDIR/boxed-sdk-check-fixture" "$TMPDIR/boxed-sdk-check-fixture"/{home,tmp}
         export -f boxedSdkCredentialCheck
         ${pkgs.bubblewrap}/bin/bwrap --unshare-user --uid 1 --gid 1 --cap-drop ALL \
           --ro-bind "$TMPDIR/boxed-sdk-check-root" / --ro-bind /nix /nix \
           --ro-bind ${pkgs.bash}/bin /bin --bind "$PWD" /source \
-          --bind "$TMPDIR/boxed-sdk-check-fixture" /fixture --proc /proc --dev /dev \
+          --bind "$TMPDIR/boxed-sdk-check-fixture" /fixture \
+          --perms 0700 --tmpfs /fixture/recovery-tmp --setenv REVERIE_RECOVERY_TEST_TMP /fixture/recovery-tmp \
+          --proc /proc --dev /dev \
           --chdir /source --setenv HOME /fixture/home --setenv TMPDIR /fixture/tmp \
           ${pkgs.bash}/bin/bash -euc '
             test "$(id -u)" = 1
@@ -211,7 +219,7 @@ let
       npm test -- test/browser-coverage-collection.test.ts test/browser-coverage-execution.test.ts test/browser-coverage-report.test.ts test/browser-coverage-convert.test.ts test/browser-coverage-producer.test.ts
       npm test -- test/company-employee-resources-ui.test.ts test/resource-employee-data.test.ts test/employee-recovery-ui.test.ts \
         test/resource-employee-service.test.ts test/resource-fleet-operation.test.ts \
-        test/employee-recovery-authority.test.ts test/employee-recovery-service.test.ts test/employee-recovery-diagnostics-wire.test.ts \
+        test/employee-recovery-service.test.ts test/employee-recovery-diagnostics-wire.test.ts \
         test/resource-fleet-native-failure-client.test.ts test/resource-fleet-codec-upgrade.test.ts \
         test/native-owner-channel.test.ts test/prepare-test-vendor.test.ts test/spreadsheet-assets.test.ts test/capture-claude-launch.test.ts \
         test/control-behavior-inventory.test.ts test/control-behavior-ratchet.test.ts test/text-controls.test.ts
@@ -310,8 +318,11 @@ let
       npm test -- test/rust-routes/frames.test.ts test/rust-routes/channel.test.ts test/rust-routes/config.test.ts \
         test/routes/subscription-profiles-forwarder.test.ts
       npm test -- test/rust-front/frames.test.ts
-      npm test -- test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
-        test/rust-routes/settings-fixtures.test.ts
+      (
+        export NIX_REVERIE_TEST_RUST_ROUTE_HANDLER=${rustRouteHandler}/bin/reverie-route-handler
+        npm test -- test/office-settings-file.test.ts test/routes/settings-rust-goldens.test.ts test/routes/settings-forwarder.test.ts \
+          test/rust-routes/settings-fixtures.test.ts
+      )
       npm test -- test/rust-front/adapter.test.ts test/rust-front/fd-inheritance.test.ts test/rust-front/server-front.test.ts \
         test/rust-front/front-child.test.ts test/rust-front/receipts.test.ts test/rust-front/direct-child.test.ts \
         test/rust-front/http-body.test.ts
@@ -668,9 +679,10 @@ let
     };
   });
   laptopTools = import ./laptop-tools.nix { inherit pkgs src; };
+  runtimeGit = pkgs.git.override { pythonSupport = false; };
   runtime = pkgs.buildEnv {
     name = "reverie-runtime";
-    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux pkgs.git pkgs.ripgrep
+    paths = [ console memoryJournalCli kokoro modelRelay officeRelay hands adminMemory handsTools workerExec workerChild opsNativeCli backendNativeCli leaseCli pkgs.nodejs_22 pkgs.docker-client pkgs.tmux runtimeGit pkgs.ripgrep
       pkgs.curl pkgs.coreutils pkgs.bashInteractive pkgs.gnugrep pkgs.gnused
       pkgs.gawk pkgs.findutils pkgs.gnutar pkgs.gzip pkgs.procps pkgs.which pkgs.gnumake pkgs.gcc
       pkgs.gh pkgs.jq pkgs.diffutils pkgs.fd

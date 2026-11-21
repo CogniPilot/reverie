@@ -9,9 +9,10 @@ application service and its scoped authority, rather than duplicate the workflow
 
 The default adapter supports an ordinary Docker console, default bridge
 networking and existing bind mounts. Other network and volume layouts refuse
-before the live stop. Preview explicitly refreshes image defaults while
-preserving old entries that differ from the old image defaults; it does not
-infer whether an equal-to-default value was explicitly selected historically.
+before the live stop. Preview carries forward the running office's private HTTPS
+enablement, hostname and web port, including values inherited from its image.
+For other environment settings, preview refreshes image defaults and preserves
+values that differed from the previous defaults.
 Private environment values remain in the owner-only operation record.
 
 The existing GPU image has one fixed entrypoint ABI: `tini -g -s --`, the
@@ -73,10 +74,43 @@ source, and only then swaps names and starts. Readiness requires the HTTP status
 and an actual Rust-front/Node process relationship. This remains hybrid readiness;
 the one-employee message, laptop, perf and restart trial is separate acceptance.
 
+Check free space before stopping the office. The operation directory is
+`runtime/update-state/console-deployments/<operation>/` under the installation.
+Ordinary apply keeps the archive and extracted rehearsal there. To put the
+extraction on a separate filesystem, pass `--rehearsal-root /absolute/private/directory`
+to apply. Choose an empty owner-only directory outside worker mounts.
+
+Add `--compress-backup` to stage both the raw tar and its extraction on the
+rehearsal disk. Budget for both copies there. The operation directory then
+holds `snapshot/console.tar.gz`. Before the swap, the updater reads back the
+complete gzip file and compares its decoded length and SHA-256 to the tar
+that passed the restore rehearsal. The snapshot receipt records both checksums.
+For an ordinary update, capture, restore verification, and compressed publication
+each have up to 30 minutes. An explicit initial-operation deadline still limits
+the entire update.
+The retained-copy workflow still writes its copy under `retained-copy/`.
+
+An image archive can be staged on scratch. Importing it still requires space
+in Docker's image storage for new layers. When Docker and the operation directory
+share a filesystem, leave room for the image import and the backup together.
+
 Rollback addresses only the original retained container identities. It retains
 both containers, never bulk-wakes employees and never automatically restores data.
 An attempted effect is not automatically retried after a lost response. The
 registered active-operation fence and private receipts stay available for review.
+
+Run `reverie-deployment --root ROOT status` to inspect the operation holding
+the installation claim. This works after losing the operation ID. A preview
+without a claim still needs its explicit ID. An installation with no claim
+returns `DEPLOYMENT_NO_ACTIVE_OPERATION`.
+
+Run `reverie-deployment --root ROOT status OPERATION` after a lost response.
+The Rust client can read the registered journal while the Docker socket is
+unavailable. An outstanding stop attempt, for example, still reports
+`STOP_UNCONFIRMED`. If a terminal receipt exists but live verification fails,
+`stage` is `READINESS_UNCONFIRMED`, `readiness_failure.recorded_stage` gives
+the historical stage, and `readiness_failure.diagnostic.error.code` identifies
+the failed check. Reading status never repeats an operation.
 
 `confirm OPERATION` explicitly reinspects the recorded sleeping candidate after
 a refused validation. It does not repeat container creation. `activate-retained
@@ -88,6 +122,11 @@ checked swap. The copy is not a consistent snapshot: status and the readiness
 receipt report `backup_verified: false` / `backupVerified: false`. No recovery
 path automatically extracts data onto the live company. Returning to an older
 console can fail after newer schema writes; this mode accepts fixing forward.
+
+For a fresh prepared operation, add `--stop-running-source` to that command
+to stop the running console before retaining the copy. The deployment tool
+checks the original container incarnation, candidate, bind grants and shared
+writers before recording and issuing the stop.
 
 The snapshot is a verified copy of the observed stopped console subtree. Other
 worker-writable account paths require an explicit writer/consistency disposition;

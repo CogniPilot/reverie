@@ -42,6 +42,7 @@ import type { ChatroomService } from './chatroom-service.js';
 import type { PlanService, PlanAccount } from './plan-accounts.js';
 import type { PlanMoveStore } from './plan-move-store.js';
 import {
+  PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
   type PlanMoveInput,
@@ -354,6 +355,13 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       // facts after it, retaining the same scope checks and five-second proof.
       const workerImage = await this.#d.engine.replacementTargetImage(selected.row.destination!, current);
       current();
+      if (input.forceBusy && input.fromAccount === input.toAccount) {
+        // A cold worker cannot supply a live storage observation after reservation.
+        // Check its retained mounts before taking the employee's move lock.
+        const helper = this.#d.recoveryHelper;
+        await this.#d.engine.planReplacementHome(selected.row, current, 'stopped', helper ? { helper } : undefined);
+        current();
+      }
       const native = await this.#source.capture(selected.row, selected.binding, current, input.forceBusy);
       current();
       const observation = native.observation(selected.row, selected.binding);
@@ -412,7 +420,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         input,
         { sessionId, owner: source.employee.owner, at: Date.now() },
         policy,
-        { kind: 'template' }
+        { kind: 'template', sourceState: observation.kind }
       );
     current();
     snapshot.require();
@@ -452,6 +460,25 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       requestDigest,
     });
   }
+  async #requireSourcePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    let observed;
+    try {
+      observed = await this.#d.engine.observePool(row);
+    } catch (error) {
+      current();
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_ANCHOR_REPLACED' ||
+          !this.#d.requireReconciledSourcePool) throw error;
+    }
+    current();
+    if (observed && same(observed, row.pool)) return;
+    // Reconciliation can establish a new kernel epoch of the original pool.
+    // A positive observation of a different placement or policy remains a conflict.
+    if (!this.#d.requireReconciledSourcePool || !row.pool ||
+        (observed && !same({ ...observed, physicalDigest: row.pool.physicalDigest }, row.pool)))
+      throw new PlanMoveError('The original shared pool must be reconciled first', 409);
+    await this.#d.requireReconciledSourcePool(row, current);
+    current();
+  }
   async prepare(record: Readonly<PlanMoveRecord>, journal: PlanMoveDockerJournal): Promise<void> {
     journal.current();
     requireCanonicalAccountSource(journal.read());
@@ -480,18 +507,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
     if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
       throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
-    try {
-      const pool = await this.#d.engine.observePool(state.seed.source.record);
-      journal.current();
-      if (!pool || !same(pool, state.seed.source.record.pool))
-        throw new PlanMoveError('The original shared pool must be reconciled first', 409);
-    } catch (error) {
-      journal.current();
-      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_ANCHOR_REPLACED' ||
-          !this.#d.requireReconciledSourcePool) throw error;
-      await this.#d.requireReconciledSourcePool(state.seed.source.record, () => journal.current());
-      journal.current();
-    }
+    await this.#requireSourcePool(state.seed.source.record, () => journal.current());
     const target = await this.#snapshot(record, journal);
     try {
       target.snapshot.selected(target.account);
@@ -680,7 +696,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const snapshot = await DockerPlanAccountSnapshot.capture(this.#d.plans, account.id, () => journal.current());
     if (snapshot.descriptor.canonicalSnapshotDigest !== seed.target.accountSnapshotDigest) {
       snapshot.close();
-      throw new PlanMoveError('The selected account material changed after reservation', 409);
+      journal.current();
+      throw new PlanMoveAccountSnapshotChanged();
     }
     return { account, snapshot };
   }

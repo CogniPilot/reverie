@@ -187,6 +187,7 @@ describe('test suite partition', () => {
     expect(end).toBeGreaterThan(start);
     const namespace = source.slice(start, end);
     expect(nixCheckedFiles("    checkPhase = ''\n" + namespace + '\nrunHook postCheck')).toEqual([
+      'test/employee-recovery-authority.test.ts',
       'test/boxed-plan-provider-entry.test.ts',
       'test/plan-office-agent-force.test.ts',
       'test/plan-office-viewer-repair.test.ts',

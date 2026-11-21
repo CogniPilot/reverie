@@ -46,3 +46,20 @@ fn reference_inputs_are_canonical_and_bounded() {
         assert!(invalid.parse::<Directory>().is_err(), "{invalid}");
     }
 }
+
+#[test]
+fn filesystem_id_is_checked_on_the_open_directory() {
+    let mut files = Files::new();
+    let index = files.storage("/", false).unwrap();
+    let descriptor = files.get(index);
+    let volume = rustix::fs::fstatvfs(descriptor).unwrap();
+    let metadata = nix::sys::statfs::fstatfs(descriptor).unwrap();
+    let expected = volume.f_fsid;
+    let ext = metadata.filesystem_type() == nix::sys::statfs::EXT4_SUPER_MAGIC;
+    assert_eq!(
+        verify_filesystem(&files, index, expected).is_ok(),
+        ext && expected != 0
+    );
+    assert!(verify_filesystem(&files, index, expected ^ 1).is_err());
+    assert!(verify_filesystem(&files, index, 0).is_err());
+}

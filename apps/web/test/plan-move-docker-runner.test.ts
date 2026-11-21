@@ -4,7 +4,7 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { PlanMoves, PlanMoveComposerNotReady, type PlanMovePort, type PlanMoveInput } from '../src/plan-move.js';
+import { PlanMoves, PlanMoveAccountSnapshotChanged, PlanMoveComposerNotReady, type PlanMovePort, type PlanMoveInput } from '../src/plan-move.js';
 import { PlanMoveStore, dockerPlanMoveNotIssuedOf } from '../src/plan-move-store.js';
 import type { PlanMoveDockerActor, PlanMoveDockerJournal } from '../src/plan-move-docker.js';
 import { dockerPlanJournalFixture } from './helpers/docker-plan-move-fixture.js';
@@ -231,6 +231,30 @@ describe('native plan coordinator with recording actor and actual protected jour
     expect(f.actor.finalize).toHaveBeenCalledTimes(1);
     expect(f.actor.stopSource).toHaveBeenCalledTimes(1);
   });
+  it.each(['unissued', 'issued', 'untyped'] as const)(
+    'settles a stale account reservation through original recovery (%s)', async (mode) => {
+      const f = await fixture();
+      if (mode === 'issued') vi.mocked(f.actor.start).mockRejectedValueOnce(Error('paused after source stop'));
+      else vi.mocked(f.actor.prepare).mockRejectedValueOnce(Error('temporary preflight failure'));
+      await f.moves.begin(f.input, f.owner);
+      const previous = await f.settled();
+      expect(previous.phase).toBe('recovery-required');
+      const error = new PlanMoveAccountSnapshotChanged();
+      vi.mocked(f.actor.inspectForContinuation).mockRejectedValueOnce(mode === 'untyped' ? Error(error.message) : error);
+      await f.moves.continueDocker(previous.id, {
+        oldSession: previous.oldSession, newSession: previous.newSession!, toAccount: previous.toAccount,
+      }, f.owner, f.port);
+      await vi.waitFor(async () => {
+        const stored = await f.store.dockerRecord(previous.id);
+        expect(stored.error).toBe(error.message);
+        expect(stored.phase).toBe(mode === 'unissued' ? 'failed' : 'recovery-required');
+      });
+      if (mode === 'unissued') await vi.waitFor(() => f.moves.assertAvailable(f.input.employeeId));
+      else await expect(f.moves.assertAvailable(f.input.employeeId)).rejects.toThrow();
+      expect(f.actor.stopSource).toHaveBeenCalledTimes(mode === 'issued' ? 1 : 0);
+      expect(f.actor.start).toHaveBeenCalledTimes(mode === 'issued' ? 1 : 0);
+    }
+  );
   it('releases a cancelled idle wait only after its effect-free failure is durably acknowledged', async () => {
     const f = await fixture();
     let waiting!: () => void;

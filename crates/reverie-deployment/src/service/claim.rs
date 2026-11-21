@@ -160,6 +160,21 @@ impl DeploymentService {
         })
     }
 }
+pub(super) fn active_status(service: &DeploymentService) -> Result<DeploymentStatus> {
+    let path = service
+        .installation
+        .state
+        .join("console-deployment-active.json");
+    if std::fs::symlink_metadata(&path)
+        .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+    {
+        return Err(DeploymentError::new("DEPLOYMENT_NO_ACTIVE_OPERATION"));
+    }
+    let active = ClaimFile::capture(path)?;
+    let status = service.status(&active.selected()?)?;
+    active.assert_current()?;
+    Ok(status)
+}
 pub(super) fn selected(installation: &Installation) -> Result<String> {
     ClaimFile::capture(installation.state.join("console-deployment-active.json"))?.selected()
 }

@@ -48,7 +48,7 @@ describe('replies beyond the recent-message window', () => {
   const makeService = () => new ChatroomService({ file: join(directory, 'rooms.json'),
     database: join(directory, 'chat.db'), getSession: id => sessions.get(id),
     employeeOf: id => `employee-${id}`, broadcast: () => {} });
-  // This setup used to share each case's 30s budget; do not reduce it to the 10s hook default.
+  // Seeding over 1,000 durable posts and checkpointing SQLite can exceed a case's 30s budget.
   beforeAll(async () => {
     vi.stubEnv('REVERIE_ADMIN_PHONE_WAKE', 'enabled');
     fixtureRoot = mkdtempSync(join(tmpdir(), 'archived-reply-suite-'));
@@ -76,7 +76,7 @@ describe('replies beyond the recent-message window', () => {
     }
     closedDatabases(seedDirectory);
     vi.unstubAllEnvs();
-  }, 30_000);
+  }, 120_000);
   beforeEach(async () => {
     vi.stubEnv('REVERIE_ADMIN_PHONE_WAKE', 'enabled');
     directory = mkdtempSync(join(fixtureRoot, 'empty-case-'));

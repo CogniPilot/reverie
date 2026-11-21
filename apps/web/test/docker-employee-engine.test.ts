@@ -480,8 +480,8 @@ async function retainedStoppedFixture(version: 1 | 2 = 2, ephemeral = false) {
     version: 1,
     purpose: 'reverie-boxed-storage-observation-v1',
     holderStartTicks: '123',
-    home: { dev: '4', ino: '5', uid: 1000, gid: 100, mode: 16832 },
-    nix: { dev: '4', ino: '6', uid: 1000, gid: 100, mode: 16832 },
+    home: { dev: '4', ino: '5', uid: 1000, gid: 100, mode: 448 },
+    nix: { dev: '4', ino: '6', uid: 1000, gid: 100, mode: 448 },
   };
   let holder: Record<string, unknown> | undefined;
   f.journal.read = (_row, role) => f.row.tasks?.find((t) => t.role === role);
@@ -622,6 +622,48 @@ describe('existing provider reattachment after Docker restart', () => {
   );
 });
 describe('retained published plan source after historical source deletion', () => {
+  it.each([false, true])('brackets an absent v3 ancestor for plan recovery (reappears: %s)', async (reappears) => {
+    let published = '';
+    const f = await dockerPlanRetirementFixture({
+      canonicalRead: async (row) => ({
+        providerSourceDigest: row.providerSourceDigest,
+        publish(ready) {
+          published = dockerContinuationDigest(ready);
+          return Promise.resolve();
+        },
+        requireCurrent(ready) {
+          expect(dockerContinuationDigest(ready)).toBe(published);
+        },
+      }),
+    });
+    try {
+      const row = f.state.work!;
+      const ancestor = row.original.containerId;
+      const run = vi.mocked(f.command.run);
+      const original = run.getMockImplementation()!;
+      let censuses = 0;
+      run.mockImplementation(async (args, input) => {
+        if (args[0] === 'container' && args[1] === 'inspect' && args[2] === ancestor)
+          throw Error('Historical container inspect unavailable');
+        if (args[0] === 'container' && args[1] === 'ls' && args.includes('id=' + ancestor)) {
+          expect(args).toEqual(['container', 'ls', '--all', '--no-trunc', '--filter', 'id=' + ancestor, '--format', '{{.ID}}']);
+          return ++censuses === 2 && reappears ? ancestor : '';
+        }
+        return original(args, input);
+      });
+      vi.mocked(f.command.create).mockClear();
+      run.mockClear();
+      const image = f.engine.existingPlanSourceImage(row, () => {});
+      if (reappears) await expect(image).rejects.toThrow('ORIGINAL_CHANGED');
+      else await expect(image).resolves.toEqual(row.workerImage);
+      expect(censuses).toBe(2);
+      expect(f.command.create).not.toHaveBeenCalled();
+      expect(run.mock.calls.some(([args]) => args.includes('start') || args.includes('exec'))).toBe(false);
+    } finally {
+      f.engine.close();
+    }
+  });
+
   const read = (
     f: Awaited<ReturnType<typeof retainedStoppedFixture>>,
     kind: 'HOME' | 'networks',
@@ -641,6 +683,44 @@ describe('retained published plan source after historical source deletion', () =
       vi.mocked(f.command.run).mock.calls.some(([a]) => a[2] === cid || a[0] === 'image' || a[1] === 'start')
     ).toBe(false);
   });
+  it.each(['match', 'filesystem', 'inode', 'generation'] as const)(
+    'checks the approved filesystem on both reads of a renumbered stopped worker: %s', async (scenario) => {
+      const f = await retainedStoppedFixture();
+      f.holder().State = { Running: false, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 };
+      const image = 'sha256:' + '8'.repeat(64);
+      const helper = new DockerWorkerReattachHelper(f.command, image, () => { throw Error('No credential request'); });
+      const approval = {
+        sessionId: f.row.request.sessionId, sessionGeneration: f.row.request.sessionGeneration,
+        operationId: f.row.request.operationId, containerId: f.row.destination!.containerId,
+        historicalDevice: '4', currentDevice: '7', filesystemId: '9988',
+        homeInode: f.storage.home.ino, nixInode: f.storage.nix.ino,
+      };
+      if (scenario === 'generation') {
+        expect(() => helper.approveStorage(f.row, { ...approval, sessionGeneration: approval.sessionGeneration+1 })).toThrow();
+        return;
+      }
+      helper.approveStorage(f.row, { ...approval, homeInode: scenario === 'inode' ? '88' : approval.homeInode });
+      const original = vi.mocked(f.command.run).getMockImplementation()!;
+      let reads = 0;
+      vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+        if (args[0] === 'image' && args.at(-1) === image) return JSON.stringify(image);
+        if (args[0] === 'run' && args.includes('verify-storage-reference')) {
+          reads++;
+          expect(args.slice(-2)).toEqual(['--filesystem-id','9988']);
+          expect(args).toContain('7:5:1000:100:448');
+          if (scenario === 'filesystem' && reads === 2) throw Error('BOXED_STORAGE_FILESYSTEM_CHANGED');
+          return JSON.stringify({ version: 1, purpose: 'reverie-boxed-storage-reference-v1', holderStartTicks: null,
+            home: { ...f.storage.home, dev: '7' }, nix: { ...f.storage.nix, dev: '7' } });
+        }
+        return original(args,input);
+      });
+      const result = f.engine.planReplacementHome(f.row, () => {}, 'stopped', { helper });
+      if (scenario === 'match') await expect(result).resolves.toMatchObject({ dev: '7', ino: '5' });
+      else await expect(result).rejects.toThrow();
+      expect(reads).toBe(scenario === 'inode' ? 0 : 2);
+      expect(f.command.create).not.toHaveBeenCalled();
+    }
+  );
   it.each([1, 2] as const)('reads v%s exact stopped networks without its historical source', async (version) => {
     const f = await retainedStoppedFixture(version);
     await expect(f.engine.planReplacementNetworkIds(f.row, () => {})).resolves.toEqual([f.network]);
@@ -786,6 +866,35 @@ describe('Engine-owned existing Docker provider view', () => {
           Config: { ...wire.Config, Cmd: value },
         })
       ).toThrow();
+  });
+  it('matches Docker empty DNS to a retained legacy source only when the full fingerprint agrees', async () => {
+    const f = fixture();
+    f.source.HostConfig.Dns = null;
+    const historical = (await f.engine.observeSource(subject, cid)).original;
+    f.source.HostConfig.Dns = [];
+    expect((await f.engine.observeSource(subject, cid, historical)).original).toEqual(historical);
+    expect((await f.engine.observeSource(subject, cid)).original).not.toEqual(historical);
+    f.source.HostConfig.Dns = ['192.0.2.1'];
+    expect((await f.engine.observeSource(subject, cid, historical)).original).not.toEqual(historical);
+    f.source.HostConfig.Dns = [];
+    f.source.HostConfig.PidsLimit = 128;
+    expect((await f.engine.observeSource(subject, cid, historical)).original).not.toEqual(historical);
+  });
+  it('keeps an already prepared identity destination on the selected image after its source retires', async () => {
+    const f = await providerViewFixture();
+    const engine = new DockerEmployeeEngine(f.command, 'fixture', f.resources,
+      { imageId: target, clientManifestDigest: '4'.repeat(64), sourceImageIds: [target] },
+      f.journal, helper, '7'.repeat(64), () => 'claude');
+    f.row.phase = 'identity-ready';
+    await expect(engine.image(f.row.original)).rejects.toThrow('SOURCE_IMAGE_UNSUPPORTED');
+    await expect(engine.preparedIdentityImage(f.row, () => {})).resolves.toEqual(f.row.workerImage);
+    f.row.phase = 'identity-issued';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).resolves.toEqual(f.row.workerImage);
+    f.row.phase = 'destination-issued';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).rejects.toThrow('WORKER_IMAGE_CHANGED');
+    f.row.phase = 'identity-ready';
+    f.observed.Config.User = '2000:2000';
+    await expect(engine.preparedIdentityImage(f.row, () => {})).rejects.toThrow('DESTINATION_CHANGED');
   });
   it('keeps a published image readable while selecting an independently built replacement', async () => {
     const f = await providerViewFixture(),

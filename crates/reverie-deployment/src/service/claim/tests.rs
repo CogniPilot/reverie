@@ -7,6 +7,49 @@ use std::{
 mod fixture;
 use fixture::Fixture;
 
+#[test]
+fn reopened_status_preserves_journal_progress_without_an_engine_socket() {
+    let mut fixture = Fixture::new(false);
+    let root = fixture.service.installation.root.clone();
+    let absent = root.join("absent.sock");
+    fixture.next.attempt("stop-attempt").unwrap();
+    fixture.service.close().unwrap();
+    let read = |op: &Operation| {
+        DeploymentService::registered_status_with_socket(&root, Some(&op.plan.operation), &absent)
+            .unwrap()
+    };
+    let active = DeploymentService::registered_status_with_socket(&root, None, &absent).unwrap();
+    assert_eq!(active.operation, fixture.previous.plan.operation);
+    assert_eq!(active.stage, "READINESS_UNCONFIRMED");
+    let pending = read(&fixture.next);
+    assert_eq!(pending.stage, "STOP_UNCONFIRMED");
+    assert!(pending.readiness_failure.is_none());
+    let historical = read(&fixture.previous);
+    assert_eq!(historical.stage, "READINESS_UNCONFIRMED");
+    assert_eq!(
+        historical.readiness_failure.unwrap().recorded_stage,
+        "HYBRID_READY"
+    );
+    assert_eq!(fixture.previous.status().unwrap().stage, "HYBRID_READY");
+    fixture.close();
+}
+
+#[test]
+fn active_status_requires_a_private_claim_and_never_guesses_from_previews() {
+    let mut fixture = Fixture::new(false);
+    fs::set_permissions(fixture.claim_path(), fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(
+        active_status(&fixture.service).err().unwrap().code(),
+        "DEPLOYMENT_PRIVATE_OWNER_REQUIRED"
+    );
+    fs::remove_file(fixture.claim_path()).unwrap();
+    assert_eq!(
+        active_status(&fixture.service).err().unwrap().code(),
+        "DEPLOYMENT_NO_ACTIVE_OPERATION"
+    );
+    fixture.close();
+}
+
 fn snapshot_refusal() -> DeploymentError {
     DeploymentError::snapshot(
         "DEPLOYMENT_SNAPSHOT_REFUSED",

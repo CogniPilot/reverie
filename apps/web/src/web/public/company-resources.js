@@ -2282,6 +2282,12 @@
             text: 'Reconcile shared pool observation',
           })
         );
+      if (p.state === 'held' && p.code === 'DOCKER_POOL_ANCHOR_UNCONFIRMED')
+        this.controls.append(
+          this.shell.button('ca-btn', 'Review stopped pool recovery', () => this.recoverColdPool(), {
+            text: 'Review stopped pool recovery',
+          })
+        );
     }
     async change(action, revision) {
       let refreshed = false,
@@ -2368,6 +2374,47 @@
         refreshed = true;
       });
       if (refreshed) await this.load();
+    }
+    async recoverColdPool() {
+      let refresh = false;
+      await this.run(async (sequence) => {
+        await this.current();
+        const preview = await this.api(`${this.path}/docker-pool/cold-preview`);
+        if (
+          !this.matches(preview) ||
+          !digest(preview.scopeDigest) ||
+          !Number.isSafeInteger(preview.policy?.memoryMaxBytes) ||
+          preview.policy.memoryMaxBytes <= 0
+        )
+          throw Error('Stopped pool recovery could not be verified.');
+        if (!this.live(sequence)) return;
+        const approved = await this.shell.confirmCompanyAction(
+          'Recover the stopped shared pool',
+          `Start the existing pool and reapply its approved limits, including the ${gib(preview.policy.memoryMaxBytes)} RAM ceiling. Employee sessions can be recovered once the limits are verified.`,
+          'Recover shared pool'
+        );
+        if (!this.live(sequence)) return;
+        if (approved) {
+          await this.current();
+          if (!this.live(sequence)) return;
+          this.status.textContent = 'Starting the pool and verifying its limits…';
+          const result = await this.api(`${this.path}/docker-pool/cold-recover`, {
+            method: 'POST',
+            body: {
+              operationId: nonce(),
+              sessionId: preview.sessionId,
+              sessionGeneration: preview.sessionGeneration,
+              expectedScopeDigest: preview.scopeDigest,
+            },
+          });
+          await this.current();
+          if (!this.live(sequence)) return;
+          if (!this.matches(result) || result.state !== 'retained')
+            throw Error('Pool recovery is unconfirmed. Refresh resources to inspect the attempt.');
+        }
+        refresh = true;
+      });
+      if (refresh) await this.load();
     }
   }
   const ORIGINAL = `${ROOT}/original-attempts`;

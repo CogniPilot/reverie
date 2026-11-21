@@ -56,6 +56,8 @@ const { EXISTING_SETTINGS, subagentWatcher, imageWatcher, workflowRunWatcher } =
   };
 });
 
+vi.mock('../../src/web/office-settings-file.js', () => import('../helpers/mock-office-settings-file.js'));
+
 vi.mock('node:fs/promises', () => ({
   default: {
     readFile: vi.fn(async () => JSON.stringify(EXISTING_SETTINGS)),

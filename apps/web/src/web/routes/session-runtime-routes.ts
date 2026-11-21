@@ -114,7 +114,12 @@ export function registerSessionRuntimeRoutes(app: FastifyInstance, ctx: SessionP
     if (!authorize(req) && employee.desiredRunning === false)
       return reply.code(409).send({success:false,error:'Enter the office before restarting this expert'});
     const session = ctx.sessions.get(employee.sessionId) ?? loadSession?.(employee.sessionId, req);
-    if (!session) return reply.code(409).send({ success: false, error: 'No saved runtime recipe is available for this expert. Restore their runtime settings before restarting.' });
+    if (!session) {
+      const reason = employee.runtimeRecipe
+        ? { code: 'EMPLOYEE_SESSION_UNAVAILABLE', error: 'The runtime settings are saved, but the office could not open the employee’s bound session. Inspect the employee’s runtime recovery status.' }
+        : { code: 'EMPLOYEE_RUNTIME_RECIPE_MISSING', error: 'No saved runtime recipe is available for this expert. Restore their runtime settings before restarting.' };
+      return reply.code(409).send({ success: false, ...reason });
+    }
     // A wedged agent on an isolated laptop cannot change runtime in place. With the owner's confirmed recovery, the
     // broker stops only that agent's in-laptop process group (no exit receipt, so the laptop keeps running) and the
     // dead-pane recovery below relaunches it with the saved recipe and thread. Raw terminal output is not counted as

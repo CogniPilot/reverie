@@ -95,6 +95,7 @@ export interface DockerContainedResourcesConfiguration {
   /** Original issued pool helpers from the canonical operation journal, for
    * later employees sharing the same actually acknowledged pool. */
   retainedPoolConfigurationTasks?(): readonly DockerContinuationTask[];
+  requireColdPoolIdle?(): void;
 }
 function refuse(code = 'DOCKER_RESOURCE_REVISION_CHANGED'): never {
   throw new DockerEmployeeContinuationError(code);
@@ -875,6 +876,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     current();
     if (!ids.length) refuse('DOCKER_POOL_ORIGINAL_ACK_MISSING');
     const matches: DockerContinuationTask[] = [];
+    const history: DockerContinuationTask[] = [];
     for (const candidate of ids) {
       const raw = await this.#inspect(candidate);
       current();
@@ -885,17 +887,27 @@ export class DockerContainedResources implements DockerContainedResourceControll
         .parse(label['reverie.box.resource.name']);
       const restore = raw.Image === this.configuration.poolRestoreHelperImageId;
       const imageId = restore ? this.configuration.poolRestoreHelperImageId! : this.configuration.helperImageId;
+      if (raw.Image !== imageId) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
       if (restore) await requireDockerPoolRestoreHelperImage(this.command, imageId, current);
       // The terminal ACK records the complete scope at the ORIGINAL write.
       // Current membership is independently earned by the fresh Rust probe;
       // leaving or replacing a worker cannot rewrite this historical receipt.
-      const historical = restore
-        ? DockerPoolRestoreAcknowledgement.parse(JSON.parse(await this.command.run(['container', 'logs', candidate])))
-        : undefined;
+      const output: unknown = JSON.parse(await this.command.run(['container', 'logs', candidate]));
+      const historical = restore ? DockerPoolRestoreAcknowledgement.parse(output) : undefined;
+      const acknowledged = historical?.observation ?? observation.parse(output);
+      if (
+        acknowledged.boxId !== fresh.boxId ||
+        acknowledged.parent.path !== fresh.parent.path ||
+        acknowledged.anchor.id !== fresh.anchor.id ||
+        acknowledged.worker !== null
+      ) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+      const sameEpoch =
+        isDeepStrictEqual(acknowledged.parent, fresh.parent) && isDeepStrictEqual(acknowledged.anchor, fresh.anchor);
       current();
+      const epoch = sameEpoch ? fresh : acknowledged;
       const args = restore
-        ? this.#restoreArguments(fresh, policy, historical!.members)
-        : this.#poolArguments(fresh, policy);
+        ? this.#restoreArguments(epoch, policy, historical!.members)
+        : this.#poolArguments(epoch, policy);
       current();
       const expected = this.#configuration(
         'pool-helper',
@@ -932,10 +944,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
         (state.Error ?? '') !== ''
       )
         refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
-      const output: unknown = JSON.parse(await this.command.run(['container', 'logs', candidate]));
-      const ack = restore ? DockerPoolRestoreAcknowledgement.parse(output) : observation.parse(output);
-      if (restore && !isDeepStrictEqual(ack, historical)) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
-      current();
       const task = DockerContinuationTask.parse({
         role: 'pool-helper',
         name: taskName,
@@ -943,11 +951,18 @@ export class DockerContainedResources implements DockerContainedResourceControll
         configurationDigest: dockerContinuationDigest(expected),
         phase: 'completed',
         containerId: candidate,
-        resultDigest: dockerContinuationDigest(ack),
+        resultDigest: dockerContinuationDigest(historical ?? acknowledged),
       });
-      if (!(await this.#ack(task, fresh, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+      if (!(await this.#ack(task, epoch, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
       current();
-      matches.push(task);
+      if (sameEpoch) {
+        matches.push(task);
+      } else {
+        // A retained, closed helper from an earlier epoch is part of the
+        // writer census. It cannot acknowledge the current resource limits.
+        this.#requireHistoricalPoolWriter(task);
+        history.push(task);
+      }
     }
     if (!matches.length) refuse('DOCKER_POOL_ORIGINAL_ACK_MISSING');
     if (
@@ -972,15 +987,19 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (!(await this.#ack(task, confirmed, policy, null, false))) refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
       current();
     }
+    for (const task of history) {
+      this.#requireHistoricalPoolWriter(task);
+      if ((await this.#poolWriterState(task)) !== 'closed') refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+      current();
+    }
     if (
       !isDeepStrictEqual(await this.#poolCensus('pool-helper'), ids) ||
       !isDeepStrictEqual(await this.#poolCensus('anchor'), anchors)
     )
       refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
     current();
-    // All actual writers are closed and their original ACKs prove this SAME
-    // epoch/policy. Picking one is new observation correlation, never a claim
-    // about which historical employee or operation caused the pool state.
+    // Only a closed writer with an ACK for the current epoch can supply the
+    // observation. Picking one does not attribute the pool to an old operation.
     const retained = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
     const chosen =
       matches.find((task) =>
@@ -1020,10 +1039,18 @@ export class DockerContainedResources implements DockerContainedResourceControll
     });
     return new DockerPoolReconciliationReceipt(poolObservationOrigin, record, current);
   }
+  #requireHistoricalPoolWriter(task: DockerContinuationTask): void {
+    const digest = dockerContinuationDigest(task);
+    const retained = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    if (!retained.some((reference) => dockerContinuationDigest(reference) === digest))
+      refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
+  }
   /** Plan permission does not authorize a shared pool writer. Adopt only the
    * actual fixed already-running anchor and an already-enforced pool with its
    * original terminal ACK. No CREATE/START/configure is reachable here. */
   async prepareRetainedPool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const admitted = current;
+    current = () => { admitted(); this.configuration.requireColdPoolIdle?.(); };
     current();
     const name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32),
       config = this.#configuration('anchor', name, ['anchor']),
@@ -1108,6 +1135,9 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_ANCHOR_REPLACED');
   }
   async preparePool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const admitted = current;
+    current = () => { admitted(); this.configuration.requireColdPoolIdle?.(); };
+    current();
     const anchor = await this.#anchor(row, current);
     current();
     if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
@@ -1151,6 +1181,84 @@ export class DockerContainedResources implements DockerContainedResourceControll
         resources: seen.resources,
       }),
     };
+  }
+  /** Preview the exact externally stopped anchor and the current empty worker
+   * selection. Only the owner workflow can persist and consume this scope. */
+  async coldPoolScope(row: DockerEmployeeContinuationRecord, current: () => void) {
+    current();
+    const original = row.tasks?.find(task => task.role === 'anchor');
+    const name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32);
+    const configuration = this.#configuration('anchor', name, ['anchor']);
+    if (!row.pool || original?.phase !== 'running' || original.containerId !== row.pool.containerId ||
+        original.configurationDigest !== dockerContinuationDigest(configuration) ||
+        row.pool.cgroupParent !== this.#slice || row.pool.policyDigest !== dockerContinuationDigest(row.policy.pool))
+      refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const id = original.containerId;
+    const state = await this.#stoppedPoolAnchor(id, configuration, current);
+    const members = await this.#coldPoolMembers(current);
+    const helpers = await this.#poolCensus('pool-helper');
+    current();
+    const retained = await this.#poolWritersClosed();
+    current();
+    if (helpers.some(helper => !retained.some(task => task.phase === 'completed' && task.containerId === helper)))
+      refuse('DOCKER_POOL_COLD_WRITER_UNCONFIRMED');
+    if (dockerContinuationDigest(await this.#stoppedPoolAnchor(id, configuration, current)) !== dockerContinuationDigest(state) ||
+        !isDeepStrictEqual(await this.#poolCensus('pool-helper'), helpers))
+      refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    current();
+    return { id, state, configuration, members, digest: dockerContinuationDigest({
+      original, state, members, helpers, policy: row.policy.pool,
+    }) };
+  }
+  async #stoppedPoolAnchor(id: string, configuration: Config, current: () => void) {
+    const anchors = await this.#poolCensus('anchor');
+    current();
+    if (anchors.length !== 1 || anchors[0] !== id) refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const raw = await this.#fixed(id, configuration);
+    current();
+    return z.object({
+      Status: z.literal('exited'), Running: z.literal(false), Restarting: z.literal(false),
+      Paused: z.literal(false), Dead: z.literal(false), Pid: z.literal(0),
+      OOMKilled: z.literal(false), Error: z.literal(''),
+      StartedAt: z.string().datetime(), FinishedAt: z.string().datetime(),
+    }).passthrough().parse(raw.State);
+  }
+  async #coldPoolMembers(current: () => void): Promise<string> {
+    const bindings: Record<string, unknown>[] = [];
+    const active = await this.#members(undefined, this.command, bindings);
+    current();
+    if (active.length) refuse('DOCKER_POOL_COLD_WORKERS_RUNNING');
+    return dockerContinuationDigest(bindings);
+  }
+  /** The caller's exclusive durable attempt precedes the anchor START. The
+   * normal helper cursors independently precede helper CREATE and START. */
+  async recoverColdPool(
+    row: DockerEmployeeContinuationRecord,
+    attempt: { id: string; nativeDigest: string },
+    journal: DockerContinuationTaskJournal,
+    current: () => void,
+  ): Promise<DockerPoolReconciliationReceipt> {
+    const source = await this.coldPoolScope(row, current);
+    if (attempt.nativeDigest !== source.digest) refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    current();
+    await this.command.run(['container', 'start', source.id]);
+    current();
+    const started = await this.#fixed(source.id, source.configuration);
+    current();
+    if (!z.object({ Running: z.literal(true), StartedAt: z.string().datetime() })
+      .refine(state => Date.parse(state.StartedAt) > Date.parse(source.state.StartedAt)).safeParse(started.State).success)
+      refuse('DOCKER_POOL_COLD_START_UNCONFIRMED');
+    const init = await this.#init(source.id);
+    current();
+    if (!init || await this.#coldPoolMembers(current) !== source.members)
+      refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
+    const seen = await this.#probe(init);
+    current();
+    await this.#configureTask(row, 'pool-helper', this.#poolArguments(seen, row.policy.pool), {
+      path: this.#parent, target: '/run/reverie-box-pool',
+    }, current, { id: attempt.id, journal, imageId: this.configuration.helperImageId });
+    current();
+    return this.capturePoolObservation(row.policy.pool, current);
   }
   async #worker(row: DockerEmployeeContinuationRecord): Promise<Init> {
     if (!row.destination) refuse('DOCKER_RESOURCE_DESTINATION_REQUIRED');
@@ -2364,6 +2472,9 @@ export class DockerContainedResources implements DockerContainedResourceControll
     }
   }
   async configure(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const admitted = current;
+    current = () => { admitted(); this.configuration.requireColdPoolIdle?.(); };
+    current();
     const pool = await this.observePool(row);
     current();
     if (!pool || !row.pool || !isDeepStrictEqual(pool, row.pool)) refuse('DOCKER_RESOURCE_POOL_CHANGED');

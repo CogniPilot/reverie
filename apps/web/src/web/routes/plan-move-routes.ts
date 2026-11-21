@@ -1,4 +1,5 @@
 import { dockerPlanMoveNotIssuedOf } from '../../plan-move-store.js';
+import { DockerEmployeeContinuationError } from '../../docker-employee-continuation.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { PlanMoveError, type PlanMoves, type PlanMoveExecutor } from '../../plan-move.js';
@@ -58,6 +59,9 @@ export function registerPlanMoveRoutes(
         notIssued,
       });
 
+    if (error instanceof DockerEmployeeContinuationError && error.status === 409) {
+      return reply.code(409).send({ ...createErrorResponse(ApiErrorCode.CONFLICT, error.code), reason: error.code });
+    }
     if (!(error instanceof PlanMoveError)) throw error;
     const code =
       error.status === 404

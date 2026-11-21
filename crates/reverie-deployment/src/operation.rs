@@ -308,6 +308,7 @@ impl Operation {
                 None
             },
             diagnostic: self.snapshot_diagnostic()?,
+            readiness_failure: None,
         })
     }
     fn receipt_valid(&self, file: &str) -> bool {

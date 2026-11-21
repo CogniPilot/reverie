@@ -23,6 +23,8 @@ import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import { httpStatusForErrorCode, type ApiErrorCode } from '../../src/types.js';
 import { createMockRouteContext } from '../mocks/index.js';
 import type { RebootRestoreEntry } from '../../src/reboot-restore.js';
+import { CompanyStore } from '../../src/company-store.js';
+import { EmployeeSchema } from '../../src/company-types.js';
 import type { SessionState } from '../../src/types.js';
 
 async function createHarness(authUser?: { username: string; role: 'admin' | 'user' }): Promise<FastifyInstance> {
@@ -31,7 +33,8 @@ async function createHarness(authUser?: { username: string; role: 'admin' | 'use
 
 async function createHarnessWithCtx(
   ctx: ReturnType<typeof createMockRouteContext>,
-  authUser?: { username: string; role: 'admin' | 'user' }
+  authUser?: { username: string; role: 'admin' | 'user' },
+  isPersonalSession: (id: string) => boolean = () => true
 ): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   await app.register(fastifyCookie);
@@ -40,7 +43,7 @@ async function createHarnessWithCtx(
       (req as unknown as { authUser: typeof authUser }).authUser = authUser;
     });
   }
-  registerRebootRestoreRoutes(app, ctx as never);
+  registerRebootRestoreRoutes(app, ctx as never, isPersonalSession);
 
   app.addHook('preSerialization', (req, reply, payload: unknown, done) => {
     if (!req.url.startsWith('/api')) return done(null, payload);
@@ -88,6 +91,45 @@ afterEach(() => {
 });
 
 describe('held reboot recovery', () => {
+  it('preserves both offers and releases the restore lock when the company lookup fails', async () => {
+    let available = false;
+    const app = await createHarnessWithCtx(createMockRouteContext(), undefined, id => {
+      if (!available && id === 'second') throw new Error('company unavailable');
+      return true;
+    });
+    rebootRestoreRegistry.set([offerEntry('first'), offerEntry('second')]);
+    try {
+      const restore = () => app.inject({ method: 'POST', url: '/api/reboot-restore/restore', payload: {} });
+      expect((await restore()).statusCode).toBe(500);
+      available = true;
+      const retry = await restore();
+      expect(retry.statusCode).toBe(200);
+      expect(retry.json().data.skipped.map((row: {sessionId: string}) => row.sessionId)).toEqual(['first', 'second']);
+    } finally { await app.close(); }
+  });
+  it('keeps an employee out of ordinary restore, including a direct request with the session ID', async () => {
+    const ctx = createMockRouteContext();
+    const directory = mkdtempSync(join(tmpdir(), 'restore-company-'));
+    const store = new CompanyStore(join(directory, 'company.json'));
+    await store.init();
+    const employee = EmployeeSchema.parse({ id: 'expert', sessionId: 'on-leave', name: 'Expert',
+      position: 'Expert', icon: 'E', expertise: ['coding'], createdAt: 1, desiredRunning: false, onVacation: true });
+    await store.update(state => {
+      state.employees.push(employee);
+      state.retired.push({ ...employee, id: 'former', sessionId: 'retired-session', retiredAt: 2 });
+    });
+    const app = await createHarnessWithCtx(ctx, undefined, id => store.allowsPersonalSessionRestore(id));
+    rebootRestoreRegistry.set([offerEntry('on-leave'), offerEntry('retired-session'), offerEntry('personal')]);
+    try {
+      const list = await app.inject({ method: 'GET', url: '/api/reboot-restore' });
+      expect(list.json().data.sessions.map((row: {id: string}) => row.id)).toEqual(['personal']);
+      const restore = await app.inject({ method: 'POST', url: '/api/reboot-restore/restore', payload: {sessionIds: ['on-leave', 'retired-session']} });
+      expect(restore.json().data).toEqual({ restored: [], skipped: [] });
+      await app.inject({ method: 'POST', url: '/api/reboot-restore/dismiss' });
+      expect(rebootRestoreRegistry.list(() => true).map(row => row.sessionId)).toEqual(['on-leave', 'retired-session']);
+      expect(ctx.addSession).not.toHaveBeenCalled();
+    } finally { await app.close(); rmSync(directory, {recursive: true, force: true}); }
+  });
   it.each(['terminalInputHeld', 'providerDispatchHeld'] as const)('preserves a saved %s offer without creating, preparing or starting a successor', async marker => {
     const entry = offerEntry('held-original');
     const directory = mkdtempSync(join(tmpdir(), 'reboot-held-'));

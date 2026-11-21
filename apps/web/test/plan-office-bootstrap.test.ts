@@ -10,6 +10,7 @@ import { registerOwnerRoutes } from '../src/owner-auth/routes.js';
 import { OWNER_COOKIE } from '../src/owner-auth/policy.js';
 import { PlanOfficeBootstrap, seedPlanOffice } from './helpers/plan-office-bootstrap.js';
 import {
+  authenticateRestartedPlanOfficeOwner,
   enrollIsolatedPlanOfficeOwner,
   resumeIsolatedPlanOfficeOwner,
 } from './helpers/docker-continuation-auth-canary.js';
@@ -29,6 +30,38 @@ const contract = {
   ],
 };
 describe('isolated plan-office bootstrap boundaries', () => {
+  it('authenticates the same account after a real owner service restart with one login and no setup', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'plan-office-restart-'));
+    const start = async () => {
+      const app = Fastify();
+      await app.register(cookie);
+      const service = new OwnerAuthService({
+        store: new OwnerAuthStore(join(directory, 'owner-auth.json')),
+        auditFile: join(directory, 'audit.jsonl'),
+        setupEnabled: true,
+      });
+      registerOwnerRoutes(app, service, false);
+      const endpoint = await app.listen({ port: 0, host: '127.0.0.1' });
+      return { app, endpoint };
+    };
+    let control = await start();
+    try {
+      await enrollIsolatedPlanOfficeOwner(control.endpoint, directory);
+      await control.app.close();
+      control = await start();
+      await expect(resumeIsolatedPlanOfficeOwner(control.endpoint, directory)).rejects.toThrow('Current actual owner login');
+      const owner = await authenticateRestartedPlanOfficeOwner(control.endpoint, directory, 'a'.repeat(64));
+      expect(owner.requests().map(({method, path}) => [method, path])).toEqual([
+        ['GET', '/api/owner/status'], ['POST', '/api/owner/login'], ['GET', '/api/owner/status'],
+      ]);
+      const status = await (await owner.request('/api/owner/status')).json();
+      expect(status).toMatchObject({data: {username: 'canary-owner', signedIn: true, mustChange: false, policy: 'enforce'}});
+      await expect(authenticateRestartedPlanOfficeOwner(control.endpoint, directory, 'a'.repeat(64))).rejects.toThrow();
+    } finally {
+      await control.app.close();
+      await rm(directory, {recursive: true, force: true});
+    }
+  });
   it('does not accept seeded native bindings, live phases or an uncontrolled account path', async () => {
     expect(PlanOfficeBootstrap.parse(contract).employees[0]!.permissions.managePlans).toBe(false);
     for (const extra of [{ dockerBinding: {} }, { phase: 'ready' }, { account: '/personal/account' }])

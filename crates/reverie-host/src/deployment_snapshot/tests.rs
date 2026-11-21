@@ -134,6 +134,30 @@ fn complete_owned_copy_restores_bytes_modes_acl_xattrs_hardlinks_and_symlinks() 
 }
 
 #[test]
+fn capture_and_rehearsal_preserve_sparse_file_holes() {
+    use std::os::unix::fs::{FileExt, MetadataExt};
+
+    let fixture = Fixture::new();
+    fixture.separate();
+    let path = fixture.source().join("console/sparse");
+    let length = 8 << 20;
+    let file = File::create_new(path).unwrap();
+    file.write_all_at(b"start", 0).unwrap();
+    file.write_all_at(b"end", length - 3).unwrap();
+    drop(file);
+
+    let mut snapshot = tools()
+        .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    assert!(fs::metadata(snapshot.archive_path()).unwrap().len() < length / 2);
+    snapshot.rehearse(fixture.end()).unwrap();
+    let restored = fs::metadata(fixture.destination().join("rehearsal/console/sparse")).unwrap();
+    assert_eq!(restored.len(), length);
+    assert!(restored.blocks() * 512 < length / 2);
+    snapshot.close().unwrap();
+}
+
+#[test]
 fn source_content_and_archive_replacement_are_refusals() {
     let fixture = Fixture::new();
     fixture.separate();
@@ -283,4 +307,142 @@ fn ambiguous_xattr_dump_cannot_forge_verified_values() {
             .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
             .is_err()
     );
+}
+
+#[test]
+fn separate_rehearsal_root_retains_the_archive_in_the_operation() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let root = fixture.0.join("restore");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let selected = RehearsalRoot::open(
+        &root,
+        &fixture.source(),
+        fixture.destination().parent().unwrap(),
+        fixture.end(),
+    )
+    .unwrap();
+    fs::write(fixture.source().join("console/hello"), b"hello").unwrap();
+    let mut snapshot = tools()
+        .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    snapshot
+        .rehearse_at(Some(&selected), fixture.end())
+        .unwrap();
+    assert!(snapshot.restore_rehearsed());
+    assert!(fixture.destination().join("console.tar").is_file());
+    assert!(!fixture.destination().join("rehearsal").exists());
+    assert_eq!(
+        fs::read(root.join("rehearsal/console/hello")).unwrap(),
+        b"hello"
+    );
+    selected.close().unwrap();
+    snapshot.close().unwrap();
+    assert!(
+        RehearsalRoot::open(
+            &root,
+            &fixture.source(),
+            fixture.destination().parent().unwrap(),
+            fixture.end()
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn separate_rehearsal_requires_private_disjoint_storage() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let root = fixture.0.join("restore");
+    fs::create_dir(&root).unwrap();
+    let open = |path: &Path| {
+        RehearsalRoot::open(
+            path,
+            &fixture.source(),
+            fixture.destination().parent().unwrap(),
+            fixture.end(),
+        )
+    };
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(
+        open(&root).err().unwrap().code(),
+        "SNAPSHOT_DESTINATION_CUSTODY"
+    );
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let alias = fixture.0.join("alias");
+    symlink(&root, &alias).unwrap();
+    assert_eq!(
+        open(&alias).err().unwrap().code(),
+        "SNAPSHOT_REHEARSAL_ROOT"
+    );
+    let nested = fixture.source().join("private");
+    fs::create_dir(&nested).unwrap();
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(open(&nested).err().unwrap().code(), "SNAPSHOT_MOUNT_ALIAS");
+}
+
+#[test]
+fn a_staged_archive_rechecks_the_source_before_extracting() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let path = fixture.source().join("console/example");
+    fs::write(&path, b"first").unwrap();
+    let stage = tools()
+        .stage_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    fs::write(path, b"later").unwrap();
+    assert_eq!(
+        stage.rehearse(None, fixture.end()).err().unwrap().code(),
+        "SNAPSHOT_SOURCE_CHANGED"
+    );
+    assert!(!fixture.destination().join("rehearsal").exists());
+}
+
+#[test]
+fn compressed_backup_verifies_the_rehearsed_raw_archive_on_separate_storage() {
+    use std::io::Read;
+    let fixture = Fixture::new();
+    fixture.separate();
+    let staging = fixture.0.join("staging");
+    fs::create_dir(&staging).unwrap();
+    fs::set_permissions(&staging, fs::Permissions::from_mode(0o700)).unwrap();
+    let selected = RehearsalRoot::open(
+        &staging,
+        &fixture.source(),
+        fixture.destination().parent().unwrap(),
+        fixture.end(),
+    )
+    .unwrap();
+    fs::write(fixture.source().join("console/example"), vec![b'A'; 65536]).unwrap();
+    let mut snapshot = selected
+        .capture(&tools(), &fixture.source(), fixture.end())
+        .unwrap();
+    assert!(
+        snapshot
+            .compressed_copy(&fixture.destination(), fixture.end())
+            .is_err()
+    );
+    snapshot.rehearse(fixture.end()).unwrap();
+    let (path, compressed_sha) = snapshot
+        .compressed_copy(&fixture.destination(), fixture.end())
+        .unwrap();
+    let bytes = fs::read(&path).unwrap();
+    let mut decoded = Vec::new();
+    flate2::read::MultiGzDecoder::new(&bytes[..])
+        .read_to_end(&mut decoded)
+        .unwrap();
+    assert_eq!(decoded, fs::read(snapshot.archive_path()).unwrap());
+    assert!(bytes.len() < decoded.len());
+    assert_eq!(
+        compressed_sha,
+        manifest::file_digest(&File::open(path).unwrap(), fixture.end()).unwrap()
+    );
+    assert!(
+        snapshot
+            .compressed_copy(&fixture.destination(), fixture.end())
+            .is_err()
+    );
+    snapshot.close().unwrap();
+    selected.close().unwrap();
 }

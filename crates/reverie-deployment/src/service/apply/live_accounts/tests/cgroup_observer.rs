@@ -1,7 +1,7 @@
 //! Real cgroup2 RO binds and an owned unobservable peer. No host cgroup writes,
 //! Docker execution, resource configuration or running employee effects.
 use super::*;
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 
 fn setup(f: &Fixture, destination: &str, pid: u32) {
     f.port

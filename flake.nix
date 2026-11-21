@@ -40,7 +40,6 @@
           workerClientCapsule = import ./nix/worker-client-capsule.nix {
             inherit pkgs;
             src = source;
-            console = packages.console;
           };
           docker-memory-high-helper = import ./nix/docker-resource-helper.nix { inherit pkgs; src = source; };
           docker-memory-high-helper-image = import ./nix/docker-memory-high-helper-image.nix { inherit pkgs; src = source; };
@@ -135,11 +134,10 @@
     in {
       lib.mkBoxedWebsiteImage = { system, runtimeConfiguration,
         baseImage ? self.packages.${system}.dockerImage, baseConfig ? baseImage.reverieConfig,
-        privateAccessRuntime ? null }:
+        privateAccessRuntime ? null, clientCapsule ? self.packages.${system}.workerClientCapsule }:
         import ./nix/boxed-website-image.nix {
           pkgs = pkgsFor system;
-          inherit baseImage baseConfig runtimeConfiguration privateAccessRuntime;
-          clientCapsule = self.packages.${system}.workerClientCapsule;
+          inherit baseImage baseConfig runtimeConfiguration privateAccessRuntime clientCapsule;
           gpuProjectionCompiler = self.packages.${system}.containerRuntime;
         };
       lib.mkContainerGpuImage = { system, capability ? "", baseImage ? self.packages.${system}.dockerImage,

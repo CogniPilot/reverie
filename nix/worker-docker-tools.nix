@@ -1,6 +1,7 @@
 # Optional Nix profile, never part of the lean worker runtime/image closure.
 { pkgs, src }:
 let
+  sourceFile = import ./source-file.nix src;
   # Only replace the four already-selected reproducibility patches whose
   # upstream HTTP endpoints now return an Anubis HTML challenge. The same
   # full Git commits are vendored; all other patches remain unchanged.
@@ -18,7 +19,7 @@ let
     {
       patches = map (patch:
         if builtins.hasAttr patch.name replacements
-        then src + "/nix/patches/nftables/${replacements.${patch.name}}"
+        then sourceFile "nix/patches/nftables/${replacements.${patch.name}}"
         else patch
       ) previous.patches;
     });
@@ -36,7 +37,7 @@ pkgs.runCommand "reverie-worker-docker" {
     ln -s "$path" "$out/libexec/docker/$(basename "$path")"
   done
   rm "$out/libexec/docker/runc"
-  substitute ${src}/scripts/reverie-rootless-runc "$out/libexec/docker/runc" \
+  substitute ${sourceFile "scripts/reverie-rootless-runc"} "$out/libexec/docker/runc" \
     --replace-fail '@RUNC@' "$(readlink -f "$moby/libexec/docker/runc")"
   chmod 0555 "$out/libexec/docker/runc"
   patchShebangs "$out/libexec/docker/runc"
