@@ -19,6 +19,43 @@ export interface DockerCredentialHome {
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
 }
+/** Fixed in-container program: no path, name or content comes from a caller
+ * except the validated operation id used in the superseded file name. It only
+ * renames an owner-private regular file inside the private identity directory. */
+export const DOCKER_UNBOUND_IDENTITY_ARCHIVE_PROGRAM = String.raw`
+const fs = require('node:fs');
+const argv = process.argv.slice(1);
+const operation = argv[0];
+function refuse() { throw Error('Unbound identity archive refused'); }
+if (argv.length !== 1 || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(operation || '')) refuse();
+const uid = process.getuid();
+const directory = '/home/agent/.reverie';
+function stat(path) {
+  try { return fs.lstatSync(path); } catch (error) {
+    if (error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+const parent = stat(directory);
+if (!parent) { process.stdout.write('ABSENT\n'); process.exit(0); }
+if (!parent.isDirectory() || parent.uid !== uid || (parent.mode & 0o777) !== 0o700) refuse();
+let archived = 0;
+for (const name of ['docker-worker-identity', 'docker-worker-identity.pending']) {
+  const source = directory + '/' + name, target = source + '.superseded-' + operation;
+  const before = stat(source), kept = stat(target);
+  if (kept && (!kept.isFile() || kept.uid !== uid || (kept.mode & 0o777) !== 0o600)) refuse();
+  if (!before) { if (kept) archived += 1; continue; }
+  if (!before.isFile() || before.uid !== uid || (before.mode & 0o777) !== 0o600 || before.size > 4096 ||
+      before.nlink !== (kept && kept.ino === before.ino && kept.dev === before.dev ? 2 : 1) ||
+      (kept && (kept.ino !== before.ino || kept.dev !== before.dev))) refuse();
+  if (!kept) fs.linkSync(source, target);
+  fs.unlinkSync(source);
+  archived += 1;
+}
+const handle = fs.openSync(directory, 'r');
+try { fs.fsyncSync(handle); } finally { fs.closeSync(handle); }
+process.stdout.write(archived ? 'ARCHIVED\n' : 'ABSENT\n');
+`;
 export class DockerEmployeeCredentialInstaller {
   constructor(
     private readonly command: DockerEngineCommand,
@@ -74,6 +111,24 @@ export class DockerEmployeeCredentialInstaller {
       refuse('DOCKER_IDENTITY_ORIGINAL_INSTALL_HELD');
     return false;
   }
+  /** Before this operation's installer is first issued, any identity file in the
+   * private HOME was written for an earlier binding. The store keeps one row per
+   * employee and that row has no installer yet, so the file is unbound and its
+   * token is refused by the server. It is kept under a superseded name; the
+   * fixed installer still never replaces or reads another operation's bytes. */
+  async #archiveUnbound(row: DockerEmployeeContinuationRecord): Promise<void> {
+    if (row.version === 3 || !row.destination) return;
+    const result = await this.command.run([
+      'exec',
+      row.destination.containerId,
+      '/opt/reverie-worker-client/bin/node',
+      '--input-type=commonjs',
+      '-e',
+      DOCKER_UNBOUND_IDENTITY_ARCHIVE_PROGRAM,
+      row.request.operationId,
+    ]);
+    if (result !== 'ABSENT\n' && result !== 'ARCHIVED\n') refuse('DOCKER_IDENTITY_UNBOUND_ARCHIVE_UNCONFIRMED');
+  }
   async provision(row: DockerEmployeeContinuationRecord, token: string, current: () => void): Promise<void> {
     if (token.length > 2048 || token.length === 0 || /[\r\n\0]/.test(token)) refuse('DOCKER_IDENTITY_TOKEN_INVALID');
     const home = await this.home(row);
@@ -89,6 +144,10 @@ export class DockerEmployeeCredentialInstaller {
       };
     let task = this.#task(row, config);
     const fresh = task === undefined;
+    if (fresh) {
+      await this.#archiveUnbound(row);
+      current();
+    }
     if (!task) {
       await this.journal.publish(row, undefined, { ...base, phase: 'create-issued' }, current);
       task = this.#task(row, config)!;
