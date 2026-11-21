@@ -49,6 +49,10 @@ import {
   requireDockerAbsentSessionRetirement,
 } from './docker-absent-reprovision-proof.js';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
+/** A local denial was written inside an office container. It may be cleared
+ * only together with a saved boxed view of a container proven absent: that
+ * office incarnation, and any process it launched, no longer exists. */
+const DOCKER_ABSENT_LAUNCH_TRANSPORTS: readonly string[] = ['docker', 'local-mux', 'local-pty'];
 import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
 
 /** Debounce delay for batching state writes (ms) */
@@ -788,7 +792,8 @@ export class StateStore {
     if (this.#providerLaunchHistory !== 'observed') return 'DOCKER_REPROVISION_LAUNCH_HISTORY_UNCONFIRMED';
     if (
       row &&
-      (row.transport !== 'docker' ||
+      (!DOCKER_ABSENT_LAUNCH_TRANSPORTS.includes(row.transport) ||
+        (row.transport !== 'docker' && !this.state.sessions[sessionId]?.docker) ||
         row.owner !== (owner ?? null) ||
         this.#providerLaunchOwners.get(sessionId)?.deref())
     )
@@ -815,7 +820,8 @@ export class StateStore {
         if (this.#providerLaunchHistory !== 'observed') refuse('DOCKER_REPROVISION_LAUNCH_HISTORY_UNCONFIRMED');
         if (
           row &&
-          (row.transport !== 'docker' ||
+          (!DOCKER_ABSENT_LAUNCH_TRANSPORTS.includes(row.transport) ||
+            (row.transport !== 'docker' && !stale) ||
             row.owner !== (scope.owner ?? null) ||
             this.#providerLaunchOwners.get(scope.sessionId)?.deref())
         )
