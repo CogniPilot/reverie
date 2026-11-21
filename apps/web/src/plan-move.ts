@@ -532,13 +532,24 @@ export class PlanMoves {
     owner: string | undefined
   ): Promise<readonly { id: string; docker: boolean; busy: boolean }[]> {
     await this.init();
-    return [...this.records.values()]
-      .filter((row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase))
-      .map((row) => ({
-        id: row.id,
-        docker: !!row.dockerReplacement && row.owner === owner && !row.resourceIntent,
-        busy: this.aborts.has(row.id) || this.intents.has(row.id),
-      }));
+    return (
+      [...this.records.values()]
+        .filter((row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase))
+        // A held move of the retired native runtime has no Docker effect to close
+        // and never gated a boxed continuation. It keeps its own recovery record.
+        .filter(
+          (row) =>
+            row.dockerReplacement ||
+            row.phase !== 'recovery-required' ||
+            this.aborts.has(row.id) ||
+            this.intents.has(row.id)
+        )
+        .map((row) => ({
+          id: row.id,
+          docker: !!row.dockerReplacement && row.owner === owner && !row.resourceIntent,
+          busy: this.aborts.has(row.id) || this.intents.has(row.id),
+        }))
+    );
   }
   /** Close every open native move of one employee as abandoned. The caller holds
    * fresh positive Engine proof of absence and retains it through `current`.
