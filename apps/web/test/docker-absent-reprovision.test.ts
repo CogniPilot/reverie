@@ -600,7 +600,7 @@ describe('absence proof', () => {
       absent: [destinationCid, originalCid],
       present: [],
       home: f.row.original.home,
-      nixSource: `/synthetic-state/employees/${employeeId}/nix`,
+      nixSource: `/synthetic-state/nix`,
       scratchSource: `/synthetic-scratch/laptops/employees/${employeeId}`,
       sourceImageId: workerImage,
       network: { name: networkName, id: 'b'.repeat(64) },
@@ -629,13 +629,22 @@ describe('absence proof', () => {
     add(f);
     const preview = await f.service.preview(employeeId, template, f.authority);
     expect(preview.present).toHaveLength(1);
-    expect(preview).toMatchObject({ allowedActions: [], code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' });
-    await expect(f.service.reprovision(employeeId, input, f.authority)).rejects.toMatchObject({
-      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
-    });
-    await expect(
-      f.service.reprovision(employeeId, { ...input, expectedScopeDigest: preview.scopeDigest }, f.authority)
-    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' });
+    if (_name.startsWith('the recorded')) {
+      // A recorded container is offered for discard; the stale confirmation still changes nothing.
+      expect(preview).toMatchObject({ allowedActions: ['reprovision'], discard: preview.present });
+      await expect(f.service.reprovision(employeeId, input, f.authority)).rejects.toMatchObject({
+        code: 'DOCKER_REPROVISION_SCOPE_CHANGED',
+      });
+      expect(f.engine.discarded).toEqual([]);
+    } else {
+      expect(preview).toMatchObject({ allowedActions: [], code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' });
+      await expect(f.service.reprovision(employeeId, input, f.authority)).rejects.toMatchObject({
+        code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+      });
+      await expect(
+        f.service.reprovision(employeeId, { ...input, expectedScopeDigest: preview.scopeDigest }, f.authority)
+      ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT' });
+    }
     expect(f.store.record(employeeId)).toEqual(f.row);
     expect(f.entry()).toBeUndefined();
   });
@@ -940,7 +949,7 @@ describe('retirement and replacement source', () => {
           Tmpfs: { '/run': 'rw,nosuid,nodev,size=16777216' },
           Mounts: [
             bind(homeSource, '/home/agent'),
-            bind(`/synthetic-state/employees/${employeeId}/nix`, '/nix'),
+            bind(`/synthetic-state/nix`, '/nix'),
             bind(`/synthetic-scratch/laptops/employees/${employeeId}/tmp`, '/tmp'),
             bind(`/synthetic-scratch/laptops/employees/${employeeId}`, '/scratch'),
             bind('/synthetic-drives/workspace', '/reverie_workspace'),
@@ -1541,14 +1550,7 @@ describe('a continuation that never requested its destination', () => {
           present: [],
           allowedActions: ['reprovision'],
         });
-      else if (phase === 'ready')
-        await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
-          mode: 'retire',
-          allowedActions: [],
-          discard: [],
-          code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
-        });
-      // Never ready: the preview offers to discard the recorded containers, and changes nothing.
+      // The preview offers to discard the recorded containers, and changes nothing.
       else
         await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
           mode: 'retire',
@@ -1789,13 +1791,15 @@ describe('a laptop whose provider never started', () => {
     expect(tenant.engine.containers.has(destinationCid)).toBe(true);
     expect(tenant.snapshot().dockerEmployeeContinuations).toHaveLength(1);
 
+    // A ready laptop with a live provider is refused by the same idle proof.
     const ready = await fixture();
     present(ready);
-    await expect(ready.service.preview(employeeId, template, ready.authority)).resolves.toMatchObject({
-      allowedActions: [],
-      code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
-      discard: [],
-    });
+    ready.setLive({ inert: true });
+    ready.engine.tenants.add(destinationCid);
+    await expect(
+      ready.service.reprovision(employeeId, await ready.request(), ready.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE' });
+    expect(ready.snapshot().dockerEmployeeContinuations).toHaveLength(1);
 
     const foreign = await fixture({ row: issued() });
     present(foreign);

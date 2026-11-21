@@ -44,7 +44,7 @@ export interface ReprovisionStorage {
 function within(a: string, b: string): boolean {
   return a === b || a.startsWith(b + '/');
 }
-/** `<stateRoot>/employees/<employeeId>/{home,nix}` and the ephemeral layout
+/** `<stateRoot>/employees/<employeeId>/home`, the shared `<stateRoot>/nix` and the ephemeral layout
  * `<scratchRoot>/employees/<employeeId>{,/tmp}` with a `laptops` scratch root. */
 export function reprovisionStorage(
   row: DockerEmployeeContinuationRecord,
@@ -61,8 +61,20 @@ export function reprovisionStorage(
   const employeeRoot = posix.dirname(home.source);
   if (posix.basename(template.scratchRoot) !== 'laptops') refuse('DOCKER_REPROVISION_SCRATCH_LAYOUT_UNSUPPORTED');
   const scratch = posix.join(template.scratchRoot, 'employees', row.employeeId);
-  const storage = { home: home.source, nix: posix.join(employeeRoot, 'nix'), scratch, tmp: scratch + '/tmp' };
+  // One Nix store is shared by every laptop: `<stateRoot>/nix`, beside the
+  // `employees` directory. Nothing private lives in it, laptops do not collect
+  // garbage in it, and it counts against no employee's disk budget.
+  const employeesRoot = posix.dirname(employeeRoot);
+  if (posix.basename(employeesRoot) !== 'employees') refuse('DOCKER_REPROVISION_PRIVATE_HOME_UNSUPPORTED');
+  const nix = posix.join(posix.dirname(employeesRoot), 'nix');
+  const storage = { home: home.source, nix, scratch, tmp: scratch + '/tmp' };
   const ephemeralRoot = posix.dirname(template.scratchRoot);
+  if (
+    within(nix, ephemeralRoot) ||
+    within(ephemeralRoot, nix) ||
+    template.mounts.some((mount) => within(mount.source, nix) || within(nix, mount.source))
+  )
+    refuse('DOCKER_REPROVISION_TEMPLATE_STORAGE_OVERLAP');
   for (const mount of template.mounts)
     if (
       within(mount.source, employeeRoot) ||

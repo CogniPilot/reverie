@@ -319,14 +319,20 @@ Calls, in order, for employee `EID`:
    `held` names the refusing step; send the same body again to resume.
    Before the source is created, the worker image's own networkless
    `reverie-nix-store-prepare` helper additively imports that image's closure
-   into the employee's private Nix store, as the legacy broker's image
-   preparation did; without it the image's tools are dangling links behind the
-   store bind. The call can therefore take a few minutes.
-   A record that requested its destination and never reached `ready` has no
-   retry for a failed one-shot step. For it the preview lists the recorded
-   containers under `discard` and still allows `reprovision`: each is removed,
-   never by force, only after the Engine shows it hosts nothing beyond its own
-   init. Home, Nix and scratch are binds and are kept.
+   into the Nix store, as the legacy broker's image preparation did; without
+   it the image's tools are dangling links behind the store bind. The first
+   call can therefore take a few minutes.
+   Every reprovisioned laptop mounts one shared store, `<stateRoot>/nix`
+   beside the `employees` directory, instead of a private store beside its
+   home. The owner creates that directory once, owned by the laptop user.
+   Laptops must not collect garbage in it: each laptop's profile roots live in
+   its own home and are invisible to the others. The shared store counts
+   against no employee's disk budget.
+   A record that requested its destination lists its recorded containers under
+   `discard` and still allows `reprovision`: each is removed, never by
+   force, only when it is stopped or the Engine shows it hosts nothing beyond
+   its own init. A laptop with a live provider is refused; stop it first. Home
+   and scratch are binds and are kept.
 3. `GET /api/company/employees/EID/docker-policy`. It now reports
    `state: "stopped"`, `operationId: null`, the new `containerId`, `imageId`,
    `destinationImageId`, `policyDigest` and `allowedActions: ["continue"]`.

@@ -581,14 +581,12 @@ export class DockerAbsentReprovision {
     const present = await this.#present(facts.ids, employeeId);
     current();
     // A continuation that never reached ready has no retry for a failed
-    // one-shot step (a resource helper, its one provider launch). Its recorded
-    // containers may be discarded once each is proven to host nothing beyond
-    // its own init.
+    // one-shot step (a resource helper, its one provider launch), and the
+    // owner may move a stopped ready laptop to new storage. The recorded
+    // containers may be discarded once each is stopped or proven to host
+    // nothing beyond its own init; a laptop with a live tenant is refused.
     const discardable =
-      present.length > 0 &&
-      facts.row.phase !== 'ready' &&
-      present.every((id) => facts.ids.includes(id)) &&
-      !!this.command.removeIdleLaptop;
+      present.length > 0 && present.every((id) => facts.ids.includes(id)) && !!this.command.removeIdleLaptop;
     const image = await this.#image();
     current();
     const { network, names } = await this.#network(employeeId, template.network, discardable ? present : []);
