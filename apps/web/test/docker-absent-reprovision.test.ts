@@ -102,6 +102,7 @@ class FakeEngine {
       const rows = [...(kind === 'network' ? this.networks : this.containers).values()].filter((row) =>
         filters.every((filter) => {
           if (filter.startsWith('id=')) return (row.Id as string).startsWith(filter.slice(3));
+          if (filter.startsWith('name=')) return String(row.Name).includes(filter.slice(5));
           const [key, ...value] = filter.slice('label='.length).split('=');
           const labels = (kind === 'network' ? row.Labels : (row.Config as Json).Labels) as Record<string, string>;
           return labels?.[key!] === value.join('=');

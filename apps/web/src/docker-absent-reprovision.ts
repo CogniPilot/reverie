@@ -79,6 +79,14 @@ export interface DockerAbsentReprovisionResult {
 }
 type Network = { name: string; id: string };
 /** Same closed name rule the deployment verifier applies to a worker bridge. */
+/** Three bridge generations exist. Each binds the employee by label, or by the
+ * full-identity name together with the per-worker purpose label. */
+function officeBridgeLabels(labels: Record<string, string>, name: string, employeeId: string): boolean {
+  if (labels['reverie.boxed.employee'] !== undefined) return labels['reverie.boxed.employee'] === employeeId;
+  if (labels['reverie.box.purpose'] !== 'per-worker-office-api') return false;
+  if (labels['reverie.box.employee'] !== undefined) return labels['reverie.box.employee'] === employeeId;
+  return name === 'reverie-boxed-api-' + employeeId.replaceAll('-', '');
+}
 function workerBridgeName(name: string, employeeId: string): boolean {
   if (!name.startsWith('reverie-boxed-api-')) return false;
   const suffix = name.slice('reverie-boxed-api-'.length),
@@ -184,9 +192,9 @@ export class DockerAbsentReprovision {
   /** The surviving per-worker office API bridge gives the laptop its only
    * network, as on an ordinary boxed destination. This workflow creates none. */
   async #network(employeeId: string, selected: string | undefined): Promise<{ network: Network; names: string[] }> {
-    const rows = (
-      await this.#listed('network', ['label=reverie.boxed.employee=' + employeeId], '{{.ID}} {{.Name}}')
-    ).map((line) => {
+    const rows = // Earlier bridge generations carry different labels; the name rule and
+    // the inspected labels below bind each candidate to this employee.
+    (await this.#listed('network', ['name=reverie-boxed-api-'], '{{.ID}} {{.Name}}')).map((line) => {
       const [id, name, ...rest] = line.split(' ');
       if (!id || !name || rest.length || !cid.test(id)) refuse('DOCKER_REPROVISION_OFFICE_NETWORK_UNCONFIRMED');
       return { id: id!, name: name! };
@@ -221,7 +229,7 @@ export class DockerAbsentReprovision {
     // Exactly the office endpoint remains; another member is another laptop.
     if (
       !parsed.success ||
-      parsed.data[0]!.Labels['reverie.boxed.employee'] !== employeeId ||
+      !officeBridgeLabels(parsed.data[0]!.Labels, network.name, employeeId) ||
       Object.keys(parsed.data[0]!.Containers).length !== 1
     )
       refuse('DOCKER_REPROVISION_OFFICE_NETWORK_CHANGED');
