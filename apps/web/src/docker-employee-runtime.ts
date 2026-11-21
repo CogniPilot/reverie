@@ -6,6 +6,7 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
+import { DockerAbsentReprovision, type DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
@@ -81,6 +82,7 @@ interface Attached {
   pool: DockerPoolReconciliation;
   resourceRevisions: DockerResourceRevisionService;
   recoveryHelper?: DockerWorkerReattachHelper;
+  absent: DockerAbsentReprovision;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -209,6 +211,7 @@ export class DockerEmployeeRuntime {
   #attached?: Attached;
   readonly #planActors=new Set<DockerPlanMoveActor>();
   #planMoves?:PlanMoveStore;
+  #absentPlanMoves?: DockerAbsentReprovisionPlanMoves;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -399,7 +402,42 @@ export class DockerEmployeeRuntime {
           key: this.#key.key.toString('hex'),
         }))
       : undefined;
-    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions, recoveryHelper };
+    const absent = new DockerAbsentReprovision(
+      company,
+      store,
+      command,
+      {
+        deployment: configuration.deployment,
+        boxId,
+        apiUrl: configuration.apiUrl,
+        workerImageId: configuration.workerImageId,
+        sourceImageIds: configuration.sourceImageIds,
+      },
+      {
+        saved: (id) => ctx.store.getSession(id) ?? undefined,
+        live: (id) => {
+          const session = ctx.sessions.get(id);
+          return session
+            ? { inert: session.pid === null && session.runningTaskCount === 0 && !session.paneLifecycleInFlight }
+            : undefined;
+        },
+        blocked: (id, owner) => ctx.store.dockerAbsentReprovisionBlocker(id, owner),
+        discard: (id) => ctx.discardPartiallyBuiltSession(id),
+        clear: (proof) => ctx.store.commitDockerAbsentReprovision(proof),
+      },
+      () => this.#absentPlanMoves,
+      (employeeId) => service.flightActive(employeeId),
+      () => {
+        if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+      }
+    );
+    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions, recoveryHelper, absent };
+  }
+  /** Server composition only: the in-memory owner of the private move journal.
+   * Until it is bound, an absent-laptop reprovision is refused. */
+  bindPlanMoves(moves: DockerAbsentReprovisionPlanMoves): void {
+    if (this.#absentPlanMoves && this.#absentPlanMoves !== moves) throw Error('Original plan move owner required');
+    this.#absentPlanMoves = moves;
   }
   registerRoutes(
     app: FastifyInstance,
@@ -427,7 +465,8 @@ export class DockerEmployeeRuntime {
       }),
       readLegacyDockerPolicyProposal,
       a.pool,
-      a.recoveryHelper
+      a.recoveryHelper,
+      a.absent
     );
   }
   /** Server composition only. Inert until the API supplies its genuine captured

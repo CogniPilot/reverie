@@ -1,5 +1,6 @@
 import {DockerEmployeeBinding,DockerEmployeeResourcePolicy,DockerEmployeeContinuationRecord} from './docker-employee-continuation-data.js';
 import {DockerPoolObservations} from './docker-pool-observation-data.js';
+import { DockerAbsentContinuationRetirements } from './docker-absent-reprovision-data.js';
 import { DockerSharedPoolLineages } from './docker-shared-pool-lineage.js';
 import { RuntimeRecipeSchema } from './expert-runtime-recipe.js';
 import { z } from 'zod';
@@ -387,6 +388,10 @@ export const CompanyStateSchema = z.object({
   dockerEmployeeContinuations: z.array(DockerEmployeeContinuationRecord).max(64).refine(rows =>
     new Set(rows.map(row=>row.employeeId)).size===rows.length &&
     new Set(rows.map(row=>row.request.operationId)).size===rows.length).optional(),
+  /** Append-only history of continuation rows retired because the Engine positively
+   * reported every recorded container absent. History and a resumable source
+   * cursor only, never a native grant; CompanyService.view never projects it. */
+  retiredDockerEmployeeContinuations: DockerAbsentContinuationRetirements.optional(),
   /** Private deny-only native recovery correlation; CompanyService.view never projects it. */
   employeeRecoveryOperations: z.array(EmployeeRecoveryOperation).max(256).refine(
     rows => new Set(rows.map(row => row.approval.operationId)).size === rows.length,
@@ -423,8 +428,9 @@ export const CompanyStateSchema = z.object({
   /** Employees the owner retired: off the org chart and out of every room, kept (same id and session) so history still names them. */
   retired: z.array(EmployeeSchema.extend({ retiredAt: z.number() })).default([]),
 }).refine(state=>state.version===2 ||
-  (!(state.dockerSharedPoolLineages?.length) && !(state.dockerPoolObservations?.length)),
-  'Company format 2 is required for retained global pool metadata');
+  (!(state.dockerSharedPoolLineages?.length) && !(state.dockerPoolObservations?.length) &&
+    !(state.retiredDockerEmployeeContinuations?.length)),
+  'Company format 2 is required for retained pool metadata and retired continuation history');
 export type CompanyState = z.infer<typeof CompanyStateSchema>;
 
 /** Eligibility only: the organization scheduler must explicitly schedule a Gantt task. */

@@ -89,6 +89,8 @@ export interface PlanMoveRecord {
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
+  /** Terminal closure because the Engine reported every recorded container absent. */
+  dockerAbandonment?: { version: 1; reason: 'recorded-containers-absent'; operationId: string; at: number };
   id: string;
   owner?: string;
   employeeId: string;
@@ -523,6 +525,54 @@ export class PlanMoves {
     const proof = await executor.dockerReplacement!.admitDisjointGeneration!(employeeId, owner, rows);
     requireDockerPlanDisjointGeneration(proof, this.coldRows(employeeId, owner, ownId), employeeId, owner);
     return proof;
+  }
+  /** Open moves an absent-laptop reprovision would have to close. DATA only. */
+  async openMoves(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { id: string; docker: boolean; busy: boolean }[]> {
+    await this.init();
+    return [...this.records.values()]
+      .filter((row) => row.employeeId === employeeId && !['completed', 'failed'].includes(row.phase))
+      .map((row) => ({
+        id: row.id,
+        docker: !!row.dockerReplacement && row.owner === owner && !row.resourceIntent,
+        busy: this.aborts.has(row.id) || this.intents.has(row.id),
+      }));
+  }
+  /** Close every open native move of one employee as abandoned. The caller holds
+   * fresh positive Engine proof of absence and retains it through `current`.
+   * The private journal is kept verbatim; no native effect is issued here. */
+  async abandonAbsentDockerMoves(
+    employeeId: string,
+    owner: string | undefined,
+    abandonment: NonNullable<PlanMoveRecord['dockerAbandonment']>,
+    current: () => void
+  ): Promise<readonly string[]> {
+    current();
+    const store = this.port.dockerJournal;
+    const open = await this.openMoves(employeeId, owner);
+    if (!open.length) return [];
+    if (!store?.abandonAbsent || open.some((row) => !row.docker || row.busy))
+      throw new PlanMoveError('An open move for this employee requires its own recovery', 409);
+    const closed: string[] = [];
+    for (const { id } of open) {
+      const record = this.records.get(id)!;
+      current();
+      const disk = await store.record(id);
+      current();
+      if (this.records.get(id) !== record || this.aborts.has(id) || this.intents.has(id) || !disk.dockerReplacement)
+        throw new PlanMoveError('The original Docker move flight changed', 409);
+      const saved = await store.abandonAbsent(id, disk.dockerReplacement, abandonment, current);
+      record.phase = saved.phase;
+      record.error = saved.error;
+      record.dockerReplacement = saved.dockerReplacement;
+      record.dockerSettlementBudget = saved.dockerSettlementBudget;
+      record.dockerAbandonment = saved.dockerAbandonment;
+      closed.push(id);
+    }
+    this.releaseLock(employeeId);
+    return closed;
   }
   private releaseLock(employeeId: string): void {
     if (

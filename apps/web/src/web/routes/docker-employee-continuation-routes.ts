@@ -1,5 +1,6 @@
 import type { DockerWorkerReattachHelper } from '../../docker-worker-reattach-helper.js';
 import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
+import type { DockerAbsentReprovision } from '../../docker-absent-reprovision.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -52,7 +53,8 @@ export function registerDockerEmployeeContinuationRoutes(
   auth: DockerContinuationRouteAuthentication,
   proposal?: (employeeId: string) => DockerPolicyProposal | undefined,
   pool?: DockerPoolReconciliation,
-  recoveryHelper?: DockerWorkerReattachHelper
+  recoveryHelper?: DockerWorkerReattachHelper,
+  absent?: DockerAbsentReprovision
 ): void {
   const human = (req: FastifyRequest) =>
     req.headers['x-reverie-parent-session'] === undefined &&
@@ -115,6 +117,29 @@ export function registerDockerEmployeeContinuationRoutes(
         authority.require();
         recoveryHelper.approveStorage(row, req.body);
         return { state: 'approved', operationId: row.request.operationId };
+      })
+    );
+  }
+  if (absent) {
+    // Owner only. A worker identity, parent session or service token never
+    // retires a record or defines a laptop, whatever its recovery permission.
+    const owner = (req: FastifyRequest) => {
+      if (!human(req) || !sameOrigin(req))
+        throw new CompanyError('Verified same-origin owner required to reprovision an absent laptop', 403);
+      const id = uuid.parse((req.params as { id: string }).id);
+      return { id, authority: capture(req, id) };
+    };
+    app.post('/api/company/employees/:id/docker-absent/preview', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const body = z.object({ template: z.unknown() }).strict().parse(req.body);
+        return absent.preview(id, body.template, authority);
+      })
+    );
+    app.post('/api/company/employees/:id/docker-absent/reprovision', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        return absent.reprovision(id, req.body, authority);
       })
     );
   }

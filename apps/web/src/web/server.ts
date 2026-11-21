@@ -2518,8 +2518,10 @@ export class WebServer extends EventEmitter {
         claim: (...args) => planMoveStore.dockerClaim(...args),
         phase: (...args) => planMoveStore.dockerPhase(...args),
         closeRestored: (...args) => planMoveStore.closeRestoredDockerMove(...args),
+        abandonAbsent: (...args) => planMoveStore.abandonAbsentDockerMove(...args),
       },
     });
+    dockerRuntime?.bindPlanMoves(planMoves);
     this.workerViewerReconnect = new WorkerViewerReconnect({
       company: this.companyService,
       session: id => this.sessions.get(id),

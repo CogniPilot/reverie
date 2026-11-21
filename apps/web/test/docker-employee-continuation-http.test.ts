@@ -33,6 +33,7 @@ import {
 } from '../src/docker-employee-continuation.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { registerDockerEmployeeContinuationRoutes } from '../src/web/routes/docker-employee-continuation-routes.js';
+import type { DockerAbsentReprovision } from '../src/docker-absent-reprovision.js';
 import {
   DockerWorkerIdentityAuthentication,
   dockerWorkerIdentityOf,
@@ -236,6 +237,19 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     async run() { throw Error('No native operation during approval'); },
     async create() { throw Error('No container creation during approval'); },
   }, destinationImage, () => { throw Error('No token during approval'); });
+  const absentCalls: Array<{ kind: 'preview' | 'reprovision'; employeeId: string; body: unknown; owner: unknown }> = [];
+  const absent = {
+    async preview(employeeId: string, body: unknown, authority: { owner: unknown; require(): void }) {
+      authority.require();
+      absentCalls.push({ kind: 'preview', employeeId, body, owner: authority.owner });
+      return { scopeDigest: '1'.repeat(64) };
+    },
+    async reprovision(employeeId: string, body: unknown, authority: { owner: unknown; require(): void }) {
+      authority.require();
+      absentCalls.push({ kind: 'reprovision', employeeId, body, owner: authority.owner });
+      return { operationId: (body as { operationId: string }).operationId, state: 'ready' };
+    },
+  };
   registerDockerEmployeeContinuationRoutes(
     app,
     company,
@@ -250,7 +264,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       () => {
         if (!runtimeCurrent) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }
-    ), undefined, undefined, reattach
+    ), undefined, undefined, reattach, absent as unknown as DockerAbsentReprovision
   );
   let resourceReads = 0,
     beforeResourceRead: (() => Promise<void>) | undefined;
@@ -332,6 +346,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
   };
   return {
     app,
+    absentCalls,
     companyStore,
     revisions,
     resourceRevisionService,
@@ -2184,5 +2199,67 @@ describe('original cursor phase/status actions remain independent of current tar
     expect(() =>
       f.physical.controller.existingPolicy(moved, { ...moved.policy, memoryHighBytes: 48 * 1024 ** 3 })
     ).toThrow();
+  });
+});
+
+describe('absent laptop reprovision routes are owner-only', () => {
+  type F = Awaited<ReturnType<typeof fixture>>;
+  const body = {
+    operationId: '99999999-9999-4999-8999-999999999999',
+    sessionId: sid,
+    sessionGeneration: 9,
+    expectedScopeDigest: '1'.repeat(64),
+    template: { user: '1000:1000', scratchRoot: '/synthetic/laptops', mounts: [] },
+  };
+  const calls = async (f: F, headers: Record<string, string>) => [
+    await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-absent/preview',
+      headers,
+      payload: { template: body.template },
+    }),
+    await f.app.inject({ method: 'POST', url: f.url + '/docker-absent/reprovision', headers, payload: body }),
+  ];
+  it('admits the signed-in same-origin owner and passes the request through unchanged', async () => {
+    const f = await fixture({ storedPolicy: true });
+    const [preview, confirm] = await calls(f, f.ownerHeaders);
+    expect(preview!.statusCode).toBe(200);
+    expect(preview!.json()).toEqual({ success: true, data: { scopeDigest: '1'.repeat(64) } });
+    expect(confirm!.json()).toEqual({ success: true, data: { operationId: body.operationId, state: 'ready' } });
+    expect(f.absentCalls).toEqual([
+      { kind: 'preview', employeeId: target, body: body.template, owner: undefined },
+      { kind: 'reprovision', employeeId: target, body, owner: undefined },
+    ]);
+    const invalid = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-absent/preview',
+      headers: f.ownerHeaders,
+      payload: { template: body.template, extra: 1 },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+  it.each([
+    ['an agent with recovery permission', (f: F) => f.workerHeaders],
+    ['a headless worker identity', (f: F) => f.headersFor('headless-worker')],
+    ['an owner cookie with a parent session', (f: F) => ({ ...f.ownerHeaders, 'x-reverie-parent-session': actorSid })],
+    ['an owner cookie with a service token', (f: F) => ({ ...f.ownerHeaders, 'x-reverie-service-token': 'synthetic' })],
+    [
+      'an owner cookie with a worker identity header',
+      (f: F) => ({ ...f.ownerHeaders, [DOCKER_WORKER_IDENTITY_HEADER]: 'synthetic' }),
+    ],
+    ['a cross-origin browser request', (f: F) => ({ ...f.ownerHeaders, origin: 'http://attacker.example' })],
+    ['a request without an origin', (f: F) => ({ cookie: f.ownerHeaders.cookie, host: 'localhost' })],
+    ['an anonymous request', () => ({ origin: 'http://localhost', host: 'localhost' })],
+  ])('refuses %s', async (_name, headers) => {
+    const f = await fixture({ storedPolicy: true, recover: true, office: true });
+    for (const response of await calls(f, headers(f) as Record<string, string>))
+      expect([401, 403]).toContain(response.statusCode);
+    expect(f.absentCalls).toEqual([]);
+  });
+  it('refuses after the owner signs out', async () => {
+    const f = await fixture({ storedPolicy: true });
+    f.logout();
+    for (const response of await calls(f, f.ownerHeaders)) expect([401, 403]).toContain(response.statusCode);
+    expect(f.absentCalls).toEqual([]);
   });
 });

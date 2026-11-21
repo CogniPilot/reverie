@@ -121,3 +121,33 @@ continuation; it does not fall back to local/native execution. Fresh employee
 creation and successful plan moves with boxed bindings remain separate owning
 work, alongside the full company/plan/permission CI scenario. This slice is not a
 claim that those workflows are complete.
+
+### Recorded containers that no longer exist
+
+Every continuation step re-inspects the original or the destination. When an
+operator prune removed them, the record cannot advance and `begin` refuses a
+new operation while it exists. The owner workflow
+[Reprovision a laptop whose containers are absent](owner-operations.md#reprovision-a-laptop-whose-containers-are-absent)
+handles exactly that case.
+
+It requires a positive Engine listing that none of the recorded containers and
+no container labelled for the employee exists. It then retires the record and
+binding into `retiredDockerEmployeeContinuations`, removes the saved session's
+stale boxed view and boxed launch denial, and creates one stopped replacement
+source from the retired record's HOME bind, its sibling Nix directory and an
+owner-approved shared-drive template. The source carries the ordinary
+`reverie.worker`, `reverie.employee` and `reverie.session` labels, so
+`GET …/docker-policy` selects it and `POST …/docker-continuation` begins a new
+version 2 operation with a new operation ID. Storage holder, pool, destination,
+start, resources, identity and provider launch are unchanged; the launch
+resumes the saved conversation.
+
+The source's only network is the employee's surviving per-worker office API
+bridge, which the destination copies as its `NetworkMode`. The pruned
+per-laptop source bridge is not recreated. A retired plan replacement (version
+3) record becomes history; its open native move is closed as abandoned in the
+PlanMoves journal and the new operation is an ordinary version 2 continuation.
+
+The workflow does not start containers, launch providers or create a fresh
+employee. A laptop with any surviving recorded container stays with the
+workflows above.

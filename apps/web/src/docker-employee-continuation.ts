@@ -244,6 +244,10 @@ export class DockerEmployeeContinuation {
     private readonly identity: DockerContinuationIdentity,
     private readonly onFailure?: (failure: DockerContinuationFailure) => void
   ) {}
+  /** Denial DATA for other owners of the same employee; never an admission. */
+  flightActive(employeeId: string): boolean {
+    return this.#flights.has(employeeId);
+  }
   #require(
     subject: DockerContinuationSubject,
     authority: DockerContinuationAuthority,

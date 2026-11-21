@@ -266,3 +266,120 @@ later become empty. Older literal-1 readers must refuse the entire store rather
 than strip fields. Do not run old/new writers together or restore an older backup
 over current company data. This envelope upgrade does not change any employee,
 session, binding, approved resource policy, operation or launch fence.
+
+## Reprovision a laptop whose containers are absent
+
+Use this when an employee's recorded Docker containers no longer exist in the
+Engine, for example after an operator prune removed stopped containers. The
+employee ID, session ID, generation, memories, approved resource policy,
+private HOME/Nix directories and provider conversation are kept. Only the
+container is replaced. Employees are never recreated or rehired.
+
+The workflow is owner-only: a signed-in, same-origin owner request without
+parent-session, worker-identity or service-token headers. No agent permission,
+title or CLI reaches it. The GUI has no control for it yet; an authorized
+headless client uses the same API.
+
+Preconditions, checked at preview and again at confirmation:
+
+- The employee exists once, is in the office, wants to run, and has no binding
+  migration, pending owner stop or open recovery operation.
+- One continuation record exists for the current session and generation.
+- An Engine listing returns none of: the record's original and destination,
+  the employee's bound container, a plan replacement's source container, any
+  container labelled `reverie.boxed.employee` for this deployment, and any
+  labelled `reverie.employee` for this deployment. A failed or errored Engine
+  call is unknown, never absence. If anything exists, running or stopped, the
+  request is refused and the ordinary recovery workflows own the laptop.
+- No continuation is in flight. No plan move is being dispatched. An open
+  native (Docker) plan move for the employee is closed by this operation; any
+  other open move is refused.
+- The saved session exists. Its boxed view, if any, names one of the absent
+  containers. Its launch denial, if any, is a boxed (`docker`) launch with no
+  live owner.
+- A qualified source image is present: the manifest worker image, otherwise a
+  listed source image.
+- One per-worker office API network labelled `reverie.boxed.employee` for the
+  employee survives with exactly the office attached. This workflow creates no
+  network; deployment tooling owns those bridges.
+
+Calls, in order, for employee `EID`:
+
+1. `POST /api/company/employees/EID/docker-absent/preview` with
+   `{ "template": TEMPLATE }`. It returns `sessionId`, `sessionGeneration`,
+   `record`, `absent`, `present`, `home`, `nixSource`, `scratchSource`,
+   `sourceImageId`, `network`, `networkCandidates`, `planMoves`,
+   `templateDigest`, `scopeDigest` and `allowedActions`. It changes nothing.
+2. `POST /api/company/employees/EID/docker-absent/reprovision` with
+   `{ "operationId": NEW_UUID, "sessionId", "sessionGeneration",
+   "expectedScopeDigest": scopeDigest, "template": TEMPLATE }`. It returns
+   `{ operationId, state, code?, sourceContainerId?, sourceImageId? }`.
+   `ready` means the record is retired and one stopped source laptop exists.
+   `held` names the refusing step; send the same body again to resume.
+3. `GET /api/company/employees/EID/docker-policy`. It now reports
+   `state: "stopped"`, `operationId: null`, the new `containerId`, `imageId`,
+   `destinationImageId`, `policyDigest` and `allowedActions: ["continue"]`.
+4. `POST /api/company/employees/EID/docker-continuation` with
+   `{ "request": { "operationId": ANOTHER_NEW_UUID, "sessionId",
+   "sessionGeneration", "containerId", "imageId", "expectedPolicyDigest":
+   policyDigest, "expectedDestinationImageId": destinationImageId,
+   "enterOffice": false } }`.
+5. `POST /api/company/employees/EID/docker-continuation/observe` with
+   `{ "operationId": ANOTHER_NEW_UUID }` until `state` is `ready`. A `held`
+   result with `allowedActions` containing `continue` is advanced by repeating
+   call 4 with the same body. An unknown outcome is never repeated.
+
+`TEMPLATE` is the owner-approved shared-drive layout:
+
+```json
+{
+  "user": "1000:1000",
+  "scratchRoot": "/HOST/SCRATCH/laptops",
+  "mounts": [
+    { "source": "/HOST/DRIVE", "destination": "/reverie_workspace", "readOnly": false }
+  ],
+  "workspaceAlias": true
+}
+```
+
+`user` is a non-root `uid:gid`. `scratchRoot` must be named `laptops`; the
+laptop receives `<scratchRoot>/employees/<employeeId>` as `/scratch` and its
+`tmp` child as `/tmp`. Mount targets are limited to `/reverie_workspace`,
+`/workspace`, `/projects`, `/projects/<name>` and the read-only operator set
+`/host-published`, `/instances/default/tools`,
+`/instances/default/console/statusline-exporter.sh` and `/run/reverie-model`.
+Paths are absolute and normalized. Targets are disjoint. `workspaceAlias`
+mounts the `/reverie_workspace` drive at `/workspace` as well. `network` names
+one of `networkCandidates` when the preview reports more than one. The backend
+derives HOME from the retired record and Nix from its sibling `nix` directory;
+a template cannot name private storage, `/proc`, a worker capsule or an Engine
+socket, and no drive may overlap the employee or scratch directories.
+
+Effects of a confirmed request:
+
+- An open native plan move is closed as `failed` with a `dockerAbandonment`
+  record naming this operation. Its journal is kept verbatim and is immutable.
+- One CompanyStore transaction moves the continuation record and the published
+  binding verbatim into `retiredDockerEmployeeContinuations` and removes them
+  from the employee. This history is append-only and publishes company format 2.
+- The state service removes the saved session's stale boxed view, the holds
+  that view carried and its boxed launch denial. A stopped viewer object for
+  the session is discarded. Mode, working directory, model, recipe, thread and
+  resume fields are unchanged, so the provider resumes the same conversation.
+- The create intent is recorded, then one stopped container
+  `reverie-boxed-source-<digest>` is created and its ID recorded. It uses the
+  inert worker init, no command, the template user, a read-only root, no
+  capabilities, `no-new-privileges`, no restart, no device request, no secret
+  and no Engine socket. It is never started. The destination is built from it
+  by the ordinary continuation, which adds the GPU profile and resource limits.
+
+A lost create reply leaves the operation `held`. Repeating the same request
+lists the source by its labels: an existing source is verified and recorded; a
+create is issued again only when the Engine positively lists none. A repeated
+request after `ready` returns the recorded result without Engine access. A
+different operation ID is then refused because no record remains to retire.
+
+This workflow never starts a container, launches a provider, edits a resource
+policy, creates a network, deletes journal history, or changes an employee's
+identity, session, generation or account. Rebuilding deleted worker images is
+separate. Installed qualification on a real Engine is still required.

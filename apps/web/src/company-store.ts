@@ -569,7 +569,8 @@ export class CompanyStore {
                 records.push(structuredClone(pool.record));
               }
             }
-            if (current.dockerSharedPoolLineages?.length || current.dockerPoolObservations?.length)
+            if (current.dockerSharedPoolLineages?.length || current.dockerPoolObservations?.length ||
+                current.retiredDockerEmployeeContinuations?.length)
               current.version=2;
             CompanyStateSchema.parse(current);
             const goalBytes = Buffer.byteLength(

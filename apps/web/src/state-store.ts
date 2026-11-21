@@ -44,6 +44,11 @@ import { validateTabLayout, type TabLayout } from './tab-layout.js';
 import { Session, NativeProviderRetirementRequiredError, ProviderDispatchUnconfirmedError } from './session.js';
 import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { EmployeeRecoveryAttempt } from './employee-recovery-attempt.js';
+import {
+  dockerAbsentSessionReference,
+  requireDockerAbsentSessionRetirement,
+} from './docker-absent-reprovision-proof.js';
+import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import { PROVIDER_LAUNCH_DISK_KEY, decodeProviderLaunchIntents, stageProviderLaunch, type ProviderLaunchSource, type ProviderLaunchIntent, ProviderLaunchPublication } from './provider-launch-publication.js';
 
 /** Debounce delay for batching state writes (ms) */
@@ -768,6 +773,84 @@ export class StateStore {
         },
         'config'
       );
+    });
+  }
+  /** Same strict main writer. Removes ONLY a saved boxed view of a container
+   * the Engine positively reported absent, the holds that view carried, and its
+   * unowned `docker` launch denial. Conversation and recipe fields are kept, so
+   * a later first launch resumes the same thread. The proof re-reads the
+   * canonical retirement before and after publication. */
+  /** Denial DATA for the preview: why this writer could not later remove the
+   * session's launch denial. Reveals no row and grants nothing. */
+  dockerAbsentReprovisionBlocker(sessionId: string, owner: string | undefined): string | undefined {
+    const row = this.#providerLaunchIntents[sessionId];
+    if (this.#publicationUncertainty) return 'DOCKER_REPROVISION_STATE_PUBLICATION_UNCONFIRMED';
+    if (this.#providerLaunchHistory !== 'observed') return 'DOCKER_REPROVISION_LAUNCH_HISTORY_UNCONFIRMED';
+    if (
+      row &&
+      (row.transport !== 'docker' ||
+        row.owner !== (owner ?? null) ||
+        this.#providerLaunchOwners.get(sessionId)?.deref())
+    )
+      return 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN';
+    return undefined;
+  }
+  async commitDockerAbsentReprovision(proof: unknown): Promise<'cleared' | 'unchanged'> {
+    return this.serializeWrite(() => {
+      const scope = requireDockerAbsentSessionRetirement(proof);
+      const refuse = (code: string): never => {
+        throw new DockerEmployeeContinuationError(code);
+      };
+      const validate = () => {
+        requireDockerAbsentSessionRetirement(proof);
+        const saved = this.state.sessions[scope.sessionId],
+          row = this.#providerLaunchIntents[scope.sessionId];
+        if (!saved || saved.id !== scope.sessionId || saved.owner !== scope.owner || saved.remote)
+          refuse('DOCKER_REPROVISION_SAVED_SESSION_REQUIRED');
+        if (saved!.nativePlanRetiredBy !== undefined) refuse('DOCKER_REPROVISION_SESSION_RETIRED');
+        const stale = dockerAbsentSessionReference(saved!.docker, scope);
+        if (saved!.docker && !stale) refuse('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN');
+        if (!stale && (saved!.providerDispatchHeld || saved!.terminalInputHeld))
+          refuse('DOCKER_REPROVISION_SESSION_HELD');
+        if (this.#providerLaunchHistory !== 'observed') refuse('DOCKER_REPROVISION_LAUNCH_HISTORY_UNCONFIRMED');
+        if (
+          row &&
+          (row.transport !== 'docker' ||
+            row.owner !== (scope.owner ?? null) ||
+            this.#providerLaunchOwners.get(scope.sessionId)?.deref())
+        )
+          refuse('DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN');
+      };
+      validate();
+      const before = this.state.sessions[scope.sessionId]!,
+        row = this.#providerLaunchIntents[scope.sessionId];
+      if (!before.docker && !row) return 'unchanged';
+      this.acknowledgeMainState(
+        () => {
+          validate();
+          const next = { ...this.state.sessions[scope.sessionId]!, status: 'stopped' as const, pid: null };
+          if (next.docker) {
+            delete next.docker;
+            delete next.providerDispatchHeld;
+            delete next.terminalInputHeld;
+            delete next.viewerInputHeld;
+          }
+          this.state.sessions[scope.sessionId] = next;
+          this.dirtySessions.add(scope.sessionId);
+          delete this.#providerLaunchIntents[scope.sessionId];
+          this.#providerLaunchOwners.delete(scope.sessionId);
+        },
+        // After mutation only the canonical retirement remains to re-check.
+        () => void requireDockerAbsentSessionRetirement(proof),
+        (serialized) => {
+          const saved = (JSON.parse(serialized) as AppState).sessions[scope.sessionId];
+          if (saved) this.state.sessions[scope.sessionId] = saved;
+          this.dirtySessions.add(scope.sessionId);
+          if (row) this.#providerLaunchIntents[scope.sessionId] = row;
+        },
+        'config'
+      );
+      return 'cleared';
     });
   }
   /** Sole strict acknowledged writer, under the existing main-state queue. */

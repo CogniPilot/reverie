@@ -6,9 +6,9 @@ A busy badge does not prove work. Check employee, session and activity. Preserve
 
 Check the profile and Debug terminal. An idle prompt can be healthy. Native laptop evidence can show Online while its optional viewer is unavailable; observations expire within 25 seconds. Liveness and HTTP success do not prove model readiness or delivery.
 
-After a Docker terminal disconnects, Reverie checks the original provider and reconnects its viewer, respecting vacations, deliberate stops and session moves. Owners can inspect delays in **Status** or request repair with **Reconnect**. Conversation and pending input survive reconnection.
+After a Docker terminal disconnects, Reverie checks the original provider and reconnects its viewer, respecting vacations, deliberate stops and session moves. Owners inspect delays in **Status** or repair with **Reconnect**. Conversation and pending input survive reconnection.
 
-**Restart session** preserves identity, memory and channel membership. Explicitly return an absent employee first. **Recover a stalled session** requires checking activity: running tasks, dialogs and input within two minutes block it; redraws alone do not. Verify readiness and request a brief chat acknowledgement afterward.
+**Restart session** preserves identity, memory and channel membership. Explicitly return an absent employee first. **Recover a stalled session** requires checking activity: running tasks, dialogs and input within two minutes block it; redraws alone do not. Verify readiness and request a chat acknowledgement afterward.
 
 ## Delegated wake and viewer repair
 
@@ -22,11 +22,11 @@ reverie agent viewer-status EMPLOYEE_ID --json
 reverie agent reconnect-viewer EMPLOYEE_ID --json
 ```
 
-Use the full employee UUID. Separate `agent wake SESSION_ID` only nudges an idle session. Ordinary wake preserves stopped/vacation intent and saved runtime; inspect `data.recovery.awakened` and `data.recovery.skipped`. Its budget is three attempts per employee in fifteen minutes, subject to office settings.
+Use the full employee UUID. Separate `agent wake SESSION_ID` only nudges an idle session. Ordinary wake preserves stopped/vacation intent and saved runtime; inspect `data.recovery.awakened` and `data.recovery.skipped`. Budget: three attempts per employee in fifteen minutes, subject to office settings.
 
 Isolated-laptop wake uses fresh provider health, preserving a healthy provider. `native-health-unconfirmed` blocks startup until health can be checked; repair viewers separately. Permission and original employee/session generation remain checked while waiting.
 
-`start-unconfirmed` means startup may have happened. The CLI exits with an error, preserves JSON and never retries automatically. Inspect current state before another attempt.
+`start-unconfirmed` means startup may have happened. The CLI exits with an error, preserves JSON and never retries. Inspect state before retrying.
 
 Viewer repair requires compatible website, broker and laptop CLI versions, authenticated native office proof, current permissions, exact session/generation and fresh provider health. Missing proof fails closed. Copied parent headers and borrowed owner cookies grant no authority.
 
@@ -59,4 +59,4 @@ Preserve work first and write a truthful handoff with durable recovery locations
 
 Adoption verifies the existing destination and stopped source without launching or replaying a handoff. Self-recovery waits for idle: end your turn, then inspect status. Cancellation applies only while waiting. Active, ambiguous, resource and unconfirmed moves remain held; unknown deliveries and stop fences remain authoritative.
 
-Report persistent failures with employee, current session, time, error and attempted recoveries. Keep credentials and private history out of shared chat. See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).
+Laptop containers missing from Docker need owner reprovisioning. Report persistent failures with employee, session, time, error and attempted recoveries. Keep credentials and private history out of shared chat. See [Permissions](/handbook/permissions) and [Power and restarts](/handbook/power).

@@ -12,8 +12,23 @@ import { writeCompanyStateFile } from './company-store.js';
 import type { PlanMoveRecord } from './plan-move.js';
 import { canSettleRestoredPlanSource } from './plan-move-docker.js';
 
+/** Explicit terminal closure of a native move whose recorded containers the
+ * Engine positively reported absent. History only; never a retry grant. */
+export const DockerPlanMoveAbandonment = z
+  .object({
+    version: z.literal(1),
+    reason: z.literal('recorded-containers-absent'),
+    operationId: z
+      .string()
+      .uuid()
+      .regex(/^[0-9a-f-]+$/),
+    at: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export type DockerPlanMoveAbandonment = z.infer<typeof DockerPlanMoveAbandonment>;
 const RecordSchema = z
   .object({
+    dockerAbandonment: DockerPlanMoveAbandonment.optional(),
     dockerReplacement: DockerPlanMoveJournalState.optional(),
     dockerSettlementBudget: z
       .object({
@@ -117,7 +132,10 @@ const RecordSchema = z
     if (record.restoredSource && (!docker || record.phase !== 'failed' ||
         !canSettleRestoredPlanSource(docker, record.restoredSource)))
       context.addIssue({ code: 'custom', message: 'Restored source settlement requires an untouched target' });
-    if (docker && record.phase === 'failed' && !record.restoredSource && (docker.sourceStop || docker.work || docker.paidDispatch))
+    if (record.dockerAbandonment && (!docker || record.phase !== 'failed' || record.restoredSource))
+      context.addIssue({ code: 'custom', message: 'Abandonment closes only its original failed Docker journal' });
+    if (docker && record.phase === 'failed' && !record.restoredSource && !record.dockerAbandonment &&
+        (docker.sourceStop || docker.work || docker.paidDispatch))
       context.addIssue({ code: 'custom', message: 'Issued Docker plan work retains recovery' });
     if (
       docker &&
@@ -787,6 +805,23 @@ export class PlanMoveStore {
     });
   }
 
+  /** Terminal `failed` with an explicit abandonment record. The caller holds
+   * fresh positive Engine proof that every recorded container is absent. The
+   * native journal is retained verbatim and becomes immutable history. */
+  abandonAbsentDockerMove(
+    id: string, before: Readonly<DockerPlanMoveJournalState>,
+    abandonment: DockerPlanMoveAbandonment, current: () => void
+  ): Promise<Readonly<PlanMoveRecord>> {
+    const captured = DockerPlanMoveJournalState.parse(before),
+      checked = DockerPlanMoveAbandonment.parse(abandonment);
+    return this.dockerTransaction(id, captured, current, (record) => {
+      if (record.restoredSource) throw Error('A restored source move has its own settlement');
+      record.phase = 'failed';
+      record.error = 'Abandoned: the Engine reported every recorded container absent';
+      record.dockerAbandonment = { ...checked };
+    });
+  }
+
   dockerPublish(
     id: string,
     before: Readonly<DockerPlanMoveJournalState>,
@@ -851,7 +886,11 @@ export class PlanMoveStore {
     let maximum = this.settlementBounds.get(key);
     if (maximum === undefined) {
       const budget = { version: 1 as const, purpose: 'docker-plan-settlement-budget-v1' as const, maxRecordBytes: 1 };
-      const { restoredSource: _terminalRestoredSource, ...openRecord } = record;
+      const {
+        restoredSource: _terminalRestoredSource,
+        dockerAbandonment: _terminalAbandonment,
+        ...openRecord
+      } = record;
       const witness = dockerPlanMaximumRecord({ ...openRecord, dockerSettlementBudget: budget });
       for (let pass = 0; pass < 8; pass++) {
         const value = Buffer.byteLength(JSON.stringify(RecordSchema.parse(witness)));
