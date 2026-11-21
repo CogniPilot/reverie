@@ -3167,6 +3167,13 @@ export class Session extends EventEmitter {
     };
   }
 
+  private _retainPermissionRecipe = false;
+  /** A saved plan-generation recipe that already records its permission mode
+   * keeps recording it when a later ordinary continuation relaunches it, so
+   * the launch fingerprint taken from that saved state still matches. */
+  retainPermissionRecipe(): void {
+    this._retainPermissionRecipe = true;
+  }
   /** Provider recipe DATA only, without runtime/view getters. Never an API serializer or a grant. */
   providerRecipeState() {
     const persistentRecord = resolvedStockProtocol(this.mode)?.shipped.capabilities.rebootRestore === 'persistent-record';
@@ -3206,7 +3213,7 @@ export class Session extends EventEmitter {
     // A plan generation must keep its explicit permission/tool recipe across
     // replacement and restore. Legacy v1/v2 launch fingerprints stay unchanged.
     if (
-      this._docker?.continuation?.planReplacement &&
+      (this._docker?.continuation?.planReplacement || this._retainPermissionRecipe) &&
       accountReplacementProfile(this.mode)?.name === 'anthropic-account-v1'
     ) {
       snapshot.claudeMode = this._claudeMode;

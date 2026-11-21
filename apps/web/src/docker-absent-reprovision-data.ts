@@ -203,7 +203,10 @@ export const DockerAbsentContinuationRetirement = z
   )
   .refine((entry) => {
     if (entry.reason === 'recorded-containers-absent')
-      return !!entry.record && !entry.previous && !entry.removal && entry.absent.containerIds.length > 0;
+      // `previous` links a later retirement of a record begun from an earlier entry's source.
+      return (
+        !!entry.record && entry.previous !== entry.operationId && !entry.removal && entry.absent.containerIds.length > 0
+      );
     const replaced =
       !!entry.previous &&
       entry.previous !== entry.operationId &&

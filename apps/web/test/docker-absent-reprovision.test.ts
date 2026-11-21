@@ -1531,9 +1531,19 @@ describe('a continuation that never requested its destination', () => {
           ...(phase === 'destination-issued' ? {} : { destination: { ...row.original, containerId: destinationCid } }),
         });
       });
-      await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
-        code: 'DOCKER_REPROVISION_CONTINUATION_ADVANCED',
-      });
+      // A record with a destination is retired as a whole, and only once its
+      // recorded containers are gone; the surviving source offers no action.
+      if (phase === 'destination-issued')
+        await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+          code: 'DOCKER_REPROVISION_CONTINUATION_ADVANCED',
+        });
+      else
+        await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
+          mode: 'retire',
+          allowedActions: [],
+          discard: [],
+          code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+        });
       expect(f.engine.removed).toEqual([]);
     }
   );
@@ -1713,6 +1723,39 @@ describe('a laptop whose provider never started', () => {
     expect(f.engine.discarded.sort()).toEqual([destinationCid, originalCid].sort());
     expect(f.engine.prepared).toHaveLength(1);
     expect(f.snapshot().dockerEmployeeContinuations).toEqual([]);
+  });
+  it('retires a record begun from an earlier reprovisioned source and keeps one history', async () => {
+    const f = await fixture();
+    f.setLive({ inert: true });
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    const source = first.sourceContainerId!;
+    const next = '77777777-7777-4777-8777-777777777777';
+    const row = DockerEmployeeContinuationRecord.parse({
+      ...v2Row('ready'),
+      phase: 'provider-issued',
+      request: { ...v2Row('ready').request, operationId: next, containerId: source, imageId: workerImage },
+      original: { ...original(source), imageId: workerImage },
+      workerImage: { imageId: workerImage, sourceImageId: workerImage, clientManifestDigest: manifest },
+    });
+    await f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations = [structuredClone(row)];
+      state.employees[0]!.dockerBinding = {
+        ...f.binding,
+        operationId: next,
+        originalDigest: dockerContinuationDigest(row.destination),
+      };
+    });
+    f.engine.container(destinationCid, {}, true);
+    const again = '88888888-8888-4888-8888-888888888888';
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ mode: 'retire', discard: [source, destinationCid].sort(), allowedActions: ['reprovision'] });
+    const result = await f.service.reprovision(employeeId, await f.request(again), f.authority);
+    expect(result).toMatchObject({ operationId: again, state: 'ready' });
+    const entries = f.snapshot().retiredDockerEmployeeContinuations!;
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toMatchObject({ operationId: again, previous: retireOperation, source: { phase: 'created' } });
+    expect(f.snapshot().employees[0]!.dockerBinding).toBeUndefined();
+    await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({ mode: 'replace-source' });
   });
   it('keeps a laptop with a tenant, a ready laptop and an unrecorded container', async () => {
     const tenant = await fixture({ row: issued() });

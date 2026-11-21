@@ -171,6 +171,8 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
           providerDispatchHeld: false,
           terminalInputHeld: false,
         });
+      if (!reused && (saved.claudeMode !== undefined || saved.allowedTools !== undefined))
+        candidate.retainPermissionRecipe();
       original.candidate = candidate;
       if (!reused) {
         // Keep the saved recipe visible to admission. Endpoint values are

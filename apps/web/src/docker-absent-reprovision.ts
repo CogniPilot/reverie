@@ -345,7 +345,13 @@ export class DockerAbsentReprovision {
       head = this.#head(employeeId, state),
       rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
     if (!head || head.source.phase !== 'created') return false;
-    return rows.length === 0 || (rows.length === 1 && rows[0]!.original.containerId === head.source.containerId);
+    // A record that requested its destination is retired as a whole instead.
+    const advanced =
+      rows.length === 1 &&
+      (!!rows[0]!.destination || !!state.employees.find((value) => value.id === employeeId)?.dockerBinding);
+    return (
+      rows.length === 0 || (rows.length === 1 && !advanced && rows[0]!.original.containerId === head.source.containerId)
+    );
   }
   async #scope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
     this.runtimeCurrent();
@@ -749,6 +755,8 @@ export class DockerAbsentReprovision {
     const { facts } = scope;
     if (input.operationId === facts.row.request.operationId) refuse('DOCKER_REPROVISION_OPERATION_CHANGED');
     const at = this.now();
+    // One history per employee: a later retirement names the entry it follows.
+    const head = this.#head(employeeId);
     let planMoveIds: readonly string[] = [];
     if (scope.open.length) {
       try {
@@ -773,6 +781,7 @@ export class DockerAbsentReprovision {
       retiredAt: at,
       operationId: input.operationId,
       reason: 'recorded-containers-absent',
+      ...(head ? { previous: head.operationId } : {}),
       employeeId,
       ...(facts.employee.owner === undefined ? {} : { owner: facts.employee.owner }),
       sessionId: facts.employee.sessionId,
