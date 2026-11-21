@@ -322,8 +322,8 @@ Calls, in order, for employee `EID`:
    into the employee's private Nix store, as the legacy broker's image
    preparation did; without it the image's tools are dangling links behind the
    store bind. The call can therefore take a few minutes.
-   A record that issued its one provider launch and never reached `ready`
-   (`provider-issued`) has no retry. For it the preview lists the recorded
+   A record that requested its destination and never reached `ready` has no
+   retry for a failed one-shot step. For it the preview lists the recorded
    containers under `discard` and still allows `reprovision`: each is removed,
    never by force, only after the Engine shows it hosts nothing beyond its own
    init. Home, Nix and scratch are binds and are kept.

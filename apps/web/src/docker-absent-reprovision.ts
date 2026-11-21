@@ -393,7 +393,12 @@ export class DockerAbsentReprovision {
       rows.length > 1 ||
       (row &&
         (row.version !== 2 ||
-          !['staged', 'office-issued', 'office-ready', 'pool-issued', 'pool-ready'].includes(row.phase) ||
+          // An issued destination CREATE that produced no container is still
+          // unrequested in effect: any created destination carries this
+          // employee's label and holds the scope as a present container.
+          !['staged', 'office-issued', 'office-ready', 'pool-issued', 'pool-ready', 'destination-issued'].includes(
+            row.phase
+          ) ||
           row.destination ||
           row.owner !== employee.owner ||
           row.request.sessionId !== employee.sessionId ||
@@ -570,12 +575,13 @@ export class DockerAbsentReprovision {
     if (open.some((move) => !move.docker || move.busy)) refuse('DOCKER_REPROVISION_PLAN_MOVE_ACTIVE');
     const present = await this.#present(facts.ids, employeeId);
     current();
-    // A continuation that issued its one provider launch and never reached
-    // ready has no retry. Its recorded containers may be discarded once each
-    // is proven to host nothing beyond its own init.
+    // A continuation that never reached ready has no retry for a failed
+    // one-shot step (a resource helper, its one provider launch). Its recorded
+    // containers may be discarded once each is proven to host nothing beyond
+    // its own init.
     const discardable =
       present.length > 0 &&
-      facts.row.phase === 'provider-issued' &&
+      facts.row.phase !== 'ready' &&
       present.every((id) => facts.ids.includes(id)) &&
       !!this.command.removeIdleLaptop;
     const image = await this.#image();

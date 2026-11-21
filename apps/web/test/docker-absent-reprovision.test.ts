@@ -1533,18 +1533,30 @@ describe('a continuation that never requested its destination', () => {
       });
       // A record with a destination is retired as a whole, and only once its
       // recorded containers are gone; the surviving source offers no action.
+      // An issued CREATE with no labelled container may be superseded like an unrequested one.
       if (phase === 'destination-issued')
-        await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
-          code: 'DOCKER_REPROVISION_CONTINUATION_ADVANCED',
+        await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
+          mode: 'retire',
+          reason: 'source-superseded',
+          present: [],
+          allowedActions: ['reprovision'],
         });
-      else
+      else if (phase === 'ready')
         await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
           mode: 'retire',
           allowedActions: [],
           discard: [],
           code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
         });
+      // Never ready: the preview offers to discard the recorded containers, and changes nothing.
+      else
+        await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({
+          mode: 'retire',
+          reason: 'recorded-containers-absent',
+          allowedActions: ['reprovision'],
+        });
       expect(f.engine.removed).toEqual([]);
+      expect(f.engine.discarded).toEqual([]);
     }
   );
   it('refuses a foreign container, a foreign holder, a later helper and a busy continuation', async () => {
