@@ -633,11 +633,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
   async #poolWriterState(task: DockerContinuationTask): Promise<'closed' | 'removed' | 'unconfirmed'> {
     if (task.phase === 'create-issued' || task.phase === 'created') return 'closed';
     const restore = task.imageId === this.configuration.poolRestoreHelperImageId;
-    if (
-      task.role !== 'pool-helper' ||
-      (!restore && task.imageId !== this.configuration.helperImageId) ||
-      !('containerId' in task)
-    )
+    if (task.role !== 'pool-helper' || !('containerId' in task)) return 'unconfirmed';
+    // A completed writer the Engine positively reports absent can no longer
+    // write, whichever helper image generation created it. Checked first so a
+    // later manifest's helper image selection cannot hold a removed writer.
+    if (task.phase !== 'completed' && !restore && task.imageId !== this.configuration.helperImageId)
       return 'unconfirmed';
     if (task.phase === 'completed') {
       // An absent completed writer cannot supply an ACK. Use an unscoped
@@ -657,6 +657,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (!selected) return 'removed';
       if (selected !== task.containerId) return 'unconfirmed';
     }
+    if (!restore && task.imageId !== this.configuration.helperImageId) return 'unconfirmed';
     const raw = await this.#inspect(task.containerId);
     const args = z.array(z.string()).min(1).max(512).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Cmd);
     if (args[0] !== (restore ? 'restore-pool' : 'configure-pool')) return 'unconfirmed';
@@ -717,6 +718,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (state === 'closed') retained.push(task);
     }
     return retained;
+  }
+  /** Whether a closed earlier writer still acknowledges this exact observation. */
+  async #poolAcknowledged(fresh: Observation, policy: DockerEmployeeResourcePolicy['pool']): Promise<boolean> {
+    for (const task of await this.#poolWritersClosed()) if (await this.#ack(task, fresh, policy, null, false)) return true;
+    return false;
   }
   async #poolAck(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<void> {
     const own = this.journal.read(row, 'pool-helper');
@@ -1143,7 +1149,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
     const seen = await this.#probe(anchor);
     current();
-    if (this.#matches(seen, row.policy.pool, null)) {
+    // Limits that already match still need a surviving acknowledgement. When
+    // every earlier writer is terminal or positively absent and none can
+    // supply one, this operation's own helper re-applies the same approved
+    // limits below and earns a fresh acknowledgement.
+    if (
+      this.#matches(seen, row.policy.pool, null) &&
+      (this.journal.read(row, 'pool-helper') || (await this.#poolAcknowledged(seen, row.policy.pool)))
+    ) {
       await this.#poolAck(row, seen);
       current();
       return;
