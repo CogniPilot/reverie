@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { runBoxedStartupNamespace } from './fixtures/boxed-webserver-startup.js';
 import type { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import type { DockerEngineCommand } from '../src/docker-engine-command.js';
+import { DOCKER_UNBOUND_IDENTITY_ARCHIVE_PROGRAM } from '../src/docker-employee-credential-installer.js';
 import type { DockerContinuationTask, DockerContinuationTaskRole } from '../src/docker-continuation-task.js';
 
 const eid = '11111111-1111-4111-8111-111111111111';
@@ -264,6 +265,7 @@ class PhysicalDocker implements DockerEngineCommand {
           tokenDigest: this.tokenDigest,
         });
       if (args.includes('status')) return '{}';
+      if (args.includes(DOCKER_UNBOUND_IDENTITY_ARCHIVE_PROGRAM)) return 'ABSENT\n';
       if ((args.includes('presence') || args.includes('observe')) && this.providerAbsent) return 'ABSENT\n';
       if (args.includes('presence') || args.includes('observe'))
         return JSON.stringify({ ...pane, hooks: args.at(-1) === 'none' ? { kind: 'none' } : pane.hooks });
