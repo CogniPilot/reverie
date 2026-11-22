@@ -69,7 +69,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     if (!(company instanceof CompanyService)) throw Error('Actual company service required');
   }
   subject(employeeId: string): DockerContinuationSubject | undefined {
-    return this.subjectFromSnapshot(employeeId, this.company.store.snapshot());
+    return this.subjectFromSnapshot(employeeId, this.company.store.view());
   }
   private subjectFromSnapshot(employeeId: string, state: CompanyState): DockerContinuationSubject | undefined {
     const rows = state.employees.filter((e) => e.id === employeeId),
@@ -108,7 +108,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   }
   /** Existing-provider correlation is not authority for another launch. */
   existingSubject(employeeId: string, row: DockerEmployeeContinuationRecord): DockerContinuationSubject | undefined {
-    const state = this.company.store.snapshot(),
+    const state = this.company.store.view(),
       subject = this.subjectFromSnapshot(employeeId, state);
     const rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
     const employee = state.employees.find((value) => value.id === employeeId);
@@ -239,7 +239,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
     });
   }
   policy(employeeId: string): DockerEmployeeResourcePolicy {
-    const rows = this.company.store.snapshot().employees.filter((e) => e.id === employeeId);
+    const rows = this.company.store.view().employees.filter((e) => e.id === employeeId);
     if (rows.length !== 1 || !rows[0]!.dockerResourcePolicy)
       throw new CompanyError('Approve a boxed resource policy before recovery', 409);
     const original = DockerEmployeeResourcePolicy.parse(rows[0]!.dockerResourcePolicy);
@@ -247,7 +247,7 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   }
   /** Approved defaults apply to NEW operations only. Existing request/policy/binding stay byte-identical. */
   newPolicy(employeeId: string, policy: DockerEmployeeResourcePolicy): DockerEmployeeResourcePolicy {
-    const employees = this.company.store.snapshot().employees.filter((employee) => employee.id === employeeId);
+    const employees = this.company.store.view().employees.filter((employee) => employee.id === employeeId);
     if (employees.length !== 1) throw new CompanyError('Unknown employee', 404);
     const original = DockerEmployeeResourcePolicy.parse(policy);
     return this.record(employeeId) || !this.defaultPolicy
@@ -257,13 +257,14 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   /** A new explicit plan operation snapshots the already owner-approved default.
    * Existing operation rows and their historical baseline remain unchanged. */
   newOperationPolicy(employeeId:string):DockerEmployeeResourcePolicy{
-    const employees=this.company.store.snapshot().employees.filter(e=>e.id===employeeId),employee=employees[0];
+    const employees=this.company.store.view().employees.filter(e=>e.id===employeeId),employee=employees[0];
     if(employees.length!==1||!employee?.dockerResourcePolicy)throw new CompanyError('Approved employee resource policy required',409);
     const original=DockerEmployeeResourcePolicy.parse(employee.dockerResourcePolicy);
     return this.defaultPolicy?DockerEmployeeResourcePolicy.parse(this.defaultPolicy(employee.owner,original)):original;
   }
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined {
-    return this.company.store.snapshot().dockerEmployeeContinuations?.find((row) => row.employeeId === employeeId);
+    const row = this.company.store.view().dockerEmployeeContinuations?.find((value) => value.employeeId === employeeId);
+    return row && structuredClone(row);
   }
   async replace(
     before: DockerEmployeeContinuationRecord | undefined,
