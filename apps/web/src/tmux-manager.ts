@@ -1619,7 +1619,10 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
  const env={...selectedEnvironment.env,LD_PRELOAD:'',LD_AUDIT:'',LD_LIBRARY_PATH:'',GCONV_PATH:'',LOCPATH:'',GLIBC_TUNABLES:'',OPENSSL_CONF:'',OPENSSL_MODULES:'',OPENSSL_ENGINES:'',LOCALE_ARCHIVE:'/opt/reverie-worker-tools/share/locale/locale-archive',LC_ALL:'C.UTF-8',TMUX:'',TMUX_TMPDIR:'/tmp',TERMINFO:'/opt/reverie-worker-tools/share/terminfo',TERMINFO_DIRS:'/opt/reverie-worker-tools/share/terminfo',REVERIE_SESSION_ID:sessionId,REVERIE_MUX:'1',REVERIE_DOCKER_OPERATION_ID:placement.operationId,
    REVERIE_WORKER_IDENTITY_FILE:selectedEnvironment.identityFile,REVERIE_CLI:'/opt/reverie-worker-client/bin/reverie',REVERIE_API_URL:placement.apiUrl};
  const flags=Object.entries(env).flatMap(([key,value])=>['--env',key+'='+value]);
- flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION')).flatMap(key=>['--env',key]));
+ // Office REVERIE_* state never enters a laptop, except the names this CLI's
+ // own registry entry declares as its provider inputs.
+ const declared=getCli(opts.mode)?.env.dockerExecEnvNames??[];
+ flags.push(...selectedEnvironment.names.filter(key=>!Object.hasOwn(env,key)&&(!key.startsWith('REVERIE_')||key==='REVERIE_HOOK_GENERATION'||declared.includes(key))).flatMap(key=>['--env',key]));
  let inner:string;
  let innerArgs:string[];
  if(opts.continuationLaunch){
@@ -1627,8 +1630,13 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
    const workspace = DockerEmployeeProviderLaunch.prototype.workspaceForCommand.call(opts.continuationLaunch, sessionId, docker);
    const nativeEnv = DOCKER_PROVIDER_VIEW_ENV.filter((_, i) => i % 2 === 1).map(value => { const n=value.indexOf('='); return value.slice(0,n)+'='+shellescape(value.slice(n+1)); }).join(' ');
    const cwdCheck = workspace ? nativeEnv + ' ' + ['/opt/reverie-worker-client/bin/node', '--input-type=commonjs', '-e', DOCKER_CODEX_WORKSPACE_PROGRAM, '--', 'verify', workspace.realPath, workspace.dev, workspace.ino].map(shellescape).join(' ') + ' && ' : '';
+   // The legacy worker runtime served the mounted model socket on loopback;
+   // a boxed laptop starts the same fixed image relay for a CLI that needs it.
+   const modelRelay = getCli(opts.mode)?.capabilities.boxedModelRelay
+     ? '{ [ -S /run/reverie-model/default.sock ] && REVERIE_MODEL_SOCKET=/run/reverie-model/default.sock /bin/reverie-model-relay >/dev/null 2>&1 & } ; '
+     : '';
    const source = tmuxSourceCommands([
-    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + opts.canonicalCommand],
+    ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + modelRelay + opts.canonicalCommand],
     ['setenv', '-t', target, 'REVERIE_SESSION_ID', sessionId],
     ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],
     ['set', '-t', target, 'status', 'off'],
