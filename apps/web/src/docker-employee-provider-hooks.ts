@@ -10,7 +10,7 @@ export function dockerProviderModeReader(
   states: StateStore
 ): (row: DockerEmployeeContinuationRecord) => string {
   return (row) => {
-    const employees = company.store.snapshot().employees.filter((e) => e.id === row.employeeId),
+    const employees = company.store.view().employees.filter((e) => e.id === row.employeeId),
       employee = employees[0],
       saved = states.getSession(row.request.sessionId);
     const mode = saved?.mode ?? 'claude';

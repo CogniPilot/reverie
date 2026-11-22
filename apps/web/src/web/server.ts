@@ -2186,9 +2186,9 @@ export class WebServer extends EventEmitter {
     );
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
-      employees: () => companyStore.snapshot().employees,
+      employees: () => structuredClone(companyStore.view().employees),
       timeZone: owner => this.companyService?.view(owner).settings.timeZone,
-      coordinatorId: owner => companyStore.snapshot().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
+      coordinatorId: owner => companyStore.view().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), title: 'Disk critical', timeoutMs: 5000 }),

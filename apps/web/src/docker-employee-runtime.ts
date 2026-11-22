@@ -225,7 +225,7 @@ export class DockerEmployeeRuntime {
   get restorationReports(): readonly DockerExistingViewRestoration[] {
     const attached = this.#attached;
     if (!attached || !this.current()) return [];
-    const employees = attached.company.store.snapshot().employees;
+    const employees = attached.company.store.view().employees;
     return this.#restorationReports.filter((report) =>
       employees.some(
         (employee) =>
@@ -255,7 +255,7 @@ export class DockerEmployeeRuntime {
   #binding(employeeId: string): DockerWorkerIdentityBinding | undefined {
     const attached = this.#attached;
     if (!attached || !this.current()) return;
-    const employee = attached.company.store.snapshot().employees.find((e) => e.id === employeeId),
+    const employee = attached.company.store.view().employees.find((e) => e.id === employeeId),
       binding = employee?.dockerBinding;
     if (
       !employee ||
@@ -727,7 +727,7 @@ export class DockerEmployeeRuntime {
     let publication: 'preparing' | 'published' | 'failed' = 'preparing';
     const current = () => {
       const subject = a.store.existingSubject(employee.id, row);
-      const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
+      const live = a.company.store.view().employees.find((value) => value.id === employee.id);
       if (
         !this.current() ||
         publication === 'failed' || (publication === 'preparing' && !allowed()) ||
@@ -811,7 +811,7 @@ export class DockerEmployeeRuntime {
     const changed = new Set(results.flatMap(result => result.status === 'fulfilled' &&
       (result.value.state === 'observed' || result.value.state === 'applied') ? [result.value.employeeId] : []));
     const keep = new Map<string, DockerExistingViewRestoration>();
-    for (const employee of a.company.store.snapshot().employees) {
+    for (const employee of a.company.store.view().employees) {
       const report = reports.get(employee.id);
       if (!employee.dockerBinding || !report || changed.has(employee.id)) continue;
       if (report.state === 'attached') {
@@ -841,7 +841,7 @@ export class DockerEmployeeRuntime {
     catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
     const previous = new Map(this.restorationReports.map(report => [report.employeeId, report]));
-    for (const employee of a.company.store.snapshot().employees) {
+    for (const employee of a.company.store.view().employees) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
       const retained = keep?.get(employee.id);
       if (retained && retained === previous.get(employee.id)) {
@@ -856,7 +856,7 @@ export class DockerEmployeeRuntime {
         bindingDigest: dockerContinuationDigest(employee.dockerBinding),
       };
       const allowed = () => {
-        const live = a.company.store.snapshot().employees.find((value) => value.id === employee.id);
+        const live = a.company.store.view().employees.find((value) => value.id === employee.id);
         return (
           this.current() &&
           !!live &&

@@ -373,11 +373,14 @@ it('uses one canonical snapshot per N-employee company render and one post-query
     research: {} as never,
   });
   const snapshots = vi.spyOn(store, 'snapshot');
+  // The census reads the shared view and copies only the employee rows.
+  const censusReads = vi.spyOn(store, 'view');
   try {
     await health.refresh();
     // Keep the pre-query binding fence and ONE fresh census after the await.
     expect(census).toHaveBeenCalledTimes(2);
-    expect(snapshots).toHaveBeenCalledTimes(2);
+    expect(censusReads).toHaveBeenCalledTimes(2);
+    expect(snapshots).not.toHaveBeenCalled();
     census.mockClear();
     snapshots.mockClear();
     for (let i = 0; i < 4; i++) {

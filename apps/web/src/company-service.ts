@@ -429,7 +429,7 @@ export class CompanyService {
   }
 
   registeredEmployees() {
-    return this.store.snapshot().employees;
+    return structuredClone(this.store.view().employees);
   }
   allowsPersonalSessionRestore(sessionId: string): boolean {
     return this.store.allowsPersonalSessionRestore(sessionId);
