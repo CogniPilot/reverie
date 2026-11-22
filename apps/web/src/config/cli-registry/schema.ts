@@ -382,7 +382,6 @@ const capabilitiesSchema = z
     privilegedCommandGate: z.boolean(),
     startMode: z.enum(['interactive', 'shell']),
     stripInkBloat: z.boolean(),
-    boxedModelRelay: z.boolean().optional(),
     ralph: z.boolean(),
     respawn: z.boolean(),
     effort: z.boolean(),

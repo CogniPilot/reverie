@@ -1655,7 +1655,7 @@ const HANDS: CliEntry = {
   launch: { params: {}, variants: [{ id: 'default', args: [{ lit: 'reverie-hands' }] }] },
   env: { exports: [], unset: [], tmuxSetenvKeys: HANDS_ENV, dockerExecEnvNames: HANDS_ENV, allowedPrefixes: [], allowedKeys: HANDS_ENV },
   capabilities: {
-    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false, boxedModelRelay: true, rebootRestore: 'persistent-record',
+    ...agentDefaults(), chatDelivery: 'poll', stripInkBloat: false, rebootRestore: 'persistent-record',
     model: { source: 'none' }, echo: { policy: 'buffer', anchor: { kind: 'none' } },
     customModelInjection: { kind: 'env', baseUrlVar: 'REVERIE_HANDS_BASE_URL', apiKeyVar: 'REVERIE_HANDS_API_KEY', modelVars: ['REVERIE_HANDS_MODEL'], appendV1Suffix: true },
   }, overlays: {},

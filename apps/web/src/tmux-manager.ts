@@ -1631,8 +1631,10 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
    const nativeEnv = DOCKER_PROVIDER_VIEW_ENV.filter((_, i) => i % 2 === 1).map(value => { const n=value.indexOf('='); return value.slice(0,n)+'='+shellescape(value.slice(n+1)); }).join(' ');
    const cwdCheck = workspace ? nativeEnv + ' ' + ['/opt/reverie-worker-client/bin/node', '--input-type=commonjs', '-e', DOCKER_CODEX_WORKSPACE_PROGRAM, '--', 'verify', workspace.realPath, workspace.dev, workspace.ino].map(shellescape).join(' ') + ' && ' : '';
    // The legacy worker runtime served the mounted model socket on loopback;
-   // a boxed laptop starts the same fixed image relay for a CLI that needs it.
-   const modelRelay = getCli(opts.mode)?.capabilities.boxedModelRelay
+   // a boxed laptop starts the same fixed image relay for a CLI whose registry
+   // entry takes its model endpoint from the launch environment.
+   const relayCli = getCli(opts.mode), relayInjection = relayCli?.capabilities.customModelInjection;
+   const modelRelay = relayInjection?.kind === 'env' && (relayCli?.env.dockerExecEnvNames ?? []).includes(relayInjection.baseUrlVar)
      ? '{ [ -S /run/reverie-model/default.sock ] && REVERIE_MODEL_SOCKET=/run/reverie-model/default.sock /bin/reverie-model-relay >/dev/null 2>&1 & } ; '
      : '';
    const source = tmuxSourceCommands([

@@ -587,9 +587,6 @@ export interface CliCapabilities {
   privilegedCommandGate: boolean;
   startMode: 'interactive' | 'shell';
   stripInkBloat: boolean;
-  /** A boxed laptop starts the image's loopback model relay beside this CLI,
-   * so an office-local model endpoint resolves inside the laptop too. */
-  boxedModelRelay?: boolean;
   ralph: boolean;
   respawn: boolean;
   effort: boolean;
