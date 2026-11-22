@@ -76,13 +76,6 @@ export type CompanyUpdateOutcome<T> =
 /** Cross-process lock covers reload, validation, CAS and durable rename. The kernel releases it on process death. */
 /** Canonical byte budget for service authority (serviceGrants plus serviceGrantRevocations), enforced at every commit. */
 export const SERVICE_AUTHORITY_BUDGET = 2 * 1024 * 1024;
-function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
-  }
-  return value;
-}
 export function serviceAuthorityBytes(state: Pick<CompanyState, 'serviceGrants' | 'serviceGrantRevocations'>): number {
   return Buffer.byteLength(JSON.stringify({ grants: state.serviceGrants, revocations: state.serviceGrantRevocations }));
 }
@@ -267,7 +260,7 @@ export class CompanyStore {
     this.assertWritable();
     const before = this.possibleHealthStamp();
     try {
-      this.state = deepFreeze(CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8'))));
+      this.state = CompanyStateSchema.parse(JSON.parse(await fs.readFile(this.file, 'utf8')));
       this.existed = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
@@ -349,7 +342,7 @@ export class CompanyStore {
     this.readStamp = undefined;
     // This is an internal private canonical file, never a user-selected remote workspace path.
     try {
-      this.state = deepFreeze(CompanyStateSchema.parse(JSON.parse(readFileSync(this.file, 'utf8'))));
+      this.state = CompanyStateSchema.parse(JSON.parse(readFileSync(this.file, 'utf8')));
       this.existed = true;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || this.existed) throw error;
@@ -362,9 +355,9 @@ export class CompanyStore {
     this.refreshState();
     return structuredClone(this.state);
   }
-  /** Shared read-only state for hot read paths. Loaded state is frozen and is
-   * replaced, never edited, so no copy is taken. Copy the part you return
-   * to a caller that may edit it; use `snapshot()` for a private whole copy. */
+  /** Shared state for hot read paths: the store replaces it and never edits it,
+   * so no copy is taken. Callers must not edit it and must copy any part they
+   * hand on; use `snapshot()` for a private whole copy. */
   view(): CompanyState {
     this.refreshState();
     return this.state;
