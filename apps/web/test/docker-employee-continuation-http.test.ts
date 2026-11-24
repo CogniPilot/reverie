@@ -237,8 +237,28 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     async run() { throw Error('No native operation during approval'); },
     async create() { throw Error('No container creation during approval'); },
   }, destinationImage, () => { throw Error('No token during approval'); });
-  const absentCalls: Array<{ kind: 'preview' | 'reprovision'; employeeId: string; body: unknown; owner: unknown }> = [];
+  const absentCalls: Array<{
+    kind: 'preview' | 'reprovision' | 'rebuild-preview' | 'rebuild';
+    employeeId: string;
+    body: unknown;
+    owner: unknown;
+  }> = [];
+  /** What the fake rebuild answers; a test replaces it to exercise a refusal. */
+  const rebuildOutcome: { preview: Record<string, unknown>; apply: (body: unknown) => Record<string, unknown> } = {
+    preview: { scopeDigest: '2'.repeat(64), allowedActions: ['rebuild'] },
+    apply: (body) => ({ operationId: (body as { operationId: string }).operationId, state: 'ready' }),
+  };
   const absent = {
+    async previewRebuild(employeeId: string, body: unknown, authority: { owner: unknown; require(): void }) {
+      authority.require();
+      absentCalls.push({ kind: 'rebuild-preview', employeeId, body, owner: authority.owner });
+      return rebuildOutcome.preview;
+    },
+    async rebuild(employeeId: string, body: unknown, authority: { owner: unknown; require(): void }) {
+      authority.require();
+      absentCalls.push({ kind: 'rebuild', employeeId, body, owner: authority.owner });
+      return rebuildOutcome.apply(body);
+    },
     async preview(employeeId: string, body: unknown, authority: { owner: unknown; require(): void }) {
       authority.require();
       absentCalls.push({ kind: 'preview', employeeId, body, owner: authority.owner });
@@ -347,6 +367,7 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
   return {
     app,
     absentCalls,
+    rebuildOutcome,
     companyStore,
     revisions,
     resourceRevisionService,
@@ -2237,6 +2258,154 @@ describe('absent laptop reprovision routes are owner-only', () => {
       payload: { template: body.template, extra: 1 },
     });
     expect(invalid.statusCode).toBe(400);
+  });
+  it.each([
+    ['an agent with recovery permission', (f: F) => f.workerHeaders],
+    ['a headless worker identity', (f: F) => f.headersFor('headless-worker')],
+    ['an owner cookie with a parent session', (f: F) => ({ ...f.ownerHeaders, 'x-reverie-parent-session': actorSid })],
+    ['an owner cookie with a service token', (f: F) => ({ ...f.ownerHeaders, 'x-reverie-service-token': 'synthetic' })],
+    [
+      'an owner cookie with a worker identity header',
+      (f: F) => ({ ...f.ownerHeaders, [DOCKER_WORKER_IDENTITY_HEADER]: 'synthetic' }),
+    ],
+    ['a cross-origin browser request', (f: F) => ({ ...f.ownerHeaders, origin: 'http://attacker.example' })],
+    ['a request without an origin', (f: F) => ({ cookie: f.ownerHeaders.cookie, host: 'localhost' })],
+    ['an anonymous request', () => ({ origin: 'http://localhost', host: 'localhost' })],
+  ])('refuses %s', async (_name, headers) => {
+    const f = await fixture({ storedPolicy: true, recover: true, office: true });
+    for (const response of await calls(f, headers(f) as Record<string, string>))
+      expect([401, 403]).toContain(response.statusCode);
+    expect(f.absentCalls).toEqual([]);
+  });
+  it('refuses after the owner signs out', async () => {
+    const f = await fixture({ storedPolicy: true });
+    f.logout();
+    for (const response of await calls(f, f.ownerHeaders)) expect([401, 403]).toContain(response.statusCode);
+    expect(f.absentCalls).toEqual([]);
+  });
+});
+
+describe('laptop rebuild routes are owner-only and say what to do next', () => {
+  type F = Awaited<ReturnType<typeof fixture>>;
+  const body = {
+    operationId: '99999999-9999-4999-8999-999999999999',
+    sessionId: sid,
+    sessionGeneration: 9,
+    expectedScopeDigest: '2'.repeat(64),
+    template: { user: '1000:1000', scratchRoot: '/synthetic/laptops', mounts: [] },
+    confirmDiscardRunning: true,
+  };
+  const calls = async (f: F, headers: Record<string, string>) => [
+    await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-rebuild/preview',
+      headers,
+      payload: { template: body.template },
+    }),
+    await f.app.inject({ method: 'POST', url: f.url + '/docker-rebuild/apply', headers, payload: body }),
+  ];
+  it('admits the signed-in same-origin owner and explains the result', async () => {
+    const f = await fixture({ storedPolicy: true });
+    const [preview, apply] = await calls(f, f.ownerHeaders);
+    expect(preview!.statusCode).toBe(200);
+    expect(preview!.json()).toMatchObject({
+      success: true,
+      data: {
+        scopeDigest: '2'.repeat(64),
+        allowedActions: ['rebuild'],
+        message: expect.stringContaining('home directory'),
+      },
+    });
+    expect(apply!.json()).toMatchObject({
+      success: true,
+      data: {
+        operationId: body.operationId,
+        state: 'ready',
+        allowedActions: ['continue'],
+        message: expect.stringContaining('continue'),
+      },
+    });
+    expect(f.absentCalls).toEqual([
+      { kind: 'rebuild-preview', employeeId: target, body: body.template, owner: undefined },
+      { kind: 'rebuild', employeeId: target, body, owner: undefined },
+    ]);
+    const invalid = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-rebuild/preview',
+      headers: f.ownerHeaders,
+      payload: { template: body.template, rebuild: true },
+    });
+    expect(invalid.statusCode).toBe(400);
+  });
+  it('turns a blocked preview, a held result and a refusal into a sentence with the next step', async () => {
+    const f = await fixture({ storedPolicy: true });
+    f.rebuildOutcome.preview = {
+      scopeDigest: '2'.repeat(64),
+      code: 'DOCKER_REBUILD_PLAN_MOVE_HELD',
+      allowedActions: ['abandon'],
+      planMoves: { open: ['held-move'], abandoned: [] },
+    };
+    f.rebuildOutcome.apply = (request) => ({
+      operationId: (request as { operationId: string }).operationId,
+      state: 'held',
+      code: 'DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED',
+    });
+    const [preview, held] = await calls(f, f.ownerHeaders);
+    expect(preview!.json().data).toMatchObject({
+      code: 'DOCKER_REBUILD_PLAN_MOVE_HELD',
+      allowedActions: ['abandon'],
+      message: expect.stringContaining('Abandon that move first'),
+    });
+    expect(held!.json().data).toMatchObject({
+      state: 'held',
+      allowedActions: ['retry'],
+      message: expect.stringContaining('Send the same request again'),
+    });
+    f.rebuildOutcome.apply = () => {
+      throw new DockerEmployeeContinuationError('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED');
+    };
+    const refused = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-rebuild/apply',
+      headers: f.ownerHeaders,
+      payload: body,
+    });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json()).toEqual({
+      success: false,
+      error: {
+        code: 'DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED',
+        message: expect.stringContaining('confirmDiscardRunning'),
+        allowedActions: ['rebuild'],
+      },
+    });
+    // The names an ambiguous network refusal carries reach the caller; an unexplained code stays bare.
+    f.rebuildOutcome.apply = () => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_OFFICE_NETWORK_AMBIGUOUS', 409, {
+        cause: { networkCandidates: ['reverie-boxed-api-one', 'reverie-boxed-api-two'] },
+      });
+    };
+    const ambiguous = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-rebuild/apply',
+      headers: f.ownerHeaders,
+      payload: body,
+    });
+    expect(ambiguous.json().error).toMatchObject({
+      code: 'DOCKER_REPROVISION_OFFICE_NETWORK_AMBIGUOUS',
+      allowedActions: ['choose-network'],
+      networkCandidates: ['reverie-boxed-api-one', 'reverie-boxed-api-two'],
+    });
+    f.rebuildOutcome.apply = () => {
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+    };
+    const bare = await f.app.inject({
+      method: 'POST',
+      url: f.url + '/docker-rebuild/apply',
+      headers: f.ownerHeaders,
+      payload: body,
+    });
+    expect(bare.json()).toEqual({ success: false, error: { code: 'DOCKER_REPROVISION_HISTORY_AMBIGUOUS' } });
   });
   it.each([
     ['an agent with recovery permission', (f: F) => f.workerHeaders],

@@ -100,6 +100,20 @@ export const DockerAbsentReprovisionRequest = z
   })
   .strict();
 export type DockerAbsentReprovisionRequest = z.infer<typeof DockerAbsentReprovisionRequest>;
+/** The owner's rebuild confirmation. `confirmDiscardRunning` is the explicit
+ * statement that a laptop the preview listed as running, and the conversation
+ * in its terminal, may be discarded. It selects nothing else. */
+export const DockerLaptopRebuildRequest = z
+  .object({
+    operationId: uuid,
+    sessionId: uuid,
+    sessionGeneration: z.number().int().positive().safe(),
+    expectedScopeDigest: digest,
+    template: DockerLaptopTemplate,
+    confirmDiscardRunning: z.literal(true).optional(),
+  })
+  .strict();
+export type DockerLaptopRebuildRequest = z.infer<typeof DockerLaptopRebuildRequest>;
 const sourceIntent = {
   name: z.string().regex(/^reverie-boxed-source-[a-f0-9]{64}$/),
   imageId: image,

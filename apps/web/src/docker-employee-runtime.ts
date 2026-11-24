@@ -422,7 +422,10 @@ export class DockerEmployeeRuntime {
         live: (id) => {
           const session = ctx.sessions.get(id);
           return session
-            ? { inert: session.pid === null && session.runningTaskCount === 0 && !session.paneLifecycleInFlight }
+            ? {
+                inert: session.pid === null && session.runningTaskCount === 0 && !session.paneLifecycleInFlight,
+                ...(session.docker?.continuation ? { container: session.docker.containerName } : {}),
+              }
             : undefined;
         },
         blocked: (id, owner) => ctx.store.dockerAbsentReprovisionBlocker(id, owner),
@@ -436,6 +439,9 @@ export class DockerEmployeeRuntime {
             : undefined;
         },
         discard: (id) => ctx.discardPartiallyBuiltSession(id),
+        ...(ctx.discardAbsentLaptopView
+          ? { discardView: (id, absent) => ctx.discardAbsentLaptopView!(id, absent) }
+          : {}),
         clear: (proof) => ctx.store.commitDockerAbsentReprovision(proof),
       },
       () => this.#absentPlanMoves,

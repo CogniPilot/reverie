@@ -19,10 +19,15 @@ import {
 } from './docker-employee-continuation.js';
 import { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import { DockerEmployeeInspect, boxedOriginal } from './docker-employee-engine-data.js';
-import type { DockerEngineCommand } from './docker-engine-command.js';
+import {
+  dockerLaptopContainerProven,
+  type DockerEngineCommand,
+  type DockerLaptopContainerProof,
+} from './docker-engine-command.js';
 import {
   DockerAbsentContinuationRetirement,
   DockerAbsentReprovisionRequest,
+  DockerLaptopRebuildRequest,
   DockerLaptopTemplate,
   allowedReprovisionTransition,
   type DockerReprovisionAccount,
@@ -56,12 +61,17 @@ export interface DockerAbsentReprovisionConfiguration {
 /** The state service that owns state.json and the live application Sessions. */
 export interface DockerAbsentReprovisionSessions {
   saved(sessionId: string): SessionState | undefined;
-  live(sessionId: string): { readonly inert: boolean } | undefined;
+  /** `container` names the boxed laptop a live viewer is attached to, if any. */
+  live(sessionId: string): { readonly inert: boolean; readonly container?: string } | undefined;
   /** Why the saved launch denial could not be removed, before anything is retired. */
   blocked(sessionId: string, owner: string | undefined): string | undefined;
   /** The saved launch overrides, clamped exactly as the provider launch clamps them. */
   overrides(sessionId: string): Promise<Readonly<Record<string, string>> | undefined>;
   discard(sessionId: string): Promise<void>;
+  /** Forget the office-side viewer of a boxed laptop whose own container the
+   * Engine positively reports absent. Local terminal objects only; the saved
+   * session record is kept. Used by the owner's rebuild alone. */
+  discardView?(sessionId: string, containerAbsent: (containerId: string) => Promise<boolean>): Promise<void>;
   clear(proof: unknown): Promise<'cleared' | 'unchanged'>;
 }
 export interface DockerAbsentReprovisionPlanMoves {
@@ -75,6 +85,28 @@ export interface DockerAbsentReprovisionPlanMoves {
     abandonment: { version: 1; reason: 'recorded-containers-absent'; operationId: string; at: number },
     current: () => void
   ): Promise<readonly string[]>;
+  /** Containers named by the moves the owner abandoned for this employee. */
+  ownerAbandonedContainers?(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<
+    readonly {
+      moveId: string;
+      containers: {
+        source: string;
+        target?: string;
+        sourceHolder?: string;
+        helpers: readonly { role: 'storage-holder' | 'leaf-helper' | 'identity-helper'; containerId: string }[];
+      };
+    }[]
+  >;
+}
+/** One container the owner's rebuild will stop (if running) and remove. */
+export interface DockerRebuildDiscard {
+  readonly containerId: string;
+  readonly role: 'laptop' | 'source-holder' | 'storage-holder' | 'leaf-helper' | 'identity-helper';
+  readonly running: boolean;
+  readonly proof: DockerLaptopContainerProof;
 }
 export interface DockerAbsentReprovisionResult {
   operationId: string;
@@ -214,7 +246,10 @@ export class DockerAbsentReprovision {
     if (!candidates.length) refuse('DOCKER_REPROVISION_OFFICE_NETWORK_REQUIRED');
     const chosen = selected ? candidates.filter((row) => row.name === selected) : candidates;
     if (chosen.length !== 1)
-      refuse(selected ? 'DOCKER_REPROVISION_OFFICE_NETWORK_REQUIRED' : 'DOCKER_REPROVISION_OFFICE_NETWORK_AMBIGUOUS');
+      // The names let the owner choose one with `template.network`.
+      refuse(selected ? 'DOCKER_REPROVISION_OFFICE_NETWORK_REQUIRED' : 'DOCKER_REPROVISION_OFFICE_NETWORK_AMBIGUOUS', {
+        networkCandidates: names,
+      });
     const network = chosen[0]!;
     let inspected: unknown;
     try {
@@ -249,7 +284,12 @@ export class DockerAbsentReprovision {
   #entry(operationId: string, state = this.company.store.snapshot()) {
     return state.retiredDockerEmployeeContinuations?.find((row) => row.operationId === operationId);
   }
-  #employee(employeeId: string, authority: DockerContinuationAuthority, state: CompanyState): CompanyEmployee {
+  #employee(
+    employeeId: string,
+    authority: DockerContinuationAuthority,
+    state: CompanyState,
+    rebuild = false
+  ): CompanyEmployee {
     const rows = state.employees.filter((value) => value.id === employeeId),
       employee = rows[0];
     if (
@@ -259,17 +299,20 @@ export class DockerAbsentReprovision {
       state.employees.filter((value) => value.sessionId === employee.sessionId).length !== 1
     )
       refuse('DOCKER_REPROVISION_TARGET_CHANGED');
-    if (employee!.bindingMigration || employee!.onVacation || employee!.desiredRunning === false)
+    // The owner's rebuild also serves an employee who is out of the office: it
+    // creates only an inert source, and the continuation that follows still
+    // needs its own explicit enter-office decision before anything runs.
+    if (employee!.bindingMigration || (!rebuild && (employee!.onVacation || employee!.desiredRunning === false)))
       refuse('DOCKER_REPROVISION_EMPLOYEE_NOT_ELIGIBLE');
     return employee!;
   }
   /** Synchronous canonical facts; re-read before and after every await. */
-  #facts(employeeId: string, authority: DockerContinuationAuthority) {
+  #facts(employeeId: string, authority: DockerContinuationAuthority, rebuild = false) {
     this.runtimeCurrent();
     authority.require();
     if (this.company.store.publicationUnconfirmed) refuse('DOCKER_REPROVISION_PUBLICATION_UNCONFIRMED');
     const state = this.company.store.snapshot(),
-      employee = this.#employee(employeeId, authority, state);
+      employee = this.#employee(employeeId, authority, state, rebuild);
     if (ownerStopPending(employee.sessionId)) refuse('DOCKER_REPROVISION_OWNER_STOP_PENDING');
     if (!this.company.employeeRecoveryAvailable(employeeId, employee.owner, state))
       refuse('DOCKER_REPROVISION_RECOVERY_PENDING');
@@ -306,7 +349,9 @@ export class DockerAbsentReprovision {
     });
     if (saved!.docker && !stale) refuse('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN');
     if (!stale && (saved!.providerDispatchHeld || saved!.terminalInputHeld)) refuse('DOCKER_REPROVISION_SESSION_HELD');
-    if (this.sessions.live(employee.sessionId)?.inert === false) refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
+    // A rebuild discards the live viewer itself, once its laptop is gone.
+    if (!rebuild && this.sessions.live(employee.sessionId)?.inert === false)
+      refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
     const blocked = this.sessions.blocked(employee.sessionId, employee.owner);
     if (blocked) refuse(blocked);
     return {
@@ -361,19 +406,19 @@ export class DockerAbsentReprovision {
       rows.length === 0 || (rows.length === 1 && !advanced && rows[0]!.original.containerId === head.source.containerId)
     );
   }
-  async #scope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+  async #scope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority, rebuild = false) {
     this.runtimeCurrent();
     authority.require();
     return this.#replaceable(employeeId)
-      ? this.replaceScope(employeeId, unchecked, authority)
-      : this.absentScope(employeeId, unchecked, authority);
+      ? this.replaceScope(employeeId, unchecked, authority, rebuild)
+      : this.absentScope(employeeId, unchecked, authority, rebuild);
   }
-  #replaceFacts(employeeId: string, authority: DockerContinuationAuthority) {
+  #replaceFacts(employeeId: string, authority: DockerContinuationAuthority, rebuild = false) {
     this.runtimeCurrent();
     authority.require();
     if (this.company.store.publicationUnconfirmed) refuse('DOCKER_REPROVISION_PUBLICATION_UNCONFIRMED');
     const state = this.company.store.snapshot(),
-      employee = this.#employee(employeeId, authority, state);
+      employee = this.#employee(employeeId, authority, state, rebuild);
     if (ownerStopPending(employee.sessionId)) refuse('DOCKER_REPROVISION_OWNER_STOP_PENDING');
     if (!this.company.employeeRecoveryAvailable(employeeId, employee.owner, state))
       refuse('DOCKER_REPROVISION_RECOVERY_PENDING');
@@ -421,7 +466,8 @@ export class DockerAbsentReprovision {
     if (saved!.nativePlanRetiredBy !== undefined) refuse('DOCKER_REPROVISION_SESSION_RETIRED');
     if (saved!.docker) refuse('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN');
     if (saved!.providerDispatchHeld || saved!.terminalInputHeld) refuse('DOCKER_REPROVISION_SESSION_HELD');
-    if (this.sessions.live(employee.sessionId)?.inert === false) refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
+    if (!rebuild && this.sessions.live(employee.sessionId)?.inert === false)
+      refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
     // Storage holders the journal already owns: this record's and retired ones'.
     const holders = [row, ...(state.retiredDockerEmployeeContinuations ?? []).map((entry) => entry.record)]
       .filter((value) => value?.employeeId === employeeId)
@@ -471,9 +517,14 @@ export class DockerAbsentReprovision {
     if (listed.some((id) => !known.includes(id))) refuse('DOCKER_REPROVISION_HELPER_FOREIGN');
     return listed.sort();
   }
-  private async replaceScope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+  private async replaceScope(
+    employeeId: string,
+    unchecked: unknown,
+    authority: DockerContinuationAuthority,
+    rebuild = false
+  ) {
     const template = DockerLaptopTemplate.parse(unchecked),
-      facts = this.#replaceFacts(employeeId, authority);
+      facts = this.#replaceFacts(employeeId, authority, rebuild);
     const key = (value: typeof facts) =>
       dockerContinuationDigest({
         owner: value.employee.owner ?? null,
@@ -487,7 +538,8 @@ export class DockerAbsentReprovision {
       });
     const factsDigest = key(facts);
     const current = () => {
-      if (key(this.#replaceFacts(employeeId, authority)) !== factsDigest) refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+      if (key(this.#replaceFacts(employeeId, authority, rebuild)) !== factsDigest)
+        refuse('DOCKER_REPROVISION_TARGET_CHANGED');
     };
     const sourceId = (facts.head.source as { containerId: string }).containerId;
     const storage = reprovisionStorage(facts.basis, template);
@@ -555,9 +607,14 @@ export class DockerAbsentReprovision {
       scopeDigest,
     };
   }
-  private async absentScope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+  private async absentScope(
+    employeeId: string,
+    unchecked: unknown,
+    authority: DockerContinuationAuthority,
+    rebuild = false
+  ) {
     const template = DockerLaptopTemplate.parse(unchecked),
-      facts = this.#facts(employeeId, authority);
+      facts = this.#facts(employeeId, authority, rebuild);
     // Identity, record, binding and saved view; unrelated profile edits do not matter.
     const key = (value: typeof facts) =>
       dockerContinuationDigest({
@@ -573,7 +630,7 @@ export class DockerAbsentReprovision {
       });
     const factsDigest = key(facts);
     const current = () => {
-      if (key(this.#facts(employeeId, authority)) !== factsDigest) refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+      if (key(this.#facts(employeeId, authority, rebuild)) !== factsDigest) refuse('DOCKER_REPROVISION_TARGET_CHANGED');
     };
     const storage = reprovisionStorage(facts.row, template);
     const moves = this.planMoves();
@@ -743,6 +800,367 @@ export class DockerAbsentReprovision {
       this.#flights.delete(employeeId);
     }
   }
+  /** One listed container, or undefined when the Engine positively lists none
+   * under that ID. A failed read is unknown, never absence. */
+  async #listedContainer(id: string) {
+    if (!(await this.#containers(['id=' + id])).includes(id)) return undefined;
+    try {
+      const rows = z
+        .array(
+          z
+            .object({
+              Id: z.literal(id),
+              Name: z.string().max(256),
+              State: z.object({ Running: z.boolean() }).passthrough(),
+              Config: z.object({ Labels: z.record(z.string(), z.string()).nullable() }).passthrough(),
+            })
+            .passthrough()
+        )
+        .length(1)
+        .parse(JSON.parse(await this.command.run(['container', 'inspect', id])));
+      return rows[0]!;
+    } catch (cause) {
+      return refuse('DOCKER_REPROVISION_ABSENCE_UNCONFIRMED', cause);
+    }
+  }
+  /** Everything the owner's rebuild would discard, each bound to this employee:
+   * laptops by the employee and deployment labels their creator set (or by the
+   * employee's own canonical record), and the holder and helpers that a move
+   * the owner abandoned named in its journal, by their own employee and box
+   * labels. A container that carries no such proof is reported, never removed.
+   * The shared pool is never part of this. Reads only. */
+  private async rebuildScope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority) {
+    const template = DockerLaptopTemplate.parse(unchecked);
+    this.runtimeCurrent();
+    authority.require();
+    // An earlier operation that retired the record but has not finished its
+    // source is continued by repeating its own request, never started over.
+    const head = this.#head(employeeId);
+    if (
+      head &&
+      (head.source.phase !== 'created' ||
+        head.session.phase !== 'cleared' ||
+        (head.removal && head.removal.phase !== 'removed'))
+    )
+      refuse('DOCKER_REPROVISION_OPERATION_PENDING', { pendingOperationId: head.operationId });
+    const replace = this.#replaceable(employeeId);
+    const read = () => {
+      const facts = replace
+        ? this.#replaceFacts(employeeId, authority, true)
+        : this.#facts(employeeId, authority, true);
+      const basis = 'basis' in facts ? facts.basis : facts.row,
+        // The unused source of a finished earlier operation is replaced by that
+        // workflow's own never-started proof, not discarded here.
+        source = 'head' in facts && facts.head.source.phase === 'created' ? facts.head.source.containerId : null,
+        recorded = 'ids' in facts ? facts.ids : [];
+      return { facts, basis, source, recorded };
+    };
+    const first = read(),
+      { employee } = first.facts;
+    const key = (value: ReturnType<typeof read>) =>
+      dockerContinuationDigest({
+        owner: value.facts.employee.owner ?? null,
+        sessionId: value.facts.employee.sessionId,
+        sessionGeneration: value.facts.employee.sessionGeneration,
+        name: value.facts.employee.name,
+        profile: value.facts.employee.runtimeRecipe?.subscriptionProfile?.id ?? null,
+        row: value.facts.row,
+        binding: value.facts.employee.dockerBinding ?? null,
+        recorded: value.recorded,
+        source: value.source,
+      });
+    const factsDigest = key(first);
+    const current = () => {
+      if (key(read()) !== factsDigest) refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+    };
+    const storage = reprovisionStorage(first.basis, template);
+    const moves = this.planMoves();
+    if (!moves) refuse('DOCKER_REPROVISION_PLAN_JOURNAL_UNAVAILABLE');
+    const open = await moves!.openMoves(employeeId, employee.owner);
+    current();
+    const abandoned = (await moves!.ownerAbandonedContainers?.(employeeId, employee.owner)) ?? [];
+    current();
+    const listed = (await this.#present(first.recorded, employeeId)).filter((id) => id !== first.source);
+    current();
+    const box = this.configuration.boxId,
+      deployment = this.configuration.deployment;
+    const wanted = new Map<string, { role: DockerRebuildDiscard['role']; moveId?: string }>();
+    for (const id of listed) wanted.set(id, { role: 'laptop' });
+    for (const move of abandoned) {
+      // The source and candidate of a move are laptops: only the label listing
+      // or the employee's own record above can select one of those.
+      if (move.containers.sourceHolder && !wanted.has(move.containers.sourceHolder))
+        wanted.set(move.containers.sourceHolder, { role: 'source-holder', moveId: move.moveId });
+      for (const helper of move.containers.helpers)
+        if (!wanted.has(helper.containerId)) wanted.set(helper.containerId, { role: helper.role, moveId: move.moveId });
+    }
+    const discard: DockerRebuildDiscard[] = [],
+      foreign: string[] = [];
+    for (const [id, hint] of [...wanted].sort(([a], [b]) => (a < b ? -1 : 1))) {
+      const raw = await this.#listedContainer(id);
+      current();
+      if (!raw) continue;
+      const proofs: Record<DockerRebuildDiscard['role'], DockerLaptopContainerProof[]> = {
+        laptop: [
+          {
+            kind: 'labels',
+            labels: { 'reverie.boxed.employee': employeeId, 'reverie.boxed.instance': deployment },
+          },
+          { kind: 'labels', labels: { 'reverie.employee': employeeId, 'reverie.worker': deployment } },
+          ...(first.recorded.includes(id) ? [{ kind: 'recorded' as const }] : []),
+        ],
+        'source-holder': [
+          {
+            kind: 'labels',
+            labels: {
+              'reverie.box.plan-source.employee': employeeId,
+              'reverie.box.plan-source.box': box,
+              'reverie.box.plan-source.move': hint.moveId ?? '',
+            },
+          },
+        ],
+        'storage-holder': [
+          { kind: 'labels', labels: { 'reverie.box.storage.employee': employeeId, 'reverie.box.storage.box': box } },
+        ],
+        'identity-helper': [
+          { kind: 'labels', labels: { 'reverie.box.identity.employee': employeeId, 'reverie.box.identity.box': box } },
+        ],
+        'leaf-helper': [
+          {
+            kind: 'labels',
+            labels: { 'reverie.box.resource.box': box, 'reverie.box.resource.role': 'leaf-helper' },
+          },
+        ],
+      };
+      const labels = raw.Config.Labels ?? {},
+        // A boxed laptop of another box in the same deployment is not this office's to remove.
+        otherBox = labels['reverie.boxed.box'] !== undefined && labels['reverie.boxed.box'] !== box,
+        proof = otherBox
+          ? undefined
+          : proofs[hint.role].find((candidate) => dockerLaptopContainerProven(raw, candidate));
+      if (!proof) foreign.push(id);
+      else discard.push({ containerId: id, role: hint.role, running: raw.State.Running, proof });
+    }
+    const laptops = discard.filter((item) => item.role === 'laptop').map((item) => item.containerId);
+    const image = await this.#image();
+    current();
+    const { network, names } = await this.#network(employeeId, template.network, laptops);
+    current();
+    const account = await this.#account(first.basis, employee, template);
+    current();
+    requireReprovisionEphemeralLayout(this.#input(first.basis, template, '', employee.name, image, network, account));
+    const live = this.sessions.live(employee.sessionId);
+    const templateDigest = dockerContinuationDigest(template);
+    // Decided before any effect: a viewer this rebuild could not forget
+    // afterwards must stop it here, not after the laptop is already gone.
+    const own = [...first.recorded, ...discard.map((item) => item.containerId)];
+    const viewer = !live
+      ? undefined
+      : live.container !== undefined
+        ? !own.includes(live.container)
+          ? ('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN' as const)
+          : !this.sessions.discardView
+            ? ('DOCKER_REBUILD_VIEWER_DISCARD_UNAVAILABLE' as const)
+            : undefined
+        : live.inert
+          ? undefined
+          : ('DOCKER_REPROVISION_SESSION_ACTIVE' as const);
+    const blocked = open.some((move) => move.busy || !move.docker)
+      ? ('DOCKER_REBUILD_PLAN_MOVE_ACTIVE' as const)
+      : open.length
+        ? ('DOCKER_REBUILD_PLAN_MOVE_HELD' as const)
+        : foreign.length
+          ? ('DOCKER_REBUILD_CONTAINER_FOREIGN' as const)
+          : viewer;
+    const scopeDigest = dockerContinuationDigest({
+      purpose: 'docker-laptop-rebuild-scope-v1',
+      mode: replace ? 'replace-source' : 'retire',
+      deployment,
+      boxId: box,
+      employeeId,
+      owner: employee.owner ?? null,
+      sessionId: employee.sessionId,
+      sessionGeneration: employee.sessionGeneration,
+      record: dockerContinuationDigest(first.facts.row),
+      binding: dockerContinuationDigest(employee.dockerBinding ?? null),
+      recorded: first.recorded,
+      source: first.source,
+      discard: discard.map((item) => ({ id: item.containerId, role: item.role, running: item.running })),
+      foreign,
+      openMoves: open.map((move) => move.id).sort(),
+      abandonedMoves: abandoned.map((move) => move.moveId).sort(),
+      viewer: live?.container ?? null,
+      sourceImageId: image.imageId,
+      network,
+      storage,
+      account,
+      templateDigest,
+    });
+    return {
+      replace,
+      template,
+      templateDigest,
+      ...first,
+      own,
+      employee,
+      current,
+      storage,
+      open,
+      abandoned,
+      discard,
+      foreign,
+      image,
+      network,
+      names,
+      account,
+      live,
+      blocked,
+      scopeDigest,
+    };
+  }
+  /** Read-only. Lists what a rebuild keeps and what it discards; the digest
+   * binds all of it, and `apply` must echo it. */
+  async previewRebuild(employeeId: string, template: unknown, authority: DockerContinuationAuthority) {
+    const scope = await this.rebuildScope(employeeId, template, authority),
+      row = scope.facts.row,
+      running = scope.discard.filter((item) => item.role === 'laptop' && item.running);
+    return {
+      action: 'rebuild' as const,
+      mode: scope.replace ? ('replace-source' as const) : ('retire' as const),
+      employeeId,
+      sessionId: scope.employee.sessionId,
+      sessionGeneration: scope.employee.sessionGeneration,
+      outOfOffice: scope.employee.onVacation === true || scope.employee.desiredRunning === false,
+      record: row ? { version: row.version, phase: row.phase, operationId: row.request.operationId } : null,
+      discard: scope.discard.map(({ containerId, role, running: isRunning }) => ({
+        containerId,
+        role,
+        running: isRunning,
+      })),
+      runningLaptops: running.map((item) => item.containerId),
+      requiresConfirmation: running.length > 0,
+      foreign: scope.foreign,
+      viewer: scope.live ? { live: true, container: scope.live.container ?? null } : { live: false, container: null },
+      planMoves: { open: scope.open.map((move) => move.id), abandoned: scope.abandoned.map((move) => move.moveId) },
+      kept: { home: scope.basis.original.home, nixSource: scope.storage.nix, scratchSource: scope.storage.scratch },
+      account: scope.account,
+      sourceImageId: scope.image.imageId,
+      network: scope.network,
+      networkCandidates: scope.names,
+      templateDigest: scope.templateDigest,
+      scopeDigest: scope.scopeDigest,
+      allowedActions: scope.blocked
+        ? scope.blocked === 'DOCKER_REBUILD_PLAN_MOVE_HELD'
+          ? (['abandon'] as const)
+          : scope.blocked === 'DOCKER_REBUILD_PLAN_MOVE_ACTIVE'
+            ? (['observe'] as const)
+            : ([] as const)
+        : (['rebuild'] as const),
+      lost:
+        'Everything running in the laptop right now, including the conversation in its terminal. Files in the home ' +
+        'directory, the shared Nix store, scratch space and shared drives are kept, and the saved conversation is ' +
+        'resumed only if its transcript is among those files.',
+      ...(scope.blocked ? { code: scope.blocked } : {}),
+    };
+  }
+  /** The owner's rebuild. It first makes the recorded state true: every listed
+   * container of this employee is stopped and removed and the viewer of the
+   * gone laptop is forgotten. From there it is exactly the absent-laptop
+   * workflow above, which retires the record and creates one inert source.
+   * Each step only removes or advances, so a failed attempt is repeated from
+   * a fresh preview and converges. */
+  async rebuild(
+    employeeId: string,
+    unchecked: unknown,
+    authority: DockerContinuationAuthority
+  ): Promise<DockerAbsentReprovisionResult> {
+    const input = DockerLaptopRebuildRequest.parse(unchecked);
+    this.runtimeCurrent();
+    authority.require();
+    if (this.#flights.has(employeeId)) refuse('DOCKER_REPROVISION_BUSY');
+    this.#flights.add(employeeId);
+    try {
+      let entry = this.#entry(input.operationId);
+      if (!entry) {
+        const scope = await this.rebuildScope(employeeId, input.template, authority);
+        if (
+          input.sessionId !== scope.employee.sessionId ||
+          input.sessionGeneration !== scope.employee.sessionGeneration
+        )
+          refuse('DOCKER_REPROVISION_TARGET_CHANGED');
+        if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
+        if (scope.blocked) refuse(scope.blocked);
+        if (scope.discard.some((item) => item.role === 'laptop' && item.running) && !input.confirmDiscardRunning)
+          refuse('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED');
+        await this.#discardForRebuild(scope);
+        await this.#forgetViewer(scope);
+        // The recorded state is now true; the ordinary workflow takes over.
+        const inner = await this.#scope(employeeId, input.template, authority, true);
+        if (inner.present.length) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
+        entry =
+          inner.kind === 'absent'
+            ? await this.#retire(employeeId, input, authority, inner, true)
+            : await this.#replace(employeeId, input, authority, inner, true);
+      } else if (
+        entry.employeeId !== employeeId ||
+        entry.owner !== authority.owner ||
+        entry.sessionId !== input.sessionId ||
+        entry.sessionGeneration !== input.sessionGeneration ||
+        entry.templateDigest !== dockerContinuationDigest(input.template)
+      )
+        refuse('DOCKER_REPROVISION_OPERATION_CHANGED');
+      return await this.#resume(entry, authority, true);
+    } finally {
+      this.#flights.delete(employeeId);
+    }
+  }
+  /** Laptops first, so their viewers end; then the abandoned move's holder and
+   * helpers. Never by force and never with volumes. A positive listing settles
+   * every removal before anything canonical is written. */
+  async #discardForRebuild(scope: Awaited<ReturnType<DockerAbsentReprovision['rebuildScope']>>): Promise<void> {
+    if (!scope.discard.length) return;
+    if (!this.command.discardLaptopContainer) refuse('DOCKER_REBUILD_REMOVAL_UNAVAILABLE');
+    const ordered = [...scope.discard].sort((a, b) => Number(b.role === 'laptop') - Number(a.role === 'laptop'));
+    for (const item of ordered) {
+      scope.current();
+      try {
+        await this.command.discardLaptopContainer!(item.containerId, item.proof, scope.current);
+      } catch (cause) {
+        if (cause instanceof DockerEmployeeContinuationError) throw cause;
+        refuse('DOCKER_REBUILD_REMOVAL_UNCONFIRMED', cause);
+      }
+    }
+    for (const item of ordered) {
+      scope.current();
+      if ((await this.#containers(['id=' + item.containerId])).length) refuse('DOCKER_REBUILD_REMOVAL_UNCONFIRMED');
+    }
+    scope.current();
+  }
+  /** A live viewer of a laptop that no longer exists is only office-side
+   * terminal state. It is forgotten through the state service once the Engine
+   * positively lists no container under the ID it was attached to. */
+  async #forgetViewer(scope: Awaited<ReturnType<DockerAbsentReprovision['rebuildScope']>>): Promise<void> {
+    const sessionId = scope.employee.sessionId,
+      live = this.sessions.live(sessionId);
+    if (!live) return;
+    const absent = async (id: string) => /^[a-f0-9]{64}$/.test(id) && !(await this.#containers(['id=' + id])).length;
+    try {
+      if (live.container !== undefined) {
+        if (!this.sessions.discardView) refuse('DOCKER_REBUILD_VIEWER_DISCARD_UNAVAILABLE');
+        // Only a viewer of one of this employee's own, now absent, laptops.
+        if (!scope.own.includes(live.container)) refuse('DOCKER_REPROVISION_SESSION_VIEW_FOREIGN');
+        if (!(await absent(live.container))) refuse('DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED');
+        scope.current();
+        await this.sessions.discardView!(sessionId, absent);
+      } else if (live.inert) await this.sessions.discard(sessionId);
+      else refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
+    } catch (cause) {
+      if (cause instanceof DockerEmployeeContinuationError) throw cause;
+      refuse('DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED', cause);
+    }
+    scope.current();
+    if (this.sessions.live(sessionId)) refuse('DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED');
+  }
   /** Each container is removed only after the Engine shows it hosts no process
    * beyond its own init, and never by force. Home, Nix and scratch are binds. */
   async #discard(ids: readonly string[], current: () => void): Promise<void> {
@@ -762,7 +1180,8 @@ export class DockerAbsentReprovision {
     employeeId: string,
     input: DockerAbsentReprovisionRequest,
     authority: DockerContinuationAuthority,
-    scope: Awaited<ReturnType<DockerAbsentReprovision['absentScope']>>
+    scope: Awaited<ReturnType<DockerAbsentReprovision['absentScope']>>,
+    rebuild = false
   ): Promise<DockerAbsentContinuationRetirement> {
     const { facts } = scope;
     if (input.operationId === facts.row.request.operationId) refuse('DOCKER_REPROVISION_OPERATION_CHANGED');
@@ -814,7 +1233,7 @@ export class DockerAbsentReprovision {
     };
     await this.company.store.update((state) => {
       authorityCurrent();
-      const employee = this.#employee(employeeId, authority, state),
+      const employee = this.#employee(employeeId, authority, state, rebuild),
         rows = state.dockerEmployeeContinuations ?? [],
         index = rows.findIndex((value) => value.employeeId === employeeId);
       if (
@@ -839,7 +1258,8 @@ export class DockerAbsentReprovision {
     employeeId: string,
     input: DockerAbsentReprovisionRequest,
     authority: DockerContinuationAuthority,
-    scope: Awaited<ReturnType<DockerAbsentReprovision['replaceScope']>>
+    scope: Awaited<ReturnType<DockerAbsentReprovision['replaceScope']>>,
+    rebuild = false
   ): Promise<DockerAbsentContinuationRetirement> {
     const { facts } = scope,
       head = facts.head;
@@ -879,7 +1299,7 @@ export class DockerAbsentReprovision {
     };
     await this.company.store.update((state) => {
       authorityCurrent();
-      const employee = this.#employee(employeeId, authority, state),
+      const employee = this.#employee(employeeId, authority, state, rebuild),
         rows = state.dockerEmployeeContinuations ?? [],
         mine = rows.filter((value) => value.employeeId === employeeId),
         actual = this.#head(employeeId, state);
@@ -947,7 +1367,8 @@ export class DockerAbsentReprovision {
   }
   async #resume(
     initial: DockerAbsentContinuationRetirement,
-    authority: DockerContinuationAuthority
+    authority: DockerContinuationAuthority,
+    rebuild = false
   ): Promise<DockerAbsentReprovisionResult> {
     const result = (entry: DockerAbsentContinuationRetirement, code?: string): DockerAbsentReprovisionResult => ({
       operationId: entry.operationId,
@@ -970,7 +1391,7 @@ export class DockerAbsentReprovision {
       authority.require();
       if (this.company.store.publicationUnconfirmed) refuse('DOCKER_REPROVISION_PUBLICATION_UNCONFIRMED');
       const state = this.company.store.snapshot(),
-        employee = this.#employee(entry.employeeId, authority, state);
+        employee = this.#employee(entry.employeeId, authority, state, rebuild);
       if (
         employee.sessionId !== entry.sessionId ||
         employee.sessionGeneration !== entry.sessionGeneration ||

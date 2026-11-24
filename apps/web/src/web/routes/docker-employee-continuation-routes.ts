@@ -18,6 +18,7 @@ import {
 } from '../../docker-employee-continuation-data.js';
 import { CompanyDockerContinuationStore } from '../../docker-employee-store.js';
 import { sameOrigin } from '../../owner-auth/policy.js';
+import { dockerRecoveryGuidance } from '../../docker-recovery-guidance.js';
 const uuid = z
   .string()
   .uuid()
@@ -89,8 +90,25 @@ export function registerDockerEmployeeContinuationRoutes(
     try {
       return { success: true, data: await body() };
     } catch (error) {
-      if (error instanceof DockerEmployeeContinuationError)
-        return reply.code(error.status).send({ success: false, error: { code: error.code } });
+      if (error instanceof DockerEmployeeContinuationError) {
+        // The code stays the contract; a sentence and the next step ride along
+        // for the refusals a person or managing agent has to act on.
+        const guidance = dockerRecoveryGuidance(error.code),
+          detail = error.cause as { networkCandidates?: unknown; pendingOperationId?: unknown } | undefined,
+          candidates = detail?.networkCandidates,
+          pending = detail?.pendingOperationId;
+        return reply.code(error.status).send({
+          success: false,
+          error: {
+            code: error.code,
+            ...(guidance ? { message: guidance.message, allowedActions: guidance.allowedActions } : {}),
+            ...(Array.isArray(candidates) && candidates.every((name) => typeof name === 'string')
+              ? { networkCandidates: candidates }
+              : {}),
+            ...(typeof pending === 'string' && /^[0-9a-f-]{36}$/.test(pending) ? { pendingOperationId: pending } : {}),
+          },
+        });
+      }
       if (error instanceof CompanyError)
         return reply
           .code(error.status)
@@ -133,13 +151,53 @@ export function registerDockerEmployeeContinuationRoutes(
       run(reply, async () => {
         const { id, authority } = owner(req);
         const body = z.object({ template: z.unknown() }).strict().parse(req.body);
-        return absent.preview(id, body.template, authority);
+        const preview = await absent.preview(id, body.template, authority);
+        // A preview that offers no action says why and where to go instead.
+        const guidance = preview.code ? dockerRecoveryGuidance(preview.code) : undefined;
+        return guidance ? { ...preview, message: guidance.message, nextActions: guidance.allowedActions } : preview;
       })
     );
     app.post('/api/company/employees/:id/docker-absent/reprovision', async (req, reply) =>
       run(reply, async () => {
         const { id, authority } = owner(req);
         return absent.reprovision(id, req.body, authority);
+      })
+    );
+    // "Rebuild laptop": the same owner-only authentication, on its own routes so
+    // that nothing sent to the absent-laptop workflow above can ever select the
+    // authority to stop a running laptop or discard a live terminal.
+    app.post('/api/company/employees/:id/docker-rebuild/preview', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const body = z.object({ template: z.unknown() }).strict().parse(req.body);
+        const preview = await absent.previewRebuild(id, body.template, authority);
+        const guidance = 'code' in preview && preview.code ? dockerRecoveryGuidance(preview.code) : undefined;
+        return {
+          ...preview,
+          message:
+            guidance?.message ??
+            'Rebuilding discards the listed containers and the conversation in the laptop terminal. The employee, ' +
+              'their home directory, shared Nix store, scratch space, memories and session identity are kept, and a ' +
+              'fresh laptop source is created on their current plan. Confirm with the scope digest, then continue ' +
+              'the laptop until it is ready.',
+        };
+      })
+    );
+    app.post('/api/company/employees/:id/docker-rebuild/apply', async (req, reply) =>
+      run(reply, async () => {
+        const { id, authority } = owner(req);
+        const result = await absent.rebuild(id, req.body, authority);
+        const guidance = result.code ? dockerRecoveryGuidance(result.code) : undefined;
+        return {
+          ...result,
+          message:
+            result.state === 'ready'
+              ? 'The old laptop is discarded and a fresh source exists. Read the resource policy, then continue the ' +
+                'laptop until it reports ready.'
+              : (guidance?.message ??
+                'The rebuild is recorded but not finished. Send the same request again to continue it.'),
+          allowedActions: result.state === 'ready' ? ['continue'] : (guidance?.allowedActions ?? ['retry']),
+        };
       })
     );
   }

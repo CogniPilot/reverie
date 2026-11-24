@@ -25,6 +25,9 @@ import { DockerResourceRevisionStore } from '../src/docker-resource-revisions.js
 import { boxedMountConfiguration, DockerEmployeeInspect } from '../src/docker-employee-engine-data.js';
 import { ephemeralProjection } from '../src/docker-ephemeral-data.js';
 import { DockerAbsentReprovision } from '../src/docker-absent-reprovision.js';
+import { dockerLaptopContainerProven, type DockerLaptopContainerProof } from '../src/docker-engine-command.js';
+import { absentLaptopViewRefusal } from '../src/absent-laptop-view.js';
+import { dockerRecoveryGuidance } from '../src/docker-recovery-guidance.js';
 import { DockerLaptopTemplate, allowedReprovisionTransition } from '../src/docker-absent-reprovision-data.js';
 import { reprovisionHostname, reprovisionSourceName } from '../src/docker-absent-reprovision-source.js';
 import { PlanMoveStore } from '../src/plan-move-store.js';
@@ -84,10 +87,10 @@ class FakeEngine {
       Config: { Entrypoint: null, Cmd: null, Env: env, Labels: { 'org.reverie.worker-client.manifest': manifest } },
     });
   }
-  container(id: string, labels: Record<string, string>, running = false) {
+  container(id: string, labels: Record<string, string>, running = false, name = '/synthetic-' + id.slice(0, 8)) {
     this.containers.set(id, {
       Id: id,
-      Name: '/synthetic-' + id.slice(0, 8),
+      Name: name,
       Image: legacyImage,
       State: { Running: running, Paused: false, Restarting: false, Dead: false, Status: 'exited', Pid: 0 },
       Config: { User: '1000:1000', Entrypoint: null, Cmd: null, Env: [], Labels: labels },
@@ -188,6 +191,22 @@ class FakeEngine {
     if (this.tenants.has(id)) throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE');
     this.discarded.push(id);
     this.containers.delete(id);
+  }
+  readonly stopped: string[] = [];
+  readonly rebuilt: string[] = [];
+  discardOutcome: 'ok' | 'failed' = 'ok';
+  /** Same guard as the packaged command: the proof is re-read, then stop and remove without force. */
+  async discardLaptopContainer(id: string, proof: DockerLaptopContainerProof, current: () => void): Promise<void> {
+    current();
+    const row = this.containers.get(id);
+    if (!row || !dockerLaptopContainerProven(row as never, proof))
+      throw new DockerEmployeeContinuationError('DOCKER_REBUILD_CONTAINER_NOT_REMOVABLE');
+    if (this.discardOutcome === 'failed') throw Error('synthetic Engine stop failure');
+    if ((row.State as Json).Running) this.stopped.push(id);
+    this.rebuilt.push(id);
+    this.containers.delete(id);
+    // A removed container leaves every network it was attached to.
+    for (const network of this.networks.values()) delete (network.Containers as Json)[id];
   }
   readonly removed: string[] = [];
   removeOutcome: 'ok' | 'lost-reply' | 'not-sent' = 'ok';
@@ -318,7 +337,9 @@ interface Options {
   provider?: 'anthropic' | 'openai';
   mode?: string;
   overrides?: Record<string, string>;
-  moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown } | null;
+  moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown; ownerAbandonedContainers?: unknown } | null;
+  /** Whether the state service can forget the viewer of a removed laptop. */
+  discardView?: boolean;
 }
 async function fixture(options: Options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'absent-laptop-'));
@@ -458,8 +479,9 @@ async function fixture(options: Options = {}) {
     Containers: { ['0'.repeat(64)]: { Name: deployment } },
   });
   let authorized = true,
-    live: { inert: boolean } | undefined;
-  const discarded: string[] = [];
+    live: { inert: boolean; container?: string } | undefined;
+  const discarded: string[] = [],
+    forgotten: string[] = [];
   const authority: DockerContinuationAuthority = {
     owner: undefined,
     require() {
@@ -484,9 +506,21 @@ async function fixture(options: Options = {}) {
       overrides: async (id) =>
         (state.getSession(id) as { __envOverrides?: Record<string, string> } | null)?.__envOverrides,
       discard: async (id) => {
+        // The real guarded discard refuses a boxed viewer and a live pane.
+        if (live?.container !== undefined || live?.inert === false) throw Error('synthetic stop authority unavailable');
         discarded.push(id);
         live = undefined;
       },
+      ...(options.discardView === false
+        ? {}
+        : {
+            // Same admission as the server: only once the viewer's own container is positively absent.
+            discardView: async (id: string, absent: (containerId: string) => Promise<boolean>) => {
+              if (!live?.container || !(await absent(live.container))) throw Error('synthetic laptop still exists');
+              forgotten.push(id);
+              live = undefined;
+            },
+          }),
       clear: (proof) => state.commitDockerAbsentReprovision(proof),
     },
     () => moves as never,
@@ -503,8 +537,8 @@ async function fixture(options: Options = {}) {
   });
   return {
     directory, company, companyStore, state, stateFile, store, engine, service, authority, row, binding, saved,
-    conversation, request, discarded,
-    setLive: (value: { inert: boolean } | undefined) => { live = value; },
+    conversation, request, discarded, forgotten,
+    setLive: (value: { inert: boolean; container?: string } | undefined) => { live = value; },
     setBusy: (value: boolean) => { busy = value; },
     revoke: () => { authorized = false; },
     snapshot: () => companyStore.snapshot(),
@@ -1886,5 +1920,583 @@ describe('a laptop whose provider never started', () => {
       allowedActions: [],
       code: 'DOCKER_REPROVISION_CONTAINERS_PRESENT',
     });
+  });
+});
+
+const moveId = 'synthetic-move';
+const laptopLabels = {
+  'reverie.boxed.employee': employeeId,
+  'reverie.boxed.instance': deployment,
+  'reverie.boxed.box': boxId,
+};
+const laptopName = (id: string) => '/reverie-boxed-' + id;
+const helperName = (kind: string, fill: string) => '/reverie-boxed-' + kind + '-' + fill.repeat(64);
+const holderLabels = (move = moveId, employee = employeeId) => ({
+  'reverie.box.plan-source.employee': employee,
+  'reverie.box.plan-source.box': boxId,
+  'reverie.box.plan-source.move': move,
+  'reverie.box.plan-source.container': destinationCid,
+});
+const storageLabels = (employee = employeeId) => ({
+  'reverie.box.storage.employee': employee,
+  'reverie.box.storage.box': boxId,
+  'reverie.box.storage.operation': nextOperation,
+});
+const leafLabels = { 'reverie.box.resource.box': boxId, 'reverie.box.resource.role': 'leaf-helper' };
+/** No open move; `containers` is what a move the owner abandoned named in its journal. */
+const abandonedMove = (containers: Json | null, open: Json[] = []) => ({
+  openMoves: async () => open,
+  abandonAbsentDockerMoves: async () => [],
+  ownerAbandonedContainers: async () => (containers ? [{ moveId, containers }] : []),
+});
+const rebuildRequest = async (f: Fixture, operationId = retireOperation, extra: Json = {}) => ({
+  operationId,
+  sessionId: sid,
+  sessionGeneration: 9,
+  expectedScopeDigest: (await f.service.previewRebuild(employeeId, template, f.authority)).scopeDigest,
+  template,
+  ...extra,
+});
+const candidateCid = '4'.repeat(64),
+  storageCid = '5'.repeat(64),
+  leafCid = '6'.repeat(64);
+
+describe('rebuild laptop', () => {
+  it('rebuilds an out-of-office employee whose move stopped the old laptop and left a holder', async () => {
+    // The held move was abandoned: old laptop exited, source holder running, dead viewer still live.
+    const f = await fixture({
+      employee: { onVacation: true, desiredRunning: false },
+      moves: abandonedMove({ source: destinationCid, sourceHolder: candidateCid, helpers: [] }),
+    });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    f.engine.container(candidateCid, holderLabels(), true, laptopName('e'.repeat(64)));
+    f.setLive({ inert: false, container: destinationCid });
+    // Every existing exit is closed to this state.
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_EMPLOYEE_NOT_ELIGIBLE',
+    });
+    const before = fs.readFileSync(f.companyStore.file, 'utf8');
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      action: 'rebuild',
+      mode: 'retire',
+      employeeId,
+      sessionId: sid,
+      sessionGeneration: 9,
+      outOfOffice: true,
+      record: { version: 2, phase: 'ready', operationId: priorOperation },
+      discard: [
+        { containerId: candidateCid, role: 'source-holder', running: true },
+        { containerId: destinationCid, role: 'laptop', running: false },
+      ],
+      runningLaptops: [],
+      requiresConfirmation: false,
+      foreign: [],
+      viewer: { live: true, container: destinationCid },
+      planMoves: { open: [], abandoned: [moveId] },
+      kept: {
+        home: f.row.original.home,
+        nixSource: '/synthetic-state/nix',
+        scratchSource: `/synthetic-scratch/laptops/employees/${employeeId}`,
+      },
+      allowedActions: ['rebuild'],
+    });
+    expect(preview).not.toHaveProperty('code');
+    expect(preview.lost).toContain('conversation');
+    // The preview is read-only.
+    expect(fs.readFileSync(f.companyStore.file, 'utf8')).toBe(before);
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.forgotten).toEqual([]);
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f), f.authority);
+    expect(result).toMatchObject({ operationId: retireOperation, state: 'ready' });
+    // The laptop goes first so its viewer ends; only the running holder needed a stop.
+    expect(f.engine.rebuilt).toEqual([destinationCid, candidateCid]);
+    expect(f.engine.stopped).toEqual([candidateCid]);
+    expect(f.forgotten).toEqual([sid]);
+    // The employee, their identity, intent and conversation are untouched; the laptop record is retired.
+    expect(f.snapshot().employees[0]).toMatchObject({
+      id: employeeId,
+      sessionId: sid,
+      sessionGeneration: 9,
+      name: 'Ada Lovelace',
+      onVacation: true,
+      desiredRunning: false,
+    });
+    expect(f.snapshot().employees[0]!.dockerBinding).toBeUndefined();
+    expect(f.snapshot().dockerEmployeeContinuations).toEqual([]);
+    expect(f.entry()).toMatchObject({
+      reason: 'recorded-containers-absent',
+      record: f.row,
+      binding: f.binding,
+      session: { phase: 'cleared', containerName: destinationCid },
+      source: { phase: 'created', containerId: result.sourceContainerId },
+    });
+    const saved = f.state.getSession(sid)!;
+    expect(saved.docker).toBeUndefined();
+    expect(saved).toMatchObject(f.conversation);
+    // One inert source on the employee's private home; nothing was started.
+    expect(f.engine.created).toHaveLength(1);
+    expect((f.engine.containers.get(result.sourceContainerId!)!.State as Json).Status).toBe('created');
+    // The same request replays its recorded result without another effect.
+    const again = await f.service.rebuild(
+      employeeId,
+      { operationId: retireOperation, sessionId: sid, sessionGeneration: 9, expectedScopeDigest: '0'.repeat(64), template },
+      f.authority
+    );
+    expect(again).toEqual(result);
+    expect(f.engine.rebuilt).toHaveLength(2);
+    expect(f.engine.created).toHaveLength(1);
+  });
+  it('requires an explicit confirmation before it stops a running laptop, then discards the candidate and its helpers', async () => {
+    // A move that created and started the new laptop before its resource helper failed.
+    const anchor = '9'.repeat(64);
+    const f = await fixture({
+      moves: abandonedMove({
+        source: destinationCid,
+        target: candidateCid,
+        helpers: [
+          { role: 'storage-holder', containerId: storageCid },
+          { role: 'leaf-helper', containerId: leafCid },
+        ],
+      }),
+    });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    f.engine.container(candidateCid, laptopLabels, true, laptopName(candidateCid));
+    f.engine.container(storageCid, storageLabels(), true, helperName('storage', 'a'));
+    f.engine.container(leafCid, leafLabels, false, helperName('leaf-helper', 'b'));
+    // The shared pool anchor belongs to every laptop and is named by no abandonment.
+    f.engine.container(anchor, { 'reverie.box.resource.box': boxId, 'reverie.box.resource.role': 'anchor' }, true);
+    // The running candidate is still attached to the employee's office bridge.
+    (f.engine.networks.get('b'.repeat(64))!.Containers as Json)[candidateCid] = { Name: 'synthetic-candidate' };
+    f.setLive({ inert: false, container: destinationCid });
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SESSION_ACTIVE',
+    });
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      discard: [
+        { containerId: candidateCid, role: 'laptop', running: true },
+        { containerId: storageCid, role: 'storage-holder', running: true },
+        { containerId: leafCid, role: 'leaf-helper', running: false },
+        { containerId: destinationCid, role: 'laptop', running: false },
+      ],
+      runningLaptops: [candidateCid],
+      requiresConfirmation: true,
+      allowedActions: ['rebuild'],
+    });
+    const request = await rebuildRequest(f);
+    await expect(f.service.rebuild(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED',
+    });
+    // Refused before any effect.
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.forgotten).toEqual([]);
+    expect(f.store.record(employeeId)).toEqual(f.row);
+    expect(f.entry()).toBeUndefined();
+    const result = await f.service.rebuild(employeeId, { ...request, confirmDiscardRunning: true }, f.authority);
+    expect(result.state).toBe('ready');
+    expect(f.engine.rebuilt).toEqual([candidateCid, destinationCid, storageCid, leafCid]);
+    expect(f.engine.stopped).toEqual([candidateCid, storageCid]);
+    expect(f.engine.containers.has(anchor)).toBe(true);
+    expect(f.forgotten).toEqual([sid]);
+    // The ordinary continuation owns the fresh source from here.
+    await beginsAgain(f, result.sourceContainerId!);
+  });
+  it('rebuilds a laptop whose provider exited and left another process behind', async () => {
+    const row = DockerEmployeeContinuationRecord.parse({ ...v2Row('ready'), phase: 'provider-issued' });
+    const f = await fixture({ row, moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, true, laptopName(destinationCid));
+    f.engine.tenants.add(destinationCid);
+    // The idle-only discard of the absent workflow refuses it.
+    f.setLive({ inert: true });
+    await expect(f.service.reprovision(employeeId, await f.request(), f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE',
+    });
+    f.setLive({ inert: false, container: destinationCid });
+    expect(await f.service.previewRebuild(employeeId, template, f.authority)).toMatchObject({
+      record: { phase: 'provider-issued' },
+      runningLaptops: [destinationCid],
+      requiresConfirmation: true,
+    });
+    const result = await f.service.rebuild(
+      employeeId,
+      await rebuildRequest(f, retireOperation, { confirmDiscardRunning: true }),
+      f.authority
+    );
+    expect(result.state).toBe('ready');
+    expect(f.engine.stopped).toEqual([destinationCid]);
+    expect(f.forgotten).toEqual([sid]);
+    await beginsAgain(f, result.sourceContainerId!);
+  });
+  it('sends the owner to abandon a held move first and waits for a working one', async () => {
+    const held = await fixture({ moves: abandonedMove(null, [{ id: 'm', docker: true, busy: false }]) });
+    held.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    expect(await held.service.previewRebuild(employeeId, template, held.authority)).toMatchObject({
+      code: 'DOCKER_REBUILD_PLAN_MOVE_HELD',
+      allowedActions: ['abandon'],
+      planMoves: { open: ['m'], abandoned: [] },
+    });
+    await expect(held.service.rebuild(employeeId, await rebuildRequest(held), held.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_PLAN_MOVE_HELD',
+    });
+    expect(held.engine.rebuilt).toEqual([]);
+    expect(held.store.record(employeeId)).toEqual(held.row);
+    for (const move of [
+      { id: 'm', docker: true, busy: true },
+      { id: 'm', docker: false, busy: false },
+    ]) {
+      const f = await fixture({ moves: abandonedMove(null, [move]) });
+      expect(await f.service.previewRebuild(employeeId, template, f.authority)).toMatchObject({
+        code: 'DOCKER_REBUILD_PLAN_MOVE_ACTIVE',
+        allowedActions: ['observe'],
+      });
+    }
+    const unbound = await fixture({ moves: null });
+    await expect(unbound.service.previewRebuild(employeeId, template, unbound.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_PLAN_JOURNAL_UNAVAILABLE',
+    });
+  });
+  it('never removes a container that is not provably this employee’s own', async () => {
+    const other = '33333333-3333-4333-8333-333333333333',
+      strangerCid = '7'.repeat(64);
+    const f = await fixture({
+      moves: abandonedMove({
+        source: destinationCid,
+        // A move record can only point; the labels decide.
+        target: strangerCid,
+        sourceHolder: candidateCid,
+        helpers: [{ role: 'storage-holder', containerId: storageCid }],
+      }),
+    });
+    // Recorded, but neither labelled for the employee nor under the boxed laptop name.
+    f.engine.container(destinationCid, {});
+    // Another employee's laptop, holder and storage holder.
+    f.engine.container(strangerCid, { ...laptopLabels, 'reverie.boxed.employee': other }, true, laptopName(strangerCid));
+    f.engine.container(candidateCid, holderLabels(moveId, other), true);
+    f.engine.container(storageCid, storageLabels(other), true);
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      discard: [],
+      foreign: [candidateCid, storageCid, destinationCid],
+      code: 'DOCKER_REBUILD_CONTAINER_FOREIGN',
+      allowedActions: [],
+    });
+    // Another employee's laptop is not even listed: a move record never selects a laptop.
+    expect(JSON.stringify(preview)).not.toContain(strangerCid);
+    await expect(
+      f.service.rebuild(employeeId, await rebuildRequest(f, retireOperation, { confirmDiscardRunning: true }), f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REBUILD_CONTAINER_FOREIGN' });
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.engine.containers.size).toBe(4);
+    // A laptop of this employee under another box of the same deployment is not this office's.
+    const boxed = await fixture({ moves: abandonedMove(null) });
+    boxed.engine.container(
+      candidateCid,
+      { ...laptopLabels, 'reverie.boxed.box': '1'.repeat(64) },
+      false,
+      laptopName(candidateCid)
+    );
+    expect(await boxed.service.previewRebuild(employeeId, template, boxed.authority)).toMatchObject({
+      discard: [],
+      foreign: [candidateCid],
+    });
+    // A holder labelled for another move of this employee is not the abandoned move's.
+    const moved = await fixture({
+      moves: abandonedMove({ source: destinationCid, sourceHolder: candidateCid, helpers: [] }),
+    });
+    moved.engine.container(candidateCid, holderLabels('another-move'), true);
+    expect((await moved.service.previewRebuild(employeeId, template, moved.authority)).foreign).toEqual([candidateCid]);
+  });
+  it('refuses a stale preview, a changed inventory, a revoked owner and an unknown Engine', async () => {
+    const f = await fixture({ moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    const request = await rebuildRequest(f);
+    await expect(
+      f.service.rebuild(employeeId, { ...request, expectedScopeDigest: '0'.repeat(64) }, f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_SCOPE_CHANGED' });
+    await expect(f.service.rebuild(employeeId, { ...request, sessionGeneration: 10 }, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_TARGET_CHANGED',
+    });
+    // The absent workflow's digest is never a rebuild confirmation, and the other way round.
+    const absent = await f.request();
+    expect(absent.expectedScopeDigest).not.toBe(request.expectedScopeDigest);
+    await expect(f.service.rebuild(employeeId, absent, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SCOPE_CHANGED',
+    });
+    await expect(f.service.reprovision(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SCOPE_CHANGED',
+    });
+    // The absent workflow's request cannot carry the rebuild's confirmation at all.
+    await expect(
+      f.service.reprovision(employeeId, { ...absent, confirmDiscardRunning: true }, f.authority)
+    ).rejects.toThrow();
+    // A laptop that started after the preview is a different scope.
+    f.engine.container(candidateCid, laptopLabels, true, laptopName(candidateCid));
+    await expect(
+      f.service.rebuild(employeeId, { ...request, confirmDiscardRunning: true }, f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_SCOPE_CHANGED' });
+    f.engine.failLists = true;
+    await expect(f.service.previewRebuild(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_ABSENCE_UNCONFIRMED',
+    });
+    f.engine.failLists = false;
+    f.revoke();
+    await expect(f.service.previewRebuild(employeeId, template, f.authority)).rejects.toThrow('synthetic revoked owner');
+    await expect(f.service.rebuild(employeeId, request, f.authority)).rejects.toThrow('synthetic revoked owner');
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.store.record(employeeId)).toEqual(f.row);
+  });
+  it('records nothing when a removal is not confirmed and converges from a fresh preview', async () => {
+    const f = await fixture({
+      moves: abandonedMove({ source: destinationCid, sourceHolder: candidateCid, helpers: [] }),
+    });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    f.engine.container(candidateCid, holderLabels(), true);
+    f.setLive({ inert: false, container: destinationCid });
+    const first = await rebuildRequest(f);
+    // The laptop is removed, then the Engine fails on the holder.
+    const discard = f.engine.discardLaptopContainer.bind(f.engine);
+    f.engine.discardLaptopContainer = async (id, proof, current) => {
+      if (id === candidateCid) throw Error('synthetic Engine stop failure');
+      return discard(id, proof, current);
+    };
+    await expect(f.service.rebuild(employeeId, first, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED',
+    });
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
+    // Nothing canonical moved and the viewer is still there.
+    expect(f.store.record(employeeId)).toEqual(f.row);
+    expect(f.snapshot().employees[0]!.dockerBinding).toEqual(f.binding);
+    expect(f.entry()).toBeUndefined();
+    expect(f.forgotten).toEqual([]);
+    // The stale confirmation no longer matches what exists.
+    f.engine.discardLaptopContainer = discard;
+    await expect(f.service.rebuild(employeeId, first, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SCOPE_CHANGED',
+    });
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview.discard).toEqual([{ containerId: candidateCid, role: 'source-holder', running: true }]);
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f), f.authority);
+    expect(result.state).toBe('ready');
+    expect(f.engine.rebuilt).toEqual([destinationCid, candidateCid]);
+    expect(f.forgotten).toEqual([sid]);
+  });
+  it('decides about the live viewer before it removes anything', async () => {
+    // A viewer of a container the employee's records do not name.
+    const foreign = await fixture({ moves: abandonedMove(null) });
+    foreign.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    foreign.setLive({ inert: false, container: 'f'.repeat(64) });
+    expect(await foreign.service.previewRebuild(employeeId, template, foreign.authority)).toMatchObject({
+      code: 'DOCKER_REPROVISION_SESSION_VIEW_FOREIGN',
+      allowedActions: [],
+    });
+    await expect(
+      foreign.service.rebuild(employeeId, await rebuildRequest(foreign), foreign.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_SESSION_VIEW_FOREIGN' });
+    expect(foreign.engine.rebuilt).toEqual([]);
+    // An office that cannot forget a boxed viewer.
+    const old = await fixture({ moves: abandonedMove(null), discardView: false });
+    old.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    old.setLive({ inert: true, container: destinationCid });
+    await expect(old.service.rebuild(employeeId, await rebuildRequest(old), old.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_VIEWER_DISCARD_UNAVAILABLE',
+    });
+    expect(old.engine.rebuilt).toEqual([]);
+    // A live local session that is not a laptop viewer and is still working.
+    const local = await fixture({ moves: abandonedMove(null) });
+    local.setLive({ inert: false });
+    await expect(local.service.rebuild(employeeId, await rebuildRequest(local), local.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SESSION_ACTIVE',
+    });
+    // An inert local session object is discarded the way the absent workflow discards it.
+    const inert = await fixture({ moves: abandonedMove(null) });
+    inert.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    inert.setLive({ inert: true });
+    await expect(
+      inert.service.rebuild(employeeId, await rebuildRequest(inert), inert.authority)
+    ).resolves.toMatchObject({ state: 'ready' });
+    expect(inert.discarded).toEqual([sid]);
+    expect(inert.forgotten).toEqual([]);
+  });
+  it('keeps a viewer whose laptop the Engine still lists', async () => {
+    // The removal reports success, yet a listing still shows the laptop.
+    const f = await fixture({ moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    f.setLive({ inert: false, container: destinationCid });
+    const request = await rebuildRequest(f);
+    f.engine.discardLaptopContainer = async () => {};
+    await expect(f.service.rebuild(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_REMOVAL_UNCONFIRMED',
+    });
+    expect(f.forgotten).toEqual([]);
+    expect(f.store.record(employeeId)).toEqual(f.row);
+  });
+  it('rebuilds over an unused source that an earlier operation created', async () => {
+    const f = await fixture({ moves: abandonedMove(null) });
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(first.state).toBe('ready');
+    // A stray laptop of this employee appears beside the never-started source.
+    f.engine.container(candidateCid, laptopLabels, true, laptopName(candidateCid));
+    (f.engine.networks.get('b'.repeat(64))!.Containers as Json)[candidateCid] = {};
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      mode: 'replace-source',
+      record: null,
+      discard: [{ containerId: candidateCid, role: 'laptop', running: true }],
+      requiresConfirmation: true,
+    });
+    const result = await f.service.rebuild(
+      employeeId,
+      await rebuildRequest(f, replaceOperation, { confirmDiscardRunning: true }),
+      f.authority
+    );
+    expect(result).toMatchObject({ operationId: replaceOperation, state: 'ready' });
+    expect(f.engine.rebuilt).toEqual([candidateCid]);
+    // The unused source was replaced by its own workflow, with its never-started proof.
+    expect(f.engine.removed).toEqual([first.sourceContainerId]);
+    const entries = f.snapshot().retiredDockerEmployeeContinuations!;
+    expect(entries).toHaveLength(2);
+    expect(entries[1]).toMatchObject({ reason: 'source-replaced', previous: retireOperation, source: { phase: 'created' } });
+    await beginsAgain(f, result.sourceContainerId!);
+  });
+  it('finishes an unfinished rebuild by repeating its own request', async () => {
+    const f = await fixture({ moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    const request = await rebuildRequest(f);
+    f.engine.prepareOutcome = 'failed';
+    await expect(f.service.rebuild(employeeId, request, f.authority)).resolves.toMatchObject({
+      state: 'held',
+      code: 'DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED',
+    });
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
+    expect(f.entry()).toMatchObject({ source: { phase: 'issued' } });
+    // A new preview names the operation to finish instead of starting another one.
+    const pending = await f.service.previewRebuild(employeeId, template, f.authority).catch((error) => error);
+    expect(pending).toMatchObject({ code: 'DOCKER_REPROVISION_OPERATION_PENDING' });
+    expect(pending.cause).toEqual({ pendingOperationId: retireOperation });
+    f.engine.prepareOutcome = 'ok';
+    await expect(f.service.rebuild(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.created).toHaveLength(1);
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
+  });
+  it('still requires what a discarded laptop does not make moot', async () => {
+    const busy = await fixture({ moves: abandonedMove(null) });
+    busy.setBusy(true);
+    await expect(busy.service.previewRebuild(employeeId, template, busy.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_BUSY',
+    });
+    const foreignLaunch = await fixture({ moves: abandonedMove(null), launchTransport: 'native-ordinary' });
+    await expect(
+      foreignLaunch.service.previewRebuild(employeeId, template, foreignLaunch.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN' });
+    const none = await fixture({ moves: abandonedMove(null) });
+    await none.companyStore.update((state) => {
+      state.dockerEmployeeContinuations = [];
+    });
+    await expect(none.service.previewRebuild(employeeId, template, none.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_RECORD_REQUIRED',
+    });
+    // The absent workflow itself still refuses an out-of-office employee and a live viewer.
+    const away = await fixture({ employee: { onVacation: true, desiredRunning: false } });
+    await expect(away.service.reprovision(employeeId, {
+      operationId: retireOperation, sessionId: sid, sessionGeneration: 9, expectedScopeDigest: '0'.repeat(64), template,
+    }, away.authority)).rejects.toMatchObject({ code: 'DOCKER_REPROVISION_EMPLOYEE_NOT_ELIGIBLE' });
+  });
+  it('derives the sign-in seat of the rebuilt laptop from the profile', async () => {
+    const f = await fixture({ profile: seat, moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    const account = {
+      kind: 'seat-mount',
+      key: 'CLAUDE_CONFIG_DIR',
+      path: seatPath,
+      source: `${homeSource}/.reverie/seat-auth/${seat}`,
+      env: true,
+    };
+    expect((await f.service.previewRebuild(employeeId, template, f.authority)).account).toEqual(account);
+    await f.service.rebuild(employeeId, await rebuildRequest(f), f.authority);
+    expect(mountsOf(f)).toHaveLength(1);
+    expect(envOf(f)).toEqual(['CLAUDE_CONFIG_DIR=' + seatPath]);
+    expect(f.entry()!.account).toEqual(account);
+  });
+});
+
+describe('rebuild proofs and guidance', () => {
+  it('binds a container by its creator labels or by the recorded laptop name', () => {
+    const row = { Name: laptopName(candidateCid), Config: { Labels: laptopLabels } };
+    expect(dockerLaptopContainerProven(row, { kind: 'labels', labels: laptopLabels })).toBe(true);
+    expect(dockerLaptopContainerProven(row, { kind: 'recorded' })).toBe(true);
+    expect(
+      dockerLaptopContainerProven({ ...row, Name: '/reverie-boxed-source-' + candidateCid }, { kind: 'recorded' })
+    ).toBe(true);
+    for (const proof of [
+      { kind: 'labels', labels: {} },
+      { kind: 'labels', labels: { ...laptopLabels, 'reverie.boxed.employee': '33333333-3333-4333-8333-333333333333' } },
+      { kind: 'labels', labels: { 'reverie.boxed.employee': '' } },
+      { kind: 'labels', labels: { 'com.example.employee': employeeId } },
+    ] as DockerLaptopContainerProof[])
+      expect(dockerLaptopContainerProven(row, proof)).toBe(false);
+    expect(dockerLaptopContainerProven({ Name: '/reverie', Config: { Labels: null } }, { kind: 'recorded' })).toBe(false);
+    expect(
+      dockerLaptopContainerProven({ Name: '/reverie-boxed-anchor-' + 'a'.repeat(32), Config: null }, { kind: 'recorded' })
+    ).toBe(false);
+    expect(
+      dockerLaptopContainerProven({ Name: laptopName(candidateCid), Config: null }, { kind: 'labels', labels: laptopLabels })
+    ).toBe(false);
+  });
+  it('lets only a boxed laptop viewer be forgotten', () => {
+    const viewer = {
+      id: sid,
+      docker: {
+        hostId: 'boxed-runtime',
+        engine: 'docker',
+        owned: false,
+        containerName: destinationCid,
+        continuation: { operationId: priorOperation },
+      },
+    };
+    expect(absentLaptopViewRefusal(viewer, sid, false)).toBeUndefined();
+    for (const [subject, cleaning] of [
+      [{ ...viewer, id: oldSid }, false],
+      [{ ...viewer, remote: {} }, false],
+      [{ id: sid }, false],
+      [{ ...viewer, docker: { ...viewer.docker, continuation: undefined } }, false],
+      [{ ...viewer, docker: { ...viewer.docker, owned: true } }, false],
+      [{ ...viewer, docker: { ...viewer.docker, hostId: 'case-host' } }, false],
+      [{ ...viewer, docker: { ...viewer.docker, containerName: 'named-container' } }, false],
+      [{ ...viewer, paneLifecycleInFlight: true }, false],
+      [viewer, true],
+    ] as const)
+      expect(absentLaptopViewRefusal(subject as never, sid, cleaning)).toEqual(expect.any(String));
+  });
+  it('explains every rebuild refusal and names the next step', () => {
+    for (const code of [
+      'DOCKER_REBUILD_PLAN_MOVE_HELD',
+      'DOCKER_REBUILD_PLAN_MOVE_ACTIVE',
+      'DOCKER_REBUILD_CONTAINER_FOREIGN',
+      'DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED',
+      'DOCKER_REBUILD_CONTAINER_NOT_REMOVABLE',
+      'DOCKER_REBUILD_REMOVAL_UNCONFIRMED',
+      'DOCKER_REBUILD_REMOVAL_UNAVAILABLE',
+      'DOCKER_REBUILD_VIEWER_DISCARD_UNAVAILABLE',
+      'DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED',
+      'DOCKER_REPROVISION_SESSION_ACTIVE',
+      'DOCKER_REPROVISION_SESSION_VIEW_FOREIGN',
+      'DOCKER_REPROVISION_EMPLOYEE_NOT_ELIGIBLE',
+      'DOCKER_REPROVISION_CONTAINERS_PRESENT',
+      'DOCKER_REPROVISION_LAPTOP_NOT_REMOVABLE',
+      'DOCKER_REPROVISION_PLAN_MOVE_ACTIVE',
+      'DOCKER_REPROVISION_SCOPE_CHANGED',
+      'DOCKER_REPROVISION_OFFICE_NETWORK_AMBIGUOUS',
+    ]) {
+      const guidance = dockerRecoveryGuidance(code)!;
+      expect(guidance.message, code).toMatch(/^[A-Z].*[.]$/s);
+      expect(guidance.message).not.toMatch(/DOCKER_|undefined/);
+      expect(Array.isArray(guidance.allowedActions)).toBe(true);
+    }
+    expect(dockerRecoveryGuidance('DOCKER_REBUILD_PLAN_MOVE_HELD')!.allowedActions).toEqual(['abandon']);
+    expect(dockerRecoveryGuidance('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED')!.allowedActions).toEqual(['rebuild']);
+    expect(dockerRecoveryGuidance('DOCKER_REPROVISION_SESSION_ACTIVE')!.allowedActions).toEqual(['rebuild-preview']);
+    expect(dockerRecoveryGuidance('toString')).toBeUndefined();
+    expect(dockerRecoveryGuidance('DOCKER_CONTINUATION_UNKNOWN')).toBeUndefined();
   });
 });
