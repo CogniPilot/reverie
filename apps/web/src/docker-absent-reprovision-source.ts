@@ -136,6 +136,11 @@ export interface ReprovisionProfile {
   readonly provider: SubscriptionProvider;
   readonly mode: string;
 }
+/** Default host folder of one seat, inside the employee's private home. The
+ * workflow makes this one itself; an owner-named `accountSource` is not made. */
+export function reprovisionSeatSource(home: string, profileId: string): string {
+  return posix.join(home, '.reverie', 'seat-auth', profileId);
+}
 /** Provider account routing of the source, derived by the backend only.
  * (a) A retired plan replacement keeps its in-home account generation as one
  * Env entry. (b) A saved launch override that selects the employee's own
@@ -188,7 +193,7 @@ export function reprovisionAccount(
   if (seats.length > 1 || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || id !== profile?.id)
     refuse('DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH');
   const storage = reprovisionStorage(basis, template),
-    source = template.accountSource ?? posix.join(storage.home, '.reverie', 'seat-auth', id);
+    source = template.accountSource ?? reprovisionSeatSource(storage.home, id);
   if (posix.basename(source) !== id) refuse('DOCKER_REPROVISION_ACCOUNT_SOURCE_MISMATCH');
   const ephemeralRoot = posix.dirname(template.scratchRoot);
   if (

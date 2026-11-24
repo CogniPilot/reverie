@@ -29,6 +29,7 @@ import {
   DockerAbsentReprovisionRequest,
   DockerLaptopRebuildRequest,
   DockerLaptopTemplate,
+  REPROVISION_ACCOUNT_ROOT,
   allowedReprovisionTransition,
   type DockerReprovisionAccount,
   type DockerReprovisionSourceCursor,
@@ -37,6 +38,7 @@ import {
   REPROVISION_OPERATION_LABEL,
   REPROVISION_PURPOSE_LABEL,
   reprovisionAccount,
+  reprovisionSeatSource,
   reprovisionSourceConfiguration,
   reprovisionSourceName,
   reprovisionStorage,
@@ -73,6 +75,20 @@ export interface DockerAbsentReprovisionSessions {
    * session record is kept. Used by the owner's rebuild alone. */
   discardView?(sessionId: string, containerAbsent: (containerId: string) => Promise<boolean>): Promise<void>;
   clear(proof: unknown): Promise<'cleared' | 'unchanged'>;
+}
+/** The office's own signed-in copy of one plan account, held until closed. */
+export interface DockerSeatSignIn {
+  authText(): string;
+  close(): void;
+}
+export interface DockerAbsentReprovisionSeatAccounts {
+  /** Undefined when the office holds no usable sign-in for that plan. The
+   * profile ID is the employee's owner-selected one; no request names it. */
+  capture(
+    profileId: string,
+    provider: 'anthropic' | 'openai',
+    current: () => void
+  ): Promise<DockerSeatSignIn | undefined>;
 }
 export interface DockerAbsentReprovisionPlanMoves {
   openMoves(
@@ -114,6 +130,10 @@ export interface DockerAbsentReprovisionResult {
   code?: string;
   sourceContainerId?: string;
   sourceImageId?: string;
+  /** Where in the laptop the mount whose host folder is missing would appear. */
+  missingMountTarget?: string;
+  /** The plan the office is not signed in to. */
+  seatProfile?: { id: string; label?: string };
 }
 type Network = { name: string; id: string };
 /** Same closed name rule the deployment verifier applies to a worker bridge. */
@@ -135,6 +155,31 @@ function workerBridgeName(name: string, employeeId: string): boolean {
     new RegExp('^' + prefix + '-move[0-9a-f]{8}$').test(suffix)
   );
 }
+/** The two facts a hold may name beside its code: the laptop-side target of a
+ * mount whose host folder is missing, and the plan that needs a sign-in. */
+export function dockerReprovisionHoldDetail(
+  cause: unknown
+): Pick<DockerAbsentReprovisionResult, 'missingMountTarget' | 'seatProfile'> {
+  if (!(cause instanceof DockerEmployeeContinuationError)) return {};
+  const detail = cause.cause as
+    | { missingMountTarget?: unknown; seatProfile?: { id?: unknown; label?: unknown } }
+    | undefined;
+  if (cause.code === 'DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING' && typeof detail?.missingMountTarget === 'string')
+    return { missingMountTarget: detail.missingMountTarget };
+  const profile = detail?.seatProfile;
+  if (
+    cause.code === 'DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT' &&
+    typeof profile?.id === 'string' &&
+    /^[a-z0-9][a-z0-9_-]{0,63}$/.test(profile.id)
+  )
+    return {
+      seatProfile: {
+        id: profile.id,
+        ...(typeof profile.label === 'string' ? { label: profile.label.slice(0, 100) } : {}),
+      },
+    };
+  return {};
+}
 function persisted<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -149,7 +194,8 @@ export class DockerAbsentReprovision {
     private readonly planMoves: () => DockerAbsentReprovisionPlanMoves | undefined,
     private readonly continuationBusy: (employeeId: string) => boolean,
     private readonly runtimeCurrent: () => void,
-    private readonly now: () => number = Date.now
+    private readonly now: () => number = Date.now,
+    private readonly seatAccounts: () => DockerAbsentReprovisionSeatAccounts | undefined = () => undefined
   ) {
     if (
       !(company instanceof CompanyService) ||
@@ -782,6 +828,14 @@ export class DockerAbsentReprovision {
         if (scope.present.length && !(scope.kind === 'absent' && scope.discardable))
           refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');
         if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
+        // Before anything is discarded or retired: a seat that cannot be signed in stops here.
+        await this.#seat(
+          input.operationId,
+          scope.account,
+          scope.kind === 'absent' ? scope.facts.row : scope.facts.basis,
+          scope.template,
+          scope.current
+        );
         if (scope.kind === 'absent' && scope.present.length) await this.#discard(scope.present, scope.current);
         entry =
           scope.kind === 'absent'
@@ -1092,6 +1146,8 @@ export class DockerAbsentReprovision {
         if (scope.blocked) refuse(scope.blocked);
         if (scope.discard.some((item) => item.role === 'laptop' && item.running) && !input.confirmDiscardRunning)
           refuse('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED');
+        // Before the laptop is discarded: a seat that cannot be signed in stops here.
+        await this.#seat(input.operationId, scope.account, scope.basis, scope.template, scope.current);
         await this.#discardForRebuild(scope);
         await this.#forgetViewer(scope);
         // The recorded state is now true; the ordinary workflow takes over.
@@ -1408,11 +1464,12 @@ export class DockerAbsentReprovision {
       return result(entry);
     } catch (cause) {
       if (cause instanceof CompanyError) throw cause;
-      const latest = this.#entry(initial.operationId) ?? entry;
-      return result(
-        latest,
-        cause instanceof DockerEmployeeContinuationError ? cause.code : 'DOCKER_REPROVISION_EFFECT_UNCONFIRMED'
-      );
+      const latest = this.#entry(initial.operationId) ?? entry,
+        held = result(
+          latest,
+          cause instanceof DockerEmployeeContinuationError ? cause.code : 'DOCKER_REPROVISION_EFFECT_UNCONFIRMED'
+        );
+      return { ...held, ...dockerReprovisionHoldDetail(cause) };
     }
   }
   /** Through the state service only; this class never writes state.json. */
@@ -1444,6 +1501,64 @@ export class DockerAbsentReprovision {
       .parse(JSON.parse(await this.command.run(['container', 'inspect', id])));
     if (rows[0]!.Id !== id) refuse('DOCKER_REPROVISION_SOURCE_CHANGED');
     return rows[0]!;
+  }
+  /** A laptop whose plan is routed to a seat has to come up signed in. The
+   * Engine refuses a bind whose host folder is missing, and an employee who
+   * never used this plan has no seat folder yet; an empty one would leave the
+   * laptop at the provider's sign-in screen. So a fixed helper, running as the
+   * laptop user, makes the default seat inside the private home and, when the
+   * seat has no sign-in of its own, places the office's signed-in copy of that
+   * plan account: the same held snapshot a plan move installs. A sign-in that
+   * exists is never replaced. With neither, nothing is built and the owner is
+   * told to sign in. The helper only adds what is missing, so it runs before
+   * anything is discarded and again at every attempt of the same operation. A
+   * folder the owner named with `accountSource` is the owner's to provide. */
+  async #seat(
+    operationId: string,
+    account: DockerReprovisionAccount | undefined,
+    basis: DockerEmployeeContinuationRecord,
+    template: DockerLaptopTemplate,
+    current: () => void
+  ): Promise<void> {
+    if (account?.kind !== 'seat-mount') return;
+    const home = reprovisionStorage(basis, template).home,
+      profileId = account.path.slice(REPROVISION_ACCOUNT_ROOT.length);
+    if (account.source !== reprovisionSeatSource(home, profileId)) return;
+    if (!this.command.prepareSeatDirectory) return refuse('DOCKER_REPROVISION_SEAT_PREPARATION_UNAVAILABLE');
+    const provider = account.key === 'CLAUDE_CONFIG_DIR' ? ('anthropic' as const) : ('openai' as const),
+      accounts = this.seatAccounts();
+    let signIn: DockerSeatSignIn | undefined;
+    try {
+      signIn = await accounts?.capture(profileId, provider, current);
+      current();
+      const receipt = await this.command.prepareSeatDirectory(
+        'reverie-boxed-seat-prepare-' + operationId.replaceAll('-', ''),
+        { imageId: this.configuration.workerImageId, user: template.user, homeSource: home, profileId, provider },
+        current,
+        signIn?.authText()
+      );
+      current();
+      // Without a plan account service nothing is known about the office's
+      // sign-in, and the folder alone is all this office can provide.
+      if (accounts && receipt.credential === 'absent') {
+        const profile = this.company.store
+          .snapshot()
+          .employees.find((value) => value.runtimeRecipe?.subscriptionProfile?.id === profileId)
+          ?.runtimeRecipe?.subscriptionProfile;
+        refuse('DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT', {
+          seatProfile: { id: profileId, ...(profile ? { label: profile.label.slice(0, 100) } : {}) },
+        });
+      }
+    } catch (cause) {
+      if (cause instanceof DockerEmployeeContinuationError) throw cause;
+      refuse('DOCKER_REPROVISION_SEAT_PREPARATION_UNCONFIRMED', cause);
+    } finally {
+      try {
+        signIn?.close();
+      } catch {
+        /* Read-only handles of the office's own account; its copy is already zeroed. */
+      }
+    }
   }
   /** Effect B. One inert source; an issued CREATE is settled by observation. */
   async #source(
@@ -1509,6 +1624,7 @@ export class DockerAbsentReprovision {
         refuse('DOCKER_REPROVISION_STORE_PREPARATION_UNCONFIRMED', cause);
       }
       current();
+      await this.#seat(entry.operationId, entry.account, basis, entry.template, current);
     }
     const id = seen[0] ?? (await this.command.create(name, configuration, current));
     current();

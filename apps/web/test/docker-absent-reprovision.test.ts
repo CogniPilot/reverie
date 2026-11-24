@@ -24,7 +24,7 @@ import { DockerContainedResources } from '../src/docker-contained-resource-contr
 import { DockerResourceRevisionStore } from '../src/docker-resource-revisions.js';
 import { boxedMountConfiguration, DockerEmployeeInspect } from '../src/docker-employee-engine-data.js';
 import { ephemeralProjection } from '../src/docker-ephemeral-data.js';
-import { DockerAbsentReprovision } from '../src/docker-absent-reprovision.js';
+import { DockerAbsentReprovision, dockerReprovisionHoldDetail } from '../src/docker-absent-reprovision.js';
 import { dockerLaptopContainerProven, type DockerLaptopContainerProof } from '../src/docker-engine-command.js';
 import { absentLaptopViewRefusal } from '../src/absent-laptop-view.js';
 import { dockerRecoveryGuidance } from '../src/docker-recovery-guidance.js';
@@ -78,7 +78,7 @@ class FakeEngine {
   readonly images = new Map<string, Json>();
   readonly created: Array<{ name: string; configuration: Json }> = [];
   failLists = false;
-  createOutcome: 'ok' | 'lost-reply' | 'not-sent' = 'ok';
+  createOutcome: 'ok' | 'lost-reply' | 'not-sent' | 'config-rejected' | 'bind-missing' = 'ok';
   #next = 1;
   image(id: string, env: string[] = ['PATH=/opt/reverie/bin:/usr/bin', 'LANG=C.UTF-8']) {
     this.images.set(id, {
@@ -128,6 +128,13 @@ class FakeEngine {
     current();
     this.created.push({ name, configuration: structuredClone(configuration) });
     if (this.createOutcome === 'not-sent') throw Error('synthetic create transport failure');
+    // What the packaged port makes of a complete HTTP 400.
+    if (this.createOutcome === 'config-rejected')
+      throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED');
+    if (this.createOutcome === 'bind-missing')
+      throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING', 409, {
+        cause: { missingMountTarget: '/reverie_workspace' },
+      });
     if ([...this.containers.values()].some((row) => row.Name === '/' + name)) throw Error('synthetic name conflict');
     const host = configuration.HostConfig as Json,
       image = this.images.get(configuration.Image as string);
@@ -181,6 +188,31 @@ class FakeEngine {
     const sources = [...this.containers.values()].filter((row) => String(row.Name).startsWith('/reverie-boxed-source-'));
     this.prepared.push({ name, spec: structuredClone(spec), sources: sources.length });
     if (this.prepareOutcome === 'failed') throw Error('synthetic preparation failure');
+  }
+  readonly seats: Array<{ name: string; spec: Json; auth: string | undefined; sources: number; containers: number }> = [];
+  /** What the employee's own seat holds: no sign-in file, or one of its own. */
+  seatCredential: 'absent' | 'present' = 'absent';
+  seatOutcome: 'ok' | 'failed' | 'foreign' = 'ok';
+  /** The fixed helper; the fake records the request and answers as the program does. */
+  async prepareSeatDirectory(name: string, spec: Json, current: () => void, auth?: string) {
+    current();
+    const sources = [...this.containers.values()].filter((row) => String(row.Name).startsWith('/reverie-boxed-source-'));
+    this.seats.push({ name, spec: structuredClone(spec), auth, sources: sources.length, containers: this.containers.size });
+    if (this.seatOutcome === 'failed') throw Error('synthetic seat helper failure');
+    if (this.seatOutcome === 'foreign')
+      throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN');
+    const credential = this.seatCredential === 'present' ? 'present' : auth ? 'installed' : 'absent';
+    if (credential === 'installed') this.seatCredential = 'present';
+    return {
+      version: 1 as const,
+      purpose: 'reverie-seat-directory-ready-v1' as const,
+      profile: spec.profileId as string,
+      provider: spec.provider as 'anthropic' | 'openai',
+      created: [],
+      credential: credential as 'installed' | 'present' | 'absent',
+      home: { dev: '64', ino: '10' },
+      seat: { dev: '64', ino: '12' },
+    };
   }
   readonly tenants = new Set<string>();
   readonly discarded: string[] = [];
@@ -340,7 +372,11 @@ interface Options {
   moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown; ownerAbandonedContainers?: unknown } | null;
   /** Whether the state service can forget the viewer of a removed laptop. */
   discardView?: boolean;
+  /** Whether the office's own copy of the employee's plan account is signed in. */
+  office?: 'signed-in' | 'signed-out';
 }
+/** Synthetic text standing in for the office's signed-in copy of a plan account. */
+const officeSignIn = JSON.stringify({ claudeAiOauth: { accessToken: 'SYNTHETIC_OFFICE_SIGN_IN' } });
 async function fixture(options: Options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'absent-laptop-'));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
@@ -494,6 +530,12 @@ async function fixture(options: Options = {}) {
       ? undefined
       : (options.moves ?? { openMoves: async () => [], abandonAbsentDockerMoves: async () => [] });
   let busy = false;
+  // The office's plan account service: unbound, as before it existed, unless a test says otherwise.
+  const officePlans = {
+    state: options.office ?? ('unbound' as 'unbound' | 'signed-in' | 'signed-out'),
+    asked: [] as Array<{ profileId: string; provider: string }>,
+    held: 0,
+  };
   const service = new DockerAbsentReprovision(
     company,
     store,
@@ -526,7 +568,19 @@ async function fixture(options: Options = {}) {
     () => moves as never,
     () => busy,
     () => {},
-    () => 1234
+    () => 1234,
+    () =>
+      officePlans.state === 'unbound'
+        ? undefined
+        : {
+            capture: async (profileId: string, provider: 'anthropic' | 'openai', current: () => void) => {
+              current();
+              officePlans.asked.push({ profileId, provider });
+              if (officePlans.state === 'signed-out') return undefined;
+              officePlans.held += 1;
+              return { authText: () => officeSignIn, close: () => void (officePlans.held -= 1) };
+            },
+          }
   );
   const request = async (operationId = retireOperation, body = template) => ({
     operationId,
@@ -537,7 +591,7 @@ async function fixture(options: Options = {}) {
   });
   return {
     directory, company, companyStore, state, stateFile, store, engine, service, authority, row, binding, saved,
-    conversation, request, discarded, forgotten,
+    conversation, request, discarded, forgotten, officePlans,
     setLive: (value: { inert: boolean; container?: string } | undefined) => { live = value; },
     setBusy: (value: boolean) => { busy = value; },
     revoke: () => { authorized = false; },
@@ -2498,5 +2552,138 @@ describe('rebuild proofs and guidance', () => {
     expect(dockerRecoveryGuidance('DOCKER_REPROVISION_SESSION_ACTIVE')!.allowedActions).toEqual(['rebuild-preview']);
     expect(dockerRecoveryGuidance('toString')).toBeUndefined();
     expect(dockerRecoveryGuidance('DOCKER_CONTINUATION_UNKNOWN')).toBeUndefined();
+  });
+});
+
+describe('the sign-in seat of a new laptop', () => {
+  const seatSpec = { imageId: workerImage, user: template.user, homeSource, profileId: seat, provider: 'anthropic' };
+  const helper = 'reverie-boxed-seat-prepare-' + retireOperation.replaceAll('-', '');
+  const rebuilt = async (options: Options = {}) => {
+    const f = await fixture({ profile: seat, moves: abandonedMove(null), ...options });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    return f;
+  };
+  it('rebuilds a laptop that comes up signed in from the office plan account, with no owner sign-in', async () => {
+    const f = await rebuilt({ office: 'signed-in' });
+    await expect(f.service.rebuild(employeeId, await rebuildRequest(f), f.authority)).resolves.toMatchObject({
+      state: 'ready',
+    });
+    // Once before the old laptop is discarded, and again before the source is created.
+    expect(f.engine.seats).toEqual([
+      { name: helper, spec: seatSpec, auth: officeSignIn, sources: 0, containers: 1 },
+      { name: helper, spec: seatSpec, auth: officeSignIn, sources: 0, containers: 0 },
+    ]);
+    expect(f.officePlans.asked).toEqual([
+      { profileId: seat, provider: 'anthropic' },
+      { profileId: seat, provider: 'anthropic' },
+    ]);
+    // The office's held copy is released after each use, and never reaches the Engine configuration.
+    expect(f.officePlans.held).toBe(0);
+    expect(JSON.stringify(f.engine.created)).not.toContain('SYNTHETIC_OFFICE_SIGN_IN');
+    expect(JSON.stringify(f.snapshot())).not.toContain('SYNTHETIC_OFFICE_SIGN_IN');
+    expect(mountsOf(f)).toHaveLength(1);
+    expect(envOf(f)).toEqual(['CLAUDE_CONFIG_DIR=' + seatPath]);
+  });
+  it('builds nothing and discards nothing when neither the office nor the employee is signed in', async () => {
+    const f = await rebuilt({ office: 'signed-out' });
+    const request = await rebuildRequest(f);
+    const refused = await f.service.rebuild(employeeId, request, f.authority).catch((error) => error);
+    expect(refused).toMatchObject({ code: 'DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT' });
+    expect(dockerReprovisionHoldDetail(refused)).toEqual({ seatProfile: { id: seat, label: 'Synthetic seat' } });
+    expect(f.engine.containers.has(destinationCid)).toBe(true);
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.engine.created).toHaveLength(0);
+    expect(f.entry()).toBeUndefined();
+    expect(f.snapshot().dockerEmployeeContinuations).toHaveLength(1);
+    expect(f.engine.seats).toHaveLength(1);
+    expect(f.engine.seats[0]!.auth).toBeUndefined();
+    // The owner signs in on the Plans page and sends the same request again.
+    f.officePlans.state = 'signed-in';
+    await expect(f.service.rebuild(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
+    expect(f.engine.seats.at(-1)!.auth).toBe(officeSignIn);
+  });
+  it('keeps the sign-in an employee already has, whatever the office holds', async () => {
+    for (const office of ['signed-in', 'signed-out'] as const) {
+      const f = await rebuilt({ office });
+      f.engine.seatCredential = 'present';
+      await expect(f.service.rebuild(employeeId, await rebuildRequest(f), f.authority)).resolves.toMatchObject({
+        state: 'ready',
+      });
+      expect(f.engine.created).toHaveLength(1);
+      expect(f.officePlans.held).toBe(0);
+    }
+  });
+  it('still makes the folder when no plan account service is bound, and leaves an owner-named seat alone', async () => {
+    const unbound = await rebuilt();
+    await expect(
+      unbound.service.rebuild(employeeId, await rebuildRequest(unbound), unbound.authority)
+    ).resolves.toMatchObject({ state: 'ready' });
+    expect(unbound.engine.seats.map((call) => call.auth)).toEqual([undefined, undefined]);
+    // The owner's own directory is neither created nor written by the office.
+    const named = await fixture({ profile: seat, office: 'signed-in' });
+    const body = { ...template, accountSource: '/synthetic-seats/' + seat };
+    await expect(
+      named.service.reprovision(employeeId, await named.request(retireOperation, body), named.authority)
+    ).resolves.toMatchObject({ state: 'ready' });
+    expect(named.engine.seats).toEqual([]);
+    expect(named.officePlans.asked).toEqual([]);
+    // An employee without a plan has no seat at all.
+    const none = await fixture({ office: 'signed-in' });
+    none.setLive({ inert: true });
+    await none.service.reprovision(employeeId, await none.request(), none.authority);
+    expect(none.engine.seats).toEqual([]);
+  });
+  it('refuses a seat it may not use before anything is retired, and converges once that is fixed', async () => {
+    const f = await seatFixture({ office: 'signed-in' });
+    const request = await f.request();
+    f.engine.seatOutcome = 'foreign';
+    await expect(f.service.reprovision(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN',
+    });
+    expect(f.entry()).toBeUndefined();
+    expect(f.engine.created).toHaveLength(0);
+    expect(f.officePlans.held).toBe(0);
+    f.engine.seatOutcome = 'failed';
+    await expect(f.service.reprovision(employeeId, request, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SEAT_PREPARATION_UNCONFIRMED',
+    });
+    expect(f.officePlans.held).toBe(0);
+    f.engine.seatOutcome = 'ok';
+    await expect(f.service.reprovision(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.created).toHaveLength(1);
+  });
+  it('finishes an operation that an earlier office left held on a refused create', async () => {
+    // The seat folder did not exist, the Engine answered 400 and the operation stayed issued.
+    const f = await seatFixture({ office: 'signed-in' });
+    const request = await f.request();
+    f.engine.createOutcome = 'config-rejected';
+    const held = await f.service.reprovision(employeeId, request, f.authority);
+    expect(held).toMatchObject({ state: 'held', code: 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED' });
+    expect(dockerRecoveryGuidance(held.code!)!.allowedActions).toEqual(['retry']);
+    expect(f.entry()).toMatchObject({ source: { phase: 'issued' } });
+    const before = f.engine.seats.length;
+    f.engine.createOutcome = 'ok';
+    // The same request again: the seat is prepared before the create is repeated.
+    await expect(f.service.reprovision(employeeId, request, f.authority)).resolves.toMatchObject({ state: 'ready' });
+    expect(f.engine.seats).toHaveLength(before + 1);
+    expect(f.engine.seats.at(-1)).toMatchObject({ name: helper, sources: 0 });
+  });
+  it('names the mount whose host folder is missing when the Engine says which', async () => {
+    const f = await fixture();
+    f.setLive({ inert: true });
+    const request = await f.request();
+    f.engine.createOutcome = 'bind-missing';
+    const held = await f.service.reprovision(employeeId, request, f.authority);
+    expect(held).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING',
+      missingMountTarget: '/reverie_workspace',
+    });
+    expect(dockerRecoveryGuidance(held.code!)!.message).toContain('missingMountTarget');
+    f.engine.createOutcome = 'ok';
+    const done = await f.service.reprovision(employeeId, request, f.authority);
+    expect(done).toMatchObject({ state: 'ready' });
+    expect(done.missingMountTarget).toBeUndefined();
   });
 });

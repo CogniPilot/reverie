@@ -2542,6 +2542,7 @@ export class WebServer extends EventEmitter {
       },
     });
     dockerRuntime?.bindPlanMoves(planMoves);
+    dockerRuntime?.bindSeatAccounts(this.planService);
     this.workerViewerReconnect = new WorkerViewerReconnect({
       company: this.companyService,
       session: id => this.sessions.get(id),

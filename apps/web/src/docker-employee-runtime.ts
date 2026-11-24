@@ -7,7 +7,12 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
-import { DockerAbsentReprovision, type DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
+import {
+  DockerAbsentReprovision,
+  type DockerAbsentReprovisionPlanMoves,
+  type DockerAbsentReprovisionSeatAccounts,
+} from './docker-absent-reprovision.js';
+import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
@@ -220,6 +225,7 @@ export class DockerEmployeeRuntime {
   readonly #planActors=new Set<DockerPlanMoveActor>();
   #planMoves?:PlanMoveStore;
   #absentPlanMoves?: DockerAbsentReprovisionPlanMoves;
+  #seatPlans?: Pick<PlanService, 'account'>;
   #restorationReports: readonly DockerExistingViewRestoration[] = [];
   readonly #restorationFailures = new Map<string, unknown>();
   #restoring?: Promise<readonly DockerExistingViewRestoration[]>;
@@ -463,7 +469,9 @@ export class DockerEmployeeRuntime {
       (employeeId) => service.flightActive(employeeId),
       () => {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
-      }
+      },
+      Date.now,
+      () => this.#seatAccounts()
     );
     this.#attached = {
       company,
@@ -484,6 +492,37 @@ export class DockerEmployeeRuntime {
   bindPlanMoves(moves: DockerAbsentReprovisionPlanMoves): void {
     if (this.#absentPlanMoves && this.#absentPlanMoves !== moves) throw Error('Original plan move owner required');
     this.#absentPlanMoves = moves;
+  }
+  /** Server composition only: the plan account catalogue a plan move reads.
+   * Until it is bound, a rebuilt laptop gets its seat folder and no sign-in. */
+  bindSeatAccounts(plans: Pick<PlanService, 'account'>): void {
+    if (this.#seatPlans && this.#seatPlans !== plans) throw Error('Original plan account service required');
+    this.#seatPlans = plans;
+  }
+  /** The office's signed-in copy of one plan account, captured exactly as a
+   * plan move captures its target: held private files, re-verified on use.
+   * An account that cannot be read that way is reported as not signed in. */
+  #seatAccounts(): DockerAbsentReprovisionSeatAccounts | undefined {
+    const plans = this.#seatPlans;
+    if (!plans) return undefined;
+    return {
+      capture: async (profileId, provider, current) => {
+        let snapshot: DockerPlanAccountSnapshot;
+        try {
+          snapshot = await DockerPlanAccountSnapshot.capture(plans, profileId, current);
+        } catch (error) {
+          current();
+          if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_PLAN_ACCOUNT_UNCONFIRMED')
+            return undefined;
+          throw error;
+        }
+        if (snapshot.descriptor.provider !== provider) {
+          snapshot.close();
+          return undefined;
+        }
+        return snapshot;
+      },
+    };
   }
   registerRoutes(
     app: FastifyInstance,

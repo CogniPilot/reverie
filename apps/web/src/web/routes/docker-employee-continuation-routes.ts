@@ -1,6 +1,6 @@
 import type { DockerWorkerReattachHelper } from '../../docker-worker-reattach-helper.js';
 import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
-import type { DockerAbsentReprovision } from '../../docker-absent-reprovision.js';
+import { dockerReprovisionHoldDetail, type DockerAbsentReprovision } from '../../docker-absent-reprovision.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -115,6 +115,8 @@ export function registerDockerEmployeeContinuationRoutes(
               ? { networkCandidates: candidates }
               : {}),
             ...(typeof pending === 'string' && /^[0-9a-f-]{36}$/.test(pending) ? { pendingOperationId: pending } : {}),
+            // A refusal before anything was recorded names the same two facts a hold does.
+            ...dockerReprovisionHoldDetail(error),
           },
         });
       }
@@ -169,7 +171,10 @@ export function registerDockerEmployeeContinuationRoutes(
     app.post('/api/company/employees/:id/docker-absent/reprovision', async (req, reply) =>
       run(reply, async () => {
         const { id, authority } = owner(req);
-        return absent.reprovision(id, req.body, authority);
+        const result = await absent.reprovision(id, req.body, authority);
+        // A held operation says why, as the rebuild below does.
+        const guidance = result.code ? dockerRecoveryGuidance(result.code) : undefined;
+        return guidance ? { ...result, message: guidance.message, nextActions: guidance.allowedActions } : result;
       })
     );
     // "Rebuild laptop": the same owner-only authentication, on its own routes so

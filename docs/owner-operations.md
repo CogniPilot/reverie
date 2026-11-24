@@ -501,6 +501,35 @@ journal entry.
 An override that names another profile, two seat overrides, or an
 `accountSource` with nothing to route is refused.
 
+#### The seat folder and its sign-in
+
+The Engine refuses a bind whose host folder does not exist, and an empty seat
+would leave the laptop at the provider's sign-in screen. For the default seat
+(`<home>/.reverie/seat-auth/<id>`) the workflow therefore runs one fixed helper
+from the worker image, as the laptop user, with no network and only the
+employee's home writable. It runs before anything is discarded or retired and
+again before each attempt to create the source:
+
+- It creates `.reverie`, `seat-auth` and `<id>` with mode 0700 where they are
+  missing. A directory that exists must be a real directory of the laptop user
+  with mode 0700; a link, another owner or another mode is refused
+  (`DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN`, or `..._SEAT_HOME_FOREIGN` for
+  the home itself). Nothing that exists is changed.
+- When the seat holds no sign-in file (`.credentials.json` for Anthropic,
+  `auth.json` for OpenAI) and the office holds a signed-in copy of that plan
+  account, the helper places that copy. It is the same held account snapshot a
+  plan move installs, it reaches the helper on stdin only, and the office
+  accepts the result by digest. A sign-in file that exists is never replaced.
+- When the seat holds no sign-in file and the office is not signed in to the
+  plan either, nothing is built: the request is refused with
+  `DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT` and `seatProfile` names the plan.
+  Sign in to it on the Plans page and send the same request again.
+
+A folder named with `accountSource` is the owner's: the office neither creates
+it nor writes a sign-in into it. If the Engine reports that a mount's host
+folder is missing, the hold is `DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING`
+and `missingMountTarget` gives the path of that mount inside the laptop.
+
 ### Replace an unused source
 
 The same two calls replace a source that was never started, for example one
