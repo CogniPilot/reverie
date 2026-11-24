@@ -635,7 +635,16 @@ export class CompanyService {
     };
   }
   view(owner?: string) {
-    const state = this.store.snapshot();
+    // Copy only what this view returns: the laptop records are most of the store and none of it is used here.
+    const shared = this.store.view();
+    const state = structuredClone({
+      employees: shared.employees,
+      settings: shared.settings,
+      cycles: shared.cycles,
+      memories: shared.memories,
+      temporaryAgents: shared.temporaryAgents,
+      retired: shared.retired,
+    });
     const employees = state.employees.filter((e) => sameOwner(e.owner, owner));
     const sessionCounts = new Map<string, number>();
     for (const employee of state.employees)
