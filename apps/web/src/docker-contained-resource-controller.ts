@@ -109,6 +109,10 @@ export interface DockerContainedResourcesConfiguration {
    * later employees sharing the same actually acknowledged pool. */
   retainedPoolConfigurationTasks?(): readonly DockerContinuationTask[];
   requireColdPoolIdle?(): void;
+  /** Exact kernel cpu.max values of group CPU ceilings the owner approved.
+   * DATA only: a POOL observation may show one of them beside "no quota".
+   * A worker leaf never has a quota, and nothing here issues a write. */
+  approvedPoolCpuMax?(): readonly string[];
 }
 function refuse(code = 'DOCKER_RESOURCE_REVISION_CHANGED'): never {
   throw new DockerEmployeeContinuationError(code);
@@ -150,14 +154,15 @@ function canonicalCpus(values: readonly number[]): string {
 /** Pure DATA comparison only. A boolean never supplies a native resource or owner proof. */
 export function dockerOtherResourceLimitsMatch(
   r: Observation['resources'],
-  policy: DockerEmployeeResourcePolicy['pool']
+  policy: DockerEmployeeResourcePolicy['pool'],
+  approvedCpuMax: readonly string[] = []
 ): boolean {
   return (
     r.memoryMax === String(policy.memoryMaxBytes) &&
     r.swapMax === String(policy.swapMaxBytes) &&
     r.pidsMax === String(policy.pidsMax) &&
     r.cpuWeight === String(policy.cpuWeight) &&
-    /^max [1-9][0-9]*$/.test(r.cpuMax) &&
+    (/^max [1-9][0-9]*$/.test(r.cpuMax) || approvedCpuMax.includes(r.cpuMax)) &&
     !!r.cpusetCpus &&
     isDeepStrictEqual(cpus(r.cpusetCpusEffective), policy.allowedCpus) &&
     isDeepStrictEqual(cpus(r.cpusetCpus), policy.allowedCpus)
@@ -553,9 +558,16 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_OBSERVATION_CHANGED');
     return result;
   }
+  /** Well-formed owner-approved pool ceilings; anything else approves nothing. */
+  #approvedPoolCpuMax(): readonly string[] {
+    return (this.configuration.approvedPoolCpuMax?.() ?? [])
+      .slice(0, 16)
+      .filter((value) => /^[1-9][0-9]{0,15} [1-9][0-9]{0,8}$/.test(value));
+  }
   #matches(seen: Observation, policy: DockerEmployeeResourcePolicy['pool'], high: number | null): boolean {
     return (
-      dockerOtherResourceLimitsMatch(seen.resources, policy) &&
+      // Only the pool parent may carry the approved group ceiling.
+      dockerOtherResourceLimitsMatch(seen.resources, policy, seen.worker === null ? this.#approvedPoolCpuMax() : []) &&
       seen.resources.memoryHigh === (high === null ? 'max' : String(high))
     );
   }
@@ -1088,13 +1100,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (ids.length > 128 || new Set(ids).size !== ids.length) refuse('DOCKER_POOL_CENSUS_UNCONFIRMED');
     return ids.sort();
   }
-  /** Re-earn an ORIGINAL actual native ACK. No create/start/configure path. */
-  async capturePoolObservation(
-    input: DockerEmployeeResourcePolicy['pool'],
-    current: () => void
-  ): Promise<DockerPoolReconciliationReceipt> {
-    const policy = DockerEmployeePoolPolicy.parse(input);
-    current();
+  /** The one fixed, running anchor of this box, found by census. Read-only. */
+  async #runningPoolAnchor(current: () => void) {
     const anchors = await this.#poolCensus('anchor');
     current();
     if (anchors.length !== 1) refuse('DOCKER_POOL_ANCHOR_UNCONFIRMED');
@@ -1106,6 +1113,25 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const init = await this.#init(id);
     current();
     if (!init) refuse('DOCKER_POOL_ANCHOR_UNCONFIRMED');
+    return { anchors, id, name, configuration, init };
+  }
+  /** What the kernel enforces on the pool's CPU time right now, and how many
+   * CPUs the pool may run on. A fresh native read; it approves nothing. */
+  async observePoolCpu(current: () => void): Promise<{ cpuMax: string; cpus: number }> {
+    current();
+    const { init } = await this.#runningPoolAnchor(current);
+    const seen = await this.#probe(init);
+    current();
+    return { cpuMax: seen.resources.cpuMax, cpus: cpus(seen.resources.cpusetCpusEffective).length };
+  }
+  /** Re-earn an ORIGINAL actual native ACK. No create/start/configure path. */
+  async capturePoolObservation(
+    input: DockerEmployeeResourcePolicy['pool'],
+    current: () => void
+  ): Promise<DockerPoolReconciliationReceipt> {
+    const policy = DockerEmployeePoolPolicy.parse(input);
+    current();
+    const { anchors, id, name, configuration, init } = await this.#runningPoolAnchor(current);
     const fresh = await this.#probe(init);
     current();
     if (!this.#matches(fresh, policy, null)) refuse('DOCKER_POOL_POLICY_CHANGED');

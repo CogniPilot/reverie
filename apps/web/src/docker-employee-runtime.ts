@@ -10,6 +10,9 @@ import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
 import { DockerAbsentReprovision, type DockerAbsentReprovisionPlanMoves } from './docker-absent-reprovision.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
+import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
+import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
+import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -85,6 +88,7 @@ interface Attached {
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
   resourceRevisions: DockerResourceRevisionService;
+  cpuCeiling: DockerPoolCpuCeiling;
   recoveryHelper?: DockerWorkerReattachHelper;
   absent: DockerAbsentReprovision;
 }
@@ -311,6 +315,10 @@ export class DockerEmployeeRuntime {
     const inventory = () => store.resourceInventory();
     const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const coldPool = new DockerColdPoolJournal(join(dirname(company.store.file), 'docker-pool-cold-recovery.jsonl'));
+    const cpuCeilings = new DockerPoolCpuCeilingStore(
+      join(dirname(company.store.file), 'docker-pool-cpu-ceiling.jsonl'),
+      boxId
+    );
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
         boxId,
@@ -320,6 +328,7 @@ export class DockerEmployeeRuntime {
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
         leafWriterHelperImageId: configuration.leafWriterHelperImageId,
         requireColdPoolIdle: () => coldPool.requireIdle(),
+        approvedPoolCpuMax: () => cpuCeilings.acceptedCpuMax(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
           store.retainedPoolConfigurationTasks(
@@ -403,6 +412,9 @@ export class DockerEmployeeRuntime {
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     }, coldPool);
     const resourceRevisions = new DockerResourceRevisionService(company, store, revisions, resources, engine);
+    const cpuCeiling = new DockerPoolCpuCeiling(company, cpuCeilings, resources, boxId, () => {
+      if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+    });
     const recoveryHelper = configuration.recoveryHelperImageId
       ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({
           instanceId: this.#key.instanceId,
@@ -453,7 +465,19 @@ export class DockerEmployeeRuntime {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }
     );
-    this.#attached = { company, ctx, store, engine, provider, service, pool, resourceRevisions, recoveryHelper, absent };
+    this.#attached = {
+      company,
+      ctx,
+      store,
+      engine,
+      provider,
+      service,
+      pool,
+      resourceRevisions,
+      cpuCeiling,
+      recoveryHelper,
+      absent,
+    };
   }
   /** Server composition only: the in-memory owner of the private move journal.
    * Until it is bound, an absent-laptop reprovision is refused. */
@@ -472,6 +496,11 @@ export class DockerEmployeeRuntime {
     };
     registerDockerResourceRevisionRoutes(app, a.resourceRevisions,
       guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent));
+    registerDockerPoolCpuCeilingRoutes(
+      app,
+      a.cpuCeiling,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
     registerDockerOwnerStopRoutes(
       app,
       new DockerOwnerStopDiagnostic(a.company, requireCurrent),

@@ -75,6 +75,53 @@ Current gaps: only the case folder is measured. An employee's private home and
 scratch storage are not measured and do not count yet, nothing is deleted or
 blocked automatically, and the owner is not alerted separately.
 
+## Employee group CPU ceiling
+
+All employee laptops of one office run under one pool cgroup,
+`reverie.slice/reverie-box.slice/reverie-box-<box>.slice`. The owner can approve
+a ceiling on the CPU time they use together, in whole CPUs. It is the pool's
+kernel `cpu.max` (`<CPUs x 100000> 100000`), separate from every employee's own
+resource policy, so approving or changing it alters no employee policy, digest,
+acknowledgement, container or session.
+
+`GET /api/company/docker-resources/cpu-ceiling` (signed-in owner only) returns:
+
+- `approved`: the owner's current decision (`revision`, `cpuCores`, `cpuMax`),
+  or `null`. `cpuCores: null` means the owner chose no ceiling.
+- `proposed`: a suggestion for the approved pool CPU set, three quarters of its
+  CPUs and always at least four left free (24 of 32). It is never applied by
+  itself.
+- `effective`: what a fresh read-only pool observation shows the kernel
+  enforcing, or `null` when the pool could not be observed (`code` says why).
+- `state`: `unapproved`, `pending` (approved, the kernel still shows none or an
+  earlier approved value), `applied`, `drifted` (a value the owner never
+  approved) or `unobserved`.
+
+`PUT /api/company/docker-resources/cpu-ceiling` (signed-in, same-origin owner;
+no worker, parent-session or service-token header) records a decision:
+
+```json
+{ "revision": "NEW_UUID", "expectedRevision": null, "scope": "all-employees", "cpuCores": 24 }
+```
+
+`expectedRevision` is the `approved.revision` the owner last saw, or `null` for
+the first decision. A stale value is refused with
+`DOCKER_POOL_CPU_CEILING_CHANGED`; repeating the identical request is accepted
+once. A value above the pool CPU set is refused. Decisions are appended to the
+private `docker-pool-cpu-ceiling.jsonl` beside the company store.
+
+Recording a decision changes nothing in the kernel. Pool checks accept "no
+quota" or a ceiling the owner approved (the current and the seven before it),
+so a pool carrying an approved ceiling stays acknowledged; any other pool quota
+is still an unapproved change. A worker's own cgroup never has a quota.
+
+Current gaps: the office does not yet issue the write. The fixed helper has the
+command (`configure-pool-cpu-max`, which writes only `cpu.max` on a populated
+pool after the usual identity checks and keeps every laptop running), but no
+helper image carrying it is selected in the runtime manifest and no apply
+endpoint exists, so `state` stays `pending` after approval. There is no GUI
+control. A host restart recreates the pool cgroup without a ceiling.
+
 ## Retained expert startup
 
 After a reboot, the ordinary session restore banner and its API offer personal
