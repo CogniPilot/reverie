@@ -11,6 +11,8 @@ mod claim;
 mod diagnostic;
 mod invalid_create;
 pub(crate) use invalid_create::PROOF as INVALID_CREATE_PROOF;
+mod retention;
+pub(crate) use retention::RecordedRoot;
 #[cfg(test)]
 mod tests;
 

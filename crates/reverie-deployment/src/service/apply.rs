@@ -333,6 +333,10 @@ impl DeploymentService {
             deadline.snapshot(),
         )?;
         deadline.check()?;
+        if let Some((root, _)) = rehearsal {
+            // Retention later removes only what this journal names.
+            operation.record_rehearsal_root(root.path(), root.identity())?;
+        }
         operation.attempt("stop-attempt")?;
         deadline.check()?;
         self.engine.stop(model::string(&source, "Id")?)?;

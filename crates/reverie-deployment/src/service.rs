@@ -13,6 +13,7 @@ mod adoption;
 mod apply;
 mod claim;
 mod invalid_create;
+mod retention;
 mod rollback;
 mod scratch;
 mod shared_writers;

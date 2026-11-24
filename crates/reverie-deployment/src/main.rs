@@ -97,6 +97,18 @@ enum Action {
         #[arg(long, requires = "rehearsal_root")]
         compress_backup: bool,
     },
+    /// Report or remove the backups of closed, superseded updates.
+    #[command(
+        long_about = "Report the backups and restore-rehearsal copies that earlier updates left behind. With --apply, remove those of operations that ended ready, restored or refused and whose claim a later operation took over. The active operation and the --keep most recent operations holding storage are always kept. Only directories this tool created and journaled are removed, never anything found by name; operation journals and containers are kept. A rehearsal copy made before this command existed was not journaled and is not removed."
+    )]
+    PruneDeployments {
+        /// Permanently remove the listed backups. Without this, report only.
+        #[arg(long)]
+        apply: bool,
+        /// Operations holding storage to keep, counting the active one.
+        #[arg(long, default_value_t = 2)]
+        keep: u16,
+    },
     /// Report or clear the contents of this office's employee /tmp mounts.
     #[command(
         long_about = "Report allocated bytes in the registered office's employee /tmp trees. With --apply, clear disposable entries after the office and overlapping Docker containers are stopped. Keep the mount directories. Stop host jobs that use these trees before applying."
@@ -131,7 +143,11 @@ fn main() -> ExitCode {
     let args = Arguments::parse();
     let storage = matches!(
         args.action,
-        Command::Online(Action::PruneScratch { .. } | Action::PruneWorkspace { .. })
+        Command::Online(
+            Action::PruneScratch { .. }
+                | Action::PruneWorkspace { .. }
+                | Action::PruneDeployments { .. }
+        )
     );
     let rollback = rollback_command(&args);
     let result = run(args);
@@ -342,6 +358,9 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 rehearsal_root,
                 compress_backup,
             } => service.check_backup_storage(rehearsal_root.as_deref(), compress_backup)?,
+            Action::PruneDeployments { apply, keep } => {
+                service.prune_deployments(apply, usize::from(keep))?
+            }
             Action::PruneScratch {
                 apply,
                 force_read_only,
