@@ -8,9 +8,10 @@ import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const codexRelease = JSON.parse(readFileSync(new URL('./codex-release.json', import.meta.url), 'utf8'));
+const release = name => JSON.parse(readFileSync(new URL(`./${name}-release.json`, import.meta.url), 'utf8'));
+const claudeRelease = release('claude'), codexRelease = release('codex');
 const providers = [
-  { id: 'claude', package: '@anthropic-ai/claude-code', version: '2.1.308', integrity: 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA==' },
+  { id: 'claude', package: '@anthropic-ai/claude-code', ...claudeRelease },
   { id: 'codex', package: '@openai/codex', ...codexRelease },
   { id: 'opencode', package: 'opencode-ai', version: '1.19.3', integrity: 'sha512-wDRcUlMDibaLzecIGvVGUA9naghXVqzCWcUE7N3qagpGiLSUlU4VbixI+bpsErwJp+AAuSO2lhSr/XxJl7XbrQ==' },
 ];
@@ -145,8 +146,11 @@ const status = (prefix, provider, state) => {
 };
 for (const provider of providers.filter(provider => requested.includes(provider.id))) {
   // Retained containers still use the legacy tools prefix and may repair their
-  // old pin. Keep the new Codex release separate across mixed deployments.
-  const prefix = provider.id === 'codex' ? join(tools, 'codex', provider.version) : tools;
+  // old pin: the office and every laptop share this folder, and a laptop keeps
+  // the installer of the image it was made from. Each reviewed Claude and Codex
+  // release therefore has its own prefix, so two pins never reinstall over each
+  // other and a running client's files are never replaced underneath it.
+  const prefix = provider.id === 'codex' || provider.id === 'claude' ? join(tools, provider.id, provider.version) : tools;
   mkdirSync(prefix, { recursive: true });
   let installed;
   try { installed = JSON.parse(readFileSync(join(prefix, 'lib/node_modules', provider.package, 'package.json'), 'utf8')).version; } catch {}

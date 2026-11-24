@@ -732,10 +732,14 @@ let
   codexReleaseJson = builtins.readFile (src + "/scripts/codex-release.json");
   codexRelease = builtins.fromJSON codexReleaseJson;
   codexReleaseFile = pkgs.writeText "codex-release.json" codexReleaseJson;
+  claudeReleaseJson = builtins.readFile (src + "/scripts/claude-release.json");
+  claudeRelease = builtins.fromJSON claudeReleaseJson;
+  claudeReleaseFile = pkgs.writeText "claude-release.json" claudeReleaseJson;
   cliInstallerSource = pkgs.runCommandLocal "reverie-install-clis" {} ''
     mkdir -p "$out"
     cp ${cliInstallerProgram} "$out/reverie-install-clis.mjs"
     cp ${codexReleaseFile} "$out/codex-release.json"
+    cp ${claudeReleaseFile} "$out/claude-release.json"
   '';
   installClis = pkgs.writeShellApplication {
     name = "reverie-install-clis";
@@ -751,7 +755,7 @@ let
     (builtins.readFile (src + "/scripts/reverie-provider-cli"));
   providerLaunchers = map (provider: pkgs.writeShellScriptBin provider ''
     export PATH=${pkgs.nodejs_22}/bin:${pkgs.coreutils}/bin:${lockTools}/bin:$PATH
-    exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else "unversioned")} "$@"
+    exec ${pkgs.bash}/bin/bash ${providerLauncherSource} ${provider} ${installClis}/bin/reverie-install-clis ${lib.escapeShellArg (if provider == "codex" then codexRelease.version else if provider == "claude" then claudeRelease.version else "unversioned")} "$@"
   '') [ "claude" "codex" "opencode" ];
   launcher = pkgs.writeShellScript "reverie-launcher" ''
     export PATH=${installClis}/bin:${runtime}/bin:$PATH

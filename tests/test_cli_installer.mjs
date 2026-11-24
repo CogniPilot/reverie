@@ -6,7 +6,8 @@ import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 
-const codexVersion = '0.169.0';
+const codexVersion = '0.169.0', claudeVersion = '2.1.326';
+const claudePrefix = root => join(root, 'data/tools/claude', claudeVersion);
 const codexPrefix = root => join(root, 'data/tools/codex', codexVersion);
 
 function fixture() {
@@ -46,12 +47,12 @@ test('first start installs exact pins on persistent storage and matching version
   try {
     const first = f.run();
     assert.equal(first.status, 0, first.stderr);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.169.0', 'opencode-ai@1.19.3']);
-    assert.deepEqual(f.calls().map(args => args[args.indexOf('--prefix') + 1]), [join(f.root, 'data/tools'), codexPrefix(f.root), join(f.root, 'data/tools')]);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), [`@anthropic-ai/claude-code@${claudeVersion}`, `@openai/codex@${codexVersion}`, 'opencode-ai@1.19.3']);
+    assert.deepEqual(f.calls().map(args => args[args.indexOf('--prefix') + 1]), [claudePrefix(f.root), codexPrefix(f.root), join(f.root, 'data/tools')]);
     assert.ok(!first.stdout.includes('synthetic private diagnostic'));
     assert.equal(f.run().status, 0);
     assert.equal(f.calls().length, 3);
-    assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'ready');
+    assert.equal(JSON.parse(readFileSync(join(claudePrefix(f.root), '.install-claude.json'))).state, 'ready');
   } finally { f.clean(); }
 });
 
@@ -65,10 +66,10 @@ function completion(child) {
   child.stdout?.on('data', text => stdout += text); child.stderr?.on('data', text => stderr += text);
   return new Promise((resolve, reject) => { child.once('error', reject); child.once('close', status => resolve({ status, stdout, stderr })); });
 }
-function guarded(f, args = [], extra = {}) {
+function guarded(f, args = [], extra = {}, provider = 'codex') {
   const installer = join(f.root, 'installer');
   writeFileSync(installer, `#!${process.execPath}\nimport(${JSON.stringify('file://' + resolve('scripts/reverie-install-clis.mjs'))});\n`, { mode: 0o700 });
-  return spawn('bash', [resolve('scripts/reverie-provider-cli'), 'codex', installer, codexVersion, ...args], { env: { ...f.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+  return spawn('bash', [resolve('scripts/reverie-provider-cli'), provider, installer, provider === 'claude' ? claudeVersion : codexVersion, ...args], { env: { ...f.env, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 test('provider launch waits behind a blocked real installer and executes only the completed reviewed version', async () => {
@@ -85,7 +86,7 @@ test('provider launch waits behind a blocked real installer and executes only th
     await pause(150); assert.equal(launching.exitCode, null); assert.equal(existsSync(oldStarted), false);
     writeFileSync(barrier + '.release', 'continue');
     assert.equal((await installed).status, 0);
-    const result = await launched; assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), '0.169.0');
+    const result = await launched; assert.equal(result.status, 0, result.stderr); assert.equal(result.stdout.trim(), codexVersion);
     assert.equal(existsSync(oldStarted), false); assert.equal(f.calls().length, 2);
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); launching?.kill(); f.clean(); }
 });
@@ -122,6 +123,34 @@ test('a newer container leaves the retained container’s Codex binary and pin i
   } finally { f.clean(); }
 });
 
+test('a newer container leaves the retained container’s Claude binary and pin intact', async () => {
+  const f = fixture();
+  try {
+    // The shared folder as an older image left it: Claude 2.1.308 at the legacy prefix, which that image's installer
+    // insists on and would reinstall over anything else it found there.
+    const legacy = join(f.root, 'data/tools');
+    const metadata = join(legacy, 'lib/node_modules/@anthropic-ai/claude-code/package.json');
+    mkdirSync(resolve(metadata, '..'), { recursive: true });
+    mkdirSync(join(legacy, 'bin'), { recursive: true });
+    writeFileSync(metadata, JSON.stringify({ version: '2.1.308' }));
+    const binary = join(legacy, 'bin/claude');
+    writeFileSync(binary, `#!${process.execPath}\nconsole.log('2.1.308 (Claude Code)');\n`, { mode: 0o700 });
+    writeFileSync(join(legacy, '.install-claude.json'), JSON.stringify({ provider: 'claude', version: '2.1.308', state: 'ready' }));
+
+    assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'claude' }).status, 0);
+    assert.deepEqual(f.calls().map(args => args[args.indexOf('--prefix') + 1]), [claudePrefix(f.root)]);
+    const current = await completion(guarded(f, ['--version'], {}, 'claude'));
+    assert.equal(current.status, 0, current.stderr);
+    assert.equal(current.stdout.trim(), claudeVersion);
+    assert.equal(JSON.parse(readFileSync(metadata, 'utf8')).version, '2.1.308');
+    assert.equal(JSON.parse(readFileSync(join(legacy, '.install-claude.json'), 'utf8')).version, '2.1.308');
+    assert.equal(spawnSync(binary, ['--version'], { encoding: 'utf8' }).stdout.trim(), '2.1.308 (Claude Code)');
+    // A release name that is not a plain version never becomes a path.
+    const odd = spawnSync('bash', [resolve('scripts/reverie-provider-cli'), 'claude', join(f.root, 'installer'), '../../escape', '--version'], { env: f.env, encoding: 'utf8' });
+    assert.equal(odd.status, 2);
+  } finally { f.clean(); }
+});
+
 test('version discovery never queues preparation behind an installer lock', async () => {
   const f = fixture(); let installing;
   const barrier = join(f.root, 'barrier');
@@ -131,7 +160,7 @@ test('version discovery never queues preparation behind an installer lock', asyn
     const installed = completion(installing); await until(() => existsSync(barrier + '.started'));
     const result = await completion(guarded(f, ['--version'], { REVERIE_CLI_INSTALL_WAIT_SECONDS: '0.05' }));
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout.trim(), '0.169.0');
+    assert.equal(result.stdout.trim(), codexVersion);
     writeFileSync(barrier + '.release', 'continue'); await installed;
   } finally { writeFileSync(barrier + '.release', 'continue'); installing?.kill(); f.clean(); }
 });
@@ -162,11 +191,11 @@ test('offline install failure is nonfatal and retries only the missing provider 
   const f = fixture();
   try {
     assert.equal(f.run({ FAIL_PACKAGE: '@anthropic-ai/claude-code' }).status, 0);
-    assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'unavailable');
+    assert.equal(JSON.parse(readFileSync(join(claudePrefix(f.root), '.install-claude.json'))).state, 'unavailable');
     assert.equal(JSON.parse(readFileSync(join(codexPrefix(f.root), '.install-codex.json'))).state, 'ready');
     assert.equal(f.run().status, 0);
     assert.equal(f.calls().length, 4);
-    assert.equal(f.calls().at(-1).at(-1), '@anthropic-ai/claude-code@2.1.308');
+    assert.equal(f.calls().at(-1).at(-1), `@anthropic-ai/claude-code@${claudeVersion}`);
   } finally { f.clean(); }
 });
 
@@ -176,7 +205,7 @@ test('none disables downloads and explicit selection installs only the requested
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'none' }).status, 0);
     assert.equal(f.calls().length, 0);
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex' }).status, 0);
-    assert.deepEqual(f.calls().map(args => args.at(-1)), ['@openai/codex@0.169.0']);
+    assert.deepEqual(f.calls().map(args => args.at(-1)), [`@openai/codex@${codexVersion}`]);
   } finally { f.clean(); }
 });
 
@@ -186,7 +215,7 @@ test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and
   try {
     assert.equal(f.run().status, 0);
     const tools = join(f.root, 'data/tools');
-    for (const [prefix, pkg, version] of [[codexPrefix(f.root), '@openai/codex', '0.146.0'], [tools, '@anthropic-ai/claude-code', '2.1.284']])
+    for (const [prefix, pkg, version] of [[codexPrefix(f.root), '@openai/codex', '0.146.0'], [claudePrefix(f.root), '@anthropic-ai/claude-code', '2.1.284']])
       writeFileSync(join(prefix, 'lib/node_modules', pkg, 'package.json'), JSON.stringify({ version }));
     const preserved = [join(f.env.HOME, '.codex/auth.json'), join(f.env.HOME, '.claude/.credentials.json'), join(f.root, 'data/subscription-profiles.json'), join(f.root, 'data/company.json')];
     for (const file of preserved) {
@@ -194,12 +223,12 @@ test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and
       writeFileSync(file, 'synthetic private fixture: retain unchanged\n', { mode: 0o600 });
     }
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex claude' }).status, 0);
-    assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), ['@anthropic-ai/claude-code@2.1.308', '@openai/codex@0.169.0']);
+    assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), [`@anthropic-ai/claude-code@${claudeVersion}`, `@openai/codex@${codexVersion}`]);
     for (const [id, version, integrity] of [
-      ['codex', '0.169.0', 'sha512-KhzYlkKPxoNssR8CEm45IjqnFWn7UtlF4CiD3tOJPea51xBs7MaHy0UQG9GSbCqk6Lrjn5QdJDV0QD1/FgWlGw=='],
-      ['claude', '2.1.308', 'sha512-b2HnszgyN73wRTFP+IYPDJNn9ADXnG6jr26ibL+w03HSKqfb6GqE8Jnfr4mz37Zv4AT/NP+B5/3c1F89WTdWSA=='],
+      ['codex', codexVersion, 'sha512-KhzYlkKPxoNssR8CEm45IjqnFWn7UtlF4CiD3tOJPea51xBs7MaHy0UQG9GSbCqk6Lrjn5QdJDV0QD1/FgWlGw=='],
+      ['claude', claudeVersion, 'sha512-F7OqxXKogQYUs+RN1903IWlXGuxn8iwAykx+umRbDKvoBeK0Xm6cdgQx9auu5dtsB+DczN58/EFrlaU8pLfgJg=='],
     ]) {
-      const status = JSON.parse(readFileSync(join(id === 'codex' ? codexPrefix(f.root) : tools, `.install-${id}.json`), 'utf8'));
+      const status = JSON.parse(readFileSync(join(id === 'codex' ? codexPrefix(f.root) : claudePrefix(f.root), `.install-${id}.json`), 'utf8'));
       assert.equal(status.version, version); assert.equal(status.registryIntegrity, integrity); assert.equal(status.state, 'ready');
     }
     for (const file of preserved) assert.equal(readFileSync(file, 'utf8'), 'synthetic private fixture: retain unchanged\n');
@@ -271,12 +300,12 @@ test('Nix Claude native hardlink layout gets a nonmutating loader launcher', () 
   const f = fixture();
   try {
     const loader = join(f.root, 'loader');
-    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.308');\n`, { mode: 0o700 });
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('${claudeVersion}');\n`, { mode: 0o700 });
     const result = f.run({ REVERIE_INSTALL_CLIS: 'claude', CREATE_CLAUDE_NATIVE: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(readFileSync(join(f.root,'data/tools/.install-claude.json'))).state, 'ready');
-    assert.ok(readFileSync(join(f.root,'data/tools/bin/.reverie-claude.mjs'), 'utf8').includes('--library-path'));
-    assert.deepEqual(readFileSync(join(f.root,'data/tools/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe')), Buffer.from([127,69,76,70,0]));
+    assert.equal(JSON.parse(readFileSync(join(claudePrefix(f.root), '.install-claude.json'))).state, 'ready');
+    assert.ok(readFileSync(join(claudePrefix(f.root), 'bin/.reverie-claude.mjs'), 'utf8').includes('--library-path'));
+    assert.deepEqual(readFileSync(join(claudePrefix(f.root), 'lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe')), Buffer.from([127,69,76,70,0]));
   } finally { f.clean(); }
 });
 
@@ -284,12 +313,12 @@ function claudeDispatchFixture(callback) {
   const f = fixture();
   try {
     const loader = join(f.root, 'loader');
-    writeFileSync(loader, `#!${process.execPath}\nconsole.log('2.1.308');\n`, { mode: 0o700 });
+    writeFileSync(loader, `#!${process.execPath}\nconsole.log('${claudeVersion}');\n`, { mode: 0o700 });
     const result = f.run({ REVERIE_INSTALL_CLIS: 'claude', CREATE_CLAUDE_NATIVE: '1', REVERIE_ELF_INTERPRETER: loader, REVERIE_ELF_LIBRARY_PATH: '/nix/test/lib' });
     assert.equal(result.status, 0, result.stderr);
-    const native = join(f.root, 'data/tools/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
+    const native = join(claudePrefix(f.root), 'lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe');
     const before = readFileSync(native);
-    const source = readFileSync(join(f.root, 'data/tools/bin/.reverie-claude.mjs'), 'utf8')
+    const source = readFileSync(join(claudePrefix(f.root), 'bin/.reverie-claude.mjs'), 'utf8')
       .replace(/^#![^\n]*\n/, '').replace(/^import [^\n]*\n/gm, '');
     const dispatch = (kind, status = 0, libraryPath = '/caller/lib') => {
       let call, exit;
