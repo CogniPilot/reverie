@@ -34,6 +34,9 @@ fn main() -> std::process::ExitCode {
         Command::ProbePool(input) => operations::probe_pool(&mut files, &input),
         Command::ConfigurePool(input) => operations::configure_pool(&mut files, &input),
         Command::RestorePool(input) => operations::restore_pool(&mut files, &input),
+        Command::ConfigurePoolCpuMax(input) => {
+            operations::configure_pool_cpu_max(&mut files, &input)
+        }
         Command::ProbeWorker(input) => operations::probe_worker(&mut files, &input),
         Command::ConfigureHigh(input) => operations::configure_high(&mut files, &input),
         Command::ConfigureMemoryHigh(input) => {

@@ -1,8 +1,9 @@
 mod memory_high;
 mod pool;
+mod pool_cpu;
 
 use crate::{
-    args::{Common, HighWrite, MemoryHighWrite, PoolWrite, Worker},
+    args::{Common, HighWrite, MemoryHighWrite, PoolCpuMaxWrite, PoolWrite, Worker},
     data::Resources,
     error::{Result, need},
     files::Files,
@@ -142,6 +143,9 @@ pub(crate) fn restore_pool(files: &mut Files, input: &PoolWrite) -> Result<Strin
         "BOXED_RESOURCE_RESTORE_CPU_SET_REQUIRED",
     )?;
     pool::configure(files, input)
+}
+pub(crate) fn configure_pool_cpu_max(files: &mut Files, input: &PoolCpuMaxWrite) -> Result<String> {
+    pool_cpu::configure(files, input)
 }
 fn require_hard(resources: &Resources, input: &HighWrite) -> Result<()> {
     need(

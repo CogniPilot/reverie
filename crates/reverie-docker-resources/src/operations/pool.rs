@@ -14,6 +14,11 @@ pub(super) fn require_restore_members(common: &Common) -> Result<()> {
         !common.member.is_empty() && common.member.len() <= 64,
         "BOXED_RESOURCE_RESTORE_MEMBERS_REQUIRED",
     )?;
+    require_bound_members(common)
+}
+/// Every declared member carries its process birth and appears once.
+pub(super) fn require_bound_members(common: &Common) -> Result<()> {
+    need(common.member.len() <= 64, "BOXED_RESOURCE_MEMBER_BOUND")?;
     need(
         common.member.iter().all(|member| member.start > 0),
         "BOXED_RESOURCE_PID_BIRTH_REQUIRED",

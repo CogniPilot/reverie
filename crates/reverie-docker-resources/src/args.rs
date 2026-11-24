@@ -16,6 +16,8 @@ pub(crate) enum Command {
     ConfigurePool(PoolWrite),
     /// Restore the declared pool policy with every current worker explicitly bound.
     RestorePool(PoolWrite),
+    /// Write only the pool's cpu.max, retaining every other declared pool limit.
+    ConfigurePoolCpuMax(PoolCpuMaxWrite),
     ProbeWorker(Worker),
     ConfigureHigh(HighWrite),
     /// Write only memory.high, retaining all declared hard, CPU and cpuset limits.
@@ -88,6 +90,20 @@ pub(crate) struct PoolWrite {
     #[arg(long)]
     pub(crate) cpuset_cpus: Option<String>,
 }
+/// The CPU time every pool member may use together, in whole CPUs.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CpuCeiling {
+    Unlimited,
+    Cores(u32),
+}
+#[derive(Args)]
+pub(crate) struct PoolCpuMaxWrite {
+    #[command(flatten)]
+    pub(crate) pool: PoolWrite,
+    /// Whole CPUs for all members together, or `max` for no ceiling.
+    #[arg(long, value_parser=cpu_ceiling)]
+    pub(crate) cpu_max_cores: CpuCeiling,
+}
 #[derive(Args)]
 pub(crate) struct HighWrite {
     #[command(flatten)]
@@ -127,6 +143,17 @@ pub(crate) fn hex(raw: &str) -> std::result::Result<String, String> {
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
     .then(|| raw.to_owned())
     .ok_or_else(|| "full lower-case hexadecimal identity required".into())
+}
+fn cpu_ceiling(raw: &str) -> std::result::Result<CpuCeiling, String> {
+    if raw == "max" {
+        return Ok(CpuCeiling::Unlimited);
+    }
+    decimal(raw)
+        .ok()
+        .and_then(|value| u32::try_from(value).ok())
+        .filter(|value| (1..=8192).contains(value))
+        .map(CpuCeiling::Cores)
+        .ok_or_else(|| "whole CPU count or max required".into())
 }
 fn pid(raw: &str) -> std::result::Result<u32, String> {
     decimal(raw)

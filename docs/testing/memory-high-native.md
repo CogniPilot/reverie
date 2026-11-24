@@ -43,3 +43,21 @@ limits or old task phases. Strict observation version 2 retains the original
 anchor image separately; version 1 remains supported. This source/component
 coverage is not evidence of an actual populated-kernel restoration; that must be
 qualified on the selected image and original native attempt.
+
+## Group CPU ceiling on a populated pool
+
+The fixed `configure-pool-cpu-max` command takes the same parent identity,
+approved pool limits, explicit CPU set and birth-bound `--member` list, plus
+`--cpu-max-cores N` (whole CPUs, at most the pool CPU set) or
+`--cpu-max-cores max`. It requires every other pool limit to already equal the
+declared policy, writes only `cpu.max` as `<N x 100000> 100000` (or
+`max 100000`), reads it back and repeats the membership checks around the write.
+It accepts an empty or a populated pool and never stops or recreates a worker.
+Its ACK (`reverie-boxed-pool-cpu-max-ack-v1`) carries the pool observation and
+the observed members.
+
+No helper image carrying this command is selected yet and the console does not
+issue it. The component tests exercise owned regular files, not a kernel; an
+actual write must be qualified on its own selected image, like the commands
+above. The owner approval and status API is described under
+[owner operations](../owner-operations.md#employee-group-cpu-ceiling).
