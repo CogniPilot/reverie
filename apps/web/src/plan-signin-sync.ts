@@ -16,9 +16,10 @@
  *   anything. It RECEIVES the newest usable copy of the plan.
  * - Copies of the SAME sign-in converge on the newest of them, so a copy whose refresh token another holder
  *   already replaced is renewed before its own client tries and is refused.
- * - A usable copy of a DIFFERENT sign-in is left alone. Two separate sign-ins of one plan never collide, and
- *   overwriting one would only create a second holder of the other. The exception is a copy whose access token
- *   ended more than ten minutes ago while another holder has one that has not: no running client leaves it so.
+ * - A usable copy of a DIFFERENT sign-in is left alone, however long ago its access token ended. Two separate
+ *   sign-ins of one plan never collide, and overwriting one would only create a second holder of the other. A
+ *   client that sits idle renews nothing until its next request, so an old access token says nothing about
+ *   whether the copy still works; a copy that does not is emptied by its client and then receives one.
  * - The office's copy is never created here: an office that is signed out of a plan stays signed out.
  * - A copy that was placed and then emptied by its client is dead and is never placed again.
  */
@@ -101,9 +102,6 @@ export interface SignInSyncPlan {
 
 /** Two recorded refresh deadlines this close are one sign-in. Separate sign-ins were measured hours apart. */
 export const SAME_SIGN_IN_TOLERANCE_MS = 2 * 60_000;
-/** A client that is running renews within five minutes of its access token's end. A copy still expired this long
- * after it is treated as one nobody is renewing. */
-export const STALE_SIGN_IN_MS = 10 * 60_000;
 
 function live(holder: SignInHolder, now: number, dead: ReadonlySet<string>): boolean {
   const { view } = holder;
@@ -168,14 +166,6 @@ export function planSignInSync(
       newest.view.expiresAt! > holder.view.expiresAt!
     )
       transfers.push({ from: newest.id, to: holder.id, reason: 'older-copy' });
-    else if (
-      // No running client leaves its access token expired this long: this copy is idle or already refused, so
-      // nothing is lost by giving it one that works.
-      holder.view.expiresAt! + STALE_SIGN_IN_MS <= now &&
-      best.view.expiresAt! > now &&
-      best.view.digest !== holder.view.digest
-    )
-      transfers.push({ from: best.id, to: holder.id, reason: 'stranded' });
   }
   return { transfers, usable: true, ...(sharedExpiresAt === undefined ? {} : { sharedExpiresAt }) };
 }

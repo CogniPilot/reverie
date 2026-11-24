@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   SAME_SIGN_IN_TOLERANCE_MS,
-  STALE_SIGN_IN_MS,
   planSignInSync,
   signInView,
   type SignInHolder,
@@ -179,15 +178,13 @@ describe('planSignInSync', () => {
     ).toEqual(['laptop:b>laptop:a:stranded', 'laptop:b>office:stranded']);
   });
 
-  it('replaces a copy nobody is renewing with one that works, but not one a client may be about to renew', () => {
-    const working = file(NOW + 5 * HOUR, GRANT_B, 2);
-    const longExpired = file(NOW - STALE_SIGN_IN_MS, GRANT_A, 1),
-      justExpired = file(NOW - STALE_SIGN_IN_MS + 1, GRANT_A, 1);
-    expect(moves([holder('office', working), holder('laptop:a', longExpired)])).toEqual(['office>laptop:a:stranded']);
-    expect(moves([holder('office', longExpired), holder('laptop:a', working)])).toEqual(['laptop:a>office:stranded']);
-    expect(moves([holder('office', working), holder('laptop:a', justExpired)])).toEqual([]);
-    // Two expired copies of different sign-ins: neither is known to work, so neither replaces the other.
-    expect(moves([holder('office', file(NOW - HOUR, GRANT_B, 3)), holder('laptop:a', longExpired)])).toEqual([]);
+  it('leaves a separate sign-in alone however long ago its access token ended', () => {
+    // An idle client renews nothing until its next request: an old access token is not a dead sign-in.
+    const working = file(NOW + 5 * HOUR, GRANT_B, 2),
+      idle = file(NOW - 6 * HOUR, GRANT_A, 1);
+    expect(moves([holder('office', working), holder('laptop:a', idle)])).toEqual([]);
+    expect(moves([holder('office', idle), holder('laptop:a', working)])).toEqual([]);
+    expect(moves([holder('office', file(NOW - HOUR, GRANT_B, 3)), holder('laptop:a', idle)])).toEqual([]);
   });
 
   it('prefers the office on a tie and does not depend on input order', () => {
