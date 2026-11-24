@@ -14,6 +14,8 @@ import {
 } from './docker-absent-reprovision.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
 import { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
+import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
+import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
@@ -97,6 +99,7 @@ interface Attached {
   cpuCeiling: DockerPoolCpuCeiling;
   recoveryHelper?: DockerWorkerReattachHelper;
   absent: DockerAbsentReprovision;
+  command: PackagedDockerEngineCommand;
 }
 function config(): { value: z.infer<typeof DockerRuntimeConfiguration>; current: () => boolean; close: () => void } {
   const path = '/etc/reverie/boxed-runtime.json',
@@ -498,6 +501,7 @@ export class DockerEmployeeRuntime {
       cpuCeiling,
       recoveryHelper,
       absent,
+      command,
     };
   }
   /** Server composition only: the in-memory owner of the private move journal.
@@ -536,6 +540,24 @@ export class DockerEmployeeRuntime {
         return snapshot;
       },
     };
+  }
+  /** Server composition only: one employee's running laptop as a holder of its plan's sign-in. The laptop is the
+   * recorded destination of a finished set-up; the holder stops answering once that record names another
+   * container or the runtime is no longer current. Nothing is read or written until the reconciler asks. */
+  signInHolder(employeeId: string, label: string, profileId: string): DockerLaptopSignInHolder | undefined {
+    const a = this.#attached;
+    if (!a || !this.current()) return undefined;
+    const row = a.store.record(employeeId),
+      containerId = row?.destination?.containerId;
+    if (!row || !containerId || !['provider-issued', 'ready'].includes(row.phase)) return undefined;
+    return new DockerLaptopSignInHolder(
+      a.command,
+      { id: laptopSignInHolderId(employeeId), label, containerId, profileId },
+      () =>
+        this.current() &&
+        this.#attached === a &&
+        a.store.record(employeeId)?.destination?.containerId === containerId
+    );
   }
   /** Server composition only: the office supervisor's laptop reads and steps. Each one is a call to the same
    * service the owner's route for that step calls, under the authority `DockerSupervisorLaptops` documents. */
