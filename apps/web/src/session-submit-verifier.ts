@@ -91,6 +91,19 @@ function stripClaudeWelcomePlaceholder(screen: string): string {
   );
 }
 
+/**
+ * A styled capture without its complete operating-system commands (OSC: `ESC ]` … ended by BEL or `ESC \`). tmux writes
+ * each hyperlink on the screen as an OSC 8 pair, and Claude Code prints links in its notices and answers. An OSC never
+ * changes how text is drawn, so it says nothing about a later row's style; read as an unknown escape it made every later
+ * faint suggestion look like a draft until some row happened to send a full reset. Claude Code 2.1.326 ends its styled runs
+ * with `ESC [39m`, not `ESC [0m`, so one link on its welcome screen kept the empty composer below it "not empty" (measured
+ * 2026-11-24). An OSC that is never terminated is left in place and still reads as unknown.
+ */
+function withoutOsc(screen: string): string {
+  // eslint-disable-next-line no-control-regex
+  return screen.replace(/\x1b\][^\x07\x1b\n]*(?:\x07|\x1b\\)/gu, '');
+}
+
 /** Text attributes in effect while reading a styled capture; `unknown` once a code this reader does not model is seen. */
 interface SgrState { on: Set<number>; fg: boolean; bg: boolean; underlineColour: boolean; unknown: boolean }
 /** The attributes each "off" code clears (25 clears both blinks); 26 is not an "off" code and is treated as unknown. */
@@ -128,7 +141,7 @@ function applySgr(state: SgrState, params: string): void {
 function glyphStyles(screen: string, glyph: string): Map<number, string | undefined> {
   const state: SgrState = { on: new Set(), fg: false, bg: false, underlineColour: false, unknown: false };
   const styles = new Map<number, string | undefined>();
-  screen.split('\n').forEach((row, index) => {
+  withoutOsc(screen).split('\n').forEach((row, index) => {
     // eslint-disable-next-line no-control-regex
     const lead = /^((?:\x1b\[[0-9;:]*m)*)/u.exec(row)![1]!;
     // eslint-disable-next-line no-control-regex
@@ -202,7 +215,8 @@ export function composerBody(screen: string, glyph: string): string | undefined 
  * Whether Claude Code's composer, rows `first` to `final` of a styled capture, shows only its own suggestion (ghost text).
  *
  * Claude Code offers a next prompt in the empty composer as its placeholder: faint (SGR 2), with its drawn cursor (inverse,
- * SGR 7) on the first character, the same way it draws the welcome example above (measured on 2.1.308). Text a person or the
+ * SGR 7) on the first character, the same way it draws the welcome example above (measured on 2.1.308); 2.1.326 draws no
+ * cursor cell at all, only the faint words. Text a person or the
  * office typed is never faint. So the composer is suggestion-only when every visible character after the glyph is faint,
  * except that the very first may instead be the bare inverse cursor, and at least one is faint. Any other attribute, a
  * background, an escape this reader does not model, or one character in the default style keeps the composer a draft; so does
@@ -211,7 +225,7 @@ export function composerBody(screen: string, glyph: string): string | undefined 
  */
 function claudeSuggestionOnly(screen: string, glyph: string, first: number, final: number): boolean {
   const state: SgrState = { on: new Set(), fg: false, bg: false, underlineColour: false, unknown: false };
-  const rows = screen.split('\n');
+  const rows = withoutOsc(screen).split('\n');
   if (final >= rows.length || final - first > 16) return false;
   let seen = 0, faint = 0;
   for (let index = 0; index <= final; index++) {

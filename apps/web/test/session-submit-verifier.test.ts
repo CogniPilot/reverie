@@ -95,6 +95,28 @@ describe('promptStillInComposer', () => {
       // One typed word among the faint ones is enough to keep it a draft.
       expect(composerIsEmpty(frame(perWord.replace('\x1b[2mthe\x1b[0m', 'the')), '❯')).toBe(false);
     });
+    it('reads Claude Code 2.1.326 composers captured with `tmux capture-pane -e -p`, under a hyperlink', () => {
+      // Verbatim rows from a live 2.1.326 pane (2026-11-24). This version draws no inverse cursor cell, ends styled runs with
+      // SGR 39 rather than a full reset, and its welcome notice carries a link, which tmux writes as an OSC 8 pair.
+      const link = '\x1b[38;5;246m\x1b]8;id=11prv8;https://clau.de/api-credits\x1b\\https://clau.de/api-credits\x1b[39m\x1b]8;;\x1b\\';
+      const rule = '\x1b[38;5;244m' + '─'.repeat(40);
+      const footer = '\x1b[39m  \x1b[38;5;211m⏵⏵ bypass permissions on\x1b[38;5;246m (shift+tab to cycle)\x1b[39m';
+      const pane = (composer: string, above = link) => [' Claude Code v2.1.326', above, rule, composer, rule, footer].join('\n');
+      const welcome = '\x1b[39m❯\u00a0\x1b[2mTry "edit <filepath> to…"\x1b[0m';
+      const typed = '\x1b[39m❯\u00a0hello draft text';
+      expect(composerIsEmpty(pane(welcome), '❯')).toBe(true);
+      expect(promptStillInComposer(pane(welcome), 'Continue the work you were handed.', '❯')).toBe(false);
+      expect(composerIsEmpty(pane(typed), '❯')).toBe(false);
+      expect(promptStillInComposer(pane(typed), 'hello draft text', '❯')).toBe(true);
+      // BEL-terminated links are the same thing.
+      expect(composerIsEmpty(pane(welcome, '\x1b]8;;https://example.org\x07link\x1b]8;;\x07'), '❯')).toBe(true);
+      // An escape this reader does not model still keeps the composer a draft: an unterminated OSC, or a cursor move.
+      expect(composerIsEmpty(pane(welcome, '\x1b]8;;https://example.org'), '❯')).toBe(false);
+      expect(composerIsEmpty(pane(welcome, '\x1b[2Aup'), '❯')).toBe(false);
+      // A link inside the composer row changes nothing: faint words stay a suggestion, plain words stay a draft.
+      expect(composerIsEmpty(pane('\x1b[39m❯\u00a0\x1b[2m\x1b]8;;https://example.org\x1b\\see the docs\x1b]8;;\x1b\\\x1b[0m'), '❯')).toBe(true);
+      expect(composerIsEmpty(pane('\x1b[39m❯\u00a0\x1b]8;;https://example.org\x1b\\see the docs\x1b]8;;\x1b\\'), '❯')).toBe(false);
+    });
     it('keeps the very same words a draft when they were typed, or when the capture has no styles', () => {
       // Exactly the screen in the report, as plain text: a suggestion and typed text cannot be told apart, so it is a draft.
       expect(composerIsEmpty(frame(`❯ ${words}`), '❯')).toBe(false);
