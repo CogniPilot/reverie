@@ -24,6 +24,7 @@ import type {
 import type { DockerContainedResourceController } from './docker-employee-engine.js';
 import {
   DockerContinuationTask,
+  DockerSingleAttemptTask,
   type DockerContinuationTaskJournal,
   type DockerContinuationTaskRole,
 } from './docker-continuation-task.js';
@@ -2312,7 +2313,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
             row,
             desired,
             old,
-            { ...dockerResourceAttemptKey(row, revision), state: 'helper', task: next },
+            // The revision ledger holds single-attempt tasks only; its writer is never rerun.
+            { ...dockerResourceAttemptKey(row, revision), state: 'helper', task: DockerSingleAttemptTask.parse(next) },
             requireCurrent
           );
           requireCurrent();
