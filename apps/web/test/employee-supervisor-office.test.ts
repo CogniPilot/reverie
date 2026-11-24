@@ -267,6 +267,22 @@ describe('office supervisor ports', () => {
     expect(await o.ports.actions['continue-move']!(o.employee(), pass, undefined)).toEqual({ outcome: 'refused', detail: 'no held move' });
   });
 
+  it('abandons a held move through the same service call, under the supervisor’s own guard', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    expect(await o.ports.actions['abandon-move']!(o.employee(), pass, held)).toEqual({ outcome: 'done', detail: 'abandoned move-1' });
+    expect(o.state.calls).toEqual([['abandon', 'move-1', 'a', undefined]]);
+    const refusing = () => {
+      throw new Error('switched off');
+    };
+    expect(await o.ports.actions['abandon-move']!(o.employee(), refusing, held)).toEqual({
+      outcome: 'refused',
+      detail: 'The office supervisor may no longer abandon this move',
+    });
+    expect(o.state.calls).toHaveLength(1);
+  });
+
   it('reconnects a terminal with the owner’s Wake, which only attaches what already runs', async () => {
     const o = office();
     expect(await o.ports.actions['reconnect-viewer']!(o.employee(), pass, undefined)).toEqual({ outcome: 'done', detail: 'attached' });
@@ -283,7 +299,7 @@ describe('office supervisor ports', () => {
   it('offers no relaunch step and no laptop steps without the laptop runtime', () => {
     const o = office();
     expect(Object.keys(o.ports.actions).sort()).toEqual([
-      'continue-move', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
+      'abandon-move', 'continue-move', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
     ]);
   });
 

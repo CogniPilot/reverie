@@ -9,6 +9,8 @@
  * - laptop steps: `DockerSupervisorLaptops` (see that file's comment);
  * - continuing a held plan move: a `supervisor` requester for the ORIGINAL of that move
  *   (`captureDockerPlanMoveSupervisorRequester`), built by the server and passed in as `moveExecutor`;
+ * - abandoning a held plan move: `PlanMoves.abandonHeldDockerMove` with the supervisor's guard as its `authorized`
+ *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them;
  * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running.
  */
 import type { CompanyService } from './company-service.js';
@@ -49,7 +51,7 @@ export interface OfficeSupervisorDeps {
   restorations(): readonly { employeeId: string; state: 'attached' | 'held'; code?: string }[];
   providerHealth?(employee: CompanyEmployee): { state: 'healthy' | 'dead' | 'unknown' } | undefined;
   ownerStopPending(sessionId: string): boolean;
-  readonly moves: Pick<PlanMoves, 'list' | 'get' | 'continueDocker'>;
+  readonly moves: Pick<PlanMoves, 'list' | 'get' | 'continueDocker' | 'abandonHeldDockerMove'>;
   /** A plan move executor that can only continue the original of a held move, while `current` holds. */
   moveExecutor(employee: SupervisedEmployee, current: () => boolean): PlanMoveExecutor;
   planSignedIn(accountId: string): Promise<boolean | undefined>;
@@ -267,6 +269,17 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
             deps.moveExecutor(employee, current)
           );
           return { outcome: 'done', detail: 'continuing ' + move.id };
+        } catch (error) {
+          return moveRefusal(error);
+        }
+      },
+      'abandon-move': async (employee, guard, move) => {
+        if (!move) return { outcome: 'refused', detail: 'no held move' };
+        try {
+          await deps.moves.abandonHeldDockerMove(move.id, employee.id, employee.owner, () => {
+            if (!holds(guard)()) throw new PlanMoveError('The office supervisor may no longer abandon this move', 403);
+          });
+          return { outcome: 'done', detail: 'abandoned ' + move.id };
         } catch (error) {
           return moveRefusal(error);
         }
