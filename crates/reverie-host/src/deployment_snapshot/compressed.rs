@@ -1,5 +1,5 @@
 //! Publish a gzip copy whose complete decoded stream matches the rehearsed tar.
-use super::{ConsoleSnapshot, Directory, Result, combine, deadline, manifest, mounts, require};
+use super::{ConsoleSnapshot, Directory, Result, combine, deadline, manifest, require};
 use flate2::{Compression, read::MultiGzDecoder, write::GzEncoder};
 use sha2::{Digest, Sha256};
 use std::{
@@ -17,11 +17,17 @@ impl ConsoleSnapshot {
         end: Instant,
     ) -> Result<(PathBuf, String)> {
         require(self.restore_rehearsed(), "SNAPSHOT_REHEARSAL_REQUIRED")?;
+        // The durable destination joins the compared mounts before the
+        // archive check below reads the current table.
+        self.mounts
+            .include(&super::selected_destination(destination)?.1)?;
         self.check_archive(end)?;
         let directory = Directory::create(destination)?;
         let result = (|| {
-            mounts::disjoint(self.source.root.path(), directory.path(), &self.mounts)?;
-            mounts::disjoint(self.destination.path(), directory.path(), &self.mounts)?;
+            self.mounts
+                .disjoint(self.source.root.path(), directory.path())?;
+            self.mounts
+                .disjoint(self.destination.path(), directory.path())?;
             let file = directory.create_file("console.tar.gz")?;
             let result = self.compress_and_verify(&directory, &file, end);
             combine(result, crate::native::close(file).map_err(Into::into))

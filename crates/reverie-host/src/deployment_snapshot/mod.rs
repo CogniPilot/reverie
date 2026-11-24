@@ -168,28 +168,17 @@ impl SnapshotTools {
         partial: &mut PartialCapture,
         destination: &Path,
         end: Instant,
-    ) -> Result<(
-        Manifest,
-        String,
-        reverie_contracts::kernel_mounts::MountTable,
-    )> {
+    ) -> Result<(Manifest, String, mounts::Observed)> {
         let source = &partial.source;
-        let parent = std::fs::canonicalize(
-            destination
-                .parent()
-                .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
-        )?;
-        let selected = parent.join(
-            destination
-                .file_name()
-                .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
-        );
+        let (parent, selected) = selected_destination(destination)?;
         require(
             !selected.starts_with(source.root.path()) && !source.root.path().starts_with(&selected),
             "SNAPSHOT_OVERLAP",
         )?;
-        let mounts = mounts::capture(end)?;
-        mounts::disjoint(source.root.path(), &parent, &mounts)?;
+        let mut mounts = mounts::Observed::capture(end)?;
+        mounts.include(source.root.path())?;
+        mounts.include(&parent)?;
+        mounts.disjoint(source.root.path(), &parent)?;
         partial.destination = Some(Arc::new(Directory::create(destination)?));
         let destination = partial.destination.as_ref().expect("captured directory");
         require(
@@ -212,6 +201,21 @@ impl SnapshotTools {
         let digest = manifest::file_digest(archive, end)?;
         Ok((before, digest, mounts))
     }
+}
+/// The canonical parent of a destination that may not exist yet, and the
+/// destination's own path beneath it.
+fn selected_destination(destination: &Path) -> Result<(PathBuf, PathBuf)> {
+    let parent = std::fs::canonicalize(
+        destination
+            .parent()
+            .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
+    )?;
+    let selected = parent.join(
+        destination
+            .file_name()
+            .ok_or_else(|| SnapshotError::refused("SNAPSHOT_DESTINATION"))?,
+    );
+    Ok((parent, selected))
 }
 struct PartialCapture {
     source: SnapshotSource,
@@ -297,7 +301,7 @@ pub struct ConsoleSnapshot {
     archive: File,
     digest: String,
     manifest: Manifest,
-    mounts: reverie_contracts::kernel_mounts::MountTable,
+    mounts: mounts::Observed,
     rehearsed: bool,
 }
 
@@ -380,11 +384,18 @@ impl ConsoleSnapshot {
     }
 
     pub fn rehearse_at(&mut self, selected: Option<&RehearsalRoot>, end: Instant) -> Result<()> {
+        if let Some(root) = selected {
+            // The separate root joins the compared mounts before the source
+            // check below reads the current table.
+            self.mounts.include(root.directory().path())?;
+        }
         self.verify_source(end)?;
         let parent = selected.map_or(self.destination.as_ref(), RehearsalRoot::directory);
         if selected.is_some() {
-            mounts::disjoint(self.source.root.path(), parent.path(), &self.mounts)?;
-            mounts::disjoint(self.destination.path(), parent.path(), &self.mounts)?;
+            self.mounts
+                .disjoint(self.source.root.path(), parent.path())?;
+            self.mounts
+                .disjoint(self.destination.path(), parent.path())?;
         }
         let rehearsal = Arc::new(parent.create_child("rehearsal")?);
         let result = parent.check().and_then(|()| {
@@ -408,10 +419,7 @@ impl ConsoleSnapshot {
         Ok(())
     }
     fn check_archive(&self, end: Instant) -> Result<()> {
-        require(
-            mounts::capture(end)? == self.mounts,
-            "SNAPSHOT_MOUNTS_CHANGED",
-        )?;
+        self.mounts.require_current(end)?;
         self.source.root.check()?;
         self.destination.check()?;
         self.destination.check_file("console.tar", &self.archive)?;
