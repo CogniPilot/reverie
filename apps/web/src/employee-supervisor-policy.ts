@@ -775,6 +775,16 @@ function rebuildGate(
             REBUILD_BY_HAND,
         }
       : { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
+  // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
+  // looks like, and then the shared pool has to be recovered before any laptop is built.
+  if (provider === 'no-laptop' && observed.laptop.poolAlive === false)
+    return {
+      kind: 'human',
+      needsHuman:
+        'No laptop of this office is running. After a host restart, recover the shared pool first: GET ' +
+        '…/docker-pool/cold-preview, then POST …/docker-pool/cold-recover. ' +
+        REBUILD_BY_HAND,
+    };
   return { kind: 'ok', preconditions: provider === undefined ? ['no-agent-running'] : [] };
 }
 

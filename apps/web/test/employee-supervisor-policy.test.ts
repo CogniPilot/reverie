@@ -654,6 +654,19 @@ describe('employee supervisor: laptops the office cannot judge alone', () => {
     expect(assessEmployee(withOthers, since(0, 'x'), ON, 60 * MINUTE).next.action).toBe('rebuild-laptop');
   });
 
+  it('builds no laptop while none is running anywhere, because that is what a host restart looks like', () => {
+    const failed = held('DOCKER_CONTINUATION_DESTINATION_UNCONFIRMED');
+    const history = since(0, classifyEmployee(failed).fingerprint);
+    const gone = (poolAlive: boolean | undefined, provider: 'no-laptop' | 'absent') =>
+      assessEmployee({ ...failed, laptop: { ...failed.laptop, provider, poolAlive } }, history, ON, 10 * MINUTE);
+    expect(gone(true, 'no-laptop').next.action).toBe('rebuild-laptop');
+    const alone = gone(false, 'no-laptop');
+    expect(alone.next.action).toBeNull();
+    expect(alone.needsHuman).toMatch(/No laptop of this office is running.*cold-recover/);
+    // A laptop that runs with no agent in it is evidence that the box is up.
+    expect(gone(false, 'absent').next.action).toBe('rebuild-laptop');
+  });
+
   it('asks for a person once a laptop has been unreadable for fifteen minutes', () => {
     const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
     const unread = { ...failed, laptop: { ...failed.laptop, provider: 'unknown' as const } };

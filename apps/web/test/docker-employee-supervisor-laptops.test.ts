@@ -175,9 +175,11 @@ describe('the office supervisor’s laptop authority', () => {
     const w = world();
     w.state.guard = false;
     await expect(w.laptops.resend(EMPLOYEE, w.guard)).rejects.toThrow(/switched off/);
+    await expect(w.laptops.rebuild(EMPLOYEE, w.guard)).rejects.toThrow(/switched off/);
     expect(w.state.calls).toEqual([]);
     // A read reports what it could not confirm instead of throwing.
     expect(await w.laptops.read(EMPLOYEE, w.guard)).toMatchObject({ state: 'held', code: 'DOCKER_CONTINUATION_UNCONFIRMED' });
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
     expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('unknown');
   });
 });
@@ -294,5 +296,150 @@ describe('continuing and starting a laptop', () => {
     expect((await w.laptops.start(EMPLOYEE, w.guard)).detail).toBe('no stopped laptop source');
     expect(w.made('begin')).toEqual([]);
     expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('running');
+  });
+});
+
+describe('what a rebuild would discard', () => {
+  it('finds no laptop when the Engine lists none running', async () => {
+    const w = world();
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('no-laptop');
+    expect(w.made('preview')).toEqual([TEMPLATE]);
+    expect(w.made('observeDestination')).toEqual([]);
+  });
+
+  it.each([
+    ['exited', { state: 'running', provider: { kind: 'exited', exit: {} } }, 'exited'],
+    ['never started', { state: 'running', provider: { kind: 'absent' } }, 'absent'],
+    ['running', { state: 'running', provider: { kind: 'running', operationId: 'o', sessionId: 's' } }, 'running'],
+    ['unreadable', { state: 'running', provider: { kind: 'unknown' } }, 'unknown'],
+    ['a container the read says is stopped', { state: 'stopped', provider: { kind: 'absent' } }, 'unknown'],
+    ['a container the read cannot find', null, 'unknown'],
+    ['a read that fails', new Error('exec failed'), 'unknown'],
+  ])('reads the one running destination: agent %s', async (_title, observed, expected) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = observed;
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe(expected);
+  });
+
+  it('calls any other running laptop occupied, because nothing shows it empty', async () => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: ['f'.repeat(64)] };
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('running');
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION, 'f'.repeat(64)] };
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('running');
+    expect(w.made('observeDestination')).toEqual([]);
+  });
+
+  it('knows nothing without a layout on record or when the preview fails', async () => {
+    const w = world();
+    w.state.preview = new DockerEmployeeContinuationError('DOCKER_REPROVISION_ABSENCE_UNCONFIRMED') as never;
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
+    w.state.retired = [];
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
+  });
+
+  it('uses the newest laptop operation’s layout and none when the history is ambiguous', async () => {
+    const w = world();
+    const newer = { ...TEMPLATE, scratchRoot: '/host/new/laptops' };
+    w.state.retired = [retired(), retired({ operationId: 'newer', previous: retired().operationId, template: newer })];
+    await w.laptops.provider(EMPLOYEE, w.guard);
+    expect(w.made('preview')).toEqual([newer]);
+    w.state.retired = [retired(), retired({ operationId: 'sibling' })];
+    expect(w.laptops.glance(EMPLOYEE.id).templateOnRecord).toBe(false);
+  });
+});
+
+describe('rebuilding a laptop', () => {
+  it('applies the preview it just read, with the recorded layout, and never confirms a discard nobody needs', async () => {
+    const w = world();
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'rebuilt new' });
+    expect(w.made('rebuild')).toEqual([
+      {
+        operationId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        sessionId: EMPLOYEE.sessionId,
+        sessionGeneration: 3,
+        expectedScopeDigest: '6'.repeat(64),
+        template: TEMPLATE,
+      },
+    ]);
+  });
+
+  it('confirms discarding a running laptop only after a read inside it found no agent', async () => {
+    for (const kind of ['exited', 'absent']) {
+      const w = world();
+      w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+      w.state.observed = { state: 'running', provider: { kind } };
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+      expect(w.made('rebuild')).toEqual([expect.objectContaining({ confirmDiscardRunning: true })]);
+      expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination', 'rebuild']);
+    }
+  });
+
+  it.each([
+    ['an agent runs in it', { state: 'running', provider: { kind: 'running' } }, [DESTINATION]],
+    ['it cannot be read', { state: 'running', provider: { kind: 'unknown' } }, [DESTINATION]],
+    ['the read fails', new Error('exec failed'), [DESTINATION]],
+    ['the running laptop is not the recorded destination', { state: 'running', provider: { kind: 'absent' } }, ['f'.repeat(64)]],
+    ['two laptops run', { state: 'running', provider: { kind: 'absent' } }, [DESTINATION, 'f'.repeat(64)]],
+  ])('never discards a running laptop when %s', async (_title, observed, running) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: running };
+    w.state.observed = observed;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({
+      outcome: 'refused',
+      detail: 'a running laptop is not shown to be empty',
+    });
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('stops the discard if anything that could start an agent moved after the read', async () => {
+    const cases: Array<[string, (state: ReturnType<typeof world>['state']) => void, boolean]> = [
+      ['a set-up step took flight', (state) => (state.flight = true), true],
+      ['the office terminal became another process', (state) => (state.session = { pid: 99 }), true],
+      ['the office terminal was replaced', (state) => (state.session = { pid: 77 }), true],
+      ['the office terminal went away, as the rebuild itself does', (state) => (state.session = undefined), false],
+      ['the office terminal stopped', (state) => (state.session!.pid = null), false],
+    ];
+    for (const [title, change, stops] of cases) {
+      const w = world();
+      w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+      w.state.during = () => change(w.state);
+      const result = w.laptops.rebuild(EMPLOYEE, w.guard);
+      if (stops) expect([title, await result]).toEqual([title, { outcome: expect.stringMatching(/busy|refused/), detail: expect.stringMatching(/^DOCKER_/) }]);
+      else expect([title, (await result).outcome]).toEqual([title, 'done']);
+    }
+  });
+
+  it('does not rebuild when the preview is blocked or offers no rebuild', async () => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, code: 'DOCKER_REBUILD_PLAN_MOVE_HELD', allowedActions: ['abandon'] };
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'refused', detail: 'DOCKER_REBUILD_PLAN_MOVE_HELD' });
+    w.state.preview = { ...w.state.preview, code: undefined, allowedActions: [] };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toBe('the rebuild is not offered');
+    w.state.preview = new DockerEmployeeContinuationError('DOCKER_REPROVISION_BUSY') as never;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'busy', detail: 'DOCKER_REPROVISION_BUSY' });
+    w.state.retired = [];
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).detail).toBe('no approved laptop layout on record');
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('finishes a rebuild that is recorded but not finished by sending that same request again', async () => {
+    const w = world();
+    const pending = retired({ session: { phase: 'pending' } });
+    w.state.retired = [pending];
+    expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('no-laptop');
+    w.state.rebuilt = { operationId: pending.operationId, state: 'held', code: 'DOCKER_REPROVISION_SOURCE_UNCONFIRMED' };
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard)).toEqual({ outcome: 'refused', detail: 'DOCKER_REPROVISION_SOURCE_UNCONFIRMED' });
+    w.state.rebuilt = { operationId: pending.operationId, state: 'ready' };
+    expect((await w.laptops.rebuild(EMPLOYEE, w.guard)).outcome).toBe('done');
+    expect(w.made('preview')).toEqual([]);
+    expect(w.made('rebuild')[0]).toEqual({
+      operationId: pending.operationId,
+      sessionId: EMPLOYEE.sessionId,
+      sessionGeneration: 3,
+      expectedScopeDigest: '5'.repeat(64),
+      template: TEMPLATE,
+    });
   });
 });

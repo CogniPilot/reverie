@@ -299,7 +299,7 @@ describe('office supervisor ports', () => {
   it('offers no relaunch step and no laptop steps without the laptop runtime', () => {
     const o = office();
     expect(Object.keys(o.ports.actions).sort()).toEqual([
-      'abandon-move', 'continue-move', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
+      'abandon-move', 'continue-move', 'rebuild-laptop', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
     ]);
   });
 

@@ -16,6 +16,10 @@
  * It is rechecked at every point the services recheck an owner. Its office authority is the same check and nothing
  * more: it can confirm an attendance the owner already set, and can never bring anyone back from being out of the
  * office. It cannot approve or change resource limits, choose a plan or a template, or answer for a stopped employee.
+ *
+ * A rebuild is requested without `confirmDiscardRunning` unless one running laptop is exactly the recorded
+ * destination and a read made inside it just now says no agent runs there. That statement is the supervisor's only
+ * use of the owner's confirmation.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
@@ -38,7 +42,7 @@ import type {
   SupervisorGuard,
   SupervisorLaptopReading,
 } from './employee-supervisor.js';
-import type { SupervisorObservation } from './employee-supervisor-policy.js';
+import type { SupervisorObservation, SupervisorProviderPresence } from './employee-supervisor-policy.js';
 
 export interface DockerSupervisorLaptopDeps {
   readonly company: Pick<CompanyService, 'recoveryAction' | 'store'>;
@@ -184,6 +188,40 @@ export class DockerSupervisorLaptops {
     }
   }
 
+  async #destinationPresence(row: DockerEmployeeContinuationRecord): Promise<SupervisorProviderPresence> {
+    try {
+      const seen = await this.deps.engine.observeDestination(row);
+      // The listing said this container runs; a read that disagrees proves nothing.
+      if (!seen || seen.state !== 'running') return 'unknown';
+      return seen.provider.kind;
+    } catch {
+      return 'unknown';
+    }
+  }
+
+  /**
+   * What a rebuild would discard, read now. `no-laptop`: the Engine lists no running laptop of this employee.
+   * `exited` / `absent`: the one running laptop is the recorded destination and a read inside it found no agent.
+   * `running`: an agent runs there, or a laptop runs that this office cannot show to be empty.
+   */
+  async provider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence> {
+    // A pending operation already proved its containers absent or discarded them before it retired the record.
+    if (this.#pending(employee.id)) return 'no-laptop';
+    const template = this.#template(employee.id);
+    if (!template) return 'unknown';
+    let running: readonly string[];
+    try {
+      running = (await this.deps.absent.previewRebuild(employee.id, template, this.#authority(employee, guard)))
+        .runningLaptops;
+    } catch {
+      return 'unknown';
+    }
+    if (!running.length) return 'no-laptop';
+    const row = this.#row(employee.id);
+    if (!row?.destination || running.length !== 1 || running[0] !== row.destination.containerId) return 'running';
+    return this.#destinationPresence(row);
+  }
+
   /** Continue: the recorded request, sent again. Never for a plan move's private record. */
   async resend(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
     const row = this.#row(employee.id);
@@ -222,6 +260,81 @@ export class DockerSupervisorLaptops {
           authority
         )
       );
+    } catch (error) {
+      return refusal(error);
+    }
+  }
+
+  /**
+   * Nothing that could start an agent in the laptop has moved since the read that found it empty: no set-up step
+   * is in flight and the office terminal is the same object under the same process, or gone.
+   */
+  #quiet(employee: SupervisedEmployee): () => void {
+    const before = this.deps.sessions.get(employee.sessionId),
+      pid = before?.pid ?? null;
+    return () => {
+      if (this.deps.service.flightActive(employee.id))
+        throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_BUSY');
+      const now = this.deps.sessions.get(employee.sessionId);
+      if (now && now.pid !== null && (now !== before || now.pid !== pid))
+        throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_TARGET_CHANGED');
+    };
+  }
+
+  /** The owner's rebuild: preview, then apply with the preview's own digest. A pending one is finished instead. */
+  async rebuild(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
+    try {
+      const pending = this.#pending(employee.id);
+      if (pending) {
+        const resumed = await this.deps.absent.rebuild(
+          employee.id,
+          {
+            operationId: pending.operationId,
+            sessionId: pending.sessionId,
+            sessionGeneration: pending.sessionGeneration,
+            expectedScopeDigest: pending.scopeDigest,
+            template: pending.template,
+          },
+          this.#authority(employee, guard)
+        );
+        return resumed.state === 'ready'
+          ? { outcome: 'done', detail: 'finished ' + pending.operationId }
+          : { outcome: 'refused', detail: resumed.code ?? resumed.state };
+      }
+      const template = this.#template(employee.id);
+      if (!template) return { outcome: 'refused', detail: 'no approved laptop layout on record' };
+      const preview = await this.deps.absent.previewRebuild(employee.id, template, this.#authority(employee, guard));
+      const blocked = 'code' in preview ? preview.code : undefined;
+      if (blocked || !(preview.allowedActions as readonly string[]).includes('rebuild'))
+        return { outcome: 'refused', detail: blocked ?? 'the rebuild is not offered' };
+      let fence: (() => void) | undefined;
+      if (preview.runningLaptops.length) {
+        const row = this.#row(employee.id);
+        const presence =
+          row?.destination &&
+          preview.runningLaptops.length === 1 &&
+          preview.runningLaptops[0] === row.destination.containerId
+            ? await this.#destinationPresence(row)
+            : 'running';
+        if (presence !== 'exited' && presence !== 'absent')
+          return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+        fence = this.#quiet(employee);
+      }
+      const result = await this.deps.absent.rebuild(
+        employee.id,
+        {
+          operationId: randomUUID(),
+          sessionId: preview.sessionId,
+          sessionGeneration: preview.sessionGeneration,
+          expectedScopeDigest: preview.scopeDigest,
+          template,
+          ...(fence ? { confirmDiscardRunning: true as const } : {}),
+        },
+        this.#authority(employee, guard, fence)
+      );
+      return result.state === 'ready'
+        ? { outcome: 'done', detail: 'rebuilt ' + result.operationId }
+        : { outcome: 'refused', detail: result.code ?? result.state };
     } catch (error) {
       return refusal(error);
     }

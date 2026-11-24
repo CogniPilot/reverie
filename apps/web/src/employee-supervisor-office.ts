@@ -217,8 +217,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     planSignedIn: (accountId) => deps.planSignedIn(accountId),
     readLaptop: async (employee, guard) => laptops?.read(employee, guard),
     readSource: async (employee, guard) => (laptops ? laptops.source(employee, guard) : 'unknown'),
-    // No rebuild step is wired yet, so nothing asks what a rebuild would discard.
-    readProvider: async () => 'unknown',
+    readProvider: async (employee, guard) => (laptops ? laptops.provider(employee, guard) : 'unknown'),
     actions: {
       ...(laptops
         ? {
@@ -226,6 +225,8 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
               laptops.resend(employee, guard),
             'start-continuation': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
               laptops.start(employee, guard),
+            'rebuild-laptop': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
+              laptops.rebuild(employee, guard),
           }
         : {}),
       'reconnect-viewer': async (employee, guard) => {
