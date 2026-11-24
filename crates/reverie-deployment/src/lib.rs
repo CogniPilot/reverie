@@ -4,7 +4,7 @@ mod adoption;
 mod binds;
 mod engine;
 mod error;
-pub use error::DeploymentError;
+pub use error::{DeploymentError, SourceRestore};
 mod installation;
 mod live_accounts;
 mod model;

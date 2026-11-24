@@ -3,14 +3,20 @@ use reverie_host::deployment_snapshot::SnapshotError;
 use std::{fmt, io};
 mod diagnostic;
 mod receipt;
+mod restore;
 pub(crate) use receipt::decode_receipt;
+pub use restore::SourceRestore;
 #[cfg(test)]
 mod tests;
+
+/// An Engine request whose effect may or may not have happened.
+const OUTCOME_UNKNOWN: &str = "DEPLOYMENT_ENGINE_RESPONSE_UNKNOWN";
 
 pub struct DeploymentError {
     code: &'static str,
     snapshot: Option<Box<SnapshotError>>,
     finalizers: Vec<DeploymentError>,
+    restore: Option<Box<SourceRestore>>,
 }
 impl DeploymentError {
     pub(crate) fn new(code: &'static str) -> Self {
@@ -18,6 +24,7 @@ impl DeploymentError {
             code,
             snapshot: None,
             finalizers: Vec::new(),
+            restore: None,
         }
     }
     pub(crate) fn snapshot(code: &'static str, cause: SnapshotError) -> Self {
@@ -25,7 +32,22 @@ impl DeploymentError {
             code,
             snapshot: Some(Box::new(cause)),
             finalizers: Vec::new(),
+            restore: None,
         }
+    }
+    /// Present when this failure happened after apply had stopped the
+    /// original console: whether that console is serving again.
+    pub fn source_restore(&self) -> Option<&SourceRestore> {
+        self.restore.as_deref()
+    }
+    pub(crate) fn with_source_restore(mut self, restore: SourceRestore) -> Self {
+        self.restore = Some(Box::new(restore));
+        self
+    }
+    /// A lost Engine response anywhere in this failure. The container may
+    /// still be changing, so no follow-up effect is issued automatically.
+    pub(crate) fn outcome_unknown(&self) -> bool {
+        self.code == OUTCOME_UNKNOWN || self.finalizers.iter().any(Self::outcome_unknown)
     }
     pub fn snapshot_error(&self) -> Option<&SnapshotError> {
         self.snapshot.as_deref()

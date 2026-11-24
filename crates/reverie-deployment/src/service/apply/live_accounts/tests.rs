@@ -293,11 +293,19 @@ fn live_copy_is_explicitly_unverified_and_precedes_the_single_website_stop() {
         || {
             let f = Fixture::live_accounts();
             std::fs::write("/tmp/deployment/data/console/retained-marker", "owned-data").unwrap();
+            f.ready_source();
             let result = f.service.apply(&f.operation.plan.operation);
             // The controlled port refuses all mutation requests; this is ordering
             // qualification, never a fabricated stopped/ready container receipt.
+            // The refused stop leaves the original console running, which the
+            // automatic restore observes and records without another request.
             if option_env!("REVERIE_DEPLOYMENT_COPY").is_some() {
-                assert_eq!(result.err().unwrap().code(), "DEPLOYMENT_ENGINE_REFUSED");
+                let error = result.err().unwrap();
+                assert_eq!(error.code(), "DEPLOYMENT_ENGINE_REFUSED");
+                assert!(matches!(
+                    error.source_restore(),
+                    Some(crate::SourceRestore::Restored)
+                ));
                 assert_eq!(
                     std::fs::read_to_string(
                         f.operation.directory.join("retained-copy/retained-marker")
@@ -317,12 +325,14 @@ fn live_copy_is_explicitly_unverified_and_precedes_the_single_website_stop() {
                     vec![format!("POST /containers/{}/stop?t=30", "a".repeat(64))]
                 );
                 assert!(f.operation.exists("stop-attempt"));
+                assert!(!f.operation.exists("started") && !f.operation.exists("ready"));
+                f.close_adoption();
             } else {
                 assert_eq!(result.err().unwrap().code(), "DEPLOYMENT_COPY_UNINSTALLED");
                 assert!(!f.operation.exists("stop-attempt"));
+                assert!(!f.operation.exists("started") && !f.operation.exists("ready"));
+                f.close();
             }
-            assert!(!f.operation.exists("started") && !f.operation.exists("ready"));
-            f.close();
         },
     );
 }
@@ -586,14 +596,20 @@ fn no_backup_preserves_the_exact_live_writer_guard_and_stops_only_the_website() 
             assert!(!f.port.calls().iter().any(|call| call.starts_with("POST ")));
 
             f.port.set(writer_path, fixture::worker());
-            assert_eq!(
-                f.service
-                    .apply_live_without_backup(&f.operation.plan.operation)
-                    .err()
-                    .unwrap()
-                    .code(),
-                "DEPLOYMENT_ENGINE_REFUSED"
-            );
+            f.ready_source();
+            let error = f
+                .service
+                .apply_live_without_backup(&f.operation.plan.operation)
+                .err()
+                .unwrap();
+            assert_eq!(error.code(), "DEPLOYMENT_ENGINE_REFUSED");
+            // The refused stop left the original console running; the restore
+            // observes that and closes the operation without another request.
+            assert!(matches!(
+                error.source_restore(),
+                Some(crate::SourceRestore::Restored)
+            ));
+            assert_eq!(f.operation.status().unwrap().stage, "RESTORED");
             assert_eq!(f.operation.status().unwrap().backup_verified, Some(false));
             assert!(!f.operation.exists("retained-copy-attempt"));
             assert!(!f.operation.directory.join("retained-copy").exists());
@@ -606,7 +622,7 @@ fn no_backup_preserves_the_exact_live_writer_guard_and_stops_only_the_website() 
                 vec![format!("POST /containers/{}/stop?t=30", "a".repeat(64))]
             );
             assert!(!f.operation.exists("started"));
-            f.close();
+            f.close_adoption();
         },
     );
 }

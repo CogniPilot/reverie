@@ -15,4 +15,23 @@ impl Operation {
             Err(write) => error.with_finalizer(write),
         }
     }
+    /// The journaled decision to bring the original console back after a
+    /// failed apply, with the outcome the later receipts establish.
+    pub(crate) fn automatic_restore(&self) -> Result<Option<Value>> {
+        if !self.record_present("automatic-restore")? {
+            return Ok(None);
+        }
+        let mut data = self.read_record("automatic-restore")?;
+        let outcome = if data["decision"] != "ADMITTED" {
+            "NOT_ATTEMPTED"
+        } else if self.record_present("restored")? {
+            "RESTORED"
+        } else if self.record_present("rollback-attempt")? {
+            "UNPROVEN"
+        } else {
+            "NOT_ATTEMPTED"
+        };
+        data["outcome"] = json!(outcome);
+        Ok(Some(data))
+    }
 }

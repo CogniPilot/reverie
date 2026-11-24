@@ -38,6 +38,9 @@ pub struct DeploymentStatus {
     pub backup_verified: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diagnostic: Option<Value>,
+    /// Whether a failed apply brought the original console back, and why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automatic_restore: Option<Value>,
     /// Last terminal receipt and current observation error, when live readiness is unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub readiness_failure: Option<ReadinessFailure>,

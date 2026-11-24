@@ -1,12 +1,14 @@
 use clap::{Parser, Subcommand};
-use reverie_deployment::{DeploymentPreviewMode, DeploymentProfile, DeploymentService};
+use reverie_deployment::{
+    DeploymentPreviewMode, DeploymentProfile, DeploymentService, SourceRestore,
+};
 use std::{path::PathBuf, process::ExitCode};
 
 #[derive(Parser)]
 #[command(
     about = "Preview, prepare, apply or roll back the registered Reverie console release.",
     long_about = "Local owner bootstrap API for an existing ordinary Docker deployment. Reads the registered deployment.json and holds its existing update lock. It never changes the worker broker or bulk-wakes employees. Each effect attempt is durable and is never automatically retried. All output is structured JSON; private environment/configuration stays in the owner-only operation record.",
-    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Ordinary apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. A live-account-writers-fix-forward plan retains an unverified live copy by default. Apply with --skip-backup to omit that copy for a prepared live-account plan. Code rollback compatibility is not guaranteed in either live mode. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission."
+    after_long_help = "FLOW:\n  reverie-deployment --root ROOT preview --image sha256:IMAGE_ID\n  reverie-deployment --root ROOT prepare OPERATION\n  reverie-deployment --root ROOT apply OPERATION\n  reverie-deployment --root ROOT status OPERATION\n  reverie-deployment --root ROOT rollback OPERATION\n\nA prepared candidate has not started. Ordinary apply verifies a stopped-console snapshot and real extraction rehearsal before renaming anything. A live-account-writers-fix-forward plan retains an unverified live copy by default. Apply with --skip-backup to omit that copy for a prepared live-account plan. Code rollback compatibility is not guaranteed in either live mode. HYBRID_READY still requires the one-employee delivery/perf/restart acceptance. Rollback retains both containers and never automatically restores company data. A lost response requires status and inspection, not another submission. When apply fails after stopping the office and before the new console has ever started, it starts the original office again and reports both the failure and the restore; if that restore is not proven, the output names the one rollback command to run."
 )]
 struct Arguments {
     /// Existing private installation root containing deployment.json.
@@ -116,6 +118,7 @@ fn main() -> ExitCode {
         args.action,
         Command::Online(Action::PruneScratch { .. } | Action::PruneWorkspace { .. })
     );
+    let rollback = rollback_command(&args);
     let result = run(args);
     match result {
         Ok(mut value) => {
@@ -131,14 +134,92 @@ fn main() -> ExitCode {
             }
         }
         Err(error) => {
-            println!(
-                "{}",
-                serde_json::json!({"success":false,"code":error.code(),"finalizationCode":error.finalization_code(),"diagnostic":error.diagnostic(),
-                "recovery":recovery_message(error.code())})
-            );
+            println!("{}", failure_report(&error, rollback.as_deref()));
             ExitCode::FAILURE
         }
     }
+}
+/// The one command that returns to the original console, or records that
+/// return once it is observed. Shown as arguments so no quoting is implied.
+fn rollback_command(args: &Arguments) -> Option<Vec<String>> {
+    let operation = match &args.action {
+        Command::Online(
+            Action::Apply { operation, .. }
+            | Action::ActivateRetained { operation, .. }
+            | Action::Rollback { operation },
+        ) => operation,
+        Command::Status {
+            operation: Some(operation),
+        } => operation,
+        _ => return None,
+    };
+    Some(rollback_arguments(&args.root, operation))
+}
+fn rollback_arguments(root: &std::path::Path, operation: &str) -> Vec<String> {
+    vec![
+        "reverie-deployment".into(),
+        "--root".into(),
+        root.display().to_string(),
+        "rollback".into(),
+        operation.into(),
+    ]
+}
+fn failure_report(
+    error: &reverie_deployment::DeploymentError,
+    rollback: Option<&[String]>,
+) -> serde_json::Value {
+    let mut report = serde_json::json!({"success":false,"code":error.code(),"finalizationCode":error.finalization_code(),"diagnostic":error.diagnostic(),
+        "recovery":recovery_message(error.code())});
+    if let Some(restore) = error.source_restore() {
+        report["sourceRestore"] = restore.report();
+        report["recovery"] = restore_message(restore).into();
+        if !matches!(restore, SourceRestore::Restored) {
+            report["sourceRestore"]["command"] = serde_json::json!(rollback);
+        }
+    }
+    report
+}
+fn restore_message(restore: &SourceRestore) -> &'static str {
+    match restore {
+        SourceRestore::Restored => {
+            "The update was not applied. The original office was started again automatically and answered its readiness check. This operation is closed: fix the reported cause, then begin a new preview."
+        }
+        SourceRestore::NotAttempted(_) => {
+            "The update was not applied and the original office was NOT restarted automatically; it may be stopped. sourceRestore.code says why. Check status, then run sourceRestore.command to return to the original office."
+        }
+        SourceRestore::Unproven(_) => {
+            "The update was not applied. An automatic restart of the original office was attempted and is NOT proven; the office may be stopped. Check status and the containers. sourceRestore.command repeats no effect: it records the restore once the original console is observed running and ready."
+        }
+    }
+}
+/// What an interrupted operation needs next, for a status read after the
+/// process that ran the update is gone.
+fn status_recovery(stage: &str) -> Option<&'static str> {
+    match stage {
+        "STOP_UNCONFIRMED" | "SNAPSHOT_VERIFIED" | "SWAP_UNCONFIRMED" => Some(
+            "This update stopped the original office and did not finish. Run the rollback command to start the original office again.",
+        ),
+        "START_UNCONFIRMED" => Some(
+            "The new console was started and is not confirmed ready. Inspect it first. The rollback command returns to the original console, which may not read data the new console wrote.",
+        ),
+        "ROLLBACK_UNCONFIRMED" => Some(
+            "A return to the original console was attempted and is not proven. The rollback command repeats no effect: it records the restore once the original console is observed running and ready.",
+        ),
+        _ => None,
+    }
+}
+fn status_report(
+    root: &std::path::Path,
+    status: reverie_deployment::DeploymentStatus,
+) -> Result<serde_json::Value, reverie_deployment::DeploymentError> {
+    let recovery = status_recovery(&status.stage);
+    let command = recovery.map(|_| rollback_arguments(root, &status.operation));
+    let mut report = serde_json::json!({"success":true,"data":status});
+    if let Some(recovery) = recovery {
+        report["recovery"] = recovery.into();
+        report["rollbackCommand"] = serde_json::to_value(command)?;
+    }
+    Ok(report)
 }
 fn recovery_message(code: &str) -> &'static str {
     match code {
@@ -167,7 +248,7 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
                 Some(id) => DeploymentService::registered_status(&args.root, &id)?,
                 None => DeploymentService::registered_active_status(&args.root)?,
             };
-            return Ok(serde_json::json!({"success":true,"data":status}));
+            return status_report(&args.root, status);
         }
         Command::Online(action) => action,
     };
@@ -381,6 +462,47 @@ mod tests {
                 ..
             })
         ));
+    }
+    #[test]
+    fn an_interrupted_status_names_the_one_rollback_command() {
+        let status = |stage: &str| reverie_deployment::DeploymentStatus {
+            operation: "c".repeat(32),
+            stage: stage.into(),
+            candidate_id: None,
+            source_id: "a".repeat(64),
+            backup_verified: None,
+            diagnostic: None,
+            automatic_restore: None,
+            readiness_failure: None,
+        };
+        let root = std::path::Path::new("/office root");
+        for stage in [
+            "STOP_UNCONFIRMED",
+            "SNAPSHOT_VERIFIED",
+            "SWAP_UNCONFIRMED",
+            "START_UNCONFIRMED",
+            "ROLLBACK_UNCONFIRMED",
+        ] {
+            let report = status_report(root, status(stage)).unwrap();
+            assert_eq!(
+                report["rollbackCommand"],
+                serde_json::json!([
+                    "reverie-deployment",
+                    "--root",
+                    "/office root",
+                    "rollback",
+                    "c".repeat(32)
+                ]),
+                "{stage}"
+            );
+            assert!(report["recovery"].is_string(), "{stage}");
+            assert_eq!(report["data"]["stage"], stage);
+        }
+        for stage in ["PREPARED", "HYBRID_READY", "RESTORED", "SUPERSEDED"] {
+            let report = status_report(root, status(stage)).unwrap();
+            assert!(report.get("recovery").is_none(), "{stage}");
+            assert!(report.get("rollbackCommand").is_none(), "{stage}");
+        }
     }
     #[test]
     fn body_and_close_errors_both_survive_cli_finalization() {

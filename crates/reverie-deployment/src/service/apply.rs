@@ -2,6 +2,7 @@ use super::*;
 use reverie_host::deployment_snapshot::{RehearsalRoot, SnapshotTools};
 use std::io::{Read, Write};
 mod live_accounts;
+mod restore;
 mod retained_copy;
 
 #[derive(Clone, Copy)]
@@ -47,6 +48,12 @@ impl OperationDeadline {
             Self::Initial(original) => end.min(original),
         }
     }
+    /// The owner's own update brings the original console back when it
+    /// fails. The bounded initial rollout settles its own failure under its
+    /// one deadline, which has no allowance for a second readiness wait.
+    fn restores_source(self) -> bool {
+        matches!(self, Self::Ordinary)
+    }
 }
 impl DeploymentService {
     /// Recover a stopped source after backup verification refused.
@@ -75,6 +82,7 @@ impl DeploymentService {
                 && !operation.exists("retained-copy-attempt"),
             "DEPLOYMENT_SWAP_ALREADY_ATTEMPTED",
         )?;
+        let stopped_before = operation.exists("stop-attempt");
         let pins = self.pins(&operation)?;
         let result = (|| {
             let candidate = operation.candidate()?;
@@ -112,6 +120,7 @@ impl DeploymentService {
             self.swap(&operation, &candidate, &pins)?;
             operation.status()
         })();
+        let result = self.restoring_source(&operation, &pins, stopped_before, result);
         DeploymentError::finalized(result, pins.close())
     }
 
@@ -245,6 +254,7 @@ impl DeploymentService {
                 })
             })
             .transpose()?;
+        let stopped_before = operation.exists("stop-attempt");
         let result = (|| {
             let pins = self.pins(&operation)?;
             let applied = self.apply_pinned(
@@ -254,6 +264,11 @@ impl DeploymentService {
                 skip_live_backup,
                 rehearsal.as_ref().map(|(root, format)| (root, *format)),
             );
+            let applied = if deadline.restores_source() {
+                self.restoring_source(&operation, &pins, stopped_before, applied)
+            } else {
+                applied
+            };
             DeploymentError::finalized(applied, pins.close())
         })();
         let closed = rehearsal.map_or(Ok(()), |(root, _)| {

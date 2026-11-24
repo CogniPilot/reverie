@@ -308,6 +308,7 @@ impl Operation {
                 None
             },
             diagnostic: self.snapshot_diagnostic()?,
+            automatic_restore: self.automatic_restore()?,
             readiness_failure: None,
         })
     }

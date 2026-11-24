@@ -64,6 +64,27 @@ impl Port {
             .unwrap()
             .insert(format!("/containers/{id}/json"), values.into());
     }
+    /// Accept one mutation request and make later inspections of the named
+    /// containers report its result. Other mutations stay refused.
+    pub(in crate::service) fn effect(&self, request: String, then: Vec<(&str, Value)>) {
+        let mut facts = self.facts.lock().unwrap();
+        facts.insert(
+            format!("THEN {request}"),
+            then.into_iter()
+                .map(|(id, value)| {
+                    let path = format!("/containers/{id}/json");
+                    (0, json!({"path":path,"value":value}))
+                })
+                .collect(),
+        );
+        facts.insert(request, vec![(200, Value::Null)].into());
+    }
+    pub(in crate::service) fn posts(&self) -> Vec<String> {
+        self.calls()
+            .into_iter()
+            .filter(|call| call.starts_with("POST "))
+            .collect()
+    }
     pub(in crate::service) fn calls(&self) -> Vec<String> {
         self.calls.lock().unwrap().clone()
     }
@@ -128,11 +149,23 @@ fn response(facts: &Facts, method: &str, path: &str) -> Option<(u16, Value)> {
         return None;
     };
     let values = facts.get_mut(key)?;
-    if values.len() > 1 {
+    let reply = if values.len() > 1 {
         values.pop_front()
     } else {
         values.front().cloned()
+    };
+    // A controlled effect changes what later observations report.
+    let effects = facts
+        .get(&format!("THEN {key}"))
+        .cloned()
+        .unwrap_or_default();
+    for (_, effect) in effects {
+        facts.insert(
+            effect["path"].as_str().unwrap().to_owned(),
+            vec![(200, effect["value"].clone())].into(),
+        );
     }
+    reply
 }
 
 pub(in crate::service) struct Fixture {
@@ -291,6 +324,18 @@ impl Fixture {
     pub(in crate::service) fn close_adoption(mut self) {
         self.service.close().unwrap();
         assert!(self.health.requests() > 0);
+    }
+    /// The original console answers its readiness check and shows the
+    /// expected front process tree.
+    pub(in crate::service) fn ready_source(&self) {
+        self.port.set(
+            format!(
+                "/containers/{}/top?ps_args=-eo%20pid,ppid,comm",
+                "a".repeat(64)
+            ),
+            json!({"Processes":[["1","0","reverie-front"],["2","1","node"]]}),
+        );
+        self.health.healthy();
     }
     pub(in crate::service) fn refuse_health(&self) {
         self.health.refuse();
