@@ -1,5 +1,6 @@
 /** Reconnect durable laptops after replacing the disposable website container. */
 import type { CompanyEmployee } from './company-types.js';
+import { employeeStartupOrder } from './employee-startup-order.js';
 import type { SessionState } from './types.js';
 import { planRebootRestore, type RebootRestoreEntry } from './reboot-restore.js';
 
@@ -19,7 +20,8 @@ export async function reattachLaptops(deps: LaptopReconnectDeps): Promise<{ conn
       !inventory.runningSessionIds.every(id => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id)))
     throw new Error('The laptop manager does not provide a verified session inventory');
   const running = new Set(inventory.runningSessionIds as string[]);
-  for (const { id, owner, sessionId, sessionGeneration } of deps.employees()) {
+  // Order only (employee-startup-order.ts): a failed reconnection is reported and the next employee is still tried.
+  for (const { id, owner, sessionId, sessionGeneration } of employeeStartupOrder(deps.employees())) {
     const allowed = () => deps.employees().some(e => e.id === id && e.owner === owner &&
       e.sessionId === sessionId && e.sessionGeneration === sessionGeneration && e.desiredRunning === true &&
       !e.onVacation && !e.bindingMigration && !e.dockerBinding);

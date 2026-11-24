@@ -1,4 +1,5 @@
 import type { DockerWakeOutcome } from './company-wake.js';
+import { employeeStartupOrder, heldFirstNotice } from './employee-startup-order.js';
 import { renewExistingDockerProviderView } from './docker-existing-view-renewal.js';
 import {dockerPlanWorkerContainerIds}from'./docker-plan-worker-inventory.js';
 import {DockerPlanMoveActor}from'./docker-plan-move-actor.js';
@@ -850,7 +851,8 @@ export class DockerEmployeeRuntime {
     catch { if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED'); }
     const reports: DockerExistingViewRestoration[] = [];
     const previous = new Map(this.restorationReports.map(report => [report.employeeId, report]));
-    for (const employee of a.company.store.view().employees) {
+    // Order only (employee-startup-order.ts): each employee below is still attached or held on its own.
+    for (const employee of employeeStartupOrder(a.company.store.view().employees)) {
       if (!employee.dockerBinding || employee.onVacation || employee.desiredRunning !== true) continue;
       const retained = keep?.get(employee.id);
       if (retained && retained === previous.get(employee.id)) {
@@ -908,6 +910,9 @@ export class DockerEmployeeRuntime {
           }
         }
         reports.push(Object.freeze({ ...base, state: 'held', code: 'DOCKER_CONTINUATION_EXISTING_VIEW_UNCONFIRMED' }));
+      } finally {
+        const notice = heldFirstNotice(employee, reports.at(-1), previous.get(employee.id));
+        if (notice) console.warn('[docker-employee-continuation] ' + notice);
       }
     }
     for (const report of reports) {
