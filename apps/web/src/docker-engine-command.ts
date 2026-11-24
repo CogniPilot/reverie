@@ -5,6 +5,8 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { request, type ClientRequest } from 'node:http';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
+import type { DockerTaskFailure } from './docker-continuation-task.js';
+import { classifyDockerResourceHelperFailure } from './docker-resource-helper-failure.js';
 /** A completed rejection describes that response only. It grants no retry,
  * adoption or replacement authority; the continuation retains its issued fence. */
 function createFailure(status?: number): DockerEmployeeContinuationError {
@@ -21,6 +23,9 @@ function createFailure(status?: number): DockerEmployeeContinuationError {
 export interface DockerEngineCommand {
   run(args: readonly string[], input?: string, timeoutMs?: number): Promise<string>;
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string>;
+  /** Why one exited resource writer failed, as a closed class. What the helper
+   * printed never leaves the port, and a read that fails is `unknown`. */
+  helperFailure?(containerId: string): Promise<DockerTaskFailure>;
   /** Removes one never-started reprovision source, never by force. The owning
    * workflow separately proves its labels, journal entry and that it is unused. */
   removeCreatedSource?(name: string, containerId: string, requireCurrent: () => void): Promise<void>;
@@ -144,6 +149,26 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
         child.stdin?.on('error', () => {});
         child.stdin?.end(input);
       }
+    });
+  }
+  /** Reads the retained output of one exited helper and keeps only its class.
+   * A failed helper prints nothing on stdout and one line on stderr; an Engine
+   * error, any stdout or more output than one line can hold is `unknown`. */
+  helperFailure(containerId: string): Promise<DockerTaskFailure> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) return Promise.reject(Error('Fixed resource helper container required'));
+    return new Promise((resolve) => {
+      execFile(
+        '/bin/docker',
+        ['--host', this.endpoint, 'container', 'logs', containerId],
+        {
+          timeout: 30000,
+          maxBuffer: 16384,
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+        },
+        (error, stdout, stderr) =>
+          resolve(error || stdout !== '' ? 'unknown' : classifyDockerResourceHelperFailure(stderr))
+      );
     });
   }
   async removeCreatedSource(name: string, containerId: string, requireCurrent: () => void): Promise<void> {
