@@ -1979,6 +1979,53 @@ describe('a laptop whose provider never started', () => {
     expect(f.snapshot().employees[0]!.dockerBinding).toBeUndefined();
     await expect(f.service.preview(employeeId, template, f.authority)).resolves.toMatchObject({ mode: 'replace-source' });
   });
+  it('makes the next source for the current session when the history began under an earlier one', async () => {
+    // A plan move replaces an employee's session. Every later source derives from the FIRST record of the history,
+    // which names the session of its own day. A source labelled with that session failed the proof that follows its
+    // creation (DOCKER_CONTINUATION_CONTAINER_BINDING_CHANGED) on every retry, after the laptop was already gone.
+    const f = await fixture();
+    f.setLive({ inert: true });
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    const source = first.sourceContainerId!;
+    const earlier = 'aaaaaaaa-9999-4999-8999-999999999999';
+    // The first operation, as it reads once the employee has since been given another session.
+    await f.companyStore.update((state) => {
+      const history = state.retiredDockerEmployeeContinuations!;
+      history[0] = JSON.parse(JSON.stringify(history[0]).replaceAll(sid, earlier)) as (typeof history)[number];
+    });
+    const next = '77777777-7777-4777-8777-777777777777';
+    const row = DockerEmployeeContinuationRecord.parse({
+      ...v2Row('ready'),
+      phase: 'provider-issued',
+      request: { ...v2Row('ready').request, operationId: next, containerId: source, imageId: workerImage },
+      original: { ...original(source), imageId: workerImage },
+      workerImage: { imageId: workerImage, sourceImageId: workerImage, clientManifestDigest: manifest },
+    });
+    await f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations = [structuredClone(row)];
+      state.employees[0]!.dockerBinding = {
+        ...f.binding,
+        operationId: next,
+        originalDigest: dockerContinuationDigest(row.destination),
+      };
+    });
+    f.engine.container(destinationCid, {}, true);
+    const bridge = f.engine.networks.get('b'.repeat(64))!;
+    (bridge.Containers as Json)[destinationCid] = { Name: 'synthetic-laptop' };
+    const removeIdle = f.engine.removeIdleLaptop.bind(f.engine);
+    f.engine.removeIdleLaptop = async (id, current) => {
+      await removeIdle(id, current);
+      delete (bridge.Containers as Json)[id];
+    };
+    const again = '88888888-8888-4888-8888-888888888888';
+    const result = await f.service.reprovision(employeeId, await f.request(again), f.authority);
+    expect(result).toMatchObject({ operationId: again, state: 'ready' });
+    const entries = f.snapshot().retiredDockerEmployeeContinuations!;
+    expect(entries[0]).toMatchObject({ sessionId: earlier });
+    expect(entries[1]).toMatchObject({ operationId: again, previous: retireOperation, sessionId: sid, source: { phase: 'created' } });
+    const created = f.engine.created.at(-1)!.configuration as { Labels: Record<string, string> };
+    expect(created.Labels['reverie.session']).toBe(sid);
+  });
   it('keeps a laptop with a tenant, a ready laptop and an unrecorded container', async () => {
     const tenant = await fixture({ row: issued() });
     present(tenant);
