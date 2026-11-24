@@ -2540,11 +2540,11 @@
       "reason": "Detection gap: dynamic-constructor:d41c627948b8"
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeHealth::inline::button:Reconnect",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::reconnect::button:Reconnect",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeHealth::inline::button:Restart session for ${employee.name}",
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::restart::button:Restart session for ${employee.name}",
       "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {

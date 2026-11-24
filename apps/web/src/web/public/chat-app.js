@@ -9172,28 +9172,6 @@ class ReverieChatApp {
           text: 'Reconnect',
         }),
     };
-    const enter = {
-      name: 'ca-company-enter-office',
-      wanted: manage && employee.onVacation === true,
-      make: () =>
-        this.button(
-          'ca-btn ca-company-enter-office',
-          `Bring ${employee.name} into the office`,
-          () => this.enterEmployeeOffice(employee, controls.onSaved),
-          { text: 'Enter office' }
-        ),
-    };
-    const wake = {
-      name: 'ca-company-wake',
-      wanted: manage && health.state === 'gone' && !health.stoppedByChoice,
-      make: () =>
-        this.button(
-          'ca-btn ca-company-wake',
-          `Wake ${employee.name}: start their agent if it is not running`,
-          () => this.wakeEmployee(employee, controls.onSaved),
-          { text: 'Wake' }
-        ),
-    };
     // The viewer check explains a state that is not simply working or idle.
     const inspect = {
       name: 'ca-viewer-status',
@@ -9203,7 +9181,7 @@ class ReverieChatApp {
     // The card offers the one next step: a dead agent can only be restarted, otherwise the repair that interrupts nothing
     // comes first. The roster row, the member menu and the profile keep every other control.
     const next = (health.state === 'dead' ? [restart, reconnect] : [reconnect, restart])
-      .concat(enter, wake, inspect)
+      .concat(inspect)
       .find((action) => action.wanted);
     let slot = card.querySelector('.ca-company-status-actions');
     if (!slot) card.append((slot = this.el('div', 'ca-company-status-actions')));

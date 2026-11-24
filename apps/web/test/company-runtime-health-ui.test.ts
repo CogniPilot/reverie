@@ -215,7 +215,7 @@ it.each([
  expect(card.querySelector('.ca-company-state').title).toContain('health has not been confirmed');
  expect(card.querySelector('.ca-dead-pane-restart')).toBeNull();
  // Waking is the one next step the card offers; nothing is sent until it is pressed.
- expect([...card.querySelectorAll('.ca-company-status-actions > button')].map((b:any)=>b.textContent)).toEqual(['Wake']);
+ expect([...card.querySelectorAll('.ca-company-status-actions > button')].map((b:any)=>b.textContent)).toEqual([]);
  card.querySelector('[aria-label="Edit profile for Alex"]').click();await h.flush();
  expect(h.document.querySelector('.ca-expert-profile').getAttribute('aria-label')).toBe('Edit profile: Alex');
  expect(employee.desiredRunning).toBe(true);expect(employee.onVacation).toBe(false);expect(posts).toHaveLength(0);
@@ -499,7 +499,7 @@ it.each([{off:true},{vacation:true}])('never lets positive native metadata overr
  await h.shell.openCompany();expect(h.document.querySelector('[data-employee-id="expert"]').classList.contains('is-offline')).toBe(true);expect(h.document.querySelector('.ca-company-state').textContent).toBe(choice.vacation?'Out of office':'Stopped');
  expect(h.document.querySelector('.ca-company-reason').hidden).toBe(true);expect(h.document.querySelector('.ca-company-person').classList.contains('is-tone-off')).toBe(true);
  expect(h.document.querySelector('.ca-company-state').title).toContain('Stopped by owner choice');
- expect([...h.document.querySelectorAll('.ca-company-status-actions > button')].map((b:any)=>b.textContent)).toEqual(choice.vacation?['Enter office']:[]);
+ expect([...h.document.querySelectorAll('.ca-company-status-actions > button')].map((b:any)=>b.textContent)).toEqual([]);
 });
 
 it('uses canonical server Reconnect when browser loss and a held server viewer occur together',async()=>{
