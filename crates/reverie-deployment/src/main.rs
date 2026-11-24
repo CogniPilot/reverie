@@ -70,15 +70,30 @@ enum Action {
         stop_running_source: bool,
     },
     /// Stop, verify backup/rehearsal, swap and check the Rust-front process tree.
+    #[command(
+        long_about = "Stop the office, capture and verify its console data, rehearse the restore, then swap to the prepared console and check it. The rehearsal directory, the backup destination and the free space for both copies are checked before the office is stopped. If anything fails after the stop and before the new console has ever started, the original office is started again and the output reports both results."
+    )]
     Apply {
         operation: String,
         /// Activate a prepared live-account deployment without copying console data.
         #[arg(long)]
         skip_backup: bool,
-        /// Existing private directory for the extracted restore test.
+        /// Existing empty directory you own with mode 0700, for the extracted restore test.
         #[arg(long, conflicts_with = "skip_backup")]
         rehearsal_root: Option<PathBuf>,
         /// Keep a verified gzip archive in the operation and stage the raw tar on the rehearsal disk.
+        #[arg(long, requires = "rehearsal_root")]
+        compress_backup: bool,
+    },
+    /// Report whether a verified update's backup would fit; change nothing.
+    #[command(
+        long_about = "Measure the running office's console data and report the space the archive and the restore rehearsal need against what is free, using the same checks apply runs before it stops the office. Give the same --rehearsal-root and --compress-backup you intend to pass to apply. Nothing is prepared, stopped or written."
+    )]
+    CheckStorage {
+        /// Existing empty directory you own with mode 0700, for the extracted restore test.
+        #[arg(long)]
+        rehearsal_root: Option<PathBuf>,
+        /// Stage the raw tar on the rehearsal disk as apply --compress-backup would.
         #[arg(long, requires = "rehearsal_root")]
         compress_backup: bool,
     },
@@ -169,7 +184,7 @@ fn failure_report(
     rollback: Option<&[String]>,
 ) -> serde_json::Value {
     let mut report = serde_json::json!({"success":false,"code":error.code(),"finalizationCode":error.finalization_code(),"diagnostic":error.diagnostic(),
-        "recovery":recovery_message(error.code())});
+        "detail":error.detail(),"recovery":recovery_message(error.code())});
     if let Some(restore) = error.source_restore() {
         report["sourceRestore"] = restore.report();
         report["recovery"] = restore_message(restore).into();
@@ -228,6 +243,15 @@ fn recovery_message(code: &str) -> &'static str {
         }
         "DEPLOYMENT_SHARED_WRITABLE_MOUNT" => {
             "Another running container has a writable bind overlapping console data. Keep the current website running, coordinate authorized maintenance to quiesce that shared writer, then create a fresh verified deployment. Do not exclude account data or bypass backup verification."
+        }
+        "DEPLOYMENT_REHEARSAL_ROOT_REFUSED" => {
+            "Nothing was stopped. The rehearsal root must already exist as an empty directory that you own with mode 0700, given as an absolute path with no symbolic link in it, outside the console data and the operation directory. Any name is accepted. diagnostic.error.snapshot.code says which of these failed."
+        }
+        "DEPLOYMENT_BACKUP_SPACE_INSUFFICIENT" => {
+            "Nothing was stopped. detail.filesystems lists the bytes each filesystem needs for the archive and the restore rehearsal against the bytes free. Free space, for example with prune-deployments, or pass --rehearsal-root on another disk."
+        }
+        "DEPLOYMENT_BACKUP_ESTIMATE_REFUSED" | "DEPLOYMENT_SNAPSHOT_OCCUPIED" => {
+            "Nothing was stopped. The backup could not be planned; diagnostic.error names the check that refused."
         }
         "SCRATCH_LEASE_IN_USE" => {
             "Finish the task or wait for its reservation to expire before clearing scratch."
@@ -314,6 +338,10 @@ fn run(args: Arguments) -> Result<serde_json::Value, reverie_deployment::Deploym
             } else {
                 service.apply(&operation)?
             })?,
+            Action::CheckStorage {
+                rehearsal_root,
+                compress_backup,
+            } => service.check_backup_storage(rehearsal_root.as_deref(), compress_backup)?,
             Action::PruneScratch {
                 apply,
                 force_read_only,

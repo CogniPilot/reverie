@@ -28,6 +28,32 @@ pub struct DeploymentPreview {
     pub preserved_networks: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_accounts: Option<crate::live_accounts::LiveAccountDispositionPreview>,
+    /// What a verified update copies while the office is stopped. Absent
+    /// for a plan that copies while the office runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_backup: Option<StoppedBackupPreview>,
+}
+#[derive(Serialize, Deserialize)]
+pub struct StoppedBackupPreview {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<StoppedBackupEstimate>,
+    /// Why the console could not be measured; apply would refuse the same
+    /// way before stopping anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_refusal: Option<String>,
+    pub note: String,
+}
+#[derive(Serialize, Deserialize)]
+pub struct StoppedBackupEstimate {
+    pub console_entries: u64,
+    pub console_regular_bytes: u64,
+    /// Space for the uncompressed archive.
+    pub archive_bytes: u64,
+    /// Space for the extracted restore rehearsal.
+    pub rehearsal_bytes: u64,
+    pub bytes_written_while_stopped: u64,
+    /// Across every verification read of the console, archive and rehearsal.
+    pub bytes_read_while_stopped: u64,
 }
 #[derive(Serialize, Deserialize)]
 pub struct DeploymentStatus {

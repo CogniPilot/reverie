@@ -139,6 +139,7 @@ fn make_operation(
         profile: None,
         preserved_networks: None,
         live_accounts: None,
+        stopped_backup: None,
     };
     Operation::create(
         &service.installation.state,

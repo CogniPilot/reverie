@@ -2,6 +2,7 @@ use super::*;
 use reverie_host::deployment_snapshot::{RehearsalRoot, SnapshotTools};
 use std::io::{Read, Write};
 mod live_accounts;
+mod preflight;
 mod restore;
 mod retained_copy;
 
@@ -242,16 +243,13 @@ impl DeploymentService {
                     operation.plan.live_account_writers.is_none(),
                     "DEPLOYMENT_VERIFIED_BACKUP_REQUIRED",
                 )?;
-                RehearsalRoot::open(
+                preflight::open_rehearsal(
                     path,
                     &self.data_source(&operation)?,
                     &operation.directory,
                     deadline.snapshot(),
                 )
                 .map(|root| (root, format))
-                .map_err(|error| {
-                    DeploymentError::snapshot("DEPLOYMENT_REHEARSAL_ROOT_REFUSED", error)
-                })
             })
             .transpose()?;
         let stopped_before = operation.exists("stop-attempt");
@@ -327,6 +325,13 @@ impl DeploymentService {
         let tools = snapshot_tools()?;
         pins.running_mounts(&source)?;
         self.refuse_shared_writers(&source)?;
+        // Last refusals that leave the office running: destination and space.
+        preflight::backup_admitted(
+            &operation.directory,
+            &source_root,
+            rehearsal,
+            deadline.snapshot(),
+        )?;
         deadline.check()?;
         operation.attempt("stop-attempt")?;
         deadline.check()?;

@@ -17,6 +17,7 @@ pub struct DeploymentError {
     snapshot: Option<Box<SnapshotError>>,
     finalizers: Vec<DeploymentError>,
     restore: Option<Box<SourceRestore>>,
+    detail: Option<Box<serde_json::Value>>,
 }
 impl DeploymentError {
     pub(crate) fn new(code: &'static str) -> Self {
@@ -25,6 +26,7 @@ impl DeploymentError {
             snapshot: None,
             finalizers: Vec::new(),
             restore: None,
+            detail: None,
         }
     }
     pub(crate) fn snapshot(code: &'static str, cause: SnapshotError) -> Self {
@@ -33,6 +35,7 @@ impl DeploymentError {
             snapshot: Some(Box::new(cause)),
             finalizers: Vec::new(),
             restore: None,
+            detail: None,
         }
     }
     /// Present when this failure happened after apply had stopped the
@@ -42,6 +45,15 @@ impl DeploymentError {
     }
     pub(crate) fn with_source_restore(mut self, restore: SourceRestore) -> Self {
         self.restore = Some(Box::new(restore));
+        self
+    }
+    /// Measured figures that explain a refusal, such as bytes required and
+    /// available. Never a path, a name or file content.
+    pub fn detail(&self) -> Option<&serde_json::Value> {
+        self.detail.as_deref()
+    }
+    pub(crate) fn with_detail(mut self, detail: serde_json::Value) -> Self {
+        self.detail = Some(Box::new(detail));
         self
     }
     /// A lost Engine response anywhere in this failure. The container may

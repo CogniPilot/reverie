@@ -425,6 +425,7 @@ fn operation(
         backup_metadata_scope: "controlled fixture".into(),
         profile: None,
         preserved_networks: Some(topology.preview()),
+        stopped_backup: None,
         live_accounts: writers
             .as_ref()
             .map(crate::live_accounts::Inventory::preview),
