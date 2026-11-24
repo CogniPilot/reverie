@@ -14,7 +14,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-routines" ];
   cargoTestFlags = [ "-p" "reverie-routines" ];
   nativeBuildInputs = [ pkgs.makeWrapper ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   # Zones come from this tzdata unless the host sets TZDIR; the binary's bundled database is the last resort.
   postInstall = ''
     wrapProgram "$out/bin/reverie-routines" --set-default TZDIR ${pkgs.tzdata}/share/zoneinfo

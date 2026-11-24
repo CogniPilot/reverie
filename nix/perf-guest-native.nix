@@ -17,7 +17,7 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-perf-check" "-p" "reverie-worker-init" ];
   # Qualify real ancillary/process ownership under the shipped static ABI.
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   cargoTestFlags = [ "-p" "reverie-host" "--lib" "native::owned_process::tests" ];
   nativeCheckInputs = [ pkgs.rustc ];
   preCheck = ''

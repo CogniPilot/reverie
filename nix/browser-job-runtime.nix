@@ -13,7 +13,7 @@ pkgs.buildNpmPackage {
   PUPPETEER_SKIP_DOWNLOAD = "1";
   dontNpmBuild = true;
   dontNpmPrune = true;
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   checkPhase = ''
     runHook preCheck
     node --test ${src}/scripts/browser-jobs/slam-driver.test.mjs ${src}/scripts/browser-jobs/slam-job-run.test.mjs

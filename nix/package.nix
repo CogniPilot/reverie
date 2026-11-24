@@ -70,7 +70,7 @@ let
 
     '';
     preBuild = "npm rebuild node-pty esbuild --offline --ignore-scripts=false";
-    doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+    doCheck = true;
     passthru = { inherit workerWebFixtures; };
     nativeCheckInputs = [ pkgs.nix pkgs.git pkgs.tmux pkgs.curl pkgs.which pkgs.procps (lib.getBin pkgs.util-linux) backendNativeCli ] ++ lib.optionals pkgs.stdenv.isLinux [ pkgs.bubblewrap ];
     checkPhase = ''

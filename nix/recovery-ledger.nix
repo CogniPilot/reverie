@@ -12,7 +12,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-store" "--bin" "reverie-recovery-ledger" ];
   cargoTestFlags = [ "-p" "reverie-store" "--lib" "--test" "recovery_ledger_rpc" "recovery_ledger" ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   meta = {
     description = "Bounded stdio adapter for the private SQLite recovery ledger";
     mainProgram = "reverie-recovery-ledger";

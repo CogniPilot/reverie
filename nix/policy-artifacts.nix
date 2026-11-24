@@ -18,7 +18,7 @@ in pkgs.rustPlatform.buildRustPackage {
   };
   cargoBuildFlags = [ "-p" "reverie-policy-artifacts" ];
   cargoTestFlags = [ "-p" "reverie-policy-artifacts" ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   meta = {
     description = "Build-only fixed Docker namespace and task perf seccomp producer";
     license = pkgs.lib.licenses.mit;

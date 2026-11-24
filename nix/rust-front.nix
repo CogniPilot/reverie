@@ -13,7 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-front" "--bin" "reverie-front" ];
   cargoTestFlags = [ "-p" "reverie-front" ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   meta = {
     description = "Native listener and child supervisor for the Reverie console";
     mainProgram = "reverie-front";

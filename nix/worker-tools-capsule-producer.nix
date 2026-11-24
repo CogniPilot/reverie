@@ -12,7 +12,7 @@ in pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-tools-capsule" ];
   cargoTestFlags = [ "-p" "reverie-elf-bundle" "-p" "reverie-worker-tools-capsule" ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   nativeCheckInputs = [ pkgs.clippy ];
   postCheck = ''
     cargo clippy --locked --offline --release --target ${pkgs.stdenv.hostPlatform.rust.rustcTarget} \

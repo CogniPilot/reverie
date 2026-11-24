@@ -9,7 +9,7 @@ pkgs.buildNpmPackage {
   npmRebuildFlags = [ "--ignore-scripts" ];
   nativeBuildInputs = [ pkgs.esbuild ];
   dontNpmBuild = true;
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   buildPhase = ''
     runHook preBuild
     esbuild test/fixtures/docker-original-writer-native.ts \

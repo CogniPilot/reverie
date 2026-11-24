@@ -11,7 +11,7 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   src = workspace.source;
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-docker-resources" ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   cargoTestFlags = [ "-p" "reverie-docker-resources" ];
   postInstall = ''
     mkdir -p "$out/opt/reverie-worker-tools"

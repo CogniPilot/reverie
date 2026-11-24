@@ -31,7 +31,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-memory-cli" "-p" "reverie-mcp-cli" ];
   cargoTestFlags = [ "-p" "reverie-memory-cli" "-p" "reverie-mcp-cli" ];
   nativeCheckInputs = [ pkgs.coreutils ];
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   postInstall = ''
     regexNotices="$out/share/doc/reverie-memory-cli/regex"
     mkdir -p "$regexNotices"

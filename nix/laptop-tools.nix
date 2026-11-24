@@ -15,7 +15,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-laptop-tools" ];
   cargoTestFlags = [ "-p" "reverie-laptop-tools" ];
   REVERIE_TEST_MKFIFO = "${pkgs.coreutils}/bin/mkfifo";
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   postInstall = ''
     notices="$out/share/doc/reverie-laptop-tools"
     mkdir -p "$notices"

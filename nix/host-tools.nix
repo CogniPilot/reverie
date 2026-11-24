@@ -31,7 +31,7 @@ pkgs.rustPlatform.buildRustPackage {
   REVERIE_DEPLOYMENT_GETFATTR = "${pkgs.attr}/bin/getfattr";
   REVERIE_DEPLOYMENT_GETFACL = "${pkgs.acl}/bin/getfacl";
   REVERIE_DEPLOYMENT_COPY = "${pkgs.coreutils}/bin/cp";
-  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
+  doCheck = true;
   meta = {
     description = "Deployment, lease, worker Nix store bootstrap and worker child tools from one host build";
     license = pkgs.lib.licenses.mit;
