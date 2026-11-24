@@ -20,6 +20,7 @@ import {
 import {
   captureDockerPlanMoveOriginalRequester,
   captureDockerPlanMoveRequester,
+  captureDockerPlanMoveSupervisorRequester,
   requireDockerPlanMoveRequesterSource,
   requireDockerPlanMoveRequesterReservation,
   requireDockerPlanMoveRequesterCurrent,
@@ -822,5 +823,63 @@ describe('genuine requester grant for one Docker plan journal', () => {
       expect(() => requireDockerPlanMoveRequesterSource(proof, f.record.employeeId, undefined)).toThrow();
     vi.spyOn(performance, 'now').mockReturnValue(-1);
     expect(() => f.current()).toThrow();
+  });
+  it('lets the office supervisor continue only the original of a held move while its switch is on', async () => {
+    const f = await fixture();
+    let on = true;
+    const proof = await captureDockerPlanMoveSupervisorRequester(f.record.id, f.moveStore, f.company, () => {}, {
+      current: () => on,
+    });
+    expect(requireDockerPlanMoveRequesterSource(proof, f.record.employeeId, undefined)).toMatchObject({
+      requester: { kind: 'supervisor' },
+      purpose: 'original',
+      employeeId: f.record.employeeId,
+    });
+    requireDockerPlanMoveRequesterCurrent(proof, f.record, f.state);
+    // It carries no request, so it can never reserve a new choice, even the one the journal names.
+    expect(() => requireDockerPlanMoveRequesterReservation(proof, f.input, undefined)).toThrow(/exact request/);
+    on = false;
+    expect(() => requireDockerPlanMoveRequesterCurrent(proof, f.record, f.state)).toThrow();
+    // A refusal is final for this capture, as it is for an owner whose sign-in ended.
+    on = true;
+    expect(() => requireDockerPlanMoveRequesterCurrent(proof, f.record, f.state)).toThrow();
+  });
+  it('refuses the office supervisor while its switch is off or the runtime changed', async () => {
+    const f = await fixture();
+    await expect(
+      captureDockerPlanMoveSupervisorRequester(f.record.id, f.moveStore, f.company, () => {}, { current: () => false })
+    ).rejects.toThrow(/may not continue/);
+    await expect(
+      captureDockerPlanMoveSupervisorRequester(
+        f.record.id,
+        f.moveStore,
+        f.company,
+        () => {
+          throw Error('runtime changed');
+        },
+        { current: () => true }
+      )
+    ).rejects.toThrow(/runtime changed/);
+    await expect(
+      captureDockerPlanMoveSupervisorRequester('unknown-move', f.moveStore, f.company, () => {}, { current: () => true })
+    ).rejects.toThrow();
+  });
+  it('ends the office supervisor’s move authority once the owner stops the employee', async () => {
+    const f = await fixture();
+    const proof = await captureDockerPlanMoveSupervisorRequester(f.record.id, f.moveStore, f.company, () => {}, {
+      current: () => true,
+    });
+    requireDockerPlanMoveRequesterCurrent(proof, f.record, f.state);
+    await f.store.update((state) => {
+      state.employees[0]!.desiredRunning = false;
+    });
+    expect(() => requireDockerPlanMoveRequesterCurrent(proof, f.record, f.state)).toThrow();
+    // And it is never captured for an employee who is out of the office.
+    const away = await fixture(undefined, true);
+    await expect(
+      captureDockerPlanMoveSupervisorRequester(away.record.id, away.moveStore, away.company, () => {}, {
+        current: () => true,
+      })
+    ).rejects.toThrow();
   });
 });

@@ -36,6 +36,8 @@ export interface DockerPlanMoveRequesterScope {
   /** Correlation/audit DATA only; current permissions are checked independently. */
   readonly requester:
     | { readonly kind: 'owner' }
+    /** The office supervisor continuing an original held move. Never a new choice. */
+    | { readonly kind: 'supervisor' }
     | {
         readonly kind: 'agent';
         readonly employeeId: string;
@@ -125,26 +127,31 @@ export function requireDockerPlanMoveRequesterCurrent(
   DockerPlanMoveRequester.prototype.current.call(genuine(proof), record, state);
 }
 function captureRequester(
-  request: FastifyRequest,
+  request: FastifyRequest | undefined,
   input: DockerPlanMoveRequesterTarget,
   company: CompanyService,
   auth: Pick<AuthPort, 'authSessions'>,
   ownerAuth: Pick<OwnerAuthService, 'session'> | undefined,
   runtimeCurrent: () => void,
-  original?: Readonly<PlanMoveRecord>
+  original?: Readonly<PlanMoveRecord>,
+  /** In place of a request: the office supervisor, for the original of a held move only. */
+  supervisor?: { readonly owner: string | undefined; current(): boolean }
 ): DockerPlanMoveRequester {
   if (!(company instanceof CompanyService)) throw new PlanMoveError('Actual company plan authority required', 403);
   const target = targetSchema.parse(input),
-    identity = dockerWorkerIdentityOf(request),
-    owner = ownerFor(request);
+    identity = request ? dockerWorkerIdentityOf(request) : undefined,
+    owner = request ? ownerFor(request) : supervisor?.owner;
+  if (!request && (!supervisor || !original || target.purpose !== 'original' || isMultiUserMode()))
+    throw new PlanMoveError('The office supervisor may only continue the original of a held move', 403);
   if (
+    request &&
     dockerWorkerIdentityPresented(request) &&
     (!identity || request.headers['x-reverie-parent-session'] !== identity.sessionId)
   )
     throw new PlanMoveError('Current boxed plan identity required', 403);
   // Global subscription accounts have no per-member ownership model. Preserve
   // the existing agentPlanRequestExecution refusal, including presented hints.
-  if(isMultiUserMode()&&(identity||dockerWorkerIdentityPresented(request)||request.headers['x-reverie-parent-session']!==undefined))throw new PlanMoveError('Agent plan moves require supported account ownership',403);
+  if(request&&isMultiUserMode()&&(identity||dockerWorkerIdentityPresented(request)||request.headers['x-reverie-parent-session']!==undefined))throw new PlanMoveError('Agent plan moves require supported account ownership',403);
   const issuer = identity ? captureDockerWorkerPlanRequestContinuation(identity) : undefined;
   const employees = () => company.registeredEmployees();
   const find = (id: string) => {
@@ -187,7 +194,9 @@ function captureRequester(
           sessionGeneration: identity.sessionGeneration,
           containerId: identity.containerId,
         }
-      : { kind: 'owner' },
+      : request
+        ? { kind: 'owner' }
+        : { kind: 'supervisor' },
     employeeId: employee.id,
     owner,
     sessionId: sourceBinding.sessionId,
@@ -237,7 +246,14 @@ function captureRequester(
         } else if (!inOffice && (identity || target.choice || !off)) return refuse();
       }
       if (!identity) {
-        if (!authenticatedPlanMover(request, auth.authSessions, ownerAuth)) return refuse();
+        // No request: the supervisor's own switch and target stand where the owner's sign-in stands, and the
+        // employee must still be meant to be running in the office.
+        if (
+          request
+            ? !authenticatedPlanMover(request, auth.authSessions, ownerAuth)
+            : !supervisor!.current() || current.onVacation || current.desiredRunning !== true
+        )
+          return refuse();
         return;
       }
       const delegate = find(identity.employeeId),
@@ -345,5 +361,46 @@ export async function captureDockerPlanMoveOriginalRequester(
     ownerAuth,
     runtimeCurrent,
     record
+  );
+}
+/** The office supervisor continuing the ORIGINAL of a held move: the same frozen
+ * journal lookup as an owner's recovery, with the supervisor's own switch where
+ * the owner's sign-in stands. It carries no request, so it can never reserve,
+ * preview or choose a target, and it never settles a restored source: that
+ * check asks for the signed-in owner by kind. */
+export async function captureDockerPlanMoveSupervisorRequester(
+  id: string,
+  store: PlanMoveStore,
+  company: CompanyService,
+  runtimeCurrent: () => void,
+  supervisor: { current(): boolean }
+): Promise<DockerPlanMoveRequester> {
+  if (!(store instanceof PlanMoveStore)) throw new PlanMoveError('Actual retained plan journal required', 403);
+  identifier.parse(id);
+  runtimeCurrent();
+  const record = await PlanMoveStore.prototype.dockerRecord.call(store, id),
+    state = record.dockerReplacement!;
+  runtimeCurrent();
+  if (!supervisor.current()) throw new PlanMoveError('The office supervisor may not continue this move', 403);
+  return captureRequester(
+    undefined,
+    {
+      employeeId: record.employeeId,
+      sessionId: record.oldSession,
+      sessionGeneration: state.seed.source.binding.sessionGeneration,
+      purpose: 'original',
+      choice: {
+        moveId: record.id,
+        toAccount: record.toAccount,
+        forceBusy: state.seed.forceBusy,
+        ...(state.seed.returnToOffice ? { returnToOffice: true } : {}),
+      },
+    },
+    company,
+    { authSessions: null },
+    undefined,
+    runtimeCurrent,
+    record,
+    { owner: record.owner, current: () => supervisor.current() }
   );
 }
