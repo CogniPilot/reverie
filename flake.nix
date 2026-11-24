@@ -261,6 +261,16 @@
             mutations = import ./tests/boxed_runtime_boundary_eval.nix;
           in assert checked.passed; pkgs.writeText "reverie-boxed-runtime-boundary.json"
             (builtins.toJSON { inherit (checked) checks; inherit mutations; });
+          # The client capsule's digest is recorded by deployments. Its source is the
+          # modules its entry imports; importing the office server would make every
+          # server edit a new capsule again.
+          workerClientSources = let
+            files = import ./nix/typescript-import-closure.nix {
+              lib = nixpkgs.lib; root = ./apps/web/src; entry = "worker-client-cli.ts";
+            };
+          in assert builtins.elem "worker-client-cli.ts" files && builtins.elem "types/index.ts" files;
+            assert !(builtins.elem "session.ts" files) && !(builtins.elem "web/server.ts" files);
+            pkgs.writeText "reverie-worker-client-sources.json" (builtins.toJSON files);
           boxedWebsiteImage = pkgs.writeText "reverie-boxed-website-image-checks.json"
             (builtins.toJSON (import ./tests/boxed_website_image_eval.nix));
 
