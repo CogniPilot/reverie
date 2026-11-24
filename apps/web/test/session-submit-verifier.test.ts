@@ -79,6 +79,22 @@ describe('promptStillInComposer', () => {
       // tmux carries attributes across rows: a faint state opened on an earlier row still applies.
       expect(composerIsEmpty(`\x1b[2m` + frame(`❯ ${words}`), '❯')).toBe(true);
     });
+    it('accepts both composer rows captured from live Claude Code 2.1.308 panes with `tmux capture-pane -e -p`', () => {
+      // Verbatim: the glyph is followed by a no-break space and a space, the cursor is the inverse first character, the rest
+      // is faint, and in the second form the spaces between the faint words are emitted with the attributes reset.
+      const wholeRun = '\x1b[39m❯  \x1b[7my\x1b[0;2mes, check Vulkan and start the RTX run\x1b[0m';
+      const perWord =
+        '\x1b[39m❯  \x1b[7mk\x1b[0;2meep\x1b[0m \x1b[2mgoing\x1b[0m \x1b[2mon\x1b[0m \x1b[2mthe\x1b[0m \x1b[2munowned\x1b[0m \x1b[2missues\x1b[0m';
+      for (const row of [wholeRun, perWord]) {
+        expect(composerIsEmpty(frame(row), '❯')).toBe(true);
+        expect(promptStillInComposer(frame(row), 'Continue the work you were handed.', '❯')).toBe(false);
+      }
+      // The same two rows with the words typed instead: no faint run, so each is a draft.
+      expect(composerIsEmpty(frame('\x1b[39m❯  yes, check Vulkan and start the RTX run\x1b[7m \x1b[0m'), '❯')).toBe(false);
+      expect(composerIsEmpty(frame('\x1b[39m❯  \x1b[7mk\x1b[0meep going on the unowned issues'), '❯')).toBe(false);
+      // One typed word among the faint ones is enough to keep it a draft.
+      expect(composerIsEmpty(frame(perWord.replace('\x1b[2mthe\x1b[0m', 'the')), '❯')).toBe(false);
+    });
     it('keeps the very same words a draft when they were typed, or when the capture has no styles', () => {
       // Exactly the screen in the report, as plain text: a suggestion and typed text cannot be told apart, so it is a draft.
       expect(composerIsEmpty(frame(`❯ ${words}`), '❯')).toBe(false);
