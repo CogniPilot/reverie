@@ -30,18 +30,24 @@ const decl = (rules: postcss.Rule[], selector: string, prop: string): string | u
   return found;
 };
 
-it('shows unknown agent health as readable text in compact company cards', () => {
-  const rules: postcss.Rule[] = [];
-  root.walkRules((rule) => {
-    if (rule.selector.includes('.ca-company-map .ca-company-person .ca-company-state') &&
-      rule.selector.includes('.is-unknown')) rules.push(rule);
-  });
+it('shows every agent health state as a readable pill inside compact company cards', () => {
+  const pill = '.ca-company-map .ca-company-person .ca-company-state';
   const values = new Map<string, string>();
-  for (const rule of rules) rule.walkDecls((entry) => { values.set(entry.prop, entry.value); });
-  expect(values.get('position')).toBe('static');
+  root.walkRules((rule) => {
+    // No state may shrink the pill back to a bare dot or let it leave the fixed-size card.
+    if (rule.selectors.some((selector) => /\.ca-company-state(?:[.:](?!:before)[^ ]*)?$/.test(selector)))
+      rule.walkDecls((entry) => {
+        if (entry.prop === 'font-size') expect(parseFloat(entry.value)).toBeGreaterThanOrEqual(10);
+        if (['width', 'height'].includes(entry.prop)) expect(entry.value).toBe('auto');
+      });
+    if (rule.selectors.includes(pill)) rule.walkDecls((entry) => { values.set(entry.prop, entry.value); });
+  });
   expect(values.get('font-size')).toBe('11px');
-  expect(values.get('overflow')).toBe('visible');
-  expect(values.get('height')).toBe('auto');
+  expect(values.get('position')).toBe('absolute');
+  expect(values.get('max-width')).toBe('calc(100% - 12px)');
+  expect(values.get('overflow')).toBe('hidden');
+  expect(values.get('text-overflow')).toBe('ellipsis');
+  expect(values.get('white-space')).toBe('nowrap');
 });
 
 describe('phone drawers', () => {

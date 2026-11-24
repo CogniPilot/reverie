@@ -20,6 +20,8 @@ html[data-reverie-view='debug'] #chatApp {
   --ca-line: #26272b;
   --ca-hover: color-mix(in srgb, var(--text) 8%, transparent);
   --ca-active: color-mix(in srgb, var(--text) 14%, transparent);
+  /* The colour of a company card's status pill; each card sets it from its state. */
+  --ca-status-tone: var(--text-dim);
 }
 .ca-root {
   position: fixed;
@@ -5832,10 +5834,6 @@ button.ca-company-profile-trigger:focus-visible {
   font-size: 11px;
   color: var(--text-dim);
 }
-.ca-company-map .ca-company-person .ca-company-state {
-  font-size: 10px;
-  line-height: 14px;
-}
 .ca-company-map .ca-company-reporting {
   width: 100%;
   display: flex;
@@ -5891,41 +5889,138 @@ button.ca-company-profile-trigger:focus-visible {
 .ca-company-map .ca-company-reporting[hidden] {
   display: none;
 }
-.ca-company-map .ca-company-person .ca-company-state {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  width: 7px;
-  height: 7px;
-  overflow: hidden;
-  font-size: 0;
-  border-radius: 50%;
-  background: var(--text-dim);
+
+/*
+ * Company card status, in three fixed places so a row of cards reads at a glance and nothing leaves the card:
+ * one pill on the portrait's lower edge (what state), one line under the title (why, when the pill does not say),
+ * and the one next action in the top corner. Colour follows the roster dots: green fine, yellow waiting for you,
+ * red needs you now, accent in progress, grey stopped or not confirmed.
+ */
+.ca-company-person:is(.is-tone-ok, .is-tone-idle) {
+  --ca-status-tone: var(--green, #4fbf86);
 }
-.ca-company-map .ca-company-person .ca-company-state.is-connected {
-  background: var(--green, #4fbf86);
+.ca-company-person.is-tone-wait {
+  --ca-status-tone: var(--yellow, #e6b800);
 }
-.ca-company .ca-company-person:is(.is-health-dead, .is-health-disconnected) {
+.ca-company-person.is-tone-alert {
+  --ca-status-tone: var(--red);
+}
+.ca-company-person.is-tone-moving {
+  --ca-status-tone: var(--accent, #5b8def);
+}
+.ca-company .ca-company-person.is-tone-alert {
   border-color: var(--red);
 }
-.ca-company .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected) {
-  color: var(--red);
-  font-weight: 700;
-}
-.ca-company-map .ca-company-person .ca-company-state:is(.is-dead, .is-disconnected, .is-unknown) {
-  position: static;
-  grid-column: 1 / -1;
-  width: auto;
-  height: auto;
-  overflow: visible;
+.ca-company-map .ca-company-person .ca-company-state {
+  position: absolute;
+  top: 85px;
+  left: 50%;
+  transform: translateX(-50%);
+  box-sizing: border-box;
+  max-width: calc(100% - 12px);
+  padding: 1px 8px 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid color-mix(in srgb, var(--ca-status-tone) 60%, var(--ca-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ca-status-tone) 16%, var(--ca-main-bg));
+  color: var(--text);
   font-size: 11px;
-  line-height: 1.4;
-  border-radius: 0;
-  background: transparent;
+  font-weight: 600;
+  line-height: 14px;
 }
-.ca-company-person .ca-dead-pane-restart {
-  grid-column: 1 / -1;
-  min-height: 32px;
+.ca-company-map .ca-company-person .ca-company-state::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--ca-status-tone);
+}
+.ca-company-map .ca-company-person.is-tone-ok .ca-company-state::before {
+  box-shadow: 0 0 5px 1px color-mix(in srgb, var(--ca-status-tone) 55%, transparent);
+}
+.ca-company-map .ca-company-person:is(.is-tone-idle, .is-tone-off, .is-tone-unknown) .ca-company-state {
+  background: var(--ca-main-bg);
+}
+.ca-company-map .ca-company-person.is-tone-unknown .ca-company-state::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ca-status-tone);
+}
+/* Under the name: a title of up to two lines, or one line of title and the one-line reason. */
+.ca-company-map .ca-company-person .ca-company-role,
+.ca-company-map .ca-company-owner .ca-company-owner-role {
+  display: -webkit-box;
+  max-height: 28px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.ca-company-map .ca-company-person.has-status-reason .ca-company-role {
+  display: block;
+  max-height: 14px;
+  white-space: nowrap;
+}
+.ca-company-map .ca-company-person .ca-company-reason {
+  width: 100%;
+  min-height: 14px;
+  max-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 14px;
+}
+.ca-company-map .ca-company-person.is-tone-alert .ca-company-reason {
+  color: var(--red);
+  font-weight: 600;
+}
+.ca-company-map .ca-company-person.is-tone-wait .ca-company-reason {
+  color: var(--yellow, #e6b800);
+}
+.ca-company-map .ca-company-person .ca-company-status-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  max-width: calc(100% - 8px);
+  display: flex;
+}
+.ca-company-map .ca-company-person .ca-company-status-actions[hidden] {
+  display: none;
+}
+.ca-company-map .ca-company-person .ca-company-status-actions > button {
+  width: auto;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--ca-line);
+  border-radius: 999px;
+  background: var(--ca-main-bg);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.ca-company-map .ca-company-person .ca-company-status-actions > .ca-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+}
+.ca-company-map .ca-company-person .ca-company-status-actions > .ca-icon-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.ca-company-map .ca-company-person .ca-company-status-actions > .is-danger:not(:hover, :focus-visible) {
+  border-color: var(--red);
+  color: var(--red);
+}
+.ca-company-map .ca-company-person .ca-company-status-actions > button:is(:hover, :focus-visible) {
+  border-color: var(--text);
 }
 .ca-company-map-tools {
   padding: 2px 0 5px;
@@ -6234,8 +6329,7 @@ button.ca-company-profile-trigger:focus-visible {
 
 /* Viewer transport loss is a neutral warning, separate from agent availability. */
 .ca-root .ca-viewer-warning,
-.ca-root .ca-runtime-health.is-viewer-unavailable,
-.ca-root .ca-company-state.is-viewer-unavailable {
+.ca-root .ca-runtime-health.is-viewer-unavailable {
   color: var(--text-dim);
   font-weight: 400;
 }
