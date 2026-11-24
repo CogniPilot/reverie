@@ -65,6 +65,49 @@ pauses the selected container and excludes mounted-volume data, so an image
 commit cannot provide this shared-data backup. Coordinated shared-writer
 quiescence remains a product workflow requirement.
 
+## Office recovery supervisor
+
+Under the boxed laptop runtime the office checks every employee who should be
+running (in the office, `desiredRunning`) every thirty seconds and takes the
+next mechanical repair step itself. An employee who is stopped or out of the
+office is never read or touched. It runs no HTTP request of its own: each step
+is the service call behind the owner route for that step, recorded in the admin
+audit log as `office supervisor` with one console line `[supervisor] …`.
+
+`GET /api/company` carries a `supervisor` object on each employee: `condition`,
+`sentence`, `code`, `since`, `last` (what it did and how that ended), `next`
+(what it will do and no earlier than when), `waitingFor`, and `needsHuman` (what
+a person or a managing agent has to do, with the route to call). The company
+card shows the short form and keeps the sentence in its tooltip.
+
+Steps, least destructive first, each bounded per episode (an episode ends after
+ten healthy minutes):
+
+| Step | When | Bound |
+| --- | --- | --- |
+| Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min |
+| Start a fresh stopped source | no record, approved limits | 3 |
+| Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
+| Wake (attach a provider that already runs) | the terminal is not connected | 6 |
+| Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
+| Rebuild the laptop, then start it | the operation cannot advance and nothing runs in the laptop | 2, and 2 per day |
+
+It never answers a sign-in or an owner's decision screen, never approves limits
+or a laptop layout, never returns anyone to the office, and never rebuilds
+while an agent runs in the laptop or while it cannot read the laptop. A rebuild
+reuses, verbatim, the layout of the employee's most recent laptop operation; an
+employee with none on record is rebuilt by hand once. A stopped or missing
+laptop is rebuilt only while another laptop of the box runs; when none does,
+that is what a host restart looks like, so recover the shared pool first
+(below). A code or a plan move error it does not recognize is reported and left
+alone.
+
+Two company settings switch it (`PUT /api/company/settings`, owner only; absent
+means on): `supervisorEnabled` (observe, continue, wake) and
+`supervisorAutoRepair` (abandon and rebuild). Its pacing state is
+`employee-supervisor.json` in the office data directory; deleting it only
+restarts the waits.
+
 ## Employee disk budget
 
 Every employee has a fixed disk budget of 20 GiB for their case folder, the
