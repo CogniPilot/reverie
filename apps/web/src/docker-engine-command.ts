@@ -32,6 +32,34 @@ export interface DockerEngineCommand {
   ): Promise<void>;
   /** Removes one recorded laptop container that hosts only its own init. */
   removeIdleLaptop?(containerId: string, requireCurrent: () => void): Promise<void>;
+  /** Stops (if running) and removes one container the owner asked to discard
+   * with an employee's laptop. The owning workflow proves whose it is; this
+   * port re-reads the container and requires that same proof before each effect. */
+  discardLaptopContainer?(
+    containerId: string,
+    proof: DockerLaptopContainerProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+}
+/** How one container is bound to the employee whose laptop is being rebuilt:
+ * by the labels its creator gave it, or, for a container the employee's own
+ * canonical record names, by the fixed boxed laptop name rule. */
+export type DockerLaptopContainerProof =
+  | { readonly kind: 'labels'; readonly labels: Readonly<Record<string, string>> }
+  | { readonly kind: 'recorded' };
+const RECORDED_LAPTOP_NAME = /^\/reverie-boxed-(?:source-)?[a-f0-9]{64}$/;
+export function dockerLaptopContainerProven(
+  row: { Name?: unknown; Config?: { Labels?: Record<string, string> | null } | null },
+  proof: DockerLaptopContainerProof
+): boolean {
+  if (proof.kind === 'recorded') return RECORDED_LAPTOP_NAME.test(String(row.Name));
+  const expected = Object.entries(proof.labels),
+    labels = row.Config?.Labels ?? {};
+  return (
+    expected.length > 0 &&
+    expected.length <= 8 &&
+    expected.every(([key, value]) => key.startsWith('reverie.') && value !== '' && labels[key] === value)
+  );
 }
 const probeOrigin = Symbol('complete native read-only resource ESRCH');
 function probeArgs(args: readonly string[]): boolean {
@@ -257,6 +285,40 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
       state = await inspect();
     }
     if (state.Running !== false || !['exited', 'created'].includes(String(state.Status))) notRemovable();
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** The owner's laptop rebuild. Unlike `removeIdleLaptop` this stops a running
+   * container whatever it hosts, because the owner confirmed that its running
+   * conversation is discarded. It is never forced: `stop` gives the container
+   * its ordinary grace period, `rm` takes no `--force` and no `--volumes`, so
+   * the employee's bind-mounted home, Nix store and scratch are not touched.
+   * The proof is re-read immediately before the stop and before the removal. */
+  async discardLaptopContainer(
+    containerId: string,
+    proof: DockerLaptopContainerProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId)) throw Error('Fixed laptop container required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_REBUILD_CONTAINER_NOT_REMOVABLE');
+    };
+    const inspect = async () => {
+      const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+      const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+      const state = row?.State as Record<string, unknown> | undefined;
+      if (row?.Id !== containerId || !state || !dockerLaptopContainerProven(row, proof)) return notRemovable();
+      return state;
+    };
+    requireCurrent();
+    let state = await inspect();
+    if (state.Paused === true || state.Restarting === true) notRemovable();
+    if (state.Running === true) {
+      requireCurrent();
+      await this.run(['container', 'stop', '--time', '20', containerId]);
+      state = await inspect();
+    }
+    if (state.Running !== false || !['exited', 'created', 'dead'].includes(String(state.Status))) notRemovable();
     requireCurrent();
     await this.run(['container', 'rm', containerId]);
   }

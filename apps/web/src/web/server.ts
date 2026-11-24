@@ -163,6 +163,7 @@ import { getCli, enabledClis, listClis } from '../config/cli-registry/registry.j
 import { isCliEntryInstalled, probeStockCliAvailability } from '../utils/cli-installed-probes.js';
 import { readCustomModelHosts } from '../custom-model-hosts.js';
 import { applyCustomModelInjection, customModelConfigDir, removeConfigDir } from '../custom-model-injection-apply.js';
+import { absentLaptopViewRefusal } from '../absent-laptop-view.js';
 import type { CustomModelBookkeeping } from '../types/session.js';
 import { registerGeneratedArtifactAttachment } from '../generated-artifact-attachments.js';
 import {
@@ -1060,6 +1061,7 @@ export class WebServer extends EventEmitter {
       persistSessionStateNow: this._persistSessionStateNow.bind(this),
       reapplyPersistedSessionState: this.reapplyPersistedSessionState.bind(this),
       discardPartiallyBuiltSession: this.discardPartiallyBuiltSession.bind(this),
+      discardAbsentLaptopView: this.discardAbsentLaptopView.bind(this),
       retireDockerPlanSource: this.retireDockerPlanSource.bind(this),
       getSessionStateWithRespawn: this.getSessionStateWithRespawn.bind(this),
       // EventPort
@@ -5242,6 +5244,63 @@ export class WebServer extends EventEmitter {
       );
       if (this.sessions.has(sessionId))
         throw new Error('Partial cleanup required: a successor appeared before notification');
+      this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
+    } finally {
+      this.cleaningUp.delete(sessionId);
+      this.killingSessions.delete(sessionId);
+      if (current()) session.markClosing(false);
+    }
+  }
+
+  /**
+   * Forget the office-side viewer of a boxed laptop that no longer exists.
+   *
+   * {@link discardPartiallyBuiltSession} cannot do this: its guarded stop refuses
+   * a boxed viewer (a wrapper proves nothing about the native job behind it) and
+   * needs a live pane, while a laptop that is gone leaves a dead one. Here the
+   * caller's Engine listing is the authority: only when it positively reports no
+   * container under the exact ID this viewer was attached to is the ordinary
+   * local stop used, which ends this office's terminal client and its local
+   * pane and nothing else. The observers and the map entry are removed exactly
+   * as the partial discard removes them, and the persisted record is kept.
+   */
+  async discardAbsentLaptopView(
+    sessionId: string,
+    containerAbsent: (containerId: string) => Promise<boolean>
+  ): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    const owner = session.owner,
+      docker = session.docker;
+    const current = () =>
+      this.sessions.get(sessionId) === session && session.owner === owner && session.docker === docker;
+    const refusal = () => absentLaptopViewRefusal(session, sessionId, this.cleaningUp.has(sessionId));
+    const reason = refusal();
+    if (reason) throw new Error('Laptop viewer discard refused: ' + reason);
+    if (!(await containerAbsent(docker!.containerName)))
+      throw new Error('Laptop viewer discard refused: its laptop container still exists');
+    const changed = !current() ? 'the session changed' : refusal();
+    if (changed) throw new Error('Laptop viewer discard refused: ' + changed);
+    this.cleaningUp.add(sessionId);
+    this.killingSessions.add(sessionId);
+    session.markClosing(true);
+    try {
+      await this.tabLayouts.runFailedSessionRollback(
+        { id: sessionId, owner },
+        async () => {
+          if (!current()) throw new Error('Laptop viewer discard refused: the session changed');
+          await session.stop(true);
+          if (!current()) throw new Error('Laptop viewer discard unconfirmed: the session changed');
+          this.discardPartialSessionObservers(session);
+          this.sessions.delete(sessionId);
+        },
+        () => {
+          if (this.sessions.has(sessionId))
+            throw new Error('Laptop viewer discard unconfirmed: a successor appeared before layout publication');
+        }
+      );
+      if (this.sessions.has(sessionId))
+        throw new Error('Laptop viewer discard unconfirmed: a successor appeared before notification');
       this.broadcast(SseEvent.SessionDeleted, { id: sessionId });
     } finally {
       this.cleaningUp.delete(sessionId);

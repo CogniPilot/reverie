@@ -292,7 +292,12 @@ describe('abandon route', () => {
     );
     const headers = { host: 'console.test', origin: 'https://console.test', cookie: 'reverie_session=owner' };
     const send = (extra: Record<string, string> = {}, payload: unknown = { employeeId: 'expert' }) =>
-      server.inject({ method: 'POST', url: '/api/plans/moves/held/abandon', headers: { ...headers, ...extra }, payload });
+      server.inject({
+        method: 'POST',
+        url: '/api/plans/moves/held/abandon',
+        headers: { ...headers, ...extra },
+        payload,
+      });
     return { server, send, abandonHeldDockerMove, sessions };
   }
   it('abandons for the signed-in owner and names the next step', async () => {
