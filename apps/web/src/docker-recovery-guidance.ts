@@ -142,6 +142,65 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'Nothing was recorded as rebuilt. Wait a moment, then preview the rebuild again.',
     allowedActions: ['rebuild-preview'],
   },
+  // The step that sets a laptop's resource limits. `retry` is the same request
+  // again (Continue for a laptop recovery or a plan move); nothing is forced.
+  DOCKER_RESOURCE_HELPER_RETRY_PENDING: {
+    message:
+      'Setting the resource limits of this laptop did not finish: a process in the box ended while the limits were ' +
+      'being checked. That is harmless and nothing is stuck. Continue, and the office sets the limits again.',
+    allowedActions: ['retry', 'rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED: {
+    message:
+      'Setting the resource limits of this laptop failed three times in a row, each time because a process in the ' +
+      'box ended while the limits were being checked. A box that is compiling or running many short commands does ' +
+      'this. Continue to try three more times, or use Rebuild laptop to start it over.',
+    allowedActions: ['retry', 'rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_RETRY_UNCONFIRMED: {
+    message:
+      'The office could not confirm that the earlier attempt to set this laptop’s resource limits has completely ' +
+      'stopped, so it did not start another one beside it. Wait a moment and continue, or use Rebuild laptop.',
+    allowedActions: ['retry', 'rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT: {
+    message:
+      'Setting the resource limits of this laptop failed nine times, which is as often as the office tries for one ' +
+      'laptop. Use Rebuild laptop: it keeps the employee, their files and their memories and builds a fresh laptop.',
+    allowedActions: ['rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_REFUSED: {
+    message:
+      'The helper that sets resource limits refused: the laptop, its box or its limits were not what was approved ' +
+      'when it checked. The office does not repeat a refused change. Use Rebuild laptop to build a fresh laptop ' +
+      'under the current limits.',
+    allowedActions: ['rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_CLOSE_UNCONFIRMED: {
+    message:
+      'The helper that sets resource limits could not confirm that it had released the laptop’s control files, so ' +
+      'the office does not run it again for this laptop. Use Rebuild laptop to build a fresh one.',
+    allowedActions: ['rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_FAILURE_UNKNOWN: {
+    message:
+      'The helper that sets resource limits stopped without a reason the office recognizes, so it is not run again ' +
+      'for this laptop. Use Rebuild laptop to build a fresh one.',
+    allowedActions: ['rebuild-preview'],
+  },
+  DOCKER_RESOURCE_HELPER_RETRY_SCOPE_CHANGED: {
+    message:
+      'The laptop, its approved limits or the step it is at changed after the earlier attempt to set its resource ' +
+      'limits failed, so that attempt is not repeated. Use Rebuild laptop to build a fresh one under the current limits.',
+    allowedActions: ['rebuild-preview'],
+  },
+  DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE: {
+    message:
+      'This office is configured to set laptop resource limits with a helper image that the container engine does ' +
+      'not have, or that was built for something else. Nothing was changed. The office installation needs that ' +
+      'image loaded or its setting corrected; then continue.',
+    allowedActions: ['retry'],
+  },
 };
 export function dockerRecoveryGuidance(code: string): DockerRecoveryGuidance | undefined {
   return Object.hasOwn(GUIDANCE, code) ? GUIDANCE[code] : undefined;

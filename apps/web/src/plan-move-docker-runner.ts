@@ -2,7 +2,8 @@
  * cleanup/rebind path is never a fallback for a boxed worker. */
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
+import { dockerRecoveryGuidance } from './docker-recovery-guidance.js';
 import { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import type { PlanMoveDockerJournal, PlanMoveDockerJournalStore } from './plan-move-docker.js';
 import {
@@ -15,6 +16,25 @@ import {
   type PlanMoveExecutor,
   type PlanMoveSourceViewRetirement,
 } from './plan-move.js';
+/** Why a move is held. A held resource step is told in a sentence, with what
+ * the owner can do about it on a plan move; its code stays in the text. */
+export function dockerPlanMoveFailureMessage(error: unknown): string {
+  if (
+    error instanceof DockerEmployeeContinuationError &&
+    (error.code.startsWith('DOCKER_RESOURCE_HELPER_') || error.code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE')
+  ) {
+    const guidance = dockerRecoveryGuidance(error.code);
+    if (guidance)
+      return (
+        `${guidance.message} This step belongs to a plan move: ` +
+        (guidance.allowedActions.includes('retry')
+          ? 'continue the move to try again, or abandon it.'
+          : 'abandon the move first.') +
+        ` (${error.code})`
+      );
+  }
+  return error instanceof Error ? error.message : 'Docker plan move failed';
+}
 function frozen<T>(value: T): Readonly<T> {
   if (value && typeof value === 'object') {
     Object.values(value).forEach((child) => frozen(child));
@@ -273,7 +293,7 @@ export async function runDockerPlanMove(
       !cursor.paidDispatch &&
       !cursor.companyPublication &&
       !cursor.handoff;
-    const message = (error instanceof Error ? error.message : 'Docker plan move failed').slice(0, 4000);
+    const message = dockerPlanMoveFailureMessage(error).slice(0, 4000);
     record.phase = 'recovery-required';
     record.error = message;
     try {

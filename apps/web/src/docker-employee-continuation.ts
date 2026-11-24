@@ -15,6 +15,8 @@ import {
   DockerEmployeeWorkerImage,
   type DockerEmployeeContinuationPhase,
 } from './docker-employee-continuation-data.js';
+import { dockerFailedWriterHold } from './docker-continuation-task.js';
+import { dockerRecoveryGuidance, type DockerRecoveryAction } from './docker-recovery-guidance.js';
 export function dockerContinuationDigest(value: unknown): string {
   return createHash('sha256')
     .update(
@@ -104,6 +106,9 @@ export interface DockerContinuationEngine {
   ): boolean;
   start(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   configureResources(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Records a started resource writer that is proved terminal and failed. One
+   * journal publication and reads; never a CREATE, START or kernel write. */
+  settleResourceWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, requireCurrent: () => void): Promise<void>;
 }
 export interface DockerContinuationStore {
@@ -139,8 +144,11 @@ export interface DockerContinuationResult {
   operationId: string;
   phase: DockerEmployeeContinuationPhase;
   state: 'ready' | 'pending' | 'held';
-  allowedActions: readonly ('observe' | 'continue')[];
+  /** `continue` and `retry` both name this same request sent again. */
+  allowedActions: readonly ('observe' | 'continue' | DockerRecoveryAction)[];
   code?: string;
+  /** What a held resource step means, in a sentence. DATA only. */
+  message?: string;
 }
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
@@ -308,9 +316,19 @@ export class DockerEmployeeContinuation {
       refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
     if (!isDeepStrictEqual(this.store.policy(subject.employeeId), policy)) refuse('DOCKER_CONTINUATION_POLICY_CHANGED');
   }
+  /** The hold of a leaf writer that failed terminally, when that is where the operation stands. */
+  #failedWriter(row: DockerEmployeeContinuationRecord): string | undefined {
+    const leaf = row.tasks?.find((task) => task.role === 'leaf-helper');
+    return row.phase === 'resources-issued' && leaf?.phase === 'failed' ? dockerFailedWriterHold(leaf) : undefined;
+  }
   #unissuedHelper(row: DockerEmployeeContinuationRecord): boolean {
     const task = (role: string) => row.tasks?.find((task) => task.role === role);
-    if (row.phase === 'resources-issued') return task('leaf-helper')?.phase === 'created';
+    if (row.phase === 'resources-issued')
+      // A writer that failed on a lost read is terminal: its next attempt is
+      // as unissued as a writer that was created and never started.
+      return (
+        task('leaf-helper')?.phase === 'created' || this.#failedWriter(row) === 'DOCKER_RESOURCE_HELPER_RETRY_PENDING'
+      );
     if (row.phase === 'identity-issued') return task('identity-helper')?.phase === 'created';
     if (row.phase === 'pool-issued')
       return (
@@ -320,20 +338,37 @@ export class DockerEmployeeContinuation {
       );
     return false;
   }
-  #result(row: DockerEmployeeContinuationRecord, code?: string): DockerContinuationResult {
+  #result(row: DockerEmployeeContinuationRecord, held?: string): DockerContinuationResult {
+    // A terminally failed resource writer says more than the read that found
+    // no enforcement: name it, with a sentence and what can be done next.
+    const failed = held === 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED' ? this.#failedWriter(row) : undefined,
+      code = failed ?? held,
+      guidance =
+        code?.startsWith('DOCKER_RESOURCE_HELPER_') || code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE'
+          ? dockerRecoveryGuidance(code)
+          : undefined;
+    const allowed: DockerContinuationResult['allowedActions'] =
+      row.version === 3
+        ? ['observe']
+        : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
+          ? ['observe', 'continue']
+          : code || row.phase === 'ready' || issued.has(row.phase)
+            ? ['observe']
+            : ['observe', 'continue'];
     return {
       operationId: row.request.operationId,
       phase: row.phase,
       state: code ? 'held' : row.phase === 'ready' ? 'ready' : 'pending',
       allowedActions:
-        row.version === 3
-          ? ['observe']
-          : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
-            ? ['observe', 'continue']
-            : code || row.phase === 'ready' || issued.has(row.phase)
-              ? ['observe']
-              : ['observe', 'continue'],
+        guidance && row.version !== 3
+          ? [
+              'observe',
+              ...(guidance.allowedActions.includes('retry') ? (['continue'] as const) : []),
+              ...guidance.allowedActions,
+            ]
+          : allowed,
       ...(code ? { code } : {}),
+      ...(guidance ? { message: guidance.message } : {}),
     };
   }
   async #phase(
@@ -684,6 +719,18 @@ export class DockerEmployeeContinuation {
           row = await this.#phase(row, 'destination-issued', current);
           await this.engine.createDestination(row, current);
           continue;
+        }
+        // A started resource writer that exited with an error is recorded as
+        // failed first. The read below would find it unacknowledged for good.
+        if (
+          effects &&
+          initial.phase === 'resources-issued' &&
+          row.phase === 'resources-issued' &&
+          this.engine.settleResourceWriter &&
+          ['start-issued', 'running'].includes(row.tasks?.find((task) => task.role === 'leaf-helper')?.phase ?? '')
+        ) {
+          await this.engine.settleResourceWriter(row, current);
+          row = this.#refresh(row, current);
         }
         let destination = await this.#destination(row, current);
         if (

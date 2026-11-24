@@ -545,6 +545,114 @@ describe('same original proven-unissued helper continuation', () => {
   });
 });
 
+describe('a resource writer that failed terminally', () => {
+  const leaf = (extra: Record<string, unknown>) =>
+    ({
+      role: 'leaf-helper',
+      name: 'reverie-boxed-leaf-' + oid,
+      imageId: 'sha256:' + '9'.repeat(64),
+      configurationDigest: '8'.repeat(64),
+      ...extra,
+    }) as NonNullable<DockerEmployeeContinuationRecord['tasks']>[number];
+  const failed = (failure: string, attempt?: number) =>
+    leaf({ phase: 'failed', containerId: '7'.repeat(64), exitCode: 1, failure, ...(attempt ? { attempt } : {}) });
+  it('holds with a sentence after three lost reads and is rerun by the same request sent again', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed('lost-process', 3)];
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED');
+    });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toMatchObject({
+      phase: 'resources-issued',
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_RETRY_EXHAUSTED',
+      allowedActions: ['observe', 'continue', 'retry', 'rebuild-preview'],
+    });
+    expect(held.message).toContain('three times in a row');
+    // A read-only check names the same hold and starts nothing.
+    const seen = await f.service.observe(eid, oid, f.authority);
+    expect(seen).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_RETRY_PENDING',
+      allowedActions: ['observe', 'continue', 'retry', 'rebuild-preview'],
+    });
+    expect(seen.message).toContain('nothing is stuck');
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready' });
+    expect(f.engine.configureResources).toHaveBeenCalledTimes(2);
+    expect(f.engine.start).toHaveBeenCalledOnce();
+    expect(f.engine.createDestination).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['refused', 'DOCKER_RESOURCE_HELPER_REFUSED'],
+    ['close-unconfirmed', 'DOCKER_RESOURCE_HELPER_CLOSE_UNCONFIRMED'],
+    ['unknown', 'DOCKER_RESOURCE_HELPER_FAILURE_UNKNOWN'],
+  ])('holds a %s failure for a rebuild and never reruns it', async (failure, code) => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed(failure)];
+      throw new DockerEmployeeContinuationError(code);
+    });
+    const expected = { phase: 'resources-issued', state: 'held', code, allowedActions: ['observe', 'rebuild-preview'] };
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toMatchObject(expected);
+    expect(held.message).toContain('Rebuild laptop');
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject(expected);
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+  it('offers only a rebuild once every attempt of the operation is spent', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [failed('lost-process', 9)];
+      throw new DockerEmployeeContinuationError('DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT');
+    });
+    const expected = { state: 'held', code: 'DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT' };
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    const seen = await f.service.observe(eid, oid, f.authority);
+    expect(seen).toMatchObject({ ...expected, allowedActions: ['observe', 'rebuild-preview'] });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject(expected);
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+  });
+  it('records a started writer that exited with an error before the next request reruns it; a read never does', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [leaf({ phase: 'start-issued', containerId: '7'.repeat(64) })];
+      throw Error('office stopped while the writer ran');
+    });
+    const settle = vi.fn(async () => {
+      expect(f.record()!.phase).toBe('resources-issued');
+      f.record()!.tasks = [failed('lost-process')];
+    });
+    Object.assign(f.engine, { settleResourceWriter: settle });
+    await f.service.begin(eid, f.request, f.authority);
+    expect((await f.service.observe(eid, oid, f.authority)).state).toBe('held');
+    expect(settle).not.toHaveBeenCalled();
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready' });
+    expect(settle).toHaveBeenCalledOnce();
+    expect(f.engine.configureResources).toHaveBeenCalledTimes(2);
+  });
+  it('leaves a started writer that is not proved failed exactly as held as before', async () => {
+    const f = fixture();
+    f.engine.configureResources.mockImplementationOnce(async () => {
+      f.record()!.tasks = [leaf({ phase: 'start-issued', containerId: '7'.repeat(64) })];
+      throw Error('unknown actual start reply');
+    });
+    const settle = vi.fn(async () => {});
+    Object.assign(f.engine, { settleResourceWriter: settle });
+    await f.service.begin(eid, f.request, f.authority);
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      allowedActions: ['observe'],
+    });
+    expect(settle).toHaveBeenCalledOnce();
+    expect(f.engine.configureResources).toHaveBeenCalledOnce();
+  });
+});
+
 describe('existing-provider identity survives observed native thread progress', () => {
   it('observes the same running provider after native progress without replaying its original launch', async () => {
     const f = fixture();

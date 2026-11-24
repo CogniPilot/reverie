@@ -57,6 +57,8 @@ export interface DockerContainedResourceController {
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null>;
   read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null>;
   configure(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Records a started leaf writer that is proved terminal and failed. No effect. */
+  settleFailedWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   existingPolicy?(row: DockerEmployeeContinuationRecord, actual: DockerEmployeeResourcePolicy): unknown;
   readExistingAfterHostRestart?(
     row: DockerEmployeeContinuationRecord,
@@ -1796,6 +1798,13 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     await this.resources.configure(row, current);
+  }
+  /** Journal metadata only: a started resource writer proved terminal and failed. */
+  async settleResourceWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const raw = await this.#destination(row);
+    current();
+    if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    await this.resources.settleFailedWriter?.(row, current);
   }
   async provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, current: () => void): Promise<void> {
     const raw = await this.#destination(row);
