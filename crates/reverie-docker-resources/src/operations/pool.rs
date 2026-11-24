@@ -1,4 +1,4 @@
-use super::{encoded, observation, writable, write_checked};
+use super::{POOL, encoded, observation, writable, write_checked};
 use crate::{
     args::{Common, PoolWrite},
     data::{self, Resources},
@@ -128,13 +128,13 @@ impl Pool for ScopedPool<'_> {
 }
 pub(super) fn configure(files: &mut Files, input: &PoolWrite) -> Result<String> {
     let policy = Policy::new(input)?;
-    let scope = Scope::capture(files, &input.common)?;
+    let scope = Scope::capture(files, &input.common, None)?;
     let expected = (input.parent_dev, input.parent_ino);
     need(
         files.identity(scope.parent)? == expected,
         "BOXED_RESOURCE_PARENT_CHANGED",
     )?;
-    let index = writable(files, "/run/reverie-box-pool", expected)?;
+    let index = writable(files, &POOL, expected)?;
     apply(
         &mut ScopedPool {
             files,

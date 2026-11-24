@@ -66,7 +66,7 @@ fn encoded(value: &impl Serialize) -> Result<String> {
         .map_err(Into::into)
 }
 pub(crate) fn probe_pool(files: &mut Files, common: &Common) -> Result<String> {
-    let scope = Scope::capture(files, common)?;
+    let scope = Scope::capture(files, common, None)?;
     encoded(&observation(files, &scope, None)?)
 }
 fn worker_scope(files: &mut Files, worker: &Worker) -> Result<Scope> {
@@ -76,14 +76,31 @@ fn worker_scope(files: &mut Files, worker: &Worker) -> Result<Scope> {
         pid: worker.worker_pid,
         start: worker.worker_start.unwrap_or(0),
     });
-    Scope::capture(files, &common)
+    Scope::capture(files, &common, Some(&worker.worker_id))
 }
 pub(crate) fn probe_worker(files: &mut Files, worker: &Worker) -> Result<String> {
     let scope = worker_scope(files, worker)?;
     encoded(&observation(files, &scope, Some(&worker.worker_id))?)
 }
-fn writable(files: &mut Files, path: &str, expected: (u64, u64)) -> Result<usize> {
-    let index = files.root(path, CGROUP2_SUPER_MAGIC, false)?;
+/// The writable mount of the one cgroup an operation may change.
+struct Writable {
+    path: &'static str,
+    /// Its name in failure reports.
+    role: &'static str,
+}
+const LEAF: Writable = Writable {
+    path: "/run/reverie-worker-cgroup",
+    role: "leaf",
+};
+const POOL: Writable = Writable {
+    path: "/run/reverie-box-pool",
+    role: "pool",
+};
+fn writable(files: &mut Files, mount: &Writable, expected: (u64, u64)) -> Result<usize> {
+    let index = files
+        .root(mount.path, CGROUP2_SUPER_MAGIC, false)
+        .map_err(|error| error.of(|| mount.role.to_owned()))?;
+    files.name(index, mount.role);
     need(
         files.identity(index)? == expected,
         "BOXED_RESOURCE_WRITABLE_IDENTITY",
@@ -108,6 +125,7 @@ fn write_checked(
         files.read(index, name, 4096)?.trim_end_matches('\n') == value,
         "BOXED_RESOURCE_WRITE_READBACK",
     )?;
+    files.confirm(name);
     scope.assert_current(files)
 }
 pub(crate) fn configure_pool(files: &mut Files, input: &PoolWrite) -> Result<String> {
@@ -157,7 +175,7 @@ pub(crate) fn configure_high(files: &mut Files, input: &HighWrite) -> Result<Str
         files.identity(target)? == expected,
         "BOXED_RESOURCE_LEAF_CHANGED",
     )?;
-    let index = writable(files, "/run/reverie-worker-cgroup", expected)?;
+    let index = writable(files, &LEAF, expected)?;
     require_hard(&scope::resources(files, index)?, input)?;
     write_checked(
         files,

@@ -1,4 +1,4 @@
-use super::{encoded, observation, worker_scope, writable, write_checked};
+use super::{LEAF, encoded, observation, worker_scope, writable, write_checked};
 use crate::{
     args::MemoryHighWrite,
     data::{self, Resources},
@@ -116,7 +116,7 @@ pub(super) fn configure(files: &mut Files, input: &MemoryHighWrite) -> Result<St
         files.identity(target)? == expected,
         "BOXED_RESOURCE_LEAF_CHANGED",
     )?;
-    let index = writable(files, "/run/reverie-worker-cgroup", expected)?;
+    let index = writable(files, &LEAF, expected)?;
     apply(
         &mut ScopedLeaf {
             files,

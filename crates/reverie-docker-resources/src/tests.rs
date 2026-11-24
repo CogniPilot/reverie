@@ -177,6 +177,83 @@ fn failed_validation_and_consuming_close_are_both_preserved() {
     assert_eq!(close[0].raw_os_error(), Some(nix::libc::EINTR));
 }
 #[test]
+fn failure_line_keeps_the_earlier_form_and_only_adds_what_it_knows() {
+    let absent = || Error::from(std::io::Error::from_raw_os_error(nix::libc::ENOENT));
+    let mut files = Files::new();
+    // Exactly what earlier helpers printed; the office matches these lines.
+    assert_eq!(
+        files.failure(&absent()),
+        "BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false"
+    );
+    assert_eq!(
+        files.failure(&Error::Refused("BOXED_RESOURCE_PID_EXITED")),
+        "BOXED_RESOURCE_PID_EXITED; effectIssued=false"
+    );
+    let named = absent()
+        .at(|| "/proc/7/stat".into())
+        .of(|| "member d task 7".into());
+    // The innermost names are kept.
+    let named = named.at(|| "/proc".into()).of(|| "box".into());
+    assert_eq!(
+        files.failure(&named),
+        "BOXED_RESOURCE_IO: No such file or directory (os error 2) at /proc/7/stat \
+         (member d task 7); effectIssued=false"
+    );
+    files.issued = true;
+    assert!(files.failure(&named).ends_with("; effectIssued=true"));
+    files.confirm("memory.high");
+    files.confirm("cpu.weight");
+    assert_eq!(
+        files.failure(&Error::Refused("BOXED_RESOURCE_FINAL_POLICY")),
+        "BOXED_RESOURCE_FINAL_POLICY; confirmed=memory.high,cpu.weight; effectIssued=true"
+    );
+    let lost: crate::error::Result<()> = finalized(
+        Err(absent()),
+        vec![std::io::Error::from_raw_os_error(nix::libc::EINTR)],
+    );
+    let lost = lost.unwrap_err().at(|| "/run/leaf/cpu.weight".into());
+    assert!(
+        lost.to_string()
+            .starts_with("BOXED_RESOURCE_IO: No such file or directory (os error 2) at /run/leaf/cpu.weight; BOXED_RESOURCE_CLOSE_UNCONFIRMED: ")
+    );
+}
+#[test]
+fn failed_opens_and_reads_name_the_path_they_were_issued_for() {
+    let tree = Tree::new();
+    fs::create_dir(tree.0.join("leaf")).unwrap();
+    let mut files = Files::new();
+    let missing = tree.0.join("missing");
+    let error = files.storage(missing.to_str().unwrap(), false).unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "BOXED_RESOURCE_IO: No such file or directory (os error 2) at {}",
+            missing.display()
+        )
+    );
+    let root = files.storage(tree.path(), false).unwrap();
+    let magic = nix::sys::statfs::fstatfs(files.get(root))
+        .unwrap()
+        .filesystem_type();
+    let leaf = files.child(root, "leaf", magic).unwrap();
+    files.name(leaf, "leaf");
+    for error in [
+        files.read(leaf, "memory.high", 128).unwrap_err(),
+        files.write(leaf, "memory.high", "1\n").unwrap_err(),
+    ] {
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "BOXED_RESOURCE_IO: No such file or directory (os error 2) at {}/leaf/memory.high (leaf)",
+                tree.path()
+            )
+        );
+    }
+    // A write that never opened its file issued nothing.
+    assert!(!files.issued);
+    assert!(files.close_all().is_empty());
+}
+#[test]
 fn directory_enumeration_uses_fresh_owned_cursor_and_never_adopts_symlinks() {
     let tree = Tree::new();
     fs::create_dir(tree.0.join("child")).unwrap();

@@ -56,7 +56,7 @@ fn main() -> std::process::ExitCode {
             std::process::ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("{error}; effectIssued={}", files.issued);
+            eprintln!("{}", files.failure(&error));
             std::process::ExitCode::FAILURE
         }
     }

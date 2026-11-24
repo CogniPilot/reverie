@@ -86,6 +86,8 @@ pub(crate) fn canonical_cpus(raw: &str) -> Result<String> {
     }
     Ok(groups.join(","))
 }
+/// Refusal for a well-formed stat record of a task that has already exited.
+pub(crate) const PID_EXITED: &str = "BOXED_RESOURCE_PID_EXITED";
 pub(crate) fn process_stat(raw: &str, pid: u32) -> Result<u64> {
     need(
         raw.starts_with(&format!("{pid} (")),
@@ -95,10 +97,9 @@ pub(crate) fn process_stat(raw: &str, pid: u32) -> Result<u64> {
         .rfind(") ")
         .ok_or(crate::error::Error::Refused("BOXED_RESOURCE_PID_STAT"))?;
     let fields = raw[end + 2..].split_whitespace().collect::<Vec<_>>();
-    need(
-        fields.len() >= 20 && !matches!(fields[0], "Z" | "X" | "x"),
-        "BOXED_RESOURCE_PID_EXITED",
-    )?;
+    // A truncated record says nothing about the task; only its state does.
+    need(fields.len() >= 20, "BOXED_RESOURCE_PID_STAT")?;
+    need(!matches!(fields[0], "Z" | "X" | "x"), PID_EXITED)?;
     decimal(fields[19])
         .ok()
         .filter(|value| *value > 0)
