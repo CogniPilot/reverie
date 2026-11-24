@@ -173,23 +173,86 @@ describe('the fixed sign-in folder program', () => {
       );
     }
   });
-  it('refuses a seat that is not private or is a file, without changing it', () => {
-    const open = home(),
-      seat = seatOf(open);
-    fs.mkdirSync(seat, { recursive: true, mode: 0o700 });
-    fs.chmodSync(seat, 0o755);
-    expect(run(open, [profile, 'anthropic'], auth)).toEqual({ status: 3, output: 'REFUSED seat-mode\n' });
-    expect(mode(seat)).toBe(0o755);
-    expect(fs.readdirSync(seat)).toEqual([]);
+  it.each([
+    ['.reverie', 'state', 0o770],
+    // The live case: a seat parent left `drwxr-xr-x` above a private profile folder.
+    ['.reverie/seat-auth', 'seats', 0o755],
+    ['.reverie/seat-auth/' + profile, 'seat', 0o755],
+    ['.reverie/seat-auth/' + profile, 'seat', 0o2777],
+  ])('narrows its own too-permissive folder %s to 0700 and goes on', (place, label, loose) => {
+    const root = home(),
+      path = join(root, ...place.split('/'));
+    fs.mkdirSync(seatOf(root), { recursive: true, mode: 0o700 });
+    fs.chmodSync(path, loose);
+    const result = run(root, [profile, 'anthropic'], auth);
+    const receipt = readSeatDirectoryResult(result.status, result.output, claude);
+    expect(receipt).toMatchObject({ created: [], tightened: [label], credential: 'installed' });
+    for (const each of [join(root, '.reverie'), join(root, '.reverie', 'seat-auth'), seatOf(root)])
+      expect(mode(each)).toBe(0o700);
+    // A second run finds nothing left to narrow.
+    const again = run(root, [profile, 'anthropic'], auth);
+    expect(readSeatDirectoryResult(again.status, again.output, claude)).toMatchObject({
+      tightened: [],
+      credential: 'current',
+    });
+  });
+  it('narrows its own too-permissive sign-in file to 0600, whether or not it is given one', () => {
+    for (const input of ['', auth]) {
+      const root = home(),
+        file = join(seatOf(root), '.credentials.json');
+      fs.mkdirSync(seatOf(root), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, auth, { mode: 0o600 });
+      fs.chmodSync(file, 0o644);
+      const result = run(root, [profile, 'anthropic'], input);
+      expect(readSeatDirectoryResult(result.status, result.output, claude)).toMatchObject({
+        tightened: ['credential'],
+        credential: input ? 'current' : 'present',
+      });
+      expect(mode(file)).toBe(0o600);
+      expect(fs.readFileSync(file, 'utf8')).toBe(auth);
+    }
+    // A replaced sign-in is narrowed before it is kept beside the new one.
+    const root = home(),
+      file = join(seatOf(root), '.credentials.json');
+    fs.mkdirSync(seatOf(root), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, '{"own":"older"}');
+    fs.chmodSync(file, 0o664);
+    const result = run(root, [profile, 'anthropic'], auth);
+    expect(readSeatDirectoryResult(result.status, result.output, claude)).toMatchObject({
+      tightened: ['credential'],
+      credential: 'refreshed',
+    });
+    expect(mode(file)).toBe(0o600);
+    expect(mode(file + '.reverie-previous')).toBe(0o600);
+  });
+  it('still refuses what narrowing cannot make right, without changing it', () => {
+    // A mode that withholds the owner's own access is not "too permissive".
+    const closed = home();
+    fs.mkdirSync(seatOf(closed), { recursive: true, mode: 0o700 });
+    fs.chmodSync(seatOf(closed), 0o500);
+    expect(run(closed, [profile, 'anthropic'], auth)).toEqual({ status: 3, output: 'REFUSED seat-mode\n' });
+    expect(mode(seatOf(closed))).toBe(0o500);
+    fs.chmodSync(seatOf(closed), 0o700);
+    const readOnly = home(),
+      credential = join(seatOf(readOnly), '.credentials.json');
+    fs.mkdirSync(seatOf(readOnly), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(credential, auth);
+    fs.chmodSync(credential, 0o400);
+    expect(run(readOnly, [profile, 'anthropic'], auth)).toEqual({ status: 3, output: 'REFUSED credential-mode\n' });
+    expect(mode(credential)).toBe(0o400);
+    expect(() => readSeatDirectoryResult(3, 'REFUSED credential-mode\n', claude)).toThrow(
+      'DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN'
+    );
+    // Not a directory at all.
     const file = home();
     fs.mkdirSync(join(file, '.reverie', 'seat-auth'), { recursive: true, mode: 0o700 });
     fs.writeFileSync(seatOf(file), '');
     expect(run(file, [profile, 'anthropic'])).toEqual({ status: 3, output: 'REFUSED seat-not-directory\n' });
-    const loose = home();
-    fs.mkdirSync(join(loose, '.reverie'), { mode: 0o700 });
-    fs.chmodSync(join(loose, '.reverie'), 0o770);
-    expect(run(loose, [profile, 'anthropic'])).toEqual({ status: 3, output: 'REFUSED state-mode\n' });
-    expect(fs.readdirSync(join(loose, '.reverie'))).toEqual([]);
+    // The home itself is never changed: one that is not private is refused as before.
+    const shared = home();
+    fs.chmodSync(shared, 0o755);
+    expect(run(shared, [profile, 'anthropic'], auth)).toEqual({ status: 3, output: 'REFUSED home-mode\n' });
+    expect(mode(shared)).toBe(0o755);
   });
   it('refuses a home that is not private, and one that is not there', () => {
     const shared = home();
@@ -223,6 +286,7 @@ const receiptLine = (extra: Record<string, unknown> = {}) =>
     profile,
     provider: 'anthropic',
     created: ['seat'],
+    tightened: [],
     credential: 'absent',
     home: { dev: '64', ino: '10' },
     seat: { dev: '64', ino: '12' },

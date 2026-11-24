@@ -511,10 +511,15 @@ employee's home writable. It runs before anything is discarded or retired and
 again before each attempt to create the source:
 
 - It creates `.reverie`, `seat-auth` and `<id>` with mode 0700 where they are
-  missing. A directory that exists must be a real directory of the laptop user
-  with mode 0700; a link, another owner or another mode is refused
-  (`DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN`, or `..._SEAT_HOME_FOREIGN` for
-  the home itself). Nothing that exists is changed.
+  missing. A directory that exists must be a real directory of the laptop
+  user; a link, another owner or something that is not a directory is refused
+  (`DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN`). One of these three whose mode
+  is merely too permissive (for example `drwxr-xr-x`) is narrowed to 0700
+  through its held handle and read back, and so is an existing sign-in file
+  that is not 0600; the receipt lists them as `tightened`. A mode that
+  withholds the owner's own access, or a narrowing that does not take, is
+  refused. The home itself is never changed: one that is not a private (0700)
+  directory of the laptop user is refused (`..._SEAT_HOME_FOREIGN`).
 - When the office holds a signed-in copy of that plan account, the helper
   places that copy as the seat's sign-in file (`.credentials.json` for
   Anthropic, `auth.json` for OpenAI). It is the same held account snapshot a

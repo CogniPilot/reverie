@@ -24,7 +24,10 @@ const AUTH_LIMIT = 128 * 1024;
  * written whole under a private name and renamed into place, and a different
  * sign-in that was there is kept once beside it, so a token the provider
  * rotated at the office does not leave the laptop on a stale copy. A sign-in
- * path that is not a plain file of this user is refused. No chmod, no chown.
+ * path that is not a plain file of this user is refused. A directory below the
+ * home, or the sign-in file, that is this user's but more permissive than 0700
+ * or 0600 is narrowed to it through its held handle and read back; the home
+ * itself is never changed, and nothing is ever chown-ed.
  * One stdout line: a JSON receipt, or `REFUSED <reason>` with exit status 3. */
 export const DOCKER_SEAT_DIRECTORY_PROGRAM = String.raw`
 const fs = require('node:fs');
@@ -34,7 +37,19 @@ class Refusal extends Error {}
 const refuse = (reason) => { throw new Refusal(reason); };
 const FLAGS = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW;
 const NEW = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_NOFOLLOW;
-function held(path, label) {
+const tightened = [];
+// A mode that grants more than the wanted one is narrowed through the held
+// handle and read back; one that withholds the owner's own access is refused.
+function narrow(fd, stat, wanted, label, allowed) {
+  if ((stat.mode & 0o7777n) === wanted) return stat;
+  if (!allowed || (stat.mode & wanted) !== wanted) refuse(label + '-mode');
+  try { fs.fchmodSync(fd, Number(wanted)); } catch { refuse(label + '-mode'); }
+  const after = fs.fstatSync(fd, { bigint: true });
+  if ((after.mode & 0o7777n) !== wanted || after.ino !== stat.ino || after.dev !== stat.dev) refuse(label + '-mode');
+  tightened.push(label);
+  return after;
+}
+function held(path, label, mayNarrow) {
   let fd;
   try { fd = fs.openSync(path, FLAGS); } catch (error) {
     refuse(label + (error && (error.code === 'ELOOP' || error.code === 'ENOTDIR') ? '-not-directory' : '-unreadable'));
@@ -42,8 +57,7 @@ function held(path, label) {
   const stat = fs.fstatSync(fd, { bigint: true });
   if (!stat.isDirectory()) refuse(label + '-not-directory');
   if (stat.uid !== BigInt(process.getuid())) refuse(label + '-owner');
-  if ((stat.mode & 0o7777n) !== 0o700n) refuse(label + '-mode');
-  return { fd, stat };
+  return { fd, stat: narrow(fd, stat, 0o700n, label, mayNarrow) };
 }
 function input() {
   const chunks = [], buffer = Buffer.alloc(65536), pause = new Int32Array(new SharedArrayBuffer(4));
@@ -76,6 +90,18 @@ function entry(path) {
 }
 function own(stat) {
   if (!stat.isFile() || stat.uid !== BigInt(process.getuid())) refuse('credential-foreign');
+}
+function privateFile(path, stat) {
+  if ((stat.mode & 0o7777n) === 0o600n) return;
+  let fd;
+  try { fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); } catch {
+    refuse('credential-mode');
+  }
+  try {
+    const now = fs.fstatSync(fd, { bigint: true });
+    if (!now.isFile() || now.ino !== stat.ino || now.dev !== stat.dev || now.uid !== stat.uid) refuse('credential-foreign');
+    narrow(fd, now, 0o600n, 'credential', true);
+  } finally { fs.closeSync(fd); }
 }
 function same(path, stat, bytes) {
   if (stat.size !== BigInt(bytes.length)) return false;
@@ -126,7 +152,7 @@ try {
   if (process.platform !== 'linux' || !(process.getuid() > 0)) refuse('user');
   process.umask(0o077);
   const auth = input();
-  const home = held(HOME, 'home');
+  const home = held(HOME, 'home', false);
   const created = [];
   let at = home;
   for (const [name, label] of [['.reverie', 'state'], ['seat-auth', 'seats'], [id, 'seat']]) {
@@ -135,13 +161,13 @@ try {
     try { fs.mkdirSync(path, 0o700); made = true; } catch (error) {
       if (!error || error.code !== 'EEXIST') refuse(label + '-create');
     }
-    const next = held(path, label);
+    const next = held(path, label, true);
     if (made) { created.push(label); fs.fsyncSync(at.fd); }
     at = next;
   }
   const name = provider === 'anthropic' ? '.credentials.json' : 'auth.json';
   const path = '/proc/self/fd/' + at.fd + '/' + name, existing = entry(path);
-  if (existing) own(existing);
+  if (existing) { own(existing); privateFile(path, existing); }
   const credential = !auth.length ? (existing ? 'present' : 'absent')
     : existing && same(path, existing, auth) ? 'current' : place(at, name, auth);
   process.stdout.write(JSON.stringify({
@@ -150,6 +176,7 @@ try {
     profile: id,
     provider,
     created,
+    tightened,
     credential,
     ...(auth.length
       ? { credentialDigest: require('node:crypto').createHash('sha256').update(auth).digest('hex') }
@@ -171,6 +198,8 @@ const receipt = z
     profile: z.string().regex(PROFILE),
     provider: z.enum(['anthropic', 'openai']),
     created: z.array(z.enum(['state', 'seats', 'seat'])).max(3),
+    /** What existed with a mode that granted too much and was narrowed. */
+    tightened: z.array(z.enum(['state', 'seats', 'seat', 'credential'])).max(4),
     /** With the office's copy on stdin: `installed` (the seat had none),
      * `refreshed` (it replaced a different one, which is kept beside it once)
      * or `current` (the seat already held exactly it). Without: `present` (the
@@ -205,7 +234,11 @@ function refuse(code: string): never {
 export function seatDirectoryRefusal(reason: string): string {
   if (/^home-(?:not-directory|unreadable|owner|mode)$/.test(reason) || reason === 'user')
     return 'DOCKER_REPROVISION_SEAT_HOME_FOREIGN';
-  if (/^(?:state|seats|seat)-(?:not-directory|unreadable|owner|mode)$/.test(reason) || reason === 'credential-foreign')
+  if (
+    /^(?:state|seats|seat)-(?:not-directory|unreadable|owner|mode)$/.test(reason) ||
+    reason === 'credential-foreign' ||
+    reason === 'credential-mode'
+  )
     return 'DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN';
   if (/^(?:state|seats|seat|credential)-create$/.test(reason)) return 'DOCKER_REPROVISION_SEAT_DIRECTORY_UNWRITABLE';
   return 'DOCKER_REPROVISION_SEAT_PREPARATION_UNCONFIRMED';

@@ -209,6 +209,7 @@ class FakeEngine {
       profile: spec.profileId as string,
       provider: spec.provider as 'anthropic' | 'openai',
       created: [],
+      tightened: [],
       credential: credential as 'installed' | 'refreshed' | 'present' | 'absent',
       home: { dev: '64', ino: '10' },
       seat: { dev: '64', ino: '12' },

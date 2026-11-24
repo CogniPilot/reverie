@@ -179,9 +179,10 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
   DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN: {
     message:
       'The sign-in folder for the plan of this employee (.reverie/seat-auth/<plan> in their home), or one of the two ' +
-      'folders above it, already exists but is a link, is not a folder, belongs to another user or is not private ' +
-      '(mode 0700). The office changes nothing that it did not create, so no laptop was created. Make it a real ' +
-      'folder of the laptop user with mode 0700 on the host, then send the same request again.',
+      'folders above it, or the sign-in file in it, already exists but is a link, is not a folder (or a plain file), ' +
+      'belongs to another user, or has a mode that the office could not narrow to private (0700 for a folder, 0600 ' +
+      'for the file). A mode that is merely too permissive is narrowed by the office itself. No laptop was created. ' +
+      'Make it a real folder or file of the laptop user on the host, then send the same request again.',
     allowedActions: ['retry'],
   },
   DOCKER_REPROVISION_SEAT_DIRECTORY_UNWRITABLE: {
