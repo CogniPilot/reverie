@@ -69,6 +69,8 @@ export function createMockRouteContext(options?: {
     }),
     // Native cleanup is unavailable unless a fixture supplies its genuine adapter.
     retireDockerPlanSource: undefined,
+    // The laptop rebuild forgets an absent laptop's viewer; unavailable unless a fixture supplies it.
+    discardAbsentLaptopView: undefined,
     getSessionStateWithRespawn: vi.fn((s: MockSession) => s.toState()),
 
     // -- EventPort --
