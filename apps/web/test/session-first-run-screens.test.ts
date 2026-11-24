@@ -462,9 +462,33 @@ describe('FirstRunScan', () => {
   });
 });
 
+describe("Claude Code 2.1.326's theme chooser", () => {
+  /** Verbatim option rows from a live 2.1.326 pane (2026-11-24): a new first option is the preselected one. */
+  const AUTO_THEME = [
+    'Welcome to Claude Code v2.1.326',
+    " Let's get started.",
+    ' Choose the text style that looks best with your terminal',
+    ' To change this later, run /theme',
+    ' ❯ ✔ Auto (match terminal)',
+    '     Dark mode',
+    '     Light mode',
+    '     Dark mode (colorblind-friendly)',
+    '     Light mode (colorblind-friendly)',
+    '     Dark mode (ANSI colors only)',
+    '     Light mode (ANSI colors only)',
+    '  Syntax theme: Monokai Extended (ctrl+t to disable)',
+  ].join('\n');
+  it('confirms the preselected Auto option', () => {
+    expect(readProviderScreen(AUTO_THEME)).toMatchObject({ screen: { id: 'claude-theme' }, key: SCREEN_KEY_CONFIRM });
+  });
+  it('still waits when the highlight is on nothing it can name', () => {
+    expect(readProviderScreen(AUTO_THEME.replace(' ❯ ✔ Auto (match terminal)', '   ✔ Auto (match terminal)'))).toBeNull();
+  });
+});
+
 describe('nameProviderScreen', () => {
   /** A layout the matcher cannot answer: the highlight is on an option the table does not name. */
-  const REDRAWN_THEME = THEME.replace(' ❯ ✔ Dark mode', ' ❯ ✔ Auto (match terminal)\n     Dark mode');
+  const REDRAWN_THEME = THEME.replace(' ❯ ✔ Dark mode', ' ❯ ✔ High contrast\n     Dark mode');
 
   it('names a screen the office cannot answer, without ever offering a key for it', () => {
     expect(readProviderScreen(REDRAWN_THEME)).toBeNull();

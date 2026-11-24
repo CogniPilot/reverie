@@ -151,8 +151,10 @@ export const PROVIDER_SCREENS: readonly ProviderScreenPattern[] = [
     id: 'claude-theme',
     label: "Claude's theme chooser",
     markers: [['choosethetextstylethatlooksbestwithyourterminal'], ['darkmode', 'lightmode']],
-    // Any highlighted theme will do; the preselected one is the dark default.
-    answer: { kind: 'choose', accept: ['darkmode', 'lightmode'], decline: [] },
+    // Any highlighted theme will do. The preselected one was the dark default; since 2.1.326 it is a new first
+    // option, "Auto (match terminal)". Without it in this list the office named the screen and never answered it,
+    // and a rebuilt laptop sat at the chooser (measured 2026-11-24).
+    answer: { kind: 'choose', accept: ['auto(matchterminal)', 'darkmode', 'lightmode'], decline: [] },
   },
   {
     id: 'claude-security-notes',
