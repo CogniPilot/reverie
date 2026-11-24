@@ -183,7 +183,13 @@ describe('the fixed sign-in folder program', () => {
     const root = home(),
       path = join(root, ...place.split('/'));
     fs.mkdirSync(seatOf(root), { recursive: true, mode: 0o700 });
-    fs.chmodSync(path, loose);
+    try {
+      fs.chmodSync(path, loose);
+    } catch (error) {
+      // A build sandbox refuses to set the set-group-id bit; the plain permission bits still exercise the narrowing.
+      if ((error as NodeJS.ErrnoException).code !== 'EPERM' || (loose & 0o7000) === 0) throw error;
+      fs.chmodSync(path, loose & 0o777);
+    }
     const result = run(root, [profile, 'anthropic'], auth);
     const receipt = readSeatDirectoryResult(result.status, result.output, claude);
     expect(receipt).toMatchObject({ created: [], tightened: [label], credential: 'installed' });
