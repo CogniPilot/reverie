@@ -5012,11 +5012,20 @@ export class Session extends EventEmitter {
       this._applyFirstRunFrame(this._terminalBuffer.value.slice(-FIRST_RUN_SCAN_BYTES));
       return;
     }
-    const frame = this._readPaneStatus();
+    // This runs from a timer: a pane that cannot be read is simply read again on the next one.
+    let frame: string | null | Promise<string | null | undefined>;
+    try {
+      frame = this._readPaneStatus();
+    } catch {
+      return;
+    }
     if (frame instanceof Promise) {
-      void frame.then((text) => {
-        if (typeof text === 'string') this._applyFirstRunFrame(text);
-      });
+      void frame.then(
+        (text) => {
+          if (typeof text === 'string') this._applyFirstRunFrame(text);
+        },
+        () => {}
+      );
     } else if (typeof frame === 'string') this._applyFirstRunFrame(frame);
   }
 
