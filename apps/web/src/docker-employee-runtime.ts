@@ -449,7 +449,19 @@ export class DockerEmployeeRuntime {
               }
             : undefined;
         },
-        blocked: (id, owner) => ctx.store.dockerAbsentReprovisionBlocker(id, owner),
+        // Only a viewer that is not starting or attaching can be the one a rebuild discards.
+        blocked: (id, owner, discardingViewer) => {
+          const viewer = discardingViewer ? ctx.sessions.get(id) : undefined;
+          return ctx.store.dockerAbsentReprovisionBlocker(
+            id,
+            owner,
+            viewer?.docker?.continuation && !viewer.paneLifecycleInFlight ? viewer : undefined
+          );
+        },
+        viewerLaunchOwned: (id) => {
+          const viewer = ctx.sessions.get(id);
+          return !!viewer?.docker?.continuation && ctx.store.absentLaptopViewOwnsLaunch(viewer);
+        },
         overrides: async (id) => {
           const saved = ctx.store.getSession(id);
           return saved

@@ -786,19 +786,44 @@ export class StateStore {
    * canonical retirement before and after publication. */
   /** Denial DATA for the preview: why this writer could not later remove the
    * session's launch denial. Reveals no row and grants nothing. */
-  dockerAbsentReprovisionBlocker(sessionId: string, owner: string | undefined): string | undefined {
+  dockerAbsentReprovisionBlocker(
+    sessionId: string,
+    owner: string | undefined,
+    /** The live boxed viewer that the owner's confirmed rebuild will discard.
+     * Its own launch is not foreign to that rebuild; any other live launch is. */
+    discardedViewer?: object
+  ): string | undefined {
     const row = this.#providerLaunchIntents[sessionId];
     if (this.#publicationUncertainty) return 'DOCKER_REPROVISION_STATE_PUBLICATION_UNCONFIRMED';
     if (this.#providerLaunchHistory !== 'observed') return 'DOCKER_REPROVISION_LAUNCH_HISTORY_UNCONFIRMED';
+    const live = this.#providerLaunchOwners.get(sessionId)?.deref();
     if (
       row &&
       (!DOCKER_ABSENT_LAUNCH_TRANSPORTS.includes(row.transport) ||
         (row.transport !== 'docker' && !this.state.sessions[sessionId]?.docker) ||
         row.owner !== (owner ?? null) ||
-        this.#providerLaunchOwners.get(sessionId)?.deref())
+        (live && !(discardedViewer && live.owns(discardedViewer))))
     )
       return 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN';
     return undefined;
+  }
+  /** Whether the live launch recorded for this session is this very viewer's. */
+  absentLaptopViewOwnsLaunch(viewer: { readonly id: string }): boolean {
+    return this.#providerLaunchOwners.get(viewer.id)?.deref()?.owns(viewer) === true;
+  }
+  /** The office-side viewer of a laptop whose container the Engine positively
+   * reports absent has been stopped and is being forgotten: the launch it owned
+   * can no longer be in flight. Only the in-memory owner link is dropped, in
+   * the same synchronous step that forgets the viewer, so no state exists in
+   * which the viewer is gone and its launch still looks live. The row itself
+   * stays as an unowned denial, exactly what a restarted office would load, and
+   * only the canonical retirement removes it (`commitDockerAbsentReprovision`).
+   * A live launch that is not this viewer's is refused and left alone. */
+  releaseAbsentLaptopViewLaunch(viewer: { readonly id: string }): void {
+    const live = this.#providerLaunchOwners.get(viewer.id)?.deref();
+    if (!live) return;
+    if (!live.owns(viewer)) throw new Error('Laptop viewer discard refused: another launch owns this session');
+    this.#providerLaunchOwners.delete(viewer.id);
   }
   async commitDockerAbsentReprovision(proof: unknown): Promise<'cleared' | 'unchanged'> {
     return this.serializeWrite(() => {

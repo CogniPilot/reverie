@@ -65,8 +65,14 @@ export interface DockerAbsentReprovisionSessions {
   saved(sessionId: string): SessionState | undefined;
   /** `container` names the boxed laptop a live viewer is attached to, if any. */
   live(sessionId: string): { readonly inert: boolean; readonly container?: string } | undefined;
-  /** Why the saved launch denial could not be removed, before anything is retired. */
-  blocked(sessionId: string, owner: string | undefined): string | undefined;
+  /** Why the saved launch denial could not be removed, before anything is retired.
+   * `discardingViewer` says the caller is the owner's rebuild and will discard
+   * the live boxed viewer of this session: the launch that viewer itself owns
+   * is then not a reason, while any other live launch still is. */
+  blocked(sessionId: string, owner: string | undefined, discardingViewer?: boolean): string | undefined;
+  /** Whether a launch this office process made is still owned by the live
+   * boxed viewer of this session. Discarding that viewer releases it. */
+  viewerLaunchOwned?(sessionId: string): boolean;
   /** The saved launch overrides, clamped exactly as the provider launch clamps them. */
   overrides(sessionId: string): Promise<Readonly<Record<string, string>> | undefined>;
   discard(sessionId: string): Promise<void>;
@@ -398,7 +404,13 @@ export class DockerAbsentReprovision {
     // A rebuild discards the live viewer itself, once its laptop is gone.
     if (!rebuild && this.sessions.live(employee.sessionId)?.inert === false)
       refuse('DOCKER_REPROVISION_SESSION_ACTIVE');
-    const blocked = this.sessions.blocked(employee.sessionId, employee.owner);
+    // A rebuild discards the live boxed viewer, and with it the launch that
+    // viewer owns; without the means to discard it, that launch still blocks.
+    const blocked = this.sessions.blocked(
+      employee.sessionId,
+      employee.owner,
+      rebuild && !!this.sessions.discardView && this.sessions.live(employee.sessionId)?.container !== undefined
+    );
     if (blocked) refuse(blocked);
     return {
       employee,
@@ -1004,6 +1016,8 @@ export class DockerAbsentReprovision {
     current();
     requireReprovisionEphemeralLayout(this.#input(first.basis, template, '', employee.name, image, network, account));
     const live = this.sessions.live(employee.sessionId);
+    // A launch this office process made and its live boxed viewer still owns: the rebuild ends it with the viewer.
+    const launchOwned = live?.container !== undefined && this.sessions.viewerLaunchOwned?.(employee.sessionId) === true;
     const templateDigest = dockerContinuationDigest(template);
     // Decided before any effect: a viewer this rebuild could not forget
     // afterwards must stop it here, not after the laptop is already gone.
@@ -1044,6 +1058,7 @@ export class DockerAbsentReprovision {
       openMoves: open.map((move) => move.id).sort(),
       abandonedMoves: abandoned.map((move) => move.moveId).sort(),
       viewer: live?.container ?? null,
+      viewerLaunch: launchOwned,
       sourceImageId: image.imageId,
       network,
       storage,
@@ -1068,6 +1083,7 @@ export class DockerAbsentReprovision {
       names,
       account,
       live,
+      launchOwned,
       blocked,
       scopeDigest,
     };
@@ -1092,9 +1108,11 @@ export class DockerAbsentReprovision {
         running: isRunning,
       })),
       runningLaptops: running.map((item) => item.containerId),
-      requiresConfirmation: running.length > 0,
+      requiresConfirmation: running.length > 0 || scope.launchOwned,
       foreign: scope.foreign,
-      viewer: scope.live ? { live: true, container: scope.live.container ?? null } : { live: false, container: null },
+      viewer: scope.live
+        ? { live: true, container: scope.live.container ?? null, ...(scope.launchOwned ? { ownsLaunch: true } : {}) }
+        : { live: false, container: null },
       planMoves: { open: scope.open.map((move) => move.id), abandoned: scope.abandoned.map((move) => move.moveId) },
       kept: { home: scope.basis.original.home, nixSource: scope.storage.nix, scratchSource: scope.storage.scratch },
       account: scope.account,
@@ -1144,7 +1162,11 @@ export class DockerAbsentReprovision {
           refuse('DOCKER_REPROVISION_TARGET_CHANGED');
         if (input.expectedScopeDigest !== scope.scopeDigest) refuse('DOCKER_REPROVISION_SCOPE_CHANGED');
         if (scope.blocked) refuse(scope.blocked);
-        if (scope.discard.some((item) => item.role === 'laptop' && item.running) && !input.confirmDiscardRunning)
+        // Stopping a running laptop, or ending a launch this office still holds live, needs the owner's explicit word.
+        if (
+          (scope.discard.some((item) => item.role === 'laptop' && item.running) || scope.launchOwned) &&
+          !input.confirmDiscardRunning
+        )
           refuse('DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED');
         // Before the laptop is discarded: a seat that cannot be signed in stops here.
         await this.#seat(input.operationId, scope.account, scope.basis, scope.template, scope.current);

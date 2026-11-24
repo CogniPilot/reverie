@@ -517,6 +517,11 @@ async function fixture(options: Options = {}) {
   });
   let authorized = true,
     live: { inert: boolean; container?: string } | undefined;
+  // A launch this office process made and still holds in memory: none, the live viewer's own, or another one.
+  const viewerLaunch = {
+    owner: 'none' as 'none' | 'viewer' | 'foreign',
+    fail: undefined as undefined | 'stop' | 'layout',
+  };
   const discarded: string[] = [],
     forgotten: string[] = [];
   const authority: DockerContinuationAuthority = {
@@ -545,7 +550,14 @@ async function fixture(options: Options = {}) {
     {
       saved: (id) => state.getSession(id) ?? undefined,
       live: () => live,
-      blocked: (id, owner) => state.dockerAbsentReprovisionBlocker(id, owner),
+      // The state store's rule: a live launch blocks unless it is the launch of the very viewer a rebuild discards.
+      blocked: (id, owner, discardingViewer) =>
+        state.dockerAbsentReprovisionBlocker(id, owner) ??
+        (viewerLaunch.owner === 'foreign' ||
+        (viewerLaunch.owner === 'viewer' && !(discardingViewer && live?.container !== undefined))
+          ? 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN'
+          : undefined),
+      viewerLaunchOwned: () => viewerLaunch.owner === 'viewer' && live?.container !== undefined,
       overrides: async (id) =>
         (state.getSession(id) as { __envOverrides?: Record<string, string> } | null)?.__envOverrides,
       discard: async (id) => {
@@ -560,8 +572,20 @@ async function fixture(options: Options = {}) {
             // Same admission as the server: only once the viewer's own container is positively absent.
             discardView: async (id: string, absent: (containerId: string) => Promise<boolean>) => {
               if (!live?.container || !(await absent(live.container))) throw Error('synthetic laptop still exists');
+              // The server stops the viewer first (which can fail), then releases its launch and
+              // forgets it in one step, then publishes the tab layout (which can also fail).
+              if (viewerLaunch.fail === 'stop') {
+                viewerLaunch.fail = undefined;
+                throw Error('synthetic viewer stop failure');
+              }
+              if (viewerLaunch.owner === 'foreign') throw Error('synthetic foreign launch');
+              viewerLaunch.owner = 'none';
               forgotten.push(id);
               live = undefined;
+              if (viewerLaunch.fail === 'layout') {
+                viewerLaunch.fail = undefined;
+                throw Error('synthetic layout publication failure');
+              }
             },
           }),
       clear: (proof) => state.commitDockerAbsentReprovision(proof),
@@ -594,6 +618,7 @@ async function fixture(options: Options = {}) {
     directory, company, companyStore, state, stateFile, store, engine, service, authority, row, binding, saved,
     conversation, request, discarded, forgotten, officePlans,
     setLive: (value: { inert: boolean; container?: string } | undefined) => { live = value; },
+    viewerLaunch,
     setBusy: (value: boolean) => { busy = value; },
     revoke: () => { authorized = false; },
     snapshot: () => companyStore.snapshot(),
@@ -2686,5 +2711,130 @@ describe('the sign-in seat of a new laptop', () => {
     const done = await f.service.reprovision(employeeId, request, f.authority);
     expect(done).toMatchObject({ state: 'ready' });
     expect(done.missingMountTarget).toBeUndefined();
+  });
+});
+
+describe('rebuilding the laptop of a session this office process launched', () => {
+  /** A healthy running laptop, its live viewer, and the launch that viewer still owns in memory. */
+  const launched = async (owner: 'viewer' | 'foreign' = 'viewer') => {
+    const f = await fixture({ moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, true, laptopName(destinationCid));
+    f.setLive({ inert: false, container: destinationCid });
+    f.viewerLaunch.owner = owner;
+    return f;
+  };
+  const confirmed = (f: Fixture) => rebuildRequest(f, retireOperation, { confirmDiscardRunning: true });
+  it('previews, asks for the owner’s word and rebuilds without an office restart', async () => {
+    const f = await launched();
+    // The absent-laptop workflow still refuses a live terminal, and a live launch behind an idle one.
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SESSION_ACTIVE',
+    });
+    f.setLive({ inert: true, container: destinationCid });
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN',
+    });
+    f.setLive({ inert: false, container: destinationCid });
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({
+      runningLaptops: [destinationCid],
+      requiresConfirmation: true,
+      viewer: { live: true, container: destinationCid, ownsLaunch: true },
+      allowedActions: ['rebuild'],
+    });
+    await expect(f.service.rebuild(employeeId, await rebuildRequest(f), f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED',
+    });
+    expect(f.engine.rebuilt).toEqual([]);
+    expect(f.viewerLaunch.owner).toBe('viewer');
+    await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).resolves.toMatchObject({
+      state: 'ready',
+    });
+    // Containers first, then the viewer together with its launch, then the ordinary retirement.
+    expect(f.engine.stopped).toEqual([destinationCid]);
+    expect(f.engine.rebuilt).toEqual([destinationCid]);
+    expect(f.forgotten).toEqual([sid]);
+    expect(f.viewerLaunch.owner).toBe('none');
+    expect(f.entry()).toMatchObject({ session: { phase: 'cleared' }, source: { phase: 'created' } });
+  });
+  it('needs the owner’s word for a held launch even when the laptop itself is already stopped', async () => {
+    const f = await fixture({ moves: abandonedMove(null) });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    f.setLive({ inert: false, container: destinationCid });
+    f.viewerLaunch.owner = 'viewer';
+    expect(await f.service.previewRebuild(employeeId, template, f.authority)).toMatchObject({
+      runningLaptops: [],
+      requiresConfirmation: true,
+    });
+    await expect(f.service.rebuild(employeeId, await rebuildRequest(f), f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED',
+    });
+    expect(f.engine.rebuilt).toEqual([]);
+  });
+  it('keeps refusing a launch that is not the viewer’s own, before anything is touched', async () => {
+    const f = await launched('foreign');
+    await expect(f.service.previewRebuild(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN',
+    });
+    // Also a launch with no live viewer to discard, and an office that cannot discard viewers.
+    const orphan = await launched();
+    orphan.setLive(undefined);
+    await expect(orphan.service.previewRebuild(employeeId, template, orphan.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN',
+    });
+    const unable = await fixture({ moves: abandonedMove(null), discardView: false });
+    unable.engine.container(destinationCid, laptopLabels, true, laptopName(destinationCid));
+    unable.setLive({ inert: false, container: destinationCid });
+    unable.viewerLaunch.owner = 'viewer';
+    await expect(unable.service.previewRebuild(employeeId, template, unable.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN',
+    });
+    for (const each of [f, orphan, unable]) {
+      expect(each.engine.rebuilt).toEqual([]);
+      expect(each.engine.containers.has(destinationCid)).toBe(true);
+      expect(each.entry()).toBeUndefined();
+    }
+  });
+  it('completes from a fresh preview after a failure between the container discard and the launch release', async () => {
+    const f = await launched();
+    f.viewerLaunch.fail = 'stop';
+    await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED',
+    });
+    // The laptop is gone, the viewer and its launch are both still there, nothing is recorded.
+    expect(f.engine.containers.has(destinationCid)).toBe(false);
+    expect(f.viewerLaunch.owner).toBe('viewer');
+    expect(f.forgotten).toEqual([]);
+    expect(f.entry()).toBeUndefined();
+    // The request as it was sent no longer matches what exists.
+    const stale = { ...(await confirmed(f)), expectedScopeDigest: '0'.repeat(64) };
+    await expect(f.service.rebuild(employeeId, stale, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_SCOPE_CHANGED',
+    });
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ discard: [], requiresConfirmation: true, allowedActions: ['rebuild'] });
+    await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).resolves.toMatchObject({
+      state: 'ready',
+    });
+    expect(f.forgotten).toEqual([sid]);
+    expect(f.viewerLaunch.owner).toBe('none');
+  });
+  it('completes from a fresh preview after a failure that follows the launch release', async () => {
+    const f = await launched();
+    f.viewerLaunch.fail = 'layout';
+    await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REBUILD_VIEWER_DISCARD_UNCONFIRMED',
+    });
+    // Laptop gone, viewer gone, launch released: the state the absent-laptop workflow already handles.
+    expect(f.engine.containers.has(destinationCid)).toBe(false);
+    expect(f.viewerLaunch.owner).toBe('none');
+    expect(f.entry()).toBeUndefined();
+    const absent = await f.service.preview(employeeId, template, f.authority);
+    expect(absent.allowedActions).toEqual(['reprovision']);
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ discard: [], requiresConfirmation: false, viewer: { live: false } });
+    await expect(f.service.rebuild(employeeId, await confirmed(f), f.authority)).resolves.toMatchObject({
+      state: 'ready',
+    });
   });
 });

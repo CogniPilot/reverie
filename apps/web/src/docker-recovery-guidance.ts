@@ -108,8 +108,9 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
   },
   DOCKER_REBUILD_RUNNING_CONFIRMATION_REQUIRED: {
     message:
-      'A laptop of this employee is still running (the preview lists it under runningLaptops). Rebuilding discards the ' +
-      'conversation in its terminal; files in the home directory are kept. Send the same request with ' +
+      'A laptop of this employee is still running (the preview lists it under runningLaptops), or the office still ' +
+      'holds the live terminal that it started for them (viewer.ownsLaunch in the preview). Rebuilding discards the ' +
+      'conversation in that terminal; files in the home directory are kept. Send the same request with ' +
       'confirmDiscardRunning set to true to go ahead.',
     allowedActions: ['rebuild'],
   },

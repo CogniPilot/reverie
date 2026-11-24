@@ -541,6 +541,27 @@ it nor writes a sign-in into it. If the Engine reports that a mount's host
 folder is missing, the hold is `DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING`
 and `missingMountTarget` gives the path of that mount inside the laptop.
 
+#### Rebuilding the laptop of a session this office started
+
+`POST /api/company/employees/:id/docker-rebuild/preview` and `.../apply` also
+work while the office process still holds, in memory, the launch it made for
+the employee's session. That launch blocks the absent-laptop workflow
+(`DOCKER_REPROVISION_LAUNCH_INTENT_FOREIGN`), but not the rebuild, provided it
+is owned by the live laptop viewer that the rebuild itself discards and that
+viewer is not starting or attaching. The preview then reports
+`viewer.ownsLaunch: true` and `requiresConfirmation: true`, and `apply` needs
+`confirmDiscardRunning: true` even when the laptop container is already
+stopped. A live launch owned by anything else is still refused before any
+effect.
+
+The order of effects is: stop and remove the listed containers; stop the
+viewer; in one step without an await, release the viewer's launch and forget
+the viewer; then the ordinary absent-laptop retirement. A failure before that
+step leaves the viewer and its launch together, and one after it leaves
+neither, which is the state the absent-laptop workflow handles. In both cases
+a fresh preview followed by `apply` completes; the earlier request's
+`expectedScopeDigest` no longer matches, because the containers are gone.
+
 ### Replace an unused source
 
 The same two calls replace a source that was never started, for example one

@@ -5292,6 +5292,10 @@ export class WebServer extends EventEmitter {
           if (!current()) throw new Error('Laptop viewer discard refused: the session changed');
           await session.stop(true);
           if (!current()) throw new Error('Laptop viewer discard unconfirmed: the session changed');
+          // From here to the map entry's removal nothing awaits, and the launch
+          // this viewer owned is released first: the state "viewer forgotten,
+          // its launch still live" cannot exist, and a repeat finds no live launch.
+          this.store.releaseAbsentLaptopViewLaunch(session);
           this.discardPartialSessionObservers(session);
           this.sessions.delete(sessionId);
         },
