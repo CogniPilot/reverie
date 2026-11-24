@@ -90,7 +90,7 @@ ten healthy minutes):
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
 | Wake (attach a provider that already runs) | the terminal is not connected | 6 |
 | Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
-| Rebuild the laptop, then start it | the operation cannot advance and nothing runs in the laptop | 2, and 2 per day |
+| Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop | 2, and 2 per day |
 
 It never answers a sign-in or an owner's decision screen, never approves limits
 or a laptop layout, never returns anyone to the office, and never rebuilds
@@ -550,10 +550,10 @@ The backend derives the source's account routing; a request cannot choose it.
 The preview reports it as `account`, and it is part of `scopeDigest` and of the
 journal entry.
 
-- `generation-env`: the employee's first retired record was a plan
-  replacement. The source carries one variable, `CLAUDE_CONFIG_DIR` (Anthropic)
+- `generation-env`: a plan replacement still decides where the employee's
+  sign-in is. The source carries one variable, `CLAUDE_CONFIG_DIR` (Anthropic)
   or `CODEX_HOME` (OpenAI), set to
-  `/home/agent/.reverie/plan-moves/<retired operationId>/generation-<projectionDigest>/<claude|codex>`
+  `/home/agent/.reverie/plan-moves/<that record's operationId>/generation-<projectionDigest>/<claude|codex>`
   inside the private home. No mount is added.
 - `seat-mount`: the saved session's launch overrides, clamped as the provider
   launch clamps them, set `CLAUDE_CONFIG_DIR` or `CODEX_HOME` to
@@ -567,6 +567,24 @@ journal entry.
 
 An override that names another profile, two seat overrides, or an
 `accountSource` with nothing to route is refused.
+
+Which plan replacement decides is read from the employee's laptop records,
+newest first: the record that is being retired or superseded, then each
+journal entry from the newest back. A plan replacement record decides, because
+its move installed the sign-in in a folder of its own. An entry whose source
+was routed as `seat-mount` or `none` decides too: the laptop built from it
+left the folder of every earlier plan move, and a later laptop is not sent back
+there. An entry whose source only repeats a `generation-env` is skipped and
+the record behind it is read instead. The first record of the journal fixes
+where the private home is and nothing else; for an employee who has changed
+plan since, its folder is one they left.
+
+If the plan that is selected for the employee is on another provider than the
+plan replacement that decides, the preview and the request are refused with
+`DOCKER_REPROVISION_ACCOUNT_PLAN_MISMATCH` before anything is discarded or
+retired. The plan was then changed by something that is not a plan move, and
+no record says which folder holds the sign-in. Move the employee to the plan
+they should be on, then preview again.
 
 #### The seat folder and its sign-in
 
@@ -632,8 +650,8 @@ a fresh preview followed by `apply` completes; the earlier request's
 ### Replace an unused source
 
 The same two calls replace a source that was never started, for example one
-created before account routing existed. Use a new `operationId`. The preview
-reports `mode`:
+created before account routing existed, or one made for an earlier laptop
+image. Use a new `operationId`. The preview reports `mode`:
 
 - `replace-source` (`reason: "source-replaced"`): the employee's newest journal
   entry is complete and no continuation record exists.
@@ -649,6 +667,24 @@ and network, in state `created` with no start time. Any other container
 labelled for the employee, a started source, a later record phase, an open
 plan move or a storage holder the journal does not own is refused. The preview
 adds `previous: { operationId, sourceContainerId }` and `helpers`.
+
+A storage holder is owned when one of the employee's laptop records lists it,
+current or retired. It is also owned when it is listed by the laptop record
+that a finished plan move replaced. That record exists in the move's journal
+only; a plan replacement that the employee's own journal retired names it by
+move, operation and digest, and the move's copy must match all three. Its
+laptop was the source of the move, which the Engine listed as absent before
+the plan replacement was retired. Any other holder is refused with
+`DOCKER_REPROVISION_HELPER_FOREIGN`, and `foreignHelpers` names it. The
+rebuild makes this check in its preview, before it discards anything.
+
+A source is created from the laptop image of its day. Once the office runs
+another laptop image that does not descend from it, the unused source cannot
+be built on: the policy read and a start request answer
+`DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED` with the two rebuild calls, and
+replacing the source makes one from the current image. The image rule itself
+is unchanged, and a laptop that is not that unused source keeps
+`DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED`.
 
 Effects: a new journal entry naming the previous operation is recorded first.
 Then the old source is removed by ID, without force, and only while the Engine
