@@ -152,6 +152,7 @@ describe('App Settings modal structure', () => {
       'opus[1m]',
       'claude-fable-5[1m]',
       'claude-fable-5-1[1m]',
+      'claude-fable-5-2[1m]',
       'claude-opus-5-5[1m]',
       'claude-opus-4-6[1m]',
     ]) {
@@ -176,6 +177,24 @@ describe('App Settings modal structure', () => {
     ]) {
       const routing = modal.match(new RegExp(`id="${id}"([\\s\\S]*?)</select>`))?.[1] ?? '';
       expect(routing, `${id} does not offer Fable 5.1`).toContain('value="claude-fable-5-1"');
+    }
+  });
+
+  it('models: offers Fable 5.2 as the latest card and to task routing', () => {
+    const modal = settingsModal();
+    const select = modal.match(/id="appSettingsClaudeModel"([\s\S]*?)<\/select>/)?.[1] ?? '';
+    expect(select).toMatch(/value="claude-fable-5-2" data-meta="Latest"[^>]*data-ctx="1"/);
+    // Exactly one card carries the plain "Latest" label.
+    expect(select.match(/data-meta="Latest"/g)).toHaveLength(1);
+    for (const id of [
+      'appSettingsDefaultModel',
+      'appSettingsModelExplore',
+      'appSettingsModelImplement',
+      'appSettingsModelTest',
+      'appSettingsModelReview',
+    ]) {
+      const routing = modal.match(new RegExp(`id="${id}"([\\s\\S]*?)</select>`))?.[1] ?? '';
+      expect(routing, `${id} does not offer Fable 5.2`).toContain('value="claude-fable-5-2"');
     }
   });
 

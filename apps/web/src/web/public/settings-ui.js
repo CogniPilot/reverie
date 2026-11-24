@@ -1094,7 +1094,7 @@ Object.assign(ReverieApp.prototype, {
       desc.textContent = inert
         ? 'The selected model has no 1M variant.'
         : base
-          ? 'Available for Fable 5.1, Fable 5, Opus 5.5, Opus and Opus 4.6.'
+          ? 'Available for Fable 5.2, Fable 5.1, Fable 5, Opus 5.5, Opus and Opus 4.6.'
           : 'With no model pinned, this starts new sessions on Opus with a 1M window.';
     }
   },
