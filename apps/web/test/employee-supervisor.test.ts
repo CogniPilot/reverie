@@ -232,6 +232,25 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
   });
 
+  it('does not keep asking an occupied laptop what runs in it, and still reads again before any rebuild', async () => {
+    const occupied = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    occupied.provider = 'running';
+    const w = world([occupied], { limits: { ...LIMITS, idleReadMs: 120_000 } });
+    await w.run(20);
+    const reads = () => w.state.reads.filter((read) => read === 'provider:a').length;
+    // Forty passes; one read when the rebuild first came due, then one per two minutes.
+    expect(reads()).toBeLessThanOrEqual(9);
+    expect(reads()).toBeGreaterThanOrEqual(7);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a').needsHuman).toMatch(/needs the owner/);
+    // The agent exits. A reading that found the laptop occupied is never what a rebuild is decided on.
+    occupied.provider = 'exited';
+    const before = reads();
+    await w.run(3);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(reads()).toBe(before + 1);
+  });
+
   it('never rebuilds on a laptop it could not read, and asks for a person once that lasts', async () => {
     const unread = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
     unread.provider = 'unknown';

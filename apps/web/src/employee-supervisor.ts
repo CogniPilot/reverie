@@ -162,6 +162,8 @@ export class EmployeeSupervisor {
   readonly #readings = new Map<string, { at: number; operationId: string; reading: SupervisorLaptopReading }>();
   /** The observation being assessed reused a kept laptop reading. Only read within one pass. */
   #reused = false;
+  /** The last read that found a laptop occupied or unreadable. Never one that found it empty. */
+  readonly #occupied = new Map<string, { at: number; presence: 'running' | 'unknown' }>();
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -215,6 +217,7 @@ export class EmployeeSupervisor {
         this.#reports.delete(id);
         this.#announced.delete(id);
         this.#readings.delete(id);
+        this.#occupied.delete(id);
       }
     // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat.
     const order = [...employees].sort(
@@ -368,14 +371,21 @@ export class EmployeeSupervisor {
       return false;
     }
     const flags = this.#flags(employee);
-    let observed = await this.#observe(employee, flags.enabled);
+    // A laptop that was just found occupied or unreadable is not asked again every half minute. Only a reading
+    // that forbids a rebuild is ever kept: one that would allow it is always made immediately before the step.
+    const occupied = this.#occupied.get(employee.id);
+    const withOccupied = (seen: SupervisorObservation): SupervisorObservation =>
+      occupied && now - occupied.at < this.limits.idleReadMs
+        ? { ...seen, laptop: { ...seen.laptop, provider: occupied.presence } }
+        : seen;
+    let observed = withOccupied(await this.#observe(employee, flags.enabled));
     let history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
     this.#remember(employee.id, history);
     const due = (step: SupervisorAssessment) => step.next.action !== null && (step.next.at ?? 0) <= now;
     if (due(assessment) && seat && this.#reused) {
       // A step is never decided on a reading that was kept from an earlier pass.
-      observed = await this.#observe(employee, flags.enabled, true);
+      observed = withOccupied(await this.#observe(employee, flags.enabled, true));
       history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       this.#remember(employee.id, history);
@@ -389,6 +399,9 @@ export class EmployeeSupervisor {
       const provider = await this.ports
         .readProvider(employee, this.#guard(employee, 'repair'))
         .catch(() => 'unknown' as const);
+      if (provider === 'running' || provider === 'unknown')
+        this.#occupied.set(employee.id, { at: now, presence: provider });
+      else this.#occupied.delete(employee.id);
       observed = { ...observed, laptop: { ...observed.laptop, provider } };
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       if (!due(assessment) || assessment.next.preconditions.length) {
