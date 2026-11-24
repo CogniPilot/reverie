@@ -355,3 +355,85 @@ it('private Box identity scopes the held storage name independently of client op
   await b.service.prepare(b.row, () => {});
   expect(vi.mocked(a.command.create).mock.calls[0]![0]).not.toBe(vi.mocked(b.command.create).mock.calls[0]![0]);
 });
+
+describe('a status read of the running holder that fails', () => {
+  const line =
+    'Command failed: /bin/docker --host unix:///run/reverie-engine/docker.sock exec ' +
+    cid +
+    ' /bin/reverie-docker-resources storage-status --holder-start 123';
+  /** What `execFile` rejects with for a failed child. */
+  const failure = (stderr = '', fields: Record<string, unknown> = { code: 137 }) =>
+    Object.assign(Error(line + '\n' + stderr), { killed: false, signal: null, ...fields });
+  /** The next `failures` execs into the holder fail; everything else is the ordinary fixture. */
+  async function held(failures: number, error: () => Error) {
+    const f = fixture();
+    await f.service.prepare(f.row, () => {});
+    const base = vi.mocked(f.command.run).getMockImplementation()!;
+    let left = failures;
+    vi.mocked(f.command.run).mockImplementation(async (args, input) => {
+      if (args[0] === 'exec' && args[1] === cid && left-- > 0) throw error();
+      return base(args, input);
+    });
+    vi.mocked(f.command.run).mockClear();
+    const reads = () => vi.mocked(f.command.run).mock.calls.filter(([a]) => a[0] === 'exec' && a[1] === cid).length;
+    return { ...f, reads };
+  }
+  it('reads again when the read was killed inside the holder, and then succeeds', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await held(2, () => failure());
+    await expect(f.service.observe(f.row)).resolves.toBe('ready');
+    expect(f.reads()).toBe(3);
+    // Each failed attempt leaves one bounded line: a class and an exit status, never the command line.
+    const holder = cid.slice(0, 12);
+    expect(warn.mock.calls.map(([text]) => text)).toEqual([
+      `[docker-storage] storage-status read of holder ${holder} failed (attempt 1/3): kind=killed exit=137 stderrBytes=0`,
+      `[docker-storage] storage-status read of holder ${holder} failed (attempt 2/3): kind=killed exit=137 stderrBytes=0`,
+    ]);
+    warn.mockRestore();
+  });
+  it('reports why it failed, not the command line, once three reads have failed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await held(3, () => failure());
+    const refused = await f.service.protectedDirectories(f.row).catch((error: unknown) => error);
+    expect(refused).toMatchObject({ code: 'DOCKER_STORAGE_HOLDER_STATUS_KILLED', status: 409 });
+    expect((refused as Error).message).toBe('DOCKER_STORAGE_HOLDER_STATUS_KILLED');
+    expect((refused as Error).cause).toEqual({ kind: 'killed', exitCode: 137, stderrBytes: 0 });
+    expect(f.reads()).toBe(3);
+    // The holder is untouched: no create, start, stop or removal follows a failed read.
+    expect(
+      vi.mocked(f.command.run).mock.calls.filter(([a]) => ['start', 'stop', 'rm', 'restart'].includes(a[1]!))
+    ).toEqual([]);
+    expect(f.command.create).toHaveBeenCalledOnce();
+    // The same call a moment later reads it normally.
+    await expect(f.service.protectedDirectories(f.row)).resolves.toHaveLength(2);
+    warn.mockRestore();
+  });
+  it('does not read again after a timeout, and never repeats a holder that answers as replaced', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const slow = await held(3, () => failure('', { code: null, killed: true, signal: 'SIGTERM' }));
+    await expect(slow.service.observe(slow.row)).rejects.toMatchObject({
+      code: 'DOCKER_STORAGE_HOLDER_STATUS_TIMED_OUT',
+    });
+    expect(slow.reads()).toBe(1);
+    const replaced = await held(3, () => failure('BOXED_STORAGE_HOLDER_CHANGED; effectIssued=false\n', { code: 1 }));
+    await expect(replaced.service.observe(replaced.row)).rejects.toMatchObject({
+      code: 'DOCKER_STORAGE_HOLDER_REPLACED',
+    });
+    expect(replaced.reads()).toBe(1);
+    warn.mockRestore();
+  });
+  it('treats a holder that stopped between the two reads as stopped, exactly as before the read', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const f = await held(1, () => {
+      // The Engine's answer is the first sign that the holder has exited.
+      f.exitHolder();
+      return failure('Error response from daemon: container ' + cid + ' is not running\n', { code: 1 });
+    });
+    await expect(f.service.observe(f.row)).resolves.toBe('unknown');
+    expect(f.reads()).toBe(1);
+    await expect(f.service.protectedDirectories(f.row)).rejects.toMatchObject({
+      code: 'DOCKER_STORAGE_HOLDER_UNCONFIRMED',
+    });
+    warn.mockRestore();
+  });
+});

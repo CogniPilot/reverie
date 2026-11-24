@@ -21,16 +21,24 @@ import {
 export function dockerPlanMoveFailureMessage(error: unknown): string {
   if (
     error instanceof DockerEmployeeContinuationError &&
-    (error.code.startsWith('DOCKER_RESOURCE_HELPER_') || error.code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE')
+    (error.code.startsWith('DOCKER_RESOURCE_HELPER_') ||
+      error.code.startsWith('DOCKER_STORAGE_HOLDER_STATUS_') ||
+      error.code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE')
   ) {
     const guidance = dockerRecoveryGuidance(error.code);
+    // A failed holder read also says how it ended: an exit status and, when the helper refused, its own code.
+    const detail = error.cause as { exitCode?: unknown; helper?: unknown } | undefined,
+      ended = [
+        ...(Number.isInteger(detail?.exitCode) ? [`exit ${detail!.exitCode as number}`] : []),
+        ...(typeof detail?.helper === 'string' && /^BOXED_[A-Z0-9_]{1,64}$/.test(detail.helper) ? [detail.helper] : []),
+      ];
     if (guidance)
       return (
         `${guidance.message} This step belongs to a plan move: ` +
         (guidance.allowedActions.includes('retry')
           ? 'continue the move to try again, or abandon it.'
           : 'abandon the move first.') +
-        ` (${error.code})`
+        ` (${[error.code, ...ended].join(', ')})`
       );
   }
   return error instanceof Error ? error.message : 'Docker plan move failed';

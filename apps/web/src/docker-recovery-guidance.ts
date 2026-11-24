@@ -262,6 +262,39 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
     allowedActions: ['retry'],
   },
 };
+/** Reading a laptop's storage holder: a small container that only holds the
+ * employee's home and Nix directories open. The read changes nothing and was
+ * already repeated before any of these is reported. */
+const HOLDER_READ =
+  'Reading the storage holder of this laptop failed three times in a row. The read changes nothing, so continuing ' +
+  'is safe and reads it again. ';
+const HOLDER_STATUS: Readonly<Record<string, string>> = {
+  KILLED:
+    'Each time the read was killed inside the holder (exit 137), which for a helper that only reads means the ' +
+    'holder reached its 16 MiB memory limit, usually because several reads ran in it at once.',
+  OUT_OF_MEMORY:
+    'Each time the container runtime could not start the read for lack of memory inside the holder, whose limit ' +
+    'is 16 MiB; this happens when several reads run in it at once.',
+  TASK_LIMIT:
+    'Each time the container runtime could not start the read because the holder reached its limit of eight ' +
+    'tasks; this happens when several reads run in it at once.',
+  EXEC_REFUSED: 'Each time the container runtime refused to start the read inside the holder.',
+  TIMED_OUT: 'The read did not answer within 30 seconds, so the office stopped waiting for it.',
+  ENGINE_UNREACHABLE: 'The container engine could not be reached.',
+  HELPER_REFUSED: 'Each time the holder helper itself refused the read with one of its own codes.',
+  NOT_RUNNING: 'The container engine said the holder was not running while also reporting it as running.',
+  ABSENT: 'The container engine said the holder did not exist while also reporting it as running.',
+  FAILED: 'Each time the read ended with an error status that the office does not recognize.',
+};
 export function dockerRecoveryGuidance(code: string): DockerRecoveryGuidance | undefined {
+  const prefix = 'DOCKER_STORAGE_HOLDER_STATUS_';
+  if (code.startsWith(prefix) && Object.hasOwn(HOLDER_STATUS, code.slice(prefix.length)))
+    return {
+      message:
+        (code === prefix + 'TIMED_OUT' || code === prefix + 'ENGINE_UNREACHABLE'
+          ? 'Reading the storage holder of this laptop failed. The read changes nothing, so continuing is safe. '
+          : HOLDER_READ) + HOLDER_STATUS[code.slice(prefix.length)],
+      allowedActions: ['retry'],
+    };
   return Object.hasOwn(GUIDANCE, code) ? GUIDANCE[code] : undefined;
 }

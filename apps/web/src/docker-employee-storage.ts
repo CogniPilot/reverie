@@ -9,6 +9,15 @@ import type { DockerContinuationTask, DockerContinuationTaskJournal } from './do
 import type { DockerCredentialHome } from './docker-employee-credential-installer.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
 import { DockerEmployeeInspect } from './docker-employee-engine-data.js';
+import {
+  classifyDockerExecFailure,
+  describeDockerExecFailure,
+  dockerExecFailureCode,
+  dockerExecFailureRetryable,
+  type DockerExecFailure,
+} from './docker-exec-failure.js';
+/** Waits before the second and third read of a holder's status. */
+const STATUS_RETRY_DELAYS_MS = [150, 600] as const;
 const decimal = z.string().regex(/^(0|[1-9][0-9]{0,19})$/),
   cid = z.string().regex(/^[a-f0-9]{64}$/);
 const directory = z
@@ -76,7 +85,8 @@ export class DockerEmployeeStorage {
     private readonly helperImageId: string,
     private readonly source: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect>,
     private readonly boxId: string,
-    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source
+    private readonly readSource: (row: DockerEmployeeContinuationRecord) => Promise<DockerEmployeeInspect> = source,
+    private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
   ) {
     if (!/^[a-f0-9]{64}$/.test(boxId)) throw Error('Fixed boxed namespace required');
     if (!/^sha256:[a-f0-9]{64}$/.test(helperImageId)) throw Error('Fixed qualified storage helper required');
@@ -255,24 +265,46 @@ export class DockerEmployeeStorage {
     if (!state.Running) return null;
     const first = storage.parse(JSON.parse(await this.command.run(['logs', task.containerId])));
     if (!first.holderStartTicks || first.holderStartTicks === '0') refuse('DOCKER_STORAGE_ORIGINAL_HEADER_UNKNOWN');
-    const value = storage.parse(
-      JSON.parse(
-        await this.command.run([
-          'exec',
-          task.containerId,
-          '/bin/reverie-docker-resources',
-          'storage-status',
-          '--holder-start',
-          first.holderStartTicks,
-        ])
-      )
-    );
+    const status = await this.#status(task.containerId, first.holderStartTicks, config);
+    if (status === null) return null;
+    const value = storage.parse(JSON.parse(status));
     if (
       !isDeepStrictEqual(value, first) ||
       (task.phase === 'running' && (task.initPid !== state.Pid || task.initStartTicks !== value.holderStartTicks))
     )
       refuse('DOCKER_STORAGE_HOLDER_REPLACED');
     return { pid: state.Pid, value };
+  }
+  /** The holder's own status, read by one exec of its fixed helper. The read
+   * changes nothing, so a failed one is repeated a bounded number of times: the
+   * holder runs under a 16 MiB memory limit and a limit of eight tasks, which
+   * an exec that overlaps another one can exceed. A holder that the Engine then
+   * positively reports as stopped is `null`, exactly as before the exec; a
+   * holder that reports a different init is a replacement and is not read
+   * again. What finally fails carries its class, not the command line. */
+  async #status(id: string, ticks: string, config: Record<string, unknown>): Promise<string | null> {
+    const args = ['exec', id, '/bin/reverie-docker-resources', 'storage-status', '--holder-start', ticks];
+    let failure: DockerExecFailure | undefined;
+    for (let attempt = 0; attempt <= STATUS_RETRY_DELAYS_MS.length; attempt++) {
+      if (attempt) await this.sleep(STATUS_RETRY_DELAYS_MS[attempt - 1]!);
+      try {
+        return await this.command.run(args);
+      } catch (error) {
+        failure = classifyDockerExecFailure(error);
+        console.warn(
+          `[docker-storage] storage-status read of holder ${id.slice(0, 12)} failed ` +
+            `(attempt ${attempt + 1}/${STATUS_RETRY_DELAYS_MS.length + 1}): ${describeDockerExecFailure(failure)}`
+        );
+        if (failure.helper === 'BOXED_STORAGE_HOLDER_CHANGED') refuse('DOCKER_STORAGE_HOLDER_REPLACED');
+        if (failure.kind === 'not-running' || failure.kind === 'absent') {
+          const state = z.object({ Running: z.boolean() }).parse((await this.#inspect(id, config)).State);
+          if (!state.Running) return null;
+        } else if (!dockerExecFailureRetryable(failure) && failure.kind !== 'helper-refused') break;
+      }
+    }
+    throw new DockerEmployeeContinuationError(dockerExecFailureCode('DOCKER_STORAGE_HOLDER_STATUS', failure!), 409, {
+      cause: failure,
+    });
   }
   /** Settle an already observed live holder cursor; never create or START.
    * Monotone task publication and the owning epoch keep this exact cursor. */
