@@ -97,6 +97,42 @@ describe('fixed packaged Engine creation response', () => {
     expect(requestMock).toHaveBeenCalledOnce();
     expect(f.call.end).toHaveBeenCalledOnce();
   });
+  it('names only the laptop-side target of its own mount when the Engine says a bind source is missing', async () => {
+    const mounts = [
+      { Type: 'bind', Source: '/private/host/home', Target: '/home/agent' },
+      { Type: 'bind', Source: '/private/host/drive', Target: '/reverie_workspace' },
+      { Type: 'bind', Source: '/private/host/drive', Target: '/workspace' },
+      { Type: 'tmpfs', Target: '/reverie_workspace/attachments' },
+    ];
+    const rejected = async (message: unknown, configuration: Record<string, unknown> = { HostConfig: { Mounts: mounts } }) => {
+      const f = fixture(),
+        pending = f.command.create(name, { Image: 'sha256:' + 'c'.repeat(64), ...configuration }, () => {});
+      f.respond(400, JSON.stringify({ message }));
+      return pending.catch((error) => error);
+    };
+    const missing = await rejected(
+      'invalid mount config for type "bind": bind source path does not exist: /private/host/drive'
+    );
+    expect(missing).toBeInstanceOf(DockerEmployeeContinuationError);
+    expect(missing).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING', status: 409 });
+    expect(missing.cause).toEqual({ missingMountTarget: '/reverie_workspace' });
+    // Neither the host path nor the Engine's sentence survives.
+    expect(JSON.stringify(missing) + JSON.stringify(missing.cause) + String(missing.stack)).not.toContain('/private');
+    expect(String(missing.message)).toBe('DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING');
+    // A path that is not one of the request's own binds, or any other 400, stays the bare class.
+    for (const other of [
+      'invalid mount config for type "bind": bind source path does not exist: /somewhere/else',
+      'bind source path does not exist: /private/host/drive and more\ntext',
+      'No such image: sha256:' + 'c'.repeat(64),
+      { nested: 'bind source path does not exist: /private/host/drive' },
+    ]) {
+      const error = await rejected(other);
+      expect(error).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED' });
+      expect(error.cause).toBeUndefined();
+    }
+    const unmounted = await rejected('bind source path does not exist: /private/host/drive', {});
+    expect(unmounted).toMatchObject({ code: 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED' });
+  });
   it.each([200, 202, 302, 401, 500, 503])('keeps HTTP%s unknown, without an implicit retry', async (status) => {
     const f = fixture(),
       pending = f.start();

@@ -7,9 +7,39 @@ import { request, type ClientRequest } from 'node:http';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type { DockerTaskFailure } from './docker-continuation-task.js';
 import { classifyDockerResourceHelperFailure } from './docker-resource-helper-failure.js';
+import {
+  prepareSeatDirectory,
+  type DockerSeatDirectoryReceipt,
+  type DockerSeatDirectorySpec,
+} from './docker-seat-directory.js';
+/** The one configuration rejection whose cause the request itself can name: a
+ * bind whose host folder does not exist. The Engine's text and the host path
+ * are dropped; only the container-side target of the request's own mount that
+ * the Engine named is kept. */
+export function missingBindTarget(body: Buffer, configuration: Readonly<Record<string, unknown>>): string | undefined {
+  let message: unknown;
+  try {
+    message = (JSON.parse(body.toString('utf8')) as { message?: unknown } | null)?.message;
+  } catch {
+    return undefined;
+  }
+  const found =
+    typeof message === 'string' ? /bind source path does not exist: (\/[^\r\n\0]{0,4095})$/.exec(message) : null;
+  const mounts = (configuration.HostConfig as { Mounts?: unknown } | null | undefined)?.Mounts;
+  if (!found || !Array.isArray(mounts)) return undefined;
+  const targets = (mounts as Array<{ Type?: unknown; Source?: unknown; Target?: unknown } | null>).flatMap((mount) =>
+    mount?.Type === 'bind' && mount.Source === found[1] && typeof mount.Target === 'string' ? [mount.Target] : []
+  );
+  // eslint-disable-next-line no-control-regex
+  return targets[0] !== undefined && /^\/[^\u0000-\u001f\u007f]{0,4095}$/.test(targets[0]) ? targets[0] : undefined;
+}
 /** A completed rejection describes that response only. It grants no retry,
  * adoption or replacement authority; the continuation retains its issued fence. */
-function createFailure(status?: number): DockerEmployeeContinuationError {
+function createFailure(status?: number, missingMountTarget?: string): DockerEmployeeContinuationError {
+  if (status === 400 && missingMountTarget !== undefined)
+    return new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING', 409, {
+      cause: Object.freeze({ missingMountTarget }),
+    });
   const code =
     status === 400
       ? 'DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED'
@@ -35,6 +65,16 @@ export interface DockerEngineCommand {
     spec: Readonly<{ imageId: string; user: string; nixSource: string }>,
     requireCurrent: () => void
   ): Promise<void>;
+  /** Makes the default sign-in folder inside one employee's private home, as
+   * the laptop user, with a fixed helper program of the worker image. `auth`
+   * is the office's own signed-in copy of the plan account: it is placed only
+   * when the seat has no sign-in file, and only ever travels on stdin. */
+  prepareSeatDirectory?(
+    name: string,
+    spec: DockerSeatDirectorySpec,
+    requireCurrent: () => void,
+    auth?: string
+  ): Promise<DockerSeatDirectoryReceipt>;
   /** Removes one recorded laptop container that hosts only its own init. */
   removeIdleLaptop?(containerId: string, requireCurrent: () => void): Promise<void>;
   /** Stops (if running) and removes one container the owner asked to discard
@@ -286,6 +326,14 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
     if (value.Status !== 'exited' || value.ExitCode !== 0 || value.OOMKilled === true) unconfirmed();
     await this.run(['container', 'rm', id]);
   }
+  prepareSeatDirectory(
+    name: string,
+    spec: DockerSeatDirectorySpec,
+    requireCurrent: () => void,
+    auth?: string
+  ): Promise<DockerSeatDirectoryReceipt> {
+    return prepareSeatDirectory(this, name, spec, requireCurrent, auth);
+  }
   /** Removes one recorded laptop container that hosts no process beyond its
    * own init, never by force. The owning workflow separately proves that the
    * container is the employee's recorded one and that no provider ever ran. */
@@ -408,7 +456,12 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
                 return;
               }
               if (response.statusCode !== 201) {
-                rejectOnce(createFailure(response.statusCode));
+                rejectOnce(
+                  createFailure(
+                    response.statusCode,
+                    response.statusCode === 400 ? missingBindTarget(Buffer.concat(chunks), configuration) : undefined
+                  )
+                );
                 return;
               }
               let id: unknown;

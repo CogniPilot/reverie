@@ -142,6 +142,66 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'Nothing was recorded as rebuilt. Wait a moment, then preview the rebuild again.',
     allowedActions: ['rebuild-preview'],
   },
+  // Creating the laptop source. `retry` is the same request again, with the
+  // same operation and template: the recorded operation keeps its template.
+  DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING: {
+    message:
+      'The container engine refused to create the laptop because a host folder that it mounts does not exist ' +
+      '(missingMountTarget names where that folder would appear inside the laptop). The office creates the default ' +
+      'sign-in folder itself; a shared drive or scratch folder of the template, or a sign-in folder given as ' +
+      'accountSource, has to exist on the host. Create that folder, then send the same request again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_CONTINUATION_CREATE_CONFIG_REJECTED: {
+    message:
+      'The container engine refused the configuration of the laptop and gave no reason that the office recognizes, ' +
+      'so nothing was created. An office that did not yet create sign-in folders reported a missing one this way; ' +
+      'sending the same request again now creates it. If it is refused again, the engine log on the host names the ' +
+      'setting it rejected.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT: {
+    message:
+      'The office is not signed in to the plan of this employee (seatProfile names it), and the employee has no ' +
+      'sign-in of their own for it, so the laptop would have stopped at the provider sign-in screen. No laptop was ' +
+      'created and nothing was discarded by this step. Sign in to that plan on the Plans page, then send the same ' +
+      'request again; the laptop then comes up signed in.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_HOME_FOREIGN: {
+    message:
+      'The home folder of this employee is not a private folder (mode 0700) owned by the laptop user that the ' +
+      'template names, so the office did not create a sign-in folder in it and created no laptop. Check the user ' +
+      'in the template against the owner of the home folder. An operation that is already recorded keeps its ' +
+      'template: fix the folder on the host, then send the same request again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN: {
+    message:
+      'The sign-in folder for the plan of this employee (.reverie/seat-auth/<plan> in their home), or one of the two ' +
+      'folders above it, already exists but is a link, is not a folder, belongs to another user or is not private ' +
+      '(mode 0700). The office changes nothing that it did not create, so no laptop was created. Make it a real ' +
+      'folder of the laptop user with mode 0700 on the host, then send the same request again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_DIRECTORY_UNWRITABLE: {
+    message:
+      'The office could not create the sign-in folder in the home of this employee: the disk is full or read-only, ' +
+      'or the home cannot be written by the laptop user. No laptop was created. Fix that on the host, then send the ' +
+      'same request again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_PREPARATION_UNCONFIRMED: {
+    message:
+      'The helper that creates the sign-in folder of this employee did not finish, or did not report a result that ' +
+      'the office recognizes, so no laptop was created. The helper only adds missing folders: sending the same ' +
+      'request again is safe and runs it again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_REPROVISION_SEAT_PREPARATION_UNAVAILABLE: {
+    message: 'This office cannot create sign-in folders, so no laptop was created. Update the office and try again.',
+    allowedActions: [],
+  },
   // The step that sets a laptop's resource limits. `retry` is the same request
   // again (Continue for a laptop recovery or a plan move); nothing is forced.
   DOCKER_RESOURCE_HELPER_RETRY_PENDING: {
