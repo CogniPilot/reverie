@@ -386,7 +386,22 @@ export function registerCompanyRoutes(
       if (enabled && self && service.view(owner).employees.some(e=>e.id===id && e.sessionId===self))
         throw new CompanyError('Ask another office manager or the owner to put you out of office',409);
       if (!enabled && !wakeEmployee) throw new CompanyError('Employee startup is not ready', 503);
-      const employee = await service.setVacation(id, owner, enabled, action.require);
+      let employee: CompanyEmployee;
+      try {
+        employee = await service.setVacation(id, owner, enabled, action.require);
+      } catch (error) {
+        if (error instanceof CompanyError || !enabled) throw error;
+        // The out-of-office intent is saved before the stop on purpose, so that nothing wakes a laptop whose stop
+        // is unknown. A stop that then fails must say that the setting was kept, and what to do about the laptop.
+        const saved = service.view(owner).employees.find((e) => e.id === id);
+        if (!saved?.onVacation || saved.desiredRunning !== false) throw error;
+        throw new CompanyError(
+          `${saved.name || 'This employee'} is now marked out of the office, but their laptop could not be stopped ` +
+            'from here. The out-of-office setting was kept so that nothing restarts them. Use Rebuild laptop to ' +
+            'discard the laptop, or return them to the office.',
+          409
+        );
+      }
       const current=()=>action.current() && service.view(owner).employees.some(e=>e.id===id &&
         e.onVacation===enabled && e.desiredRunning===!enabled);
       if (!current()) throw new CompanyError('Employee office intent changed',409);

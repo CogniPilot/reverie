@@ -415,6 +415,34 @@ describe('company HTTP ownership and expert invites', () => {
     expect(response.body).not.toContain('Synthetic private failure');
   });
 
+  it('says that the out-of-office setting was kept when the laptop could not be stopped', async () => {
+    const employee = await service.hire(hireBody);
+    const url = `/api/company/employees/${employee.id}/vacation`;
+    const setVacation = service.setVacation.bind(service);
+    // The intent is durable before the stop; here the stop then refuses.
+    vi.spyOn(service, 'setVacation').mockImplementationOnce(async (id, owner, enabled, guard) => {
+      sessions.delete(employee.sessionId);
+      await setVacation(id, owner, enabled, guard);
+      throw new Error('Synthetic private stop refusal');
+    });
+    const response = await app.inject({ method: 'POST', url, payload: { enabled: true } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({ success: false, error: expect.stringContaining('marked out of the office') });
+    expect(response.json().error).toContain('Rebuild laptop');
+    expect(response.body).not.toContain('Synthetic private stop refusal');
+    expect(service.view().employees[0]).toMatchObject({ onVacation: true, desiredRunning: false });
+    // A failure that saved nothing is not described as a saved setting.
+    await service.store.update((state) => {
+      state.employees[0].onVacation = false;
+      state.employees[0].desiredRunning = true;
+    });
+    vi.spyOn(service, 'setVacation').mockRejectedValueOnce(new Error('Synthetic early failure'));
+    const early = await app.inject({ method: 'POST', url, payload: { enabled: true } });
+    expect(early.statusCode).toBe(500);
+    expect(early.body).not.toContain('marked out of the office');
+    expect(service.view().employees[0]).toMatchObject({ onVacation: false, desiredRunning: true });
+  });
+
   it('leaving the office and unauthorized entry never invoke a start', async () => {
     const employee = await service.hire(hireBody);
     const url = `/api/company/employees/${employee.id}/vacation`;
