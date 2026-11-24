@@ -314,6 +314,9 @@ interface Options {
   employee?: Record<string, unknown>;
   /** The employee's current subscription profile ID and saved launch overrides. */
   profile?: string;
+  /** The profile's provider and the saved session's mode; a Claude seat by default. */
+  provider?: 'anthropic' | 'openai';
+  mode?: string;
   overrides?: Record<string, string>;
   moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown } | null;
 }
@@ -354,10 +357,16 @@ async function fixture(options: Options = {}) {
         onVacation: false,
         desiredRunning: true,
         runtimeRecipe: {
-          mode: 'claude',
+          mode: options.mode ?? 'claude',
           workingDir: '/reverie_workspace/cases/demo',
           ...(options.profile
-            ? { subscriptionProfile: { id: options.profile, label: 'Synthetic seat', provider: 'anthropic' } }
+            ? {
+                subscriptionProfile: {
+                  id: options.profile,
+                  label: 'Synthetic seat',
+                  provider: options.provider ?? 'anthropic',
+                },
+              }
             : {}),
         },
         dockerResourcePolicy: policy,
@@ -374,7 +383,7 @@ async function fixture(options: Options = {}) {
   };
   const saved = {
     id: sid,
-    mode: 'claude',
+    mode: options.mode ?? 'claude',
     workingDir: '/reverie_workspace/cases/demo',
     status: 'idle',
     pid: 4242,
@@ -1225,7 +1234,73 @@ describe('provider account routing', () => {
       ).toBe(false);
     expect(DockerLaptopTemplate.safeParse({ ...template, accountSource: 'relative/' + seat }).success).toBe(false);
   });
-  it('adds nothing without a seat override', async () => {
+  it('derives the seat from the subscription profile when no launch override names one', async () => {
+    // The profile is set but the saved session carries no account override.
+    const f = await fixture({ profile: seat, overrides: { CLAUDE_CODE_EFFORT: 'high' } });
+    const account = {
+      kind: 'seat-mount',
+      key: 'CLAUDE_CONFIG_DIR',
+      path: seatPath,
+      source: `${homeSource}/.reverie/seat-auth/${seat}`,
+      env: true,
+    };
+    const preview = await f.service.preview(employeeId, template, f.authority);
+    expect(preview.account).toEqual(account);
+    const result = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(result.state).toBe('ready');
+    expect(f.entry()!.account).toEqual(account);
+    expect(mountsOf(f)).toEqual([
+      { Type: 'bind', Source: account.source, Target: seatPath, BindOptions: { Propagation: 'rprivate' } },
+    ]);
+    // Nothing in the launch supplies the variable, so the laptop itself carries it.
+    expect(envOf(f)).toEqual(['CLAUDE_CONFIG_DIR=' + seatPath]);
+    expect(f.state.getSession(sid)).not.toHaveProperty('__envOverrides.CLAUDE_CONFIG_DIR');
+    // The ordinary continuation accepts the source and copies its environment.
+    await beginsAgain(f, result.sourceContainerId!);
+    // A later replacement of the unused source derives the same seat again.
+    const bare = await fixture({ profile: seat });
+    expect((await bare.service.preview(employeeId, template, bare.authority)).account).toEqual(account);
+  });
+  it('derives a Codex seat and honours an explicitly supplied seat directory', async () => {
+    const id = 'openai-ed0348c4',
+      path = '/instances/default/console/accounts/' + id;
+    const f = await fixture({ profile: id, provider: 'openai', mode: 'codex' });
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual({
+      kind: 'seat-mount',
+      key: 'CODEX_HOME',
+      path,
+      source: `${homeSource}/.reverie/seat-auth/${id}`,
+      env: true,
+    });
+    const explicit = { ...template, accountSource: '/synthetic-seats/' + id };
+    await f.service.reprovision(employeeId, await f.request(retireOperation, explicit), f.authority);
+    expect(mountsOf(f)).toEqual([
+      { Type: 'bind', Source: '/synthetic-seats/' + id, Target: path, BindOptions: { Propagation: 'rprivate' } },
+    ]);
+    expect(envOf(f)).toEqual(['CODEX_HOME=' + path]);
+  });
+  it.each([
+    ['a Claude plan on a Codex session', { profile: seat, provider: 'anthropic', mode: 'codex' }],
+    ['a Codex plan on a Claude session', { profile: 'openai-ed0348c4', provider: 'openai', mode: 'claude' }],
+    ['a Codex plan that OpenCode only proxies', { profile: 'openai-ed0348c4', provider: 'openai', mode: 'opencode' }],
+    ['a shell session', { profile: seat, provider: 'anthropic', mode: 'shell' }],
+  ])('derives nothing for %s', async (_name, options) => {
+    const f = await fixture(options as Options);
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual({ kind: 'none' });
+  });
+  it('still refuses a launch override that disagrees with the profile', async () => {
+    // The override wins the derivation and must name the profile's own seat.
+    const f = await fixture({ profile: 'anthropic-00000000', overrides: { CLAUDE_CONFIG_DIR: seatPath } });
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH',
+    });
+    // A seat override for the other provider's variable is not replaced by a derived one.
+    const crossed = await fixture({ profile: seat, overrides: { CODEX_HOME: seatPath + '-other' } });
+    await expect(crossed.service.preview(employeeId, template, crossed.authority)).rejects.toMatchObject({
+      code: 'DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH',
+    });
+  });
+  it('adds nothing when the launch override names a directory that is not a seat', async () => {
     const f = await fixture({ profile: seat, overrides: { CLAUDE_CONFIG_DIR: '/home/agent/.claude-alternate' } });
     expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual({ kind: 'none' });
     await f.service.reprovision(employeeId, await f.request(), f.authority);

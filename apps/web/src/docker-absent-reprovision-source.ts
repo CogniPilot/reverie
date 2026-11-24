@@ -12,6 +12,7 @@ import {
   REPROVISION_ACCOUNT_ROOT,
 } from './docker-absent-reprovision-data.js';
 import { dockerPlanGeneration } from './docker-plan-install-data.js';
+import { subscriptionBinding, type SubscriptionProvider } from './subscription-profiles.js';
 export const REPROVISION_OPERATION_LABEL = 'reverie.reprovision.operation';
 export const REPROVISION_PURPOSE_LABEL = 'reverie.reprovision.purpose';
 const WORKER_INIT = '/opt/reverie/perf/bin/reverie-worker-init';
@@ -129,14 +130,23 @@ export interface ReprovisionSourceInput {
   /** Derived by `reprovisionAccount`; absent on entries that predate routing. */
   readonly account?: DockerReprovisionAccount;
 }
+/** The employee's owner-selected plan and the mode its saved session launches. */
+export interface ReprovisionProfile {
+  readonly id: string;
+  readonly provider: SubscriptionProvider;
+  readonly mode: string;
+}
 /** Provider account routing of the source, derived by the backend only.
  * (a) A retired plan replacement keeps its in-home account generation as one
  * Env entry. (b) A saved launch override that selects the employee's own
  * subscription seat gets that seat as one read-write bind; the launch itself
- * supplies the variable. (c) Otherwise nothing. */
+ * supplies the variable. (c) Without any override of that variable, the
+ * employee's subscription profile is the owner's choice: when its provider
+ * binds natively to the session mode, the same seat is bound and the source
+ * carries the variable itself. (d) Otherwise nothing. */
 export function reprovisionAccount(
   basis: DockerEmployeeContinuationRecord,
-  profileId: string | undefined,
+  profile: ReprovisionProfile | undefined,
   overrides: Readonly<Record<string, string>> | undefined,
   unchecked: DockerLaptopTemplate
 ): DockerReprovisionAccount {
@@ -163,10 +173,19 @@ export function reprovisionAccount(
     const path = overrides?.[key];
     return typeof path === 'string' && path.startsWith(REPROVISION_ACCOUNT_ROOT) ? [{ key, path }] : [];
   });
-  if (!seats.length) return done({ kind: 'none' });
-  const seat = seats[0]!,
+  // An explicit override of the profile's own variable that names no seat
+  // (an alternate directory inside the home) stays the launch's choice.
+  const derivedKey =
+    profile && subscriptionBinding(profile.mode, profile.provider) === 'native'
+      ? profile.provider === 'anthropic'
+        ? ('CLAUDE_CONFIG_DIR' as const)
+        : ('CODEX_HOME' as const)
+      : undefined;
+  const derived = !seats.length && derivedKey !== undefined && typeof overrides?.[derivedKey] !== 'string';
+  if (!seats.length && !derived) return done({ kind: 'none' });
+  const seat = derived ? { key: derivedKey!, path: REPROVISION_ACCOUNT_ROOT + profile!.id } : seats[0]!,
     id = seat.path.slice(REPROVISION_ACCOUNT_ROOT.length);
-  if (seats.length !== 1 || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || id !== profileId)
+  if (seats.length > 1 || !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || id !== profile?.id)
     refuse('DOCKER_REPROVISION_ACCOUNT_PROFILE_MISMATCH');
   const storage = reprovisionStorage(basis, template),
     source = template.accountSource ?? posix.join(storage.home, '.reverie', 'seat-auth', id);
@@ -181,7 +200,7 @@ export function reprovisionAccount(
     template.mounts.some((mount) => !mount.readOnly && (within(source, mount.source) || within(mount.source, source)))
   )
     refuse('DOCKER_REPROVISION_TEMPLATE_STORAGE_OVERLAP');
-  return done({ kind: 'seat-mount', key: seat.key, path: seat.path, source });
+  return done({ kind: 'seat-mount', key: seat.key, path: seat.path, source, ...(derived ? { env: true } : {}) });
 }
 /** Never started by this workflow: inert init, no command, no secret, no
  * Engine socket, no device request. The destination adds its own GPU profile. */
@@ -210,7 +229,9 @@ export function reprovisionSourceConfiguration(input: ReprovisionSourceInput): R
     'REVERIE_INSTALL_CLIS=none',
     ...temporaryEnvironment(),
     'REVERIE_API_URL=' + input.apiUrl,
-    ...(account.kind === 'generation-env' ? [account.key + '=' + account.path] : []),
+    ...(account.kind === 'generation-env' || (account.kind === 'seat-mount' && account.env)
+      ? [account.key + '=' + account.path]
+      : []),
   ];
   if (environment.some((value) => SECRET_ENV.test(value))) refuse('DOCKER_REPROVISION_SECRET_ENV_DENIED');
   return {

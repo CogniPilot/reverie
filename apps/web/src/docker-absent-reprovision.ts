@@ -336,9 +336,12 @@ export class DockerAbsentReprovision {
     return DockerEmployeeContinuationRecord.parse(persisted(at.record!));
   }
   async #account(basis: DockerEmployeeContinuationRecord, employee: CompanyEmployee, template: DockerLaptopTemplate) {
+    // The profile is the owner's choice; the saved session's mode is what launches.
+    const selected = employee.runtimeRecipe?.subscriptionProfile,
+      mode = this.sessions.saved(employee.sessionId)?.mode ?? 'claude';
     return reprovisionAccount(
       basis,
-      employee.runtimeRecipe?.subscriptionProfile?.id,
+      selected ? { id: selected.id, provider: selected.provider, mode } : undefined,
       await this.sessions.overrides(employee.sessionId),
       template
     );

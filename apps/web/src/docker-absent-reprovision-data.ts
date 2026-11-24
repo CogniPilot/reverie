@@ -136,6 +136,10 @@ export const DockerReprovisionAccount = z.discriminatedUnion('kind', [
       key: accountKey,
       path: z.string().regex(/^\/instances\/default\/console\/accounts\/[a-z0-9][a-z0-9_-]{0,63}$/),
       source: hostPath,
+      /** Set when the seat was derived from the employee's subscription profile
+       * and no saved launch override supplies the variable: the source then
+       * carries it as one Env entry, as a retained generation does. */
+      env: z.literal(true).optional(),
     })
     .strict(),
 ]);
