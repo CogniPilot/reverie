@@ -2536,6 +2536,7 @@ export class WebServer extends EventEmitter {
         phase: (...args) => planMoveStore.dockerPhase(...args),
         closeRestored: (...args) => planMoveStore.closeRestoredDockerMove(...args),
         abandonAbsent: (...args) => planMoveStore.abandonAbsentDockerMove(...args),
+        abandonOwner: (...args) => planMoveStore.abandonOwnerDockerMove(...args),
       },
     });
     dockerRuntime?.bindPlanMoves(planMoves);

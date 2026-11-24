@@ -83,14 +83,17 @@ export interface PlanMoveInput {
 export interface PlanMoveRecord {
   /** Public view DATA only. Never persisted as effect authority. */
   backend?: 'docker';
-  allowedActions?: readonly 'continue-original'[];
+  /** Next steps for this move. `abandon` is the signed-in owner's only. */
+  allowedActions?: readonly ('continue-original' | 'abandon')[];
   /** Public diagnostic only; never stored as native effect credit. */
   sourceViewRetirement?: PlanMoveSourceViewRetirement;
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
-  /** Terminal closure because the Engine reported every recorded container absent. */
-  dockerAbandonment?: { version: 1; reason: 'recorded-containers-absent'; operationId: string; at: number };
+  /** Terminal closure: the Engine reported every recorded container absent, or
+   * the signed-in owner abandoned a held move (its own containers are recorded
+   * for the owner's laptop rebuild). */
+  dockerAbandonment?: PlanMoveAbsentAbandonment | PlanMoveOwnerAbandonment;
   id: string;
   owner?: string;
   employeeId: string;
@@ -113,6 +116,23 @@ export interface PlanMoveRecord {
   resourceIntent?: PlanMoveResourceIntent;
   resourceOwnerScope?: string;
   resourcePhase?: PlanMoveResourcePhase;
+}
+export interface PlanMoveAbsentAbandonment {
+  version: 1;
+  reason: 'recorded-containers-absent';
+  operationId: string;
+  at: number;
+}
+export interface PlanMoveOwnerAbandonment {
+  version: 1;
+  reason: 'owner-abandoned';
+  at: number;
+  containers: {
+    source: string;
+    target?: string;
+    sourceHolder?: string;
+    helpers: { role: 'storage-holder' | 'leaf-helper' | 'identity-helper'; containerId: string }[];
+  };
 }
 export interface PlanMoveSourceViewRetirement {
   state: 'pending' | 'completed' | 'unconfirmed';
@@ -300,12 +320,15 @@ export class PlanMoves {
       record.backend = 'docker';
       const retirement = this.sourceRetirement(source);
       if (retirement) record.sourceViewRetirement = retirement;
+      const idle = !this.aborts.has(record.id) && !this.intents.has(record.id);
       record.allowedActions =
         (record.phase === 'recovery-required' ||
           (record.phase === 'completed' && retirement !== undefined && retirement.state !== 'completed')) &&
-        !this.aborts.has(record.id) &&
-        !this.intents.has(record.id)
-          ? ['continue-original']
+        idle
+          ? // A held move can always be given up by its owner, whatever stopped it.
+            record.phase === 'recovery-required' && !record.resourceIntent && this.port.dockerJournal?.abandonOwner
+            ? ['continue-original', 'abandon']
+            : ['continue-original']
           : [];
     }
     // A completion journal write is provisional while final native/audit fences
@@ -557,7 +580,7 @@ export class PlanMoves {
   async abandonAbsentDockerMoves(
     employeeId: string,
     owner: string | undefined,
-    abandonment: NonNullable<PlanMoveRecord['dockerAbandonment']>,
+    abandonment: PlanMoveAbsentAbandonment,
     current: () => void
   ): Promise<readonly string[]> {
     current();
@@ -838,6 +861,107 @@ export class PlanMoves {
     if (record.phase !== 'waiting' || !this.aborts.has(id))
       throw new PlanMoveError('Only a move still waiting for idle can be cancelled');
     this.aborts.get(id)!.abort(new PlanMoveError('Move cancelled by the owner'));
+  }
+
+  /** The signed-in owner gives up one move that is held for recovery. It is
+   * closed as terminally failed, the employee's move lock is released and the
+   * containers the move's own journal named are recorded for the owner's laptop
+   * rebuild. Journal DATA only: nothing is started, stopped or removed, and no
+   * other employee's record is read or written. A move that is still working
+   * (or only waiting for idle, which `cancel` covers) is refused. */
+  async abandonHeldDockerMove(
+    id: string,
+    employeeId: string,
+    owner: string | undefined,
+    authorized: () => void = () => {}
+  ): Promise<PlanMoveRecord> {
+    await this.init();
+    authorized();
+    const record = this.records.get(id);
+    if (!record || record.owner !== owner || record.employeeId !== employeeId)
+      throw new PlanMoveError('Unknown move', 404);
+    // Replaying a finished abandonment answers with the same closed record.
+    if (record.phase === 'failed' && record.dockerAbandonment?.reason === 'owner-abandoned') return this.view(record);
+    const store = this.port.dockerJournal;
+    if (!record.dockerReplacement || record.resourceIntent || !store?.abandonOwner)
+      throw new PlanMoveError(
+        'Only a held laptop plan move can be abandoned here; this move keeps its own recovery action',
+        409
+      );
+    if (this.intents.has(id) || this.aborts.has(id))
+      throw new PlanMoveError(
+        record.phase === 'waiting'
+          ? 'This move is still waiting for the employee to be idle; cancel it instead'
+          : 'This move is still working on a step; wait until it is held for recovery, then abandon it',
+        409
+      );
+    if (record.phase !== 'recovery-required')
+      throw new PlanMoveError(
+        ['completed', 'failed'].includes(record.phase)
+          ? 'This move has already finished; there is nothing to abandon'
+          : 'Only a move that is held for recovery can be abandoned',
+        409
+      );
+    this.intents.add(id);
+    try {
+      const current = () => {
+        authorized();
+        if (this.records.get(id) !== record || !this.intents.has(id) || this.aborts.has(id))
+          throw new PlanMoveError('The held move changed while it was being abandoned; refresh and retry', 409);
+      };
+      let saved: Readonly<PlanMoveRecord>;
+      try {
+        const disk = await store.record(id);
+        current();
+        if (
+          disk.id !== id ||
+          disk.owner !== owner ||
+          disk.employeeId !== employeeId ||
+          disk.requestDigest !== record.requestDigest ||
+          !disk.dockerReplacement
+        )
+          throw new PlanMoveError('The original move journal changed; refresh and retry', 409);
+        // An earlier attempt whose acknowledgement was lost is settled by the durable record.
+        saved =
+          disk.phase === 'failed' && disk.dockerAbandonment?.reason === 'owner-abandoned'
+            ? disk
+            : await store.abandonOwner(id, disk.dockerReplacement, Date.now(), current);
+      } catch (error) {
+        if (error instanceof PlanMoveError) throw error;
+        throw new PlanMoveError(
+          'The move journal did not confirm the abandonment, so the move is still held. Retry abandoning it.',
+          409
+        );
+      }
+      if (saved.phase !== 'failed' || saved.dockerAbandonment?.reason !== 'owner-abandoned')
+        throw new PlanMoveError('The move journal did not record the abandonment; the move is still held', 409);
+      record.phase = saved.phase;
+      record.error = saved.error;
+      record.dockerReplacement = saved.dockerReplacement;
+      record.dockerSettlementBudget = saved.dockerSettlementBudget;
+      record.dockerAbandonment = saved.dockerAbandonment;
+      this.releaseLock(record.employeeId);
+      this.intents.delete(id);
+      return this.view(record);
+    } finally {
+      this.intents.delete(id);
+    }
+  }
+  /** Containers recorded by the owner-abandoned moves of one employee. DATA
+   * only: the rebuild still proves each one by its Engine labels. */
+  async ownerAbandonedContainers(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; containers: PlanMoveOwnerAbandonment['containers'] }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      row.phase === 'failed' &&
+      row.dockerAbandonment?.reason === 'owner-abandoned'
+        ? [{ moveId: row.id, containers: structuredClone(row.dockerAbandonment.containers) }]
+        : []
+    );
   }
 
   async closeRestoredDockerMove(id: string, owner: string | undefined, executor: PlanMoveExecutor) {
