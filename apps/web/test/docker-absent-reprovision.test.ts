@@ -370,7 +370,12 @@ interface Options {
   provider?: 'anthropic' | 'openai';
   mode?: string;
   overrides?: Record<string, string>;
-  moves?: { openMoves: unknown; abandonAbsentDockerMoves: unknown; ownerAbandonedContainers?: unknown } | null;
+  moves?: {
+    openMoves: unknown;
+    abandonAbsentDockerMoves: unknown;
+    ownerAbandonedContainers?: unknown;
+    replacedSourceRecords?: unknown;
+  } | null;
   /** Whether the state service can forget the viewer of a removed laptop. */
   discardView?: boolean;
   /** Whether the office's own copy of the employee's plan account is signed in. */
@@ -1880,6 +1885,34 @@ describe('plan move abandonment', () => {
     );
     expect(await moves.abandonAbsentDockerMoves(employee, owner, abandonment, () => {})).toEqual([]);
   });
+  it('names the laptop record a finished move replaced, and nothing while the move is open', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'absent-move-'));
+    cleanups.push(() => rm(directory, { recursive: true, force: true }));
+    const fx = dockerPlanJournalFixture(),
+      store = new PlanMoveStore(join(directory, 'moves.json'));
+    await store.save([fx.record]);
+    await store.dockerPublish(fx.record.id, fx.state, fx.closed, () => {});
+    const moves = new PlanMoves({
+      load: () => store.load(),
+      save: (records) => store.save(records),
+      dockerJournal: {
+        record: (id: string) => store.dockerRecord(id),
+        abandonAbsent: (...args: Parameters<PlanMoveStore['abandonAbsentDockerMove']>) => store.abandonAbsentDockerMove(...args),
+      },
+    } as unknown as PlanMovePort);
+    const owner = fx.record.owner,
+      employee = fx.record.employeeId;
+    // An open move may still need the laptop it started from.
+    expect(await moves.replacedSourceRecords(employee, owner)).toEqual([]);
+    const abandonment = { version: 1 as const, reason: 'recorded-containers-absent' as const, operationId: retireOperation, at: 7 };
+    await moves.abandonAbsentDockerMoves(employee, owner, abandonment, () => {});
+    const listed = await moves.replacedSourceRecords(employee, owner);
+    expect(listed).toEqual([{ moveId: fx.record.id, record: fx.state.seed.source.record }]);
+    // The digest a plan replacement records for the record it replaced is the digest of exactly this copy.
+    expect(dockerContinuationDigest(listed[0]!.record)).toBe(fx.work.planReplacement.source.continuationDigest);
+    expect(await moves.replacedSourceRecords(employee, 'someone-else')).toEqual([]);
+    expect(await moves.replacedSourceRecords(employeeId, owner)).toEqual([]);
+  });
 });
 
 describe('worker store preparation', () => {
@@ -2561,6 +2594,8 @@ describe('rebuild laptop', () => {
 const movedFromOperation = '44444444-4444-4444-8444-444444444444';
 const laterOperation = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const openaiSeat = 'openai-ed0348c4';
+const orphanCid = 'e1'.repeat(32),
+  strayCid = 'e2'.repeat(32);
 const generation = (operationId: string, provider: 'claude' | 'codex') => ({
   kind: 'generation-env',
   key: provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
@@ -2582,6 +2617,34 @@ const selectPlan = (f: Fixture, id: string, provider: 'anthropic' | 'openai') =>
  */
 async function switchedPlan() {
   const codex = v3Row() as Extract<DockerEmployeeContinuationRecord, { version: 3 }>;
+  // The laptop record that the second plan move replaced. From then on only that move's journal holds it, and
+  // with it the storage holder of the laptop the move started from.
+  const replaced = DockerEmployeeContinuationRecord.parse({
+    ...v2Row('ready'),
+    request: {
+      ...v2Row('ready').request,
+      operationId: movedFromOperation,
+      sessionId: oldSid,
+      sessionGeneration: 8,
+      containerId: 'f'.repeat(64),
+    },
+    original: original('f'.repeat(64), oldSid),
+    destination: { ...original(originalCid, oldSid), imageId: workerImage },
+    tasks: [
+      {
+        role: 'storage-holder',
+        name: 'reverie-boxed-storage-' + 'a'.repeat(64),
+        imageId: helperImage,
+        configurationDigest: 'b'.repeat(64),
+        phase: 'running',
+        containerId: orphanCid,
+        initPid: 42,
+        initStartTicks: '1234',
+      },
+    ],
+  });
+  /** What the plan-move journal answers; a test may replace its content. */
+  const journal: { moveId: string; record: unknown }[] = [{ moveId, record: replaced }];
   const first = DockerEmployeeContinuationRecord.parse({
     ...codex,
     planReplacement: {
@@ -2589,7 +2652,18 @@ async function switchedPlan() {
       account: { ...codex.planReplacement.account, id: openaiSeat, provider: 'openai' },
     },
   });
-  const f = await fixture({ row: first, profile: openaiSeat, provider: 'openai', mode: 'codex' });
+  const f = await fixture({
+    row: first,
+    profile: openaiSeat,
+    provider: 'openai',
+    mode: 'codex',
+    moves: {
+      openMoves: async () => [],
+      abandonAbsentDockerMoves: async () => [],
+      replacedSourceRecords: async (employee: string, owner: string | undefined) =>
+        employee === employeeId && owner === undefined ? structuredClone(journal) : [],
+    },
+  });
   const one = await f.service.reprovision(employeeId, await f.request(), f.authority);
   expect(f.entry()!.account).toEqual(generation(priorOperation, 'codex'));
   const earlier = 'aaaaaaaa-9999-4999-8999-999999999999';
@@ -2603,6 +2677,7 @@ async function switchedPlan() {
       source: {
         ...codex.planReplacement.source,
         binding: { ...codex.planReplacement.source.binding, operationId: movedFromOperation },
+        continuationDigest: dockerContinuationDigest(replaced),
       },
     },
   });
@@ -2627,7 +2702,7 @@ async function switchedPlan() {
     [earlier, 3, undefined],
     [sid, 3, retireOperation],
   ]);
-  return { f, entries, source: two.sourceContainerId!, claude };
+  return { f, entries, source: two.sourceContainerId!, claude, replaced, journal };
 }
 
 describe('an employee who changed plan', () => {
@@ -2763,6 +2838,102 @@ describe('an employee who changed plan', () => {
     // Selecting the plan of that move again is accepted as before.
     await selectPlan(f, seat, 'anthropic');
     expect((await f.service.previewRebuild(employeeId, template, f.authority)).account).toEqual(claudeFolder);
+  });
+  /** The storage holder of the laptop the second plan move started from, still running after that move finished. */
+  const orphan = (f: Fixture, id = orphanCid, operation = movedFromOperation) =>
+    f.engine.container(
+      id,
+      {
+        'reverie.box.storage.employee': employeeId,
+        'reverie.box.storage.box': boxId,
+        'reverie.box.storage.operation': operation,
+      },
+      true,
+      '/reverie-boxed-storage-' + id
+    );
+  it('accounts for the storage holder of the laptop record that a finished plan move replaced', async () => {
+    // No record of the company names that holder: the record it was made for exists in the move's journal only.
+    // It refused every later replacement of the unused source, although its laptop had long been discarded.
+    const { f, entries, source } = await switchedPlan();
+    orphan(f);
+    expect(JSON.stringify(f.snapshot())).not.toContain(orphanCid);
+    expect(JSON.stringify(f.snapshot())).toContain('1'.repeat(64));
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ mode: 'replace-source', discard: [], foreign: [], allowedActions: ['rebuild'] });
+    expect(await f.service.preview(employeeId, template, f.authority)).toMatchObject({
+      mode: 'replace-source',
+      helpers: [orphanCid],
+    });
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f, thirdOperation), f.authority);
+    expect(result).toMatchObject({ operationId: thirdOperation, state: 'ready' });
+    expect(entries()[2]).toMatchObject({ reason: 'source-replaced', source: { phase: 'created' } });
+    // Accounted for, and left exactly where it was: only the unused source was removed.
+    expect(f.engine.removed).toEqual([source]);
+    expect(f.engine.containers.has(orphanCid)).toBe(true);
+    expect((f.engine.containers.get(orphanCid)!.State as Json).Running).toBe(true);
+    // The helpers are part of what the confirmation binds.
+    const again = await f.service.preview(employeeId, template, f.authority);
+    f.engine.containers.delete(orphanCid);
+    expect((await f.service.preview(employeeId, template, f.authority)).scopeDigest).not.toBe(again.scopeDigest);
+  });
+  it('still refuses a holder that nothing accounts for, before it discards anything', async () => {
+    const refused = { code: 'DOCKER_REPROVISION_HELPER_FOREIGN' };
+    const stale = { operationId: thirdOperation, sessionId: sid, sessionGeneration: 9, expectedScopeDigest: '0'.repeat(64), template };
+    const untouched = async (s: Awaited<ReturnType<typeof switchedPlan>>, holder = orphanCid) => {
+      await expect(s.f.service.previewRebuild(employeeId, template, s.f.authority)).rejects.toMatchObject({
+        ...refused,
+        cause: { foreignHelpers: [holder] },
+      });
+      await expect(s.f.service.preview(employeeId, template, s.f.authority)).rejects.toMatchObject(refused);
+      await expect(s.f.service.rebuild(employeeId, stale, s.f.authority)).rejects.toMatchObject(refused);
+      expect(s.f.engine.removed).toEqual([]);
+      expect(s.f.engine.containers.has(s.source)).toBe(true);
+      expect(s.entries()).toHaveLength(2);
+    };
+    // A holder that neither the company nor a plan move recorded.
+    const unknown = await switchedPlan();
+    orphan(unknown.f);
+    orphan(unknown.f, strayCid, laterOperation);
+    await untouched(unknown, strayCid);
+    // A journal that does not hold the record the history names: another record of the same move.
+    const other = await switchedPlan();
+    orphan(other.f);
+    other.journal[0] = {
+      moveId,
+      record: DockerEmployeeContinuationRecord.parse({
+        ...other.replaced,
+        request: { ...other.replaced.request, sessionGeneration: 7 },
+      }),
+    };
+    await untouched(other);
+    // The right record under a move that the history does not name.
+    const move = await switchedPlan();
+    orphan(move.f);
+    move.journal[0] = { moveId: 'another-move', record: move.replaced };
+    await untouched(move);
+    // Nothing in the journal, text that is no record, and a record of another employee.
+    const empty = await switchedPlan();
+    orphan(empty.f);
+    empty.journal.length = 0;
+    await untouched(empty);
+    empty.journal.push({ moveId, record: { tasks: [{ role: 'storage-holder', containerId: orphanCid }] } });
+    await untouched(empty);
+    // An employee whose history retired no plan replacement: the journal on its own accounts for nothing.
+    const live = await fixture({
+      moves: {
+        openMoves: async () => [],
+        abandonAbsentDockerMoves: async () => [],
+        replacedSourceRecords: async () => [{ moveId, record: unknown.replaced }],
+      },
+    });
+    const first = await live.service.reprovision(employeeId, await live.request(), live.authority);
+    orphan(live);
+    await expect(live.service.previewRebuild(employeeId, template, live.authority)).rejects.toMatchObject(refused);
+    expect(live.engine.containers.has(first.sourceContainerId!)).toBe(true);
+    const guidance = dockerRecoveryGuidance(refused.code)!;
+    expect(guidance.allowedActions).toEqual(['rebuild-preview']);
+    expect(guidance.message).toMatch(/^[A-Z].*[.]$/s);
+    expect(guidance.message).not.toMatch(/DOCKER_|undefined/);
   });
 });
 

@@ -5,6 +5,7 @@ import {
   requireDockerPlanDisjointHistoryData,
 } from './docker-plan-disjoint-generation.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
+import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
@@ -988,6 +989,27 @@ export class PlanMoves {
       row.phase === 'failed' &&
       row.dockerAbandonment?.reason === 'owner-abandoned'
         ? [{ moveId: row.id, containers: structuredClone(row.dockerAbandonment.containers) }]
+        : []
+    );
+  }
+
+  /** The laptop record that each finished Docker move of one employee replaced, exactly as that move's seed kept
+   * it. DATA only: this journal proves nothing about a container. The laptop rebuild binds a record to the
+   * employee's own laptop history by its digest before it reads anything from it. A move that is still open, or
+   * whose completion is still being fenced, is not finished. */
+  async replacedSourceRecords(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: DockerEmployeeContinuationRecord }[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) =>
+      row.employeeId === employeeId &&
+      row.owner === owner &&
+      ['completed', 'failed'].includes(row.phase) &&
+      row.dockerReplacement &&
+      !this.aborts.has(row.id) &&
+      !this.intents.has(row.id)
+        ? [{ moveId: row.id, record: structuredClone(row.dockerReplacement.seed.source.record) }]
         : []
     );
   }

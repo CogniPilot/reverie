@@ -169,6 +169,14 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'request again; the laptop then comes up signed in.',
     allowedActions: ['retry'],
   },
+  DOCKER_REPROVISION_HELPER_FOREIGN: {
+    message:
+      'A storage holder container that carries the labels of this employee (foreignHelpers names it) is listed by ' +
+      'none of their laptop records and by none of the laptop records that their finished plan moves replaced, so ' +
+      'the office does not know what it holds open. Nothing was discarded and no laptop was created. Inspect that ' +
+      'container; once it is gone, preview the rebuild again.',
+    allowedActions: ['rebuild-preview'],
+  },
   DOCKER_REPROVISION_ACCOUNT_PLAN_MISMATCH: {
     message:
       'The last plan move of this employee put their sign-in and their conversations in a folder for one provider, ' +

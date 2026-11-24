@@ -108,6 +108,11 @@ export interface DockerAbsentReprovisionPlanMoves {
     abandonment: { version: 1; reason: 'recorded-containers-absent'; operationId: string; at: number },
     current: () => void
   ): Promise<readonly string[]>;
+  /** The laptop record each finished Docker move of this employee replaced, as that move's journal kept it. */
+  replacedSourceRecords?(
+    employeeId: string,
+    owner: string | undefined
+  ): Promise<readonly { moveId: string; record: unknown }[]>;
   /** Containers named by the moves the owner abandoned for this employee. */
   ownerAbandonedContainers?(
     employeeId: string,
@@ -611,8 +616,50 @@ export class DockerAbsentReprovision {
       'label=reverie.box.storage.employee=' + employeeId,
       'label=reverie.box.storage.box=' + this.configuration.boxId,
     ]);
-    if (listed.some((id) => !known.includes(id))) refuse('DOCKER_REPROVISION_HELPER_FOREIGN');
+    const foreign = listed.filter((id) => !known.includes(id)).sort();
+    if (foreign.length) refuse('DOCKER_REPROVISION_HELPER_FOREIGN', { foreignHelpers: foreign });
     return listed.sort();
+  }
+  /** Storage holders of the laptop records that this employee's plan moves replaced.
+   *
+   * A plan move replaces the employee's laptop record with a plan replacement of its own. The replaced record, and
+   * with it the storage holder of the laptop the move started from, then exists in the move's journal only, so no
+   * record of the company names that holder and it stopped every later replacement of an unused source for good.
+   *
+   * One is accounted for only by this chain. A plan replacement that this employee's own history RETIRED names the
+   * record it replaced by its move, its operation and its digest. The journal copy of a finished move that matches
+   * all three is that record, and the holder it lists was made for it. Its laptop was the source of the move, one
+   * of the containers the Engine listed as absent before that plan replacement was retired, so the holder serves
+   * no laptop. Like every known holder it is only accounted for here and left in place. Anything else that carries
+   * the employee's storage labels is still refused. */
+  async #replacedHolders(
+    employeeId: string,
+    owner: string | undefined,
+    moves: DockerAbsentReprovisionPlanMoves
+  ): Promise<string[]> {
+    const retired = (this.company.store.snapshot().retiredDockerEmployeeContinuations ?? []).flatMap((entry) =>
+      entry.employeeId === employeeId && entry.record?.version === 3 && entry.record.employeeId === employeeId
+        ? [entry.record.planReplacement]
+        : []
+    );
+    if (!retired.length || !moves.replacedSourceRecords) return [];
+    const holders: string[] = [];
+    for (const { moveId, record: unchecked } of await moves.replacedSourceRecords(employeeId, owner)) {
+      const parsed = DockerEmployeeContinuationRecord.safeParse(persisted(unchecked));
+      if (!parsed.success || parsed.data.employeeId !== employeeId || parsed.data.owner !== owner) continue;
+      const record = parsed.data,
+        digest = dockerContinuationDigest(record);
+      const named = retired.some(
+        (plan) =>
+          plan.moveId === moveId &&
+          plan.source.binding.operationId === record.request.operationId &&
+          plan.source.continuationDigest === digest
+      );
+      if (!named) continue;
+      for (const task of record.tasks ?? [])
+        if (task.role === 'storage-holder' && 'containerId' in task) holders.push(task.containerId);
+    }
+    return [...new Set(holders)].sort();
   }
   private async replaceScope(
     employeeId: string,
@@ -651,7 +698,9 @@ export class DockerAbsentReprovision {
     const present = listed.filter((id) => id !== sourceId);
     await this.#unusedSource(facts.head);
     current();
-    const helpers = await this.#helpers(employeeId, facts.holders);
+    const replaced = await this.#replacedHolders(employeeId, facts.employee.owner, moves!);
+    current();
+    const helpers = await this.#helpers(employeeId, [...facts.holders, ...replaced]);
     current();
     const image = await this.#image();
     current();
@@ -1047,6 +1096,14 @@ export class DockerAbsentReprovision {
           : proofs[hint.role].find((candidate) => dockerLaptopContainerProven(raw, candidate));
       if (!proof) foreign.push(id);
       else discard.push({ containerId: id, role: hint.role, running: raw.State.Running, proof });
+    }
+    // Replacing an unused source accounts for every storage holder of the employee, but that workflow only runs
+    // after the discard below. A holder that nothing accounts for stops the rebuild here, with everything in place.
+    if ('holders' in first.facts) {
+      const replaced = await this.#replacedHolders(employeeId, employee.owner, moves!);
+      current();
+      await this.#helpers(employeeId, [...first.facts.holders, ...replaced, ...wanted.keys()]);
+      current();
     }
     const laptops = discard.filter((item) => item.role === 'laptop').map((item) => item.containerId);
     const image = await this.#image();

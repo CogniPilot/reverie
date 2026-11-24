@@ -103,9 +103,12 @@ export function registerDockerEmployeeContinuationRoutes(
         // The code stays the contract; a sentence and the next step ride along
         // for the refusals a person or managing agent has to act on.
         const guidance = dockerRecoveryGuidance(error.code),
-          detail = error.cause as { networkCandidates?: unknown; pendingOperationId?: unknown } | undefined,
+          detail = error.cause as
+            | { networkCandidates?: unknown; pendingOperationId?: unknown; foreignHelpers?: unknown }
+            | undefined,
           candidates = detail?.networkCandidates,
-          pending = detail?.pendingOperationId;
+          pending = detail?.pendingOperationId,
+          helpers = detail?.foreignHelpers;
         return reply.code(error.status).send({
           success: false,
           error: {
@@ -115,6 +118,9 @@ export function registerDockerEmployeeContinuationRoutes(
               ? { networkCandidates: candidates }
               : {}),
             ...(typeof pending === 'string' && /^[0-9a-f-]{36}$/.test(pending) ? { pendingOperationId: pending } : {}),
+            ...(Array.isArray(helpers) && helpers.every((id) => typeof id === 'string' && /^[a-f0-9]{64}$/.test(id))
+              ? { foreignHelpers: helpers }
+              : {}),
             // A refusal before anything was recorded names the same two facts a hold does.
             ...dockerReprovisionHoldDetail(error),
           },
