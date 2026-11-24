@@ -518,6 +518,7 @@ let
         test/services/unified-session-service.test.ts test/session-attachment-history.test.ts test/session-auto-name.test.ts \
         test/session-auto-resume.test.ts test/session-awaiting-workers.test.ts test/session-claude-conversation-chain.test.ts \
         test/session-close-fallback.test.ts test/session-config-model.test.ts test/session-display-model.test.ts \
+        test/session-first-run-screens.test.ts \
         test/session-history-index.test.ts test/session-interactive-recovery.test.ts test/session-lineage-lines.test.ts \
         test/session-list-layout.test.ts test/session-listener-wiring.test.ts test/session-manager.test.ts \
         test/session-options-structure.test.ts test/session-order-sse.test.ts test/session-order.test.ts test/session-overview-order.test.ts \

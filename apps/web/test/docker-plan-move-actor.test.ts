@@ -2650,6 +2650,38 @@ it.each(['unattached', 'busy', 'dialog', 'revoked-input'] as const)(
   }
 );
 
+it('names the provider start-up screen its target is waiting at, as description only', async () => {
+  const f = await publishedTargetFixture('published'),
+    journal = await f.loadJournal();
+  // Controlled local UI observations, as above: a live viewer that shows a sign-in
+  // prompt rather than a composer. They are not a native readiness acceptance.
+  vi.spyOn(f.native.target, 'pid', 'get').mockReturnValue(123);
+  vi.spyOn(f.native.target, 'terminalBuffer', 'get').mockReturnValue(' Select login method:');
+  vi.spyOn(f.native.target, 'startupScreen').mockReturnValue({
+    id: 'claude-sign-in',
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+  });
+  const before = journal.read(),
+    write = vi.spyOn(f.native.target, 'writeViaMux');
+  const refused = await f
+    .actor()
+    .verify(f.record, journal)
+    .catch((error: unknown) => error);
+  // Still the retryable not-ready refusal, now saying where the session is.
+  expect(refused).toBeInstanceOf(PlanMoveComposerNotReady);
+  expect((refused as PlanMoveComposerNotReady).waitingAt).toMatchObject({
+    label: "Claude's sign-in screen",
+    kind: 'credential',
+    answering: false,
+  });
+  expect((refused as Error).message).toMatch(/new session is waiting at Claude's sign-in screen/i);
+  expect(journal.read()).toEqual(before);
+  expect(write).not.toHaveBeenCalled();
+  expect(f.launch).not.toHaveBeenCalled();
+});
+
 it('retains the exact input admission across the handoff publication await', async () => {
   const f = await publishedTargetFixture('published'),
     journal = await f.loadJournal(),

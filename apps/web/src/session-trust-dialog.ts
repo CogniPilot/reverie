@@ -41,54 +41,36 @@
  * transcript can quote it (this file does). Matching a trust phrase AND the
  * dialog's confirm affordance is the cheap way to require the actual widget, and
  * the caller adds the real guard by only looking during session startup.
+ *
+ * **This dialog is one of several.** A config directory Claude has never seen
+ * shows a theme chooser and security notes before it and a Bypass Permissions
+ * warning after it. The trust dialog's phrases, its options, the matcher and the
+ * startup window all live in `session-first-run-screens.ts`, which treats it as
+ * one row of a table; this module is the view onto that row, kept so the
+ * dialog's history and its own tests stay in one place.
  */
 
-import { stripAnsi } from './utils/index.js';
+import {
+  WORKSPACE_TRUST_SCREEN,
+  chooseNextKey,
+  hasScreenMarkers,
+  SCREEN_KEY_CONFIRM,
+  SCREEN_KEY_DOWN,
+  SCREEN_KEY_UP,
+  FIRST_RUN_MAX_ATTEMPTS,
+  FIRST_RUN_RETRY_MS,
+  FIRST_RUN_SCAN_BYTES,
+  FIRST_RUN_WINDOW_MS,
+} from './session-first-run-screens.js';
 
-/** Phrases from the question or the "yes" option, whitespace removed, lowercased. */
-const TRUST_PHRASES = [
-  'trustthisfolder', // 2.x: "1. Yes, I trust this folder"
-  'trustthefiles', // older: "Do you trust the files in this folder?"
-  'oneyoutrust', // 2.x question: "a project you created or one you trust?"
-];
-
-/** The dialog's own affordances. Prose that quotes the question will not have these. */
-const CONFIRM_PHRASES = ['entertoconfirm', 'esctocancel', '2.no,exit'];
-
-/** The option that answers yes, compacted. Identical text in both layouts. */
-const YES_OPTION = 'yes,itrustthisfolder';
-
-/** The option that quits Claude. It is the highlighted DEFAULT since 2.1.252. */
-const NO_OPTION = 'no,exit';
-
-/** Ink's selection marker. The only marked row while the dialog is up. */
-const SELECTION_MARK = '❯';
-
-/** A numbered option's `1.` / `2.` prefix, which the 2.1.220 layout put after the marker. */
-const OPTION_NUMBER_PREFIX = /^\d+\./;
+export { compactScreenText } from './session-first-run-screens.js';
 
 /** Move the selection one row down / up. Literal, so `send-keys -l` carries them. */
-export const TRUST_KEY_DOWN = '\x1b[B';
-export const TRUST_KEY_UP = '\x1b[A';
+export const TRUST_KEY_DOWN = SCREEN_KEY_DOWN;
+export const TRUST_KEY_UP = SCREEN_KEY_UP;
 
 /** Confirm the highlighted option. */
-export const TRUST_KEY_CONFIRM = '\r';
-
-/**
- * Charset-select sequences (`ESC ( B`), which tmux emits around styled runs and
- * `stripAnsi` does not cover. Left in, they would land inside a phrase as a
- * literal `(B` and break the match.
- */
-// eslint-disable-next-line no-control-regex
-const CHARSET_SELECT = /\x1b[()][AB0]/g;
-
-/**
- * Normalize a screen or PTY chunk for phrase matching: escapes dropped, every
- * whitespace run removed, lowercased.
- */
-export function compactScreenText(text: string): string {
-  return stripAnsi(text).replace(CHARSET_SELECT, '').replace(/\s+/g, '').toLowerCase();
-}
+export const TRUST_KEY_CONFIRM = SCREEN_KEY_CONFIRM;
 
 /**
  * True when this text is the trust dialog rather than something merely talking
@@ -96,26 +78,7 @@ export function compactScreenText(text: string): string {
  * buffer is append-only, so the dialog stays in its tail long after it is gone.
  */
 export function isTrustDialogScreen(text: string): boolean {
-  const compact = compactScreenText(text);
-  return TRUST_PHRASES.some((p) => compact.includes(p)) && CONFIRM_PHRASES.some((p) => compact.includes(p));
-}
-
-/**
- * Which option the `❯` marker sits on, or null when this text does not say.
- *
- * The LAST marked option wins. A pane capture holds exactly one frame and so
- * exactly one marker, but the direct-PTY fallback reads an append-only buffer
- * where every repaint since launch is still present — there the freshest frame
- * is the one at the end, and an older one must not out-vote it.
- */
-function selectedTrustOption(compact: string): { at: number; option: 'yes' | 'no' } | null {
-  let selected: { at: number; option: 'yes' | 'no' } | null = null;
-  for (let at = compact.indexOf(SELECTION_MARK); at >= 0; at = compact.indexOf(SELECTION_MARK, at + 1)) {
-    const after = compact.slice(at + SELECTION_MARK.length).replace(OPTION_NUMBER_PREFIX, '');
-    if (after.startsWith(YES_OPTION)) selected = { at, option: 'yes' };
-    else if (after.startsWith(NO_OPTION)) selected = { at, option: 'no' };
-  }
-  return selected;
+  return hasScreenMarkers(text, WORKSPACE_TRUST_SCREEN);
 }
 
 /**
@@ -133,44 +96,17 @@ function selectedTrustOption(compact: string): { at: number; option: 'yes' | 'no
  * leave the dialog to the human. The caller's startup window bounds the waiting.
  */
 export function trustDialogNextKey(text: string): string | null {
-  const compact = compactScreenText(text);
-  if (!compact.includes(YES_OPTION)) return null; // no trust option to steer onto
-  const selected = selectedTrustOption(compact);
-  if (!selected) return null; // marker missing, or not on an option we recognize
-  if (selected.option === 'yes') return TRUST_KEY_CONFIRM;
-  // On "No, exit". Which way the trust option lies is read from THIS frame — it
-  // sits below in 2.1.252 and above in the numbered layout before it — so the
-  // order flipping again costs a repaint, not a killed session.
-  return compact.includes(YES_OPTION, selected.at) ? TRUST_KEY_DOWN : TRUST_KEY_UP;
+  return WORKSPACE_TRUST_SCREEN.answer.kind === 'choose' ? chooseNextKey(text, WORKSPACE_TRUST_SCREEN.answer) : null;
 }
 
-/**
- * How long after the pane starts the dialog is still plausible. It renders
- * before the main UI, so this only has to cover a slow first launch; leaving it
- * open forever would let a transcript that quotes the dialog trigger an Enter.
- */
-export const TRUST_DIALOG_WINDOW_MS = 90_000;
+/** How long after the pane starts the dialog is still plausible (see `FirstRunScan`). */
+export const TRUST_DIALOG_WINDOW_MS = FIRST_RUN_WINDOW_MS;
 
 /** Minimum gap between two keystrokes, and between two screen reads. */
-export const TRUST_DIALOG_RETRY_MS = 1500;
+export const TRUST_DIALOG_RETRY_MS = FIRST_RUN_RETRY_MS;
 
-/**
- * Keystrokes before giving up and leaving the dialog to the user. A keystroke
- * can land while Ink is still mounting the widget and be dropped, which is the
- * other half of why sessions got stuck here; retrying costs nothing, but
- * retrying forever would hammer Enter into whatever came next.
- *
- * Six rather than three because answering is no longer one press: the 2.1.252
- * layout needs an arrow onto the trust option and then Enter, each confirmed
- * against a re-read of the screen, so a cap of three left only one dropped
- * keystroke of slack.
- */
-export const TRUST_DIALOG_MAX_ATTEMPTS = 6;
+/** Keystrokes at this dialog before giving up and leaving it to the user. */
+export const TRUST_DIALOG_MAX_ATTEMPTS = FIRST_RUN_MAX_ATTEMPTS;
 
-/**
- * How much of the append-only terminal buffer to read on a direct-PTY session,
- * which has no pane to capture. Small on purpose: the dialog scrolls out of a
- * short tail as soon as Claude repaints its main UI, which is what keeps a
- * fallback retry from firing at an already-answered dialog.
- */
-export const TRUST_DIALOG_SCAN_BYTES = 4000;
+/** How much of the append-only terminal buffer a direct-PTY session reads. */
+export const TRUST_DIALOG_SCAN_BYTES = FIRST_RUN_SCAN_BYTES;

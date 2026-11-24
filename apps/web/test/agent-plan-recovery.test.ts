@@ -381,6 +381,22 @@ describe('strict runtime composer readiness and bounded preflight', () => {
     await expect(h.capture()!.executor.verifyRecovery!(h.record)).rejects.toBeInstanceOf(PlanMoveComposerNotReady);
     expect(h.runtime.cleanup).not.toHaveBeenCalled();
   });
+  it.each(['plain', 'dialog'] as const)('names the provider screen a candidate is waiting at (%s), still as a retryable not-ready', async kind => {
+    const h = claudeFixture();
+    (h.employee as { name?: string }).name = 'Stan';
+    h.runtime.mux.capturePaneText.mockReturnValue([
+      ' Select login method:',
+      ' ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise',
+      '   2. Anthropic Console account · API usage billing',
+    ].join('\n'));
+    if (kind === 'dialog') (h.session as { paneDialog?: string }).paneDialog = 'Enter to confirm';
+    const error = await h.capture()!.executor.verifyRecovery!(h.record).catch((refused: unknown) => refused);
+    expect(error).toBeInstanceOf(PlanMoveComposerNotReady);
+    expect((error as PlanMoveComposerNotReady).waitingAt)
+      .toMatchObject({ who: "Stan's new session", label: "Claude's sign-in screen", kind: 'credential', answering: false });
+    expect((error as Error).message).toContain("Stan's new session is waiting at Claude's sign-in screen");
+    expect(h.runtime.cleanup).not.toHaveBeenCalled();
+  });
   it.each(['capability', 'capture-unknown', 'account', 'source-live'] as const)('immediately refuses %s rather than polling an unknown/permanent failure', async kind => {
     const h = fixture(), j = await journal(h), queue = new OwnPlanRecoveries(j.moves);
     const resolve = vi.spyOn(j.moves, 'resolve');

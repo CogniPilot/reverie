@@ -164,12 +164,15 @@ describe('Session trust-dialog auto-accept', () => {
       mux,
       muxSession: registry.subject,
     } as ConstructorParameters<typeof Session>[0]);
+    // The dialog is one row of the first-run screen table now, answered by the
+    // same scan as the screens around it (session-first-run-screens.ts). A launch
+    // arms that scan; the tests arm it directly.
     const internals = session as unknown as {
-      _maybeAcceptTrustDialog(): void;
-      _interactiveStartedAt: number;
+      _answerFirstRunScreen(): void;
+      _armFirstRunScan(): void;
     };
-    internals._interactiveStartedAt = Date.now();
-    return { session, writes, tick: () => internals._maybeAcceptTrustDialog() };
+    internals._armFirstRunScan();
+    return { session, writes, tick: () => internals._answerFirstRunScreen() };
   }
 
   it('presses Enter when the dialog is on screen', () => {
@@ -235,10 +238,14 @@ describe('Session trust-dialog auto-accept', () => {
   it('never answers a dialog-looking screen outside the startup window', () => {
     vi.useFakeTimers();
     // A live agent can print this text hours in; only a launching pane can be
-    // showing the real widget.
-    const { writes, tick } = sessionShowing(() => RENDERED_DIALOG);
+    // showing the real widget. The scan reads the pane by itself while its window
+    // is open, so the pane shows nothing until the window has passed.
+    let screen = '';
+    const { writes, tick } = sessionShowing(() => screen);
     vi.advanceTimersByTime(10 * 60_000);
+    screen = RENDERED_DIALOG;
     tick();
+    vi.advanceTimersByTime(10_000);
     expect(writes).toEqual([]);
   });
 

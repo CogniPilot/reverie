@@ -11,7 +11,9 @@ import {
   type PlanMoveExecutor,
   type PlanMoveInput,
   type PlanMoveRecord,
+  type PlanMoveWaitingAt,
 } from './plan-move.js';
+import { describeStartupScreen, nameProviderScreen, startupScreenStatus } from './session-first-run-screens.js';
 import { planMoveHarness, planMoveLaunch, runtimeRefreshDigest } from './plan-move-launch.js';
 import { composerReadyMark } from './cli-agent.js';
 import { claudeComposerIsReady } from './plan-move-composer.js';
@@ -152,6 +154,20 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
   };
   const binding = (employeeId: string) =>
     runtime.company.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId;
+  /** Description only: the provider start-up screen a pane capture of a candidate short of its composer shows, if the
+   * office can name one. It is read from a capture the caller already took; it is no readiness or authority evidence. */
+  const waitingAt = (
+    mode: string,
+    text: unknown,
+    employee: (row: { id: string; sessionId?: string }) => boolean
+  ): PlanMoveWaitingAt | undefined => {
+    if (typeof text !== 'string') return undefined;
+    const reading = nameProviderScreen(text, { composerMark: composerReadyMark(mode) });
+    if (!reading) return undefined;
+    const name = runtime.company.view(owner).employees.find(employee)?.name;
+    // This path reads the pane itself and does not ask the session whether its scan is still running.
+    return { who: name ? `${name}'s new session` : 'The new session', ...startupScreenStatus(reading, false) };
+  };
   const policy = (current: ReturnType<typeof session>) => ({
     claudeMode: current.claudeMode,
     allowedTools: current.allowedTools,
@@ -250,10 +266,12 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
       assertAlive(record.newSession!);
       if (!mark || typeof runtime.mux.capturePaneText !== 'function')
         throw new PlanMoveError('This runtime does not support verified composer observation');
-      if (candidate.isWorking || candidate.paneDialog) throw new PlanMoveComposerNotReady();
+      if (candidate.isWorking) throw new PlanMoveComposerNotReady();
       const text = runtime.mux.capturePaneText(candidate.muxName!);
+      const named = () => waitingAt(candidate.mode, text, (row) => row.id === record.employeeId);
+      if (candidate.paneDialog) throw new PlanMoveComposerNotReady(named());
       if (typeof text !== 'string') throw new PlanMoveError('The candidate composer observation is unavailable');
-      if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady();
+      if (!nativeComposerReady(candidate.mode, text, mark)) throw new PlanMoveComposerNotReady(named());
     };
     fence();
     return fence;
@@ -542,8 +560,15 @@ export function planMoveExecutor(runtime: PlanMoveRuntime, owner?: string): Plan
             nativeComposerReady(current.mode, text, mark)
           )
             break;
-          if (Date.now() >= deadline)
-            throw new PlanMoveError('The replacement did not reach its composer before the deadline');
+          if (Date.now() >= deadline) {
+            // Say where it stopped when that is a screen the office can name (a sign-in prompt, a first-run screen).
+            const named = waitingAt(current.mode, text, (row) => row.sessionId === id);
+            throw new PlanMoveError(
+              named
+                ? describeStartupScreen(named.who, named)
+                : 'The replacement did not reach its composer before the deadline'
+            );
+          }
           await delay(500);
         }
       } else {

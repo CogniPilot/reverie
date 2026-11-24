@@ -11,6 +11,7 @@ import { assertResourceOperation, type ResourceOwnerBinding } from './resource-o
 import { ResourceHistoricalSettlement } from './resource-native-client.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { reserveDockerPlanMove, runDockerPlanMove } from './plan-move-docker-runner.js';
+import { describeStartupScreen, type StartupScreenStatus } from './session-first-run-screens.js';
 
 export type PlanMovePhase =
   | 'waiting'
@@ -228,14 +229,41 @@ export class PlanMoveAccountSnapshotChanged extends PlanMoveError {
 /** Deny-only: an uncertain operation never authorizes rollback, cleanup or another launch. */
 export class PlanMoveUnconfirmed extends PlanMoveError {}
 
+/** What a candidate that is short of its composer was showing instead, when that is a screen the office can name. */
+export interface PlanMoveWaitingAt extends Pick<StartupScreenStatus, 'label' | 'kind' | 'answering'> {
+  /** The owner-facing name of the session, e.g. "Stan's new session". */
+  readonly who: string;
+}
+
 /** Only a supported, currently observed composer that is not yet ready is retryable.
  * Unknown capability, account, binding and source-cleanup failures remain ordinary refusals.
+ *
+ * `waitingAt` is description only. It names the provider start-up screen the candidate was read on (a first-run screen
+ * the office is answering, or a sign-in it never answers), so a wait that runs out says where the session is stuck
+ * instead of only that it is not at its composer. It grants nothing and never makes a refusal retryable.
  */
 export class PlanMoveComposerNotReady extends PlanMoveError {
-  constructor() {
-    super('The existing candidate is not at its verified composer');
+  constructor(readonly waitingAt?: Readonly<PlanMoveWaitingAt>) {
+    super(waitingAt ? describeStartupScreen(waitingAt.who, waitingAt) : 'The existing candidate is not at its verified composer');
     this.name = 'PlanMoveComposerNotReady';
   }
+}
+
+/** How long a candidate's composer is waited for before the move asks for the owner. */
+export const PLAN_MOVE_COMPOSER_WAIT_MS = 120_000;
+/** How much longer it is waited for while the office is verifiably still answering a first-run screen. */
+export const PLAN_MOVE_FIRST_RUN_GRACE_MS = 60_000;
+
+/**
+ * Whether a composer that was not ready may be read again, `elapsedMs` into the wait.
+ *
+ * A candidate on a first-run screen the office is still answering is still starting, not failed: it gets a bounded
+ * grace past the ordinary deadline. Anything else, a sign-in prompt and a screen the office gave up on included, ends
+ * at the ordinary deadline, and the error that ends it names the screen.
+ */
+export function planMoveComposerWaitContinues(error: PlanMoveComposerNotReady, elapsedMs: number): boolean {
+  if (elapsedMs < PLAN_MOVE_COMPOSER_WAIT_MS) return true;
+  return error.waitingAt?.answering === true && elapsedMs < PLAN_MOVE_COMPOSER_WAIT_MS + PLAN_MOVE_FIRST_RUN_GRACE_MS;
 }
 
 export class PlanMoves {

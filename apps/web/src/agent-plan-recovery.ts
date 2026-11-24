@@ -98,7 +98,11 @@ export class OwnPlanRecoveries {
     const deadlineAt = performance.now() + 5 * 60_000;
     // One deadline includes the initial cached-idle wait AND native readiness.
     // It never resets for another probe, duplicate enqueue, or core verification.
+    // Description only: the provider start-up screen the last read found the candidate on, so a wait that runs out
+    // says where it stopped (a sign-in prompt, a first-run screen) as well as that it did.
+    let waitingAt: string | undefined;
     const expire = () => abort.abort(new PlanMoveError(
+      (waitingAt ? `${waitingAt} ` : '') +
       'Verified composer readiness timed out after five minutes; the existing move remains held'
     ));
     const deadline = setTimeout(expire, 5 * 60_000);
@@ -132,6 +136,7 @@ export class OwnPlanRecoveries {
           } catch (error) {
             assertWaiting();
             if (!(error instanceof PlanMoveComposerNotReady)) throw error;
+            waitingAt = error.waitingAt ? error.message : undefined;
           }
           await delay(500, undefined, { signal: abort.signal });
         }

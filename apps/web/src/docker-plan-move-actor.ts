@@ -45,6 +45,7 @@ import {
   PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
+  type PlanMoveWaitingAt,
   type PlanMoveInput,
   type PlanMoveRecord,
   type PlanMoveSnapshot,
@@ -1281,6 +1282,14 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
       templateDigest: state.seed.target.templateDigest,
     });
   }
+  /** Description only, for a target read short of its composer: the provider start-up screen it shows, if the office
+   * can name one. One read-only pane capture; it types nothing and is no readiness or authority evidence. */
+  #waitingAt(record: Readonly<PlanMoveRecord>, session: Session): PlanMoveWaitingAt | undefined {
+    const screen = session.startupScreen();
+    if (!screen) return undefined;
+    const name = this.#d.company.store.view().employees.find((e) => e.id === record.employeeId)?.name;
+    return { who: name ? `${name}'s new session` : 'The new session', ...screen };
+  }
   #composerReady(session: Session, mark: string): boolean {
     if (recoveryComposerReady(session, mark)) return true;
     if (session.mode !== 'codex' || session.isWorking || session.paneDialog || !session.muxName) return false;
@@ -1425,7 +1434,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     const mark = getCli(session.mode)?.capabilities.composerReadyMark;
     if (!mark) throw new PlanMoveError('The target provider has no protected composer', 409);
     if (!state.handoff && (!this.#composerReady(session, mark) || session.pid === null))
-      throw new PlanMoveComposerNotReady();
+      throw new PlanMoveComposerNotReady(this.#waitingAt(record, session));
     await this.#accountProbe(row, () => {
       journal.current();
       current();

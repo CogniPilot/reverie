@@ -9,6 +9,7 @@ import {
   PlanMoveAccountSnapshotChanged,
   PlanMoveComposerNotReady,
   PlanMoveError,
+  planMoveComposerWaitContinues,
   type PlanMoveInput,
   type PlanMoveRecord,
   type PlanMoveExecutor,
@@ -145,8 +146,11 @@ export async function runDockerPlanMove(
   };
   // Only a genuine, positively observed pending composer permits another read.
   // Unknown native outcomes never retry STOP, CREATE, START or the work handoff.
+  // A candidate the office is still walking through its provider's first-run
+  // screens is starting, not failed: it gets a bounded grace, and the refusal
+  // that finally ends a wait names the screen it stopped on.
   const readyRead = async <T>(read: () => Promise<T>): Promise<T> => {
-    const deadline = performance.now() + 120_000;
+    const started = performance.now();
     for (;;) {
       journal.current();
       flight.signal.throwIfAborted();
@@ -156,7 +160,11 @@ export async function runDockerPlanMove(
         flight.signal.throwIfAborted();
         return result;
       } catch (error) {
-        if (!(error instanceof PlanMoveComposerNotReady) || performance.now() >= deadline) throw error;
+        if (
+          !(error instanceof PlanMoveComposerNotReady) ||
+          !planMoveComposerWaitContinues(error, performance.now() - started)
+        )
+          throw error;
         journal.current();
         await delay(1000, undefined, { signal: flight.signal });
       }
