@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
 
-const codexVersion = '0.169.0', claudeVersion = '2.1.326';
+const codexVersion = '0.172.0', claudeVersion = '2.1.326';
 const claudePrefix = root => join(root, 'data/tools/claude', claudeVersion);
 const codexPrefix = root => join(root, 'data/tools/codex', codexVersion);
 
@@ -225,7 +225,7 @@ test('reviewed Codex and Claude upgrades preserve accounts, workspace state, and
     assert.equal(f.run({ REVERIE_INSTALL_CLIS: 'codex claude' }).status, 0);
     assert.deepEqual(f.calls().slice(3).map(args => args.at(-1)), [`@anthropic-ai/claude-code@${claudeVersion}`, `@openai/codex@${codexVersion}`]);
     for (const [id, version, integrity] of [
-      ['codex', codexVersion, 'sha512-KhzYlkKPxoNssR8CEm45IjqnFWn7UtlF4CiD3tOJPea51xBs7MaHy0UQG9GSbCqk6Lrjn5QdJDV0QD1/FgWlGw=='],
+      ['codex', codexVersion, 'sha512-yHf/6wbw4Zvha2M2ylDhDrU9FgfKLYgV6xSzSjlz3gxQNsiVLkXo+fPGwBqvP0A5geLtZs9wAbq+1v7+ZVWJ0g=='],
       ['claude', claudeVersion, 'sha512-F7OqxXKogQYUs+RN1903IWlXGuxn8iwAykx+umRbDKvoBeK0Xm6cdgQx9auu5dtsB+DczN58/EFrlaU8pLfgJg=='],
     ]) {
       const status = JSON.parse(readFileSync(join(id === 'codex' ? codexPrefix(f.root) : claudePrefix(f.root), `.install-${id}.json`), 'utf8'));
