@@ -1,6 +1,6 @@
 //! Group CPU ceiling for one declared pool. The only kernel write is cpu.max,
 //! so every running member keeps its process, leaf limits and identity.
-use super::{encoded, observation, writable, write_checked};
+use super::{POOL, encoded, observation, writable, write_checked};
 use crate::{
     args::{CpuCeiling, PoolCpuMaxWrite},
     data::{self, Resources},
@@ -121,13 +121,13 @@ impl Ceiling for ScopedCeiling<'_> {
 pub(super) fn configure(files: &mut Files, input: &PoolCpuMaxWrite) -> Result<String> {
     let policy = Policy::new(input)?;
     let pool = &input.pool;
-    let scope = Scope::capture(files, &pool.common)?;
+    let scope = Scope::capture(files, &pool.common, None)?;
     let expected = (pool.parent_dev, pool.parent_ino);
     need(
         files.identity(scope.parent)? == expected,
         "BOXED_RESOURCE_PARENT_CHANGED",
     )?;
-    let index = writable(files, "/run/reverie-box-pool", expected)?;
+    let index = writable(files, &POOL, expected)?;
     apply(
         &mut ScopedCeiling {
             files,
