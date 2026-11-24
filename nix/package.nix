@@ -94,6 +94,7 @@ let
         test/docker-resource-probe-retry.test.ts \
         test/docker-continuation-task.test.ts \
         test/docker-resource-helper-failure.test.ts \
+        test/docker-resource-leaf-retry.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
         test/docker-resource-revisions.test.ts \

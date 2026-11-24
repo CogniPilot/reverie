@@ -12,6 +12,7 @@ import {
 } from '../../src/docker-continuation-task.js';
 import type { DockerEmployeeContinuationRecord } from '../../src/docker-employee-continuation-data.js';
 import type { DockerEngineCommand } from '../../src/docker-engine-command.js';
+import { classifyDockerResourceHelperFailure } from '../../src/docker-resource-helper-failure.js';
 export const helper = 'sha256:' + 'a'.repeat(64),
   workerId = 'd'.repeat(64);
 export const deployment = 'synthetic-box';
@@ -30,8 +31,17 @@ export const policy = {
     allowedCpus: [0, 1],
   },
 };
-export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisionStore, writeImage?: string) {
+export function fixture(
+  boxId = 'b'.repeat(64),
+  revisions?: DockerResourceRevisionStore,
+  writeImage?: string,
+  leafWriterImage?: string
+) {
   let retained: DockerContinuationTask[] = [];
+  /** What each failed helper printed, and the lines the next leaf writers will print. */
+  const stderr = new Map<string, string>(),
+    leafFailures: string[] = [];
+  let members: string[] = [];
   let parentInode = '2',
     anchorBirth = '10';
   const parent = `/reverie.slice/reverie-box.slice/reverie-box-${boxId}.slice`;
@@ -162,7 +172,9 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       configurations.push({ name, config: structuredClone(config) });
       creates.push(role);
       names.push(name);
-      const id = String(creates.length).repeat(64);
+      // One repeated digit for the first nine, then a distinct padded number.
+      const id =
+        creates.length < 10 ? String(creates.length).repeat(64) : ('e' + String(creates.length)).padEnd(64, '0');
       const binds = (config.HostConfig as { Binds: string[] }).Binds;
       containers.set(id, {
         Id: id,
@@ -262,6 +274,7 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
           raw.State = { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 300 };
           throw Error('lost live start reply');
         }
+        const printed = role === 'leaf-helper' ? leafFailures.shift() : undefined;
         raw.State = {
           Status: role === 'anchor' ? 'running' : 'exited',
           Running: role === 'anchor',
@@ -269,8 +282,19 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
           Restarting: false,
           Dead: false,
           Pid: role === 'anchor' ? 100 : 0,
-          ExitCode: role === failedRole ? 1 : 0,
+          ExitCode: role === failedRole || printed !== undefined ? 1 : 0,
         };
+        if (printed !== undefined) {
+          // A helper that failed prints its reason and no result, and may
+          // have written the first limit before it stopped.
+          stderr.set(id, printed);
+          logs.set(id, '');
+          if (printed.includes('confirmed=memory.high')) {
+            const args = (raw.Config as { Cmd: string[] }).Cmd;
+            high = Number(args[args.indexOf('--memory-high') + 1]);
+          }
+          return id;
+        }
         if (role === 'pool-helper') configured = true;
         if (role === 'leaf-helper') {
           const args = (raw.Config as { Cmd: string[] }).Cmd;
@@ -302,13 +326,16 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
       if (args[0] === 'exec') return JSON.stringify(observation(args[1]!, args.includes('probe-worker')));
       throw Error('Unexpected fixed Docker command: ' + args.join(' '));
     },
+    // The real allow-list decides; a helper that printed nothing is unknown.
+    helperFailure: async (id) => classifyDockerResourceHelperFailure(stderr.get(id)),
   };
   const configuration = {
     boxId,
     deployment,
     helperImageId: helper,
     memoryHighHelperImageId: writeImage,
-    selectedWorkerContainerIds: () => [],
+    leafWriterHelperImageId: leafWriterImage,
+    selectedWorkerContainerIds: () => members,
     retainedPoolConfigurationTasks: () => retained,
   };
   const controller = new DockerContainedResources(command, journal, configuration, revisions);
@@ -350,6 +377,28 @@ export function fixture(boxId = 'b'.repeat(64), revisions?: DockerResourceRevisi
     },
     ready: () => {
       row = { ...row, phase: 'ready' };
+    },
+    resourcesIssued: () => {
+      row = { ...row, phase: 'resources-issued' };
+    },
+    /** The next leaf writers exit 1 having printed these lines, in order. */
+    failLeafWriters: (...lines: string[]) => {
+      leafFailures.push(...lines);
+    },
+    stderr,
+    /** Another running laptop of the same box, as every later scope sees it. */
+    addMember: (id: string, pid: number) => {
+      containers.set(id, {
+        Id: id,
+        Image: row.workerImage.imageId,
+        Config: { Labels: { 'reverie.boxed.instance': deployment } },
+        HostConfig: { PidMode: '' },
+        State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: pid },
+      });
+      members = [...members, id];
+    },
+    changeLeafWriterPin: (image: string | undefined) => {
+      configuration.leafWriterHelperImageId = image;
     },
     setHigh: (value: number) => {
       high = value;

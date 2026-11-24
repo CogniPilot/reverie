@@ -597,11 +597,19 @@ describe('fixed Docker resource orchestration', () => {
         await f.setPool();
         f.makeWorker();
         f.failHelper(role);
-        await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow('HELPER_FAILED');
-        await expect(f.controller.read(f.row())).rejects.toThrow('UNACKNOWLEDGED');
+        // The leaf writer's failure is recorded as terminal. Its class is
+        // unknown here, so it is never rerun, and the matching kernel values
+        // are still not reported as the policy in force.
+        await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow('HELPER_FAILURE_UNKNOWN');
+        expect(await f.controller.read(f.row())).toBeNull();
+        const starts = [...f.starts];
+        await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow('HELPER_FAILURE_UNKNOWN');
+        expect(f.starts).toEqual(starts);
       }
       const starts = [...f.starts];
-      expect(f.tasks.get(role as DockerContinuationTaskRole)?.phase).toBe('start-issued');
+      expect(f.tasks.get(role as DockerContinuationTaskRole)?.phase).toBe(
+        role === 'leaf-helper' ? 'failed' : 'start-issued'
+      );
       expect(f.starts).toEqual(starts);
     }
   );

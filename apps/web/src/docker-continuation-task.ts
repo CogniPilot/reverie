@@ -88,6 +88,26 @@ export interface DockerContinuationTaskJournal {
 export function dockerTaskAttempt(task: Pick<DockerContinuationTask, 'attempt'>): number {
   return task.attempt ?? 1;
 }
+/** The fields a task keeps through every phase of one attempt. */
+export function dockerTaskIdentity(task: DockerContinuationTask) {
+  return {
+    role: task.role,
+    name: task.name,
+    imageId: task.imageId,
+    configurationDigest: task.configurationDigest,
+    ...(task.attempt === undefined ? {} : { attempt: task.attempt }),
+  };
+}
+/** The hold a terminally failed leaf writer leaves its operation in until it
+ * is rerun or the laptop is rebuilt. Only the first of these may be rerun. */
+export function dockerFailedWriterHold(task: Extract<DockerContinuationTask, { phase: 'failed' }>): string {
+  if (task.failure === 'refused') return 'DOCKER_RESOURCE_HELPER_REFUSED';
+  if (task.failure === 'close-unconfirmed') return 'DOCKER_RESOURCE_HELPER_CLOSE_UNCONFIRMED';
+  if (task.failure === 'unknown') return 'DOCKER_RESOURCE_HELPER_FAILURE_UNKNOWN';
+  return dockerTaskAttempt(task) >= DOCKER_TASK_ATTEMPT_LIMIT
+    ? 'DOCKER_RESOURCE_HELPER_ATTEMPTS_SPENT'
+    : 'DOCKER_RESOURCE_HELPER_RETRY_PENDING';
+}
 export function allowedDockerTaskTransition(
   before: DockerContinuationTask | undefined,
   next: DockerContinuationTask
