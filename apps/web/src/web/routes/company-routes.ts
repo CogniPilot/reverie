@@ -1,4 +1,5 @@
 import type {DockerExistingViewRestoration} from '../../docker-employee-runtime.js';
+import type { SupervisorReport } from '../../employee-supervisor.js';
 import { NO_OWNER, type OwnerVerifier, type ServiceVerifier } from '../../owner-auth/marks.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -76,6 +77,8 @@ export function registerCompanyRoutes(
     /** Explicit configured backend capability, never readiness proof. */
     boxedRuntime?: boolean;
     boxedViewRestorations?: () => readonly DockerExistingViewRestoration[];
+    /** The office supervisor's latest reading of each employee of one owner. DATA only. */
+    employeeSupervisor?: (owner: string | undefined) => readonly SupervisorReport[];
     refreshHealth?: () => Promise<void>;
     startEmployee?: (id: string, req: FastifyRequest, reply: import('fastify').FastifyReply, current: () => boolean) => Promise<unknown>;
   } = {}
@@ -210,13 +213,22 @@ export function registerCompanyRoutes(
 
   app.get('/api/company', async (req) => {
     const view = service.view(ownerFor(req));
+    // What the supervisor found, did last and will do next, for the binding the employee has right now.
+    const supervised = new Map((authority.employeeSupervisor?.(ownerFor(req)) ?? []).map((row) => [row.employeeId, row]));
+    const withSupervisor = <T extends { id: string; sessionId: string; sessionGeneration: number }>(employee: T) => {
+      const report = supervised.get(employee.id);
+      if (!report || report.sessionId !== employee.sessionId || report.sessionGeneration !== employee.sessionGeneration)
+        return employee;
+      const { employeeId: _id, sessionId: _session, sessionGeneration: _generation, ...supervisor } = report;
+      return { ...employee, supervisor };
+    };
     return {
       success: true,
       data: { ...view, boxedRuntime:authority.boxedRuntime===true,
         boxedViewRestorations: (authority.boxedViewRestorations?.() ?? []).filter(result =>
           view.employees.some(employee => employee.id === result.employeeId && employee.sessionId === result.sessionId && employee.sessionGeneration === result.sessionGeneration)),
         employees: view.employees.map(employee =>
-        presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId)), canManage: verifiedOwner(req),
+        withSupervisor(presentEmployee(employee, verifiedOwner(req) || caller(req) === employee.sessionId))), canManage: verifiedOwner(req),
         canManageAttendance: verifiedOwner(req) || view.employees.some(e=>e.sessionId===caller(req) && e.permissions.manageOffice===true),
         // Only the verified owner learns that laptop memory can be changed here; the routes recheck the owner themselves.
         ...(verifiedOwner(req) && authority.resourceReplacement === true ? { resourceReplacement: true } : {}) },

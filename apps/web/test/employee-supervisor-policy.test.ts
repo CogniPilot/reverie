@@ -6,7 +6,9 @@ import {
   assessEmployee,
   classifyEmployee,
   classifyMoveError,
+  issueSupervisorAttempt,
   recordSupervisorAttempt,
+  settleSupervisorAttempt,
   rollSupervisorHistory,
   supervisorCodeKind,
   type SupervisorAction,
@@ -147,6 +149,11 @@ describe('employee supervisor: classification', () => {
     ],
     ['a stopped laptop when no laptop runs', held('DOCKER_CONTINUATION_DESTINATION_STOPPED'), 'needs-owner', /No other laptop of this office is running either/],
     ['an agent that is not running', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), 'provider-exited'],
+    [
+      'an attached employee whose record was never moved on to ready',
+      observed({ laptop: { record: { phase: 'provider-issued', version: 2, operationId: 'op-1' } } }),
+      'healthy',
+    ],
     [
       'an agent the health reader calls dead',
       observed({ session: { providerHealth: 'dead' } }),
@@ -611,6 +618,50 @@ describe('employee supervisor: history', () => {
     expect(refused.rebuilds).toEqual([]);
     expect(refused.attempts['rebuild-laptop']).toEqual({ count: 1, lastAt: 10 });
     expect(refused.lastAction).toEqual({ action: 'rebuild-laptop', at: 10, outcome: 'refused', detail: 'DOCKER_REPROVISION_BUSY' });
+  });
+
+  it('spends an attempt when it is issued and gives it back only when nothing was tried', () => {
+    const issued = issueSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'rebuild-laptop', 10);
+    expect(issued).toMatchObject({ attempts: { 'rebuild-laptop': { count: 1, lastAt: 10 } }, lastAction: { outcome: 'issued' }, rebuilds: [] });
+    expect(settleSupervisorAttempt(issued, 'done').rebuilds).toEqual([10]);
+    expect(settleSupervisorAttempt(issued, 'failed', 'EPIPE').attempts['rebuild-laptop']).toEqual({ count: 1, lastAt: 10 });
+    const busy = settleSupervisorAttempt(issued, 'busy', 'DOCKER_REPROVISION_BUSY');
+    expect(busy.attempts['rebuild-laptop']).toEqual({ count: 0, lastAt: 10 });
+    expect(busy.rebuilds).toEqual([]);
+    // Settling twice, or settling nothing, changes nothing.
+    expect(settleSupervisorAttempt(busy, 'done')).toBe(busy);
+    expect(settleSupervisorAttempt(EMPTY_SUPERVISOR_HISTORY, 'done')).toBe(EMPTY_SUPERVISOR_HISTORY);
+  });
+});
+
+describe('employee supervisor: laptops the office cannot judge alone', () => {
+  it('finishes a rebuild that was recorded and not finished', () => {
+    const pending = observed({ laptop: { record: null, bound: false, restoration: undefined, rebuildPending: true } });
+    const seen = classifyEmployee(pending);
+    expect(seen).toMatchObject({ condition: 'held-needs-rebuild', code: 'rebuild-pending' });
+    expect(assessEmployee(pending, since(0, seen.fingerprint), ON, 5 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: ['no-agent-running'],
+    });
+  });
+
+  it('leaves a stopped laptop to the owner while no other laptop runs, and rebuilds it once one does', () => {
+    const stopped = held('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    const alone = assessEmployee(stopped, since(0, 'x'), ON, 60 * MINUTE);
+    expect(alone).toMatchObject({ condition: 'needs-owner', next: { action: null } });
+    expect(alone.needsHuman).toMatch(/recover the shared pool first.*cold-preview/);
+    const withOthers = { ...stopped, laptop: { ...stopped.laptop, poolAlive: true, provider: 'no-laptop' as const } };
+    expect(assessEmployee(withOthers, since(0, 'x'), ON, 60 * MINUTE).next.action).toBe('rebuild-laptop');
+  });
+
+  it('asks for a person once a laptop has been unreadable for fifteen minutes', () => {
+    const failed = held('DOCKER_RESOURCE_HELPER_FAILED');
+    const unread = { ...failed, laptop: { ...failed.laptop, provider: 'unknown' as const } };
+    const history = since(MINUTE, classifyEmployee(failed).fingerprint);
+    expect(assessEmployee(unread, history, ON, 15 * MINUTE).needsHuman).toBeUndefined();
+    const stuck = assessEmployee(unread, history, ON, 16 * MINUTE);
+    expect(stuck.next.action).toBeNull();
+    expect(stuck.needsHuman).toMatch(/cannot read what is running in this laptop/);
   });
 });
 

@@ -13,6 +13,7 @@ import {
   type DockerAbsentReprovisionSeatAccounts,
 } from './docker-absent-reprovision.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
+import { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
@@ -535,6 +536,21 @@ export class DockerEmployeeRuntime {
         return snapshot;
       },
     };
+  }
+  /** Server composition only: the office supervisor's laptop reads and steps. Each one is a call to the same
+   * service the owner's route for that step calls, under the authority `DockerSupervisorLaptops` documents. */
+  supervisorLaptops(): DockerSupervisorLaptops | undefined {
+    const a = this.#attached;
+    if (!a) return undefined;
+    return new DockerSupervisorLaptops({
+      company: a.company,
+      store: a.store,
+      engine: a.engine,
+      service: a.service,
+      absent: a.absent,
+      sessions: a.ctx.sessions,
+      current: () => this.current() && this.#attached === a,
+    });
   }
   registerRoutes(
     app: FastifyInstance,

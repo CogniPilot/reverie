@@ -673,8 +673,43 @@ const CA_RECOVERY_CHECKS = {
     'Terminal not reconnected',
   ],
 };
+// What the office supervisor found, as a line short enough for a company card. Its full sentence goes to tooltips.
+const CA_SUPERVISOR_SHORT = {
+  starting: 'Starting',
+  'waiting-first-run-screen': 'Starting',
+  'needs-sign-in': 'Needs a sign-in',
+  'needs-owner': 'Needs you',
+  'provider-exited': 'Agent exited; repairing',
+  'viewer-lost': 'Reconnecting terminal',
+  'held-retryable': 'Laptop set-up held; retrying',
+  'held-needs-rebuild': 'Laptop held; rebuilding',
+  'laptop-not-started': 'Starting laptop',
+  'move-in-progress': 'Moving plans',
+  'move-held-retryable': 'Plan move held; retrying',
+  'move-held-dead-end': 'Plan move stuck',
+  unknown: 'Needs a look',
+};
+/** The supervisor's reading of an employee, when it found a problem: its sentence, what it will do and what it needs. */
+function caSupervisorCheck(employee) {
+  const seen = employee?.supervisor;
+  if (!seen || typeof seen.sentence !== 'string' || !Object.hasOwn(CA_SUPERVISOR_SHORT, seen.condition)) return;
+  const needs = typeof seen.needsHuman === 'string' ? seen.needsHuman : '';
+  const next = seen.next?.action ? `The office will try “${String(seen.next.action).replaceAll('-', ' ')}” next.` : '';
+  const waiting = typeof seen.waitingFor === 'string' ? `Waiting for ${seen.waitingFor}.` : '';
+  return {
+    text: seen.sentence.replace(/\.$/, ''),
+    more: needs || next || waiting,
+    short: needs && seen.condition !== 'needs-sign-in' ? 'Needs you' : CA_SUPERVISOR_SHORT[seen.condition],
+    code: String(seen.code || seen.condition),
+  };
+}
 /** The held recovery check for an employee's current binding, in plain words; the raw `code` is for tooltips only. */
 function caLastRecoveryCheck(company, employee) {
+  // The supervisor reads more than the last attach attempt, so its sentence wins when it has one.
+  if (employee?.desiredRunning && !employee.onVacation && !employee.bindingMigration) {
+    const supervised = caSupervisorCheck(employee);
+    if (supervised) return supervised;
+  }
   if (
     !employee?.dockerBinding ||
     employee.bindingMigration ||
@@ -9130,7 +9165,9 @@ class ReverieChatApp {
     const detail = [
       health.detail,
       recovery ? this.viewerReconnectDescription(recovery) : '',
-      lastCheck && status.reason === lastCheck.short ? `${lastCheck.text} (${lastCheck.code}).` : '',
+      lastCheck && status.reason === lastCheck.short
+        ? `${lastCheck.text} (${lastCheck.code}).${lastCheck.more ? ' ' + lastCheck.more : ''}`
+        : '',
     ]
       .filter(Boolean)
       .join(' ');

@@ -20,7 +20,7 @@ import type {
 } from '../src/employee-supervisor-policy.js';
 
 const MINUTE = 60_000;
-const LIMITS = { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50 };
+const LIMITS = { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0 };
 
 interface Person {
   employee: SupervisedEmployee;
@@ -330,10 +330,30 @@ describe('EmployeeSupervisor', () => {
     const w = world([hold(person('a'), 'DOCKER_RESOURCE_HELPER_RETRY_PENDING', ['observe', 'continue'])], {
       limits: { ...LIMITS, startupGraceMs: 90_000 },
     });
+    // Starting the office changes nothing by itself: not even a read.
     await w.run(1);
+    expect(w.state.reads).toEqual([]);
+    expect(w.supervisor.reports(undefined)).toEqual([]);
+    await w.run(0.5);
+    expect(w.state.reads).toContain('laptop:a');
     expect(w.state.acts).toEqual([]);
     await w.run(0.5);
     expect(w.state.acts).toEqual(['resend-continuation:a']);
+  });
+
+  it('reads a laptop that waits for a person only every two minutes, and never acts on a kept reading', async () => {
+    const waiting = hold(person('a'), 'DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED');
+    const w = world([waiting], { limits: { ...LIMITS, idleReadMs: 120_000 } });
+    await w.run(10);
+    // 20 passes in ten minutes, one read per two minutes.
+    expect(w.state.reads.filter((read) => read === 'laptop:a')).toHaveLength(5);
+    expect(w.report('a')).toMatchObject({ condition: 'needs-owner' });
+    // The owner approves the limits: the hold becomes one the supervisor can continue.
+    const before = w.state.reads.filter((read) => read === 'laptop:a').length;
+    waiting.reading = { state: 'held', phase: 'resources-issued', code: 'DOCKER_RESOURCE_HELPER_RETRY_PENDING', allowedActions: ['observe', 'continue'] };
+    await w.run(4);
+    expect(w.state.acts[0]).toBe('resend-continuation:a');
+    expect(w.state.reads.filter((read) => read === 'laptop:a').length).toBeGreaterThan(before);
   });
 
   it('keeps its ladder across an office restart instead of starting over in a burst', async () => {

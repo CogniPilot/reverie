@@ -99,15 +99,19 @@ export interface EmployeeSupervisorPorts {
 export interface EmployeeSupervisorLimits {
   /** Effectful actions started in one tick, across all employees. */
   readonly actionsPerTick: number;
-  /** No action this long after the supervisor was created: the office is still reattaching its laptops. */
+  /** No pass at all this long after the supervisor was created: the office is still reattaching its laptops, and
+   * starting the office must change nothing by itself. */
   readonly startupGraceMs: number;
   /** How long one tick waits for an action before it moves on. The action keeps its seat until it returns. */
   readonly actionWaitMs: number;
+  /** How often the laptop of an employee with no step pending (waiting for a person, unknown) is read again. */
+  readonly idleReadMs: number;
 }
 export const SUPERVISOR_LIMITS: EmployeeSupervisorLimits = {
   actionsPerTick: 2,
   startupGraceMs: 90_000,
   actionWaitMs: 5 * 60_000,
+  idleReadMs: 2 * 60_000,
 };
 
 /** What `GET /api/company` shows for one employee. */
@@ -155,6 +159,9 @@ export class EmployeeSupervisor {
   /** Employees with an action that has not returned yet. */
   readonly #acting = new Map<string, Promise<void>>();
   readonly #announced = new Map<string, string>();
+  readonly #readings = new Map<string, { at: number; operationId: string; reading: SupervisorLaptopReading }>();
+  /** The observation being assessed reused a kept laptop reading. Only read within one pass. */
+  #reused = false;
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -199,6 +206,7 @@ export class EmployeeSupervisor {
 
   async #pass(): Promise<void> {
     if (this.#closed || !this.ports.ready()) return;
+    if (this.ports.now() - this.#startedAt < this.limits.startupGraceMs) return;
     const employees = this.ports.employees();
     const known = new Set(employees.map((employee) => employee.id));
     for (const id of [...this.#histories.keys()]) if (!known.has(id)) this.#forget(id);
@@ -206,6 +214,7 @@ export class EmployeeSupervisor {
       if (!known.has(id)) {
         this.#reports.delete(id);
         this.#announced.delete(id);
+        this.#readings.delete(id);
       }
     // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat.
     const order = [...employees].sort(
@@ -281,7 +290,8 @@ export class EmployeeSupervisor {
     };
   }
 
-  async #observe(employee: SupervisedEmployee, enabled: boolean): Promise<SupervisorObservation> {
+  async #observe(employee: SupervisedEmployee, enabled: boolean, fresh = false): Promise<SupervisorObservation> {
+    this.#reused = false;
     const glance = this.ports.glance(employee);
     if (!enabled) return glance;
     const guard = this.#guard(employee, 'retry');
@@ -296,10 +306,33 @@ export class EmployeeSupervisor {
     }
     if (!glance.boxed || glance.busy || NO_LAPTOP_READ.has(first.condition) || first.code?.startsWith('move-'))
       return observed;
-    if (first.code === 'decision-screen' || first.code === 'first-run-screen') return observed;
+    if (first.code === 'decision-screen' || first.code === 'first-run-screen' || glance.laptop.rebuildPending)
+      return observed;
     if (glance.laptop.record) {
+      // While no step is pending for this employee, the same reading serves for a while: a laptop that waits for
+      // a person is not inspected every half minute.
+      const now = this.ports.now();
+      const last = this.#reports.get(employee.id);
+      const kept = this.#readings.get(employee.id);
+      const idle = !!last && !last.next && last.condition !== 'starting';
+      if (
+        !fresh &&
+        kept &&
+        idle &&
+        kept.operationId === glance.laptop.record.operationId &&
+        now - kept.at < this.limits.idleReadMs
+      ) {
+        this.#reused = true;
+        return { ...observed, laptop: { ...observed.laptop, continuation: kept.reading } };
+      }
       const continuation = await this.ports.readLaptop(employee, guard);
-      return continuation ? { ...observed, laptop: { ...observed.laptop, continuation } } : observed;
+      if (!continuation) return observed;
+      this.#readings.set(employee.id, {
+        at: now,
+        operationId: glance.laptop.record.operationId,
+        reading: continuation,
+      });
+      return { ...observed, laptop: { ...observed.laptop, continuation } };
     }
     if (!glance.laptop.policyApproved) return observed;
     return { ...observed, laptop: { ...observed.laptop, source: await this.ports.readSource(employee, guard) } };
@@ -327,21 +360,28 @@ export class EmployeeSupervisor {
       this.#report(employee, assessEmployee(stopped, history, this.#flags(employee), now, this.policy), history, now);
       return false;
     }
+    if (this.#acting.has(employee.id)) {
+      // A step for this employee has not returned. Nothing is read or decided beside it.
+      const running = this.#reports.get(employee.id);
+      if (running)
+        this.#reports.set(employee.id, { ...running, checkedAt: now, waitingFor: 'the last step to return' });
+      return false;
+    }
     const flags = this.#flags(employee);
     let observed = await this.#observe(employee, flags.enabled);
     let history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
     this.#remember(employee.id, history);
-    const acting = this.#acting.has(employee.id);
     const due = (step: SupervisorAssessment) => step.next.action !== null && (step.next.at ?? 0) <= now;
-    if (
-      !due(assessment) ||
-      acting ||
-      !seat ||
-      now - this.#startedAt < this.limits.startupGraceMs ||
-      !this.ports.actions[assessment.next.action!]
-    ) {
-      this.#report(employee, assessment, history, now, acting ? 'the last step to return' : undefined);
+    if (due(assessment) && seat && this.#reused) {
+      // A step is never decided on a reading that was kept from an earlier pass.
+      observed = await this.#observe(employee, flags.enabled, true);
+      history = rollSupervisorHistory(previous, classifyEmployee(observed), now, this.policy);
+      assessment = assessEmployee(observed, history, flags, now, this.policy);
+      this.#remember(employee.id, history);
+    }
+    if (!due(assessment) || !seat || !this.ports.actions[assessment.next.action!]) {
+      this.#report(employee, assessment, history, now);
       return false;
     }
     if (assessment.next.preconditions.includes('no-agent-running')) {

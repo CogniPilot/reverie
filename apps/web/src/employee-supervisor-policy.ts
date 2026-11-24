@@ -206,6 +206,8 @@ export interface SupervisorObservation {
     readonly templateOnRecord: boolean;
     /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
     readonly poolAlive?: boolean;
+    /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
+    readonly rebuildPending?: boolean;
   };
   /** The employee's open plan move, when there is one. */
   readonly move?: {
@@ -603,6 +605,11 @@ function classifyCode(
 
 function classifyLaptop(observed: SupervisorObservation): SupervisorClassification {
   const { laptop, session, name } = observed;
+  if (laptop.rebuildPending)
+    return classified('held-needs-rebuild', `${name}'s laptop rebuild was started and has not finished.`, {
+      code: 'rebuild-pending',
+      fingerprint: 'rebuild-pending',
+    });
   if (!laptop.record) {
     if (!laptop.policyApproved)
       return classified('needs-owner', `${name} has no laptop and no approved resource limits.`, {
@@ -634,7 +641,9 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
   }
   if (laptop.restoration?.state === 'held' && seen?.state !== 'ready')
     return classifyCode(observed, laptop.restoration.code);
-  const ready = seen ? seen.state === 'ready' : laptop.record.phase === 'ready';
+  // Without a fresh read, a record whose agent launch was issued counts as published, as it does for the laptop
+  // runtime's own attach: an employee whose terminal is attached is not read just to move that record on.
+  const ready = seen ? seen.state === 'ready' : ['ready', 'provider-issued'].includes(laptop.record.phase);
   if (!ready) return classified('starting', `${name}'s laptop is being set up (${laptop.record.phase}).`);
   if (session.providerHealth === 'dead')
     return classified('provider-exited', `${name}'s agent has exited inside their laptop.`, {

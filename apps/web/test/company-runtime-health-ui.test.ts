@@ -66,6 +66,34 @@ it('puts a held recovery check on the card in plain words and keeps its raw code
  expect(card.classList.contains('has-status-reason')).toBe(true);
 });
 
+it('puts the office supervisor’s reading on the card, with what it will do next in the tooltip', async () => {
+ const shown=async(supervisor?:unknown)=>{
+  const {h,employee}=await fixture();
+  Object.assign(employee,{dockerBinding:{operationId:'original'},sessionGeneration:3,...(supervisor?{supervisor}:{})});
+  // The supervisor reads more than the last attach attempt, so its sentence wins over that one.
+  h.shell.company.boxedViewRestorations=[{employeeId:employee.id,sessionId:SID,sessionGeneration:3,operationId:'original',
+   state:'held',code:'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'}];
+  await h.shell.openCompany();
+  const card=h.document.querySelector('[data-employee-id="expert"]');
+  return {card,reason:card.querySelector('.ca-company-reason'),controls:card.querySelectorAll('button,a,input,select').length};
+ };
+ const plain=await shown();
+ expect(plain.reason.textContent).toBe('Recovery still pending');
+ const next=await shown({condition:'held-needs-rebuild',sentence:"The helper that sets Alex's laptop limits failed.",
+  code:'DOCKER_RESOURCE_HELPER_FAILED',next:{action:'rebuild-laptop',at:1}});
+ expect(next.reason.textContent).toBe('Laptop held; rebuilding');expect(next.card.textContent).not.toContain('DOCKER_');
+ expect(next.reason.title).toContain("The helper that sets Alex's laptop limits failed (DOCKER_RESOURCE_HELPER_FAILED). The office will try “rebuild laptop” next.");
+ const needs=await shown({condition:'held-needs-rebuild',sentence:"Alex's laptop container cannot be found.",
+  needsHuman:'An agent is running in a laptop of this employee. That needs the owner.'});
+ expect(needs.reason.textContent).toBe('Needs you');
+ expect(needs.reason.title).toContain("Alex's laptop container cannot be found (held-needs-rebuild). An agent is running in a laptop of this employee. That needs the owner.");
+ // A sentence and a tooltip only: the card gains no control.
+ expect([next.controls,needs.controls]).toEqual([plain.controls,plain.controls]);
+ // A healthy reading and a condition this page does not know leave the card as it was.
+ expect((await shown({condition:'healthy',sentence:'Alex is running.'})).reason.textContent).toBe('Recovery still pending');
+ expect((await shown({condition:'something-new',sentence:'x'})).reason.textContent).toBe('Recovery still pending');
+});
+
 it.each([
  {state:'needs',label:'Needs you',why:'Waiting on your answer',tone:'alert'},
  {state:'waiting',label:'Waiting for you',why:'Done; waiting for input',tone:'wait'},

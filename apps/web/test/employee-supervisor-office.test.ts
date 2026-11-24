@@ -1,0 +1,322 @@
+import { describe, expect, it } from 'vitest';
+import { officeSupervisorPorts, type OfficeSupervisorDeps } from '../src/employee-supervisor-office.js';
+import type { SupervisedEmployee, SupervisorAuditEntry } from '../src/employee-supervisor.js';
+import { EmployeeSupervisor } from '../src/employee-supervisor.js';
+import { PlanMoveError, type PlanMoveRecord } from '../src/plan-move.js';
+
+const row = (id: string, patch: Record<string, unknown> = {}) => ({
+  id,
+  name: id.toUpperCase(),
+  owner: undefined,
+  sessionId: 'session-' + id,
+  sessionGeneration: 1,
+  desiredRunning: true,
+  onVacation: false,
+  runtimeRecipe: { subscriptionProfile: { id: 'plan-a', label: 'Plan A', provider: 'anthropic' } },
+  ...patch,
+});
+const move = (patch: Partial<PlanMoveRecord> = {}): PlanMoveRecord => ({
+  id: 'move-1',
+  employeeId: 'a',
+  name: 'A',
+  oldSession: 'session-a',
+  newSession: 'session-new',
+  fromAccount: 'plan-a',
+  toAccount: 'plan-b',
+  phase: 'recovery-required',
+  at: 1,
+  error: 'DOCKER_RESOURCE_HELPER_FAILED',
+  backend: 'docker',
+  allowedActions: ['continue-original', 'abandon'],
+  ...patch,
+});
+
+function office() {
+  const state = {
+    now: 1_000_000,
+    ready: true,
+    rows: [row('a'), row('b')] as Array<ReturnType<typeof row>>,
+    settings: {} as Record<string, unknown>,
+    sessions: new Map<string, Record<string, unknown>>([
+      ['session-a', { pid: 10, status: 'idle', runtimeHealth: 'healthy' }],
+      ['session-b', { pid: 11, status: 'idle', runtimeHealth: 'healthy' }],
+    ]),
+    restorations: [
+      { employeeId: 'a', state: 'attached' },
+      { employeeId: 'b', state: 'attached' },
+    ] as Array<{ employeeId: string; state: 'attached' | 'held'; code?: string }>,
+    moves: [] as PlanMoveRecord[],
+    publicationUnconfirmed: false,
+    ownerStop: false,
+    recovery: true,
+    flight: false,
+    screenReads: 0,
+    calls: [] as Array<[string, ...unknown[]]>,
+    audits: [] as SupervisorAuditEntry[],
+    wake: { awakened: ['a'], skipped: [] } as { awakened: string[]; skipped: Array<{ employeeId: string; reason: string }> },
+    throwing: undefined as Error | undefined,
+  };
+  const deps = {
+    company: {
+      registeredEmployees: () => structuredClone(state.rows),
+      view: () => ({ settings: state.settings }),
+      employeeRecoveryAvailable: () => state.recovery,
+      store: {
+        get publicationUnconfirmed() {
+          return state.publicationUnconfirmed;
+        },
+      },
+    },
+    session: (id: string) => state.sessions.get(id),
+    ready: () => state.ready,
+    laptops: {
+      glance: () => ({ record: { phase: 'ready', version: 2, operationId: 'op' }, bound: true, policyApproved: true, templateOnRecord: true }),
+      flightActive: () => state.flight,
+      read: async () => undefined,
+      source: async () => 'stopped',
+      provider: async () => 'absent',
+      resend: async () => ({ outcome: 'done' }),
+      start: async () => ({ outcome: 'done' }),
+      rebuild: async () => ({ outcome: 'done' }),
+    },
+    restorations: () => state.restorations,
+    providerHealth: () => ({ state: 'healthy' }),
+    ownerStopPending: () => state.ownerStop,
+    moves: {
+      list: async () => structuredClone(state.moves),
+      get: async (id: string) => structuredClone(state.moves.find((value) => value.id === id)),
+      continueDocker: async (...args: unknown[]) => {
+        state.calls.push(['continueDocker', ...args]);
+        if (state.throwing) throw state.throwing;
+      },
+      abandonHeldDockerMove: async (id: string, employeeId: string, owner: unknown, authorized: () => void) => {
+        authorized();
+        state.calls.push(['abandon', id, employeeId, owner]);
+        if (state.throwing) throw state.throwing;
+      },
+    },
+    moveExecutor: (employee: SupervisedEmployee, current: () => boolean) => ({ executorFor: employee.id, current }),
+    planSignedIn: async () => true,
+    wake: async (id: string, options: { stillCurrent: () => boolean }) => {
+      state.calls.push(['wake', id, options.stillCurrent()]);
+      return state.wake;
+    },
+    load: () => new Map(),
+    save: async () => {},
+    audit: (entry: SupervisorAuditEntry) => state.audits.push(entry),
+    log: () => {},
+    now: () => state.now,
+  } as unknown as OfficeSupervisorDeps;
+  const ports = officeSupervisorPorts(deps);
+  const employee = (id = 'a') => ports.employees().find((value) => value.id === id)!;
+  return { state, ports, employee };
+}
+const pass = () => {};
+
+describe('office supervisor ports', () => {
+  it('reads each employee and the plan they should run on from the company record', () => {
+    const o = office();
+    o.state.rows = [row('a'), row('b', { onVacation: true, runtimeRecipe: { customModel: {} } }), row('c', { runtimeRecipe: undefined })];
+    expect(o.ports.employees()).toEqual([
+      expect.objectContaining({ id: 'a', planAccountId: 'plan-a', planLabel: 'Plan A', onVacation: false, bindingMigration: false }),
+      expect.objectContaining({ id: 'b', planLabel: 'their local model', onVacation: true }),
+      expect.not.objectContaining({ planLabel: expect.anything() }),
+    ]);
+  });
+
+  it('is on unless the owner switched it off, one switch at a time', () => {
+    const o = office();
+    expect(o.ports.flags(undefined)).toEqual({ enabled: true, autoRepair: true });
+    o.state.settings = { supervisorAutoRepair: false };
+    expect(o.ports.flags(undefined)).toEqual({ enabled: true, autoRepair: false });
+    o.state.settings = { supervisorEnabled: false };
+    expect(o.ports.flags(undefined)).toEqual({ enabled: false, autoRepair: true });
+  });
+
+  it('glances from memory: session, laptop record, last attach and whether another laptop runs', () => {
+    const o = office();
+    expect(o.ports.glance(o.employee())).toEqual({
+      employeeId: 'a',
+      name: 'A',
+      desiredRunning: true,
+      onVacation: false,
+      bindingMigration: false,
+      boxed: true,
+      planLabel: 'Plan A',
+      session: { available: true, runtimeHealth: 'healthy', viewerHealth: 'connected', providerHealth: 'healthy' },
+      laptop: {
+        record: { phase: 'ready', version: 2, operationId: 'op' },
+        bound: true,
+        policyApproved: true,
+        templateOnRecord: true,
+        restoration: { state: 'attached' },
+        poolAlive: true,
+      },
+    });
+    o.state.restorations = [{ employeeId: 'a', state: 'held', code: 'DOCKER_CONTINUATION_DESTINATION_STOPPED' }];
+    o.state.sessions.delete('session-a');
+    expect(o.ports.glance(o.employee())).toMatchObject({
+      session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'unknown' },
+      laptop: { restoration: { state: 'held', code: 'DOCKER_CONTINUATION_DESTINATION_STOPPED' }, poolAlive: false },
+    });
+  });
+
+  it.each([
+    ['publication-unconfirmed', (state: ReturnType<typeof office>['state']) => (state.publicationUnconfirmed = true)],
+    ['owner-stop-pending', (state: ReturnType<typeof office>['state']) => (state.ownerStop = true)],
+    ['recovery-pending', (state: ReturnType<typeof office>['state']) => (state.recovery = false)],
+    ['continuation-flight', (state: ReturnType<typeof office>['state']) => (state.flight = true)],
+    [
+      'lifecycle-in-progress',
+      (state: ReturnType<typeof office>['state']) => (state.sessions.get('session-a')!.paneLifecycleInFlight = true),
+    ],
+  ])('reports %s so nothing starts beside it', (busy, change) => {
+    const o = office();
+    expect(o.ports.glance(o.employee()).busy).toBeUndefined();
+    change(o.state);
+    expect(o.ports.glance(o.employee()).busy).toBe(busy);
+  });
+
+  it('reads a start-up screen at most once a minute and never while the agent is working', () => {
+    const o = office();
+    const session = o.state.sessions.get('session-a')!;
+    session.startupScreen = () => {
+      o.state.screenReads++;
+      return { id: 'login', label: "Claude's sign-in screen", kind: 'credential', answering: false };
+    };
+    const seen = () => o.ports.glance(o.employee()).session.startupScreen;
+    expect(seen()).toEqual({ label: "Claude's sign-in screen", kind: 'credential', answering: false });
+    expect(seen()).toBeDefined();
+    expect(o.state.screenReads).toBe(1);
+    o.state.now += 61_000;
+    seen();
+    expect(o.state.screenReads).toBe(2);
+    session.status = 'busy';
+    expect(seen()).toBeUndefined();
+    session.status = 'idle';
+    session.startupScreen = () => {
+      throw new Error('tmux gone');
+    };
+    expect(seen()).toBeUndefined();
+  });
+
+  it('shows the one open laptop move and ignores held moves of the retired runtime', async () => {
+    const o = office();
+    expect(await o.ports.openMove(o.employee())).toBeUndefined();
+    o.state.moves = [move({ id: 'old', phase: 'completed' }), move({ id: 'native', backend: undefined }), move()];
+    expect(await o.ports.openMove(o.employee())).toEqual({
+      id: 'move-1',
+      docker: true,
+      phase: 'recovery-required',
+      busy: false,
+      error: 'DOCKER_RESOURCE_HELPER_FAILED',
+      allowedActions: ['continue-original', 'abandon'],
+      toAccount: 'plan-b',
+    });
+    expect(await o.ports.openMove(o.employee('b'))).toBeUndefined();
+    // A working move of the retired runtime still counts as a move in progress.
+    o.state.moves = [move({ id: 'native', backend: undefined, phase: 'starting' })];
+    expect(await o.ports.openMove(o.employee())).toMatchObject({ id: 'native', docker: false, phase: 'starting' });
+    // Two open moves are the owner's to untangle.
+    o.state.moves = [move(), move({ id: 'move-2' })];
+    expect((await o.ports.openMove(o.employee()))!.allowedActions).toEqual([]);
+  });
+
+  it('continues a held move as its original, with an executor that follows the employee and the switch', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    expect(await o.ports.actions['continue-move']!(o.employee(), pass, held)).toEqual({
+      outcome: 'done',
+      detail: 'continuing move-1',
+    });
+    const [, id, expected, owner, executor] = o.state.calls[0]!;
+    expect([id, expected, owner]).toEqual([
+      'move-1',
+      { oldSession: 'session-a', newSession: 'session-new', toAccount: 'plan-b' },
+      undefined,
+    ]);
+    const { current } = executor as { current: () => boolean };
+    expect(current()).toBe(true);
+    // The move rebinds the employee's session when it completes: the authority follows the employee, not the session.
+    o.state.rows[0]!.sessionId = 'session-new';
+    expect(current()).toBe(true);
+    o.state.settings = { supervisorEnabled: false };
+    expect(current()).toBe(false);
+    o.state.settings = {};
+    o.state.rows[0]!.onVacation = true;
+    expect(current()).toBe(false);
+    o.state.rows[0]!.onVacation = false;
+    o.state.ready = false;
+    expect(current()).toBe(false);
+  });
+
+  it('does not continue a move that changed, and reports a refusal in the move’s own words', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    const held = (await o.ports.openMove(o.employee()))!;
+    o.state.moves = [move({ phase: 'completed' })];
+    expect(await o.ports.actions['continue-move']!(o.employee(), pass, held)).toEqual({ outcome: 'refused', detail: 'the move changed' });
+    o.state.moves = [move()];
+    o.state.throwing = new PlanMoveError('The move is still active');
+    expect(await o.ports.actions['continue-move']!(o.employee(), pass, held)).toEqual({ outcome: 'busy', detail: 'The move is still active' });
+    o.state.throwing = new PlanMoveError('The original recovery target changed');
+    expect((await o.ports.actions['continue-move']!(o.employee(), pass, held)).outcome).toBe('refused');
+    o.state.throwing = new Error('disk');
+    await expect(o.ports.actions['continue-move']!(o.employee(), pass, held)).rejects.toThrow('disk');
+    expect(await o.ports.actions['continue-move']!(o.employee(), pass, undefined)).toEqual({ outcome: 'refused', detail: 'no held move' });
+  });
+
+  it('reconnects a terminal with the owner’s Wake, which only attaches what already runs', async () => {
+    const o = office();
+    expect(await o.ports.actions['reconnect-viewer']!(o.employee(), pass, undefined)).toEqual({ outcome: 'done', detail: 'attached' });
+    expect(o.state.calls).toEqual([['wake', 'a', true]]);
+    o.state.wake = { awakened: [], skipped: [{ employeeId: 'a', reason: 'docker-destination-stopped' }] };
+    expect(await o.ports.actions['reconnect-viewer']!(o.employee(), pass, undefined)).toEqual({
+      outcome: 'refused',
+      detail: 'docker-destination-stopped',
+    });
+    o.state.wake = { awakened: [], skipped: [{ employeeId: 'a', reason: 'recovery-in-progress' }] };
+    expect((await o.ports.actions['reconnect-viewer']!(o.employee(), pass, undefined)).outcome).toBe('busy');
+  });
+
+  it('offers no relaunch step and no laptop steps without the laptop runtime', () => {
+    const o = office();
+    expect(Object.keys(o.ports.actions).sort()).toEqual([
+      'continue-move', 'reconnect-viewer', 'resend-continuation', 'start-continuation',
+    ]);
+  });
+
+  it('drives a whole pass: a held move is continued and recorded under the supervisor’s own name', async () => {
+    const o = office();
+    o.state.moves = [move()];
+    const supervisor = new EmployeeSupervisor(o.ports, undefined, { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0 });
+    await supervisor.tick();
+    o.state.now += 61_000;
+    await supervisor.tick();
+    expect(o.state.calls.map(([name]) => name)).toEqual(['continueDocker']);
+    expect(o.state.audits).toEqual([
+      {
+        admin: 'office supervisor',
+        action: 'supervisor_continue_move',
+        target: 'A',
+        detail: {
+          id: 'a',
+          sessionId: 'session-a',
+          condition: 'move-held-retryable',
+          code: 'move-laptop-step',
+          outcome: 'done',
+          detail: 'continuing move-1',
+          attempt: 1,
+          moveId: 'move-1',
+        },
+      },
+    ]);
+    expect(supervisor.reports(undefined).find((report) => report.employeeId === 'a')).toMatchObject({
+      condition: 'move-held-retryable',
+      sentence: "A's plan move stopped part-way: DOCKER_RESOURCE_HELPER_FAILED",
+      last: { action: 'continue-move', outcome: 'done' },
+    });
+    expect(supervisor.reports(undefined).find((report) => report.employeeId === 'b')).toMatchObject({ condition: 'healthy' });
+  });
+});

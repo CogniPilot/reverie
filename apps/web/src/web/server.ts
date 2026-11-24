@@ -112,6 +112,10 @@ import { execSync } from 'node:child_process';
 import { hostname as getHostname, uptime as osUptime, homedir } from 'node:os';
 import { deliverRecoveryPrompt } from '../company-recovery-prompt.js';
 import { CompanyWake } from '../company-wake.js';
+import { EmployeeSupervisor } from '../employee-supervisor.js';
+import { officeSupervisorPorts } from '../employee-supervisor-office.js';
+import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
+import { ownerStopPending } from '../owner-stop-journal.js';
 import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
 import { planMoveHarness } from '../plan-move-launch.js';
@@ -368,6 +372,7 @@ import { dockerPlanSourceRetirementSubject, dockerPlanSourceViewRetired, require
 import {
   captureDockerPlanMoveRequester,
   captureDockerPlanMoveOriginalRequester,
+  captureDockerPlanMoveSupervisorRequester,
   requireDockerPlanMoveRequesterSource,
 } from '../docker-plan-move-requester.js';
 import { PlanMoveRequests } from '../plan-request.js';
@@ -526,6 +531,8 @@ export class WebServer extends EventEmitter {
   private companyWake!: CompanyWake;
   private hostResumeStream?: HostWorkerResumeStream;
   private companyWakeReady = false;
+  /** Present only under the boxed laptop runtime. */
+  private employeeSupervisor?: EmployeeSupervisor;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
@@ -2003,6 +2010,7 @@ export class WebServer extends EventEmitter {
         verifiedOwner,
         boxedRuntime: this.dockerEmployeeRuntime !== undefined,
         boxedViewRestorations: () => this.dockerEmployeeRuntime?.restorationReports ?? [],
+        employeeSupervisor: (owner) => this.employeeSupervisor?.reports(owner) ?? [],
         serviceRebind: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'watcher')(req),
         boardCoordinator: (sessionId) => isBoardCoordinator(this.chatroomService.rooms(), sessionId),
         publicationTokens: publicationVault,
@@ -2543,6 +2551,51 @@ export class WebServer extends EventEmitter {
     });
     dockerRuntime?.bindPlanMoves(planMoves);
     dockerRuntime?.bindSeatAccounts(this.planService);
+    if (dockerRuntime) {
+      // The office recovery supervisor. Every step it takes is a call to the service method behind the owner's
+      // own route for that step; what it presents instead of an owner request is documented in
+      // employee-supervisor-office.ts and docker-employee-supervisor-laptops.ts.
+      const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
+      this.employeeSupervisor = new EmployeeSupervisor(
+        officeSupervisorPorts({
+          company: this.companyService,
+          session: (id) => this.sessions.get(id),
+          ready: () => this.companyWakeReady && dockerRuntime.current(),
+          laptops: dockerRuntime.supervisorLaptops(),
+          restorations: () => dockerRuntime.restorationReports,
+          providerHealth: (employee) => this.workerProviderHealth?.read(employee),
+          ownerStopPending,
+          moves: planMoves,
+          // Only the original of a held move, and only while the supervisor may act: no new choice, no session
+          // start and no HTTP request of its own.
+          moveExecutor: (employee, current) =>
+            planMoveExecutor(
+              {
+                ...planMoveRuntime,
+                actor: 'office supervisor',
+                authorized: () => this.companyWakeReady && current(),
+                request: async () => {
+                  throw new PlanMoveError('The office supervisor cannot start or replay a session', 403);
+                },
+                dockerRequester: () => {
+                  throw new PlanMoveError('The office supervisor never chooses a plan', 403);
+                },
+                dockerOriginalRequester: (id) =>
+                  captureDockerPlanMoveSupervisorRequester(id, planMoveStore, this.companyService, requirePlanRuntime, {
+                    current: () => this.companyWakeReady && current(),
+                  }),
+              },
+              employee.owner
+            ),
+          planSignedIn: async (accountId) =>
+            (await this.planService.rows()).accounts.find((account) => account.id === accountId)?.signedIn,
+          wake: (id, options) => this.companyWake.wakeOne(id, options),
+          load: () => supervisorStore.load(),
+          save: (histories) => supervisorStore.save(histories),
+          audit: (entry) => void appendAdminAudit(entry),
+        })
+      );
+    }
     this.workerViewerReconnect = new WorkerViewerReconnect({
       company: this.companyService,
       session: id => this.sessions.get(id),
@@ -4779,8 +4832,11 @@ export class WebServer extends EventEmitter {
                 console.error('[company] crash recovery needs owner attention:', item.employeeId, item.reason);
           })
           .catch((error: unknown) => console.error('[company] crash wake failed:', getErrorMessage(error)));
-      void tickWake();
-      this.cleanup.setInterval(() => void tickWake(), 30_000, { description: 'Company crash recovery' });
+      // The office supervisor rides the same half-minute pass, after the crash-recovery expert has had its turn.
+      // Neither promise rejects: each logs its own failure.
+      const tickRecovery = () => void tickWake().then(() => this.employeeSupervisor?.tick());
+      tickRecovery();
+      this.cleanup.setInterval(tickRecovery, 30_000, { description: 'Company crash recovery' });
       void tickCompany();
       this.cleanup.setInterval(() => void tickCompany(), 30_000, { description: 'Company research schedule' });
       void this.refreshCodexPlanUsage();
@@ -5971,6 +6027,7 @@ export class WebServer extends EventEmitter {
     this.muxMetadataService?.close();
     this.muxMetadataPublisher?.close();
     this.companyWakeReady = false;
+    this.employeeSupervisor?.close();
     this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
