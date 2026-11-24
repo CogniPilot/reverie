@@ -30,6 +30,10 @@ let
     postPatch = ''
       mkdir -p skills
       cp -r ${consoleSkill} skills/reverie
+    '';
+    # Test inputs only. They are copied when the check phase starts, so a build
+    # without checks (nix/build-policy.nix) does not depend on any of them.
+    preCheck = ''
       # The web derivation is flattened to apps/web. Supply explicit trusted
       # offline test sources; tests must not escape /build/source to find them.
       # The Rust handler's TS byte goldens live with its crate.
@@ -82,11 +86,21 @@ let
       export NIX_TEST_VIEWER_WORKSPACES=${leaseCli}/bin/reverie-workspaces
       export NIX_TEST_HANDS_ADMISSION=${lib.getExe adminMemory}
       ${lib.optionalString pkgs.stdenv.isLinux "export LOCALE_ARCHIVE=${pkgs.glibcLocales}/lib/locale/locale-archive"}
-      # Two test files at a time (config/vitest.ci.config.ts); test/setup.ts gives each file its own HOME, temp and
-      # tmux socket directory, and every server binds port 0 (test/test-ports-guard.test.ts).
-      export NIX_TEST_FILE_WORKERS=2
+      # Test files side by side (config/vitest.ci.config.ts): a quarter of the build's cores, at least two as on the
+      # four-core CI runner and at most eight. test/setup.ts gives each file its own HOME, temp and tmux socket
+      # directory, and every server binds port 0 (test/test-ports-guard.test.ts).
+      fileWorkers=$(( ''${NIX_BUILD_CORES:-4} / 4 ))
+      if [ "$fileWorkers" -lt 2 ]; then fileWorkers=2; fi
+      if [ "$fileWorkers" -gt 8 ]; then fileWorkers=8; fi
+      export NIX_TEST_FILE_WORKERS=$fileWorkers
       # Refuse missing or duplicate registrations before the longer test batches.
       npm test -- test/test-suite-partition.test.ts test/test-selection.test.ts
+      # From here every command runs even after one fails. The phase then fails once and lists each failed
+      # command, so one run shows every failing batch and its files instead of only the first.
+      checkFailures="$NIX_BUILD_TOP/reverie-console-check-failures"
+      : > "$checkFailures"
+      set +e -E
+      trap 'printf "exit %s: %.400s\n" "$?" "$BASH_COMMAND" >> "$checkFailures"' ERR
       # Boxed recovery and bound worker transport use the same default CI gate.
       npm test -- test/docker-memory-high-canary.test.ts \
         test/docker-resource-original-writer.test.ts \
@@ -590,6 +604,13 @@ let
         test/webview-proxy-timeout.test.ts test/webview-proxy.test.ts test/webview-sse.test.ts test/wiki-home-index.test.ts \
         test/workflow-run-watcher.test.ts test/working-directory-schema.test.ts test/workspace-hooks-unreachable-mount.test.ts \
         test/ws-connection-registry.test.ts test/ws-reconnect-plan.test.ts test/ws-state-lifecycle.test.ts test/xterm-private-api.test.ts
+      trap - ERR
+      set -e +E
+      if [ -s "$checkFailures" ]; then
+        echo "reverie-console checks failed. Each failed command, in order:" >&2
+        cat "$checkFailures" >&2
+        exit 1
+      fi
       runHook postCheck
     '';
     installPhase = ''
