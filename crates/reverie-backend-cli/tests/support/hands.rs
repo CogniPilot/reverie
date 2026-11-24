@@ -175,6 +175,22 @@ fn hands_refuses_office_denial_and_private_settings_aliases() {
     assert!(!directory.join("profile.txt").exists());
 }
 
+/// Whether every directory above `path` belongs to root or to this user and
+/// is writable by nobody else: the condition under which the harness trusts a
+/// credential file found there.
+fn ancestry_admits_no_other_writer(path: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let me = fs::metadata(path).unwrap().uid();
+    path.ancestors().skip(1).all(|directory| {
+        fs::symlink_metadata(directory).is_ok_and(|info| {
+            let sticky_root = info.uid() == 0 && info.mode() & 0o1000 != 0;
+            info.is_dir()
+                && (info.uid() == 0 || info.uid() == me)
+                && (info.mode() & 0o022 == 0 || sticky_root)
+        })
+    })
+}
+
 #[test]
 fn hands_presents_the_laptop_credential_alone_and_fails_closed_without_it() {
     let fixture = Fixture::create();
@@ -182,6 +198,18 @@ fn hands_presents_the_laptop_credential_alone_and_fails_closed_without_it() {
     let credential = fixture.0.join("docker-worker-identity");
     let token = format!("WzEsImRvY2tlci13b3JrZXItaWRlbnRpdHkiXQ.{}", "0a".repeat(32));
     private_write(&credential, &format!("{token}\n"));
+    if !ancestry_admits_no_other_writer(&credential) {
+        // A build sandbox can hand out a root directory owned by a user this
+        // namespace does not map. The harness cannot rule out a substituted
+        // credential there, so the same valid file must be refused.
+        let mut command = fixture.command("http://127.0.0.1:1");
+        setup(&fixture, &mut command);
+        command.env("REVERIE_WORKER_IDENTITY_FILE", &credential);
+        let output = command.output().unwrap();
+        assert_refused(&output, "this laptop's office credential is unavailable");
+        assert!(!String::from_utf8_lossy(&output.stderr).contains(&token));
+        return;
+    }
     let (output, request) = fixture.run(
         "200 OK",
         json!({"data":{"employees":[{"sessionId":"session-123","name":"Boxed employee"}]}}),
