@@ -460,7 +460,7 @@ let
         test/plan-usage-collection-flip.test.ts test/plan-usage-latest.test.ts test/plan-usage-marks.test.ts test/plans-page-routes.test.ts \
         test/plans-roles.test.ts test/plans-statusline-usage.test.ts
       npm test -- test/plans-usage-resets.test.ts test/preview-envelope.test.ts test/previews-ui.test.ts test/proc-walk-bounds.test.ts \
-        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-launch-publication.test.ts test/native-custom-model-preflight.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
+        test/process-exit-wait.test.ts test/prompt-cache-status.test.ts test/provider-hold-reconcile.test.ts test/provider-launch-publication.test.ts test/native-custom-model-preflight.test.ts test/pty-interactive.test.ts test/push-endpoint-validation.test.ts \
         test/push-forged-actions.test.ts test/push-payload-host-title.test.ts test/python-float.test.ts test/qr-auth.test.ts test/quick-start.test.ts \
         test/ralph-config.test.ts test/ralph-integration.test.ts test/ralph-loop-deep.test.ts test/ralph-loop.test.ts \
         test/ralph-prompt.test.ts test/ralph-tracker.test.ts test/read-aloud-per-room.test.ts test/read-aloud-settings.test.ts \
