@@ -140,7 +140,12 @@ describe('employee supervisor: classification', () => {
     ['a limits step that lost a process', held('DOCKER_RESOURCE_HELPER_RETRY_PENDING'), 'held-retryable'],
     ['a failed limits helper', held('DOCKER_RESOURCE_HELPER_FAILED'), 'held-needs-rebuild'],
     ['an unacknowledged limits helper', held('DOCKER_RESOURCE_WORKER_HELPER_UNACKNOWLEDGED'), 'held-needs-rebuild'],
-    ['a stopped laptop container', held('DOCKER_CONTINUATION_CONTAINER_STOPPED'), 'held-needs-rebuild'],
+    [
+      'a stopped laptop while other laptops run',
+      { ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED'), laptop: { ...held('DOCKER_CONTINUATION_CONTAINER_STOPPED').laptop, poolAlive: true } },
+      'held-needs-rebuild',
+    ],
+    ['a stopped laptop when no laptop runs', held('DOCKER_CONTINUATION_DESTINATION_STOPPED'), 'needs-owner', /No other laptop of this office is running either/],
     ['an agent that is not running', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), 'provider-exited'],
     [
       'an agent the health reader calls dead',

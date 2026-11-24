@@ -204,6 +204,8 @@ export interface SupervisorObservation {
     readonly provider?: SupervisorProviderPresence;
     /** An owner-approved laptop layout is on record for this employee. */
     readonly templateOnRecord: boolean;
+    /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
+    readonly poolAlive?: boolean;
   };
   /** The employee's open plan move, when there is one. */
   readonly move?: {
@@ -240,10 +242,16 @@ export interface SupervisorHistory {
   readonly lastAction?: {
     readonly action: SupervisorAction;
     readonly at: number;
-    readonly outcome: 'done' | 'refused' | 'failed';
+    readonly outcome: SupervisorOutcome;
     readonly detail?: string;
   };
 }
+
+/**
+ * How an action ended. `issued` is what is recorded before the effect, so a crash in the middle still spent the
+ * attempt. `busy` means another operation held the employee and nothing was tried: that attempt is given back.
+ */
+export type SupervisorOutcome = 'issued' | 'done' | 'refused' | 'failed' | 'busy';
 
 export const EMPTY_SUPERVISOR_HISTORY: SupervisorHistory = Object.freeze({
   fingerprint: '',
@@ -292,12 +300,22 @@ export interface SupervisorAssessment {
  * - `wait`: a read that raced or an operation still running; observe again.
  * - `retry`: the same request sent again is the documented next step; a rebuild follows if that never helps.
  * - `rebuild`: the operation cannot advance; a fresh laptop is the reset.
+ * - `stopped`: the laptop container is not running. One stopped laptop is rebuilt; when no other laptop of the box
+ *   is running either, the host most likely restarted and the shared pool has to be recovered first.
  * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop.
  * - `provider`: the laptop runs but no agent of this employee is confirmed in it.
  * - `viewer`: the agent may be fine; the office terminal is not attached.
  * - `owner`: recognized, and only the owner may settle it.
  */
-export type SupervisorCodeKind = 'wait' | 'retry' | 'rebuild' | 'retry-owner' | 'provider' | 'viewer' | 'owner';
+export type SupervisorCodeKind =
+  | 'wait'
+  | 'retry'
+  | 'rebuild'
+  | 'stopped'
+  | 'retry-owner'
+  | 'provider'
+  | 'viewer'
+  | 'owner';
 
 const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
   DOCKER_CONTINUATION_BUSY: ['wait', 'Another laptop operation for {name} is running right now.'],
@@ -364,8 +382,8 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     "{name}'s new laptop was already running before the office started it.",
   ],
   DOCKER_CONTINUATION_DESTINATION_CHANGED: ['rebuild', "{name}'s laptop is not the container the office recorded."],
-  DOCKER_CONTINUATION_CONTAINER_STOPPED: ['rebuild', "{name}'s laptop container has stopped."],
-  DOCKER_CONTINUATION_DESTINATION_STOPPED: ['rebuild', "{name}'s laptop container has stopped."],
+  DOCKER_CONTINUATION_CONTAINER_STOPPED: ['stopped', "{name}'s laptop container has stopped."],
+  DOCKER_CONTINUATION_DESTINATION_STOPPED: ['stopped', "{name}'s laptop container has stopped."],
   DOCKER_CONTINUATION_IDENTITY_UNCONFIRMED: ['rebuild', "{name}'s laptop does not hold its office credential."],
   DOCKER_CONTINUATION_POLICY_CHANGED: [
     'rebuild',
@@ -469,7 +487,7 @@ export function classifyMoveError(error: string | undefined): SupervisorMoveErro
     return 'first-run';
   if (/^DOCKER_[A-Z0-9_]{1,96}$/.test(text)) {
     const kind = supervisorCodeKind(text);
-    if (kind === 'retry' || kind === 'rebuild' || kind === 'provider') return 'laptop-step';
+    if (kind === 'retry' || kind === 'rebuild' || kind === 'stopped' || kind === 'provider') return 'laptop-step';
     if (kind === 'wait' || kind === 'viewer') return 'wait';
     if (kind === 'owner' || kind === 'retry-owner') return 'owner';
   }
@@ -560,6 +578,14 @@ function classifyCode(
     );
   if (kind === 'owner')
     return classified('needs-owner', sentence, { code, fingerprint, needsHuman: OWNER_STEPS[code] });
+  if (kind === 'stopped' && observed.laptop.poolAlive !== true)
+    return classified('needs-owner', `${sentence} No other laptop of this office is running either.`, {
+      code,
+      fingerprint,
+      needsHuman:
+        'After a host restart, recover the shared pool first: GET …/docker-pool/cold-preview, then POST ' +
+        '…/docker-pool/cold-recover. Then rebuild this laptop.',
+    });
   if (kind === 'retry-owner') {
     const offered = observed.laptop.continuation?.allowedActions.some((action) =>
       ['continue', 'retry'].includes(action)
@@ -727,10 +753,19 @@ function rebuildGate(
     return {
       kind: 'human',
       needsHuman:
-        'An agent is running in this laptop, so rebuilding would discard its conversation. That needs the owner: ' +
+        'An agent is running in a laptop of this employee, or the office cannot show that a running laptop is empty, ' +
+        'so rebuilding would discard its conversation. That needs the owner: ' +
         'POST …/docker-rebuild/preview, then /apply with confirmDiscardRunning.',
     };
-  if (provider === 'unknown') return { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
+  if (provider === 'unknown')
+    return history.since > 0 && now - history.since >= policy.stalledAfterMs
+      ? {
+          kind: 'human',
+          needsHuman:
+            'The office cannot read what is running in this laptop, so it will not rebuild it on its own. ' +
+            REBUILD_BY_HAND,
+        }
+      : { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
   return { kind: 'ok', preconditions: provider === undefined ? ['no-agent-running'] : [] };
 }
 
@@ -942,20 +977,50 @@ export function rollSupervisorHistory(
     : { fingerprint: seen.fingerprint, since: now, ...kept };
 }
 
-/** Count one attempt. Counted when the action is issued, so a throw or a restart mid-action still spent it. */
-export function recordSupervisorAttempt(
+/** Count one attempt, before its effect: a throw or an office restart in the middle has still spent it. */
+export function issueSupervisorAttempt(
   history: SupervisorHistory,
   action: SupervisorAction,
-  at: number,
-  outcome: 'done' | 'refused' | 'failed',
-  detail?: string
+  at: number
 ): SupervisorHistory {
   const before = history.attempts[action]?.count ?? 0;
   return {
     ...history,
     attempts: { ...history.attempts, [action]: { count: before + 1, lastAt: at } },
-    rebuilds:
-      action === 'rebuild-laptop' && outcome === 'done' ? [...history.rebuilds, at].slice(-8) : history.rebuilds,
-    lastAction: { action, at, outcome, ...(detail ? { detail: clip(detail, 300) } : {}) },
+    lastAction: { action, at, outcome: 'issued' },
   };
+}
+
+/** Record how the last issued attempt ended. A `busy` attempt tried nothing and is given back; its time is kept. */
+export function settleSupervisorAttempt(
+  history: SupervisorHistory,
+  outcome: Exclude<SupervisorOutcome, 'issued'>,
+  detail?: string
+): SupervisorHistory {
+  const last = history.lastAction;
+  if (!last || last.outcome !== 'issued') return history;
+  const spent = history.attempts[last.action] ?? { count: 1, lastAt: last.at };
+  return {
+    ...history,
+    attempts:
+      outcome === 'busy'
+        ? { ...history.attempts, [last.action]: { count: Math.max(0, spent.count - 1), lastAt: spent.lastAt } }
+        : history.attempts,
+    rebuilds:
+      last.action === 'rebuild-laptop' && outcome === 'done'
+        ? [...history.rebuilds, last.at].slice(-8)
+        : history.rebuilds,
+    lastAction: { action: last.action, at: last.at, outcome, ...(detail ? { detail: clip(detail, 300) } : {}) },
+  };
+}
+
+/** Both steps at once, for an attempt whose outcome is already known. */
+export function recordSupervisorAttempt(
+  history: SupervisorHistory,
+  action: SupervisorAction,
+  at: number,
+  outcome: Exclude<SupervisorOutcome, 'issued'>,
+  detail?: string
+): SupervisorHistory {
+  return settleSupervisorAttempt(issueSupervisorAttempt(history, action, at), outcome, detail);
 }
