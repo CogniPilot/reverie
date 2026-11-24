@@ -147,19 +147,38 @@ export interface ReprovisionProfile {
 export function reprovisionSeatSource(home: string, profileId: string): string {
   return posix.join(home, '.reverie', 'seat-auth', profileId);
 }
+/** The record of a plan move. It names the folder in which that move installed the employee's sign-in. */
+export type ReprovisionPlanReplacement = Extract<DockerEmployeeContinuationRecord, { version: 3 }>;
 /** Provider account routing of the source, derived by the backend only.
- * (a) A retired plan replacement keeps its in-home account generation as one
- * Env entry. (b) A saved launch override that selects the employee's own
+ * (a) The plan replacement that last decided the employee's routing keeps
+ * its in-home account generation as one Env entry. Every plan move installs the
+ * sign-in in a folder of its own and the provider keeps its conversations there
+ * from then on, so the folder of an earlier move is one the employee has left:
+ * a laptop given that one comes up signed out, on the other provider's
+ * variable, with no history. (b) A saved launch override that selects the employee's own
  * subscription seat gets that seat as one read-write bind; the launch itself
  * supplies the variable. (c) Without any override of that variable, the
  * employee's subscription profile is the owner's choice: when its provider
  * binds natively to the session mode, the same seat is bound and the source
- * carries the variable itself. (d) Otherwise nothing. */
+ * carries the variable itself. (d) Otherwise nothing.
+ *
+ * `basis` supplies the private home only. `plan` is the plan replacement of
+ * (a), which the caller reads from its own history: the newest one, unless a
+ * later laptop was since routed by (b) to (d). It is the basis only when the
+ * history began with it and nothing has decided since.
+ *
+ * A plan replacement on another provider than the plan now selected for the
+ * employee is refused. The plan was then changed since by something that is
+ * not a plan move, and nothing on record says which folder holds the sign-in:
+ * the generation is the other provider's, and a seat made now would hide
+ * whatever the employee has used since. Every caller derives the account before
+ * it discards or retires anything, so the refusal leaves the laptop as it was. */
 export function reprovisionAccount(
   basis: DockerEmployeeContinuationRecord,
   profile: ReprovisionProfile | undefined,
   overrides: Readonly<Record<string, string>> | undefined,
-  unchecked: DockerLaptopTemplate
+  unchecked: DockerLaptopTemplate,
+  plan: ReprovisionPlanReplacement | undefined
 ): DockerReprovisionAccount {
   const template = DockerLaptopTemplate.parse(unchecked);
   const done = (account: DockerReprovisionAccount) => {
@@ -167,16 +186,17 @@ export function reprovisionAccount(
       refuse('DOCKER_REPROVISION_ACCOUNT_SOURCE_UNUSED');
     return DockerReprovisionAccount.parse(account);
   };
-  if (basis.version === 3) {
-    const selected = basis.planReplacement.account;
+  if (plan) {
+    const selected = plan.planReplacement.account;
+    if (profile && profile.provider !== selected.provider) refuse('DOCKER_REPROVISION_ACCOUNT_PLAN_MISMATCH');
     return done({
       kind: 'generation-env',
       key: selected.provider === 'anthropic' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
       path: dockerPlanGeneration({
-        operationId: basis.request.operationId,
+        operationId: plan.request.operationId,
         projectionDigest: selected.projectionDigest,
         provider: selected.provider,
-        containerId: basis.original.containerId,
+        containerId: plan.original.containerId,
       }).configDir,
     });
   }

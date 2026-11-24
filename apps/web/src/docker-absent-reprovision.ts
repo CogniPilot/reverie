@@ -38,6 +38,7 @@ import {
   REPROVISION_OPERATION_LABEL,
   REPROVISION_PURPOSE_LABEL,
   reprovisionAccount,
+  type ReprovisionPlanReplacement,
   reprovisionSeatSource,
   reprovisionSourceConfiguration,
   reprovisionSourceName,
@@ -438,15 +439,53 @@ export class DockerAbsentReprovision {
       refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
     return DockerEmployeeContinuationRecord.parse(persisted(at.record!));
   }
-  async #account(basis: DockerEmployeeContinuationRecord, employee: CompanyEmployee, template: DockerLaptopTemplate) {
+  /** The plan replacement that still decides where this employee's sign-in is, if one does.
+   *
+   * Newest first, the laptop records are a sequence of routing decisions: the record that is being retired or
+   * superseded now, then, for each entry of the history from its head back, the source that entry made and the
+   * record it retired.
+   * - A plan replacement decides: its move installed the sign-in in a folder of its own.
+   * - A source that was routed by the selected plan's own seat rules, or was given nothing, decides too. The laptop
+   *   built from it left the folder of every earlier move, and a later laptop is not sent back there.
+   * - A source that carries a generation only repeats an earlier decision. Which one is read from the records and
+   *   never from the entry: an entry written before this rule may name the folder of the wrong move.
+   *
+   * `#basis` is the OLDEST record. It fixes where the private home is and nothing else. */
+  #planReplacement(
+    employeeId: string,
+    row: DockerEmployeeContinuationRecord | null,
+    state = this.company.store.snapshot()
+  ): ReprovisionPlanReplacement | undefined {
+    if (row?.version === 3) return row;
+    let at = this.#head(employeeId, state);
+    for (let depth = 0; at && depth < 256; depth++) {
+      if (at.account && at.account.kind !== 'generation-env') return undefined;
+      const record = at.record?.version === 3 && DockerEmployeeContinuationRecord.parse(persisted(at.record));
+      if (record && record.version === 3) return record;
+      if (!at.previous) return undefined;
+      const before = this.#entry(at.previous, state);
+      if (!before || before.employeeId !== employeeId) refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
+      at = before;
+    }
+    return at ? refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS') : undefined;
+  }
+  /** `row` is the employee's current laptop record, when there is one. */
+  async #account(
+    basis: DockerEmployeeContinuationRecord,
+    row: DockerEmployeeContinuationRecord | null,
+    employee: CompanyEmployee,
+    template: DockerLaptopTemplate
+  ) {
     // The profile is the owner's choice; the saved session's mode is what launches.
     const selected = employee.runtimeRecipe?.subscriptionProfile,
-      mode = this.sessions.saved(employee.sessionId)?.mode ?? 'claude';
+      mode = this.sessions.saved(employee.sessionId)?.mode ?? 'claude',
+      plan = this.#planReplacement(employee.id, row);
     return reprovisionAccount(
       basis,
       selected ? { id: selected.id, provider: selected.provider, mode } : undefined,
       await this.sessions.overrides(employee.sessionId),
-      template
+      template,
+      plan
     );
   }
   /** A completed entry whose source may be replaced, when no continuation
@@ -618,7 +657,7 @@ export class DockerAbsentReprovision {
     current();
     const { network, names } = await this.#network(employeeId, template.network);
     current();
-    const account = await this.#account(facts.basis, facts.employee, template);
+    const account = await this.#account(facts.basis, facts.row, facts.employee, template);
     current();
     requireReprovisionEphemeralLayout(
       this.#input(facts.basis, template, '', facts.employee.name, image, network, account, facts.employee.sessionId)
@@ -709,7 +748,7 @@ export class DockerAbsentReprovision {
     current();
     const { network, names } = await this.#network(employeeId, template.network, discardable ? present : []);
     current();
-    const account = await this.#account(facts.row, facts.employee, template);
+    const account = await this.#account(facts.row, facts.row, facts.employee, template);
     current();
     requireReprovisionEphemeralLayout(
       this.#input(facts.row, template, '', facts.employee.name, image, network, account, facts.employee.sessionId)
@@ -1014,7 +1053,7 @@ export class DockerAbsentReprovision {
     current();
     const { network, names } = await this.#network(employeeId, template.network, laptops);
     current();
-    const account = await this.#account(first.basis, employee, template);
+    const account = await this.#account(first.basis, first.facts.row, employee, template);
     current();
     requireReprovisionEphemeralLayout(
       this.#input(first.basis, template, '', employee.name, image, network, account, employee.sessionId)

@@ -169,6 +169,14 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'request again; the laptop then comes up signed in.',
     allowedActions: ['retry'],
   },
+  DOCKER_REPROVISION_ACCOUNT_PLAN_MISMATCH: {
+    message:
+      'The last plan move of this employee put their sign-in and their conversations in a folder for one provider, ' +
+      'and the plan that is selected for them now is on the other provider. Nothing on record says which sign-in ' +
+      'folder they have used since, so no laptop was created and nothing was discarded. Move the employee to the ' +
+      'plan they should be on from the Plans page, which records the folder again, then preview the rebuild again.',
+    allowedActions: ['rebuild-preview'],
+  },
   DOCKER_REPROVISION_SEAT_HOME_FOREIGN: {
     message:
       'The home folder of this employee is not a private folder (mode 0700) owned by the laptop user that the ' +

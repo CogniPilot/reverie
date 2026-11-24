@@ -2558,6 +2558,214 @@ describe('rebuild laptop', () => {
   });
 });
 
+const movedFromOperation = '44444444-4444-4444-8444-444444444444';
+const laterOperation = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const openaiSeat = 'openai-ed0348c4';
+const generation = (operationId: string, provider: 'claude' | 'codex') => ({
+  kind: 'generation-env',
+  key: provider === 'claude' ? 'CLAUDE_CONFIG_DIR' : 'CODEX_HOME',
+  path: `/home/agent/.reverie/plan-moves/${operationId}/generation-${'1'.repeat(64)}/${provider}`,
+});
+const selectPlan = (f: Fixture, id: string, provider: 'anthropic' | 'openai') =>
+  f.companyStore.update((state) => {
+    const employee = state.employees[0]!;
+    employee.runtimeRecipe = {
+      ...employee.runtimeRecipe!,
+      subscriptionProfile: { id, label: 'Synthetic seat', provider },
+    };
+  });
+/**
+ * The history of an employee who changed plan twice. A plan move put them on a Codex plan; that laptop was
+ * reprovisioned under the session of that day (the FIRST record of the history). A second plan move, under a new
+ * session, put them on a Claude plan, and the owner rebuilt that laptop too. What is left is the unused source of
+ * the second rebuild, and the selected plan is the Claude one.
+ */
+async function switchedPlan() {
+  const codex = v3Row() as Extract<DockerEmployeeContinuationRecord, { version: 3 }>;
+  const first = DockerEmployeeContinuationRecord.parse({
+    ...codex,
+    planReplacement: {
+      ...codex.planReplacement,
+      account: { ...codex.planReplacement.account, id: openaiSeat, provider: 'openai' },
+    },
+  });
+  const f = await fixture({ row: first, profile: openaiSeat, provider: 'openai', mode: 'codex' });
+  const one = await f.service.reprovision(employeeId, await f.request(), f.authority);
+  expect(f.entry()!.account).toEqual(generation(priorOperation, 'codex'));
+  const earlier = 'aaaaaaaa-9999-4999-8999-999999999999';
+  // The second plan move: a new session, a new plan and a plan replacement record of its own.
+  const claude = DockerEmployeeContinuationRecord.parse({
+    ...codex,
+    request: { ...codex.request, operationId: nextOperation },
+    planReplacement: {
+      ...codex.planReplacement,
+      account: { ...codex.planReplacement.account, id: seat },
+      source: {
+        ...codex.planReplacement.source,
+        binding: { ...codex.planReplacement.source.binding, operationId: movedFromOperation },
+      },
+    },
+  });
+  await f.companyStore.update((state) => {
+    const history = state.retiredDockerEmployeeContinuations!;
+    history[0] = JSON.parse(JSON.stringify(history[0]).replaceAll(sid, earlier)) as (typeof history)[number];
+    state.dockerEmployeeContinuations = [structuredClone(claude)];
+    state.employees[0]!.dockerBinding = {
+      ...f.binding,
+      operationId: nextOperation,
+      originalDigest: dockerContinuationDigest(claude.destination),
+    };
+  });
+  await selectPlan(f, seat, 'anthropic');
+  f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+  const two = await f.service.rebuild(employeeId, await rebuildRequest(f, replaceOperation), f.authority);
+  expect(two).toMatchObject({ operationId: replaceOperation, state: 'ready' });
+  // The rebuild discarded the old laptop and the unused source of the first operation.
+  expect(f.engine.rebuilt.sort()).toEqual([one.sourceContainerId!, destinationCid].sort());
+  const entries = () => f.snapshot().retiredDockerEmployeeContinuations!;
+  expect(entries().map((entry) => [entry.sessionId, entry.record?.version, entry.previous])).toEqual([
+    [earlier, 3, undefined],
+    [sid, 3, retireOperation],
+  ]);
+  return { f, entries, source: two.sourceContainerId!, claude };
+}
+
+describe('an employee who changed plan', () => {
+  const claudeFolder = generation(nextOperation, 'claude');
+  it('gives the next source the sign-in folder of the newest plan move, not of the first', async () => {
+    // The laptop built from a source that named the first move's folder came up on the other provider's variable:
+    // signed out and with no history, while the sign-in and every conversation sat in the newest move's folder.
+    const { f, entries, source } = await switchedPlan();
+    expect(entries()[1]!.account).toEqual(claudeFolder);
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ mode: 'replace-source', record: null, account: claudeFolder });
+    expect((await f.service.preview(employeeId, template, f.authority)).account).toEqual(claudeFolder);
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f, thirdOperation), f.authority);
+    expect(result).toMatchObject({ operationId: thirdOperation, state: 'ready' });
+    expect(f.engine.removed).toEqual([source]);
+    expect(entries()[2]).toMatchObject({ reason: 'source-replaced', previous: replaceOperation, account: claudeFolder });
+    expect(envOf(f, 2)).toEqual(['CLAUDE_CONFIG_DIR=' + claudeFolder.path]);
+    expect(mountsOf(f, 2)).toEqual([]);
+    // The private home is still the one the first record names.
+    expect(f.engine.created[2]!.configuration.Labels).toMatchObject({ 'reverie.session': sid });
+  });
+  it.each([
+    [
+      'the seat of the selected plan',
+      { kind: 'seat-mount', key: 'CLAUDE_CONFIG_DIR', path: seatPath, source: `${homeSource}/.reverie/seat-auth/${seat}`, env: true },
+      seat,
+    ],
+    ['nothing', { kind: 'none' }, undefined],
+  ])('does not send a laptop back to a plan move’s folder once a rebuild has routed it to %s', async (_name, routed, profile) => {
+    // An earlier release routed the rebuilt laptop of a plan replacement by the selected plan's own rules. The
+    // employee has used that folder since; the move's folder is one they left.
+    const f = await fixture({ row: v3Row(), ...(profile ? { profile } : {}) });
+    f.setLive({ inert: true });
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    expect(f.entry()!.account).toEqual(generation(priorOperation, 'claude'));
+    const begin = async (source: string, operationId: string) => {
+      const row = DockerEmployeeContinuationRecord.parse({
+        ...v2Row('ready'),
+        request: { ...v2Row('ready').request, operationId, containerId: source, imageId: workerImage },
+        original: { ...original(source), imageId: workerImage },
+        workerImage: { imageId: workerImage, sourceImageId: workerImage, clientManifestDigest: manifest },
+      });
+      await f.companyStore.update((state) => {
+        state.dockerEmployeeContinuations = [structuredClone(row)];
+        state.employees[0]!.dockerBinding = {
+          ...f.binding,
+          operationId,
+          originalDigest: dockerContinuationDigest(row.destination),
+        };
+      });
+    };
+    await begin(first.sourceContainerId!, nextOperation);
+    const second = await f.service.reprovision(employeeId, await f.request(replaceOperation), f.authority);
+    expect(second).toMatchObject({ operationId: replaceOperation, state: 'ready' });
+    const entries = () => f.snapshot().retiredDockerEmployeeContinuations!;
+    // Until something else decides, the laptop stays on the folder of its plan move.
+    expect(entries()[1]).toMatchObject({ record: { version: 2 }, account: generation(priorOperation, 'claude') });
+    await f.companyStore.update((state) => {
+      state.retiredDockerEmployeeContinuations![1]!.account = routed as never;
+    });
+    // Replacing the unused source used to return to the first record's folder.
+    const replace = await f.service.preview(employeeId, template, f.authority);
+    expect(replace).toMatchObject({ mode: 'replace-source', account: routed });
+    const third = await f.service.reprovision(
+      employeeId,
+      {
+        operationId: thirdOperation,
+        sessionId: sid,
+        sessionGeneration: 9,
+        expectedScopeDigest: replace.scopeDigest,
+        template,
+      },
+      f.authority
+    );
+    expect(third).toMatchObject({ operationId: thirdOperation, state: 'ready' });
+    expect(entries()[2]).toMatchObject({ reason: 'source-replaced', account: routed });
+    expect(envOf(f, 2)).toEqual(profile ? ['CLAUDE_CONFIG_DIR=' + seatPath] : []);
+    // And so does the laptop that is built from that source and rebuilt later.
+    await begin(third.sourceContainerId!, laterOperation);
+    expect(await f.service.preview(employeeId, template, f.authority)).toMatchObject({ mode: 'retire', account: routed });
+  });
+  it('keeps that folder when the laptop built from the source is rebuilt later', async () => {
+    const { f, entries, source } = await switchedPlan();
+    // An ordinary laptop record begun from the source: it names no plan of its own.
+    const begun = DockerEmployeeContinuationRecord.parse({
+      ...v2Row('ready'),
+      request: { ...v2Row('ready').request, operationId: laterOperation, containerId: source, imageId: workerImage },
+      original: { ...original(source), imageId: workerImage },
+      workerImage: { imageId: workerImage, sourceImageId: workerImage, clientManifestDigest: manifest },
+    });
+    await f.companyStore.update((state) => {
+      state.dockerEmployeeContinuations = [structuredClone(begun)];
+      state.employees[0]!.dockerBinding = {
+        ...f.binding,
+        operationId: laterOperation,
+        originalDigest: dockerContinuationDigest(begun.destination),
+      };
+    });
+    f.engine.container(destinationCid, laptopLabels, false, laptopName(destinationCid));
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ mode: 'retire', record: { version: 2 }, account: claudeFolder });
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f, thirdOperation), f.authority);
+    expect(result).toMatchObject({ operationId: thirdOperation, state: 'ready' });
+    expect(entries()[2]).toMatchObject({ reason: 'recorded-containers-absent', account: claudeFolder });
+    expect(envOf(f, 2)).toEqual(['CLAUDE_CONFIG_DIR=' + claudeFolder.path]);
+  });
+  it('refuses, before it discards anything, when the selected plan is on another provider than the newest move', async () => {
+    // The plan was changed since by something that is not a plan move: no record says where the sign-in is.
+    const { f, entries, source } = await switchedPlan();
+    await selectPlan(f, openaiSeat, 'openai');
+    const refused = { code: 'DOCKER_REPROVISION_ACCOUNT_PLAN_MISMATCH' };
+    await expect(f.service.previewRebuild(employeeId, template, f.authority)).rejects.toMatchObject(refused);
+    await expect(f.service.preview(employeeId, template, f.authority)).rejects.toMatchObject(refused);
+    const stale = { operationId: thirdOperation, sessionId: sid, sessionGeneration: 9, expectedScopeDigest: '0'.repeat(64), template };
+    await expect(f.service.rebuild(employeeId, stale, f.authority)).rejects.toMatchObject(refused);
+    expect(f.engine.removed).toEqual([]);
+    expect(f.engine.containers.has(source)).toBe(true);
+    expect(entries()).toHaveLength(2);
+    // The same holds for a laptop that still has its record and its containers.
+    const recorded = await fixture({ row: v3Row(), profile: openaiSeat, provider: 'openai', mode: 'codex' });
+    recorded.engine.container(destinationCid, laptopLabels, true, laptopName(destinationCid));
+    await expect(recorded.service.previewRebuild(employeeId, template, recorded.authority)).rejects.toMatchObject(refused);
+    await expect(
+      recorded.service.rebuild(employeeId, { ...stale, confirmDiscardRunning: true }, recorded.authority)
+    ).rejects.toMatchObject(refused);
+    expect(recorded.engine.rebuilt).toEqual([]);
+    expect(recorded.snapshot().dockerEmployeeContinuations).toHaveLength(1);
+    expect(recorded.snapshot().retiredDockerEmployeeContinuations ?? []).toEqual([]);
+    const guidance = dockerRecoveryGuidance(refused.code)!;
+    expect(guidance.allowedActions).toEqual(['rebuild-preview']);
+    expect(guidance.message).toMatch(/^[A-Z].*[.]$/s);
+    expect(guidance.message).not.toMatch(/DOCKER_|undefined/);
+    // Selecting the plan of that move again is accepted as before.
+    await selectPlan(f, seat, 'anthropic');
+    expect((await f.service.previewRebuild(employeeId, template, f.authority)).account).toEqual(claudeFolder);
+  });
+});
+
 describe('rebuild proofs and guidance', () => {
   it('binds a container by its creator labels or by the recorded laptop name', () => {
     const row = { Name: laptopName(candidateCid), Config: { Labels: laptopLabels } };
