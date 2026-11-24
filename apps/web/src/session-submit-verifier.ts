@@ -183,12 +183,58 @@ export function composerBody(screen: string, glyph: string): string | undefined 
     if (styles.get(previous) !== '1,2' || styles.get(last) !== '1') return undefined;
   }
   const body = [lines[last].trimStart().slice(glyph.length).trimStart()];
+  let ruled = false;
   for (const line of lines.slice(last + 1, end)) {
     const text = line.trim();
-    if (glyph !== '›' && (/^[─━═╭╮╰╯]/u.test(line) || /^⏵⏵/u.test(text))) break;
+    if (glyph !== '›' && (/^[─━═╭╮╰╯]/u.test(line) || /^⏵⏵/u.test(text))) {
+      ruled = /^[─━═]/u.test(line);
+      break;
+    }
     body.push(line);
   }
-  return body.join('\n').trim();
+  const text = body.join('\n').trim();
+  // Claude Code's own suggestion of a next prompt is not a draft: nobody typed it.
+  if (text && glyph === '❯' && ruled && claudeSuggestionOnly(screen, glyph, last, last + body.length - 1)) return '';
+  return text;
+}
+
+/**
+ * Whether Claude Code's composer, rows `first` to `final` of a styled capture, shows only its own suggestion (ghost text).
+ *
+ * Claude Code offers a next prompt in the empty composer as its placeholder: faint (SGR 2), with its drawn cursor (inverse,
+ * SGR 7) on the first character, the same way it draws the welcome example above (measured on 2.1.308). Text a person or the
+ * office typed is never faint. So the composer is suggestion-only when every visible character after the glyph is faint,
+ * except that the very first may instead be the bare inverse cursor, and at least one is faint. Any other attribute, a
+ * background, an escape this reader does not model, or one character in the default style keeps the composer a draft; so does
+ * a capture taken without styles, where a suggestion and the same words typed look alike. The whole capture is read as one
+ * SGR stream, because tmux carries attributes across rows.
+ */
+function claudeSuggestionOnly(screen: string, glyph: string, first: number, final: number): boolean {
+  const state: SgrState = { on: new Set(), fg: false, bg: false, underlineColour: false, unknown: false };
+  const rows = screen.split('\n');
+  if (final >= rows.length || final - first > 16) return false;
+  let seen = 0, faint = 0;
+  for (let index = 0; index <= final; index++) {
+    let lead = index === first;
+    // eslint-disable-next-line no-control-regex
+    for (const [, params, char] of rows[index]!.matchAll(/\x1b\[([0-9;:]*)m|\x1b|([^\x1b])/gsu)) {
+      if (params !== undefined) applySgr(state, params);
+      else if (char === undefined) state.unknown = true;
+      else if (index >= first && !/[\s ]/u.test(char)) {
+        if (lead) {
+          if (char !== glyph) return false;
+          lead = false;
+          continue;
+        }
+        if (state.unknown || state.bg || state.underlineColour || ++seen > 4096) return false;
+        const on = [...state.on].sort((a, b) => a - b).join(',');
+        if (on === '2') faint++;
+        else if (on !== '7' || seen !== 1 || state.fg) return false;
+      }
+    }
+    if (lead) return false;
+  }
+  return faint > 0;
 }
 
 /** The composer glyphs whose empty state composerIsEmpty is verified to read. */
