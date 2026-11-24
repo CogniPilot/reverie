@@ -68,6 +68,8 @@ export const DockerRuntimeConfiguration = z
     helperImageId: sha,
     memoryHighHelperImageId: sha.optional(),
     poolRestoreHelperImageId: sha.optional(),
+    /** New `configure-high` leaf writers only. Never the anchor, storage or pool pin. */
+    leafWriterHelperImageId: sha.optional(),
     recoveryHelperImageId: sha.optional(),
     apiUrl: z.string().url().max(2048),
     workerGpu: DockerWorkerGpu.optional(),
@@ -316,6 +318,7 @@ export class DockerEmployeeRuntime {
         helperImageId: configuration.helperImageId,
         memoryHighHelperImageId: configuration.memoryHighHelperImageId,
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
+        leafWriterHelperImageId: configuration.leafWriterHelperImageId,
         requireColdPoolIdle: () => coldPool.requireIdle(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>

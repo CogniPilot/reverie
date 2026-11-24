@@ -37,6 +37,7 @@
     "containerRuntime",
     "default",
     "deployment",
+    "docker-leaf-writer-helper-image",
     "docker-memory-high-helper",
     "docker-memory-high-helper-image",
     "docker-pool-restore-helper-image",

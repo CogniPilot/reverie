@@ -49,6 +49,13 @@
             helper = self.packages.${system}.docker-memory-high-helper;
             name = "reverie-boxed-recovery-helper";
           };
+          # Baseline labels, so a leaf writer container created from it has the fixed
+          # configuration. Selected only by the separate leafWriterHelperImageId pin.
+          docker-leaf-writer-helper-image = import ./nix/docker-resource-helper-image.nix {
+            inherit pkgs;
+            helper = self.packages.${system}.docker-memory-high-helper;
+            name = "reverie-boxed-leaf-writer-helper";
+          };
           voiceCiVerifier = import ./nix/voice-ci-verifier.nix { inherit pkgs; src = source; };
           recoveryLedger = import ./nix/recovery-ledger.nix { inherit pkgs; src = source; };
           imageCheck = import ./nix/image-check.nix { inherit pkgs; src = source; };

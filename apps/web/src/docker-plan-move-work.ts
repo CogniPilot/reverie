@@ -54,6 +54,7 @@ export interface DockerPlanWorkComposition {
   readonly helperImageId: string;
   readonly memoryHighHelperImageId?: string;
   readonly poolRestoreHelperImageId?: string;
+  readonly leafWriterHelperImageId?: string;
   readonly target: DockerEmployeeImageConfiguration;
   readonly canonical: CompanyDockerContinuationStore;
   readonly moves: PlanMoveStore;
@@ -107,6 +108,7 @@ export class DockerPlanMoveWork {
         helperImageId: d.helperImageId,
         memoryHighHelperImageId: d.memoryHighHelperImageId,
         poolRestoreHelperImageId: d.poolRestoreHelperImageId,
+        leafWriterHelperImageId: d.leafWriterHelperImageId,
         selectedWorkerContainerIds: () =>
           dockerPlanWorkerContainerIds(
             () => d.canonical.resourceInventory(),

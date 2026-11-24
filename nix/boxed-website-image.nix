@@ -8,7 +8,8 @@ let
   clientManifestDigest = builtins.hashFile "sha256" "${clientRoot}/manifest.json";
   required = [ "version" "purpose" "deployment" "workerImageId" "clientManifestDigest"
     "sourceImageIds" "helperImageId" "apiUrl" ];
-  optional = [ "memoryHighHelperImageId" "poolRestoreHelperImageId" "recoveryHelperImageId" ];
+  optional = [ "memoryHighHelperImageId" "poolRestoreHelperImageId" "recoveryHelperImageId"
+    "leafWriterHelperImageId" ];
   matches = pattern: value: builtins.isString value && builtins.match pattern value != null;
   imageId = matches "sha256:[a-f0-9]{64}";
   decimal = max: value: matches "(0|[1-9][0-9]{0,4})" value

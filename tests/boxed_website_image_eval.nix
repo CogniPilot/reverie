@@ -76,6 +76,20 @@ let
       selected = existing // { recoveryHelperImageId = distinctId "d"; };
     in (make existing baseConfig).passthru.runtimeConfiguration == existing
       && (make selected baseConfig).passthru.runtimeConfiguration == selected;
+    leafWriterHelperIsOptInAndIndependentlyPinned = let
+      distinctId = digit: "sha256:${builtins.concatStringsSep "" (builtins.genList (_: digit) 64)}";
+      existing = cfg // {
+        memoryHighHelperImageId = distinctId "b";
+        poolRestoreHelperImageId = distinctId "c";
+        recoveryHelperImageId = distinctId "d";
+      };
+      selected = existing // { leafWriterHelperImageId = distinctId "e"; };
+    in (make existing baseConfig).passthru.runtimeConfiguration == existing
+      && (make selected baseConfig).passthru.runtimeConfiguration == selected
+      && (make selected baseConfig).passthru.runtimeConfiguration.helperImageId == cfg.helperImageId
+      && !(accepts (cfg // { leafWriterHelperImageId = null; }) baseConfig)
+      && !(accepts (cfg // { leafWriterHelperImageId = "latest"; }) baseConfig)
+      && !(accepts (cfg // { leafWriterHelperImageId = "sha256:${id}x"; }) baseConfig);
     backendNotDuplicated = (make cfg (baseConfig // {
       Env = [ "KEPT=yes" "REVERIE_RUNTIME_BACKEND=boxed-docker-v1" ];
     })).config == image.config;
