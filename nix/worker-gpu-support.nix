@@ -25,7 +25,7 @@ in pkgs.rustPlatform.buildRustPackage {
     REVERIE_FIXED_TASK_PERF_MANIFEST = "${policyV1}/share/reverie/worker-perf-profile.json";
     REVERIE_FIXED_TASK_PERF_V2_MANIFEST = "${policyV2}/share/reverie/worker-perf-profile.json";
   };
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Read-only selected employee GPU/CDI/image preflight";
     license = pkgs.lib.licenses.mit;

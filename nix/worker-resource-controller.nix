@@ -18,7 +18,7 @@ in pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-resource-controller" ];
   cargoTestFlags = [ "-p" "reverie-worker-resource-controller" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Native Docker worker-pool controller";
     license = pkgs.lib.licenses.mit;

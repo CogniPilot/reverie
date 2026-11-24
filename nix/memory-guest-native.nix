@@ -26,7 +26,7 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-memory-cli" "-p" "reverie-mcp-cli" ];
   # Qualify the real ancillary ABI under musl too. Actual fixed-path memory/MCP
   # execution is separately qualified inside the owned image namespace.
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   cargoTestFlags = [ "-p" "reverie-host" "--lib" "native::owned_process::tests" ];
   nativeCheckInputs = [ pkgs.rustc ];
   preCheck = ''

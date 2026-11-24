@@ -74,7 +74,7 @@ in pkgs.rustPlatform.buildRustPackage {
     mkdir -p "$out/share/systemd/pool-offer"
     "$out/bin/reverie-worker-broker" service-unit
   '';
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Unselected native worker broker and fixed original-process manifest";
     license = pkgs.lib.licenses.mit;

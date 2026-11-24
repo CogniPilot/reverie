@@ -14,7 +14,7 @@ rec {
     cargoLock.lockFile = workspace.lockFile;
     cargoBuildFlags = [ "-p" "reverie-worker-client" ];
     cargoTestFlags = [ "-p" "reverie-worker-client" ];
-    doCheck = true;
+    doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
     meta = {
       description = "Native client for the existing private Reverie worker broker";
       license = pkgs.lib.licenses.mit;

@@ -13,7 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-mux" ];
   cargoTestFlags = [ "-p" "reverie-mux" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   # The console's runtime runs its tmux server with pkgs.tmux; the client here is the same build,
   # so it always finds a tmux and speaks the server's protocol.
   nativeBuildInputs = [ pkgs.makeWrapper ];

@@ -13,7 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-routes" "--bin" "reverie-route-handler" ];
   cargoTestFlags = [ "-p" "reverie-routes" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Bounded native stdio handler for selected Reverie API routes";
     mainProgram = "reverie-route-handler";

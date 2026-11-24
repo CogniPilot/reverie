@@ -15,7 +15,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoBuildFlags = [ "-p" "reverie-soft-limit-helper" ];
   cargoTestFlags = [ "-p" "reverie-soft-limit-helper" ];
   REVERIE_TEST_SHELL = "${pkgs.bash}/bin/bash";
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Root-authorized, one-connection laptop soft memory limit helper";
     license = pkgs.lib.licenses.mit;

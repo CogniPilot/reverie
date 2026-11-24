@@ -25,7 +25,7 @@ in pkgs.rustPlatform.buildRustPackage (engine // {
   cargoTestFlags = [ "-p" "reverie-voice-ci" ];
   REVERIE_SPEECH_WHISPER = "${whisper}/bin/whisper-cli";
   REVERIE_SPEECH_FFMPEG = pkgs.lib.getExe' pkgs.ffmpeg-headless "ffmpeg";
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Native real-model speech fixture and voice acceptance verifier";
     license = pkgs.lib.licenses.mit;

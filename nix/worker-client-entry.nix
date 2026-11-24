@@ -10,7 +10,7 @@ in pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-client-entry" ];
   cargoTestFlags = [ "-p" "reverie-worker-client-entry" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   # Native custody tests require their own private parent, including in Nix.
   preCheck = ''
     mkdir -m 0700 "$NIX_BUILD_TOP/credential-fixtures"

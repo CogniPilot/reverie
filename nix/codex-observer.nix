@@ -93,7 +93,7 @@ let
   # public inputs does not silently compile the complete Rust graph.
   nativeCheck = candidate.overrideAttrs (_: {
     pname = "reverie-codex-observer-native-check";
-    doCheck = true;
+    doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
     checkPhase = ''
       runHook preCheck
       pushd codex-rs

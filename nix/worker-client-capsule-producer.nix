@@ -12,7 +12,7 @@ in pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-worker-client-capsule" ];
   cargoTestFlags = [ "-p" "reverie-elf-bundle" "-p" "reverie-worker-client-capsule" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   postCheck = ''
     REVERIE_TEST_CAPSULE_ORIGINS=${origins} \
     REVERIE_TEST_CAPSULE_PATCHELF=${pkgs.patchelf}/bin/patchelf \

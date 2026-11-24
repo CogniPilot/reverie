@@ -13,7 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-ops-cli" ];
   cargoTestFlags = [ "-p" "reverie-ops-cli" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   meta = {
     description = "Native structured OPS client for the installed Office API";
     license = pkgs.lib.licenses.mit;

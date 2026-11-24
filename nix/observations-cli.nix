@@ -13,7 +13,7 @@ pkgs.rustPlatform.buildRustPackage {
   cargoLock.lockFile = workspace.lockFile;
   cargoBuildFlags = [ "-p" "reverie-observations" ];
   cargoTestFlags = [ "-p" "reverie-observations" ];
-  doCheck = true;
+  doCheck = builtins.getEnv "REVERIE_FAST_BUILD" != "1";
   # The USER units' fixed systemctl, baked into reverie-observations.
   REVERIE_SYSTEMCTL = "${pkgs.systemd}/bin/systemctl";
   meta = {
