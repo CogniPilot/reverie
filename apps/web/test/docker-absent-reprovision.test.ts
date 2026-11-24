@@ -1830,6 +1830,17 @@ describe('canonical formats', () => {
     expect(
       allowedReprovisionTransition(done, { ...done, source: { ...done.source, containerId: '9'.repeat(64) } as never })
     ).toBe(false);
+    // An issued intent is fixed. Only the workflow's own re-issue may give it another configuration, and nothing else.
+    const other = { ...issued, source: { ...issued.source, configurationDigest: '7'.repeat(64) } };
+    expect(allowedReprovisionTransition(issued as never, other as never)).toBe(false);
+    expect(allowedReprovisionTransition(issued as never, other as never, true)).toBe(true);
+    expect(
+      allowedReprovisionTransition(issued as never, { ...other, source: { ...other.source, imageId: 'sha256:' + '6'.repeat(64) } } as never, true)
+    ).toBe(false);
+    expect(allowedReprovisionTransition(issued as never, { ...other, retiredAt: 5 } as never, true)).toBe(false);
+    expect(
+      allowedReprovisionTransition(done, { ...done, source: { ...done.source, configurationDigest: '7'.repeat(64) } } as never, true)
+    ).toBe(false);
   });
 });
 

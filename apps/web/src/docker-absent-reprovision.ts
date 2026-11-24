@@ -621,7 +621,7 @@ export class DockerAbsentReprovision {
     const account = await this.#account(facts.basis, facts.employee, template);
     current();
     requireReprovisionEphemeralLayout(
-      this.#input(facts.basis, template, '', facts.employee.name, image, network, account)
+      this.#input(facts.basis, template, '', facts.employee.name, image, network, account, facts.employee.sessionId)
     );
     const templateDigest = dockerContinuationDigest(template);
     const mode = facts.row ? ('retire' as const) : ('replace-source' as const),
@@ -712,7 +712,7 @@ export class DockerAbsentReprovision {
     const account = await this.#account(facts.row, facts.employee, template);
     current();
     requireReprovisionEphemeralLayout(
-      this.#input(facts.row, template, '', facts.employee.name, image, network, account)
+      this.#input(facts.row, template, '', facts.employee.name, image, network, account, facts.employee.sessionId)
     );
     const templateDigest = dockerContinuationDigest(template);
     const scopeDigest = dockerContinuationDigest({
@@ -763,10 +763,12 @@ export class DockerAbsentReprovision {
     employeeName: string,
     image: { imageId: string; path: string },
     network: Network,
-    account: DockerReprovisionAccount | undefined
+    account: DockerReprovisionAccount | undefined,
+    sessionId: string
   ) {
     return {
       row,
+      sessionId,
       template,
       operationId,
       deployment: this.configuration.deployment,
@@ -1014,7 +1016,9 @@ export class DockerAbsentReprovision {
     current();
     const account = await this.#account(first.basis, employee, template);
     current();
-    requireReprovisionEphemeralLayout(this.#input(first.basis, template, '', employee.name, image, network, account));
+    requireReprovisionEphemeralLayout(
+      this.#input(first.basis, template, '', employee.name, image, network, account, employee.sessionId)
+    );
     const live = this.sessions.live(employee.sessionId);
     // A launch this office process made and its live boxed viewer still owns: the rebuild ends it with the viewer.
     const launchOwned = live?.container !== undefined && this.sessions.viewerLaunchOwned?.(employee.sessionId) === true;
@@ -1429,10 +1433,11 @@ export class DockerAbsentReprovision {
   async #publish(
     before: DockerAbsentContinuationRetirement,
     change: Partial<Pick<DockerAbsentContinuationRetirement, 'session' | 'source' | 'removal'>>,
-    current: () => void
+    current: () => void,
+    reissue = false
   ): Promise<DockerAbsentContinuationRetirement> {
     const next = DockerAbsentContinuationRetirement.parse({ ...before, ...change });
-    if (!allowedReprovisionTransition(before, next)) refuse('DOCKER_REPROVISION_RETIREMENT_CHANGED');
+    if (!allowedReprovisionTransition(before, next, reissue)) refuse('DOCKER_REPROVISION_RETIREMENT_CHANGED');
     await this.company.store.update((state) => {
       current();
       const rows = state.retiredDockerEmployeeContinuations ?? [],
@@ -1583,6 +1588,46 @@ export class DockerAbsentReprovision {
       }
     }
   }
+  /**
+   * An intent issued before sources carried the employee's current session: its source was labelled with the session
+   * of the first record, which differs once a plan move has replaced the session, so its proof can never pass. Exactly
+   * that intent is recognised by its own recorded digest. The source it made, if it made one, is this operation's
+   * never-started container and nothing else, and is removed under that proof; the intent is then issued again for
+   * the configuration that can be accepted. Any other difference stays the refusal it was.
+   */
+  async #reissueFirstSessionSource(
+    entry: DockerAbsentContinuationRetirement,
+    basis: DockerEmployeeContinuationRecord,
+    input: Parameters<typeof reprovisionSourceConfiguration>[0],
+    name: string,
+    configurationDigest: string,
+    current: () => void
+  ): Promise<DockerAbsentContinuationRetirement> {
+    if (
+      entry.source.phase !== 'issued' ||
+      entry.source.name !== name ||
+      entry.source.configurationDigest === configurationDigest ||
+      basis.request.sessionId === entry.sessionId
+    )
+      return entry;
+    const first = reprovisionSourceConfiguration({ ...input, sessionId: basis.request.sessionId });
+    if (entry.source.configurationDigest !== dockerContinuationDigest(first)) return entry;
+    const seen = await this.#sources(entry.employeeId);
+    current();
+    if (seen.length > 1) return refuse('DOCKER_REPROVISION_SOURCE_AMBIGUOUS');
+    if (seen.length) {
+      const raw = await this.#inspect(seen[0]!);
+      current();
+      // Its own name, image, labels and mounts, and never started.
+      requireReprovisionSource(raw, name, first);
+      if (!this.command.removeCreatedSource) return refuse('DOCKER_REPROVISION_REMOVAL_UNAVAILABLE');
+      await this.command.removeCreatedSource(name, seen[0]!, current);
+      current();
+      if ((await this.#sources(entry.employeeId)).length) return refuse('DOCKER_REPROVISION_REMOVAL_UNCONFIRMED');
+      current();
+    }
+    return this.#publish(entry, { source: { ...entry.source, configurationDigest } }, current, true);
+  }
   /** Effect B. One inert source; an issued CREATE is settled by observation. */
   async #source(
     initial: DockerAbsentContinuationRetirement,
@@ -1606,9 +1651,19 @@ export class DockerAbsentReprovision {
       network = entry.source.network;
     }
     const basis = this.#basis(entry);
-    const input = this.#input(basis, entry.template, entry.operationId, employee.name, image, network, entry.account);
+    const input = this.#input(
+      basis,
+      entry.template,
+      entry.operationId,
+      employee.name,
+      image,
+      network,
+      entry.account,
+      entry.sessionId
+    );
     const configuration = reprovisionSourceConfiguration(input),
       configurationDigest = dockerContinuationDigest(configuration);
+    entry = await this.#reissueFirstSessionSource(entry, basis, input, name, configurationDigest, current);
     if (entry.source.phase === 'pending') {
       requireReprovisionEphemeralLayout(input);
       if ((await this.#sources(entry.employeeId)).length) refuse('DOCKER_REPROVISION_CONTAINERS_PRESENT');

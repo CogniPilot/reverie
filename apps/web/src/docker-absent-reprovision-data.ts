@@ -250,7 +250,11 @@ export const DockerAbsentContinuationRetirements = z
   .refine((rows) => new Set(rows.map((row) => row.operationId)).size === rows.length);
 export function allowedReprovisionTransition(
   before: DockerAbsentContinuationRetirement,
-  next: DockerAbsentContinuationRetirement
+  next: DockerAbsentContinuationRetirement,
+  /** The one change an issued source intent may make to itself: the same name, image and network issued again for
+   * another configuration, after the workflow removed the never-started source of the first (see
+   * `#reissueFirstSessionSource`). Nothing else about the entry may differ, and a created source never changes. */
+  reissue = false
 ): boolean {
   const fixed = (entry: DockerAbsentContinuationRetirement) =>
     JSON.stringify({ ...entry, session: undefined, source: undefined, removal: undefined });
@@ -276,7 +280,14 @@ export function allowedReprovisionTransition(
     b = next.source;
   if (order[b.phase] < order[a.phase] || order[b.phase] > order[a.phase] + 1) return false;
   if (a.phase !== 'pending' && b.phase !== 'pending') {
-    const intent = (value: typeof a) => JSON.stringify({ ...value, phase: undefined, containerId: undefined });
+    const again = reissue && a.phase === 'issued' && b.phase === 'issued';
+    const intent = (value: typeof a) =>
+      JSON.stringify({
+        ...value,
+        phase: undefined,
+        containerId: undefined,
+        ...(again ? { configurationDigest: undefined } : {}),
+      });
     if (intent(a) !== intent(b)) return false;
     if (a.phase === 'created' && JSON.stringify(a) !== JSON.stringify(b)) return false;
   }

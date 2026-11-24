@@ -118,6 +118,12 @@ function temporaryEnvironment(): string[] {
 }
 export interface ReprovisionSourceInput {
   readonly row: DockerEmployeeContinuationRecord;
+  /** The session the source is made for: the employee's current one. `row` is the first record every later source
+   * derives from, and a plan move replaces the session after it was written, so the two differ for any employee who
+   * has changed plan. A source labelled with the record's session is refused by the proof that follows its creation
+   * (`boxedOriginal` reads the label against the current session), which left such a rebuild held for good with the
+   * old laptop already discarded. Absent only on a caller that has no session of its own: the record's. */
+  readonly sessionId?: string;
   readonly template: DockerLaptopTemplate;
   readonly operationId: string;
   readonly deployment: string;
@@ -249,7 +255,7 @@ export function reprovisionSourceConfiguration(input: ReprovisionSourceInput): R
     Labels: {
       'reverie.worker': input.deployment,
       'reverie.employee': input.row.employeeId,
-      'reverie.session': input.row.request.sessionId,
+      'reverie.session': input.sessionId ?? input.row.request.sessionId,
       'reverie.storage': 'employee:' + input.row.employeeId,
       [REPROVISION_PURPOSE_LABEL]: 'absent-laptop-source-v1',
       [REPROVISION_OPERATION_LABEL]: input.operationId,
@@ -285,7 +291,11 @@ export function requireReprovisionEphemeralLayout(input: ReprovisionSourceInput)
     })),
     HostConfig: {},
   });
-  const projection = ephemeralProjection(synthetic, input.row.employeeId, input.row.request.sessionId);
+  const projection = ephemeralProjection(
+    synthetic,
+    input.row.employeeId,
+    input.sessionId ?? input.row.request.sessionId
+  );
   if (!projection || projection.layout !== 'employees' || projection.identity !== input.row.employeeId)
     refuse('DOCKER_REPROVISION_SCRATCH_LAYOUT_UNSUPPORTED');
 }
