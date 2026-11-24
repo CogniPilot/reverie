@@ -81,6 +81,14 @@ to preview, stop, retain and replace the existing container with the GPU image.
 `baseConfig`. This supports a GPU-only rollout of an accepted application image
 without implicitly upgrading the website or migrating company data.
 
+Both image factories accept `runChecks = false` to build without the packages'
+test suites. Pass it to `lib.mkContainerGpuImage` and to
+`lib.mkBoxedWebsiteImage`: an explicit `baseImage` keeps the variant it was
+built with, and on the website factory the argument selects the default client
+capsule. A capsule you pass yourself should come from the same variant
+(`legacyPackages.SYSTEM.unchecked.workerClientCapsule`). See
+[building without the test suites](manual.md#building-without-the-test-suites-and-running-them-separately).
+
 An existing Docker employee office also needs its immutable
 `/etc/reverie/boxed-runtime.json`. Package that configuration with
 `lib.mkBoxedWebsiteImage { system = "x86_64-linux"; baseImage = gpuImage;
