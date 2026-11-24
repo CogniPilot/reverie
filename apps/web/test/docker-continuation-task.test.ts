@@ -161,17 +161,19 @@ describe('the next attempt', () => {
     expect(dockerTaskFailureRetryable(failure)).toBe(false);
     expect(allowedDockerTaskTransition(failed(failure), next)).toBe(false);
   });
-  it('carries its index through every later phase and cannot change it', () => {
+  it('carries its index through every open phase and cannot change it', () => {
     const made = task({ ...second, phase: 'created', containerId: hex('e') });
     const started = task({ ...second, phase: 'start-issued', containerId: hex('e') });
-    const done = task({ ...second, phase: 'completed', containerId: hex('e'), resultDigest: hex('d') });
+    const { attempt: _attempt, ...unnumbered } = second;
     expect(allowedDockerTaskTransition(next, made)).toBe(true);
     expect(allowedDockerTaskTransition(made, started)).toBe(true);
-    expect(allowedDockerTaskTransition(started, done)).toBe(true);
-    expect(dockerTaskAttempt(done)).toBe(2);
-    const { attempt: _attempt, ...unnumbered } = done;
-    expect(allowedDockerTaskTransition(started, task(unnumbered))).toBe(false);
-    expect(allowedDockerTaskTransition(started, task({ ...done, attempt: 3 }))).toBe(false);
+    expect(dockerTaskAttempt(started)).toBe(2);
+    expect(
+      allowedDockerTaskTransition(made, task({ ...unnumbered, phase: 'start-issued', containerId: hex('e') }))
+    ).toBe(false);
+    expect(
+      allowedDockerTaskTransition(made, task({ ...second, attempt: 3, phase: 'start-issued', containerId: hex('e') }))
+    ).toBe(false);
     const again = task({ ...second, phase: 'failed', containerId: hex('e'), exitCode: 1, failure: 'lost-process' });
     expect(allowedDockerTaskTransition(started, again)).toBe(true);
     expect(
@@ -180,6 +182,20 @@ describe('the next attempt', () => {
         task({ ...leaf, name: 'reverie-boxed-leaf-helper-' + hex('5'), phase: 'create-issued', attempt: 3 })
       )
     ).toBe(true);
+  });
+  it('is acknowledged without its index, in the shape an office that predates the rerun reads', () => {
+    const started = task({ ...second, phase: 'start-issued', containerId: hex('e') });
+    const { attempt: _attempt, ...unnumbered } = second;
+    const done = task({ ...unnumbered, phase: 'completed', containerId: hex('e'), resultDigest: hex('d') });
+    expect(allowedDockerTaskTransition(started, done)).toBe(true);
+    expect(dockerTaskAttempt(done)).toBe(1);
+    expect(DockerSingleAttemptTask.parse(JSON.parse(JSON.stringify(done)))).toEqual(done);
+    expect(
+      DockerContinuationTask.safeParse({ ...second, phase: 'completed', containerId: hex('e'), resultDigest: hex('d') })
+        .success
+    ).toBe(false);
+    expect(allowedDockerTaskTransition(started, { ...done, attempt: 2 } as never)).toBe(false);
+    expect(allowedDockerTaskTransition(started, task({ ...done, name: leaf.name }))).toBe(false);
   });
   it('stops at the attempt limit', () => {
     const last = failed('lost-process', { attempt: DOCKER_TASK_ATTEMPT_LIMIT });

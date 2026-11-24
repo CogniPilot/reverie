@@ -4,7 +4,11 @@
  * owners run against the controlled physical Docker port; no Engine is used. */
 import { describe, expect, it } from 'vitest';
 import { DOCKER_LEAF_ATTEMPTS_PER_REQUEST } from '../src/docker-contained-resource-controller.js';
-import { DOCKER_TASK_ATTEMPT_LIMIT, dockerTaskAttempt } from '../src/docker-continuation-task.js';
+import {
+  DOCKER_TASK_ATTEMPT_LIMIT,
+  DockerSingleAttemptTask,
+  dockerTaskAttempt,
+} from '../src/docker-continuation-task.js';
 import { dockerContinuationDigest } from '../src/docker-employee-continuation.js';
 import type { DockerResourceRevisionStore } from '../src/docker-resource-revisions.js';
 import { fixture, helper, policy, workerId, writer } from './helpers/docker-resource-physical.js';
@@ -31,8 +35,15 @@ const leafWriters = (f: ReturnType<typeof fixture>) =>
   [...f.containers.values()].filter(
     (raw) => (raw.Config as { Labels?: Record<string, string> }).Labels?.['reverie.box.resource.role'] === 'leaf-helper'
   );
-const firstName = (f: ReturnType<typeof fixture>) =>
-  'reverie-boxed-leaf-helper-' + dockerContinuationDigest([box, 'leaf-helper', f.row().request.operationId]);
+const attemptName = (f: ReturnType<typeof fixture>, attempt: number) =>
+  'reverie-boxed-leaf-helper-' +
+  dockerContinuationDigest([box, 'leaf-helper', f.row().request.operationId, ...(attempt > 1 ? [{ attempt }] : [])]);
+const firstName = (f: ReturnType<typeof fixture>) => attemptName(f, 1);
+/** Acknowledged by the writer of that attempt, and recorded without an index. */
+const acknowledged = (f: ReturnType<typeof fixture>, attempt: number) => {
+  expect(leaf(f)).toMatchObject({ phase: 'completed', name: attemptName(f, attempt) });
+  expect(leaf(f)).not.toHaveProperty('attempt');
+};
 
 describe('a writer that lost a process while reading it', () => {
   it.each([
@@ -56,13 +67,39 @@ describe('a writer that lost a process while reading it', () => {
       'leaf-helper:completed',
     ]);
     expect(leafStarts(f)).toBe(2);
-    expect(leaf(f)).toMatchObject({ phase: 'completed', attempt: 2 });
+    acknowledged(f, 2);
     const names = f.names.filter((name) => name.startsWith('reverie-boxed-leaf-helper-'));
     expect(names).toHaveLength(2);
     // The first attempt keeps the name every earlier office gave it.
     expect(names[0]).toBe(firstName(f));
     expect(names[1]).not.toBe(names[0]);
     expect(leaf(f).name).toBe(names[1]);
+  });
+  it('records the acknowledged rerun in the shape an earlier office reads, and settles it again without effects', async () => {
+    const f = await prepared();
+    f.failLeafWriters(observed);
+    await f.controller.configure(f.row(), f.current);
+    const done = structuredClone(leaf(f));
+    expect(DockerSingleAttemptTask.parse(JSON.parse(JSON.stringify(done)))).toEqual(done);
+    const effects = [f.creates.length, f.starts.length];
+    // The same request once more finds its own acknowledged writer.
+    await f.controller.configure(f.row(), f.current);
+    expect(leaf(f)).toEqual(done);
+    expect([f.creates.length, f.starts.length]).toEqual(effects);
+  });
+  it('refuses an issued writer whose name is not this box and operation', async () => {
+    const f = await prepared();
+    await f.controller.configure(f.row(), f.current);
+    const foreign = {
+      ...f.row(),
+      request: { ...f.row().request, operationId: '99999999-9999-4999-8999-999999999999' },
+    };
+    const worker = f.containers.get(workerId)!;
+    (worker.Config as { Labels: Record<string, string> }).Labels['reverie.boxed.operation'] =
+      foreign.request.operationId;
+    const starts = [...f.starts];
+    await expect(f.controller.configure(foreign, f.current)).rejects.toThrow('ORIGINAL_TASK_CHANGED');
+    expect(f.starts).toEqual(starts);
   });
   it('journals the class of the failure and nothing the helper printed', async () => {
     const f = await prepared();
@@ -114,7 +151,7 @@ describe('a writer that lost a process while reading it', () => {
     // The repeated request is the retry: the fourth writer succeeds.
     await f.controller.configure(f.row(), f.current);
     expect(leafStarts(f)).toBe(4);
-    expect(leaf(f)).toMatchObject({ phase: 'completed', attempt: 4 });
+    acknowledged(f, 4);
     expect(await f.controller.read(f.row())).toEqual(policy);
   });
   it('never issues a tenth writer for one operation', async () => {
@@ -152,7 +189,7 @@ describe('a writer that failed for any other reason', () => {
     f.failLeafWriters(line);
     await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow(code);
     expect(leaf(f)).toMatchObject({ phase: 'failed', failure, exitCode: 1 });
-    expect(leaf(f).attempt).toBeUndefined();
+    expect(leaf(f)).not.toHaveProperty('attempt');
     expect(leafStarts(f)).toBe(1);
     const creates = [...f.creates];
     await expect(f.controller.configure(f.row(), f.current)).rejects.toThrow(code);
@@ -324,7 +361,7 @@ describe('a writer an earlier office left started and never acknowledged', () =>
     await f.controller.settleObservedHelpers(f.row(), f.current);
     expect(effects()).toEqual(before);
     await f.controller.configure(f.row(), f.current);
-    expect(leaf(f)).toMatchObject({ phase: 'completed', attempt: 2 });
+    acknowledged(f, 2);
     expect(leafStarts(f)).toBe(2);
     expect(await f.controller.read(f.row())).toEqual(policy);
   });
@@ -340,7 +377,7 @@ describe('a writer an earlier office left started and never acknowledged', () =>
   it('is settled and rerun by the request itself', async () => {
     const f = await latched();
     await f.controller.configure(f.row(), f.current);
-    expect(leaf(f)).toMatchObject({ phase: 'completed', attempt: 2 });
+    acknowledged(f, 2);
     expect(await f.controller.read(f.row())).toEqual(policy);
   });
   it('is held, not rerun, when what it printed is not a lost read', async () => {
@@ -394,7 +431,8 @@ describe('the separately pinned leaf writer image', () => {
     expect(leaf(f).imageId).toBe(helper);
     f.changeLeafWriterPin(leafImage);
     await f.controller.configure(f.row(), f.current);
-    expect(leaf(f)).toMatchObject({ phase: 'completed', attempt: 4, imageId: leafImage });
+    acknowledged(f, 4);
+    expect(leaf(f).imageId).toBe(leafImage);
     expect(await f.controller.read(f.row())).toEqual(policy);
     expect(leafWriters(f).map((raw) => raw.Image)).toEqual([helper, helper, helper, leafImage]);
   });

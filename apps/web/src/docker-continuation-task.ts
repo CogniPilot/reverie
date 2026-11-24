@@ -64,7 +64,10 @@ export const DockerContinuationTask = z
     created.extend(retry),
     startIssued.extend(retry),
     running.extend(retry),
-    completed.extend(retry),
+    // An acknowledged task never carries an attempt index. However many
+    // attempts preceded it, it is recorded as it always was, so an office
+    // that predates the rerun still reads every finished operation.
+    completed,
     // Terminal: the exact container exited without acknowledging anything.
     base.extend({
       ...retry,
@@ -74,7 +77,7 @@ export const DockerContinuationTask = z
       failure: DockerTaskFailure,
     }),
   ])
-  .refine((task) => task.role === 'leaf-helper' || (task.phase !== 'failed' && task.attempt === undefined));
+  .refine((task) => task.role === 'leaf-helper' || (task.phase !== 'failed' && !('attempt' in task && task.attempt)));
 export type DockerContinuationTask = z.infer<typeof DockerContinuationTask>;
 export interface DockerContinuationTaskJournal {
   read(row: DockerEmployeeContinuationRecord, role: DockerContinuationTaskRole): DockerContinuationTask | undefined;
@@ -85,17 +88,22 @@ export interface DockerContinuationTaskJournal {
     requireCurrent: () => void
   ): Promise<DockerEmployeeContinuationRecord>;
 }
-export function dockerTaskAttempt(task: Pick<DockerContinuationTask, 'attempt'>): number {
-  return task.attempt ?? 1;
+function attemptIndex(task: DockerContinuationTask): number | undefined {
+  return 'attempt' in task ? task.attempt : undefined;
 }
-/** The fields a task keeps through every phase of one attempt. */
+/** Which attempt an open or failed task is. An acknowledged task reads as 1. */
+export function dockerTaskAttempt(task: DockerContinuationTask): number {
+  return attemptIndex(task) ?? 1;
+}
+/** The fields an attempt keeps from its intent until it fails. */
 export function dockerTaskIdentity(task: DockerContinuationTask) {
+  const attempt = attemptIndex(task);
   return {
     role: task.role,
     name: task.name,
     imageId: task.imageId,
     configurationDigest: task.configurationDigest,
-    ...(task.attempt === undefined ? {} : { attempt: task.attempt }),
+    ...(attempt === undefined ? {} : { attempt }),
   };
 }
 /** The hold a terminally failed leaf writer leaves its operation in until it
@@ -112,7 +120,7 @@ export function allowedDockerTaskTransition(
   before: DockerContinuationTask | undefined,
   next: DockerContinuationTask
 ): boolean {
-  if (!before) return next.phase === 'create-issued' && next.attempt === undefined;
+  if (!before) return next.phase === 'create-issued' && attemptIndex(next) === undefined;
   if (before.role !== next.role) return false;
   if (before.phase === 'failed') {
     // The only successor of a terminal failure is the intent of the next
@@ -131,7 +139,8 @@ export function allowedDockerTaskTransition(
     before.name !== next.name ||
     before.imageId !== next.imageId ||
     before.configurationDigest !== next.configurationDigest ||
-    before.attempt !== next.attempt
+    // The index stays with an attempt until it is acknowledged, and is not recorded then.
+    (next.phase === 'completed' ? attemptIndex(next) !== undefined : attemptIndex(before) !== attemptIndex(next))
   )
     return false;
   if ('containerId' in before && (!('containerId' in next) || before.containerId !== next.containerId)) return false;

@@ -77,6 +77,14 @@ failure that is never rerun, it offers only the rebuild. A plan move held this
 way keeps its own `continue-original` and `abandon` actions; continuing first
 records the failure during its read-only inspection and then reruns the writer.
 
+An acknowledged writer is recorded without its attempt index, in exactly the
+shape a first attempt always had, so an office image that predates the rerun
+reads every finished operation. A record that holds a `failed` task or an open
+later attempt is not readable by such an image, and that record is part of the
+whole company file or plan-move journal. Do not return to an earlier office
+image while any operation is in that state; let it finish or rebuild the laptop
+first.
+
 Matching kernel values still never replace an acknowledgement. A rerun earns a
 real one: the helper's own exit 0 and readback. Settling a failed writer by
 observation alone, without a rerun, is not implemented.

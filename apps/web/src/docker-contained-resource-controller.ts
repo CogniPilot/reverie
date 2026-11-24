@@ -26,6 +26,7 @@ import {
   DockerContinuationTask,
   DockerSingleAttemptTask,
   DockerTaskFailure,
+  DOCKER_TASK_ATTEMPT_LIMIT,
   dockerFailedWriterHold,
   dockerTaskAttempt,
   dockerTaskIdentity,
@@ -784,6 +785,16 @@ export class DockerContainedResources implements DockerContainedResourceControll
     await requireDockerLeafWriterHelperImage(this.command, selected, current);
     return selected;
   }
+  /** The fixed name of one writer of this box and operation. The first attempt
+   * keeps the name every earlier office gave it; each later one has its own. */
+  #taskName(
+    row: DockerEmployeeContinuationRecord,
+    role: 'pool-helper' | 'leaf-helper',
+    revision?: string,
+    attempt = 1
+  ): string {
+    return `reverie-boxed-${role}-${dockerContinuationDigest([this.configuration.boxId, role, row.request.operationId, ...(revision ? [revision] : []), ...(attempt > 1 ? [{ attempt }] : [])])}`;
+  }
   async #configureTask(
     row: DockerEmployeeContinuationRecord,
     role: 'pool-helper' | 'leaf-helper',
@@ -791,12 +802,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
     writable: { path: string; target: string },
     current: () => void,
     revision?: { id: string; journal: DockerContinuationTaskJournal; imageId: string },
-    leaf?: { attempt: number; imageId: string }
+    leaf?: { attempt: number; imageId: string; name?: string }
   ): Promise<void> {
     const journal = revision?.journal ?? this.journal,
       attempt = leaf?.attempt ?? 1;
-    // The first attempt keeps the name every earlier office gave it.
-    const name = `reverie-boxed-${role}-${dockerContinuationDigest([this.configuration.boxId, role, row.request.operationId, ...(revision ? [revision.id] : []), ...(attempt > 1 ? [{ attempt }] : [])])}`;
+    const name = leaf?.name ?? this.#taskName(row, role, revision?.id, attempt);
     const config = this.#configuration(role, name, args, writable, revision?.imageId ?? leaf?.imageId);
     let task = await this.#created(row, role, name, config, current, journal, attempt);
     if (!('containerId' in task)) refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');
@@ -822,7 +832,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
         row,
         task,
         {
-          ...dockerTaskIdentity(task),
+          role: task.role,
+          name: task.name,
+          imageId: task.imageId,
+          configurationDigest: task.configurationDigest,
           phase: 'completed',
           containerId: task.containerId,
           resultDigest: dockerContinuationDigest(seen),
@@ -960,13 +973,24 @@ export class DockerContainedResources implements DockerContainedResourceControll
     seen: Observation,
     issued: number,
     current: () => void
-  ): Promise<{ attempt: number; imageId: string; seen: Observation; fresh: boolean }> {
+  ): Promise<{ attempt: number; imageId: string; name?: string; seen: Observation; fresh: boolean }> {
     seen = await this.#settleFailedLeaf(row, seen, current);
     const task = this.journal.read(row, 'leaf-helper');
     if (!task) return { attempt: 1, imageId: await this.#leafWriterImage(current), seen, fresh: true };
     if (task.phase !== 'failed') {
-      if (!this.#leafWriterImages().includes(task.imageId)) refuse('DOCKER_RESOURCE_ORIGINAL_TASK_CHANGED');
-      return { attempt: dockerTaskAttempt(task), imageId: task.imageId, seen, fresh: false };
+      // An issued task is resumed as itself. Its name must still be this
+      // box's and operation's own: that of its attempt, or, once it is
+      // acknowledged and no longer carries an index, of any attempt.
+      const attempts =
+        task.phase === 'completed'
+          ? Array.from({ length: DOCKER_TASK_ATTEMPT_LIMIT }, (_unused, index) => index + 1)
+          : [dockerTaskAttempt(task)];
+      if (
+        !this.#leafWriterImages().includes(task.imageId) ||
+        !attempts.some((attempt) => task.name === this.#taskName(row, 'leaf-helper', undefined, attempt))
+      )
+        refuse('DOCKER_RESOURCE_ORIGINAL_TASK_CHANGED');
+      return { attempt: dockerTaskAttempt(task), imageId: task.imageId, name: task.name, seen, fresh: false };
     }
     const hold = dockerFailedWriterHold(task);
     if (hold !== 'DOCKER_RESOURCE_HELPER_RETRY_PENDING') refuse(hold);
@@ -2695,7 +2719,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
         row,
         original,
         {
-          ...dockerTaskIdentity(original),
+          role: original.role,
+          name: original.name,
+          imageId: original.imageId,
+          configurationDigest: original.configurationDigest,
           phase: 'completed',
           containerId: original.containerId,
           resultDigest: dockerContinuationDigest(ack),
