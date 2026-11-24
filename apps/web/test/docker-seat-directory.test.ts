@@ -89,19 +89,51 @@ describe('the fixed sign-in folder program', () => {
     ).toMatchObject({ created: ['seat'], credential: 'installed' });
     expect(fs.readdirSync(seatOf(root, 'openai-ed0348c4'))).toEqual(['auth.json']);
   });
-  it('never replaces a sign-in the seat already has and is otherwise idempotent', () => {
+  it('leaves a sign-in the seat already has alone when it is given none', () => {
     const root = home(),
       file = join(seatOf(root), '.credentials.json');
     expect(run(root, [profile, 'anthropic']).status).toBe(0);
-    fs.writeFileSync(file, '{"own":"refreshed"}', { mode: 0o600 });
+    fs.writeFileSync(file, '{"own":"older"}', { mode: 0o600 });
     const before = fs.statSync(file, { bigint: true });
-    const again = run(root, [profile, 'anthropic'], auth);
+    const again = run(root, [profile, 'anthropic']);
     const receipt = readSeatDirectoryResult(again.status, again.output, claude);
     expect(receipt).toMatchObject({ created: [], credential: 'present' });
     expect(receipt.credentialDigest).toBeUndefined();
-    expect(fs.readFileSync(file, 'utf8')).toBe('{"own":"refreshed"}');
+    expect(fs.readFileSync(file, 'utf8')).toBe('{"own":"older"}');
     expect(fs.statSync(file, { bigint: true }).ino).toBe(before.ino);
     expect(fs.readdirSync(seatOf(root))).toEqual(['.credentials.json']);
+  });
+  it('refreshes a different sign-in with the one it is given, keeps the old one once, and is then idempotent', () => {
+    const root = home(),
+      file = join(seatOf(root), '.credentials.json'),
+      previous = file + '.reverie-previous';
+    fs.mkdirSync(seatOf(root), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, '{"own":"older"}', { mode: 0o600 });
+    const first = run(root, [profile, 'anthropic'], auth);
+    expect(readSeatDirectoryResult(first.status, first.output, claude)).toMatchObject({
+      credential: 'refreshed',
+      credentialDigest: digest(auth),
+    });
+    expect(fs.readFileSync(file, 'utf8')).toBe(auth);
+    expect(mode(file)).toBe(0o600);
+    expect(fs.readFileSync(previous, 'utf8')).toBe('{"own":"older"}');
+    expect(mode(previous)).toBe(0o600);
+    // The same sign-in again changes nothing.
+    const stamp = fs.statSync(file, { bigint: true });
+    const second = run(root, [profile, 'anthropic'], auth);
+    expect(readSeatDirectoryResult(second.status, second.output, claude)).toMatchObject({
+      credential: 'current',
+      credentialDigest: digest(auth),
+    });
+    expect(fs.statSync(file, { bigint: true }).ino).toBe(stamp.ino);
+    // A later rotation replaces it again; only the one before it is kept.
+    const rotated = JSON.stringify({ claudeAiOauth: { accessToken: 'SYNTHETIC_ROTATED' } });
+    const third = run(root, [profile, 'anthropic'], rotated);
+    expect(readSeatDirectoryResult(third.status, third.output, claude).credential).toBe('refreshed');
+    expect(fs.readFileSync(file, 'utf8')).toBe(rotated);
+    expect(fs.readFileSync(previous, 'utf8')).toBe(auth);
+    expect(fs.readdirSync(seatOf(root)).sort()).toEqual(['.credentials.json', '.credentials.json.reverie-previous']);
+    expect(third.output).not.toContain('SYNTHETIC');
   });
   it('clears its own interrupted earlier attempt and refuses a sign-in path that is not a plain file', () => {
     const stale = home();

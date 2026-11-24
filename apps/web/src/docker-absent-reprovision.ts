@@ -1507,12 +1507,13 @@ export class DockerAbsentReprovision {
    * never used this plan has no seat folder yet; an empty one would leave the
    * laptop at the provider's sign-in screen. So a fixed helper, running as the
    * laptop user, makes the default seat inside the private home and, when the
-   * seat has no sign-in of its own, places the office's signed-in copy of that
-   * plan account: the same held snapshot a plan move installs. A sign-in that
-   * exists is never replaced. With neither, nothing is built and the owner is
-   * told to sign in. The helper only adds what is missing, so it runs before
-   * anything is discarded and again at every attempt of the same operation. A
-   * folder the owner named with `accountSource` is the owner's to provide. */
+   * office is signed in to that plan, places the office's signed-in copy of the
+   * plan account: the same held snapshot a plan move installs, refreshed at
+   * every rebuild so a rotated token is not stale. With no sign-in on either
+   * side, nothing is built and the owner is told to sign in. The helper is
+   * idempotent, so it runs before anything is discarded and again at every
+   * attempt of the same operation. A folder the owner named with
+   * `accountSource` is the owner's to provide. */
   async #seat(
     operationId: string,
     account: DockerReprovisionAccount | undefined,

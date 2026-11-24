@@ -2,9 +2,9 @@
  * sign-in inside it. The Engine refuses a bind whose source is missing and the
  * office cannot write an employee's home, so one networkless helper from the
  * worker image makes the folder inside that home, as the laptop user. When the
- * office holds a signed-in copy of the plan account and the seat has no
- * sign-in of its own, the helper also places that copy, read from its stdin,
- * exactly as a plan move's installer receives the same bytes. The program is
+ * office holds a signed-in copy of the plan account, the helper also places
+ * that copy, read from its stdin exactly as a plan move's installer receives
+ * the same bytes, and the office accepts the result by digest. The program is
  * fixed: the caller values are the validated profile ID, which names the last
  * directory, and the provider, which selects one of two fixed file names. */
 import { createHash } from 'node:crypto';
@@ -19,9 +19,12 @@ const AUTH_LIMIT = 128 * 1024;
  * is absent and otherwise must already be a real directory (never a link) of
  * the same user with exactly that mode. Every step is taken from a held
  * directory handle, so a path swapped underneath cannot redirect a later one.
- * A sign-in file that exists is never replaced, read or reported beyond its
- * presence; a new one is written whole under a private name and linked into
- * place, which fails rather than overwrites. Nothing is chmod-ed or chown-ed.
+ * Without a sign-in on stdin, a sign-in file that exists is only reported as
+ * present. With one, the seat ends up holding exactly those bytes: they are
+ * written whole under a private name and renamed into place, and a different
+ * sign-in that was there is kept once beside it, so a token the provider
+ * rotated at the office does not leave the laptop on a stale copy. A sign-in
+ * path that is not a plain file of this user is refused. No chmod, no chown.
  * One stdout line: a JSON receipt, or `REFUSED <reason>` with exit status 3. */
 export const DOCKER_SEAT_DIRECTORY_PROGRAM = String.raw`
 const fs = require('node:fs');
@@ -74,24 +77,44 @@ function entry(path) {
 function own(stat) {
   if (!stat.isFile() || stat.uid !== BigInt(process.getuid())) refuse('credential-foreign');
 }
-function place(seat, name, bytes) {
-  const base = '/proc/self/fd/' + seat.fd + '/', pending = name + '.reverie-seed';
-  const stale = entry(base + pending);
+function same(path, stat, bytes) {
+  if (stat.size !== BigInt(bytes.length)) return false;
+  let fd;
+  try { fd = fs.openSync(path, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); } catch {
+    refuse('credential-unreadable');
+  }
   try {
+    const now = fs.fstatSync(fd, { bigint: true });
+    if (now.ino !== stat.ino || now.dev !== stat.dev) refuse('credential-foreign');
+    const read = Buffer.alloc(bytes.length + 1);
+    let size = 0;
+    for (let count; size < read.length && (count = fs.readSync(fd, read, size, read.length - size, size)) > 0;) size += count;
+    return size === bytes.length && read.subarray(0, size).equals(bytes);
+  } catch (error) {
+    if (error instanceof Refusal) throw error;
+    refuse('credential-unreadable');
+  } finally { fs.closeSync(fd); }
+}
+function place(seat, name, bytes) {
+  const base = '/proc/self/fd/' + seat.fd + '/', pending = name + '.reverie-seed', previous = name + '.reverie-previous';
+  try {
+    const stale = entry(base + pending);
     if (stale) { own(stale); fs.unlinkSync(base + pending); }
     const fd = fs.openSync(base + pending, NEW, 0o600);
     try {
       for (let at = 0; at < bytes.length;) at += fs.writeSync(fd, bytes, at, bytes.length - at);
       fs.fsyncSync(fd);
     } finally { fs.closeSync(fd); }
-    let installed = true;
-    try { fs.linkSync(base + pending, base + name); } catch (error) {
-      if (!error || error.code !== 'EEXIST') throw error;
-      installed = false;
+    const before = entry(base + name);
+    if (before) {
+      own(before);
+      const kept = entry(base + previous);
+      if (kept) { own(kept); fs.unlinkSync(base + previous); }
+      fs.linkSync(base + name, base + previous);
     }
-    fs.unlinkSync(base + pending);
+    fs.renameSync(base + pending, base + name);
     fs.fsyncSync(seat.fd);
-    return installed;
+    return before ? 'refreshed' : 'installed';
   } catch (error) {
     if (error instanceof Refusal) throw error;
     refuse('credential-create');
@@ -117,10 +140,10 @@ try {
     at = next;
   }
   const name = provider === 'anthropic' ? '.credentials.json' : 'auth.json';
-  const existing = entry('/proc/self/fd/' + at.fd + '/' + name);
-  let credential = 'absent';
-  if (existing) { own(existing); credential = 'present'; }
-  else if (auth.length) credential = place(at, name, auth) ? 'installed' : 'present';
+  const path = '/proc/self/fd/' + at.fd + '/' + name, existing = entry(path);
+  if (existing) own(existing);
+  const credential = !auth.length ? (existing ? 'present' : 'absent')
+    : existing && same(path, existing, auth) ? 'current' : place(at, name, auth);
   process.stdout.write(JSON.stringify({
     version: 1,
     purpose: 'reverie-seat-directory-ready-v1',
@@ -128,7 +151,7 @@ try {
     provider,
     created,
     credential,
-    ...(credential === 'installed'
+    ...(auth.length
       ? { credentialDigest: require('node:crypto').createHash('sha256').update(auth).digest('hex') }
       : {}),
     home: { dev: String(home.stat.dev), ino: String(home.stat.ino) },
@@ -148,9 +171,12 @@ const receipt = z
     profile: z.string().regex(PROFILE),
     provider: z.enum(['anthropic', 'openai']),
     created: z.array(z.enum(['state', 'seats', 'seat'])).max(3),
-    /** `installed`: this helper placed the office's copy. `present`: the seat
-     * already had a sign-in file, which was left alone. `absent`: it has none. */
-    credential: z.enum(['installed', 'present', 'absent']),
+    /** With the office's copy on stdin: `installed` (the seat had none),
+     * `refreshed` (it replaced a different one, which is kept beside it once)
+     * or `current` (the seat already held exactly it). Without: `present` (the
+     * seat has a sign-in file, left alone) or `absent`. */
+    credential: z.enum(['installed', 'refreshed', 'current', 'present', 'absent']),
+    /** Of the office's copy now in the seat; never of anything else. */
     credentialDigest: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -159,7 +185,9 @@ const receipt = z
     seat: identity,
   })
   .strict()
-  .refine((value) => (value.credential === 'installed') === (value.credentialDigest !== undefined));
+  .refine(
+    (value) => ['installed', 'refreshed', 'current'].includes(value.credential) === (value.credentialDigest !== undefined)
+  );
 export type DockerSeatDirectoryReceipt = z.infer<typeof receipt>;
 export interface DockerSeatDirectorySpec {
   readonly imageId: string;
@@ -398,12 +426,8 @@ export async function prepareSeatDirectory(
   const output = await command.run(['container', 'logs', id]);
   await command.run(['container', 'rm', id]);
   const result = readSeatDirectoryResult(value.ExitCode, output, spec);
-  // A placed sign-in is the one this call was given, or it is not vouched for.
-  if (
-    result.credentialDigest !== undefined &&
-    auth !== undefined &&
-    result.credentialDigest !== createHash('sha256').update(auth).digest('hex')
-  )
-    unconfirmed();
+  // Given a sign-in, the seat now holds exactly that one, or nothing is vouched
+  // for. (The helper is already removed, so the same request runs a fresh one.)
+  if (auth !== undefined && result.credentialDigest !== createHash('sha256').update(auth).digest('hex')) unconfirmed();
   return result;
 }

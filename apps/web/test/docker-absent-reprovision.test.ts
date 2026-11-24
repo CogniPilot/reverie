@@ -201,15 +201,15 @@ class FakeEngine {
     if (this.seatOutcome === 'failed') throw Error('synthetic seat helper failure');
     if (this.seatOutcome === 'foreign')
       throw new DockerEmployeeContinuationError('DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN');
-    const credential = this.seatCredential === 'present' ? 'present' : auth ? 'installed' : 'absent';
-    if (credential === 'installed') this.seatCredential = 'present';
+    const credential = auth ? (this.seatCredential === 'present' ? 'refreshed' : 'installed') : this.seatCredential;
+    if (auth) this.seatCredential = 'present';
     return {
       version: 1 as const,
       purpose: 'reverie-seat-directory-ready-v1' as const,
       profile: spec.profileId as string,
       provider: spec.provider as 'anthropic' | 'openai',
       created: [],
-      credential: credential as 'installed' | 'present' | 'absent',
+      credential: credential as 'installed' | 'refreshed' | 'present' | 'absent',
       home: { dev: '64', ino: '10' },
       seat: { dev: '64', ino: '12' },
     };
@@ -2603,7 +2603,7 @@ describe('the sign-in seat of a new laptop', () => {
     expect(f.engine.rebuilt).toEqual([destinationCid]);
     expect(f.engine.seats.at(-1)!.auth).toBe(officeSignIn);
   });
-  it('keeps the sign-in an employee already has, whatever the office holds', async () => {
+  it('builds for an employee who already has a sign-in, refreshed when the office holds one', async () => {
     for (const office of ['signed-in', 'signed-out'] as const) {
       const f = await rebuilt({ office });
       f.engine.seatCredential = 'present';

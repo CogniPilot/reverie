@@ -515,11 +515,17 @@ again before each attempt to create the source:
   with mode 0700; a link, another owner or another mode is refused
   (`DOCKER_REPROVISION_SEAT_DIRECTORY_FOREIGN`, or `..._SEAT_HOME_FOREIGN` for
   the home itself). Nothing that exists is changed.
-- When the seat holds no sign-in file (`.credentials.json` for Anthropic,
-  `auth.json` for OpenAI) and the office holds a signed-in copy of that plan
-  account, the helper places that copy. It is the same held account snapshot a
+- When the office holds a signed-in copy of that plan account, the helper
+  places that copy as the seat's sign-in file (`.credentials.json` for
+  Anthropic, `auth.json` for OpenAI). It is the same held account snapshot a
   plan move installs, it reaches the helper on stdin only, and the office
-  accepts the result by digest. A sign-in file that exists is never replaced.
+  accepts the result only when the helper reports the digest of exactly those
+  bytes. This happens at every rebuild and reprovision, so a token the provider
+  rotated at the office does not leave the laptop on a stale copy. A different
+  sign-in that was in the seat is kept once beside it as
+  `<file>.reverie-previous`.
+- When the office is not signed in to the plan, a sign-in file the seat already
+  has is left alone and the laptop is built with it.
 - When the seat holds no sign-in file and the office is not signed in to the
   plan either, nothing is built: the request is refused with
   `DOCKER_REPROVISION_SEAT_ACCOUNT_SIGNED_OUT` and `seatProfile` names the plan.
