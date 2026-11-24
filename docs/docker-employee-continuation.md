@@ -33,7 +33,74 @@ inspect the original effects and finish their metadata, but cannot create/start
 helpers, configure resources, write credentials or launch providers. A fresh
 protected effect request can advance a helper known to be created but not yet
 started. An unknown create/start or missing/failed helper acknowledgment never
-becomes permission to repeat an effect.
+becomes permission to repeat an effect. The one exception is the leaf resource
+writer, described under "Leaf resource writer retry" below: a writer proved
+terminal and failed is never started again, but may be followed by a new attempt
+with its own journal intent.
+
+## Leaf resource writer retry
+
+`configure-high` reads every thread of every laptop in the box several times.
+A thread that ends between two of those reads once ended the helper with an
+error after its first write, and the operation then held for good: the journal
+had no phase after `start-issued` except a success acknowledgement.
+
+The helper task journal now has a terminal `failed` phase for the leaf writer.
+It records the exact container, its exit status and one of five failure classes
+(`lost-process`, `deadline`, `refused`, `close-unconfirmed`, `unknown`). The
+class is read from the one line the helper printed through a closed allow-list;
+the line itself is never returned, logged or stored. Records written before this
+phase existed read unchanged, and a first attempt keeps its earlier name.
+
+A rerun is a new task: the next attempt index, a different container name, its
+own `create-issued` intent, and arguments built from a freshly collected scope.
+It is issued only when all of the following hold, and otherwise the operation
+holds with a code, a sentence and its allowed actions:
+
+1. The failure class is `lost-process` or `deadline`. A refusal of identity or
+   policy, a lost close and anything unrecognized are never rerun.
+2. The failed writer is the exact fixed container of the journaled task, exited
+   with a nonzero status, not running, PID 0, not paused, restarting or dead, and
+   unchanged across two inspections around a fresh read of the same leaf.
+3. The operation is still at `resources-issued` with the same anchor, worker,
+   leaf and policy the failed writer was issued for, and no soft-memory revision
+   exists for it.
+4. Every leaf writer container of the box that targets this worker is terminal
+   under its own fixed configuration, before and after the proof in 2.
+5. Fewer than three writers were issued by this request, and fewer than nine by
+   the operation.
+
+One request issues at most three writers. After that the hold offers `retry`
+(the same request again: Continue for a laptop recovery, Continue for a plan
+move) and `rebuild-preview` (Rebuild laptop). After nine writers, or for a
+failure that is never rerun, it offers only the rebuild. A plan move held this
+way keeps its own `continue-original` and `abandon` actions; continuing first
+records the failure during its read-only inspection and then reruns the writer.
+
+Matching kernel values still never replace an acknowledgement. A rerun earns a
+real one: the helper's own exit 0 and readback. Settling a failed writer by
+observation alone, without a rerun, is not implemented.
+
+The pool writer is not rerun. Its acknowledgement is shared by every laptop of
+the box through the retained pool lineage and has its own recovery workflows.
+
+### Separately pinned leaf writer image
+
+`helperImageId` pins the anchor, the probes that run inside it, storage holders,
+the pool writer and every existing acknowledgement. Changing it makes every
+existing box unreadable, so a corrected helper cannot ship that way. The
+optional `leafWriterHelperImageId` selects the image for NEW `configure-high`
+leaf writers only, in the same way `memoryHighHelperImageId` and
+`poolRestoreHelperImageId` select their writers. A journaled writer is always
+read under the image it was issued with, so writers issued under the baseline
+image stay acknowledged after the pin is selected. The image must carry exactly
+the baseline label set (build `docker-leaf-writer-helper-image`): a created
+container inherits its image's labels, and the fixed leaf writer configuration
+has the purpose label alone. A selected image that the Engine cannot supply is
+refused before any intent; there is no fallback to the baseline image.
+
+Probes keep running the binary inside the existing anchor. They are read-only
+and the office already repeats a probe that lost a process.
 
 Resource acceptance requires the same actual helper's successful completion and
 fresh kernel observations. Docker hard memory, no-swap/PIDs, aggregate pool,
