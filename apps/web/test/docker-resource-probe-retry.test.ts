@@ -27,6 +27,10 @@ import { DockerContainedResources } from '../src/docker-contained-resource-contr
 const marker = 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n';
 const missingThread = 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n';
 const exitedThread = 'BOXED_RESOURCE_PID_EXITED; effectIssued=false\n';
+/** A later helper's line: the kernel's text, then the path read and whose it was. */
+function located(text: string, path: string, subject?: string): string {
+  return `BOXED_RESOURCE_IO: ${text} at ${path}${subject ? ` (${subject})` : ''}; effectIssued=false\n`;
+}
 const anchor = 'a'.repeat(64),
   box = 'b'.repeat(64);
 const argv = [
@@ -76,6 +80,48 @@ describe('complete actual subprocess read-race classification', () => {
     const write = [...argv];
     write[3] = 'configure-pool';
     expect(dockerResourceProbeReadRace(await actualRace(write, 30000, exitedThread), write)).toBe(false);
+  });
+  it.each([
+    located('No such file or directory (os error 2)', '/proc/868200/stat', `member ${'d'.repeat(64)} task 868200`),
+    located('No such file or directory (os error 2)', '/proc/868200'),
+    located('No such process (os error 3)', '/proc/100/cgroup', `anchor ${anchor}`),
+    located('No such process (os error 3)', '/proc/43/stat', `worker ${'c'.repeat(64)}`),
+    located(
+      'No such file or directory (os error 2)',
+      `/sys/fs/cgroup/reverie.slice/reverie-box.slice/reverie-box-${box}.slice/docker-${anchor}.scope/cgroup.threads`,
+      'box'
+    ),
+  ])('retries a completed read whose helper also names what it lost: %s', async (line) => {
+    expect(dockerResourceProbeReadRace(await actualRace(argv, 30000, line), argv)).toBe(true);
+    const write = [...argv];
+    write[3] = 'configure-high';
+    expect(dockerResourceProbeReadRace(await actualRace(write, 30000, line), write)).toBe(false);
+  });
+  it.each([
+    located('No such file or directory (os error 2)', '/proc/7/stat').replace('false', 'true'),
+    located('No such file or directory (os error 2)', '/proc/7/stat').replace(
+      '; effectIssued',
+      '; confirmed=memory.high; effectIssued'
+    ),
+    located('No such file or directory (os error 2)', '/proc/7/stat') + 'extra\n',
+    located('No such file or directory (os error 2)', '/proc/7/stat').trimEnd(),
+    located('No such file or directory (os error 2)', 'proc/7/stat'),
+    located('No such file or directory (os error 2)', '/proc/7 8/stat'),
+    located('No such file or directory (os error 2)', '/proc/7\n/stat'),
+    located('No such file or directory (os error 2)', '/proc/7/stat; effectIssued=false\nX'),
+    located('No such file or directory (os error 2)', '/run/reverie-worker-cgroup/memory.high', 'leaf'),
+    located('No such file or directory (os error 2)', '/run/reverie-box-pool/cpu.weight', 'pool'),
+    located('No such file or directory (os error 2)', '/proc/7/stat', `member ${'D'.repeat(64)}`),
+    located('No such file or directory (os error 2)', '/proc/7/stat', `member ${'d'.repeat(63)}`),
+    located('No such file or directory (os error 2)', '/proc/7/stat', `member ${'d'.repeat(64)} task 0`),
+    located('No such file or directory (os error 2)', '/proc/7/stat', `owner ${'d'.repeat(64)}`),
+    located('No such file or directory (os error 2)', '/proc/7/stat', 'box) (box'),
+    located('Permission denied (os error 13)', '/proc/7/stat', 'box'),
+    located('Input/output error (os error 5)', '/proc/7/stat'),
+    'BOXED_RESOURCE_PID_EXITED at /proc/7/stat; effectIssued=false\n',
+    'BOXED_RESOURCE_FOREIGN_PID; effectIssued=false\n',
+  ])('refuses a located line that is not exactly a lost process read: %s', async (stderr) => {
+    expect(dockerResourceProbeReadRace(await actualRace(argv, 30000, stderr), argv)).toBe(false);
   });
   it.each([
     [marker, '', 2],

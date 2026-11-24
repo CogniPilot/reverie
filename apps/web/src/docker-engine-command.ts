@@ -62,6 +62,15 @@ export function dockerLaptopContainerProven(
   );
 }
 const probeOrigin = Symbol('complete native read-only resource ESRCH');
+/** The whole stderr of a probe that only lost a process or thread while reading
+ * it. An earlier helper prints the kernel's text alone; a later one may follow
+ * it with the path it read and whose it was, in exactly this form. */
+const probeReadRace = new RegExp(
+  '^(?:BOXED_RESOURCE_IO: (?:No such process \\(os error 3\\)|No such file or directory \\(os error 2\\))' +
+    '(?: at (?:/[A-Za-z0-9._-]{1,255}){1,16})?' +
+    '(?: \\((?:box|(?:anchor|worker|member) [a-f0-9]{64}(?: task [1-9][0-9]{0,9})?)\\))?' +
+    '|BOXED_RESOURCE_PID_EXITED); effectIssued=false\\n$'
+);
 function probeArgs(args: readonly string[]): boolean {
   return (
     args.length >= 10 &&
@@ -123,9 +132,7 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
             error.signal === null &&
             input === undefined &&
             stdout === '' &&
-            (stderr === 'BOXED_RESOURCE_IO: No such process (os error 3); effectIssued=false\n' ||
-              stderr === 'BOXED_RESOURCE_IO: No such file or directory (os error 2); effectIssued=false\n' ||
-              stderr === 'BOXED_RESOURCE_PID_EXITED; effectIssued=false\n') &&
+            probeReadRace.test(stderr) &&
             probeArgs(args)
           )
             reject(new ResourceProbeReadRace(probeOrigin, args));
