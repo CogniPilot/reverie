@@ -220,7 +220,7 @@ function claudeSuggestionOnly(screen: string, glyph: string, first: number, fina
     for (const [, params, char] of rows[index]!.matchAll(/\x1b\[([0-9;:]*)m|\x1b|([^\x1b])/gsu)) {
       if (params !== undefined) applySgr(state, params);
       else if (char === undefined) state.unknown = true;
-      else if (index >= first && !/[\s ]/u.test(char)) {
+      else if (index >= first && !/\s/u.test(char)) {
         if (lead) {
           if (char !== glyph) return false;
           lead = false;
