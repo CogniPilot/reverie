@@ -115,6 +115,8 @@ import { CompanyWake } from '../company-wake.js';
 import { EmployeeSupervisor } from '../employee-supervisor.js';
 import { officeSupervisorPorts } from '../employee-supervisor-office.js';
 import { EmployeeSupervisorStore } from '../employee-supervisor-store.js';
+import { OfficeSignInCopy } from '../plan-signin-office-copy.js';
+import { PlanSignInReconciler, type SignInHolderPort } from '../plan-signin-reconciler.js';
 import { ownerStopPending } from '../owner-stop-journal.js';
 import { HostResumeHandler, HostWorkerResumeStream } from '../host-worker-resume.js';
 import { spendRebootRestore, autoRestorePinnedIfEnabled } from './routes/reboot-restore-routes.js';
@@ -533,6 +535,7 @@ export class WebServer extends EventEmitter {
   private companyWakeReady = false;
   /** Present only under the boxed laptop runtime. */
   private employeeSupervisor?: EmployeeSupervisor;
+  private planSignIn?: PlanSignInReconciler;
   private workerViewerReconnect?: WorkerViewerReconnect;
   private workerProviderHealth?: Pick<WorkerProviderHealth, 'read' | 'refresh' | 'close'>;
   /** The console Board, once created; the chat digest reads it for an agent's own cards. */
@@ -2552,6 +2555,46 @@ export class WebServer extends EventEmitter {
     dockerRuntime?.bindPlanMoves(planMoves);
     dockerRuntime?.bindSeatAccounts(this.planService);
     if (dockerRuntime) {
+      // One Claude plan sign-in is held by the office and by every laptop that was given a copy of it, and each
+      // copy is renewed by a different client. This keeps them the same sign-in (plan-signin-sync.ts says how).
+      // An employee whose plan is being moved is left to the move.
+      this.planSignIn = new PlanSignInReconciler({
+        now: Date.now,
+        ready: () => this.companyWakeReady && dockerRuntime.current(),
+        plans: async () => {
+          const laptops = new Map<string, SignInHolderPort[]>();
+          const moving = new Map<string | undefined, Set<string>>();
+          for (const employee of this.companyService.registeredEmployees()) {
+            const profile = employee.runtimeRecipe?.subscriptionProfile;
+            if (!profile || profile.provider !== 'anthropic' || employee.bindingMigration) continue;
+            if (!moving.has(employee.owner))
+              moving.set(
+                employee.owner,
+                new Set(
+                  (await planMoves.list(employee.owner))
+                    .filter((row) => !['completed', 'failed'].includes(row.phase))
+                    .map((row) => row.employeeId)
+                )
+              );
+            if (moving.get(employee.owner)!.has(employee.id)) continue;
+            const holder = dockerRuntime.signInHolder(employee.id, employee.name, profile.id);
+            if (holder) laptops.set(profile.id, [...(laptops.get(profile.id) ?? []), holder]);
+          }
+          return [...laptops].map(([accountId, holders]) => ({
+            accountId,
+            holders: [
+              new OfficeSignInCopy(async () => {
+                const account = await this.planService.account(accountId);
+                return account?.provider === 'anthropic' ? account.realDir : undefined;
+              }),
+              ...holders,
+            ],
+          }));
+        },
+        log: (line) => console.log(line),
+      });
+    }
+    if (dockerRuntime) {
       // The office recovery supervisor. Every step it takes is a call to the service method behind the owner's
       // own route for that step; what it presents instead of an owner request is documented in
       // employee-supervisor-office.ts and docker-employee-supervisor-laptops.ts.
@@ -2587,6 +2630,7 @@ export class WebServer extends EventEmitter {
               },
               employee.owner
             ),
+          ...(this.planSignIn ? { signIn: this.planSignIn } : {}),
           planSignedIn: async (accountId) =>
             (await this.planService.rows()).accounts.find((account) => account.id === accountId)?.signedIn,
           wake: (id, options) => this.companyWake.wakeOne(id, options),
@@ -4837,6 +4881,8 @@ export class WebServer extends EventEmitter {
       const tickRecovery = () => void tickWake().then(() => this.employeeSupervisor?.tick());
       tickRecovery();
       this.cleanup.setInterval(tickRecovery, 30_000, { description: 'Company crash recovery' });
+      // Asked often, reads once a minute; every few seconds only around the renewal of a shared sign-in.
+      this.cleanup.setInterval(() => void this.planSignIn?.tick(), 5_000, { description: 'Plan sign-in copies' });
       void tickCompany();
       this.cleanup.setInterval(() => void tickCompany(), 30_000, { description: 'Company research schedule' });
       void this.refreshCodexPlanUsage();
@@ -6028,6 +6074,7 @@ export class WebServer extends EventEmitter {
     this.muxMetadataPublisher?.close();
     this.companyWakeReady = false;
     this.employeeSupervisor?.close();
+    this.planSignIn?.close();
     this.workerProviderHealth?.close();
     this.hostResumeStream?.close();
     if (this.goalPorts && 'kind' in this.goalPorts) this.goalPorts.close?.();
