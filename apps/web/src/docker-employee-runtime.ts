@@ -220,6 +220,8 @@ export class DockerEmployeeRuntime {
   #resourceTimer?: ReturnType<typeof setInterval>;
   #resourceTick?: Promise<void>;
   #tick = 0;
+  /** Timer firings to skip after a pass that changed nothing. */
+  #quietSkips = 0;
   #viewerRetries = new WeakMap<DockerExistingViewRestoration, { delay: number; due: number }>();
 
   get restorationReports(): readonly DockerExistingViewRestoration[] {
@@ -793,6 +795,7 @@ export class DockerEmployeeRuntime {
     if (this.#resourceTimer || !this.current()) return;
     this.#resourceTimer = setInterval(() => {
       if (this.#resourceTick || this.#restoring || !this.current()) return;
+      if (this.#quietSkips > 0) { this.#quietSkips--; return; }
       this.#resourceTick = this.#reconcileTick().catch(() => {
         // A failed observation grants no authority. The next tick reads fresh state.
       }).finally(() => { this.#resourceTick = undefined; });
@@ -804,8 +807,10 @@ export class DockerEmployeeRuntime {
     if (!a) return;
     const reports = new Map(this.restorationReports.map(report => [report.employeeId, report]));
     this.#tick++;
+    let converged = true;
     const results = await this.#convergeResources().catch((error: unknown) => {
       if (!this.current()) throw error;
+      converged = false;
       return [];
     });
     const changed = new Set(results.flatMap(result => result.status === 'fulfilled' &&
@@ -822,7 +827,11 @@ export class DockerEmployeeRuntime {
         if (phase !== 'ready' && phase !== 'provider-issued') keep.set(employee.id, report);
       } else if ((this.#viewerRetries.get(report)?.due ?? 0) > this.#tick) keep.set(employee.id, report);
     }
-    await this.#restore(keep);
+    const after = await this.#restore(keep);
+    // Each pass inspects every laptop against every other one. When a pass changed nothing and every wanted
+    // viewer is attached, wait three intervals before the next instead of repeating it every ten seconds.
+    this.#quietSkips = converged && changed.size === 0 && results.every(result => result.status === 'fulfilled') &&
+      after.every(report => report.state === 'attached') ? 2 : 0;
   }
   restoreExistingViews(): Promise<readonly DockerExistingViewRestoration[]> {
     return this.#restore();
