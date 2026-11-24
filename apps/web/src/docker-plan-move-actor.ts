@@ -1451,7 +1451,8 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     }
     await this.#canonicalAccount(journal, current);
     view.require(session.id, session.docker);
-    if (session.providerInputHeld && session.providerDispatchHoldKind === 'loaded-intent') {
+    // The Engine view itself, as before: a pane observation that admits input never stands in for its renewal here.
+    if (session.providerDispatchHoldKind === 'loaded-intent' && !session.dockerContinuationViewCurrent) {
       if (!this.#d.renewPublishedView) throw new PlanMoveError('The original published target reader cannot be renewed', 409);
       await this.#d.renewPublishedView(publishedWork(journal.read().work), session, () => {
         journal.current(); current();

@@ -285,6 +285,7 @@ import { registerEmployeeJournalRoutes } from './routes/employee-journal-routes.
 import { EmployeeJournalStore } from '../employee-journal.js';
 import { registerCompanyHireRoutes } from './routes/company-hire-routes.js';
 import { registerSessionRuntimeRoutes, resumeOwnerStops } from './routes/session-runtime-routes.js';
+import { registerProviderHoldRoutes } from './routes/provider-hold-routes.js';
 import { ServerHealthMetadataProvider } from '../session-health-provider.js';
 import { registerHealthMetadataProviderRoutes } from './routes/session-health-provider-routes.js';
 import { registerOwnerRoutes } from '../owner-auth/routes.js';
@@ -416,6 +417,8 @@ const CUSTOM_MODEL_REDISCOVER_INTERVAL_MS = 5 * 60_000;
 // minutes. Cheap either way — one /running GET per distinct endpoint with at least
 // one live custom-model session, not per session.
 const CUSTOM_MODEL_SWAP_CHECK_INTERVAL_MS = 20_000;
+/** How often a session whose input a launch denial still holds has its terminal re-read. */
+const PROVIDER_HOLD_RECHECK_MS = 15_000;
 
 function escapeHtmlText(value: string): string {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
@@ -2009,6 +2012,7 @@ export class WebServer extends EventEmitter {
         },
       }
     );
+    registerProviderHoldRoutes(this.app, ctx, verifiedOwner);
     const startOfficeEmployee = registerSessionRuntimeRoutes(this.app, ctx, verifiedOwner, (id, req) => {
       // Boxed creation/reattachment belongs to its authenticated runtime. A
       // missing saved row must never create a local control-plane employee.
@@ -4223,6 +4227,44 @@ export class WebServer extends EventEmitter {
     }
     this.closeCleanlyExitedSessions();
     void this.workerViewerReconnect?.tick().catch(() => undefined);
+    this.reconcileProviderHolds();
+  }
+
+  /** When each still-held session's terminal was last re-read. */
+  private providerHoldChecks = new Map<string, number>();
+
+  /**
+   * Re-read the terminal of every session whose input a launch denial still holds, so the hold releases itself
+   * once the pane shows the running agent (provider-hold-reconcile.ts). Runs after restore and on the pane-exit
+   * tick, at most once per {@link PROVIDER_HOLD_RECHECK_MS} per session. It only reads: nothing is typed, replayed,
+   * launched or retired, and a session the office cannot read stays held for the owner to settle.
+   */
+  private reconcileProviderHolds(): void {
+    const now = Date.now();
+    for (const id of this.providerHoldChecks.keys()) if (!this.sessions.has(id)) this.providerHoldChecks.delete(id);
+    for (const session of this.sessions.values()) {
+      if (!session.providerInputHeld) {
+        this.providerHoldChecks.delete(session.id);
+        continue;
+      }
+      const last = this.providerHoldChecks.get(session.id);
+      if (last !== undefined && now - last < PROVIDER_HOLD_RECHECK_MS) continue;
+      this.providerHoldChecks.set(session.id, now);
+      void session
+        .reconcileProviderHold()
+        .then((result) => {
+          if (this.sessions.get(session.id) !== session) return;
+          const held = session.providerInputHeld;
+          if (!held)
+            console.log(
+              `[provider-hold] session ${session.id.slice(0, 8)} terminal check: ${result.outcome}; input admitted, launch fence unchanged`
+            );
+          // A release always, and the first reading of a hold that stands (a restore, or a confirmation that
+          // lapsed with its pane): nothing else announces either.
+          if (!held || last === undefined) this.broadcastSessionStateDebounced(session.id);
+        })
+        .catch(() => undefined);
+    }
   }
 
   /**
@@ -4617,6 +4659,8 @@ export class WebServer extends EventEmitter {
       getHookSecret();
       await this.dockerEmployeeRuntime.restoreExistingViews();
     }
+    // A restored session whose saved launch intent holds its input is read once now, before chat replay.
+    this.reconcileProviderHolds();
     // Registry restoration and HTTP readiness must precede replay: prompted members can call the API immediately.
     try {
       await this.chatroomService.startDelivery();

@@ -2534,6 +2534,7 @@ class ReverieApp {
         providerDispatchHeld: previous.providerDispatchHeld,
         providerInputHeld: previous.providerInputHeld,
         providerDispatchHoldKind: previous.providerDispatchHoldKind,
+        providerPresence: previous.providerPresence,
       };
     }
     this._observeInputRecovery(previous);
@@ -4093,14 +4094,16 @@ class ReverieApp {
    */
   _providerInputRecovery(session) {
     const dispatch = session?.providerDispatchHeld, input = session?.providerInputHeld, kind = session?.providerDispatchHoldKind;
+    // The server admits input to an intrinsic hold only on a named pane observation (`providerPresence`).
+    const present = session?.providerPresence === 'screen' || session?.providerPresence === 'owner';
     const valid = typeof dispatch === 'boolean' && typeof input === 'boolean' &&
-      (dispatch ? kind === 'loaded-intent' || (kind === 'intrinsic' && input) : kind === null && !input);
+      (dispatch ? kind === 'loaded-intent' || (kind === 'intrinsic' && (input || present)) : kind === null && !input);
     const loaded = valid && kind === 'loaded-intent';
     const newFields = input !== undefined || kind !== undefined;
     return {
       valid, loaded,
       held: valid ? input : dispatch === true || newFields || (dispatch !== undefined && typeof dispatch !== 'boolean'),
-      sticky: dispatch === true && !loaded,
+      sticky: dispatch === true && !loaded && !(valid && input === false),
     };
   }
 
@@ -4214,6 +4217,7 @@ class ReverieApp {
           providerDispatchHeld: session.providerDispatchHeld,
           providerInputHeld: session.providerInputHeld,
           providerDispatchHoldKind: session.providerDispatchHoldKind,
+          providerPresence: session.providerPresence,
         });
       }
       this._renderInputRecoveryBanner();

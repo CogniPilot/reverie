@@ -1048,6 +1048,9 @@ export interface SessionState {
   /** Read-only live diagnostics; ignored on reload and omitted from disk snapshots. */
   providerDispatchHoldKind?: 'loaded-intent' | 'intrinsic' | null;
   providerInputHeld?: boolean;
+  /** Read-only live diagnostics: input is admitted because the session's own pane was observed to hold the
+   * provider (`screen`) or the verified owner said so (`owner`). The launch denial is unchanged. Never persisted. */
+  providerPresence?: 'screen' | 'owner' | null;
   /** Computed retained private Docker Engine-view currency. Not native health or
    * authority; absent outside boxed continuation, ignored on restore and never persisted. */
   dockerProviderViewCurrent?: boolean;

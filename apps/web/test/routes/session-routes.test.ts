@@ -1028,6 +1028,41 @@ describe('session-routes', () => {
       expect(body.success).toBe(false);
     });
 
+    it('re-checks the terminal of a provider-held session, names the owner action, and never replays the refused input', async () => {
+      const url = `/api/sessions/${harness.ctx._sessionId}/input`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const session = harness.ctx.sessions.get(harness.ctx._sessionId) as any;
+      session.writeBuffer.length = 0;
+      session.providerDispatchHeld = true;
+
+      // The office cannot tell from the pane: refused, with the supported way out.
+      const refused = await harness.app.inject({ method: 'POST', url, payload: { input: 'refused prompt', seq: 1, clientId: 'cid-hold' } });
+      expect(refused.statusCode).toBe(409);
+      expect(JSON.parse(refused.body)).toMatchObject({
+        success: false,
+        errorCode: ApiErrorCode.CONFLICT,
+        recoveryRequired: true,
+        code: 'PROVIDER_INPUT_HELD',
+        reason: 'provider-not-visible',
+        allowedActions: ['confirm-provider-running', 'report-provider-not-running', 'recheck-terminal'],
+        reconcile: { method: 'POST', path: `/api/sessions/${harness.ctx._sessionId}/provider-hold`, requires: 'verified-owner' },
+      });
+      expect(session.reconcileProviderHold).toHaveBeenCalledTimes(1);
+      expect(session.writeBuffer).toEqual([]);
+
+      // The pane now shows the running agent: this request is delivered, the earlier one is not.
+      session.providerHoldReading = { outcome: 'confirmed', source: 'screen', evidence: 'composer' };
+      const delivered = await harness.app.inject({ method: 'POST', url, payload: { input: 'new prompt', seq: 2, clientId: 'cid-hold' } });
+      expect(delivered.statusCode).toBe(200);
+      expect(session.writeBuffer).toEqual(['new prompt']);
+      expect(session.providerDispatchHeld).toBe(true);
+      // Released: later input flows without another terminal check.
+      const next = await harness.app.inject({ method: 'POST', url, payload: { input: '\r', seq: 3, clientId: 'cid-hold' } });
+      expect(next.statusCode).toBe(200);
+      expect(session.reconcileProviderHold).toHaveBeenCalledTimes(2);
+      expect(session.writeBuffer).toEqual(['new prompt', '\r']);
+    });
+
     it('rejects empty payload', async () => {
       const res = await harness.app.inject({
         method: 'POST',

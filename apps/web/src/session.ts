@@ -182,7 +182,14 @@ import { resolveConfigModel } from './model-config-resolvers.js';
 import { legacyConfigForMode } from './session-cli-registry-bridge.js';
 import { checkFullAccessFlags, fullAccessByDefault, withFullAccessDefault, type FullAccessCheck } from './full-access-default.js';
 import { canUsernameRunPrivilegedCommands } from './user-store.js';
-import { readProcStat, stopPtyChild } from './signal-target.js';
+import { readProcStat, stopPtyChild, type PaneLiveness } from './signal-target.js';
+import {
+  decideProviderHold,
+  providerScreenEvidence,
+  type ProviderHoldClaim,
+  type ProviderHoldReconciliation,
+  type ProviderPresenceSource,
+} from './provider-hold-reconcile.js';
 import { getLifecycleLog } from './session-lifecycle-log.js';
 import { ownerStopPending } from './owner-stop-journal.js';
 import {
@@ -543,7 +550,7 @@ export class NativeProviderRetirementRequiredError extends Error {
 /** A dispatched provider command may have run; no caller may replay it as a rollback. */
 export class ProviderDispatchUnconfirmedError extends Error {
   constructor(cause?: unknown) {
-    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it; inspect the terminal and confirm whether the provider ran. Same-session retry cannot clear this hold; supported reconciliation is not yet implemented.', {cause});
+    super('Provider launch outcome is unconfirmed. Input is held. Do not replay it. The office releases the hold by itself once the terminal shows the running agent; otherwise the verified owner settles it with POST /api/sessions/:id/provider-hold ({"observation":"running"} or {"observation":"not-running"}). A new launch stays fenced until the employee is recovered.', {cause});
     this.name = 'ProviderDispatchUnconfirmedError';
   }
 }
@@ -1114,6 +1121,89 @@ export class Session extends EventEmitter {
   /** Input to a freshly verified existing provider is separate from a new-provider dispatch. */
   get providerDispatchHoldKind(): 'loaded-intent' | 'intrinsic' | undefined { return this.#providerDenial?.kind; }
   get providerInputHeld(): boolean { return !this._existingProviderObservationAdmitted(); }
+  /** Website-side confirmation that the provider the denial doubts is in this pane now. It admits INPUT to that
+   * existing provider only: the denial, and every reader of `providerDispatchHeld`, stays in force, no launch is
+   * admitted, and it lapses with the pane, the mode, a new dispatch or a new denial. */
+  #providerPresence?: {
+    readonly source: ProviderPresenceSource;
+    readonly evidence: 'working-line' | 'composer' | 'owner-attested';
+    readonly denial: object;
+    readonly current: () => boolean;
+  };
+  #providerHoldLast?: { readonly denial: object; readonly result: ProviderHoldReconciliation };
+  #providerHoldReconciling?: Promise<ProviderHoldReconciliation>;
+  private _currentProviderPresence() {
+    const presence = this.#providerPresence;
+    if (!presence) return undefined;
+    if (presence.denial === this.#providerDenial && presence.current()) return presence;
+    this.#providerPresence = undefined;
+    return undefined;
+  }
+  get providerPresence(): ProviderPresenceSource | undefined { return this._currentProviderPresence()?.source; }
+  /** The last reconciliation of the CURRENT denial: what an input refusal reports. */
+  get providerHoldLastReconciliation(): ProviderHoldReconciliation | undefined {
+    return this.#providerHoldLast && this.#providerHoldLast.denial === this.#providerDenial ? this.#providerHoldLast.result : undefined;
+  }
+  /**
+   * Settle whether input may flow while a launch denial stands, from this session's own pane (provider-hold-reconcile.ts).
+   * `auto` reads the pane; `running` / `not-running` are the verified owner's reading of the terminal (the caller
+   * authenticates). Nothing is typed, replayed, launched or retired here.
+   */
+  reconcileProviderHold(claim: ProviderHoldClaim = 'auto'): Promise<ProviderHoldReconciliation> {
+    if (claim !== 'auto') return this._reconcileProviderHold(claim);
+    if (this.#providerHoldReconciling) return this.#providerHoldReconciling;
+    const work = this._reconcileProviderHold(claim).finally(() => {
+      if (this.#providerHoldReconciling === work) this.#providerHoldReconciling = undefined;
+    });
+    this.#providerHoldReconciling = work;
+    return work;
+  }
+  private async _reconcileProviderHold(claim: ProviderHoldClaim): Promise<ProviderHoldReconciliation> {
+    const denial = this.#providerDenial;
+    if (!denial) return { outcome: 'not-held' };
+    const settle = (result: ProviderHoldReconciliation): ProviderHoldReconciliation => {
+      if (this.#providerDenial === denial) this.#providerHoldLast = { denial, result };
+      return result;
+    };
+    if (claim === 'not-running') {
+      this.#providerPresence = undefined;
+      return settle({ outcome: 'not-running', evidence: 'owner-attested' });
+    }
+    if (denial.kind === 'loaded-intent' && this.dockerContinuationViewCurrent)
+      return settle({ outcome: 'confirmed', source: 'engine-view', evidence: 'engine-view' });
+    const present = this._currentProviderPresence();
+    if (present && claim === 'auto') return settle({ outcome: 'confirmed', source: present.source, evidence: present.evidence });
+    if (this._isStopped || this._closing) return settle({ outcome: 'held', reason: 'no-terminal' });
+    if (this.paneLifecycleInFlight) return settle({ outcome: 'held', reason: 'lifecycle-in-progress' });
+    const pane = this._captureMuxPaneObservation(() => this.#providerDenial === denial && !this._closing);
+    if (!pane || !pane.current()) return settle({ outcome: 'held', reason: 'no-terminal' });
+    let before: PaneLiveness, after: PaneLiveness, screen: string | null | undefined;
+    try {
+      before = await pane.read();
+      // The owner's reading replaces the screen match, so only an automatic check captures the screen.
+      screen = before.state === 'live' && claim === 'auto' ? this._mux?.capturePaneText?.(pane.name) : null;
+      after = before.state === 'live' ? await pane.read() : before;
+    } catch {
+      return settle({ outcome: 'held', reason: 'pane-unreadable' });
+    }
+    if (!pane.current() || this.paneLifecycleInFlight) return settle({ outcome: 'held', reason: 'pane-changed' });
+    const cli = getCli(this.mode)?.capabilities;
+    const decision = decideProviderHold(claim, {
+      before,
+      after,
+      registeredPid: pane.pid,
+      screen: providerScreenEvidence(screen, {
+        composerReadyMark: cli?.composerReadyMark,
+        workingLine: cli?.workDetect?.workingLine ? this._workingLinePattern() : null,
+      }),
+      // Only a local pane runs the provider as its own command; a laptop, remote or worker pane is a viewer.
+      paneIsProvider: this.paneExitApplies && !this._workerBacked,
+    });
+    if (decision.outcome === 'confirmed')
+      this.#providerPresence = { source: decision.source, evidence: decision.evidence, denial, current: () => pane.current() && !this._paneExit };
+    else if (decision.outcome === 'not-running') this.#providerPresence = undefined;
+    return settle(decision);
+  }
   private _holdUnconfirmedProvider(
     cause?: unknown,
     publication?: ProviderLaunchPublication
@@ -2061,7 +2151,8 @@ export class Session extends EventEmitter {
     if (!this.dockerContinuationViewCurrent) throw Error('Original Docker provider view changed');
   }
   private _existingProviderObservationAdmitted(): boolean {
-    return !this.#providerDispatchUncertainty || ((this.#providerDenial?.kind === 'loaded-intent') && this.dockerContinuationViewCurrent);
+    return !this.#providerDispatchUncertainty || ((this.#providerDenial?.kind === 'loaded-intent') && this.dockerContinuationViewCurrent)
+      || this._currentProviderPresence() !== undefined;
   }
   get docker(): SessionDocker | undefined {
     return this._docker;
@@ -3147,6 +3238,8 @@ export class Session extends EventEmitter {
       providerDispatchHeld: this.providerDispatchHeld,
       providerDispatchHoldKind: this.#providerDenial?.kind ?? null,
       providerInputHeld: this.providerInputHeld,
+      // Live diagnostics: a pane observation admits input while the launch denial stands.
+      providerPresence: this.providerPresence ?? null,
       // Retained private view currency only; never fresh native health or an effect grant.
       ...(this._docker?.continuation ? { dockerProviderViewCurrent: this.dockerContinuationViewCurrent } : {}),
       ...(this.terminalInputHeld ? {terminalInputHeld: true} : {}),
@@ -3222,6 +3315,7 @@ export class Session extends EventEmitter {
     delete snapshot.dockerProviderViewCurrent;
     delete snapshot.providerDispatchHoldKind;
     delete snapshot.providerInputHeld;
+    delete snapshot.providerPresence;
     if (this.#providerDenial?.kind !== 'intrinsic') delete snapshot.providerDispatchHeld;
     return snapshot;
   }
@@ -3792,7 +3886,7 @@ export class Session extends EventEmitter {
     const current = () => stillCurrent() && identity.current() && !this._isStopped &&
       this.#workspaceHookEpoch === epoch && this.mode === mode &&
       identity.subject.pid === pid;
-    return {current, pid, read: () => identity.mux.readPaneLiveness!(identity.name)};
+    return {current, pid, name: identity.name, read: () => identity.mux.readPaneLiveness!(identity.name)};
   }
 
   /** A dispatched worker command cannot settle successfully with a dead or unconfirmed outer pane.
