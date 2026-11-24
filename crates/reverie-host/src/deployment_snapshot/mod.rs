@@ -6,6 +6,8 @@ mod ancestors;
 mod attributes;
 mod compressed;
 mod directory;
+mod estimate;
+pub use estimate::{ConsoleEstimate, estimate_console};
 mod manifest;
 mod mounts;
 mod observed;
@@ -170,15 +172,7 @@ impl SnapshotTools {
         end: Instant,
     ) -> Result<(Manifest, String, mounts::Observed)> {
         let source = &partial.source;
-        let (parent, selected) = selected_destination(destination)?;
-        require(
-            !selected.starts_with(source.root.path()) && !source.root.path().starts_with(&selected),
-            "SNAPSHOT_OVERLAP",
-        )?;
-        let mut mounts = mounts::Observed::capture(end)?;
-        mounts.include(source.root.path())?;
-        mounts.include(&parent)?;
-        mounts.disjoint(source.root.path(), &parent)?;
+        let mounts = admit(source, destination, end)?;
         partial.destination = Some(Arc::new(Directory::create(destination)?));
         let destination = partial.destination.as_ref().expect("captured directory");
         require(
@@ -201,6 +195,30 @@ impl SnapshotTools {
         let digest = manifest::file_digest(archive, end)?;
         Ok((before, digest, mounts))
     }
+}
+/// The destination lies outside the console and no mount makes one a view of
+/// the other. Returns the table that proof was read from.
+fn admit(source: &SnapshotSource, destination: &Path, end: Instant) -> Result<mounts::Observed> {
+    let (parent, selected) = selected_destination(destination)?;
+    require(
+        !selected.starts_with(source.root.path()) && !source.root.path().starts_with(&selected),
+        "SNAPSHOT_OVERLAP",
+    )?;
+    let mut mounts = mounts::Observed::capture(end)?;
+    mounts.include(source.root.path())?;
+    mounts.include(&parent)?;
+    mounts.disjoint(source.root.path(), &parent)?;
+    Ok(mounts)
+}
+/// Decide while the console still runs what `stage_console` would otherwise
+/// refuse after it has been stopped: a console directory to copy, an unused
+/// destination in a private parent, and storage that is not a view of the
+/// console. Nothing is created and nothing here is retained.
+pub fn admit_console(source: &Path, destination: &Path, end: Instant) -> Result<()> {
+    deadline(end)?;
+    let source = SnapshotSource::observe(source)?;
+    let admitted = admit(&source, destination, end).and_then(|_| Directory::admits(destination));
+    combine(admitted, close_directory(source.root))
 }
 /// The canonical parent of a destination that may not exist yet, and the
 /// destination's own path beneath it.

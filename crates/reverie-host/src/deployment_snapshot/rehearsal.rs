@@ -1,15 +1,22 @@
 //! A restore test on a separately selected owner disk. The durable archive
 //! stays with the deployment operation.
-use super::{Directory, Result, combine, mounts, require};
-use std::{fs, os::unix::fs::MetadataExt, path::Path, time::Instant};
+use super::{Directory, Result, SnapshotError, combine, mounts, require};
+use std::{fs, io, os::unix::fs::MetadataExt, path::Path, time::Instant};
 
 pub struct RehearsalRoot(Directory);
 
 impl RehearsalRoot {
     /// Pin an existing private directory before stopping the office.
     pub fn open(path: &Path, source: &Path, operation: &Path, end: Instant) -> Result<Self> {
+        require(path.is_absolute(), "SNAPSHOT_REHEARSAL_ROOT")?;
+        let canonical = match fs::canonicalize(path) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Err(SnapshotError::refused("SNAPSHOT_REHEARSAL_ROOT_MISSING"));
+            }
+            other => other?,
+        };
         require(
-            path.is_absolute() && fs::canonicalize(path)? == path,
+            canonical == path && fs::symlink_metadata(path)?.is_dir(),
             "SNAPSHOT_REHEARSAL_ROOT",
         )?;
         let directory = Directory::open(path)?;
@@ -68,6 +75,16 @@ impl RehearsalRoot {
 
     pub fn close(self) -> Result<()> {
         self.0.close()
+    }
+
+    /// The canonical directory that was pinned.
+    pub fn path(&self) -> &Path {
+        self.0.path()
+    }
+
+    /// Device and inode of the pinned directory, for a later exact match.
+    pub fn identity(&self) -> (u64, u64) {
+        self.0.identity()
     }
 
     pub(super) fn directory(&self) -> &Directory {

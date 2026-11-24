@@ -14,7 +14,8 @@ use std::{
     time::Instant,
 };
 
-const MAX_ENTRIES: usize = 200_000;
+pub(super) const MAX_ENTRIES: usize = 200_000;
+pub(super) const MAX_DEPTH: usize = 128;
 const MAX_MANIFEST_BYTES: usize = 64 << 20;
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum Content {
@@ -85,7 +86,10 @@ impl Manifest {
         end: Instant,
     ) -> Result<()> {
         deadline(end)?;
-        require(relative.components().count() <= 128, "SNAPSHOT_DEPTH_BOUND")?;
+        require(
+            relative.components().count() <= MAX_DEPTH,
+            "SNAPSHOT_DEPTH_BOUND",
+        )?;
         require(self.entries.len() < MAX_ENTRIES, "SNAPSHOT_ENTRY_BOUND")?;
         let name = Path::new(
             relative

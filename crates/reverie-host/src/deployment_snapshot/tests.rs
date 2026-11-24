@@ -446,3 +446,132 @@ fn compressed_backup_verifies_the_rehearsed_raw_archive_on_separate_storage() {
     snapshot.close().unwrap();
     selected.close().unwrap();
 }
+
+#[test]
+fn a_live_console_is_sized_and_admitted_without_creating_anything() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let console = fixture.source().join("console");
+    fs::write(console.join("first"), vec![7; 1000]).unwrap();
+    fs::create_dir(console.join("nested")).unwrap();
+    fs::write(console.join("nested/second"), vec![9; 24]).unwrap();
+    symlink("first", console.join("link")).unwrap();
+    let estimate = estimate_console(&fixture.source(), fixture.end()).unwrap();
+    assert_eq!(estimate.entries(), 5);
+    assert_eq!(estimate.regular_bytes(), 1024);
+    assert_eq!(
+        estimate.stopped_write_bytes(),
+        estimate.archive_bytes() + estimate.rehearsal_bytes()
+    );
+    assert!(estimate.stopped_read_bytes() > estimate.stopped_write_bytes());
+    admit_console(&fixture.source(), &fixture.destination(), fixture.end()).unwrap();
+    assert!(!fixture.destination().exists());
+    // The verified copy that follows fits what was planned for it.
+    let mut snapshot = tools()
+        .capture_console(&fixture.source(), &fixture.destination(), fixture.end())
+        .unwrap();
+    assert_eq!(snapshot.regular_bytes(), estimate.regular_bytes());
+    assert_eq!(snapshot.entry_count() as u64, estimate.entries());
+    assert!(fs::metadata(snapshot.archive_path()).unwrap().len() <= estimate.archive_bytes());
+    snapshot.rehearse(fixture.end()).unwrap();
+    snapshot.close().unwrap();
+}
+
+#[test]
+fn admission_refuses_first_what_staging_would_refuse_after_the_stop() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let admit = |destination: &Path| {
+        admit_console(&fixture.source(), destination, fixture.end())
+            .err()
+            .map(|error| error.code())
+    };
+    assert_eq!(admit(&fixture.destination()), None);
+    assert_eq!(
+        admit(&fixture.source().join("console/snapshot")),
+        Some("SNAPSHOT_OVERLAP")
+    );
+    fs::create_dir(fixture.destination()).unwrap();
+    assert_eq!(
+        admit(&fixture.destination()),
+        Some("SNAPSHOT_DESTINATION_OCCUPIED")
+    );
+    fs::remove_dir(fixture.destination()).unwrap();
+    let output = fixture.0.join("output");
+    fs::set_permissions(&output, fs::Permissions::from_mode(0o770)).unwrap();
+    assert_eq!(
+        admit(&fixture.destination()),
+        Some("SNAPSHOT_DESTINATION_CUSTODY")
+    );
+    fs::set_permissions(&output, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        admit_console(&fixture.source(), &fixture.destination(), Instant::now())
+            .unwrap_err()
+            .code(),
+        "SNAPSHOT_DEADLINE"
+    );
+    fs::remove_dir(fixture.source().join("console")).unwrap();
+    assert!(admit(&fixture.destination()).is_some());
+    assert!(estimate_console(&fixture.source(), fixture.end()).is_err());
+    assert!(!fixture.destination().exists());
+    fs::create_dir(fixture.source().join("console")).unwrap();
+}
+
+#[test]
+fn the_estimate_refuses_a_console_deeper_than_the_capture_allows() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let mut path = fixture.source().join("console");
+    for _ in 0..manifest::MAX_DEPTH {
+        path.push("d");
+        fs::create_dir(&path).unwrap();
+    }
+    assert_eq!(
+        estimate_console(&fixture.source(), fixture.end())
+            .unwrap_err()
+            .code(),
+        "SNAPSHOT_DEPTH_BOUND"
+    );
+}
+
+#[test]
+fn a_missing_or_relative_rehearsal_root_is_named_before_anything_stops() {
+    let fixture = Fixture::new();
+    fixture.separate();
+    let open = |path: &Path| {
+        RehearsalRoot::open(
+            path,
+            &fixture.source(),
+            fixture.destination().parent().unwrap(),
+            fixture.end(),
+        )
+        .err()
+        .map(|error| error.code())
+    };
+    assert_eq!(
+        open(&fixture.0.join("never-created")),
+        Some("SNAPSHOT_REHEARSAL_ROOT_MISSING")
+    );
+    assert_eq!(
+        open(Path::new("relative/root")),
+        Some("SNAPSHOT_REHEARSAL_ROOT")
+    );
+    let file = fixture.0.join("file");
+    fs::write(&file, b"not a directory").unwrap();
+    assert_eq!(open(&file), Some("SNAPSHOT_REHEARSAL_ROOT"));
+    let root = fixture.0.join("restore");
+    fs::create_dir(&root).unwrap();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+    let selected = RehearsalRoot::open(
+        &root,
+        &fixture.source(),
+        fixture.destination().parent().unwrap(),
+        fixture.end(),
+    )
+    .unwrap();
+    use std::os::unix::fs::MetadataExt;
+    let info = fs::metadata(&root).unwrap();
+    assert_eq!(selected.identity(), (info.dev(), info.ino()));
+    assert_eq!(selected.path(), fs::canonicalize(&root).unwrap());
+    selected.close().unwrap();
+}
