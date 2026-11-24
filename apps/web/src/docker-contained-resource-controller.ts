@@ -463,7 +463,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_ANCHOR_REPLACED');
     return { ...init, startTicks: seen.anchor.startTicks };
   }
-  async #probe(anchor: Init, worker?: Init, attempts = 3): Promise<Observation> {
+  async #probe(anchor: Init, worker?: Init, attempts = 8): Promise<Observation> {
     const end = performance.now() + 30000;
     const remaining = () => {
       const value = Math.floor(end - performance.now());
@@ -1587,7 +1587,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       refuse('DOCKER_RESOURCE_REVISION_OBSERVATION_EXPIRED');
     return started;
   }
-  async #refresh(seen: Observation, current: () => void = () => {}, attempts = 3): Promise<Observation> {
+  async #refresh(seen: Observation, current: () => void = () => {}, attempts = 8): Promise<Observation> {
     if (!seen.worker) refuse('DOCKER_RESOURCE_WORKER_READBACK');
     current();
     const latest = await this.#probe(

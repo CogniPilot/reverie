@@ -233,7 +233,7 @@ describe('bounded whole resource probe retries', () => {
     }
   );
   it.each([marker, missingThread])(
-    'stops after three actual read failures and publishes no policy proof: %s',
+    'stops after eight actual read failures and publishes no policy proof: %s',
     async (line) => {
       const f = await prepared();
       let faults = 0;
@@ -244,7 +244,7 @@ describe('bounded whole resource probe retries', () => {
         }
       });
       await expect(f.controller.read(f.row())).rejects.toThrow('PROCESS_EXITED');
-      expect(faults).toBe(3);
+      expect(faults).toBe(8);
       expect(() => f.controller.existingPolicy(f.row(), policy)).toThrow();
     }
   );
