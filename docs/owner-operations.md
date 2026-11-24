@@ -18,6 +18,30 @@ preview. The updater never stops those writers implicitly. This early check is
 an observation, not a whole-host writer-exclusion guarantee; the existing byte,
 metadata and restore-rehearsal checks remain required.
 
+A console update must not leave the office stopped. The
+[deployment guide](../crates/reverie-deployment/README.md) describes the
+behaviour in full; in outline:
+
+- Preview states how many bytes the stop will copy and read back. Apply checks
+  the rehearsal directory, the backup destination and the free space for the
+  archive and the restore rehearsal before it stops the office.
+  `check-storage` runs the same checks at any time.
+- During the backup, only mounts on, above or inside the directories the backup
+  uses are compared. Unrelated containers starting or exiting do not fail it.
+- If apply fails after the stop and before the new console has ever started,
+  it starts the original console again and reports both the failure and the
+  restore. It does not do this after a lost Engine response or once the new
+  console has run; the output then names the one `rollback` command.
+- `rollback` never repeats an effect. After its one attempt it only records
+  the restore once the original console is observed running and ready.
+- `prune-deployments` reports, and with `--apply` removes, the backups and
+  rehearsal copies of closed, superseded operations. It keeps the active
+  operation and the most recent two that hold storage.
+
+These are local owner commands over the shared application service. The
+standalone owner API does not yet expose them; a GUI or HTTP adapter must call
+the same service functions and must not reimplement the checks.
+
 An outside-product replacement can leave a terminal active claim pointing at two
 containers that no longer exist. The local owner may explicitly select
 `preview --adopt-stale-claim OLD_OPERATION --expected-current-container FULL_CID`

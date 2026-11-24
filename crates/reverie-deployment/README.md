@@ -74,11 +74,56 @@ source, and only then swaps names and starts. Readiness requires the HTTP status
 and an actual Rust-front/Node process relationship. This remains hybrid readiness;
 the one-employee message, laptop, perf and restart trial is separate acceptance.
 
-Check free space before stopping the office. The operation directory is
+## What the office is stopped for
+
+The verified backup needs the office stopped. The archive, its comparison with
+the console and the restore rehearsal are one proof about one set of bytes, and
+that proof holds only while nothing writes the console. Running the copy while
+the office is up would need a frozen view of the data, such as a filesystem
+snapshot or a reflink clone taken during a brief stop; the tool has neither.
+The `--live-account-writers-fix-forward` plan copies without stopping and its
+copy is unverified for that reason.
+
+Preview therefore states the cost. Its `stopped_backup.estimate` gives the
+console's entries and bytes, the space the archive and the rehearsal need, and
+`bytes_written_while_stopped` and `bytes_read_while_stopped`. A verified update
+writes the data twice and reads it back about nineteen times across the console,
+the archive and the restored copy, which is why a 27 GB console took about
+fourteen minutes. The figures are measured while the office runs; if the
+console cannot be measured, `estimate_refusal` gives the code instead.
+
+## Checks before the stop
+
+Apply decides everything it can while the office is still running. After the
+candidate, bind, network and shared-writer checks it refuses, without stopping
+anything:
+
+- a rehearsal root that is missing, not a directory, reached through a
+  symbolic link, not owned by you with mode 0700, not empty, or a view of the
+  console or operation storage (`DEPLOYMENT_REHEARSAL_ROOT_REFUSED`; the
+  snapshot code says which, for example `SNAPSHOT_REHEARSAL_ROOT_MISSING`);
+- a backup destination that already exists or whose parent others can write
+  (`DEPLOYMENT_SNAPSHOT_REFUSED`);
+- a console with more entries or deeper nesting than the capture accepts
+  (`DEPLOYMENT_BACKUP_ESTIMATE_REFUSED`);
+- too little free space (`DEPLOYMENT_BACKUP_SPACE_INSUFFICIENT`). `detail`
+  lists each filesystem, the copies it will hold, and the bytes required and
+  available. The requirement is the estimate plus one sixteenth plus 256 MiB.
+  The archive and the rehearsal are added together when they share a
+  filesystem. The size of a compressed archive is not known in advance and is
+  not part of the requirement.
+
+`reverie-deployment --root ROOT check-storage [--rehearsal-root DIR]
+[--compress-backup]` runs the same storage checks at any time, including before
+preview, and changes nothing.
+
+The operation directory is
 `runtime/update-state/console-deployments/<operation>/` under the installation.
 Ordinary apply keeps the archive and extracted rehearsal there. To put the
 extraction on a separate filesystem, pass `--rehearsal-root /absolute/private/directory`
-to apply. Choose an empty owner-only directory outside worker mounts.
+to apply. Create it first, for example with `mkdir -m 700`. Any name is
+accepted; it does not have to match the operation. Choose a directory outside
+worker mounts.
 
 Add `--compress-backup` to stage both the raw tar and its extraction on the
 rehearsal disk. Budget for both copies there. The operation directory then
@@ -94,10 +139,105 @@ An image archive can be staged on scratch. Importing it still requires space
 in Docker's image storage for new layers. When Docker and the operation directory
 share a filesystem, leave room for the image import and the backup together.
 
+## Mounts during the backup
+
+The backup proves that its destination is not a view of the console, and that
+proof is read from the kernel mount table. The table is read again around every
+verification. A mount is compared when its mount point is, lies above, or lies
+inside one of the paths the backup uses: the console data root, the directory
+holding the archive, a separate rehearsal root, the compressed-backup
+directory, `/proc`, and `/nix/store` where the installed tools and their
+libraries live. For each such mount the identity, parent, device, root, mount
+point and filesystem type must be unchanged, and none may appear or disappear.
+A change refuses with `SNAPSHOT_MOUNTS_CHANGED`.
+
+Mounts elsewhere are ignored. Another container starting or exiting, an image
+build, or a removable disk no longer fails an update. Mount options are not
+part of the comparison because the shared mount parser does not record them;
+they were not compared before either.
+
+## When apply fails
+
+If apply fails after it has stopped the office, it starts the original console
+again itself. This is the same checked rollback as the `rollback` command: one
+journaled attempt, fresh inspection of both containers, the bind and network
+checks, and a readiness check before the `restored` receipt. The output keeps
+the original failure in `code` and `diagnostic` and adds `sourceRestore`:
+
+- `RESTORED`: the original console is running and answered its readiness
+  check. The operation is closed; begin a new preview after fixing the cause.
+- `NOT_ATTEMPTED`: no restore request was issued and `sourceRestore.code`
+  says why. The office may be stopped. `sourceRestore.command` is the rollback
+  command to run once the cause is understood.
+- `UNPROVEN`: the one rollback attempt was used and its result could not be
+  confirmed. The office may be stopped. `sourceRestore.command` is the same
+  rollback command; see below for what it does after an attempt.
+
+The restore is issued only while the new console has provably never run, which
+the Engine reports as the `created` state. Once it has started, it may have
+written data the old console cannot read, so returning to the old code stays
+the owner's decision (`DEPLOYMENT_AUTOMATIC_RESTORE_CANDIDATE_STARTED`). A lost
+Engine response also stops the restore, because the container may still be
+changing (`DEPLOYMENT_AUTOMATIC_RESTORE_OUTCOME_UNKNOWN`). In both cases the
+output and `status` name the rollback command.
+
+The decision is journaled as `automatic-restore` before any restore effect and
+appears in `status` as `automatic_restore`, with the cause and the outcome.
+This behaviour is part of apply and has no switch: a restore only starts the
+original container, every journal, container and backup stays in place for
+review, and it refuses by itself in the cases above.
+
+After an automatic restore the operation is closed, so `activate-retained` no
+longer accepts it. To fix forward with an unverified copy, prepare a fresh
+operation and use `activate-retained --stop-running-source`. That command
+restores the original console the same way if it fails after its own stop.
+
+The bounded initial rollout (`rollout_initial_website` and
+`update_uninstalled_website`) is unchanged. It settles its own failure under
+one deadline and does not restore the console.
+
 Rollback addresses only the original retained container identities. It retains
 both containers, never bulk-wakes employees and never automatically restores data.
-An attempted effect is not automatically retried after a lost response. The
-registered active-operation fence and private receipts stay available for review.
+It checks the binds and networks before it journals its one attempt, so a
+refusal that is already visible does not use the attempt up. An attempted effect
+is not automatically retried after a lost response. After the attempt, running
+`rollback OPERATION` again issues no request: when it observes the original
+console running under its own name and ready, with the candidate stopped, it
+records `restored`; otherwise it refuses with
+`DEPLOYMENT_ROLLBACK_ALREADY_ATTEMPTED`. The registered active-operation fence
+and private receipts stay available for review.
+
+`status` adds `recovery` and `rollbackCommand` when an operation is left at
+`STOP_UNCONFIRMED`, `SNAPSHOT_VERIFIED`, `SWAP_UNCONFIRMED`,
+`START_UNCONFIRMED` or `ROLLBACK_UNCONFIRMED`, for example after the updater
+process itself was killed.
+
+## Removing old backups
+
+Each verified update keeps a full archive in its operation directory and a
+full extracted copy in the rehearsal location. `reverie-deployment --root ROOT
+prune-deployments` reports what earlier operations still hold, and with
+`--apply` removes it.
+
+The command follows the journaled claim handovers back from the active
+operation. It does not list directories or match names. For each operation it
+considers only the `snapshot` and `retained-copy` directories inside that
+operation, and the `rehearsal` and `snapshot` directories inside a separate
+rehearsal root that the operation journaled before writing there. The
+rehearsal root itself, anything else in it, the operation journals and both
+containers are kept.
+
+An operation's storage is removed only when the operation ended ready, restored
+or refused and a later operation took over its claim. The active operation is
+always kept. So are the `--keep` most recent operations that hold storage,
+counting the active one (default 2), and any operation that did not close.
+History stops at the first operation the installation cannot read, and nothing
+older is considered. A rehearsal root that has been replaced, or that a newer
+operation used again, is not attributed to the older operation.
+
+Apply journals the rehearsal root from this version on. A rehearsal copy made
+by an earlier version was not journaled and is not removed; delete it by hand
+once the report shows the operation as closed.
 
 Run `reverie-deployment --root ROOT status` to inspect the operation holding
 the installation claim. This works after losing the operation ID. A preview
