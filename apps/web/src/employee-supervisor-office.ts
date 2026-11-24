@@ -11,12 +11,15 @@
  *   (`captureDockerPlanMoveSupervisorRequester`), built by the server and passed in as `moveExecutor`;
  * - abandoning a held plan move: `PlanMoves.abandonHeldDockerMove` with the supervisor's guard as its `authorized`
  *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them;
- * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running.
+ * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running;
+ * - a laptop at the provider's sign-in screen: the plan sign-in reconciler's own pass for that one plan, asked for
+ *   now instead of at its next read. It places only a sign-in some holder of that plan already has.
  */
 import type { CompanyService } from './company-service.js';
 import type { CompanyEmployee } from './company-types.js';
 import type { CompanyWakeReport } from './company-wake.js';
 import type { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
+import { laptopSignInHolderId, type PlanSignInReport } from './plan-signin-reconciler.js';
 import type {
   EmployeeSupervisorPorts,
   SupervisedEmployee,
@@ -55,6 +58,8 @@ export interface OfficeSupervisorDeps {
   /** A plan move executor that can only continue the original of a held move, while `current` holds. */
   moveExecutor(employee: SupervisedEmployee, current: () => boolean): PlanMoveExecutor;
   planSignedIn(accountId: string): Promise<boolean | undefined>;
+  /** Read every copy of one plan's sign-in now and put right what can be. Absent where no laptop holds one. */
+  readonly signIn?: { reconcile(accountId: string): Promise<PlanSignInReport | undefined> };
   /** The owner's Wake. */
   wake(employeeId: string, options: { stillCurrent: () => boolean }): Promise<CompanyWakeReport>;
   load(): Map<string, SupervisorHistory>;
@@ -227,6 +232,35 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
               laptops.start(employee, guard),
             'rebuild-laptop': (employee: SupervisedEmployee, guard: SupervisorGuard) =>
               laptops.rebuild(employee, guard),
+          }
+        : {}),
+      ...(deps.signIn
+        ? {
+            'replace-sign-in': async (
+              employee: SupervisedEmployee,
+              guard: SupervisorGuard
+            ): Promise<SupervisorActionResult> => {
+              if (!employee.planAccountId) return { outcome: 'refused', detail: 'the employee is on no plan' };
+              guard();
+              const report = await deps.signIn!.reconcile(employee.planAccountId);
+              const id = laptopSignInHolderId(employee.id);
+              const holder = report?.holders.find((value) => value.id === id);
+              if (!report || !holder)
+                return { outcome: 'refused', detail: 'the laptop has no sign-in folder of this plan to read' };
+              if (holder.state === 'usable')
+                return {
+                  outcome: 'done',
+                  detail: report.transfers.some((transfer) => transfer.to === id && transfer.outcome === 'written')
+                    ? 'sign-in placed'
+                    : 'sign-in already in place',
+                };
+              return {
+                outcome: 'refused',
+                detail: report.usable
+                  ? 'the sign-in could not be placed yet'
+                  : 'no usable sign-in of this plan is held anywhere',
+              };
+            },
           }
         : {}),
       'reconnect-viewer': async (employee, guard) => {

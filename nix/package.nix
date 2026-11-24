@@ -129,7 +129,7 @@ let
         test/docker-plan-source.test.ts test/docker-plan-source-data.test.ts test/docker-plan-move-recipe.test.ts test/docker-plan-protocol.test.ts test/docker-plan-account-status.test.ts test/docker-plan-move-actor.test.ts test/docker-plan-move-work.test.ts test/docker-plan-worker-inventory.test.ts test/docker-plan-local-client.test.ts test/docker-plan-source-native.test.ts test/docker-plan-source-holder.test.ts \
         test/docker-plan-account.test.ts \
         test/docker-engine-command.test.ts test/docker-seat-directory.test.ts test/docker-exec-failure.test.ts test/docker-rebuild-live-launch.test.ts \
-        test/plan-signin-sync.test.ts test/plan-signin-reconciler.test.ts test/docker-signin-holder.test.ts \
+        test/plan-signin-sync.test.ts test/plan-signin-reconciler.test.ts test/docker-signin-holder.test.ts test/employee-supervisor-signin.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
         test/docker-provider-exit.test.ts test/docker-employee-local-model.test.ts \

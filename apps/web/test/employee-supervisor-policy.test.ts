@@ -222,7 +222,7 @@ describe('employee supervisor: classification', () => {
   });
 
   it('never gives an unknown condition a ladder', () => {
-    for (const condition of ['unknown', 'needs-owner', 'needs-sign-in', 'owner-stopped', 'healthy', 'starting'] as const)
+    for (const condition of ['unknown', 'needs-owner', 'owner-stopped', 'healthy', 'starting'] as const)
       expect(SUPERVISOR_PATHS[condition]).toBeUndefined();
     const result = assessEmployee(held('DOCKER_CONTINUATION_SOMETHING_NEW'), since(0, 'x'), ON, 99 * MINUTE);
     expect(result.next.action).toBeNull();
@@ -553,7 +553,7 @@ describe('employee supervisor: ladder', () => {
 
   it('orders every path from the least to the most destructive step', () => {
     const order: SupervisorAction[] = [
-      'resend-continuation', 'start-continuation', 'continue-move', 'reconnect-viewer', 'relaunch-provider',
+      'resend-continuation', 'start-continuation', 'continue-move', 'reconnect-viewer', 'replace-sign-in', 'relaunch-provider',
       'abandon-move', 'rebuild-laptop',
     ];
     for (const path of Object.values(SUPERVISOR_PATHS)) {

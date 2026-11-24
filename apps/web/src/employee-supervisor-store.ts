@@ -15,6 +15,7 @@ const ACTIONS = [
   'start-continuation',
   'continue-move',
   'reconnect-viewer',
+  'replace-sign-in',
   'relaunch-provider',
   'abandon-move',
   'rebuild-laptop',

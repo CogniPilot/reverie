@@ -36,6 +36,7 @@ export type SupervisorAction =
   | 'start-continuation'
   | 'continue-move'
   | 'reconnect-viewer'
+  | 'replace-sign-in'
   | 'relaunch-provider'
   | 'abandon-move'
   | 'rebuild-laptop';
@@ -74,6 +75,8 @@ const MINUTE = 60 * SECOND;
  * - Retries are cheap and guarded by the operation they repeat (an unknown outcome is never repeated there), so they
  *   start within a minute and are spaced out; four re-sends cover the helper's own three-writer budget per request.
  * - A viewer is first left to the laptop runtime's own ten-second reconnect; the supervisor only adds a nudge.
+ * - A sign-in the laptop is missing is put back at once. It replaces one file the client at the sign-in screen is
+ *   waiting for and gives nothing up, so it is a retry: it also runs with automatic repairs switched off.
  * - Abandoning a move waits 15 minutes on the SAME error and three failed continues: a move that only needed time
  *   or one more read has finished by then, and abandoning writes the journal only (nothing is stopped or removed).
  * - A rebuild discards a laptop, so it waits longest, runs at most twice per episode and twice per day, and is
@@ -108,6 +111,13 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
       dwellMs: 45 * SECOND,
       backoffMs: [30 * SECOND, MINUTE, 2 * MINUTE, 5 * MINUTE, 10 * MINUTE],
       escalateAfterMs: 5 * MINUTE,
+    },
+    'replace-sign-in': {
+      tier: 'retry',
+      maxAttempts: 3,
+      dwellMs: 0,
+      backoffMs: [MINUTE, 5 * MINUTE],
+      escalateAfterMs: 3 * MINUTE,
     },
     'relaunch-provider': {
       tier: 'retry',
@@ -144,6 +154,8 @@ export interface SupervisorFlags {
   readonly autoRepair: boolean;
   /** The office can relaunch an exited agent inside its running laptop. */
   readonly relaunchAvailable: boolean;
+  /** The office can put the sign-in of a plan back into a laptop that lost it. */
+  readonly signInRepairAvailable?: boolean;
 }
 
 export type SupervisorProviderPresence = 'running' | 'exited' | 'absent' | 'no-laptop' | 'unknown';
@@ -716,6 +728,7 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
 /** The rungs each base condition may climb, in order. A condition that is not listed has no automatic step. */
 export const SUPERVISOR_PATHS: Readonly<Partial<Record<SupervisorCondition, readonly SupervisorAction[]>>> = {
   'viewer-lost': ['reconnect-viewer'],
+  'needs-sign-in': ['replace-sign-in'],
   'provider-exited': ['relaunch-provider', 'rebuild-laptop'],
   'held-retryable': ['resend-continuation', 'rebuild-laptop'],
   'held-needs-rebuild': ['resend-continuation', 'rebuild-laptop'],
@@ -816,6 +829,16 @@ function gate(
       return observed.laptop.record && ['ready', 'provider-issued'].includes(observed.laptop.record.phase)
         ? { kind: 'ok' }
         : { kind: 'skip' };
+    case 'replace-sign-in':
+      // Only for a laptop parked on the provider's own sign-in screen. A plan move that waits for a sign-in keeps
+      // its own record, and a supervisor that is switched off describes the screen as it always did.
+      return flags.enabled &&
+        flags.signInRepairAvailable === true &&
+        observed.boxed &&
+        !observed.move &&
+        observed.session.startupScreen?.kind === 'credential'
+        ? { kind: 'ok' }
+        : { kind: 'skip' };
     case 'relaunch-provider':
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
     case 'abandon-move': {
@@ -850,6 +873,7 @@ const BY_HAND: Readonly<Record<SupervisorAction, string>> = {
   'start-continuation': 'Start the laptop: GET …/docker-policy, then POST …/docker-continuation.',
   'continue-move': 'Continue the move: POST /api/plans/moves/:id/resolve with action continue-original.',
   'reconnect-viewer': 'Reconnect the terminal from the employee card, or wake the employee.',
+  'replace-sign-in': 'Sign the plan in at the office (Plans), or in the laptop terminal.',
   'relaunch-provider': 'Restart the agent in its laptop.',
   'abandon-move': 'Abandon the move: POST /api/plans/moves/:id/abandon, then rebuild the laptop.',
   'rebuild-laptop': REBUILD_BY_HAND,
@@ -865,6 +889,17 @@ const EXHAUSTED: Readonly<Partial<Record<SupervisorCondition, string>>> = {
   'laptop-not-started': 'The laptop would not start. Read GET …/docker-policy, then POST …/docker-continuation.',
   'move-held-retryable': 'The move is still held. ' + BY_HAND['abandon-move'],
 };
+
+/**
+ * The office put the plan's sign-in back and the agent still shows the sign-in screen. The office has no way to
+ * start an agent again inside a running laptop, so what is left is the owner's rebuild, named call by call.
+ */
+const SIGN_IN_PLACED =
+  "The office put the plan's sign-in back into this laptop, and the agent is still at the sign-in screen. It has to " +
+  'be started again, which the office can only do by rebuilding the laptop: POST ' +
+  '/api/company/employees/:id/docker-rebuild/preview, then POST …/docker-rebuild/apply with the scope digest that ' +
+  'preview returned (and confirmDiscardRunning while the preview lists a running laptop: an agent at a sign-in ' +
+  'screen has no conversation in progress), then continue it.';
 
 /** The condition a base condition is reported as once its ladder has reached a given rung. */
 function reported(base: SupervisorCondition, rung: SupervisorAction | undefined): SupervisorCondition {
@@ -904,7 +939,8 @@ export function assessEmployee(
   const result = (
     next: SupervisorNextStep,
     rung?: SupervisorAction,
-    needsHuman: string | undefined = base.needsHuman
+    // `null`: nobody is asked for anything, whatever the classification alone would say.
+    needsHuman: string | null | undefined = base.needsHuman
   ): SupervisorAssessment => ({
     condition: reported(base.condition, rung),
     sentence: base.sentence,
@@ -932,6 +968,12 @@ export function assessEmployee(
         : base.needsHuman
     );
   }
+  // A sign-in the office is putting back itself asks nobody for anything, until an attempt found none to place.
+  const last = history.lastAction;
+  const placing = (action: SupervisorAction): null | undefined =>
+    action === 'replace-sign-in' && !(last?.action === action && ['refused', 'failed'].includes(last.outcome))
+      ? null
+      : undefined;
   for (const action of path) {
     const rung = policy.ladder[action],
       tried = history.attempts[action] ?? { count: 0, lastAt: 0 },
@@ -939,16 +981,19 @@ export function assessEmployee(
     if (allowed.kind === 'skip') continue;
     if (tried.count >= rung.maxAttempts) {
       const settles = tried.lastAt + rung.escalateAfterMs;
-      if (now < settles) return result(idle('the outcome of the last attempt', settles), action);
+      if (now < settles) return result(idle('the outcome of the last attempt', settles), action, placing(action));
+      // Placed, and still at the sign-in screen: the agent has to be started again, which only a rebuild does.
+      if (action === 'replace-sign-in' && last?.action === action && last.outcome === 'done')
+        return result(idle(), action, SIGN_IN_PLACED);
       continue;
     }
     if (allowed.kind === 'human') return result(idle(), action, allowed.needsHuman);
     if (!flags.enabled || (rung.tier === 'repair' && !flags.autoRepair))
       return result(idle(), action, `${TIER_OFF[!flags.enabled ? 'retry' : 'repair']} ${BY_HAND[action]}`);
-    if (observed.busy) return result(idle(BUSY[observed.busy]), action);
+    if (observed.busy) return result(idle(BUSY[observed.busy]), action, placing(action));
     if (allowed.kind === 'wait') return result(idle(allowed.waitingFor), action);
     const at = Math.max(history.since + rung.dwellMs, tried.count ? tried.lastAt + backoff(rung, tried.count) : 0);
-    return result({ action, at, preconditions: allowed.preconditions ?? [] }, action);
+    return result({ action, at, preconditions: allowed.preconditions ?? [] }, action, placing(action));
   }
   return result(idle(), path.at(-1), EXHAUSTED[base.condition] ?? base.needsHuman);
 }

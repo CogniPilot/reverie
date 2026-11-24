@@ -425,7 +425,11 @@ export class EmployeeSupervisor {
   }
 
   #flags(employee: SupervisedEmployee) {
-    return { ...this.ports.flags(employee.owner), relaunchAvailable: !!this.ports.actions['relaunch-provider'] };
+    return {
+      ...this.ports.flags(employee.owner),
+      relaunchAvailable: !!this.ports.actions['relaunch-provider'],
+      signInRepairAvailable: !!this.ports.actions['replace-sign-in'],
+    };
   }
 
   async #act(
