@@ -79,7 +79,7 @@ export interface EmployeeSupervisorPorts {
   readSource(
     employee: SupervisedEmployee,
     guard: SupervisorGuard
-  ): Promise<'stopped' | 'running' | 'absent' | 'unknown'>;
+  ): Promise<'stopped' | 'running' | 'absent' | 'outdated' | 'unknown'>;
   /** Fresh positive read of what runs in the employee's laptops. */
   readProvider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence>;
   /** One effect each. A port that is absent is a step this office cannot take. */

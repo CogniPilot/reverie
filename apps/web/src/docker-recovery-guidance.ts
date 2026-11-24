@@ -143,6 +143,15 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'Nothing was recorded as rebuilt. Wait a moment, then preview the rebuild again.',
     allowedActions: ['rebuild-preview'],
   },
+  DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED: {
+    message:
+      'This laptop has never been started, and it was made for an earlier laptop image than the one this office ' +
+      'uses now, so the office cannot start it. Nothing is in it. Rebuild the laptop to replace it with one made ' +
+      'for the current image: POST /api/company/employees/:id/docker-rebuild/preview with the laptop template, ' +
+      'then POST /api/company/employees/:id/docker-rebuild/apply with the scope digest that the preview returned. ' +
+      'Then read the resource policy again and continue the laptop.',
+    allowedActions: ['rebuild-preview'],
+  },
   // Creating the laptop source. `retry` is the same request again, with the
   // same operation and template: the recorded operation keeps its template.
   DOCKER_CONTINUATION_CREATE_BIND_SOURCE_MISSING: {

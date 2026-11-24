@@ -31,6 +31,8 @@ import {
   DockerLaptopTemplate,
   REPROVISION_ACCOUNT_ROOT,
   allowedReprovisionTransition,
+  reprovisionHeads,
+  unusedReprovisionSource,
   type DockerReprovisionAccount,
   type DockerReprovisionSourceCursor,
 } from './docker-absent-reprovision-data.js';
@@ -427,8 +429,7 @@ export class DockerAbsentReprovision {
     };
   }
   #head(employeeId: string, state = this.company.store.snapshot()) {
-    const entries = (state.retiredDockerEmployeeContinuations ?? []).filter((row) => row.employeeId === employeeId);
-    const heads = entries.filter((row) => !entries.some((other) => other.previous === row.operationId));
+    const heads = reprovisionHeads(state.retiredDockerEmployeeContinuations, employeeId);
     if (heads.length > 1) refuse('DOCKER_REPROVISION_HISTORY_AMBIGUOUS');
     return heads[0];
   }
@@ -496,17 +497,10 @@ export class DockerAbsentReprovision {
   /** A completed entry whose source may be replaced, when no continuation
    * record exists or the only one was begun from that exact source. */
   #replaceable(employeeId: string): boolean {
-    const state = this.company.store.snapshot(),
-      head = this.#head(employeeId, state),
-      rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
-    if (!head || head.source.phase !== 'created') return false;
-    // A record that requested its destination is retired as a whole instead.
-    const advanced =
-      rows.length === 1 &&
-      (!!rows[0]!.destination || !!state.employees.find((value) => value.id === employeeId)?.dockerBinding);
-    return (
-      rows.length === 0 || (rows.length === 1 && !advanced && rows[0]!.original.containerId === head.source.containerId)
-    );
+    const state = this.company.store.snapshot();
+    // More than one head is refused here; it is never read as "nothing to replace".
+    this.#head(employeeId, state);
+    return !!unusedReprovisionSource(state, employeeId);
   }
   async #scope(employeeId: string, unchecked: unknown, authority: DockerContinuationAuthority, rebuild = false) {
     this.runtimeCurrent();

@@ -128,6 +128,8 @@ export interface DockerContinuationStore {
   /** Current owner-approved policy; request parameters carry only its expected digest. */
   policy(employeeId: string): DockerEmployeeResourcePolicy;
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined;
+  /** The never-started laptop source of the employee's newest rebuild, while no laptop set-up has gone past it. */
+  unusedSource?(employeeId: string): { readonly containerId: string } | undefined;
   replace(
     before: DockerEmployeeContinuationRecord | undefined,
     next: DockerEmployeeContinuationRecord,
@@ -430,6 +432,27 @@ export class DockerEmployeeContinuation {
     }
     return this.engine.image(original);
   }
+  /** A laptop source that a rebuild made is created from the laptop image of that day and is never started until
+   * its set-up begins. An office that has since been given another laptop image cannot build on it: the image pair
+   * is refused, rightly, because the old image is not an ancestor of the new one (or is no longer accepted at all).
+   * That refusal names an image and no way out, and the laptop stayed unusable for as long as nobody guessed the
+   * remedy. When the refused source is exactly that unused source, the refusal says so. Nothing is relaxed: the
+   * laptop is still not built, and the code names the one step that helps, which replaces a container that never
+   * ran. Every other refusal of the image pair is passed on unchanged. */
+  #outdatedSource(
+    employeeId: string,
+    seen: { original: DockerEmployeeOriginal; state: 'running' | 'stopped' },
+    error: unknown
+  ): never {
+    if (
+      error instanceof DockerEmployeeContinuationError &&
+      ['DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED', 'DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED'].includes(error.code) &&
+      seen.state === 'stopped' &&
+      this.store.unusedSource?.(employeeId)?.containerId === seen.original.containerId
+    )
+      throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED', 409, { cause: error });
+    throw error;
+  }
   async #source(
     subject: DockerContinuationSubject,
     row: DockerEmployeeContinuationRecord,
@@ -544,7 +567,11 @@ export class DockerEmployeeContinuation {
       seen.original.sessionId !== subject.sessionId
     )
       refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    const workerImage = DockerEmployeeWorkerImage.parse(await this.#legacyImage(seen.original, retained, () => authority.require()));
+    const workerImage = DockerEmployeeWorkerImage.parse(
+      await this.#legacyImage(seen.original, retained, () => authority.require()).catch((error: unknown) =>
+        this.#outdatedSource(employeeId, seen, error)
+      )
+    );
     authority.require();
     return {
       destinationImageId: workerImage.imageId,
@@ -606,7 +633,9 @@ export class DockerEmployeeContinuation {
           original.sessionId !== subject.sessionId
         )
           refuse('DOCKER_CONTINUATION_STOPPED_ORIGINAL_REQUIRED');
-        const workerImage = DockerEmployeeWorkerImage.parse(await this.engine.image(original));
+        const workerImage = DockerEmployeeWorkerImage.parse(
+          await this.engine.image(original).catch((error: unknown) => this.#outdatedSource(employeeId, seen, error))
+        );
         current();
         if (
           workerImage.sourceImageId !== original.imageId ||

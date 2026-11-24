@@ -123,6 +123,7 @@ function world() {
       },
       selection: async (_id: string, authority: DockerContinuationAuthority) => {
         took('selection', undefined, authority);
+        if (state.selection instanceof Error) throw state.selection;
         return state.selection;
       },
       begin: async (_id: string, request: unknown, authority: DockerContinuationAuthority) => {
@@ -296,6 +297,25 @@ describe('continuing and starting a laptop', () => {
     expect((await w.laptops.start(EMPLOYEE, w.guard)).detail).toBe('no stopped laptop source');
     expect(w.made('begin')).toEqual([]);
     expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('running');
+  });
+
+  it('reads an unused source that was made for an earlier laptop image as outdated, and starts nothing from it', async () => {
+    const w = world();
+    w.state.record = undefined;
+    w.state.selection = new DockerEmployeeContinuationError('DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED') as never;
+    expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('outdated');
+    expect(await w.laptops.start(EMPLOYEE, w.guard)).toEqual({
+      outcome: 'refused',
+      detail: 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED',
+    });
+    expect(w.made('begin')).toEqual([]);
+    // Any other refusal of that read says nothing about the source: a changed image alone is not this finding.
+    for (const code of ['DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED', 'DOCKER_CONTINUATION_UNIQUE_ORIGINAL_REQUIRED']) {
+      w.state.selection = new DockerEmployeeContinuationError(code) as never;
+      expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('unknown');
+    }
+    w.state.selection = Error('synthetic Engine outage') as never;
+    expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('unknown');
   });
 });
 

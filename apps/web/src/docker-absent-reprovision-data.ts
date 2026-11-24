@@ -248,6 +248,39 @@ export const DockerAbsentContinuationRetirements = z
   .array(DockerAbsentContinuationRetirement)
   .max(256)
   .refine((rows) => new Set(rows.map((row) => row.operationId)).size === rows.length);
+/** The entries of one employee that no later entry follows. A consistent history has at most one. */
+export function reprovisionHeads(
+  entries: readonly DockerAbsentContinuationRetirement[] | undefined,
+  employeeId: string
+): DockerAbsentContinuationRetirement[] {
+  const mine = (entries ?? []).filter((row) => row.employeeId === employeeId);
+  return mine.filter((row) => !mine.some((other) => other.previous === row.operationId));
+}
+/** The never-started laptop source of an employee's newest laptop operation, while no laptop set-up has gone past
+ * it: no continuation record exists, or the only one was begun from that exact source and has neither requested
+ * a destination nor published a binding. This is the source a rebuild replaces. Undefined in every other state,
+ * and for a history with more than one head. */
+export function unusedReprovisionSource(
+  state: {
+    readonly retiredDockerEmployeeContinuations?: readonly DockerAbsentContinuationRetirement[];
+    readonly dockerEmployeeContinuations?: readonly DockerEmployeeContinuationRecord[];
+    readonly employees: readonly { readonly id: string; readonly dockerBinding?: unknown }[];
+  },
+  employeeId: string
+): Extract<DockerReprovisionSourceCursor, { phase: 'created' }> | undefined {
+  const heads = reprovisionHeads(state.retiredDockerEmployeeContinuations, employeeId),
+    head = heads[0],
+    rows = state.dockerEmployeeContinuations?.filter((value) => value.employeeId === employeeId) ?? [];
+  if (heads.length !== 1 || !head || head.source.phase !== 'created') return undefined;
+  // A record that requested its destination is retired as a whole instead.
+  const advanced =
+    rows.length === 1 &&
+    (!!rows[0]!.destination || !!state.employees.find((value) => value.id === employeeId)?.dockerBinding);
+  return rows.length === 0 ||
+    (rows.length === 1 && !advanced && rows[0]!.original.containerId === head.source.containerId)
+    ? head.source
+    : undefined;
+}
 export function allowedReprovisionTransition(
   before: DockerAbsentContinuationRetirement,
   next: DockerAbsentContinuationRetirement,

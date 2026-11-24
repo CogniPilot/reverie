@@ -28,7 +28,12 @@ import { DockerAbsentReprovision, dockerReprovisionHoldDetail } from '../src/doc
 import { dockerLaptopContainerProven, type DockerLaptopContainerProof } from '../src/docker-engine-command.js';
 import { absentLaptopViewRefusal } from '../src/absent-laptop-view.js';
 import { dockerRecoveryGuidance } from '../src/docker-recovery-guidance.js';
-import { DockerLaptopTemplate, allowedReprovisionTransition } from '../src/docker-absent-reprovision-data.js';
+import {
+  DockerLaptopTemplate,
+  allowedReprovisionTransition,
+  reprovisionHeads,
+  unusedReprovisionSource,
+} from '../src/docker-absent-reprovision-data.js';
 import { reprovisionHostname, reprovisionSourceName } from '../src/docker-absent-reprovision-source.js';
 import { PlanMoveStore } from '../src/plan-move-store.js';
 import { PlanMoves, type PlanMovePort } from '../src/plan-move.js';
@@ -637,7 +642,7 @@ function continuation(f: Fixture) {
   if (!continuations.has(f)) continuations.set(f, newContinuation(f));
   return continuations.get(f)!;
 }
-function newContinuation(f: Fixture) {
+function newContinuation(f: Fixture, sourceImageIds: string[] = [legacyImage]) {
   const revisions = new DockerResourceRevisionStore(join(f.directory, 'resource-revisions'));
   cleanups.push(() => revisions.close());
   const resources = new DockerContainedResources(
@@ -650,7 +655,7 @@ function newContinuation(f: Fixture) {
     f.engine,
     deployment,
     resources,
-    { imageId: workerImage, clientManifestDigest: manifest, sourceImageIds: [legacyImage] },
+    { imageId: workerImage, clientManifestDigest: manifest, sourceImageIds },
     f.store,
     helperImage,
     boxId
@@ -2934,6 +2939,119 @@ describe('an employee who changed plan', () => {
     expect(guidance.allowedActions).toEqual(['rebuild-preview']);
     expect(guidance.message).toMatch(/^[A-Z].*[.]$/s);
     expect(guidance.message).not.toMatch(/DOCKER_|undefined/);
+  });
+});
+
+describe('a laptop source that was never started, after the office was given another laptop image', () => {
+  const earlierImage = 'sha256:' + '6'.repeat(64);
+  const outdatedCode = { code: 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED' };
+  /** The unused source of a finished rebuild, as an office reads it whose laptop image was built since: the
+   * source's image is the one of its day, and its layers are not the beginning of today's. */
+  async function outdated() {
+    const f = await fixture();
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    const source = first.sourceContainerId!;
+    f.engine.image(earlierImage);
+    (f.engine.images.get(earlierImage)!.RootFS as Json).Layers = ['sha256:' + '2'.repeat(64)];
+    f.engine.containers.get(source)!.Image = earlierImage;
+    await f.companyStore.update((state) => {
+      const head = state.retiredDockerEmployeeContinuations![0]!;
+      if (head.source.phase === 'created') head.source.imageId = earlierImage;
+    });
+    return { f, source };
+  }
+  const startFrom = (source: string, imageId = earlierImage) => ({
+    operationId: nextOperation,
+    sessionId: sid,
+    sessionGeneration: 9,
+    containerId: source,
+    imageId,
+    expectedPolicyDigest: dockerContinuationDigest(policy),
+    expectedDestinationImageId: workerImage,
+    enterOffice: false,
+  });
+  it('says that the unused laptop has to be rebuilt, instead of only naming an image', async () => {
+    // The policy read answered DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED and nothing else. The laptop could not be
+    // started, a rebuild was the one step that helped, and nothing said so.
+    const { f, source } = await outdated();
+    // The earlier image is still an accepted source image, but today's image does not descend from it.
+    const accepted = newContinuation(f, [legacyImage, earlierImage]);
+    await expect(accepted.service.selection(employeeId, f.authority)).rejects.toMatchObject(outdatedCode);
+    // The earlier image is no longer an accepted source image at all.
+    const dropped = newContinuation(f);
+    await expect(dropped.service.selection(employeeId, f.authority)).rejects.toMatchObject(outdatedCode);
+    // A start request that still names it is refused the same way and records nothing.
+    await expect(accepted.service.begin(employeeId, startFrom(source), f.authority)).rejects.toMatchObject(outdatedCode);
+    expect(f.store.record(employeeId)).toBeUndefined();
+    expect(accepted.effects).toEqual([]);
+    const guidance = dockerRecoveryGuidance(outdatedCode.code)!;
+    expect(guidance.allowedActions).toEqual(['rebuild-preview']);
+    expect(guidance.message).toMatch(/^[A-Z].*[.]$/s);
+    expect(guidance.message).not.toMatch(/DOCKER_|undefined/);
+    expect(guidance.message).toMatch(/docker-rebuild\/preview.*docker-rebuild\/apply/s);
+    // The step it names works: the rebuild replaces the never-started source with one made from today's image.
+    const preview = await f.service.previewRebuild(employeeId, template, f.authority);
+    expect(preview).toMatchObject({ mode: 'replace-source', discard: [], sourceImageId: workerImage, allowedActions: ['rebuild'] });
+    const result = await f.service.rebuild(employeeId, await rebuildRequest(f, replaceOperation), f.authority);
+    expect(result).toMatchObject({ state: 'ready', sourceImageId: workerImage });
+    expect(f.engine.removed).toEqual([source]);
+    await beginsAgain(f, result.sourceContainerId!);
+  });
+  it('keeps the image rule itself, and its own refusal for every laptop that is not that unused source', async () => {
+    // A source whose image today's image descends from was always accepted, and still is.
+    const descends = await outdated();
+    (descends.f.engine.images.get(earlierImage)!.RootFS as Json).Layers = ['sha256:' + '1'.repeat(64)];
+    await expect(
+      newContinuation(descends.f, [legacyImage, earlierImage]).service.selection(employeeId, descends.f.authority)
+    ).resolves.toMatchObject({ state: 'stopped', imageId: earlierImage, destinationImageId: workerImage });
+    // No finished rebuild on record names the container: the refusal is the image rule's own.
+    const unrecorded = await outdated();
+    await unrecorded.f.companyStore.update((state) => {
+      state.retiredDockerEmployeeContinuations = [];
+    });
+    const later = newContinuation(unrecorded.f, [legacyImage, earlierImage]);
+    await expect(later.service.selection(employeeId, unrecorded.f.authority)).rejects.toMatchObject({
+      code: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED',
+    });
+    await expect(
+      later.service.begin(employeeId, startFrom(unrecorded.source), unrecorded.f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED' });
+    await expect(
+      newContinuation(unrecorded.f).service.selection(employeeId, unrecorded.f.authority)
+    ).rejects.toMatchObject({ code: 'DOCKER_CONTINUATION_SOURCE_IMAGE_UNSUPPORTED' });
+  });
+  it('recognizes the unused source of the newest finished operation only', async () => {
+    const f = await fixture();
+    const first = await f.service.reprovision(employeeId, await f.request(), f.authority);
+    const source = first.sourceContainerId!;
+    const read = () => unusedReprovisionSource(f.snapshot(), employeeId);
+    expect(read()).toMatchObject({ phase: 'created', containerId: source });
+    expect(f.store.unusedSource(employeeId)).toEqual({ containerId: source });
+    expect(unusedReprovisionSource(f.snapshot(), '33333333-3333-4333-8333-333333333333')).toBeUndefined();
+    // A laptop set-up begun from it that has not requested its destination leaves it unused.
+    await beginsAgain(f, source);
+    expect(read()).toMatchObject({ containerId: source });
+    const begun = f.store.record(employeeId)!;
+    const put = (row: Json) =>
+      f.companyStore.update((state) => {
+        state.dockerEmployeeContinuations = [DockerEmployeeContinuationRecord.parse(row)];
+      });
+    // Once it has a destination, the laptop is retired as a whole instead.
+    await put({ ...begun, destination: { ...begun.original, containerId: destinationCid } });
+    expect(read()).toBeUndefined();
+    // A record begun from another container says nothing about this source.
+    const elsewhere = { ...begun.original, containerId: candidateCid };
+    await put({ ...begun, request: { ...begun.request, containerId: candidateCid }, original: elsewhere });
+    expect(read()).toBeUndefined();
+    await put(begun);
+    // A history with two heads, or a head whose source is not finished, names no source.
+    const [head] = f.snapshot().retiredDockerEmployeeContinuations!;
+    const twin = { ...head!, operationId: thirdOperation };
+    expect(reprovisionHeads([head!, twin], employeeId)).toHaveLength(2);
+    expect(unusedReprovisionSource({ ...f.snapshot(), retiredDockerEmployeeContinuations: [head!, twin] }, employeeId)).toBeUndefined();
+    const pending = { ...head!, source: { phase: 'pending' as const } };
+    expect(unusedReprovisionSource({ ...f.snapshot(), retiredDockerEmployeeContinuations: [pending] }, employeeId)).toBeUndefined();
+    expect(reprovisionHeads(undefined, employeeId)).toEqual([]);
   });
 });
 

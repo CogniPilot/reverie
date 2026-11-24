@@ -25,7 +25,7 @@ import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
 import type { DockerAbsentReprovision } from './docker-absent-reprovision.js';
-import type { DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
+import { reprovisionHeads, type DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
 import {
   DockerEmployeeContinuationError,
   dockerContinuationDigest,
@@ -100,10 +100,7 @@ export class DockerSupervisorLaptops {
 
   /** The newest laptop operation the owner (or an earlier pass) recorded for this employee. */
   #head(employeeId: string) {
-    const entries = (this.deps.company.store.snapshot().retiredDockerEmployeeContinuations ?? []).filter(
-      (row) => row.employeeId === employeeId
-    );
-    const heads = entries.filter((row) => !entries.some((other) => other.previous === row.operationId));
+    const heads = reprovisionHeads(this.deps.company.store.snapshot().retiredDockerEmployeeContinuations, employeeId);
     return heads.length === 1 ? heads[0] : undefined;
   }
 
@@ -178,13 +175,23 @@ export class DockerSupervisorLaptops {
     }
   }
 
-  /** The stopped source a first set-up would start from, as the owner's policy read reports it. */
-  async source(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<'stopped' | 'running' | 'unknown'> {
+  /**
+   * The stopped source a first set-up would start from, as the owner's policy read reports it. `outdated` is that
+   * read's own refusal of a never-started source that was made for an earlier laptop image. Every other refusal
+   * stays unknown.
+   */
+  async source(
+    employee: SupervisedEmployee,
+    guard: SupervisorGuard
+  ): Promise<'stopped' | 'running' | 'outdated' | 'unknown'> {
     try {
       const selection = await this.deps.service.selection(employee.id, this.#authority(employee, guard));
       return selection.operationId === null ? selection.state : 'unknown';
-    } catch {
-      return 'unknown';
+    } catch (error) {
+      return error instanceof DockerEmployeeContinuationError &&
+        error.code === 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED'
+        ? 'outdated'
+        : 'unknown';
     }
   }
 

@@ -198,8 +198,9 @@ export interface SupervisorObservation {
     /** The employee carries a published laptop binding. */
     readonly bound: boolean;
     readonly policyApproved: boolean;
-    /** State of the stopped source a new set-up would start from. Read only while there is no record. */
-    readonly source?: 'stopped' | 'running' | 'absent' | 'unknown';
+    /** State of the stopped source a new set-up would start from. Read only while there is no record. `outdated`:
+     * it has never been started and was made for an earlier laptop image, so this office cannot start it. */
+    readonly source?: 'stopped' | 'running' | 'absent' | 'outdated' | 'unknown';
     /** The runtime's own last attempt to attach the office terminal. */
     readonly restoration?: { readonly state: 'attached' } | { readonly state: 'held'; readonly code: string };
     /** A fresh read of the set-up operation, in the shape the owner's observe route returns. */
@@ -406,6 +407,11 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
   DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED: [
     'rebuild',
     "{name}'s laptop was built from an image this office no longer uses.",
+  ],
+  // Read from the unused source of an employee who has no laptop record; see `classifyLaptop`.
+  DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED: [
+    'rebuild',
+    "{name}'s laptop has never been started and was made for an earlier laptop image, so the office cannot start it.",
   ],
 
   DOCKER_CONTINUATION_POOL_UNCONFIRMED: [
@@ -634,6 +640,9 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
         code: 'source-stopped',
         fingerprint: 'source-stopped',
       });
+    // An unused laptop holds nothing, so replacing it loses nothing: the rebuild rung takes it, under the same
+    // switch, limits and proofs as every other rebuild. With repairs switched off the owner is told the calls.
+    if (laptop.source === 'outdated') return classifyCode(observed, 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED');
     return classified('unknown', `${name} has no laptop record, and the office found no laptop to start from.`, {
       code: 'no-laptop',
       fingerprint: 'no-laptop',

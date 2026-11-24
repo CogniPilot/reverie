@@ -19,6 +19,7 @@ import {
  * or competing writable journal. Saved runtime references remain unchanged.
  */
 import { isDeepStrictEqual } from 'node:util';
+import { unusedReprovisionSource } from './docker-absent-reprovision-data.js';
 import { CompanyService, CompanyError } from './company-service.js';
 import type { CompanyEmployee, CompanyState } from './company-types.js';
 import type { SessionState } from './types.js';
@@ -265,6 +266,10 @@ export class CompanyDockerContinuationStore implements DockerContinuationStore, 
   record(employeeId: string): DockerEmployeeContinuationRecord | undefined {
     const row = this.company.store.view().dockerEmployeeContinuations?.find((value) => value.employeeId === employeeId);
     return row && structuredClone(row);
+  }
+  unusedSource(employeeId: string): { containerId: string } | undefined {
+    const source = unusedReprovisionSource(this.company.store.view(), employeeId);
+    return source && { containerId: source.containerId };
   }
   async replace(
     before: DockerEmployeeContinuationRecord | undefined,

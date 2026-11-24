@@ -28,7 +28,7 @@ interface Person {
   reading?: SupervisorLaptopReading;
   move?: SupervisorMove;
   provider: SupervisorProviderPresence;
-  source: 'stopped' | 'running' | 'absent' | 'unknown';
+  source: 'stopped' | 'running' | 'absent' | 'outdated' | 'unknown';
 }
 
 function person(id: string, patch: Partial<SupervisedEmployee> = {}): Person {
@@ -280,6 +280,54 @@ describe('EmployeeSupervisor', () => {
       ['office supervisor', 'supervisor_rebuild_laptop', 'A'],
       ['office supervisor', 'supervisor_start_continuation', 'A'],
     ]);
+  });
+
+  it('replaces an unused laptop that was made for an earlier laptop image, then starts the new one', async () => {
+    // The office was redeployed with another laptop image while a rebuilt laptop had not been started yet.
+    const stale = person('a');
+    stale.source = 'outdated';
+    stale.provider = 'no-laptop';
+    stale.glance = {
+      ...stale.glance,
+      session: { available: false, runtimeHealth: 'unknown', viewerHealth: 'disconnected', providerHealth: 'unknown' },
+      laptop: { ...stale.glance.laptop, record: null, bound: false, restoration: undefined },
+    };
+    const w = world([stale]);
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      at.push([(w.state.now - 10 * MINUTE) / 1000, action]);
+      if (action === 'rebuild-laptop') stale.source = 'stopped';
+      if (action === 'start-continuation') Object.assign(stale, person('a'));
+      return { outcome: 'done' };
+    };
+    await w.run(2);
+    expect(w.report('a')).toMatchObject({
+      condition: 'held-needs-rebuild',
+      code: 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED',
+      sentence: "A's laptop has never been started and was made for an earlier laptop image, so the office cannot start it.",
+      next: { action: 'rebuild-laptop' },
+    });
+    expect(w.report('a')).not.toHaveProperty('needsHuman');
+    await w.run(8);
+    // Three minutes on the same finding, a fresh read that nothing runs, the rebuild, and then the ordinary start.
+    expect(at).toEqual([
+      [210, 'rebuild-laptop'],
+      [270, 'start-continuation'], // seen stopped at 240 s, 20 s dwell, next tick
+    ]);
+    expect(w.state.reads.filter((read) => read === 'provider:a')).toHaveLength(1);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+
+    // With automatic repairs switched off nothing is replaced, and the owner is told the calls.
+    const off = person('b');
+    off.source = 'outdated';
+    off.glance = { ...off.glance, laptop: { ...off.glance.laptop, record: null, bound: false, restoration: undefined } };
+    const told = world([off]);
+    told.state.flags = { enabled: true, autoRepair: false };
+    await told.run(10);
+    expect(told.state.acts).toEqual([]);
+    expect(told.report('b').needsHuman).toMatch(
+      /Automatic repairs are switched off.*POST \/api\/company\/employees\/:id\/docker-rebuild\/preview, then \/apply/
+    );
   });
 
   it('continues a held move three times, then abandons it after fifteen minutes on the same error', async () => {

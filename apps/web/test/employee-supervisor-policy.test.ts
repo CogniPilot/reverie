@@ -730,6 +730,74 @@ describe('employee supervisor: last night', () => {
     expect(assessEmployee(fresh('running'), history, ON, 4 * MINUTE).next.action).toBeNull();
   });
 
+  it('an unused laptop made for an earlier laptop image is replaced by the rebuild rung, or the owner is told the calls', () => {
+    // After the office was redeployed with another laptop image this read as "no laptop record, and the office
+    // found no laptop to start from", and nothing said that a rebuild was the way out.
+    const outdated = observed({
+      session: { available: false, viewerHealth: 'disconnected', providerHealth: 'unknown' },
+      laptop: { record: null, bound: false, restoration: undefined, source: 'outdated' },
+    });
+    const seen = classifyEmployee(outdated);
+    expect(seen).toMatchObject({
+      condition: 'held-needs-rebuild',
+      code: 'DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED',
+      sentence: "Stan's laptop has never been started and was made for an earlier laptop image, so the office cannot start it.",
+    });
+    const history = rollSupervisorHistory(EMPTY_SUPERVISOR_HISTORY, seen, 0);
+    // There is no record to re-send, so the rebuild rung is next; it still waits for a read that nothing runs.
+    expect(assessEmployee(outdated, history, ON, MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      at: 3 * MINUTE,
+      preconditions: ['no-agent-running'],
+    });
+    const withProvider = (provider: 'no-laptop' | 'running' | 'unknown', poolAlive = true) => ({
+      ...outdated,
+      laptop: { ...outdated.laptop, provider, poolAlive },
+    });
+    expect(assessEmployee(withProvider('no-laptop'), history, ON, 3 * MINUTE).next).toMatchObject({
+      action: 'rebuild-laptop',
+      preconditions: [],
+    });
+    // The same limits as every other rebuild: never beside a running laptop, an unread one or a dead pool.
+    expect(assessEmployee(withProvider('running'), history, ON, 3 * MINUTE)).toMatchObject({
+      next: { action: null },
+      needsHuman: expect.stringMatching(/confirmDiscardRunning/),
+    });
+    expect(assessEmployee(withProvider('unknown'), history, ON, 3 * MINUTE).next).toMatchObject({
+      action: null,
+      waitingFor: 'a confirmed read of what is running in the laptop',
+    });
+    expect(assessEmployee(withProvider('no-laptop', false), history, ON, 3 * MINUTE).needsHuman).toMatch(/cold-recover/);
+    const spent = { attempts: tried('rebuild-laptop', 2, 0) };
+    expect(assessEmployee(withProvider('no-laptop'), since(0, seen.fingerprint, spent), ON, 60 * MINUTE)).toMatchObject({
+      next: { action: null },
+      needsHuman: expect.stringMatching(/Rebuilding did not help/),
+    });
+    // Repairs switched off, or no layout on record: nothing is replaced and the owner is given the two calls.
+    const calls = /POST \/api\/company\/employees\/:id\/docker-rebuild\/preview, then \/apply/;
+    const off = assessEmployee(outdated, history, { ...ON, autoRepair: false }, 3 * MINUTE);
+    expect(off.next.action).toBeNull();
+    expect(off.needsHuman).toMatch(calls);
+    const bare = { ...outdated, laptop: { ...outdated.laptop, templateOnRecord: false } };
+    expect(assessEmployee(bare, history, ON, 3 * MINUTE)).toMatchObject({
+      next: { action: null },
+      needsHuman: expect.stringMatching(calls),
+    });
+    // The policy read that reports this state names the same step.
+    expect(supervisorCodeKind('DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED')).toBe('rebuild');
+    const guidance = dockerRecoveryGuidance('DOCKER_CONTINUATION_SOURCE_IMAGE_OUTDATED')!;
+    expect(guidance.allowedActions).toEqual(['rebuild-preview']);
+    expect(guidance.message).toMatch(/earlier laptop image.*docker-rebuild\/preview.*docker-rebuild\/apply/s);
+    // The source the rebuild leaves behind is started by the ordinary rung.
+    const rebuilt = observed({ laptop: { record: null, bound: false, restoration: undefined, source: 'stopped' } });
+    const after = rollSupervisorHistory(
+      recordSupervisorAttempt(history, 'rebuild-laptop', 3 * MINUTE, 'done'),
+      classifyEmployee(rebuilt),
+      4 * MINUTE
+    );
+    expect(assessEmployee(rebuilt, after, ON, 5 * MINUTE).next).toMatchObject({ action: 'start-continuation' });
+  });
+
   it('a laptop at a sign-in screen whose plan is signed in at the office is reported, never answered', () => {
     const screen = observed({
       planSignedIn: true,
