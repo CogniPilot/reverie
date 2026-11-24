@@ -3,6 +3,7 @@ import { dockerPlanDestinationEnvironment, dockerPlanGeneration } from './docker
 import { DockerEmployeeProviderView } from './docker-employee-engine.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, DOCKER_PROVIDER_VIEW_TMUX, dockerProviderSocketLabel, dockerProviderRuntimeArguments } from './docker-employee-provider-view-native.js';
 import { tmuxSourceCommands } from './tmux-source-command.js';
+import { BOXED_MODEL_SOCKET, takesBoxedModelEndpoint } from './docker-employee-local-model.js';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
 import { DockerViewerPane, type DockerViewerCommand } from './docker-viewer-pane.js';
 import { ProviderLaunchPublication } from './provider-launch-publication.js';
@@ -1603,6 +1604,31 @@ function replacementExecutionEnvironment(opts: DockerLaunchOptions) {
     env.REVERIE_HOOK_GENERATION = opts.execEnv.REVERIE_HOOK_GENERATION;
   return { env, names: opts.execEnvNames.filter(key => names.has(key) || key === 'REVERIE_HOOK_GENERATION'), identityFile: paths.identityFile };
 }
+/** A provider that exits non-zero within this long of its launch keeps its pane. */
+export const DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS = 120;
+/** How long that dead pane, with the provider's last screen, is kept in the laptop. */
+export const DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS = 900;
+/**
+ * tmux commands, run before the provider's session exists, that keep evidence
+ * of a launch that dies at once. Without them the laptop's tmux server exits
+ * with the provider and nothing it printed survives.
+ *
+ * Only a non-zero exit inside the launch window is kept, as a dead pane holding
+ * the last screen and the exit status, and only for a bounded time; the session
+ * is then closed exactly as it always was. A clean exit, and any exit after the
+ * window, closes at once as before. The options are global because they must
+ * be in force before the pane can die; this server hosts this one provider.
+ */
+export function dockerProviderExitEvidenceCommands(target: string): string[][] {
+  if (!/^reverie-dkr-[0-9a-f-]{36}$/.test(target)) throw Error('Fixed boxed provider session required');
+  const close = 'kill-session -t ' + target;
+  const early = '#{e|<:#{e|-:#{pane_dead_time},#{session_created}},' + DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS + '}';
+  const keep = "run-shell -d " + DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS + " -C '" + close + "'";
+  return [
+    ['set-option', '-g', 'remain-on-exit', 'failed'],
+    ['set-hook', '-g', 'pane-died', 'if-shell -F "' + early + '" "' + keep + '" "' + close + '"'],
+  ];
+}
 /** First provider is private one-attempt authority; normal restores only attach. */
 function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string {
  const {docker,sessionId}=opts,placement=docker.continuation!;
@@ -1633,11 +1659,11 @@ function buildDockerEmployeeContinuationCommand(opts:DockerLaunchOptions):string
    // The legacy worker runtime served the mounted model socket on loopback;
    // a boxed laptop starts the same fixed image relay for a CLI whose registry
    // entry takes its model endpoint from the launch environment.
-   const relayCli = getCli(opts.mode), relayInjection = relayCli?.capabilities.customModelInjection;
-   const modelRelay = relayInjection?.kind === 'env' && (relayCli?.env.dockerExecEnvNames ?? []).includes(relayInjection.baseUrlVar)
-     ? '{ [ -S /run/reverie-model/default.sock ] && REVERIE_MODEL_SOCKET=/run/reverie-model/default.sock /bin/reverie-model-relay >/dev/null 2>&1 & } ; '
+   const modelRelay = takesBoxedModelEndpoint(getCli(opts.mode))
+     ? '{ [ -S ' + BOXED_MODEL_SOCKET + ' ] && REVERIE_MODEL_SOCKET=' + BOXED_MODEL_SOCKET + ' /bin/reverie-model-relay >/dev/null 2>&1 & } ; '
      : '';
    const source = tmuxSourceCommands([
+    ...dockerProviderExitEvidenceCommands(target),
     ['new-session', '-d', '-s', target, '-c', docker.containerWorkdir, cwdCheck + modelRelay + opts.canonicalCommand],
     ['setenv', '-t', target, 'REVERIE_SESSION_ID', sessionId],
     ['setenv', '-t', target, 'REVERIE_DOCKER_OPERATION_ID', placement.operationId],

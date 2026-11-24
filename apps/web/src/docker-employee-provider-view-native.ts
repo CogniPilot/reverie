@@ -1,5 +1,6 @@
 /** Fixed read/attach-only native protocol. These bytes and returned descriptors
  * are DATA; the original Engine-minted view still owns application admission. */
+import { PROVIDER_EXIT_MAX_LINES } from './docker-provider-exit.js';
 export type DockerProviderRuntimeNamespace = 'session-v1';
 /** Placement DATA only. Callers retain their original private native authority. */
 export function dockerProviderSocketLabel(
@@ -102,9 +103,9 @@ const childEnvironment = {
   LOCALE_ARCHIVE: '/opt/reverie-worker-tools/share/locale/locale-archive',
 };
 const target = '=reverie-dkr-' + sid;
-function tmux(args, optional = false) {
+function tmux(args, optional = false, maxBuffer = 4096) {
   const result = spawnSync(tmuxProgram, ['-N', '-f', '/dev/null', '-L', socketLabel, ...args],
-    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer: 4096 });
+    { encoding: 'utf8', env: childEnvironment, timeout: 3000, killSignal: 'SIGKILL', maxBuffer });
   if (result.error || result.signal) refuse();
   if (optional && result.status === 1) return undefined;
   if (result.status !== 0) refuse();
@@ -155,6 +156,29 @@ if (mode === 'presence') {
     process.exit(0);
   }
   if (matches.length !== 1) refuse();
+  // A provider that exited non-zero inside its launch window keeps its pane for
+  // a bounded time. That pane proves the exit and holds the last screen; it is
+  // reported as such and is never a running provider.
+  const ended = () => /^1\|([0-9]{0,3})\|([0-9]{0,3})\n$/.exec(
+    tmux(['display-message', '-p', '-t', target + ':', '#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}']));
+  const dead = ended();
+  if (dead) {
+    if (tmux(['show-environment', '-t', target, 'REVERIE_DOCKER_OPERATION_ID']) !==
+        'REVERIE_DOCKER_OPERATION_ID=' + operation + '\n' ||
+        tmux(['show-environment', '-t', target, 'REVERIE_SESSION_ID']) !==
+        'REVERIE_SESSION_ID=' + sid + '\n') refuse();
+    const screen = tmux(['capture-pane', '-p', '-J', '-S', '-200', '-t', target + ':'], false, 262144);
+    const again = ended();
+    if (!again || again[0] !== dead[0]) refuse();
+    const lines = screen.split('\n').map(line => line.trimEnd()).filter(line => line !== '')
+      .slice(-${PROVIDER_EXIT_MAX_LINES}).map(line => line.slice(0, 1024));
+    process.stdout.write('EXITED ' + JSON.stringify({
+      status: dead[1] === '' ? null : Number(dead[1]),
+      signal: dead[2] === '' ? null : Number(dead[2]),
+      lines,
+    }) + '\n');
+    process.exit(0);
+  }
 }
 function birth(pid) {
   const directory = '/proc/' + pid;

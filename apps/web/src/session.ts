@@ -3341,23 +3341,39 @@ export class Session extends EventEmitter {
     if (!this._envOverrides) return undefined;
     const safe: Record<string, string> = {};
     for (const [key, value] of Object.entries(this._envOverrides)) {
-      if (
-        key.startsWith('CLAUDE_CODE_') ||
-        [
-          'CLAUDE_CONFIG_DIR',
-          'CODEX_HOME',
-          'REVERIE_RESEARCH_CYCLE_ID',
-          'REVERIE_EMPLOYEE_ID',
-          'REVERIE_RESEARCH_DEADLINE_AT',
-          'REVERIE_RESEARCH_CYCLE_ID',
-          'REVERIE_EMPLOYEE_ID',
-          'REVERIE_RESEARCH_DEADLINE_AT',
-        ].includes(key) ||
-        (this.subscriptionProfile && key === 'XDG_DATA_HOME')
-      )
-        safe[key] = value;
+      if (this._persistsEnvOverride(key)) safe[key] = value;
     }
     return Object.keys(safe).length > 0 ? safe : undefined;
+  }
+
+  /** Whether {@link getEnvOverridesForPersist} writes this key to state.json. */
+  private _persistsEnvOverride(key: string): boolean {
+    return (
+      key.startsWith('CLAUDE_CODE_') ||
+      [
+        'CLAUDE_CONFIG_DIR',
+        'CODEX_HOME',
+        'REVERIE_RESEARCH_CYCLE_ID',
+        'REVERIE_EMPLOYEE_ID',
+        'REVERIE_RESEARCH_DEADLINE_AT',
+      ].includes(key) ||
+      (!!this.subscriptionProfile && key === 'XDG_DATA_HOME')
+    );
+  }
+
+  /**
+   * Environment for the next launch only, derived at launch time from the
+   * endpoint store (values that are never saved, such as a local model key).
+   * A key that state.json records is recipe data and is left alone here, so
+   * this can never change the saved recipe or a launch fingerprint taken from
+   * it. Returns the keys it actually merged.
+   */
+  mergeLaunchEnvironment(environment: Readonly<Record<string, string>>): string[] {
+    const merged = Object.entries(environment).filter(([key, value]) => value !== '' && !this._persistsEnvOverride(key));
+    if (merged.length === 0) return [];
+    this._envOverrides = { ...(this._envOverrides ?? {}), ...Object.fromEntries(merged) };
+    for (const [key] of merged) this._pendingEnvUnsets.delete(key);
+    return merged.map(([key]) => key);
   }
 
   toDetailedState() {

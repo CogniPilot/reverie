@@ -11,7 +11,9 @@ import {
   DockerEmployeeContinuationError,
   dockerContinuationDigest,
   type DockerContinuationAuthority,
+  type DockerContinuationResult,
 } from '../../docker-employee-continuation.js';
+import { describeDockerProviderExit } from '../../docker-provider-exit.js';
 import {
   DockerEmployeeContinuationRequest,
   DockerEmployeeResourcePolicy,
@@ -35,6 +37,13 @@ const policyApproval = z
 const start = z
   .object({ request: DockerEmployeeContinuationRequest, policyApproval: policyApproval.optional() })
   .strict();
+/** A hold whose provider is known to have exited says so in a sentence. The
+ * code stays the contract; the sentence is for the person reading it. */
+function described(result: DockerContinuationResult): DockerContinuationResult {
+  return result.providerExit && !result.message
+    ? { ...result, message: describeDockerProviderExit(result.providerExit) }
+    : result;
+}
 export interface DockerContinuationVerifiedWorker {
   readonly owner: string | undefined;
   readonly sessionId: string;
@@ -346,14 +355,14 @@ export function registerDockerEmployeeContinuationRoutes(
         await store.savePolicy(employeeId, authority.owner, approval.policy, current);
         current();
       }
-      return service.begin(employeeId, body.request, authority);
+      return described(await service.begin(employeeId, body.request, authority));
     })
   );
   app.post('/api/company/employees/:id/docker-continuation/observe', async (req, reply) =>
     run(reply, async () => {
       const employeeId = uuid.parse((req.params as { id: string }).id),
         body = z.object({ operationId: uuid }).strict().parse(req.body);
-      return service.observe(employeeId, body.operationId, capture(req, employeeId));
+      return described(await service.observe(employeeId, body.operationId, capture(req, employeeId)));
     })
   );
 }

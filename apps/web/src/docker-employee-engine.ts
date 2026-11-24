@@ -47,6 +47,7 @@ import {
   dockerEngineRefuse as refuse,
 } from './docker-employee-engine-data.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
+import { parseDockerProviderExit, type DockerProviderExit } from './docker-provider-exit.js';
 import { gpuHostConfig, gpuWorkerEnvironment, workerGpuLabel, type DockerWorkerGpu } from './docker-worker-gpu.js';
 import type { SessionDocker } from './types.js';
 import { DOCKER_PROVIDER_VIEW_ENV, DOCKER_PROVIDER_VIEW_PROGRAM, dockerProviderRuntimeArguments, dockerPlanProviderSelection } from './docker-employee-provider-view-native.js';
@@ -72,6 +73,16 @@ export interface DockerEmployeeImageConfiguration {
   readonly clientManifestDigest: string;
   /** Accepted actual source base image IDs. No runtime request can add a base. */
   readonly sourceImageIds: readonly string[];
+}
+/** Where a boxed laptop sees the office's shared local model socket. */
+export const BOXED_MODEL_SOCKET_DIRECTORY = '/run/reverie-model';
+/** The in-laptop report of a provider that exited inside its launch window. */
+function exitedProvider(output: string): DockerProviderExit | undefined {
+  try {
+    return parseDockerProviderExit(output);
+  } catch {
+    return refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
+  }
 }
 const providerViewOrigin = Symbol('original Engine-observed Docker provider view');
 const providerPane = z
@@ -1299,6 +1310,9 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       provider,
       resources,
       credentialDigest,
+      // Engine inspect DATA for the launch preflight: whether this laptop was
+      // created with the shared model socket directory at all.
+      modelSocketMounted: raw.Mounts.some((mount) => mount.Destination === BOXED_MODEL_SOCKET_DIRECTORY),
     };
   }
   async start(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
@@ -1483,7 +1497,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
         hooks.kind,
       ]);
       requireCurrent();
-      if (text === 'ABSENT\n') return null;
+      // The retained pane of an exited provider hosts no provider process.
+      if (text === 'ABSENT\n' || exitedProvider(text)) return null;
       if (Buffer.byteLength(text) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
       const value = providerPane.parse(JSON.parse(text));
       if (value.hooks.kind !== hooks.kind) refuse('DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED');
@@ -1836,6 +1851,8 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     ]);
     if (!isDeepStrictEqual(this.providerHooks(row), hooks)) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (output === 'ABSENT\n') return { kind: 'absent' };
+    const exit = exitedProvider(output);
+    if (exit) return { kind: 'exited', exit };
     if (Buffer.byteLength(output) > 1024) refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');
     if (providerPane.parse(JSON.parse(output)).hooks.kind !== hooks.kind)
       refuse('DOCKER_CONTINUATION_PROVIDER_VIEW_CHANGED');

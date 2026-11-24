@@ -12,10 +12,14 @@ import {
   buildDockerLaunchCommand,
   buildSpawnCommand,
   buildDockerKillCommand,
+  dockerProviderExitEvidenceCommands,
+  DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS,
+  DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS,
 } from '../src/tmux-manager.js';
 import { dockerProviderSocketLabel } from '../src/docker-employee-provider-view-native.js';
 import { rebootRestoreLaunchConfig, rebootResumeTarget } from '../src/utils/native-thread-profile.js';
-import type { SessionDocker, SessionState } from '../src/types.js';
+import { tmuxSourceCommands } from '../src/tmux-source-command.js';
+import type { SessionDocker, SessionMode, SessionState } from '../src/types.js';
 const eid = '10000000-0000-4000-8000-000000000001',
   sid = '20000000-0000-4000-8000-000000000002',
   oid = '30000000-0000-4000-8000-000000000003';
@@ -51,9 +55,9 @@ function docker(): SessionDocker {
     },
   };
 }
-function fixture(mode: 'claude' | 'codex' = 'claude') {
+function fixture(mode: 'claude' | 'codex' | 'hands' = 'claude') {
   const place = docker(),
-    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode, docker: place });
+    session = new Session({ id: sid, workingDir: place.containerWorkdir, mode: mode as SessionMode, docker: place });
   sessions.push(session);
   const binding = {
     version: 1 as const,
@@ -67,7 +71,7 @@ function fixture(mode: 'claude' | 'codex' = 'claude') {
     policyDigest: digest,
   };
   const opts = {
-    mode,
+    mode: mode as SessionMode,
     docker: place,
     sessionId: sid,
     createContext: {} as never,
@@ -213,6 +217,77 @@ describe('boxed original provider publication', () => {
     expect(buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner })).toContain('source-file -');
   });
 
+  function launched(mode: 'claude' | 'hands', canonicalCommand: string, execEnvNames: string[] = []) {
+    const f = fixture(mode),
+      owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {});
+    let argv: readonly string[] = [];
+    buildDockerLaunchCommand({
+      ...f.opts,
+      canonicalCommand,
+      execEnvNames,
+      continuationLaunch: owner,
+      captureExecution: (command) => {
+        argv = command.argv;
+      },
+    });
+    const forwarded = argv.flatMap((value, index) => (argv[index - 1] === '--env' ? [value] : []));
+    return { f, forwarded, script: argv.at(-1)!, target: 'reverie-dkr-' + sid };
+  }
+  it('gives a boxed admin harness its declared endpoint names by name only, and the model relay', () => {
+    const names = ['REVERIE_HANDS_BASE_URL', 'REVERIE_HANDS_API_KEY', 'REVERIE_HANDS_MODEL'];
+    const hands = launched('hands', 'reverie-hands', [...names, 'REVERIE_OWNER_TOKEN', 'REVERIE_DATA_DIR']);
+    // A bare name makes the Docker client read the value from the pane's own
+    // environment, so no endpoint value or key is ever part of the command.
+    for (const name of names) expect(hands.forwarded).toContain(name);
+    expect(hands.forwarded.some((value) => /^REVERIE_HANDS_[A-Z_]+=/.test(value))).toBe(false);
+    expect(hands.forwarded.some((value) => /^REVERIE_(?:OWNER_TOKEN|DATA_DIR)/.test(value))).toBe(false);
+    const relay =
+      '{ [ -S /run/reverie-model/default.sock ] && REVERIE_MODEL_SOCKET=/run/reverie-model/default.sock ' +
+      '/bin/reverie-model-relay >/dev/null 2>&1 & } ; ';
+    expect(hands.script).toContain(
+      tmuxSourceCommands([
+        ['new-session', '-d', '-s', hands.target, '-c', hands.f.place.containerWorkdir, relay + 'reverie-hands'],
+      ])
+    );
+    // A CLI on a subscription asks for no relay and gets no harness names.
+    const claude = launched('claude', 'claude --resume x', names);
+    expect(claude.script).not.toContain('reverie-model-relay');
+    expect(claude.forwarded.some((value) => value.startsWith('REVERIE_HANDS_'))).toBe(false);
+  });
+  it('keeps the pane of a provider that dies at once, before that provider can start', () => {
+    for (const mode of ['hands', 'claude'] as const) {
+      const run = launched(mode, mode === 'hands' ? 'reverie-hands' : 'claude --resume x');
+      const evidence = dockerProviderExitEvidenceCommands(run.target).map((command) => tmuxSourceCommands([command]));
+      const session = run.script.indexOf('"new-session"');
+      expect(session).toBeGreaterThan(0);
+      for (const line of evidence) {
+        const at = run.script.indexOf(line);
+        expect(at, line).toBeGreaterThan(0);
+        expect(at).toBeLessThan(session);
+      }
+    }
+    expect(dockerProviderExitEvidenceCommands('reverie-dkr-' + sid)).toEqual([
+      ['set-option', '-g', 'remain-on-exit', 'failed'],
+      [
+        'set-hook',
+        '-g',
+        'pane-died',
+        'if-shell -F "#{e|<:#{e|-:#{pane_dead_time},#{session_created}},' +
+          DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS +
+          '}" "run-shell -d ' +
+          DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS +
+          " -C 'kill-session -t reverie-dkr-" +
+          sid +
+          '\'" "kill-session -t reverie-dkr-' +
+          sid +
+          '"',
+      ],
+    ]);
+    expect(DOCKER_PROVIDER_LAUNCH_WINDOW_SECONDS).toBeGreaterThanOrEqual(60);
+    expect(DOCKER_PROVIDER_EXIT_EVIDENCE_SECONDS).toBeLessThanOrEqual(3600);
+    for (const target of ['reverie-dkr-x', 'other-' + sid, 'reverie-dkr-' + sid + '"; kill-server'])
+      expect(() => dockerProviderExitEvidenceCommands(target)).toThrow('Fixed boxed provider session required');
+  });
   it('saved Docker placement cannot admit an existing provider viewer or a first provider', () => {
     const f = fixture();
     expect(() => buildDockerLaunchCommand(f.opts)).toThrow('Original boxed provider view required');

@@ -911,3 +911,115 @@ describe('published original resource revision consumption', () => {
     );
   });
 });
+describe('a launch that cannot work, and one that died at once', () => {
+  const refusal = {
+    code: 'DOCKER_CONTINUATION_LOCAL_MODEL_ENDPOINT_MISSING',
+    message: "Synthetic's local model endpoint 'gone' is no longer saved in this office.",
+  };
+  it('refuses before the launch is recorded as issued, and the same step can be continued', async () => {
+    const f = fixture();
+    const preflight = vi.fn(async (): Promise<typeof refusal | undefined> => refusal);
+    Object.assign(f.provider, { preflight });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toEqual({
+      operationId: oid,
+      phase: 'identity-ready',
+      state: 'held',
+      allowedActions: ['observe', 'continue'],
+      ...refusal,
+    });
+    expect(preflight).toHaveBeenCalledWith(
+      expect.objectContaining({ phase: 'identity-ready' }),
+      { modelSocketMounted: undefined },
+      expect.any(Function)
+    );
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    expect(f.binding()).toBeUndefined();
+    expect(f.journal).not.toContain('provider-issued');
+    expect(f.record()?.phase).toBe('identity-ready');
+    // Reading it again spends nothing and still offers the step.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'pending',
+      phase: 'identity-ready',
+      allowedActions: ['observe', 'continue'],
+    });
+    expect(preflight).toHaveBeenCalledOnce();
+    // Still broken: refused again, still nothing launched.
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'held', ...refusal });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    // Repaired: the one launch happens now.
+    preflight.mockResolvedValue(undefined);
+    f.setDestination({ ...f.destination()!, modelSocketMounted: true });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+    expect(preflight).toHaveBeenLastCalledWith(expect.anything(), { modelSocketMounted: true }, expect.any(Function));
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+  });
+  it('a preflight that fails outright launches nothing and leaves the step where it was', async () => {
+    const f = fixture();
+    Object.assign(f.provider, {
+      preflight: vi.fn(async () => {
+        throw Error('endpoint store unavailable');
+      }),
+    });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'identity-ready',
+      code: 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED',
+    });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+    expect(f.record()?.phase).toBe('identity-ready');
+  });
+  it('attaches how the provider ended to the hold, and keeps it after the laptop has let go of it', async () => {
+    const f = fixture();
+    const exit = {
+      status: 1,
+      signal: null,
+      lines: ['Reverie Admin Harness could not start: Reverie API rejected the session lookup', 'Pane is dead (status 1)'],
+    };
+    f.provider.launch.mockImplementation(async () => {
+      f.setDestination({ ...f.destination()!, provider: { kind: 'exited', exit } });
+    });
+    const held = await f.service.begin(eid, f.request, f.authority);
+    expect(held).toEqual({
+      operationId: oid,
+      phase: 'provider-issued',
+      state: 'held',
+      allowedActions: ['observe'],
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+      providerExit: exit,
+    });
+    // The laptop keeps the dead pane only for a bounded time.
+    f.setDestination({ ...f.destination()!, provider: { kind: 'absent' } });
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED',
+      providerExit: exit,
+    });
+    // An exited provider is never a second launch, whoever asks.
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'held', providerExit: exit });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+    // A provider seen running again owes nobody the old exit.
+    f.setDestination({ ...f.destination()!, provider: { kind: 'running', operationId: oid, sessionId: sid } });
+    const ready = await f.service.observe(eid, oid, f.authority);
+    expect(ready).toMatchObject({ state: 'ready', phase: 'ready' });
+    expect(ready.providerExit).toBeUndefined();
+    f.setDestination({ ...f.destination()!, provider: { kind: 'absent' } });
+    expect((await f.service.observe(eid, oid, f.authority)).providerExit).toBeUndefined();
+  });
+  it('a retained dead pane before any launch is still a foreign provider', async () => {
+    const f = fixture();
+    const start = f.engine.start.getMockImplementation()!;
+    f.engine.start.mockImplementation(async () => {
+      await start();
+      f.setDestination({
+        ...f.destination()!,
+        provider: { kind: 'exited', exit: { status: 1, signal: null, lines: [] } },
+      });
+    });
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({
+      state: 'held',
+      code: 'DOCKER_CONTINUATION_FOREIGN_PROVIDER',
+    });
+    expect(f.provider.launch).not.toHaveBeenCalled();
+  });
+});

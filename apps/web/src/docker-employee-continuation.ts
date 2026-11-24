@@ -17,6 +17,7 @@ import {
 } from './docker-employee-continuation-data.js';
 import { dockerFailedWriterHold } from './docker-continuation-task.js';
 import { dockerRecoveryGuidance, type DockerRecoveryAction } from './docker-recovery-guidance.js';
+import type { DockerProviderExit } from './docker-provider-exit.js';
 export function dockerContinuationDigest(value: unknown): string {
   return createHash('sha256')
     .update(
@@ -66,8 +67,18 @@ export interface DockerContainerObservation extends DockerSourceObservation {
   readonly provider:
     | { kind: 'absent' }
     | { kind: 'running'; operationId: string; sessionId: string }
+    /** Its pane is retained dead: the provider process ended and left this evidence. */
+    | { kind: 'exited'; exit: DockerProviderExit }
     | { kind: 'unknown' };
   readonly credentialDigest: string | null;
+  /** Whether the laptop was created with the shared local model socket
+   * directory. Absent when the reader did not look. */
+  readonly modelSocketMounted?: boolean;
+}
+/** Why a launch would fail, found before the one launch attempt is spent. */
+export interface DockerProviderPreflightRefusal {
+  readonly code: string;
+  readonly message: string;
 }
 export interface DockerContinuationEngine {
   image(original: DockerEmployeeOriginal): Promise<DockerEmployeeWorkerImage>;
@@ -136,6 +147,14 @@ export interface DockerContinuationProvider {
     binding: DockerEmployeeBinding,
     requireCurrent: () => void
   ): Promise<void>;
+  /** Read-only check of what the saved recipe needs in order to start, made
+   * before the launch is recorded as issued. A refusal changes nothing and the
+   * same step may be continued once its cause is repaired. */
+  preflight?(
+    row: DockerEmployeeContinuationRecord,
+    facts: { readonly modelSocketMounted: boolean | undefined },
+    requireCurrent: () => void
+  ): Promise<DockerProviderPreflightRefusal | undefined>;
 }
 export interface DockerContinuationIdentity {
   issue(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): string;
@@ -147,8 +166,11 @@ export interface DockerContinuationResult {
   /** `continue` and `retry` both name this same request sent again. */
   allowedActions: readonly ('observe' | 'continue' | DockerRecoveryAction)[];
   code?: string;
-  /** What a held resource step means, in a sentence. DATA only. */
+  /** One plain sentence for the codes that have one. DATA only; never part of a decision. */
   message?: string;
+  /** How a provider that exited right after its launch ended, with its last
+   * terminal lines. Bounded, redacted diagnostic DATA. */
+  providerExit?: DockerProviderExit;
 }
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
@@ -245,6 +267,7 @@ export function dockerContinuationFailureCauses(cause: unknown): DockerContinuat
 export class DockerEmployeeContinuation {
   readonly #flights = new Map<string, string>();
   readonly #causes = new Map<string, unknown>();
+  readonly #exits = new Map<string, DockerProviderExit>();
   constructor(
     private readonly store: DockerContinuationStore,
     private readonly engine: DockerContinuationEngine,
@@ -338,7 +361,11 @@ export class DockerEmployeeContinuation {
       );
     return false;
   }
-  #result(row: DockerEmployeeContinuationRecord, held?: string): DockerContinuationResult {
+  #result(
+    row: DockerEmployeeContinuationRecord,
+    held?: string,
+    detail: { readonly message?: string; readonly repairable?: boolean } = {}
+  ): DockerContinuationResult {
     // A terminally failed resource writer says more than the read that found
     // no enforcement: name it, with a sentence and what can be done next.
     const failed = held === 'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED' ? this.#failedWriter(row) : undefined,
@@ -347,10 +374,13 @@ export class DockerEmployeeContinuation {
         code?.startsWith('DOCKER_RESOURCE_HELPER_') || code === 'DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE'
           ? dockerRecoveryGuidance(code)
           : undefined;
+    // The last exit seen for this operation stays attached to its hold after
+    // the laptop's bounded copy of that evidence is gone.
+    const exit = code === 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED' ? this.#exits.get(row.request.operationId) : undefined;
     const allowed: DockerContinuationResult['allowedActions'] =
       row.version === 3
         ? ['observe']
-        : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || this.#unissuedHelper(row)
+        : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || detail.repairable || this.#unissuedHelper(row)
           ? ['observe', 'continue']
           : code || row.phase === 'ready' || issued.has(row.phase)
             ? ['observe']
@@ -368,8 +398,17 @@ export class DockerEmployeeContinuation {
             ]
           : allowed,
       ...(code ? { code } : {}),
-      ...(guidance ? { message: guidance.message } : {}),
+      ...(guidance ? { message: guidance.message } : detail.message ? { message: detail.message } : {}),
+      ...(exit ? { providerExit: exit } : {}),
     };
+  }
+  #providerExit(row: DockerEmployeeContinuationRecord, provider: DockerContainerObservation['provider']): void {
+    const operationId = row.request.operationId;
+    if (provider.kind === 'running') this.#exits.delete(operationId);
+    if (provider.kind !== 'exited') return;
+    this.#exits.delete(operationId);
+    if (this.#exits.size >= 64) this.#exits.delete(this.#exits.keys().next().value!);
+    this.#exits.set(operationId, provider.exit);
   }
   async #phase(
     row: DockerEmployeeContinuationRecord,
@@ -810,6 +849,16 @@ export class DockerEmployeeContinuation {
         if (row.phase === 'identity-ready') {
           if (!effects) return this.#result(row);
           if (destination.provider.kind !== 'absent') return this.#result(row, 'DOCKER_CONTINUATION_FOREIGN_PROVIDER');
+          // The launch below is recorded as issued before it runs and is never
+          // repeated. Anything that can be known to fail it is refused here,
+          // while this step can still be continued.
+          const refusal = await this.provider.preflight?.(
+            row,
+            { modelSocketMounted: destination.modelSocketMounted },
+            current
+          );
+          current();
+          if (refusal) return this.#result(row, refusal.code, { message: refusal.message, repairable: true });
           const binding = this.#binding(row);
           await this.store.bind(row, binding, current);
           current();
@@ -818,6 +867,7 @@ export class DockerEmployeeContinuation {
           continue;
         }
         if (row.phase === 'provider-issued' || row.phase === 'ready') {
+          this.#providerExit(row, destination.provider);
           if (
             destination.provider.kind !== 'running' ||
             destination.provider.operationId !== row.request.operationId ||

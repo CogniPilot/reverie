@@ -116,6 +116,7 @@ let
         test/docker-engine-command.test.ts \
         test/docker-employee-policy-import.test.ts \
         test/docker-employee-provider-launch.test.ts \
+        test/docker-provider-exit.test.ts test/docker-employee-local-model.test.ts \
         test/docker-employee-startup-restore.test.ts \
         test/boxed-fake-provider-input.test.ts \
         test/boxed-plan-provider.test.ts \

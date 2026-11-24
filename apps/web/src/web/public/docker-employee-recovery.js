@@ -291,11 +291,18 @@
           : data.state === 'held'
             ? 'Recovery needs attention. Check the original recovery before trying again.'
             : 'Recovery is in progress. Check the original recovery for an update.';
+      // A hold that knows its reason says it; the laptop's own last lines go
+      // with the details. Both are text the server already bounded and cleaned.
       this.error.textContent =
-        typeof data.code === 'string'
-          ? 'The previous recovery step could not be confirmed. Check the original recovery for its outcome.'
-          : '';
-      this.diagnostic.textContent = [data.phase, typeof data.code === 'string' ? data.code : '']
+        typeof data.message === 'string' && data.message
+          ? data.message
+          : typeof data.code === 'string'
+            ? 'The previous recovery step could not be confirmed. Check the original recovery for its outcome.'
+            : '';
+      const lines = Array.isArray(data.providerExit?.lines)
+        ? data.providerExit.lines.filter((line) => typeof line === 'string').slice(-12)
+        : [];
+      this.diagnostic.textContent = [data.phase, typeof data.code === 'string' ? data.code : '', ...lines]
         .filter(Boolean)
         .join(' · ');
       this.details.hidden = data.state === 'ready';

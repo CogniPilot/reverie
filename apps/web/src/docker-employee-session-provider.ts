@@ -16,7 +16,11 @@ import {
   dockerEmployeeProviderSourceDigest,
 } from './docker-employee-store.js';
 import { legacyDockerProviderSourceMatches } from './docker-employee-source-correlation.js';
-import type { DockerContinuationProvider } from './docker-employee-continuation.js';
+import { getCli } from './config/cli-registry/registry.js';
+import { getDataDir } from './config/instance.js';
+import { readCustomModelHosts, type CustomModelHost } from './custom-model-hosts.js';
+import { resolveBoxedLocalModel, type BoxedLocalModelResolution } from './docker-employee-local-model.js';
+import type { DockerContinuationProvider, DockerProviderPreflightRefusal } from './docker-employee-continuation.js';
 import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
 import type { SessionPort, ConfigPort, InfraPort } from './web/ports/index.js';
 import type { DockerCodexWorkspace } from './docker-employee-codex-workspace.js';
@@ -37,7 +41,10 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       row: DockerEmployeeContinuationRecord,
       workingDir: string,
       current: () => void
-    ) => Promise<DockerCodexWorkspace>
+    ) => Promise<DockerCodexWorkspace>,
+    /** The office's own endpoint store; a port only so a test needs no data directory. */
+    private readonly modelEndpoints: () => Promise<readonly CustomModelHost[]> = () =>
+      readCustomModelHosts(getDataDir())
   ) {
     const url = new URL(apiUrl);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
@@ -81,6 +88,45 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       session.pid === null &&
       session.paneLifecycleInFlight
     );
+  }
+  /** What the saved recipe's local model needs, from the employee's recipe and
+   * the endpoint store as they are now. Reads only. */
+  async #localModel(
+    employeeId: string,
+    sessionId: string,
+    modelSocketMounted: boolean | undefined
+  ): Promise<BoxedLocalModelResolution> {
+    const saved = this.ctx.store.getSession(sessionId),
+      employee = this.store.company.store.snapshot().employees.find((e) => e.id === employeeId);
+    // A changed or missing source is the launch's own refusal, not a model fact.
+    if (!saved || !employee) return { kind: 'not-applicable' };
+    const entry = getCli(saved.mode ?? 'claude');
+    let hosts: readonly CustomModelHost[];
+    try {
+      hosts = await this.modelEndpoints();
+    } catch {
+      return {
+        kind: 'refused',
+        refusal: {
+          code: 'DOCKER_CONTINUATION_LOCAL_MODEL_STORE_UNREADABLE',
+          message:
+            'The office could not read its saved local model endpoints, so nothing was launched. ' +
+            'Check the endpoint list in the office, then continue.',
+        },
+      };
+    }
+    return resolveBoxedLocalModel({ entry, employee, saved, hosts, modelSocketMounted });
+  }
+  async preflight(
+    row: DockerEmployeeContinuationRecord,
+    facts: { readonly modelSocketMounted: boolean | undefined },
+    current: () => void
+  ): Promise<DockerProviderPreflightRefusal | undefined> {
+    current();
+    if (row.version === 3) return undefined;
+    const model = await this.#localModel(row.employeeId, row.request.sessionId, facts.modelSocketMounted);
+    current();
+    return model.kind === 'refused' ? model.refusal : undefined;
   }
   launch(row: DockerEmployeeContinuationRecord, binding: DockerEmployeeBinding, current: () => void): Promise<void> {
     if (row.version === 3) throw Error('A plan replacement requires its original paid-dispatch actor');
@@ -229,6 +275,16 @@ export class DockerEmployeeSessionProvider implements DockerContinuationProvider
       currentCandidate();
       await this.ctx.reapplyPersistedSessionState(candidate, saved, 'before-spawn');
       currentCandidate();
+      if (first) {
+        // The endpoint values are never saved, and a rebuilt record may no
+        // longer carry the bookkeeping that rebuilds them. Derive them from the
+        // employee's recipe and the endpoint store, as environment only: the
+        // saved recipe and its launch fingerprint are not touched.
+        const model = await this.#localModel(row.employeeId, binding.sessionId, undefined);
+        currentCandidate();
+        if (model.kind === 'ready') candidate.mergeLaunchEnvironment(model.environment);
+        currentCandidate();
+      }
       if (!reused) await this.ctx.setupSessionListeners(candidate);
       currentCandidate();
       await candidate.startInteractive();
