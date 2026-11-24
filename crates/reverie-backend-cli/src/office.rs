@@ -1,4 +1,6 @@
 //! Read the fixed Office launch endpoints using the packaged HTTP/TLS client.
+mod identity;
+
 use crate::Result;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use http::{HeaderValue, Uri};
@@ -52,6 +54,13 @@ fn headers(id: Option<&str>, default_user: &str) -> Result<String> {
     if let Some(id) = id {
         HeaderValue::from_str(id).map_err(|_| "invalid Reverie session identity")?;
         headers.push_str(&format!("X-Reverie-Parent-Session: {id}\n"));
+    }
+    // A boxed laptop proves itself with its own office credential. The office
+    // refuses that credential beside a human password, so it is sent alone.
+    if let Some(credential) = identity::selected()? {
+        HeaderValue::from_str(&credential).map_err(|_| "invalid Reverie laptop credential")?;
+        headers.push_str(&format!("X-Reverie-Worker-Identity: {credential}\n"));
+        return Ok(headers);
     }
     if let Ok(password) = env::var("REVERIE_PASSWORD")
         && !password.is_empty()
@@ -132,6 +141,9 @@ impl FetchError {
         match self {
             Self::Protocol(message) => message,
             Self::Transport => "Reverie API request failed",
+            Self::Http(401 | 403) => {
+                "Reverie API rejected the session lookup: the office did not accept this session's credentials"
+            }
             Self::Http(_) => "Reverie API rejected the session lookup",
         }
     }
