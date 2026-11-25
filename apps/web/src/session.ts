@@ -6,6 +6,7 @@ import { DockerViewerPane } from './docker-viewer-pane.js';
 import { dockerPlanSourceRetirementMatches, requireDockerPlanSourceRetirement } from './docker-plan-source-retirement.js';
 import { readFileSync } from 'node:fs';
 import {DockerEmployeeProviderLaunch} from './docker-employee-provider-launch.js';
+import type { DockerEmployeeBinding } from './docker-employee-continuation-data.js';
 import { getStore, type StateStore } from './state-store.js';
 import { ProviderLaunchPublication, type ProviderLaunchTransport } from './provider-launch-publication.js';
 import { captureLaunchProtocolAdmission, completeInitialLaunchAdmission, initialLaunchAdmitted } from './initial-launch-admission.js';
@@ -2144,6 +2145,20 @@ export class Session extends EventEmitter {
     const view = this.#dockerContinuationView;
     if (!view || !this._docker || view.descriptor.mode !== this.mode || (view.descriptor.hooks.kind === 'none' && dockerProviderHookPolicy(this.mode)?.kind !== 'none')) return false;
     try { DockerEmployeeProviderView.prototype.require.call(view, this.id, this._docker); return true; } catch { return false; }
+  }
+  /** This office process launched the provider of exactly this binding into this Session's own pane. Its
+   * terminal is then the launch's own viewer, which no separate view proof stands for. */
+  dockerContinuationLaunchedFor(binding: DockerEmployeeBinding): boolean {
+    const launch = this._dockerContinuationLaunch;
+    return (
+      !!launch &&
+      !this.#dockerContinuationView &&
+      !!this._muxSession &&
+      !this._isStopped &&
+      !this._closing &&
+      !this._viewerClientLost &&
+      DockerEmployeeProviderLaunch.prototype.issuedFor.call(launch, this, binding)
+    );
   }
   private _requireDockerContinuationView(): void {
     if (!this.dockerContinuationViewCurrent) throw Error('Original Docker provider view changed');

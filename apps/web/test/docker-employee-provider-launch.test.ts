@@ -690,4 +690,36 @@ describe('boxed provider command contract', () => {
     );
     expect(reader).toHaveBeenCalledOnce();
   });
+  it('counts the pane of a continued provider as its viewer after the continuation grant has ended', () => {
+    const f = fixture();
+    let granted = true;
+    const owner = captureDockerEmployeeProviderLaunch(f.session, f.binding, () => {
+      if (!granted) throw Error('Continuation grant ended');
+    });
+    f.session.bindDockerContinuationLaunch(owner);
+    const issued = (binding = f.binding) =>
+      DockerEmployeeProviderLaunch.prototype.issuedFor.call(owner, f.session, binding);
+    // Not yet claimed by a pane: nothing was launched.
+    expect(issued()).toBe(false);
+    buildDockerLaunchCommand({ ...f.opts, continuationLaunch: owner });
+    expect(issued()).toBe(true);
+    // The restoration pass runs after the continuation request has finished and its grant has ended.
+    granted = false;
+    expect(issued()).toBe(true);
+    // Only exactly this binding: another operation, generation or container is not this launch.
+    expect(issued({ ...f.binding, operationId: '50000000-0000-4000-8000-000000000005' })).toBe(false);
+    expect(issued({ ...f.binding, sessionGeneration: 8 })).toBe(false);
+    expect(issued({ ...f.binding, containerId: 'd'.repeat(64) })).toBe(false);
+    // The Session reads it only while a pane of its own is open and no separate view stands for it.
+    expect(f.session.dockerContinuationLaunchedFor(f.binding)).toBe(false);
+    (f.session as unknown as { _muxSession: unknown })._muxSession = { sessionId: sid };
+    expect(f.session.dockerContinuationLaunchedFor(f.binding)).toBe(true);
+    expect(f.session.dockerContinuationViewCurrent).toBe(false);
+    (f.session as unknown as { _viewerClientLost: boolean })._viewerClientLost = true;
+    expect(f.session.dockerContinuationLaunchedFor(f.binding)).toBe(false);
+    (f.session as unknown as { _viewerClientLost: boolean })._viewerClientLost = false;
+    f.place.continuation!.operationId = '50000000-0000-4000-8000-000000000005';
+    expect(f.session.dockerContinuationLaunchedFor(f.binding)).toBe(false);
+    (f.session as unknown as { _muxSession: unknown })._muxSession = null;
+  });
 });

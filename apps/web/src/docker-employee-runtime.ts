@@ -843,10 +843,13 @@ export class DockerEmployeeRuntime {
   async wake(employee: CompanyEmployee, allowed: () => boolean): Promise<boolean> {
     return (await this.attachExistingEmployee(employee, allowed)) === 'attached';
   }
-  #currentViewer(actual: unknown, containerId: string): boolean {
-    return actual instanceof Session && actual.dockerContinuationViewCurrent &&
+  /** A current terminal on the running provider of this binding: an Engine-observed view, or the pane through which
+   * this office process launched exactly this binding's provider (a continuation leaves no separate view to renew). */
+  #currentViewer(actual: unknown, binding: DockerEmployeeBinding): boolean {
+    return actual instanceof Session &&
+      (actual.dockerContinuationViewCurrent || actual.dockerContinuationLaunchedFor(binding)) &&
       actual.pid != null && !actual.paneExit && !actual.providerInputHeld &&
-      !actual.terminalInputHeld && actual.docker?.containerName === containerId;
+      !actual.terminalInputHeld && actual.docker?.containerName === binding.containerId;
   }
   async attachExistingEmployee(employee: CompanyEmployee, allowed: () => boolean): Promise<DockerWakeOutcome> {
     const a = this.#attached;
@@ -879,7 +882,7 @@ export class DockerEmployeeRuntime {
     catch { current(); } // A pending desired revision never replaces fresh original/view admission.
     current();
     const actual = a.ctx.sessions.get(employee.sessionId);
-    if (this.#currentViewer(actual, binding.containerId)) { publication = 'published'; return 'attached'; }
+    if (this.#currentViewer(actual, binding)) { publication = 'published'; return 'attached'; }
     if (actual instanceof Session && actual.pid !== null && !actual.dockerContinuationViewCurrent) {
       await renewExistingDockerProviderView({
         company: a.company, store: a.store, engine: a.engine, sessions: a.ctx.sessions,
@@ -948,7 +951,7 @@ export class DockerEmployeeRuntime {
       const report = reports.get(employee.id);
       if (!employee.dockerBinding || !report || changed.has(employee.id)) continue;
       if (report.state === 'attached') {
-        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding.containerId))
+        if (this.#currentViewer(a.ctx.sessions.get(employee.sessionId), employee.dockerBinding))
           keep.set(employee.id, report);
       } else if (report.code === 'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING') {
         const phase = a.store.record(employee.id)?.phase;

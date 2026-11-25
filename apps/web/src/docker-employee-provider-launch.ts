@@ -76,6 +76,21 @@ export class DockerEmployeeProviderLaunch {
       throw Error('Original Docker provider launch already held');
     this.#claimed = true;
   }
+  /** Whether this launch was claimed by a pane for exactly this binding, in this Session's own placement.
+   * A read only: it takes no operation grant (that of a finished continuation has ended) and admits no effect. */
+  issuedFor(session: Session, binding: DockerEmployeeBinding): boolean {
+    const docker = session.docker;
+    return (
+      this.#claimed &&
+      this.#session === session &&
+      isDeepStrictEqual(this.#binding, binding) &&
+      session.id === binding.sessionId &&
+      docker?.containerName === binding.containerId &&
+      docker.image === binding.imageId &&
+      docker.continuation?.operationId === binding.operationId &&
+      isDeepStrictEqual(docker.continuation?.planReplacement, this.#planReplacement)
+    );
+  }
 }
 export function captureDockerEmployeeProviderLaunch(
   session: Session,
