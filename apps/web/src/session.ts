@@ -5094,6 +5094,32 @@ export class Session extends EventEmitter {
   }
 
   /**
+   * The pane's visible screen, styles kept (so a dimmed composer placeholder still reads as empty),
+   * or null when there is no pane or it cannot be read.
+   * Read-only: one capture, no input. For a caller that must see the screen before it types.
+   */
+  readScreen(): string | null {
+    const text = this._mux && this._muxSession ? this._mux.capturePaneText?.(this._muxSession.muxName, undefined, { escapes: true }) : null;
+    return typeof text === 'string' ? text : null;
+  }
+
+  /** The visible screen as plain text without blocking the server (for periodic reads), or null. */
+  async readScreenAsync(): Promise<string | null> {
+    const mux = this._mux;
+    const pane = this._muxSession;
+    if (!mux || !pane) return null;
+    const text = mux.capturePaneTextAsync
+      ? await mux.capturePaneTextAsync(pane.muxName).catch(() => null)
+      : mux.capturePaneText?.(pane.muxName);
+    return typeof text === 'string' ? text : null;
+  }
+
+  /** Re-read the pane for an open dialog now, e.g. right after the office dismissed one. */
+  refreshPaneDialog(): void {
+    this._refreshPaneDialog(false);
+  }
+
+  /**
    * The known provider start-up screen this pane shows right now, and whether
    * the office is still answering it. Read-only: one pane capture, no input.
    * Null when the pane shows none of them, cannot be read, or is at its composer.

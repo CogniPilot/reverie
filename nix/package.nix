@@ -120,7 +120,7 @@ let
         test/docker-employee-continuation-http.test.ts \
         test/docker-absent-reprovision.test.ts \
         test/employee-disk-budget.test.ts test/employee-disk-budget-service.test.ts \
-        test/employee-model-policy.test.ts \
+        test/employee-model-policy.test.ts test/employee-model-service.test.ts test/routes/employee-model-routes.test.ts \
         test/docker-employee-continuation.test.ts \
         test/docker-employee-source-correlation.test.ts \
         test/docker-employee-credential-installer.test.ts \

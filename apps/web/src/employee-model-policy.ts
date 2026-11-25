@@ -81,6 +81,8 @@ function rows(screen: string): string[] {
     .filter((row) => row.trim() !== '');
 }
 
+/** A bare limit notice is read only in this many bottom rows (the composer chrome takes about five). */
+const NOTICE_ROWS = 12;
 const MODEL_LIMIT = /\b(?:hit|reached)\s+your\s+(fable|opus|sonnet|haiku)\s+limit\b/gi;
 const LIMIT_MENU = /what do you want to do\?[\s\S]*\bstop and wait for limit to reset\b/i;
 const LIMIT_FOOTER = /\bcontinuing automatically at\b[^\n]*\besc to cancel\b/i;
@@ -115,13 +117,17 @@ export function limitPromptSurface(screen: string | null | undefined): 'menu' | 
  */
 export function readModelLimit(screen: string | null | undefined, now: number): ModelLimitReading | null {
   if (!screen) return null;
-  const text = rows(screen).join('\n');
+  const surface = limitPromptSurface(screen) ?? 'notice';
+  // A menu or footer is live wherever its notice sits. A bare notice counts only near the bottom, just
+  // above the composer's chrome: one further up is history the agent has already worked past.
+  const all = rows(screen);
+  const text = (surface === 'notice' ? all.slice(-NOTICE_ROWS) : all).join('\n');
   MODEL_LIMIT.lastIndex = 0;
   let family: string | undefined;
   for (const match of text.matchAll(MODEL_LIMIT)) family = match[1].toLowerCase();
   if (!family) return null;
-  const reset = detectUsageLimitPause(text, now);
-  return { family, resetAt: reset ? reset.resetAt : null, surface: limitPromptSurface(screen) ?? 'notice' };
+  const reset = detectUsageLimitPause(all.join('\n'), now);
+  return { family, resetAt: reset ? reset.resetAt : null, surface };
 }
 
 /** Why a slash command may not be typed into this frame now, or null when it may. */
@@ -220,7 +226,8 @@ export function planEmployeeModel(input: ModelPlanInput): ModelPlan {
     modelFamily(fallbackModel) !== limit.family &&
     !modelMatchesDisplay(fallbackModel, display)
   ) {
-    const live = limit.surface !== 'notice' || modelFamily(display) === limit.family;
+    const current = limit.resetAt === null || limit.resetAt > now;
+    const live = current && (limit.surface !== 'notice' || modelFamily(display) === limit.family);
     if (live && !fallback)
       return {
         kind: 'fallback',

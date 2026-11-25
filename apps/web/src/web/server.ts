@@ -23,7 +23,7 @@ import { EmployeeRecoveryService, registerEmployeeRecoveryRoutes, isEmployeeReco
 import { agentPlanJournalRecovery } from '../agent-plan-journal-recovery.js';
 import { laptopAgentStop, laptopPower, registerLaptopPowerRoutes } from './routes/laptop-power-routes.js';
 import { registerCommandFailureRoutes } from './routes/command-failure-routes.js';
-import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall, type CompanyEmployee } from '../company-types.js';
+import { employeeRestContext, employeeBriefContext, employeeMemoryContext, type EmployeeMemoryRecall, type CompanyEmployee, modelLimitFallback } from '../company-types.js';
 import { expertRuntimeRecipe } from '../expert-runtime-recipe.js';
 import { AvatarStore } from '../agent-avatars.js';
 import { CompanyStore } from '../company-store.js';
@@ -50,6 +50,9 @@ import { registerCompanyRoutes } from './routes/company-routes.js';
 import {EmployeeGpuClient, registerEmployeeGpuRoutes} from '../employee-gpu-access.js';
 import { EmployeeDiskBudgetService, caseFolderMeasurer } from '../employee-disk-budget-service.js';
 import { registerEmployeeDiskBudgetRoutes } from './routes/employee-disk-budget-routes.js';
+import { EmployeeModelService } from '../employee-model-service.js';
+import { EmployeeModelStore } from '../employee-model-store.js';
+import { modelEmployee, registerEmployeeModelRoutes } from './routes/employee-model-routes.js';
 import { getCasesDir } from '../config/cases-dir.js';
 import { EmbassyGuestClient } from '../embassy-guest-client.js';
 import { registerEmbassyGuestRoutes } from './routes/embassy-guest-routes.js';
@@ -136,8 +139,8 @@ import { normalizeBasePath, stripBasePath, joinBasePath } from '../config/base-p
 import { GLYPH, palette } from '../cli-style.js';
 import { getHookSecret } from '../config/hook-secret.js';
 import { EventEmitter } from 'node:events';
-import { Session, isExternalCliMode, type BackgroundTask } from '../session.js';
-import type { ClaudeMode, SessionAttachmentHistoryItem, SessionState, WorkflowRunInfo } from '../types.js';
+import { Session, cliTakesSessionModel, isExternalCliMode, type BackgroundTask } from '../session.js';
+import type { ClaudeMode, SessionAttachmentHistoryItem, SessionMode, SessionState, WorkflowRunInfo } from '../types.js';
 import { RespawnController, RespawnConfig } from '../respawn-controller.js';
 import type { TerminalMultiplexer } from '../mux-interface.js';
 import { createMultiplexer } from '../mux-factory.js';
@@ -2002,6 +2005,24 @@ export class WebServer extends EventEmitter {
     registerEmployeeDiskBudgetRoutes(this.app, this.companyService, employeeDiskBudget, verifiedOwner);
     employeeDiskBudget.start();
     this.app.addHook('onClose', async () => employeeDiskBudget.stop());
+    // Employee models: a recorded choice per employee, applied with /model at an idle empty composer, and a switch off a
+    // model that reached its per-model usage limit (employee-model-service.ts). Owner and manageModels-granted agents only.
+    const employeeModels = new EmployeeModelService({
+      store: new EmployeeModelStore(dataPath('employee-models.json')),
+      employees: () => this.companyService.registeredEmployees().map(modelEmployee),
+      session: (id) => this.sessions.get(id),
+      takesModel: (mode) => cliTakesSessionModel(mode as SessionMode),
+      glyph: (mode) => getCli(mode)?.capabilities.workDetect?.promptGlyph ?? '❯',
+      fallbackModel: (owner) => modelLimitFallback(this.companyService.view(owner).settings),
+      timeZone: (owner) => this.companyService.view(owner).settings.timeZone,
+      post: (owner, text) => {
+        const room = fullAccessAlertRoom(this.chatroomService.rooms(), owner);
+        if (room && !room.archivedAt) this.chatroomService.post(room.id, { kind: 'system', name: 'Models' }, text, 'all', { deliver: false });
+      },
+    });
+    registerEmployeeModelRoutes(this.app, { ctx, company: this.companyService, models: employeeModels, verifiedOwner });
+    employeeModels.start();
+    this.app.addHook('onClose', async () => employeeModels.stop());
     registerCompanyRoutes(
       this.app,
       ctx,
