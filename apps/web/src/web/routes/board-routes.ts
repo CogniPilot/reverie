@@ -52,7 +52,7 @@ interface Employee {
   avatar?: string;
   position?: string;
   sessionId?: string;
-  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; manageOffice?: boolean; manageGoals?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
+  permissions?: BoardPermissionFlags & { recoverEmployees?: boolean; manageOffice?: boolean; manageGoals?: boolean; manageModels?: boolean; moveOwnPlan?: boolean; managePlans?: boolean };
 }
 
 export interface BoardDeps {
@@ -346,6 +346,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         moveOwnPlan: c.kind === 'owner' || !!company.employees.find(e => e.id === c.memberId && (e.permissions?.moveOwnPlan === true || e.permissions?.managePlans === true)),
         managePlans: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.managePlans === true,
         manageGoals: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageGoals === true,
+        manageModels: c.kind === 'owner' || company.employees.find(e => e.id === c.memberId)?.permissions?.manageModels === true,
         goalPreconditions: 'Canonical Goal permission only. Requires the separately authenticated Goal broker, current same-company bindings and exact CAS. It does not control provider-native goals or grant verification, terminal decisions, adoption, grants or unblocker attestations.',
         planPreconditions: 'Grant admission only. Current owned live source/target bindings, non-vacation employees, supported single-company plan/account and handoff approval are checked again by the plan action. Self runtime refresh additionally requires the unchanged current account and runtime; it grants no installation or session-creation permission.',
       },

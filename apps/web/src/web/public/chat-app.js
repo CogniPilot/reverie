@@ -13116,6 +13116,14 @@ class ReverieChatApp {
     goalLabel.title =
       'Read, create and update this company’s operational goals before review. Does not grant verification, closing, cancellation, adoption, grants or unblocker attestations. Requires the authenticated Goal broker.';
     goalLabel.prepend(manageGoals);
+    const modelLabel = this.el('label', 'ca-hint', ' Set employee models');
+    const manageModels = this.el('input');
+    manageModels.type = 'checkbox';
+    manageModels.checked = employee.permissions?.manageModels === true;
+    manageModels.setAttribute('aria-label', `Set employee models for ${employee.name}`);
+    modelLabel.title =
+      'Choose the Claude model a colleague or this employee runs on. The office types /model only into an idle pane with an empty composer. Does not grant plans, accounts, restarts or other runtime settings.';
+    modelLabel.prepend(manageModels);
     const planPermissions = {};
     const planLabels = [];
     for (const [key, text] of [
@@ -13188,12 +13196,13 @@ class ReverieChatApp {
       recoverEmployees: recovery,
       manageOffice,
       manageGoals,
+      manageModels,
       ...planPermissions,
       ...Object.fromEntries(Object.entries(boardPermissions).map(([key, value]) => [key, value.input])),
     };
     const projection = (value) =>
       boardProjection(value) &&
-      ['recoverEmployees', 'manageOffice', 'manageGoals', 'moveOwnPlan', 'managePlans'].every(
+      ['recoverEmployees', 'manageOffice', 'manageGoals', 'manageModels', 'moveOwnPlan', 'managePlans'].every(
         (key) => typeof value?.permissions?.[key] === 'boolean'
       );
     const readUnconfirmed = 'Current permissions could not be confirmed. Refresh permissions before changing them.';
@@ -13297,6 +13306,9 @@ class ReverieChatApp {
     manageGoals.addEventListener('change', () => {
       void savePreference(manageGoals, 'manageGoals');
     });
+    manageModels.addEventListener('change', () => {
+      void savePreference(manageModels, 'manageModels');
+    });
     for (const [key, input] of Object.entries(planPermissions))
       input.addEventListener('change', () => {
         void savePreference(input, key);
@@ -13307,11 +13319,12 @@ class ReverieChatApp {
       });
     const general = this.el('fieldset', 'ca-profile-permissions');
     general.append(
-      this.el('legend', '', 'Recovery, office, plans and goals'),
+      this.el('legend', '', 'Recovery, office, plans, goals and models'),
       label,
       officeLabel,
       ...planLabels,
-      goalLabel
+      goalLabel,
+      modelLabel
     );
     preferenceStatus.classList.add('ca-profile-permission-status');
     preferenceFeedback.append(preferenceStatus, preferenceError, refresh);

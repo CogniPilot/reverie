@@ -66,6 +66,7 @@ const generalGrants = [
   ['recoverEmployees', 'Recovery permission'],
   ['manageOffice', 'Manage office attendance and restarts'],
   ['manageGoals', 'Manage team goals'],
+  ['manageModels', 'Set employee models'],
   ['moveOwnPlan', 'Move own plan'],
   ['managePlans', 'Manage team plans'],
 ] as const;

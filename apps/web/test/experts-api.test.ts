@@ -540,6 +540,7 @@ describe('experts api', () => {
         moveOwnPlan: false,
         managePlans: false,
         manageGoals: false,
+        manageModels: false,
       });
     });
 

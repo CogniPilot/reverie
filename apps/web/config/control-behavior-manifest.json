@@ -1043,7 +1043,7 @@
         "expect((await diskPermissions())[key]).toBe(false)",
         "expect(responses.filter((response) => /\\/(?:wake|restart|vacation)$/.test(response.path))).toEqual([])"
       ],
-      "outcome": "At320 and1280px the actual owner Chromium UI grants and revokes all five general profile permissions, observes the real canonical permission API and independently decoded company.json, retains grants across Cancel/reopen and does not persist the unsaved profile edit. Synthetic employees remain OFF; no wake/restart/vacation action is requested. This qualifies grant persistence and UI consumption, not delegated action authority or native execution."
+      "outcome": "At320 and1280px the actual owner Chromium UI grants and revokes all six general profile permissions, observes the real canonical permission API and independently decoded company.json, retains grants across Cancel/reopen and does not persist the unsaved profile edit. Synthetic employees remain OFF; no wake/restart/vacation action is requested. This qualifies grant persistence and UI consumption, not delegated action authority or native execution."
     },
     "office.employee-office-goals-permissions.committed-lost-readback": {
       "test": "test/office-owner-controls.browser.test.ts",
@@ -1641,6 +1641,11 @@
         "office.employee-office-goals-permissions.committed-lost-readback"
       ],
       "remaining": "Only owner profile grant/revoke persistence and the four named committed-lost-reply consumer states are qualified. The hiring-form controls, delegated action authorization/effects, employee rebinding, all other acknowledgement failures and native execution remain separately qualified or unresolved."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.employeePermissionFields::manageModels::input:[binding label]",
+      "scenarios": ["office.employee-general-permissions.real-roundtrip"],
+      "remaining": "Only owner profile grant/revoke persistence is qualified. Committed-lost-reply states, delegated model changes and their effect on a live pane are covered by unit and route tests, not by this browser scenario."
     },
     {
       "declaration": "src/web/public/account-ui.js::_renderSignIn::retry::button:plans-btn plans-btn--primary",

@@ -17,6 +17,7 @@ import type { SessionPort } from '../../src/web/ports/session-port.js';
 import { installRouteErrorHandler } from '../../src/web/route-error-handler.js';
 import type { CompanyWakeReport } from '../../src/company-wake.js';
 import { isBoardCoordinator } from '../../src/board-permissions.js';
+import { DEFAULT_MODEL_LIMIT_FALLBACK, modelLimitFallback } from '../../src/company-types.js';
 
 describe('company HTTP ownership and expert invites', () => {
   const wake = vi.fn<(id: string, options?: { explicitStart?: boolean }) => Promise<CompanyWakeReport>>(async () => ({ awakened: [], skipped: [] }));
@@ -78,7 +79,7 @@ describe('company HTTP ownership and expert invites', () => {
   it('saves successive permission checkboxes without resetting other owner grants', async () => {
     const employee = await service.hire(hireBody);
     const url = `/api/company/employees/${employee.id}`;
-    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false, manageGoals: false,
+    const permissions = { recoverEmployees: false, manageOffice: false, moveOwnPlan: true, managePlans: false, manageGoals: false, manageModels: false,
       editBoardIssues: false, manageBoard: true, manageDecisions: false };
     await service.store.update(state => { state.employees[0].permissions = { ...permissions }; });
     const before = service.store.snapshot();
@@ -94,6 +95,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect(service.store.snapshot().employees[0].permissions).toEqual(permissions);
     };
     await save({ manageGoals: true });
+    await save({ manageModels: true });
     await save({ manageOffice: true });
     await save({ managePlans: true });
     await save({ recoverEmployees: true });
@@ -297,6 +299,26 @@ describe('company HTTP ownership and expert invites', () => {
     expect(reloaded.snapshot().settings[0]).not.toHaveProperty('crashWakeEmployeeId');
     expect(reloaded.snapshot().employees[0]).toMatchObject({ desiredRunning: false, onVacation: true });
     expect(wake).not.toHaveBeenCalled();
+  });
+
+  it('keeps the model-limit fallback at its default until the owner sets or clears it', async () => {
+    expect(modelLimitFallback(service.view(undefined).settings)).toBe(DEFAULT_MODEL_LIMIT_FALLBACK);
+    const set = await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback: 'claude-sonnet-5' } });
+    expect(set.statusCode).toBe(200);
+    expect(modelLimitFallback(service.view(undefined).settings)).toBe('claude-sonnet-5');
+    const off = await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback: null } });
+    expect(off.statusCode).toBe(200);
+    expect(modelLimitFallback(service.view(undefined).settings)).toBeNull();
+    const before = service.store.snapshot();
+    for (const modelLimitFallback of ['-opus', 'opus 5', 'x'.repeat(101), 3])
+      expect((await app.inject({ method: 'PUT', url: '/api/company/settings', payload: { modelLimitFallback } })).statusCode).toBe(400);
+    const employee = await service.hire(hireBody);
+    const after = service.store.snapshot();
+    const denied = await app.inject({ method: 'PUT', url: '/api/company/settings', headers: { 'x-reverie-parent-session': employee.sessionId },
+      payload: { modelLimitFallback: 'claude-opus-5-5' } });
+    expect(denied.statusCode).toBe(403);
+    expect(service.store.snapshot()).toEqual(after);
+    expect(before.settings).toEqual(after.settings);
   });
 
   it('preserves an omitted crash expert and rejects malformed or unauthorized recovery patches atomically', async () => {
@@ -788,7 +810,7 @@ describe('company HTTP ownership and expert invites', () => {
 
   it('only the owner grants or revokes employee recovery; an agent cannot grant itself permissions', async () => {
     const employee = await service.hire({ ...hireBody, position: 'CTO' });
-    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false });
+    expect(employee.permissions).toEqual({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false });
     const url = `/api/company/employees/${employee.id}`;
     const payload = { permissions: { recoverEmployees: true } };
     for (const sessionId of ['expert-session', 'parent-session', 'stale-agent', '']) {
@@ -815,7 +837,7 @@ describe('company HTTP ownership and expert invites', () => {
       expect.objectContaining({
         action: 'employee_update',
         detail: expect.objectContaining({
-          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false } },
+          permissions: { from: { recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false }, to: { recoverEmployees: true, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false } },
         }),
       })
     );

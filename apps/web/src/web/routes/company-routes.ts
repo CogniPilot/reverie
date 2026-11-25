@@ -248,8 +248,8 @@ export function registerCompanyRoutes(
       const patch = parseBody(z.record(z.string(), z.unknown()), req.body);
       if (Object.keys(patch).some(key => !Object.hasOwn(CompanySettingsSchema.shape, key)))
         throw new CompanyError('Unknown company setting', 400);
-      if (Object.entries(patch).some(([key, value]) => value === null && key !== 'crashWakeEmployeeId'))
-        throw new CompanyError('Only the crash recovery expert can be cleared with null', 400);
+      if (Object.entries(patch).some(([key, value]) => value === null && key !== 'crashWakeEmployeeId' && key !== 'modelLimitFallback'))
+        throw new CompanyError('Only the crash recovery expert and the model-limit fallback can be cleared with null', 400);
       return { settings: await service.configure(ownerFor(req), patch as CompanySettingsPatch) };
     })
   );

@@ -463,6 +463,19 @@ export function isAdvisorModel(value: unknown): value is string {
   return (ADVISOR_MODEL_ALIASES as readonly string[]).includes(value) || ADVISOR_MODEL_ID_PATTERN.test(value);
 }
 
+/**
+ * A Claude session model id as `claude --model <id>` and the in-session `/model <id>` take it (at
+ * most 100 characters): a subset of the registry's `model-claude` pattern. The first character is a
+ * letter or digit, so the value is never flag-shaped in argv, and no space or control character can
+ * reach a pane when it is typed after `/model`.
+ */
+export const SESSION_MODEL_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._\-[\]]*$/;
+
+/** Type guard: a session model id fit for `--model` and for typing after `/model`. */
+export function isSessionModelId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 100 && SESSION_MODEL_ID_PATTERN.test(value);
+}
+
 /** OpenCode session configuration */
 export interface OpenCodeConfig {
   /** Model identifier (e.g., "anthropic/claude-sonnet-4-5", "openai/gpt-5.2", "ollama/codellama") */

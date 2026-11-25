@@ -28,6 +28,18 @@ describe('owner-selected core beliefs and honest managed input inspection', () =
     person.permissions.manageGoals = false;
     expect(buildEmployeeContext(person).context).toContain('Canonical team Goal management: not granted');
   });
+  it('declares the owner-set model grant and how to use it, and grants nothing by saying so', () => {
+    const person = employee();
+    const first = (view: ReturnType<typeof buildEmployeeContext>) =>
+      JSON.parse(view.sections.find(section => section.id === 'tool-permissions')!.text.split('\n')[0]!);
+    expect(first(buildEmployeeContext(person)).manageModels).toBe(false);
+    expect(buildEmployeeContext(person).context).toContain('Employee model management: not granted');
+    person.permissions.manageModels = true;
+    const granted = buildEmployeeContext(person);
+    expect(first(granted).manageModels).toBe(true);
+    expect(granted.context).toContain('Employee model management: granted');
+    expect(granted.context).toContain('reverie agent model <employee-id> <model-id>');
+  });
   it('defaults generic installations to no beliefs and preserves exact ordered owner data', () => {
     expect(CompanySettingsSchema.parse({}).coreBeliefs).toEqual([]);
     expect(employee().coreBeliefs).toBeUndefined();

@@ -10,6 +10,7 @@ import { normalizeIcon } from './chatroom-store.js';
 import { AVATAR_URL } from './agent-avatars.js';
 import { PRONOUNS_MAX, pronounsProblem } from './pronouns.js';
 import { EmployeeVoiceSchema } from './employee-voice.js';
+import { SESSION_MODEL_ID_PATTERN } from './types/session.js';
 
 const text = z.string().trim().min(1).max(100);
 /** Instance-owned belief text, never a repository persona or an authority grant. Text is preserved exactly. */
@@ -40,6 +41,8 @@ export const EmployeePermissionsSchema = z
     moveOwnPlan: z.boolean().default(false),
     managePlans: z.boolean().default(false),
     manageGoals: z.boolean().default(false),
+    /** Set another employee's (or one's own) model through the model service; owner-granted, never implied by a title. */
+    manageModels: z.boolean().default(false),
     editBoardIssues: z.boolean().optional(),
     manageBoard: z.boolean().optional(),
     manageDecisions: z.boolean().optional(),
@@ -54,6 +57,7 @@ export const EmployeePermissionsPatchSchema = EmployeePermissionsSchema.extend({
   moveOwnPlan: EmployeePermissionsSchema.shape.moveOwnPlan.removeDefault(),
   managePlans: EmployeePermissionsSchema.shape.managePlans.removeDefault(),
   manageGoals: EmployeePermissionsSchema.shape.manageGoals.removeDefault(),
+  manageModels: EmployeePermissionsSchema.shape.manageModels.removeDefault(),
 }).partial();
 export const EmployeeSchema = z
   .object({
@@ -66,7 +70,7 @@ export const EmployeeSchema = z
     /** Owner-selected avatar background; absent retains the automatic identity color. */
     avatarBackground: z.union([z.string().regex(/^#[0-9a-fA-F]{6}$/), z.literal('transparent')]).optional(),
     position: text,
-    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false }),
+    permissions: EmployeePermissionsSchema.default({ recoverEmployees: false, manageOffice: false, moveOwnPlan: false, managePlans: false, manageGoals: false, manageModels: false }),
     /** How to refer to this person ("she/her", "they/them"); the owner sets it (PUT /api/company/employees/:id), never the agent. */
     pronouns: PronounsSchema.optional(),
     voice: EmployeeVoiceSchema.optional(),
@@ -340,7 +344,18 @@ export const CompanySettingsSchema = z.object({
   researchMinutes: z.number().int().min(1).max(120).default(60),
   briefingMinutes: z.number().int().min(1).max(30).default(10),
   coordinatorEmployeeId: text.optional(),
+  /**
+   * The model a Claude employee is switched to when its current model reaches a per-model usage limit
+   * (employee-model-service.ts). Absent means DEFAULT_MODEL_LIMIT_FALLBACK; null turns the switch off.
+   */
+  modelLimitFallback: z.string().max(100).regex(SESSION_MODEL_ID_PATTERN).nullable().optional(),
 });
+/** The fallback model when the company has not chosen one (`modelLimitFallback` absent). */
+export const DEFAULT_MODEL_LIMIT_FALLBACK = 'claude-opus-5-5';
+/** The company's fallback model for a per-model limit, or null when the owner turned it off. */
+export function modelLimitFallback(settings: Pick<CompanySettings, 'modelLimitFallback'>): string | null {
+  return settings.modelLimitFallback === undefined ? DEFAULT_MODEL_LIMIT_FALLBACK : settings.modelLimitFallback;
+}
 export type CompanySettings = z.infer<typeof CompanySettingsSchema>;
 /** A partial owner edit. Only the crash expert accepts null, as explicit clear;
  * canonical stored settings continue to use an absent optional string. */
