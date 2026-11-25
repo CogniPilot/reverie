@@ -13,7 +13,7 @@ import {
 } from '../../company-types.js';
 import type { SessionPort } from '../ports/session-port.js';
 import { findSessionOrFail, ownerFor, parseBody, resolveParentSessionId } from '../route-helpers.js';
-import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarUrl, checkAvatar } from '../../agent-avatars.js';
+import { AvatarError, AvatarStore, MAX_AVATAR_BYTES, avatarKey, avatarUrl, checkAvatar } from '../../agent-avatars.js';
 import { createHash } from 'node:crypto';
 import { appendAdminAudit } from '../admin-audit.js';
 import { adminGrant, adminGrantContinuation } from '../../owner-auth/policy.js';
@@ -572,21 +572,33 @@ export function registerCompanyRoutes(
   // may set any agent's. The image is checked by its bytes before anything is recorded or stored.
   // The file is written BEFORE its URL is recorded, so a failed write never leaves a link to nothing;
   // if recording then fails (unknown session, profile cap), the previous image is put back.
+  // An employee's image is stored under its employee id, so a new session (plan move, laptop
+  // rebuild) never orphans it. A temporary agent has only its session id.
+  const ownedEmployees = (req: FastifyRequest, match: (e: { id: string; sessionId: string; avatar?: string }) => boolean) => {
+    const state = service.store.snapshot();
+    return [...state.employees, ...state.retired].filter(match).map((e) => ({ ...e, mine: e.owner === ownerFor(req) }));
+  };
+  const imageKey = (req: FastifyRequest, sessionId: string): string =>
+    ownedEmployees(req, (e) => e.sessionId === sessionId).find((e) => e.mine)?.id ?? sessionId;
   const setAvatar = async (req: FastifyRequest, sessionId: string, data: unknown) => {
     checkAvatar(data);
-    const previous = await avatars.get(sessionId);
-    await avatars.put(sessionId, data as Buffer);
+    const key = imageKey(req, sessionId);
+    const previous = await avatars.get(key);
+    await avatars.put(key, data as Buffer);
     try {
-      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(sessionId, Date.now()), verifiedOwner(req)) };
+      return { profile: await service.setAvatar(sessionId, ownerFor(req), avatarUrl(key, Date.now()), verifiedOwner(req)) };
     } catch (error) {
-      if (previous) await avatars.put(sessionId, previous.data);
-      else await avatars.remove(sessionId);
+      if (previous) await avatars.put(key, previous.data);
+      else await avatars.remove(key);
       throw error;
     }
   };
   const clearAvatar = async (req: FastifyRequest, sessionId: string) => {
+    const key = imageKey(req, sessionId);
+    const legacy = avatarKey(ownedEmployees(req, (e) => e.sessionId === sessionId).find((e) => e.mine)?.avatar);
     const result = await service.setAvatar(sessionId, ownerFor(req), null, verifiedOwner(req));
-    await avatars.remove(sessionId);
+    await avatars.remove(key);
+    if (legacy && legacy !== key) await avatars.remove(legacy);
     return { profile: result };
   };
   const self = (req: FastifyRequest): string => {
@@ -637,8 +649,20 @@ export function registerCompanyRoutes(
   app.delete('/api/company/agents/:sessionId/avatar', async (req, reply) =>
     image(reply, () => clearAvatar(req, agentByOwner(req)))
   );
+  // Any name an employee's image has had (its employee id, a session id it ran in, the key its
+  // recorded URL names) serves the image it has now; a foreign employee's is unknown.
+  const imageSource = (req: FastifyRequest): string => {
+    const { sessionId: id } = req.params as { sessionId: string };
+    const named = ownedEmployees(req, (e) => e.id === id || e.sessionId === id || avatarKey(e.avatar) === id);
+    if (!named.length) return avatarTarget(req);
+    const session = ctx.sessions.get(id);
+    if (named.some((e) => !e.mine) || (session && session.owner !== ownerFor(req)))
+      throw Object.assign(new CompanyError('Unknown employee', 404), { statusCode: 404 });
+    const employee = named[0]!;
+    return avatarKey(employee.avatar) ?? employee.id;
+  };
   app.get('/api/avatars/:sessionId', async (req, reply) => {
-    const stored = await avatars.get(avatarTarget(req));
+    const stored = await avatars.get(imageSource(req));
     if (!stored) return reply.code(404).send({ success: false, error: 'No profile image' });
     return reply
       .header('Content-Type', stored.type)
