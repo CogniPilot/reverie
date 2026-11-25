@@ -119,6 +119,10 @@ describe('employee supervisor: classification', () => {
       'needs-owner',
     ],
     ['a laptop set-up that is still running', held('DOCKER_CONTINUATION_BUSY'), 'starting'],
+    ['a laptop read that a busy box could not finish in time', held('DOCKER_RESOURCE_PROBE_DEADLINE'), 'starting'],
+    ['a first process the office could not read just now', held('DOCKER_RESOURCE_INIT_UNKNOWN'), 'starting'],
+    ['a first process that changed while it was read', held('DOCKER_RESOURCE_INIT_CHANGED'), 'starting'],
+    ['a laptop read that failed without a named reason', held('DOCKER_CONTINUATION_UNCONFIRMED'), 'starting'],
     [
       'a set-up step waiting for its acknowledgement',
       observed({

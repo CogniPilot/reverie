@@ -348,6 +348,14 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
   DOCKER_CONTINUATION_PROVIDER_HEALTH_CHANGED: ['wait', "{name}'s agent changed while it was being read."],
   DOCKER_CONTINUATION_OFFICE_CHANGED: ['wait', "{name}'s attendance changed while their laptop was being set up."],
   DOCKER_CONTINUATION_OFFICE_UNCONFIRMED: ['wait', "{name}'s return to the office is not recorded yet."],
+  // Reads of the laptops' processes that a busy box can fail. Each read is repeated; one that never succeeds is
+  // reported as stalled, like any other wait.
+  DOCKER_RESOURCE_PROBE_DEADLINE: [
+    'wait',
+    "The office could not finish reading {name}'s laptop in time; the box is busy.",
+  ],
+  DOCKER_RESOURCE_INIT_UNKNOWN: ['wait', 'The office could not read the first process of a laptop just now.'],
+  DOCKER_RESOURCE_INIT_CHANGED: ['wait', "A laptop's first process changed while the office was reading it."],
 
   DOCKER_RESOURCE_HELPER_RETRY_PENDING: [
     'retry',

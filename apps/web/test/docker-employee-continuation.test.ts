@@ -400,6 +400,20 @@ describe('owned boxed Docker employee continuation', () => {
     expect(await f.make().observe(eid, oid, f.authority)).toMatchObject({ state: 'ready' });
     expect(f.provider.launch).toHaveBeenCalledOnce();
   });
+  it('reports an unparsable read of a ready laptop as a failed read, not as an unconfirmed effect', async () => {
+    const f = fixture();
+    expect(await f.service.begin(eid, f.request, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+    // A busy box can answer a pool read with output that does not parse.
+    f.engine.observePool.mockImplementationOnce(async () => JSON.parse('{"truncated'));
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({
+      state: 'held',
+      phase: 'ready',
+      code: 'DOCKER_CONTINUATION_UNCONFIRMED',
+    });
+    expect(f.provider.launch).toHaveBeenCalledOnce();
+    // The next read decides again.
+    expect(await f.service.observe(eid, oid, f.authority)).toMatchObject({ state: 'ready', phase: 'ready' });
+  });
   it('Observe can acknowledge owned pool metadata but cannot create or start a destination', async () => {
     const f = fixture(),
       original = f.engine.preparePool.getMockImplementation()!;

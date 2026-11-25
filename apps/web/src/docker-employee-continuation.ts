@@ -929,9 +929,16 @@ export class DockerEmployeeContinuation {
       } catch {
         /* A stale/refused refresh cannot replace the original actual cause. */
       }
+      // A pass that may issue no Engine effect only reads the laptop (and records what it saw), so an unnamed failure
+      // there is a failed read, such as a late or unparsable Engine answer on a busy box, never an effect whose
+      // outcome is unknown. The next read decides again.
       return this.#result(
         row,
-        cause instanceof DockerEmployeeContinuationError ? cause.code : 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED'
+        cause instanceof DockerEmployeeContinuationError
+          ? cause.code
+          : effects
+            ? 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED'
+            : 'DOCKER_CONTINUATION_UNCONFIRMED'
       );
     }
   }
