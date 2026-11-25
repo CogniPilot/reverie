@@ -353,7 +353,7 @@ import {
 import { isLostWebviewFrameNavigation } from './webview-proxy.js';
 import { AuthorQuotaFile } from '../cron/author-quota.js';
 import { CronService } from '../cron/cron-service.js';
-import { ChatroomService } from '../chatroom-service.js';
+import { ChatroomService, type ChatroomServiceDeps } from '../chatroom-service.js';
 import { ChatBackupScheduler } from '../chat-backup.js';
 import { sendOwnerAlert } from '../owner-alert.js';
 import { DecisionAlerts, waitingForOwner } from '../decision-alert.js';
@@ -1196,7 +1196,7 @@ export class WebServer extends EventEmitter {
     const ownerAuth = new OfficeAuthService({
       store: new OwnerAuthStore(dataPath('owner-auth.json')),
       auditFile: dataPath('owner-auth-audit.jsonl'),
-    }, () => ({ name: this.companyService?.view().settings.ownerName, avatar: this.companyService?.view().settings.ownerAvatar }));
+    }, () => ({ name: this.companyService?.settings().ownerName, avatar: this.companyService?.settings().ownerAvatar }));
     // A machine credential is verified before the human transport layer. An
     // unavailable/mixed boxed backend refuses startup rather than falling back.
     const dockerRuntime = openDockerEmployeeRuntime(dataPath('docker-runtime'));
@@ -1233,7 +1233,7 @@ export class WebServer extends EventEmitter {
         predecessor: runtimeLineage(
           process.env.REVERIE_RUNTIME_STATE || join(dirname(getDataDir()), 'controller-state.json')
         ),
-        employeeOf: (sessionId) => this.companyService?.view().employees.find((e) => e.sessionId === sessionId)?.id,
+        employeeOf: (sessionId) => this.companyService?.employeeRefs().find((e) => e.sessionId === sessionId)?.id,
         keepers: () => ownerAuth.keepers(),
         admins: () => ownerAuth.admins(),
       }),
@@ -1253,7 +1253,7 @@ export class WebServer extends EventEmitter {
     await this.app.register(fastifyWebsocket);
     const ownerTerminal = createOwnerTerminalRuntime(verifiedOwner, ownerAuth);
     registerOwnerTerminalRoutes(this.app, verifiedOwner, (request, employeeId) =>
-      this.companyService?.view(ownerFor(request)).employees.some(employee => employee.id === employeeId) === true,
+      this.companyService?.employeeRefs(ownerFor(request)).some(employee => employee.id === employeeId) === true,
     ownerAuth, ownerTerminal);
 
     // Multipart parsing (used by paste-image). Replaces a hand-rolled
@@ -1586,7 +1586,7 @@ export class WebServer extends EventEmitter {
           .filter((row) => row.profileId === profileId)
           .flatMap((row) => row.sessions.map((s) => s.name));
         // A sleeping employee retains its configured plan, even without a live process.
-        const assigned = (this.companyService?.view().employees ?? [])
+        const assigned = (this.companyService?.employeeRefs() ?? [])
           .filter((employee) => this.store.getSession(employee.sessionId)?.subscriptionProfile?.id === profileId)
           .map((employee) => employee.name);
         return [...new Set([...running, ...assigned])];
@@ -1644,6 +1644,8 @@ export class WebServer extends EventEmitter {
     const chatroomFiles = new ChatFileStore(getDataDir());
     await chatroomFiles.initializeShared();
     let boardIssuesCache: { rev: number; issues: Issue[] } | undefined;
+    // The projected cards per owner, rebuilt only when the Board or an employee name changes: a room view asks once per member.
+    const boardViewCache = new Map<string, { rev: number; names: string; cards: ReturnType<NonNullable<ChatroomServiceDeps['boardIssues']>> }>();
     // The employee journal: opened on first use, in its own file beside the chat database. Briefs read its highlights.
     let employeeJournal: EmployeeJournalStore | undefined;
     this.app.addHook('onClose', async () => employeeJournal?.close());
@@ -1663,7 +1665,7 @@ export class WebServer extends EventEmitter {
       restContextOf: (sessionId) => {
         const employee = this.companyService?.registeredEmployees().find((e) => e.sessionId === sessionId);
         return employee
-          ? employeeBriefContext(employee, this.companyService.view(employee.owner).settings.coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.view(employee.owner).settings.timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
+          ? employeeBriefContext(employee, this.companyService.settings(employee.owner).coreBeliefs, journalHighlights(employee)) + `\nHuman-facing chat, deadline and reset times use ${displayTimeZone(this.companyService.settings(employee.owner).timeZone)}. Include the zone abbreviation; machine timestamps keep explicit offsets.`
           : undefined;
       },
       // Rooms and messages live in SQLite; chatrooms.json is imported once, when chat.db does not exist yet.
@@ -1678,20 +1680,25 @@ export class WebServer extends EventEmitter {
       workerViewers: !!process.env.REVERIE_WORKER_SOCKET,
       broadcast: (event, data) => this.broadcast(event, data),
       // An agent's `@Owner` counts as a mention of the owner: the name is the one set in the company settings.
-      ownerNames: (owner) => [this.companyService?.view(owner).settings.ownerName ?? ''],
+      ownerNames: (owner) => [this.companyService?.settings(owner).ownerName ?? ''],
       // Dropped messages are archived in ISO-week files, weeks in the company zone.
-      timeZone: (owner) => this.companyService?.view(owner).settings.timeZone,
+      timeZone: (owner) => this.companyService?.settings(owner).timeZone,
       // An agent's digest lists its own Board cards and the cards they name, and room views show each member's 'doing'
       // cards (the Board store is created below, after chat).
       boardIssues: (owner) => {
-        const names = new Map((this.companyService?.view(owner).employees ?? []).map((e) => [e.id, e.name]));
+        const names = new Map((this.companyService?.employeeRefs(owner) ?? []).map((e) => [e.id, e.name]));
         // One copy of the Board per revision, not one per room view.
         const store = this.boardStore;
         if (store && boardIssuesCache?.rev !== store.rev) boardIssuesCache = { rev: store.rev, issues: store.snapshot().issues };
-        return (boardIssuesCache?.issues ?? []).map((issue) => ({
+        const key = owner ?? '', rev = boardIssuesCache?.rev ?? -1, signature = JSON.stringify([...names]);
+        const cached = boardViewCache.get(key);
+        if (cached && cached.rev === rev && cached.names === signature) return cached.cards;
+        const cards = Object.freeze((boardIssuesCache?.issues ?? []).map((issue) => Object.freeze({
           id: issue.id, title: issue.title, status: issue.status, owner: issue.owner, reason: issue.reason,
           ownerName: issue.owner ? names.get(issue.owner) : undefined, updatedAt: issue.updatedAt, end: issue.end,
-        }));
+        })));
+        boardViewCache.set(key, { rev, names: signature, cards });
+        return cards;
       },
       // Chat refused to start or went read-only: a push to the owner's devices (5 s cap: a refusal exits next).
       alert: (text) => sendOwnerAlert(this.pushStore, text, { multiUser: isMultiUserMode(), timeoutMs: 5000 }),
@@ -1716,7 +1723,7 @@ export class WebServer extends EventEmitter {
     this.chatBackup = new ChatBackupScheduler({
       database: dataPath('chat.db'),
       dir: dataPath('chat-backups'),
-      timeZone: () => this.companyService?.view(undefined).settings.timeZone,
+      timeZone: () => this.companyService?.settings(undefined).timeZone,
       notify: (text, failed) => {
         if (failed)
           void sendOwnerAlert(this.pushStore, 'Nightly chat backup failed. Details in #reverie and the console log.', {
@@ -2013,8 +2020,8 @@ export class WebServer extends EventEmitter {
       session: (id) => this.sessions.get(id),
       takesModel: (mode) => cliTakesSessionModel(mode as SessionMode),
       glyph: (mode) => getCli(mode)?.capabilities.workDetect?.promptGlyph ?? '❯',
-      fallbackModel: (owner) => modelLimitFallback(this.companyService.view(owner).settings),
-      timeZone: (owner) => this.companyService.view(owner).settings.timeZone,
+      fallbackModel: (owner) => modelLimitFallback(this.companyService.settings(owner)),
+      timeZone: (owner) => this.companyService.settings(owner).timeZone,
       post: (owner, text) => {
         const room = fullAccessAlertRoom(this.chatroomService.rooms(), owner);
         if (room && !room.archivedAt) this.chatroomService.post(room.id, { kind: 'system', name: 'Models' }, text, 'all', { deliver: false });
@@ -2210,7 +2217,7 @@ export class WebServer extends EventEmitter {
       verifiedOwner,
       roles,
       (sessionId) =>
-        this.companyService?.view(this.sessions.get(sessionId)?.owner).employees.find((e) => e.sessionId === sessionId)
+        this.companyService?.employeeRefs(this.sessions.get(sessionId)?.owner).find((e) => e.sessionId === sessionId)
           ?.id,
       { pendingStatus: (req) => !isMultiUserMode() && serviceVerifier({ service: ownerAuth, ctx }, 'stall-watch')(req), human: req => ownerAuth.identity(req.cookies?.[OWNER_COOKIE]), humanNames: room => ownerAuth.members(room).map(person => person.name), messageOwner: id => ownerAuth.isMessageOwner(id), readAt: (id, roomId) => ownerAuth.cursor(id, roomId), markRead: (id, roomId, at) => ownerAuth.markRead(id, roomId, at) }
     );
@@ -2225,7 +2232,7 @@ export class WebServer extends EventEmitter {
     const botWatches = await registerBotWatches(this.app, {
       dataPath, bots: chatBots, chat: this.chatroomService, board: boardStore,
       employees: () => structuredClone(companyStore.view().employees),
-      timeZone: owner => this.companyService?.view(owner).settings.timeZone,
+      timeZone: owner => this.companyService?.settings(owner).timeZone,
       coordinatorId: owner => companyStore.view().settings.find(s => s.owner === owner)?.coordinatorEmployeeId,
       running: id => { const s = this.sessions.get(id); return !!s && s.pid !== null && s.pid > 0 && !s.paneExit; },
       verifiedOwner, multiUser: isMultiUserMode(), credentials:publicationVault,
@@ -2234,7 +2241,7 @@ export class WebServer extends EventEmitter {
     this.cleanup.setInterval(() => void botWatches.tick(), 30_000, { description: 'typed assignment, public issue and disk-space watchers' });
     this.inputWatch = createInputWatch({
       ledgerFile: dataPath('input-watch-ledger.json'),
-      timeZone: owner => this.companyService.view(owner).settings.timeZone,
+      timeZone: owner => this.companyService.settings(owner).timeZone,
       bot: () => (isMultiUserMode() ? undefined : chatBots.get('input-watch')),
       employee: (sessionId) => {
         const session = this.sessions.get(sessionId);
@@ -2475,9 +2482,9 @@ export class WebServer extends EventEmitter {
       this.accountLogins,
       {
         callerSession: (req) => resolveParentSessionId(ctx, req, undefined, ownerFor(req)),
-        timeZone: owner => this.companyService.view(owner).settings.timeZone,
+        timeZone: owner => this.companyService.settings(owner).timeZone,
         employees: (owner) =>
-          this.companyService.view(owner).employees.map(({ id, name, sessionId, icon, avatar }) => ({
+          this.companyService.employeeRefs(owner).map(({ id, name, sessionId, icon, avatar }) => ({
             id,
             name,
             sessionId,
@@ -2493,7 +2500,7 @@ export class WebServer extends EventEmitter {
             ) ||
           roles.can(
             {
-              employeeId: this.companyService?.view().employees.find((e) => e.sessionId === id)?.id,
+              employeeId: this.companyService?.employeeRefs().find((e) => e.sessionId === id)?.id,
               leadOfAny: leadsALiveRoom(id),
               memberId: id,
             },
@@ -2802,7 +2809,7 @@ export class WebServer extends EventEmitter {
       save: (records) => planRequestStore.save(records),
       moves: planMoves,
       binding: (employeeId, owner) =>
-        this.companyService.view(owner).employees.find((employee) => employee.id === employeeId)?.sessionId,
+        this.companyService.employeeRefs(owner).find((employee) => employee.id === employeeId)?.sessionId,
       validateTarget: async (_snapshot, target) => availablePlanTarget(target),
       capability: {
         write: value => planRequestCapabilities.write(value),

@@ -640,6 +640,20 @@ export class CompanyService {
       },
     };
   }
+  /** One owner's company settings, the same value `view(owner).settings` returns, without copying and
+   * projecting every employee: name, avatar and time-zone readers run on every request. */
+  settings(owner?: string): CompanySettings {
+    const settings = this.store.view().settings.find((s) => sameOwner(s.owner, owner));
+    return settings ? structuredClone(settings) : CompanySettingsSchema.parse({ owner });
+  }
+  /** The identity fields of one owner's employees, for lookups by id, name or session that need no
+   * health projection. Fresh objects: a caller cannot change the store through them. */
+  employeeRefs(owner?: string): { id: string; name: string; sessionId: string; owner?: string; icon?: string; avatar?: string }[] {
+    return this.store
+      .view()
+      .employees.filter((e) => sameOwner(e.owner, owner))
+      .map(({ id, name, sessionId, owner: who, icon, avatar }) => ({ id, name, sessionId, owner: who, icon, avatar }));
+  }
   view(owner?: string) {
     // Copy only what this view returns: the laptop records are most of the store and none of it is used here.
     const shared = this.store.view();
