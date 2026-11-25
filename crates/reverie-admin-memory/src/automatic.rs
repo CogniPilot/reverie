@@ -183,16 +183,16 @@ fn recall(settings: &Settings, room: &ChatRoomId, query: &str) -> io::Result<Val
         return Err(refused());
     }
     let database = Database::for_room(&settings.memory_instance, room)?;
-    settings.office.require_membership(room)?;
+    settings.office.require_conversation(room)?;
     let evidence = if query.trim().is_empty() || max_chars == 0 {
         ChannelEvidence::default()
     } else {
-        settings.office.require_membership(room)?;
+        settings.office.require_conversation(room)?;
         let store = database.writable()?;
         let result = store.recall_channel(room, query, max_chars);
         store.close().map_err(|_| refused())?;
         let evidence = result.map_err(|_| refused())?;
-        settings.office.require_membership(room)?;
+        settings.office.require_conversation(room)?;
         evidence
     };
     let sources: Vec<_> = evidence.sources.iter().map(|id| id.as_str()).collect();
@@ -217,9 +217,9 @@ fn record(settings: &Settings, room: &ChatRoomId, event: &Event<'_>) -> io::Resu
         &history,
     )
     .ok_or_else(refused)?;
-    settings.office.require_membership(room)?;
+    settings.office.require_conversation(room)?;
     let store = database.writable()?;
-    let result = settings.office.require_membership(room).and_then(|()| {
+    let result = settings.office.require_conversation(room).and_then(|()| {
         store
             .add_external_episode(
                 &exchange.external_source(),

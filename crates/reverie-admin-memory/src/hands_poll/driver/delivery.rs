@@ -75,8 +75,10 @@ impl Pass {
         self.post(room, source, span)
     }
 
+    /// Recall from this room's own memory. A direct conversation has its own store, so what it holds is recalled
+    /// only there, never in a shared channel.
     fn recall(&mut self, source: &Source<'_>, control: bool) -> io::Result<String> {
-        if control || self.is_direct(source.target) {
+        if control {
             return Ok(String::new());
         }
         let text = source.message["text"].as_str().unwrap_or_default();
@@ -146,7 +148,8 @@ impl Pass {
                 "room":source.target.name, "text":sent, "confirmed":truthy(id),
             }),
         )?;
-        if truthy(id) && !self.is_direct(source.target) {
+        // Confirmed exchanges are kept in the store of the room they happened in, direct conversations included.
+        if truthy(id) {
             let text = source.message["text"].as_str().unwrap_or_default();
             self.memory.record(
                 &mut self.link,

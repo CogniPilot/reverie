@@ -53,6 +53,15 @@ impl Office {
         }
     }
 
+    /// Membership of an ordinary channel or a direct conversation, for memory kept and recalled in that room alone.
+    pub(crate) fn require_conversation(&self, room: &ChatRoomId) -> io::Result<()> {
+        if self.rooms()?.contains_conversation(room) {
+            Ok(())
+        } else {
+            Err(refused())
+        }
+    }
+
     pub(crate) fn history(&self, room: &ChatRoomId, count: i64) -> io::Result<Vec<u8>> {
         self.run(
             &read_args(room.as_str(), ["-n", &count.to_string()]),

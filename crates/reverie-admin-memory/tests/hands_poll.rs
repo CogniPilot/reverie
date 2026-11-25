@@ -161,6 +161,22 @@ fn native_poll_publishes_claim_before_model_and_records_only_authorized_posts() 
 }
 
 #[test]
+fn native_poll_keeps_memory_of_a_direct_conversation() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "rooms.json",
+        &json!([{"id":ROOM,"name":"","kind":"dm","dm":[SESSION,"user"],"visibility":"private",
+                 "members":[{"sessionId":SESSION}],"lastMessage":{"id":SOURCE}}]),
+    );
+    let (posted, recorded) = run(
+        &fixture,
+        DuringAnswer::Available,
+        json!({"mode":"external"}),
+    );
+    assert_eq!((posted, recorded), (1, 1));
+}
+
+#[test]
 fn native_poll_records_verified_reply_without_a_memory_callback() {
     let fixture = Fixture::new();
     fixture.write("instance.json", &json!({
