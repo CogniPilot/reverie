@@ -380,7 +380,7 @@ let
         test/late-hold-control.test.ts test/opencode-late-hold-control.test.ts test/opencode-paste-hold-control.test.ts \
         test/codex-paste-hold.test.ts test/plan-move-input-hold.test.ts test/opencode-shell-mode.test.ts \
         test/remote-buffer-move-hold-control.test.ts test/opencode-verifier-hold-control.test.ts test/remote-wake.test.ts \
-        test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/routes/session-input-delivery.test.ts \
+        test/cli-agent.test.ts test/cli-agent-wake-employee.test.ts test/cli-agent-model.test.ts test/routes/session-input-delivery.test.ts \
         test/input-send-order.test.ts test/reliable-input-dedup.test.ts test/input-size-limit.test.ts test/browser-input-intake.test.ts test/browser-input-caller-contracts.test.ts test/chatroom-archived-reply.test.ts \
         test/chatroom-inline-video.test.ts test/file-preview-session-svg.test.ts
       npm test -- test/case-removal.test.ts test/routes/case-delete-guard.test.ts

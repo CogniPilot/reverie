@@ -38,6 +38,7 @@ import { displayTime, displayTimeZone } from './display-time.js';
 import { TURN_SUMMARY_MAX_CHARS } from './chatroom-turn-summary.js';
 import { agentCapabilities } from './cli-agent-capabilities.js';
 import { agentEmployeeOffice } from './cli-agent-office.js';
+import { agentEmployeeModel } from './cli-agent-model.js';
 import { agentViewerRecovery } from './cli-agent-viewer.js';
 import { agentForcePlanMove, agentMoveJournal } from './cli-agent-force.js';
 import { agentCredentialsInstall, agentCredentialsList } from './cli-agent-credentials.js';
@@ -3023,6 +3024,12 @@ export function registerAgentCommands(program: Command): Command {
     .option('--json', 'Print the normal restart acknowledgement, not a claim of native readiness')
     .action((employeeId: string, options: { force?: boolean; json?: boolean }) => run(Boolean(options.json), deps =>
       agentEmployeeOffice(deps, { employeeId, action: 'restart', forceRestart: options.force })));
+  agent.command('model <employee-id> [model]')
+    .description('Read an employee’s Claude model, or choose one with your owner-granted manageModels permission; it is applied with /model only at an idle, empty composer')
+    .option('--effort <level>', 'Also set the effort: low, medium, high, xhigh or max')
+    .option('--json', 'Print the server’s model status: applied, pending (with why) or failed')
+    .action((employeeId: string, model: string | undefined, options: { effort?: string; json?: boolean }) =>
+      run(Boolean(options.json), deps => agentEmployeeModel(deps, { employeeId, model, effort: options.effort })));
 
   agent
     .command('wait <id>')

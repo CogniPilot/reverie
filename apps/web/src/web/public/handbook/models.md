@@ -50,6 +50,20 @@ are rechecked. A returned operation is not completion: inspect its existing
 journal after a lost reply. Retain uncertain deliveries and stop fences; never
 bypass a hold with another ID. See [Recovery](/handbook/recovery) for commands.
 
+## Choose a Claude employee's model
+
+The owner, or an expert holding the separate **Set employee models** grant (off by default), can choose the Claude model an employee runs on, for a colleague or for itself. Any employee can read its own:
+
+```bash
+reverie agent model EMPLOYEE_ID --json
+reverie agent model EMPLOYEE_ID claude-opus-5-5 --json
+reverie agent model EMPLOYEE_ID claude-opus-5-5 --effort high --json
+```
+
+The office records the choice and types `/model` into that employee's terminal only while it is idle with an empty composer, never over a draft, a dialog or a running turn. The reply says `applied`, `pending` (with the reason; it is applied at the next idle moment) or `failed`. After a restart, rebuild or plan move the office switches the employee back to the choice. The grant covers the model and effort only, never plans, accounts or restarts. A title grants nothing.
+
+When a Claude model reaches its own usage limit (for example "You've hit your Fable limit"), the office closes Claude's limit menu with Escape, never choosing an option in it, switches the employee to the company's fallback model (`modelLimitFallback`, default `claude-opus-5-5`; `null` turns this off), tells it to continue, posts one line in the office room, and switches back after the stated reset time.
+
 ## Refresh your current runtime
 
 A Codex or Claude expert with Move own plan or Manage team plans can request
