@@ -30,6 +30,8 @@ class FakeSession implements ModelSession {
   /** What Escape leaves on screen. */
   afterEscape = IDLE;
   refreshed = 0;
+  /** The CLI looks busy for a moment after a /model. */
+  busyAfterModel = false;
   readScreen() {
     return this.screen;
   }
@@ -47,6 +49,7 @@ class FakeSession implements ModelSession {
     if (data === '\x1b') this.screen = this.afterEscape;
     const model = /^\/model (\S+)\r$/.exec(data)?.[1];
     if (model && this.answers[model]) this.displayModel = { model: this.answers[model] };
+    if (model && this.busyAfterModel) this.isWorking = true;
     return true;
   }
 }
@@ -201,6 +204,22 @@ describe('leaving a model that reached its limit', () => {
       expect(h.posts).toHaveLength(1);
     });
   }
+
+  it('sends a refused resume nudge at a later idle tick, once', async () => {
+    const h = harness();
+    h.session.screen = NOTICE;
+    h.session.busyAfterModel = true;
+    await h.service.tick();
+    expect(typed(h.session)).toEqual(['/model claude-opus-5-5\r']);
+    expect(h.posts).toHaveLength(1);
+    h.session.isWorking = false;
+    h.session.screen = IDLE;
+    await h.service.tick();
+    await h.service.tick();
+    expect(typed(h.session)).toHaveLength(2);
+    expect(typed(h.session)[1]).toMatch(/^Reverie: your fable usage limit was reached/);
+    expect(h.posts).toHaveLength(1);
+  });
 
   it('names the stated reset time in the office line', async () => {
     const h = harness();

@@ -56,6 +56,8 @@ export const MODEL_MAX_TRIES = 3;
 /** Escape presses at most, per attempt, on a limit menu or footer. */
 const MAX_ESCAPES = 2;
 const ESCAPE_SETTLE_MS = 800;
+/** How long a refused resume nudge is retried. */
+const NUDGE_WINDOW_MS = 10 * 60_000;
 
 export class EmployeeModelError extends Error {
   constructor(
@@ -160,6 +162,8 @@ export class EmployeeModelService {
   private readonly waits = new Map<string, string>();
   private readonly busy = new Set<string>();
   private readonly nudgeDue = new Set<string>();
+  /** Fallbacks whose resume nudge is still to be typed, and since when. */
+  private readonly nudges = new Map<string, number>();
   private readonly effortSent = new Map<string, string>();
   private ticking = false;
   private firstTick: ReturnType<typeof setTimeout> | undefined;
@@ -261,6 +265,7 @@ export class EmployeeModelService {
     this.attempts.delete(employee.id);
     this.effortSent.delete(employee.id);
     this.nudgeDue.delete(employee.id);
+    this.nudges.delete(employee.id);
     this.log(`${employee.name}: ${by} chose ${choice.model}${choice.effort ? ` (effort ${choice.effort})` : ''}`);
     await this.reconcile(employee, waitMs);
     return this.status(employee);
@@ -297,6 +302,12 @@ export class EmployeeModelService {
 
   private async step(employee: ModelEmployee, session: ModelSession, waitMs: number): Promise<void> {
     const entry = this.deps.store.get(employee.id);
+    if (
+      this.nudges.has(employee.id) &&
+      entry.fallback &&
+      modelMatchesDisplay(entry.fallback.to, session.displayModel?.model)
+    )
+      return this.sendNudge(employee, session, entry.fallback);
     const fallbackModel = this.deps.fallbackModel(employee.owner);
     // A limit leaves the session idle, or parked on its menu or footer (an open dialog to the office).
     const look =
@@ -318,7 +329,7 @@ export class EmployeeModelService {
       case 'switch': {
         const outcome = await this.switchTo(employee, session, plan.model, plan.reason, waitMs);
         if (outcome === 'applied' && plan.reason === 'fallback')
-          this.afterFallback(employee, session, this.deps.store.get(employee.id).fallback);
+          await this.afterFallback(employee, session, this.deps.store.get(employee.id).fallback);
         if (outcome === 'applied' && plan.reason === 'restore') await this.clearFallback(employee, true);
         return;
       }
@@ -442,11 +453,15 @@ export class EmployeeModelService {
       `${employee.name}: ${record.from ?? record.family} reached its usage limit; switching to ${record.to} until ${this.resetText(employee, record) ?? 'an unknown reset time'}`
     );
     const outcome = await this.switchTo(employee, session, record.to, 'fallback', waitMs);
-    if (outcome === 'applied') this.afterFallback(employee, session, record);
+    if (outcome === 'applied') await this.afterFallback(employee, session, record);
   }
 
   /** Once the fallback model is confirmed: one office-room line, then the nudge that resumes the turn. */
-  private afterFallback(employee: ModelEmployee, session: ModelSession, record: ModelFallbackRecord | undefined): void {
+  private async afterFallback(
+    employee: ModelEmployee,
+    session: ModelSession,
+    record: ModelFallbackRecord | undefined
+  ): Promise<void> {
     if (!record || !this.nudgeDue.delete(employee.id)) return;
     const reset = this.resetText(employee, record);
     try {
@@ -455,11 +470,33 @@ export class EmployeeModelService {
         `${employee.name}: ${record.from ?? record.family} reached its usage limit, switched to ${record.to}${reset ? ` until ${reset}` : ''}.`
       );
     } catch {
-      /* the log line above is the record */
+      /* the log line is the record */
     }
-    void this.typeCommand(employee, session, fallbackNudge(record.to, record.family, reset)).then((sent) =>
-      this.log(`${employee.name}: ${sent ? 'sent' : 'could not send'} the resume nudge`)
-    );
+    this.nudges.set(employee.id, this.now());
+    await this.sendNudge(employee, session, record);
+  }
+
+  /** The resume nudge, typed only like any command; a refused one is tried again at later ticks, for a while. */
+  private async sendNudge(employee: ModelEmployee, session: ModelSession, record: ModelFallbackRecord): Promise<void> {
+    const since = this.nudges.get(employee.id);
+    if (since === undefined) return;
+    if (this.now() - since > NUDGE_WINDOW_MS) {
+      this.nudges.delete(employee.id);
+      this.log(
+        `${employee.name}: gave up on the resume nudge; ${this.waits.get(employee.id) ?? 'the pane never allowed it'}`
+      );
+      return;
+    }
+    if (
+      !(await this.typeCommand(
+        employee,
+        session,
+        fallbackNudge(record.to, record.family, this.resetText(employee, record))
+      ))
+    )
+      return;
+    this.nudges.delete(employee.id);
+    this.log(`${employee.name}: sent the resume nudge`);
   }
 
   private async clearFallback(employee: ModelEmployee, restored: boolean): Promise<void> {
@@ -467,6 +504,7 @@ export class EmployeeModelService {
     if (!entry.fallback) return;
     await this.deps.store.set(employee.id, { ...(entry.preferred ? { preferred: entry.preferred } : {}) });
     this.nudgeDue.delete(employee.id);
+    this.nudges.delete(employee.id);
     this.log(
       restored
         ? `${employee.name}: the ${entry.fallback.family} limit has reset; back on ${entry.fallback.restore}`
