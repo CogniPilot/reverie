@@ -43,6 +43,15 @@ export class BoardStore {
     return structuredClone(this.state);
   }
 
+  /**
+   * The committed board itself, for a reader that only projects or serializes it (GET /api/board), so a read does not
+   * copy every card. A write never edits it: `update` mutates a copy and then replaces it, so a reference taken here
+   * stays one consistent revision. The caller must not change it; take `snapshot()` to edit.
+   */
+  committed(): Readonly<BoardState> {
+    return this.state;
+  }
+
   /** Read one committed issue without copying unrelated cards, decisions or history. */
   issue(id: string): Issue | undefined {
     const issue = this.state.issues.find((row) => row.id === id);

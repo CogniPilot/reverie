@@ -374,7 +374,7 @@
         loading = true;
         const banner = document.getElementById('banner');
         try {
-          const r = await fetch('/api/board', {
+          const r = await fetch('/api/board?known=' + encodeURIComponent((B && B.stateKey) || ''), {
             cache: 'no-store',
             credentials: 'same-origin',
             headers: { accept: 'application/json' },
@@ -408,7 +408,13 @@
           const j = await r.json();
           if (version !== loadVersion) return;
           if (j && j.success === false) throw new Error(j.error || 'refused');
-          const next = j && j.data ? j.data : j;
+          let next = j && j.data ? j.data : j;
+          // The server leaves out the cards, decisions and owners this page already holds when its state key is current.
+          if (next && next.unchanged === true) {
+            if (!B || next.stateKey !== B.stateKey) throw new Error('unexpected reply');
+            next = { ...B, ...next };
+            delete next.unchanged;
+          }
           if (!next || !Array.isArray(next.issues)) throw new Error('unexpected reply');
           const first = !B,
             previousPlan = latestPlanTag();
@@ -978,6 +984,7 @@
           .slice()
           .sort((a, b) => (a.end || 9e15) - (b.end || 9e15) || b.updatedAt - a.updatedAt);
         const col = (s) => issues.filter((i) => i.status === s);
+        const wontdo = col('wontdo');
         host.innerHTML =
           `<div class="ktabs">` +
           COLS.map((s, n) => `<button data-col="${n}"><b>${col(s).length}</b>${STATUS[s]}</button>`).join('') +
@@ -988,10 +995,21 @@
       <div class="kcards">${items.map(card).join('') || '<div class="hint" style="padding:6px">Nothing here</div>'}</div></div>`;
           }).join('') +
           `</div>` +
-          (col('wontdo').length
-            ? `<details class="wontdo"><summary>Won't do (${col('wontdo').length})</summary><div class="kcards">${col('wontdo').map(card).join('')}</div></details>`
+          (wontdo.length
+            ? `<details class="wontdo"${wontdoOpen ? ' open' : ''}><summary>Won't do (${wontdo.length})</summary><div class="kcards">${wontdoOpen ? wontdo.map(card).join('') : ''}</div></details>`
             : '');
       }
+      // The closed Won't-do list can hold hundreds of cards: they are drawn when it is opened, and it stays open across refreshes.
+      let wontdoOpen = false;
+      document.getElementById('kanban').addEventListener(
+        'toggle',
+        (e) => {
+          if (!e.target.matches?.('details.wontdo') || e.target.open === wontdoOpen) return;
+          wontdoOpen = e.target.open;
+          if (wontdoOpen) kanban();
+        },
+        true
+      );
 
       (function kanbanStrip() {
         const host = document.getElementById('kanban');

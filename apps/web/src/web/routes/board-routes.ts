@@ -12,7 +12,7 @@ import { NO_OWNER, type OwnerVerifier } from '../../owner-auth/marks.js';
  * cannot be written the write is refused (500) and the board is unchanged.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { BoardError, type BoardStore } from '../../board-store.js';
 import { applyTrackOp, TrackError, TrackOpSchema } from '../../board-track.js';
@@ -29,6 +29,7 @@ import {
   ISSUE_STATUSES,
   type BoardPin,
   type BoardPoll,
+  type BoardRefresh,
   type BoardState,
   type BoardView,
   type Issue,
@@ -126,6 +127,16 @@ const AgentInput = z
 const MarksInput = z.object({ marks: z.array(MarkSchema).max(100) }).merge(IfRev).strict();
 const ImportInput = z.object({ content: z.unknown().optional(), schedule: z.unknown().optional(), dryRun: z.boolean().optional() }).merge(IfRev).strict();
 const ISSUE_FIELDS = Object.keys(IssueSchema.shape) as (keyof Issue)[];
+/** GET /api/board?known=: the state key the caller already holds, or empty to ask for one. */
+const BoardKnownQuerySchema = z.object({ known: z.string().max(80).optional() });
+/**
+ * What the stored part of a Board view depends on: the board revision, and the employee ids and names the display owners
+ * (`ownerIds`) are resolved against. Equal keys mean equal cards, decisions and owners.
+ */
+export function boardStateKey(rev: number, employees: readonly { id: string; name: string }[]): string {
+  const people = createHash('sha256').update(JSON.stringify(employees.map((e) => [e.id, e.name]))).digest('hex');
+  return `${rev}.${people.slice(0, 16)}`;
+}
 /** A comma-separated query value (repeats are joined); an empty list is an error, never "match everything". */
 const csv = <T extends string>(item: z.ZodType<T, string>) =>
   z.preprocess(v => (Array.isArray(v) ? v.join(',') : v), z.string().max(2000))
@@ -369,11 +380,16 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       return waitingForOwner(deps.store.snapshot(), visibleRooms(c), now());
     })
   );
+  // `?known=<stateKey>` is the Board page's refresh: the reply carries `stateKey`, and when the caller already holds that
+  // key the stored cards, decisions and display owners (which only change with it) are left out (`unchanged: true`).
+  // Without the parameter the reply is the whole view, as every other reader expects.
   app.get('/api/board', async (req, reply) =>
     run(reply, async () => {
       const c = caller(req);
+      const { known } = parse(BoardKnownQuerySchema, req.query ?? {});
       const company = deps.company(c.owner);
-      const state = deps.store.snapshot();
+      // Read-only: the reply only projects and serializes it, and a write replaces it rather than editing it.
+      const state = deps.store.committed();
       const at = now();
       const rooms = visibleRooms(c);
       const roster: RosterRow[] = company.employees.map((e) => {
@@ -427,8 +443,7 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
       }
       pins.sort((a, b) => b.at - a.at);
       const ownerIds = boardOwnerIds(state.issues, company.employees);
-      const view: BoardView = {
-        ...state,
+      const live = {
         structuredDecisionWrites,
         pollNotes,
         built: at,
@@ -436,14 +451,16 @@ export function registerBoardRoutes(app: FastifyInstance, ctx: SessionPort & Par
         ownerName: company.settings.ownerName,
         roster,
         capabilities: await capabilitiesOf(c, at),
-        ownerIds,
         // Same gate as GET /api/plans.
         planBurn: isAdmin(req) ? await planBurn(state) : null,
         polls,
         pins,
         pace: boardPace(state, at, ownerIds),
       };
-      return view;
+      if (known === undefined) return { ...state, ...live, ownerIds } satisfies BoardView;
+      const stateKey = boardStateKey(state.rev, company.employees);
+      if (known === stateKey) return { rev: state.rev, ...live, stateKey, unchanged: true } satisfies BoardRefresh;
+      return { ...state, ...live, ownerIds, stateKey } satisfies BoardView & { stateKey: string };
     })
   );
   app.get('/api/board/issues/:id', async (req, reply) =>
