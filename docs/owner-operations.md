@@ -189,6 +189,68 @@ helper image carrying it is selected in the runtime manifest and no apply
 endpoint exists, so `state` stays `pending` after approval. There is no GUI
 control. A host restart recreates the pool cgroup without a ceiling.
 
+## CPUs reserved for the owner's system
+
+By default every employee laptop may use every CPU of the approved pool CPU set
+except the host's first physical core: CPU 0 and its SMT siblings, read from
+`/sys/devices/system/cpu/cpu0/topology/thread_siblings_list` (on a 16-core,
+32-thread host that is CPUs 0 and 16, so laptops get `1-15,17-31`). There is no
+CPU quota; laptops share the remaining CPUs at their approved CPU weight. A host
+whose only core is the first one reserves nothing.
+
+The reservation is applied to the resource policy of each NEW laptop operation:
+a newly approved employee, a laptop started after a rebuild, and a plan move.
+It takes the reserved CPUs off the laptop's `allowedCpus` (the container's
+`--cpuset-cpus`, confirmed by the usual cgroup readback). A laptop that may use
+the whole pool CPU set gets the pool CPU set minus the reservation, so a smaller
+reservation gives CPUs back; a laptop the owner limited to fewer CPUs keeps its
+own set minus the reservation. The pool's `allowedCpus` is never changed: every
+laptop of the box shares the one live pool cgroup, and a laptop CPU set is
+always a subset of it. A laptop operation already on record keeps the CPU set
+its owner approved and its policy digest; nothing is rewritten in place.
+
+`GET /api/company/docker-resources/cpu-reservation` (signed-in owner only)
+returns the host `topology` (`onlineCpus`, `firstCoreCpus`), the
+`defaultReservedCpus`, the owner's `approved` decision or `null`, the
+`reservedCpus` in force and their `source` (`default` or `owner`), the shared
+`poolCpus`, and per employee the `operationCpus` of the laptop on record,
+the `nextCpus` a new operation would get and a `state`:
+
+- `applied`: the laptop on record already runs on that CPU set.
+- `next-start`: no laptop operation is on record; the next start takes it.
+- `rebuild-required`: the running laptop keeps its approved CPU set until it is
+  rebuilt or moved to another plan.
+- `refused`: the reservation would leave this employee no CPU (`code`).
+
+`PUT /api/company/docker-resources/cpu-reservation` (signed-in, same-origin
+owner; no worker, parent-session or service-token header) records a decision:
+
+```json
+{ "revision": "NEW_UUID", "expectedRevision": null, "scope": "all-employees", "reservedCpus": [0, 16] }
+```
+
+`reservedCpus` is a sorted list; `[]` reserves nothing. Every CPU must be online
+(`DOCKER_CPU_RESERVATION_CPU_OFFLINE`) and at least one online CPU must remain,
+also for every employee's approved policy
+(`DOCKER_CPU_RESERVATION_LEAVES_NO_CPU`). `expectedRevision` is the
+`approved.revision` the owner last saw, or `null` for the first decision; a
+stale value is refused with `DOCKER_CPU_RESERVATION_CHANGED`. Decisions are
+appended to the private `docker-cpu-reservation.jsonl` beside the company
+store. An unreadable host topology offers no decision
+(`DOCKER_CPU_TOPOLOGY_UNKNOWN`) and reserves nothing by default.
+
+To move an existing employee onto the CPU set, rebuild the laptop once nothing
+in it matters (`POST .../docker-rebuild/preview`, then `.../apply`), read
+`GET .../docker-policy` (its `policy` and `policyDigest` now carry the new
+`allowedCpus`) and continue the laptop with that `expectedPolicyDigest`; the
+supervisor's own rebuild continues the same way. A plan move also takes the
+current CPU set. A rebuild discards the laptop terminal's conversation; home,
+memories, shared Nix store and session identity are kept.
+
+Current gaps: there is no in-place re-enforcement of a running laptop's CPU set
+and no GUI control. The pool cgroup and short-lived resource helpers still run
+on the whole pool CPU set.
+
 ## Retained expert startup
 
 After a reboot, the ordinary session restore banner and its API offer personal

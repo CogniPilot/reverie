@@ -112,6 +112,7 @@ let
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
         test/docker-pool-cpu-ceiling.test.ts \
+        test/docker-cpu-reservation.test.ts \
         test/docker-resource-revisions.test.ts \
         test/docker-resource-convergence.test.ts \
         test/docker-owner-stop-status.test.ts \

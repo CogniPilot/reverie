@@ -21,6 +21,8 @@ import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
 import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
 import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
+import { DockerCpuReservation } from './docker-cpu-reservation.js';
+import { registerDockerCpuReservationRoutes } from './web/routes/docker-cpu-reservation-routes.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -97,6 +99,7 @@ interface Attached {
   pool: DockerPoolReconciliation;
   resourceRevisions: DockerResourceRevisionService;
   cpuCeiling: DockerPoolCpuCeiling;
+  cpuReservation: DockerCpuReservation;
   recoveryHelper?: DockerWorkerReattachHelper;
   absent: DockerAbsentReprovision;
   command: PackagedDockerEngineCommand;
@@ -318,12 +321,22 @@ export class DockerEmployeeRuntime {
     if (this.#attached || !this.current()) throw Error('Boxed runtime composition is not current');
     const configuration = this.selected.value,
       revisions = new DockerResourceRevisionStore(join(dirname(company.store.file), 'docker-resource-revisions')),
+      boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment }),
+      cpuReservation = new DockerCpuReservation(
+        company,
+        join(dirname(company.store.file), 'docker-cpu-reservation.jsonl'),
+        boxId,
+        () => {
+          if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+        }
+      ),
+      // Owner-approved defaults for NEW laptop operations only: the soft memory
+      // revision, then the CPUs kept free for the owner's own system.
       store = new CompanyDockerContinuationStore(company, (id) => ctx.store.getSession(id), (owner, policy) => {
         const desired = revisions.desired(owner);
-        return desired ? dockerRevisedPolicy(policy, desired) : policy;
+        return cpuReservation.policy(desired ? dockerRevisedPolicy(policy, desired) : policy);
       });
     const inventory = () => store.resourceInventory();
-    const boxId = dockerContinuationDigest({ instanceId: this.#key.instanceId, deployment: configuration.deployment });
     const coldPool = new DockerColdPoolJournal(join(dirname(company.store.file), 'docker-pool-cold-recovery.jsonl'));
     const cpuCeilings = new DockerPoolCpuCeilingStore(
       join(dirname(company.store.file), 'docker-pool-cpu-ceiling.jsonl'),
@@ -499,6 +512,7 @@ export class DockerEmployeeRuntime {
       pool,
       resourceRevisions,
       cpuCeiling,
+      cpuReservation,
       recoveryHelper,
       absent,
       command,
@@ -588,6 +602,11 @@ export class DockerEmployeeRuntime {
     registerDockerPoolCpuCeilingRoutes(
       app,
       a.cpuCeiling,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
+    registerDockerCpuReservationRoutes(
+      app,
+      a.cpuReservation,
       guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
     );
     registerDockerOwnerStopRoutes(

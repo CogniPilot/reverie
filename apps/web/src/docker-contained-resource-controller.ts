@@ -54,6 +54,7 @@ import {
 } from './docker-resource-helper-inspection.js';
 import { DockerOriginalResourceWriterReader } from './docker-resource-original-writer.js';
 import { parseDockerLeafWriterArguments } from './docker-resource-leaf-census.js';
+import { formatKernelCpuList } from './docker-cpu-reservation-data.js';
 
 const cid = z.string().regex(/^[a-f0-9]{64}$/);
 /** Leaf writers one request may issue before it holds and asks to be repeated. */
@@ -141,16 +142,7 @@ function startTicks(raw: string): string {
   if (!value || !/^[1-9][0-9]{0,19}$/.test(value)) refuse('DOCKER_RESOURCE_INIT_UNKNOWN');
   return value;
 }
-function canonicalCpus(values: readonly number[]): string {
-  const ranges: string[] = [];
-  for (let index = 0; index < values.length; index++) {
-    const first = values[index]!;
-    let last = first;
-    while (index + 1 < values.length && values[index + 1] === last + 1) last = values[++index]!;
-    ranges.push(first === last ? String(first) : `${first}-${last}`);
-  }
-  return ranges.join(',');
-}
+const canonicalCpus = formatKernelCpuList;
 /** Pure DATA comparison only. A boolean never supplies a native resource or owner proof. */
 export function dockerOtherResourceLimitsMatch(
   r: Observation['resources'],

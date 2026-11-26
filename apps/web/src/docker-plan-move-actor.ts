@@ -76,6 +76,7 @@ import type { DockerRuntimeConfiguration } from './docker-employee-runtime.js';
 
 import type { SessionState } from './types.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
+import { dockerReplacementKeepsLimits } from './docker-cpu-reservation-data.js';
 
 type Context = SessionPort &
   ConfigPort &
@@ -506,8 +507,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
     if (!nativeThreadProfile(state.seed.target.provider === 'anthropic' ? 'claude' : 'codex'))
       throw new PlanMoveError('The selected target protocol changed', 409);
     const policy = this.#d.store.newOperationPolicy(record.employeeId);
-    if (!same(policy, { ...state.seed.source.record.policy, memoryHighBytes: policy.memoryHighBytes }))
-      throw new PlanMoveError('Plan moves cannot change shared pool or other resource limits', 409);
+    if (!dockerReplacementKeepsLimits(policy, state.seed.source.record.policy))
+      throw new PlanMoveError(
+        'Plan moves cannot change shared pool or resource limits other than memory and CPU set',
+        409
+      );
     await this.#requireSourcePool(state.seed.source.record, () => journal.current());
     const target = await this.#snapshot(record, journal);
     try {
@@ -961,8 +965,11 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
         .length(1)
         .parse(JSON.parse(await this.#command.run(['container', 'inspect', seed.source.binding.containerId])))[0]!;
     journal.current();
-    if (!same(resourcePolicy, { ...seed.source.record.policy, memoryHighBytes: resourcePolicy.memoryHighBytes }))
-      throw new PlanMoveError('Plan moves cannot change non-memory resource limits', 409);
+    if (!dockerReplacementKeepsLimits(resourcePolicy, seed.source.record.policy))
+      throw new PlanMoveError(
+        'Plan moves cannot change shared pool or resource limits other than memory and CPU set',
+        409
+      );
     const ephemeral = ephemeralRetainedProjection(raw, seed.source.record.destination!);
     const networkIds = await this.#d.engine.planReplacementNetworkIds(seed.source.record, () => journal.current());
     journal.current();
