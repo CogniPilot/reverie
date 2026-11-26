@@ -869,6 +869,15 @@
       ],
       "outcome": "The profile offers the in-place pool repair for the hold its status named and submits that exact scope. Native restoration and installed office behavior require separate verification."
     },
+    "office-warm-page-back": {
+      "test": "test/office-navigation-ui.test.ts",
+      "title": "keeps one owner-bound Workspace loaded beside the Board and shows it at once, refreshing it behind",
+      "assertions": [
+        "expect(h.shell.embed).toBe('workspace')",
+        "expect(cache.panel.querySelector('.ca-tool-page-head button')?.textContent).toContain('Back to Company / tools')"
+      ],
+      "outcome": "A page kept loaded in the background shows its own Back to Company / tools button when it is opened. Pressing it on the kept page and installed office behavior require separate verification."
+    },
     "docker-resources-cold-pool": {
       "test": "test/docker-resources-ui.test.ts",
       "title": "requires explicit owner confirmation before submitting the stopped pool recovery preview",
@@ -1555,6 +1564,11 @@
       "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Review resource default",
       "scenarios": ["docker-resources-new-revision"],
       "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.warmPageEl::inline::button:Back to Company / tools",
+      "scenarios": ["office-warm-page-back"],
+      "remaining": "Pressing the button on the kept page and installed office behavior require separate verification."
     },
     {
       "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Put approved pool limits back",
@@ -6044,8 +6058,8 @@
       "reason": "Detection gap: embedded-control-markup:cd74335d8daf"
     },
     {
-      "declaration": "src/web/public/board.html#inline-1::kanban::inline::embedded-control-markup:4752fa67f189",
-      "reason": "Detection gap: embedded-control-markup:4752fa67f189"
+      "declaration": "src/web/public/board.html#inline-1::kanban::inline::embedded-control-markup:9cc784a91a41",
+      "reason": "Detection gap: embedded-control-markup:9cc784a91a41"
     },
     {
       "declaration": "src/web/public/board.html#inline-1::kanban::inline::embedded-control-markup:96b3f46203c6",
