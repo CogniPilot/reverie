@@ -1,8 +1,6 @@
 /** A shared pool cold-start cursor survives a console restart or rollback.
  * An incomplete attempt remains held. Only an observed, published pool can
  * close it, and completed records remain available for later diagnosis. */
-import { closeSync, constants, fstatSync, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { z } from 'zod';
 import { withCanonicalStateLock } from './canonical-state-lock.js';
 import {
@@ -11,8 +9,12 @@ import {
   type DockerContinuationTaskJournal,
 } from './docker-continuation-task.js';
 import { DockerEmployeeContinuationError, dockerContinuationDigest } from './docker-employee-continuation.js';
+import {
+  appendDockerPrivateJournal,
+  readDockerPrivateJournal,
+  type DockerPrivateJournalRefusals,
+} from './docker-private-journal.js';
 
-const budget = 512 * 1024;
 const digest = z.string().regex(/^[a-f0-9]{64}$/);
 const scope = z
   .object({
@@ -37,64 +39,22 @@ type Entry = z.infer<typeof journalEntry>;
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
 }
-function privateFile(fd: number): void {
-  const status = fstatSync(fd);
-  if (
-    !status.isFile() ||
-    status.nlink !== 1 ||
-    status.uid !== process.getuid?.() ||
-    (status.mode & 0o077) !== 0 ||
-    status.size > budget
-  )
-    refuse('DOCKER_POOL_COLD_JOURNAL_UNCONFIRMED');
-}
+const refusals: DockerPrivateJournalRefusals = {
+  unconfirmed: () => refuse('DOCKER_POOL_COLD_JOURNAL_UNCONFIRMED'),
+  full: () => refuse('DOCKER_POOL_COLD_JOURNAL_FULL'),
+};
 
 export class DockerColdPoolJournal {
   constructor(private readonly path: string) {}
 
   #entries(): Entry[] {
-    let fd: number;
-    try {
-      fd = openSync(this.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw error;
-    }
-    try {
-      privateFile(fd);
-      const raw = readFileSync(fd, 'utf8');
-      if (!raw.endsWith('\n')) refuse('DOCKER_POOL_COLD_JOURNAL_UNCONFIRMED');
-      return raw
-        .slice(0, -1)
-        .split('\n')
-        .map((line) => journalEntry.parse(JSON.parse(line)));
-    } finally {
-      closeSync(fd);
-    }
+    return readDockerPrivateJournal(this.path, refusals).map((line) => journalEntry.parse(JSON.parse(line)));
   }
 
   #append(entry: Entry, current: () => void): void {
     const line = JSON.stringify(journalEntry.parse(entry)) + '\n';
     current();
-    const file = openSync(
-      this.path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      0o600
-    );
-    try {
-      privateFile(file);
-      if (fstatSync(file).size + Buffer.byteLength(line) > budget) refuse('DOCKER_POOL_COLD_JOURNAL_FULL');
-      writeFileSync(file, line, 'utf8');
-      fsyncSync(file);
-      const parent = openSync(dirname(this.path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      try {
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
-      }
-    } finally {
-      closeSync(file);
-    }
+    appendDockerPrivateJournal(this.path, line, refusals);
   }
 
   requireIdle(): void {

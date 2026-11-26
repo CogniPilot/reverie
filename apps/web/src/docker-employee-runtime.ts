@@ -59,6 +59,7 @@ import { CompanyDockerContinuationStore, dockerEmployeeProviderSourceDigest } fr
 import { DockerEmployeeEngine } from './docker-employee-engine.js';
 import { DockerWorkerGpu } from './docker-worker-gpu.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
+import { DockerResourceRepairJournal } from './docker-resource-repair-journal.js';
 import { PackagedDockerEngineCommand } from './docker-engine-command.js';
 import { DockerWorkerReattachHelper } from './docker-worker-reattach-helper.js';
 import type { DockerEmployeeBinding, DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
@@ -99,6 +100,7 @@ interface Attached {
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
+  repairs: DockerResourceRepairJournal;
   resourceRevisions: DockerResourceRevisionService;
   cpuCeiling: DockerPoolCpuCeiling;
   cpuReservation: DockerCpuReservation;
@@ -345,6 +347,12 @@ export class DockerEmployeeRuntime {
       join(dirname(company.store.file), 'docker-pool-cpu-ceiling.jsonl'),
       boxId
     );
+    // The office's own in-place repairs of limits that a reload of the host's
+    // service manager reset. One private journal beside the company store.
+    const repairs = new DockerResourceRepairJournal(
+      join(dirname(company.store.file), 'docker-resource-repair.jsonl'),
+      boxId
+    );
     const command = new PackagedDockerEngineCommand(),
       resources = new DockerContainedResources(command, store, {
         boxId,
@@ -354,6 +362,7 @@ export class DockerEmployeeRuntime {
         poolRestoreHelperImageId: configuration.poolRestoreHelperImageId,
         leafWriterHelperImageId: configuration.leafWriterHelperImageId,
         requireColdPoolIdle: () => coldPool.requireIdle(),
+        repairs,
         approvedPoolCpuMax: () => cpuCeilings.acceptedCpuMax(),
         selectedWorkerContainerIds:()=>dockerPlanWorkerContainerIds(inventory,this.#planMoves,()=>{if(!this.current())throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');}),
         retainedPoolConfigurationTasks: () =>
@@ -540,6 +549,7 @@ export class DockerEmployeeRuntime {
       provider,
       service,
       pool,
+      repairs,
       resourceRevisions,
       cpuCeiling,
       cpuReservation,
@@ -614,6 +624,7 @@ export class DockerEmployeeRuntime {
       store: a.store,
       engine: a.engine,
       service: a.service,
+      pool: a.pool,
       absent: a.absent,
       sessions: a.ctx.sessions,
       current: () => this.current() && this.#attached === a,
@@ -670,7 +681,7 @@ export class DockerEmployeeRuntime {
     const a=this.#attached;if(!a||!this.current())return;
     if(!(moves instanceof PlanMoveStore)||(this.#planMoves&&this.#planMoves!==moves))throw Error('Original private plan journal required');this.#planMoves=moves;
     const current=()=>{if(!this.current()||this.#attached!==a||a.company.store.publicationUnconfirmed)throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');};
-    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
+    return new DockerPlanMoveActor({company:a.company,ctx:a.ctx,plans,moves,chat,store:a.store,engine:a.engine,provider:a.provider,configuration:this.selected.value,boxId:dockerContinuationDigest({instanceId:this.#key.instanceId,deployment:this.selected.value.deployment}),authentication:this.authentication,revisions:a.resourceRevisions.revisions,repairs:a.repairs,current,renewPublishedView:(row,session,admitted)=>this.#renewPublishedPlanView(row,session,admitted),
       requireReconciledSourcePool: (row, admitted) => a.pool.requirePlanSourcePool(row, admitted),
       recoveryHelper: a.recoveryHelper,
       recoverPublishedPlanView: async (row, authDigest, admitted) => {

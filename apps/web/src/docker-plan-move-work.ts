@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { DockerEmployeeEngine, type DockerEmployeeImageConfiguration } from './docker-employee-engine.js';
 import { DockerContainedResources } from './docker-contained-resource-controller.js';
 import type { DockerResourceRevisionStore } from './docker-resource-revisions.js';
+import type { DockerResourceRepairJournal } from './docker-resource-repair-journal.js';
 import type { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import type { PlanMoveStore } from './plan-move-store.js';
 import type { DockerEngineCommand } from './docker-engine-command.js';
@@ -59,6 +60,7 @@ export interface DockerPlanWorkComposition {
   readonly canonical: CompanyDockerContinuationStore;
   readonly moves: PlanMoveStore;
   readonly revisions: DockerResourceRevisionStore;
+  readonly repairs?: DockerResourceRepairJournal;
   readonly providerMode: string;
 }
 export class DockerPlanMoveWork {
@@ -121,6 +123,7 @@ export class DockerPlanMoveWork {
             d.helperImageId,
             d.boxId
           ),
+        ...(d.repairs ? { repairs: d.repairs } : {}),
       },
       d.revisions
     );

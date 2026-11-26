@@ -23,6 +23,7 @@ import { submitRecoveryPrompt, recoveryComposerReady } from './company-recovery-
 import { composerIsEmpty } from './session-submit-verifier.js';
 import { getCli } from './config/cli-registry/registry.js';
 import type { DockerResourceRevisionStore } from './docker-resource-revisions.js';
+import type { DockerResourceRepairJournal } from './docker-resource-repair-journal.js';
 import type { RuntimeRecipe } from './expert-runtime-recipe.js';
 import { Session } from './session.js';
 import type { DockerPlanSourceContext } from './docker-plan-source-data.js';
@@ -99,6 +100,8 @@ export interface DockerPlanMoveComposition {
   readonly authentication: DockerWorkerIdentityAuthentication;
   readonly current: () => void;
   readonly revisions: DockerResourceRevisionStore;
+  /** The office's in-place limit repairs: their pool writers are part of every closed-writer census. */
+  readonly repairs?: DockerResourceRepairJournal;
   readonly renewPublishedView?: (row: DockerEmployeeContinuationRecord, session: Session, current: () => void) => Promise<void>;
   readonly requireReconciledSourcePool?: (row: DockerEmployeeContinuationRecord, current: () => void) => Promise<void>;
   readonly retain: (actor: DockerPlanMoveActor) => void;
@@ -747,6 +750,7 @@ export class DockerPlanMoveActor implements PlanMoveDockerActor {
           canonical: this.#d.store,
           moves: this.#d.moves,
           revisions: this.#d.revisions,
+          repairs: this.#d.repairs,
           providerMode: state.seed.target.provider === 'anthropic' ? 'claude' : 'codex',
         },
         journal

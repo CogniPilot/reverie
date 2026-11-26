@@ -397,7 +397,13 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     'rebuild',
     "{name}'s laptop or its approved limits changed after the limits step failed.",
   ],
+  // Both are put right in place while the laptop runs, when the read offers that; a rebuild follows only if that
+  // never helps, and never while an agent is running there.
   DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED: ['rebuild', "{name}'s laptop does not show its approved resource limits."],
+  DOCKER_RESOURCE_LEAF_ACK_MISSING: [
+    'rebuild',
+    "Nothing on record confirms the approved resource limits of {name}'s laptop any more.",
+  ],
   DOCKER_CONTINUATION_START_UNCONFIRMED: ['rebuild', "{name}'s laptop was asked to start and is not running."],
   DOCKER_CONTINUATION_DESTINATION_UNCONFIRMED: ['rebuild', "{name}'s laptop container cannot be found."],
   DOCKER_CONTINUATION_DESTINATION_NOT_STOPPED: [
@@ -422,9 +428,14 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     "{name}'s laptop has never been started and was made for an earlier laptop image, so the office cannot start it.",
   ],
 
+  // The pool's approved limits are written again in place when the read offers that. No laptop is rebuilt for it.
   DOCKER_CONTINUATION_POOL_UNCONFIRMED: [
     'retry-owner',
     'The shared resource pool that all laptops use is not confirmed.',
+  ],
+  DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: [
+    'retry-owner',
+    'Nothing on record confirms the limits of the shared resource pool.',
   ],
   DOCKER_CONTINUATION_STORAGE_UNCONFIRMED: ['retry-owner', "{name}'s home storage could not be verified."],
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE: [
@@ -444,11 +455,17 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     "Something the office did not start is running in {name}'s laptop terminal.",
   ],
   DOCKER_CONTINUATION_RUNTIME_CHANGED: ['owner', "The office's laptop configuration changed while it was running."],
-  DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: [
-    'owner',
-    'The helper for the shared resource pool never confirmed its limits.',
-  ],
 };
+/** Holds whose cause is the pool that every laptop shares. Rebuilding one laptop never settles them. */
+const SHARED_POOL_CODES: ReadonlySet<string> = new Set([
+  'DOCKER_CONTINUATION_POOL_UNCONFIRMED',
+  'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED',
+]);
+/** What a laptop read offers that the supervisor's re-send performs. */
+const RESENDABLE: readonly string[] = ['continue', 'retry', 'repair', 'repair-pool'];
+const REPAIR_POOL_BY_HAND =
+  'Put the approved limits of the shared pool back: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
+  '(or …/docker-pool/reconcile when the status offers that instead). No laptop is stopped.';
 /** A refused local-model launch check: its code carries the reason after this prefix and its message says the rest. */
 const LOCAL_MODEL_PREFIX = 'DOCKER_CONTINUATION_LOCAL_MODEL_';
 
@@ -458,10 +475,8 @@ const OWNER_STEPS: Readonly<Record<string, string>> = {
   DOCKER_CONTINUATION_FOREIGN_PROVIDER:
     'Look at the laptop terminal. Rebuild the laptop (POST …/docker-rebuild/preview, then /apply) once nothing in it matters.',
   DOCKER_CONTINUATION_RUNTIME_CHANGED: 'Restart the office so it reads its configuration again.',
-  DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED:
-    'Reconcile the shared pool: GET …/docker-pool/status, then POST …/docker-pool/reconcile.',
-  DOCKER_CONTINUATION_POOL_UNCONFIRMED:
-    'Reconcile the shared pool: GET …/docker-pool/status, then POST …/docker-pool/reconcile.',
+  DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: REPAIR_POOL_BY_HAND,
+  DOCKER_CONTINUATION_POOL_UNCONFIRMED: REPAIR_POOL_BY_HAND,
   DOCKER_CONTINUATION_STORAGE_UNCONFIRMED:
     'After a host restart, approve the storage device change: POST …/docker-storage/device-approval.',
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE:
@@ -615,9 +630,7 @@ function classifyCode(
         '…/docker-pool/cold-recover. Then rebuild this laptop.',
     });
   if (kind === 'retry-owner') {
-    const offered = observed.laptop.continuation?.allowedActions.some((action) =>
-      ['continue', 'retry'].includes(action)
-    );
+    const offered = observed.laptop.continuation?.allowedActions.some((action) => RESENDABLE.includes(action));
     return offered
       ? classified('held-retryable', sentence, { code, fingerprint })
       : classified('needs-owner', sentence, {
@@ -833,7 +846,7 @@ function gate(
       // Offered by the operation itself, and never for a plan move's private record.
       return observed.laptop.record &&
         observed.laptop.record.version !== 3 &&
-        seen?.allowedActions.some((name) => ['continue', 'retry'].includes(name))
+        seen?.allowedActions.some((name) => RESENDABLE.includes(name))
         ? { kind: 'ok' }
         : { kind: 'skip' };
     case 'start-continuation':
@@ -875,7 +888,10 @@ function gate(
       return { kind: 'ok' };
     }
     case 'rebuild-laptop':
-      return rebuildGate(observed, history, now, policy);
+      // A new laptop would join the same pool and be held by the same thing.
+      return seen?.code && SHARED_POOL_CODES.has(seen.code)
+        ? { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND }
+        : rebuildGate(observed, history, now, policy);
   }
 }
 

@@ -100,7 +100,9 @@ export interface DockerEngineCommand {
    * refuses the last one while any container still uses the image. */
   removeUnusedLaptopImage?(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void>;
 }
-const SUPERSEDED_HELPER_NAME = /^\/reverie-boxed-(?:ephemeral|identity|leaf-helper)-[a-f0-9]{64}$/,
+// A pool helper is named only by the office's own repair, for an earlier
+// repair writer that a newer acknowledged one has superseded.
+const SUPERSEDED_HELPER_NAME = /^\/reverie-boxed-(?:ephemeral|identity|leaf-helper|pool-helper)-[a-f0-9]{64}$/,
   LAPTOP_IMAGE_TAG = /^reverie-boxed-(?:worker|source):[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 /** Whether an inspected container is exactly the proven helper and has run to
  * its end. A created, running, paused, restarting or dead container is not. */

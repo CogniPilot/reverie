@@ -86,6 +86,7 @@ ten healthy minutes):
 | Step | When | Bound |
 | --- | --- | --- |
 | Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min |
+| Put approved limits back in place (the shared pool first, then the laptop's own) | a running laptop's read offers `repair-pool` or `repair` | the same 4 |
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
 | Wake (attach a provider that already runs) | the terminal is not connected | 6 |
@@ -101,6 +102,13 @@ laptop is rebuilt only while another laptop of the box runs; when none does,
 that is what a host restart looks like, so recover the shared pool first
 (below). A code or a plan move error it does not recognize is reported and left
 alone.
+
+Putting limits back is not changing them. A reload of the host's service
+manager resets the limits that only a helper wrote, and every laptop is then
+refused although its agent is still running. The supervisor calls the same two
+repairs an owner would ([below](#put-approved-limits-back-after-a-reload-of-the-host-service-manager)),
+which write the already approved values again. It never rebuilds a laptop for a
+hold of the shared pool: a new laptop would join the same pool.
 
 Two company settings switch it (`PUT /api/company/settings`, owner only; absent
 means on): `supervisorEnabled` (observe, continue, wake) and
@@ -450,6 +458,114 @@ proof again.
 Canonical company format 2 is published atomically when either retained pool
 lineage or a re-earned observation becomes nonempty. Empty legacy format 1
 remains readable; format 1 containing new retained pool metadata is rejected.
+
+## Put approved limits back after a reload of the host service manager
+
+A reload of the host's service manager (`systemctl daemon-reload`, and with it
+every `nixos-rebuild switch`) makes systemd apply its own unit settings to
+every cgroup again. Docker registers a laptop's hard memory and process limits
+with systemd, so those survive. The limits that only the resource helper wrote
+do not: the shared pool's memory, swap and process limits, and each laptop's
+soft memory and swap limits, are back at "no limit". Nothing is stopped by
+that, but no laptop reads as approved any more: every employee is held with
+`DOCKER_CONTINUATION_POOL_UNCONFIRMED`, and once the pool is put right, with
+`DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED` (or
+`DOCKER_RESOURCE_LEAF_ACK_MISSING` when the helper container that confirmed
+the laptop's limits no longer exists).
+
+The office repairs both in place, without stopping a laptop, and with the
+supervisor on it does so by itself. The same two calls are open to a verified
+owner and to an agent with a current `recoverEmployees` grant:
+
+1. `GET /api/company/employees/:id/docker-pool/status` for an employee whose
+   laptop is running. When it answers `held` with `allowedActions:
+   ["repair-pool"]`, submit `POST /api/company/employees/:id/docker-pool/repair`
+   with `sessionId`, `sessionGeneration` and `expectedScopeDigest` copied from
+   `scopeDigest`. The office runs the pinned restore helper once (`restore-pool`
+   with every running laptop bound by its process birth), reads the limits back,
+   verifies the helper's acknowledgement and records the pool observation if
+   none on record covers it. Sent again, it finds nothing to do and answers with
+   the status. An empty running pool is written with `configure-pool` instead.
+2. `POST /api/company/employees/:id/docker-continuation/repair` with the
+   laptop's `operationId`, for each running laptop whose read offers `repair`.
+   The office runs the leaf writer once (`restore-high`), which writes the
+   laptop's approved swap, soft memory and CPU weight again and requires the
+   limits Docker owns to be unchanged, then reads the laptop again. An agent
+   that was refused only for its limits reads `ready` again and the office
+   terminal is attached to it; nothing in the laptop is restarted.
+
+What these calls cannot do: they take no limit and no policy. The values come
+from the laptop's own approved record, and a pool repair is refused for an
+employee whose record does not name the one pool policy every employee is
+approved with. Neither one creates, starts, stops or removes a laptop, launches
+an agent or edits a laptop record.
+
+Each repair keeps its own durable cursor in `docker-resource-repair.jsonl`
+beside the company store, written before the helper is created and before it
+is started. An attempt whose reply was lost is observed as itself: a helper
+that was created is not created again, one that was started is not started
+again. A helper that exited with an error is recorded as failed, it
+acknowledges nothing, and the next request issues one new attempt from a
+freshly read pool. A helper that may still be running holds every reader of the
+pool until it has ended. The restore helper refuses by itself when a laptop
+started or stopped after the office read the pool; that attempt is recorded as
+failed and the next one names the laptops that run then.
+
+The same repair is what the pool step of a laptop set-up uses when other
+laptops already run in the pool. `configure-pool` only initializes an empty
+pool; the office no longer issues it against one that has members. A set-up
+whose own pool helper exited with an error is recorded as failed when the
+request is sent again, and then continues.
+
+Refusals worth knowing:
+
+| Code | Meaning |
+| --- | --- |
+| `DOCKER_POOL_RESTORE_HELPER_REQUIRED` | Laptops run in the pool and the office has no `poolRestoreHelperImageId`. Nothing was written. |
+| `DOCKER_RESOURCE_POOL_RESTORE_UNSUPPORTED` | The selected restore image is not built for restoring. |
+| `DOCKER_RESOURCE_MEMBERS_CHANGED` | A laptop started or stopped while the pool was read. Repeat. |
+| `DOCKER_RESOURCE_HELPER_FAILED` | The helper exited with an error; the attempt is recorded as failed. Repeat. |
+| `DOCKER_RESOURCE_REPAIR_REVISION_PRESENT` | The laptop has an owner soft-memory revision on record; apply that revision again or rebuild. |
+| `DOCKER_RESOURCE_POOL_WRITER_UNCONFIRMED` | A pool helper on record may still be running. Wait for it to end. |
+
+Limits of this workflow, stated plainly:
+
+- `restore-high` is a command of the resource helper that an image built
+  before it existed does not have. The office issues it with the leaf writer
+  image (`leafWriterHelperImageId`, or the baseline helper image when none is
+  selected), so that image must be a build that carries the command. With an
+  older image the helper exits at once, nothing is written, and the laptop
+  stays held with the repair still offered.
+- A repair helper container is kept: it is the acknowledgement. Once a newer
+  repair of the same pool or laptop is acknowledged and read back, the office
+  removes the earlier repair helpers of that target itself (exited ones only,
+  never by force, and never one the company record names), so a host that
+  reloads often keeps one per target. The helpers of a laptop's own set-up are
+  not touched by this.
+- A repair helper that was recorded as about to be created and that the
+  Engine does not list was never created (the Engine refused it, or the office
+  stopped first). The next request closes that attempt as never created and
+  issues a new one; only a helper recorded as created is ever started.
+- A laptop record whose own pool helper is recorded as failed cannot be read
+  by an office build that predates this workflow, which knew that state for a
+  laptop's own limits helper only. Do not return to such a build once one is
+  recorded.
+- A laptop of an employee who is out of the office is not repaired until they
+  return: the pool's limits bound it meanwhile, its own soft memory and swap
+  limits do not.
+- `docker-resource-repair.jsonl` holds at most 512 KiB. A full file whose
+  attempts have all ended is set aside as `docker-resource-repair.jsonl.previous`
+  and a new one is started.
+- After a restore image selection changes, an acknowledgement written under
+  the earlier image is no longer read. The pool then reads as unconfirmed with
+  intact limits, and the repair re-earns an acknowledgement under the new image.
+- The observation record that plan moves read is written by the pool repair
+  call. When the pool was put right by a laptop set-up instead, the status
+  reports `reconciliation-required` and offers `reconcile-pool` as before.
+
+This source and component coverage is not evidence of a restoration on a real
+kernel; that is qualified on the selected images, as described under
+[native helper acceptance](testing/memory-high-native.md).
 
 ## Recover the shared Docker pool after a host restart
 

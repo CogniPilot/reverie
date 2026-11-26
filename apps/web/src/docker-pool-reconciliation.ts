@@ -1,5 +1,6 @@
-/** Reconcile native pool observations and recover a stopped, empty pool using
- * its approved policy. Employee and provider launches use their own workflow. */
+/** Reconcile native pool observations, recover a stopped, empty pool and put a
+ * running pool's approved limits back in place, each using its already
+ * approved policy. Employee and provider launches use their own workflow. */
 import { CompanyService, CompanyError } from './company-service.js';
 import { CompanyDockerContinuationStore } from './docker-employee-store.js';
 import { DockerContainedResources, DockerPoolReconciliationReceipt } from './docker-contained-resource-controller.js';
@@ -17,10 +18,27 @@ export interface DockerPoolStatus {
   readonly sessionGeneration: number;
   readonly code?: string;
   readonly scopeDigest?: string;
-  readonly allowedActions: readonly 'reconcile-pool'[];
+  readonly allowedActions: readonly ('reconcile-pool' | 'repair-pool')[];
 }
+/** Holds of a running pool that re-applying its approved limits settles: the
+ * kernel no longer shows them, or no acknowledgement of them survives. */
+const REPAIRABLE: ReadonlySet<string> = new Set(['DOCKER_POOL_POLICY_CHANGED', 'DOCKER_POOL_ORIGINAL_ACK_MISSING']);
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
+}
+/** One request's view of the employee it acts for and of the pool metadata it started from. */
+interface PoolContext {
+  readonly original: {
+    employeeId: string;
+    owner: string | null;
+    sessionId: string;
+    sessionGeneration: number;
+    policy: DockerPoolObservationRecord['poolPolicy'];
+  };
+  readonly beforeState: ReturnType<CompanyService['store']['snapshot']>;
+  readonly beforePool: string;
+  current(): void;
+  requireSubject(): void;
 }
 export class DockerPoolReconciliation {
   constructor(
@@ -38,7 +56,7 @@ export class DockerPoolReconciliation {
     )
       throw Error('Actual boxed company/resource owners required');
   }
-  #context(employeeId: string, authority: DockerContinuationAuthority) {
+  #context(employeeId: string, authority: DockerContinuationAuthority): PoolContext {
     const subject = () => {
       this.runtimeCurrent();
       authority.require();
@@ -237,14 +255,86 @@ export class DockerPoolReconciliation {
       return this.#result(context, record, context.beforePool);
     } catch (cause) {
       context.current();
+      const code = cause instanceof DockerEmployeeContinuationError ? cause.code : 'DOCKER_POOL_OBSERVATION_UNCONFIRMED';
+      // The repair re-applies exactly the policy this status was read with. Its
+      // digest binds the request to this employee, this hold and this record.
+      const repairable = REPAIRABLE.has(code) && this.#repairSource(employeeId, context) !== undefined;
       return {
         state: 'held',
         sessionId: context.original.sessionId,
         sessionGeneration: context.original.sessionGeneration,
-        code: cause instanceof DockerEmployeeContinuationError ? cause.code : 'DOCKER_POOL_OBSERVATION_UNCONFIRMED',
-        allowedActions: [],
+        code,
+        ...(repairable
+          ? { scopeDigest: dockerContinuationDigest({ subject: context.original, code, poolMetadata: context.beforePool }) }
+          : {}),
+        allowedActions: repairable ? ['repair-pool'] : [],
       };
     }
+  }
+  /** The laptop record whose recorded anchor and approved pool policy a repair
+   * acts for. Undefined when this employee has none that names the one policy
+   * every employee of the box is approved with. */
+  #repairSource(employeeId: string, context: PoolContext): DockerEmployeeContinuationRecord | undefined {
+    const row = this.store.record(employeeId),
+      policy = dockerContinuationDigest(context.original.policy);
+    if (
+      !row ||
+      row.version === 3 ||
+      (row.owner ?? null) !== context.original.owner ||
+      row.request.sessionId !== context.original.sessionId ||
+      row.request.sessionGeneration !== context.original.sessionGeneration ||
+      dockerContinuationDigest(row.policy.pool) !== policy ||
+      this.company.store
+        .snapshot()
+        .employees.some(
+          (employee) =>
+            employee.dockerResourcePolicy && dockerContinuationDigest(employee.dockerResourcePolicy.pool) !== policy
+        )
+    )
+      return undefined;
+    return row;
+  }
+  /** Puts the already approved limits of the running shared pool back in
+   * place and records its observation. No laptop is stopped or recreated, and
+   * the approved policy is read, never written. A repeated request finds
+   * nothing left to do and answers with the pool's status. */
+  async repair(
+    employeeId: string,
+    input: { sessionId: string; sessionGeneration: number; expectedScopeDigest: string },
+    authority: DockerContinuationAuthority
+  ): Promise<DockerPoolStatus> {
+    const context = this.#context(employeeId, authority);
+    if (
+      input.sessionId !== context.original.sessionId ||
+      input.sessionGeneration !== context.original.sessionGeneration
+    )
+      refuse('DOCKER_POOL_TARGET_CHANGED');
+    if (this.company.store.publicationUnconfirmed) refuse('DOCKER_POOL_PUBLICATION_UNCONFIRMED');
+    const before = await this.status(employeeId, authority);
+    if (!before.allowedActions.includes('repair-pool')) return before;
+    if (input.expectedScopeDigest !== before.scopeDigest) refuse('DOCKER_POOL_SCOPE_CHANGED');
+    const row = this.#repairSource(employeeId, context);
+    if (!row) refuse('DOCKER_POOL_REPAIR_SOURCE_UNCONFIRMED');
+    const source = dockerContinuationDigest({ ...row, tasks: undefined, ephemeralRestoration: undefined });
+    const ready = () => {
+      context.current();
+      this.cold?.requireIdle();
+      const actual = this.store.record(employeeId);
+      if (
+        this.company.store.publicationUnconfirmed ||
+        !actual ||
+        dockerContinuationDigest({ ...actual, tasks: undefined, ephemeralRestoration: undefined }) !== source ||
+        !this.#repairSource(employeeId, context)
+      )
+        refuse('DOCKER_POOL_REPAIR_SOURCE_CHANGED');
+    };
+    ready();
+    await this.resources.repairPool(row, ready);
+    ready();
+    const receipt = await this.#capture(context.original.policy, ready);
+    const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, ready);
+    if (this.#retained(record)) return this.#result(context, record, context.beforePool);
+    return this.#publish(context, receipt, record, ready);
   }
   async reconcile(
     employeeId: string,
@@ -266,6 +356,15 @@ export class DockerPoolReconciliation {
     const record = DockerPoolReconciliationReceipt.prototype.snapshot.call(receipt, ready);
     const expected = this.#result(context, record, context.beforePool).scopeDigest;
     if (input.expectedScopeDigest !== expected) refuse('DOCKER_POOL_SCOPE_CHANGED');
+    return this.#publish(context, receipt, record, ready);
+  }
+  /** Records one fresh native observation through the canonical writer. */
+  async #publish(
+    context: PoolContext,
+    receipt: DockerPoolReconciliationReceipt,
+    record: DockerPoolObservationRecord,
+    ready: () => void
+  ): Promise<DockerPoolStatus> {
     ready();
     const result = await this.company.store.publishDockerPoolObservation(receipt, context.beforePool, ready);
     if (result.state === 'not-issued') throw result.cause;

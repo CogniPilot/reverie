@@ -2260,7 +2260,7 @@
         !this.matches(p) ||
         !['retained', 'reconciliation-required', 'held'].includes(p.state) ||
         !Array.isArray(p.allowedActions) ||
-        p.allowedActions.some((v) => v !== 'reconcile-pool') ||
+        p.allowedActions.some((v) => v !== 'reconcile-pool' && v !== 'repair-pool') ||
         p.allowedActions.length > 1
       ) {
         this.content.append(this.note('Shared pool status could not be verified.'));
@@ -2272,7 +2272,9 @@
             ? 'Shared pool observation retained. Future use still requires fresh native checks.'
             : p.state === 'reconciliation-required'
               ? 'The shared pool observation needs to be restored. Reconciliation checks the original confirmation and changes metadata only.'
-              : 'Shared pool verification needs attention. Refresh to recheck the original evidence. Reconciliation is offered only when the original confirmation can be verified.'
+              : p.allowedActions.includes('repair-pool')
+                ? 'The shared pool no longer shows its approved limits, or nothing on record confirms them. Laptops keep running. Putting the approved limits back writes the same approved values again and changes no policy.'
+                : 'Shared pool verification needs attention. Refresh to recheck the original evidence. Reconciliation is offered only when the original confirmation can be verified.'
         )
       );
       if (typeof p.code === 'string' && /^[A-Z][A-Z0-9_]{2,127}$/.test(p.code)) this.technical(p.code);
@@ -2280,6 +2282,12 @@
         this.controls.append(
           this.shell.button('ca-btn', 'Reconcile shared pool observation', () => this.pool(p.scopeDigest), {
             text: 'Reconcile shared pool observation',
+          })
+        );
+      if (p.state === 'held' && p.allowedActions.includes('repair-pool') && digest(p.scopeDigest))
+        this.controls.append(
+          this.shell.button('ca-btn', 'Put approved pool limits back', () => this.pool(p.scopeDigest, 'repair'), {
+            text: 'Put approved pool limits back',
           })
         );
       if (p.state === 'held' && p.code === 'DOCKER_POOL_ANCHOR_UNCONFIRMED')
@@ -2354,11 +2362,11 @@
         this.technical(notIssuedFailure.message);
       }
     }
-    async pool(scopeDigest) {
+    async pool(scopeDigest, action = 'reconcile') {
       let refreshed = false;
       await this.run(async (sequence) => {
         await this.current();
-        const result = await this.api(`${this.path}/docker-pool/reconcile`, {
+        const result = await this.api(`${this.path}/docker-pool/${action === 'repair' ? 'repair' : 'reconcile'}`, {
           method: 'POST',
           body: { sessionId: this.binding.sid, sessionGeneration: this.binding.gen, expectedScopeDigest: scopeDigest },
         });
@@ -2370,7 +2378,11 @@
           !Array.isArray(result.allowedActions) ||
           result.allowedActions.length
         )
-          throw Error('Pool metadata publication is unconfirmed. Refresh status; no limits were requested.');
+          throw Error(
+            action === 'repair'
+              ? 'The shared pool repair is unconfirmed. Refresh status before trying again; no policy was changed.'
+              : 'Pool metadata publication is unconfirmed. Refresh status; no limits were requested.'
+          );
         refreshed = true;
       });
       if (refreshed) await this.load();

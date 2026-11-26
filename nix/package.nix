@@ -111,6 +111,7 @@ let
         test/docker-resource-leaf-retry.test.ts \
         test/docker-shared-pool-lineage.test.ts \
         test/docker-pool-reconciliation.test.ts \
+        test/docker-pool-restore.test.ts \
         test/docker-pool-cpu-ceiling.test.ts \
         test/docker-cpu-reservation.test.ts \
         test/docker-leftover-cleanup.test.ts \

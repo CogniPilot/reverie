@@ -281,6 +281,43 @@ const GUIDANCE: Readonly<Record<string, DockerRecoveryGuidance>> = {
       'limits failed, so that attempt is not repeated. Use Rebuild laptop to build a fresh one under the current limits.',
     allowedActions: ['rebuild-preview'],
   },
+  DOCKER_RESOURCE_REPAIR_UNAVAILABLE: {
+    message:
+      'This office was started without the journal it needs to put approved resource limits back in place, so ' +
+      'nothing was written. Restart the office on a build that provides it, then repair again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_POOL_RESTORE_HELPER_REQUIRED: {
+    message:
+      'Laptops are running in the shared resource pool, and only the restore helper may write its limits then. ' +
+      'This office is not configured with a restore helper image (poolRestoreHelperImageId), so nothing was ' +
+      'written. The office installation needs that image selected; then repair the pool again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_RESOURCE_MEMBERS_CHANGED: {
+    message: 'A laptop started or stopped while the shared pool was being read, so nothing was written. Repair again.',
+    allowedActions: ['retry'],
+  },
+  DOCKER_RESOURCE_REPAIR_REVISION_PRESENT: {
+    message:
+      'This laptop has an owner-approved soft memory revision on record, which has its own approval and writer, so ' +
+      'its limits are not put back automatically. Apply that revision again (POST ' +
+      '/api/company/employees/:id/docker-resources/apply), or use Rebuild laptop.',
+    allowedActions: ['observe', 'rebuild-preview'],
+  },
+  DOCKER_RESOURCE_REPAIR_SCOPE_UNSUPPORTED: {
+    message:
+      'Limits are put back in place only for a laptop whose set-up has finished and whose agent launch is recorded. ' +
+      'Continue this laptop instead: its own set-up applies its limits.',
+    allowedActions: ['observe', 'retry'],
+  },
+  DOCKER_POOL_REPAIR_SOURCE_UNCONFIRMED: {
+    message:
+      'This employee has no laptop record that names the shared pool and the one pool policy every employee is ' +
+      'approved with, so the pool is not repaired on their behalf. Read the pool status for an employee whose ' +
+      'laptop is running.',
+    allowedActions: ['observe'],
+  },
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE: {
     message:
       'This office is configured to set laptop resource limits with a helper image that the container engine does ' +

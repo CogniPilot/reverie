@@ -120,6 +120,11 @@ export interface DockerContinuationEngine {
   /** Records a started resource writer that is proved terminal and failed. One
    * journal publication and reads; never a CREATE, START or kernel write. */
   settleResourceWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** The same for this operation's own pool writer, before the pool is read. */
+  settlePoolWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Re-applies the already approved limits of one published, running laptop
+   * in place. Never a stop, start, launch or policy change. */
+  repairResources?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
   provisionIdentity(row: DockerEmployeeContinuationRecord, token: string, requireCurrent: () => void): Promise<void>;
 }
 export interface DockerContinuationStore {
@@ -165,8 +170,10 @@ export interface DockerContinuationResult {
   operationId: string;
   phase: DockerEmployeeContinuationPhase;
   state: 'ready' | 'pending' | 'held';
-  /** `continue` and `retry` both name this same request sent again. */
-  allowedActions: readonly ('observe' | 'continue' | DockerRecoveryAction)[];
+  /** `continue` and `retry` both name this same request sent again. `repair`
+   * re-applies this laptop's approved limits in place; `repair-pool` does the
+   * same for the pool that every laptop shares. */
+  allowedActions: readonly ('observe' | 'continue' | 'repair' | 'repair-pool' | DockerRecoveryAction)[];
   code?: string;
   /** One plain sentence for the codes that have one. DATA only; never part of a decision. */
   message?: string;
@@ -177,6 +184,25 @@ export interface DockerContinuationResult {
 function refuse(code: string): never {
   throw new DockerEmployeeContinuationError(code);
 }
+/** Holds of a published laptop that the shared pool's in-place repair settles. */
+const POOL_REPAIRABLE: ReadonlySet<string> = new Set([
+  'DOCKER_CONTINUATION_POOL_UNCONFIRMED',
+  'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED',
+]);
+/** Holds of a published laptop that re-applying its own limits settles. */
+const LEAF_REPAIRABLE: ReadonlySet<string> = new Set([
+  'DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED',
+  'DOCKER_RESOURCE_LEAF_ACK_MISSING',
+]);
+const REPAIR_SENTENCE = {
+  'repair-pool':
+    'The resource pool that every laptop shares no longer shows its approved limits, or nothing on record confirms ' +
+    'them. The laptop is running and is not touched. Put the approved limits back: GET ' +
+    '/api/company/employees/:id/docker-pool/status, then POST /api/company/employees/:id/docker-pool/repair.',
+  repair:
+    'This laptop no longer shows its approved resource limits, or nothing on record confirms them. It is running ' +
+    'and is not touched. Put its approved limits back: POST /api/company/employees/:id/docker-continuation/repair.',
+} as const;
 const issued = new Set<DockerEmployeeContinuationPhase>([
   'office-issued',
   'pool-issued',
@@ -346,6 +372,23 @@ export class DockerEmployeeContinuation {
     const leaf = row.tasks?.find((task) => task.role === 'leaf-helper');
     return row.phase === 'resources-issued' && leaf?.phase === 'failed' ? dockerFailedWriterHold(leaf) : undefined;
   }
+  /** What a continued request can do about this operation's own pool writer:
+   * `settle` one that started and is not recorded finished, `rerun` one that
+   * is recorded failed and may be followed by another attempt. */
+  #poolWriter(row: DockerEmployeeContinuationRecord): 'settle' | 'rerun' | undefined {
+    const pool = row.tasks?.find((task) => task.role === 'pool-helper');
+    if (row.phase !== 'pool-issued' || !pool) return undefined;
+    if (pool.phase === 'start-issued' || pool.phase === 'running') return 'settle';
+    return pool.phase === 'failed' && dockerFailedWriterHold(pool) === 'DOCKER_RESOURCE_HELPER_RETRY_PENDING'
+      ? 'rerun'
+      : undefined;
+  }
+  /** How a held, published laptop can be put right without stopping it. */
+  #repairOffer(row: DockerEmployeeContinuationRecord, code: string | undefined): 'repair' | 'repair-pool' | undefined {
+    if (row.version === 3 || !['provider-issued', 'ready'].includes(row.phase) || !code) return undefined;
+    if (POOL_REPAIRABLE.has(code)) return 'repair-pool';
+    return LEAF_REPAIRABLE.has(code) && this.engine.repairResources ? 'repair' : undefined;
+  }
   #unissuedHelper(row: DockerEmployeeContinuationRecord): boolean {
     const task = (role: string) => row.tasks?.find((task) => task.role === role);
     if (row.phase === 'resources-issued')
@@ -359,7 +402,11 @@ export class DockerEmployeeContinuation {
       return (
         task('anchor')?.phase === 'created' ||
         (task('anchor')?.phase === 'running' &&
-          (task('pool-helper') === undefined || task('pool-helper')?.phase === 'created'))
+          (task('pool-helper') === undefined ||
+            task('pool-helper')?.phase === 'created' ||
+            // A started writer is first settled, and a failed one followed by
+            // its next attempt. Both only ever happen for a continued request.
+            this.#poolWriter(row) !== undefined))
       );
     return false;
   }
@@ -379,14 +426,17 @@ export class DockerEmployeeContinuation {
     // The last exit seen for this operation stays attached to its hold after
     // the laptop's bounded copy of that evidence is gone.
     const exit = code === 'DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED' ? this.#exits.get(row.request.operationId) : undefined;
+    const repair = this.#repairOffer(row, code);
     const allowed: DockerContinuationResult['allowedActions'] =
       row.version === 3
         ? ['observe']
         : code === 'DOCKER_EPHEMERAL_PREPARATION_REQUIRED' || detail.repairable || this.#unissuedHelper(row)
           ? ['observe', 'continue']
-          : code || row.phase === 'ready' || issued.has(row.phase)
-            ? ['observe']
-            : ['observe', 'continue'];
+          : repair
+            ? ['observe', repair]
+            : code || row.phase === 'ready' || issued.has(row.phase)
+              ? ['observe']
+              : ['observe', 'continue'];
     return {
       operationId: row.request.operationId,
       phase: row.phase,
@@ -400,7 +450,13 @@ export class DockerEmployeeContinuation {
             ]
           : allowed,
       ...(code ? { code } : {}),
-      ...(guidance ? { message: guidance.message } : detail.message ? { message: detail.message } : {}),
+      ...(guidance
+        ? { message: guidance.message }
+        : detail.message
+          ? { message: detail.message }
+          : repair
+            ? { message: REPAIR_SENTENCE[repair] }
+            : {}),
       ...(exit ? { providerExit: exit } : {}),
     };
   }
@@ -661,15 +717,33 @@ export class DockerEmployeeContinuation {
         await this.store.replace(undefined, row, current);
         current();
       }
-      return await this.#advance(subject, row, authority, current, true);
+      return await this.#advance(subject, row, authority, current, 'advance');
     } finally {
       this.#flights.delete(employeeId);
     }
+  }
+  /** Re-applies the already approved limits of one published laptop in place
+   * and reads it again. The laptop keeps running, nothing about its launch,
+   * binding or policy is touched, and the shared pool is not written here. */
+  async repair(
+    employeeId: string,
+    operationId: string,
+    authority: DockerContinuationAuthority
+  ): Promise<DockerContinuationResult> {
+    return this.#existing(employeeId, operationId, authority, 'repair');
   }
   async observe(
     employeeId: string,
     operationId: string,
     authority: DockerContinuationAuthority
+  ): Promise<DockerContinuationResult> {
+    return this.#existing(employeeId, operationId, authority, 'observe');
+  }
+  async #existing(
+    employeeId: string,
+    operationId: string,
+    authority: DockerContinuationAuthority,
+    mode: 'observe' | 'repair'
   ): Promise<DockerContinuationResult> {
     authority.require();
     const row = this.store.record(employeeId),
@@ -687,10 +761,15 @@ export class DockerEmployeeContinuation {
       row.request.sessionGeneration !== subject.sessionGeneration
     )
       refuse('DOCKER_CONTINUATION_TARGET_CHANGED');
-    if (this.#flights.has(employeeId)) return this.#result(row);
+    if (mode === 'repair' && (!existing || row.version === 3 || !this.engine.repairResources))
+      refuse('DOCKER_RESOURCE_REPAIR_SCOPE_UNSUPPORTED');
+    if (this.#flights.has(employeeId)) {
+      if (mode === 'repair') refuse('DOCKER_CONTINUATION_BUSY');
+      return this.#result(row);
+    }
     this.#flights.set(employeeId, operationId);
     try {
-      return await this.#advance(subject, row, authority, current, false);
+      return await this.#advance(subject, row, authority, current, mode);
     } finally {
       this.#flights.delete(employeeId);
     }
@@ -711,9 +790,14 @@ export class DockerEmployeeContinuation {
     initial: DockerEmployeeContinuationRecord,
     authority: DockerContinuationAuthority,
     requireCurrent: () => void,
-    effects: boolean
+    mode: 'observe' | 'advance' | 'repair'
   ): Promise<DockerContinuationResult> {
-    let row = initial;
+    // `advance` issues the next step of a laptop set-up. `repair` issues
+    // nothing of a set-up: it only re-applies approved limits to a laptop
+    // that is already published. `observe` issues nothing at all.
+    const effects = mode === 'advance';
+    let row = initial,
+      repaired = false;
     const current = () => {
       requireCurrent();
       this.engine.assertPreparationCurrent?.(row);
@@ -770,6 +854,19 @@ export class DockerEmployeeContinuation {
           await this.engine.preparePool(row, current);
           continue;
         }
+        // A started pool writer of this operation that exited with an error is
+        // recorded as failed first: it acknowledged nothing, and the read
+        // below would otherwise wait on it for good.
+        if (
+          effects &&
+          initial.phase === 'pool-issued' &&
+          row.phase === 'pool-issued' &&
+          this.engine.settlePoolWriter &&
+          this.#poolWriter(row) === 'settle'
+        ) {
+          await this.engine.settlePoolWriter(row, current);
+          row = this.#refresh(row, current);
+        }
         let pool = await this.#pool(row, current);
         if (!pool && effects && initial.phase === 'pool-issued' && this.#unissuedHelper(row)) {
           await this.engine.preparePool(row, current);
@@ -799,6 +896,19 @@ export class DockerEmployeeContinuation {
         ) {
           await this.engine.settleResourceWriter(row, current);
           row = this.#refresh(row, current);
+        }
+        // The one effect of a repair: this published laptop's own approved
+        // limits, written again in place once the shared pool is confirmed.
+        if (
+          mode === 'repair' &&
+          !repaired &&
+          row.version !== 3 &&
+          ['provider-issued', 'ready'].includes(row.phase) &&
+          this.engine.repairResources
+        ) {
+          repaired = true;
+          await this.engine.repairResources(row, current);
+          current();
         }
         let destination = await this.#destination(row, current);
         if (
@@ -936,7 +1046,7 @@ export class DockerEmployeeContinuation {
         row,
         cause instanceof DockerEmployeeContinuationError
           ? cause.code
-          : effects
+          : mode !== 'observe'
             ? 'DOCKER_CONTINUATION_EFFECT_UNCONFIRMED'
             : 'DOCKER_CONTINUATION_UNCONFIRMED'
       );

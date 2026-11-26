@@ -823,3 +823,77 @@ describe('employee supervisor: last night', () => {
     expect(result.sentence).toMatch(/connection refused/);
   });
 });
+
+describe('employee supervisor: limits a reload of the service manager reset', () => {
+  /** A laptop whose set-up finished and whose agent is running, held by what a fresh read found. */
+  const running = (code: string, allowedActions: string[]) => {
+    const base = held(code, { phase: 'ready', allowedActions });
+    return {
+      ...base,
+      laptop: {
+        ...base.laptop,
+        record: { phase: 'ready', version: 2, operationId: 'op-1' },
+        provider: 'running' as const,
+        templateOnRecord: true,
+      },
+    };
+  };
+  const pool = running('DOCKER_CONTINUATION_POOL_UNCONFIRMED', ['observe', 'repair-pool']);
+  const poolHistory = (patch: Partial<SupervisorHistory> = {}) =>
+    since(0, 'code:DOCKER_CONTINUATION_POOL_UNCONFIRMED', patch);
+
+  it('repairs the shared pool on its own when the laptop’s read offers that', () => {
+    const result = assessEmployee(pool, poolHistory(), ON, MINUTE);
+    expect(result).toMatchObject({ condition: 'held-retryable', next: { action: 'resend-continuation' } });
+    expect(result.needsHuman).toBeUndefined();
+  });
+
+  it.each(['DOCKER_CONTINUATION_POOL_UNCONFIRMED', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED'])(
+    'names the pool repair, and asks the owner, when %s offers nothing',
+    (code) => {
+      const result = assessEmployee(running(code, ['observe']), since(0, 'code:' + code), ON, MINUTE);
+      expect(result).toMatchObject({ condition: 'needs-owner', next: { action: null } });
+      expect(result.needsHuman).toContain('docker-pool/repair');
+    }
+  );
+
+  it('never rebuilds a laptop for the pool that all laptops share, whatever runs in it', () => {
+    const spent = tried('resend-continuation', SUPERVISOR_POLICY.ladder['resend-continuation'].maxAttempts, 0);
+    for (const provider of ['running', 'exited', 'absent', 'no-laptop'] as const) {
+      const result = assessEmployee(
+        { ...pool, laptop: { ...pool.laptop, provider } },
+        poolHistory({ attempts: spent }),
+        ON,
+        99 * MINUTE
+      );
+      expect([provider, result.next.action]).toEqual([provider, null]);
+      expect(result.needsHuman).toContain('docker-pool/repair');
+    }
+  });
+
+  it.each(['DOCKER_CONTINUATION_RESOURCES_UNCONFIRMED', 'DOCKER_RESOURCE_LEAF_ACK_MISSING'])(
+    'puts a running laptop’s own limits back before a rebuild is ever considered (%s)',
+    (code) => {
+      const leaf = running(code, ['observe', 'repair']);
+      const first = assessEmployee(leaf, since(0, 'code:' + code), ON, MINUTE);
+      expect(first).toMatchObject({ condition: 'held-needs-rebuild', next: { action: 'resend-continuation' } });
+      // Once that never helped, a laptop with a running agent is the owner's to rebuild, never the supervisor's.
+      const spent = tried('resend-continuation', SUPERVISOR_POLICY.ladder['resend-continuation'].maxAttempts, 0);
+      const after = assessEmployee(leaf, since(0, 'code:' + code, { attempts: spent }), ON, 99 * MINUTE);
+      expect(after.next.action).toBeNull();
+      expect(after.needsHuman).toContain('confirmDiscardRunning');
+    }
+  );
+
+  it('only describes the repair while automatic retries are switched off', () => {
+    const result = assessEmployee(pool, poolHistory(), { ...ON, enabled: false }, MINUTE);
+    expect(result.next.action).toBeNull();
+    expect(result.needsHuman).toContain('supervisorEnabled');
+  });
+
+  it('knows the acknowledgement code as one a laptop can be rebuilt for, and the pool codes as outside one laptop', () => {
+    expect(supervisorCodeKind('DOCKER_RESOURCE_LEAF_ACK_MISSING')).toBe('rebuild');
+    expect(supervisorCodeKind('DOCKER_CONTINUATION_POOL_UNCONFIRMED')).toBe('retry-owner');
+    expect(supervisorCodeKind('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED')).toBe('retry-owner');
+  });
+});

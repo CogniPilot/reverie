@@ -58,8 +58,10 @@ export interface DockerContainedResourceController {
   observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null>;
   read(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeeResourcePolicy | null>;
   configure(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
-  /** Records a started leaf writer that is proved terminal and failed. No effect. */
+  /** Records a started pool or leaf writer that is proved terminal and failed. No effect. */
   settleFailedWriter?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<void>;
+  /** Re-applies one published laptop's own approved limits in place. */
+  repairLeaf?(row: DockerEmployeeContinuationRecord, requireCurrent: () => void): Promise<'unchanged' | 'restored'>;
   existingPolicy?(row: DockerEmployeeContinuationRecord, actual: DockerEmployeeResourcePolicy): unknown;
   readExistingAfterHostRestart?(
     row: DockerEmployeeContinuationRecord,
@@ -1813,6 +1815,19 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
     current();
     if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     await this.resources.configure(row, current);
+  }
+  /** Journal metadata only: this operation's started pool writer proved terminal and failed. */
+  async settlePoolWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    await this.resources.settleFailedWriter?.(row, current);
+  }
+  /** Re-applies the approved limits of one published, running laptop in place.
+   * The laptop is never stopped, started or recreated here. */
+  async repairResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const raw = await this.#destination(row, current, true);
+    current();
+    if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    if (!this.resources.repairLeaf) refuse('DOCKER_RESOURCE_REPAIR_UNAVAILABLE');
+    await this.resources.repairLeaf(row, current);
   }
   /** Journal metadata only: a started resource writer proved terminal and failed. */
   async settleResourceWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {

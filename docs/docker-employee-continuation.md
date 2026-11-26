@@ -89,8 +89,15 @@ Matching kernel values still never replace an acknowledgement. A rerun earns a
 real one: the helper's own exit 0 and readback. Settling a failed writer by
 observation alone, without a rerun, is not implemented.
 
-The pool writer is not rerun. Its acknowledgement is shared by every laptop of
-the box through the retained pool lineage and has its own recovery workflows.
+A pool writer that exited with an error is recorded as failed in the same way
+when the request is sent again. It acknowledges nothing and is no unknown
+write. The attempt after it is issued from a freshly read pool: the
+operation's own `configure-pool` for an empty pool, the restore helper for a
+pool other laptops already run in. An acknowledged pool writer is never issued
+again; its acknowledgement is shared by every laptop of the box through the
+retained pool lineage. Limits that a reload of the host's service manager
+reset are put back in place by their own repair, described under
+[owner operations](owner-operations.md#put-approved-limits-back-after-a-reload-of-the-host-service-manager).
 
 ### Separately pinned leaf writer image
 
@@ -105,7 +112,9 @@ image stay acknowledged after the pin is selected. The image must carry exactly
 the baseline label set (build `docker-leaf-writer-helper-image`): a created
 container inherits its image's labels, and the fixed leaf writer configuration
 has the purpose label alone. A selected image that the Engine cannot supply is
-refused before any intent; there is no fallback to the baseline image.
+refused before any intent; there is no fallback to the baseline image. The same
+image is used for `restore-high`, which re-applies a running laptop's approved
+limits in place, so a selected image must be a build that carries that command.
 
 Probes keep running the binary inside the existing anchor. They are read-only
 and the office already repeats a probe that lost a process.

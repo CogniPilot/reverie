@@ -859,6 +859,16 @@
       ],
       "outcome": "Actual DOM/API fixture assertions exercise the selected controls. This is not native helper, permission-service or whole-site acceptance."
     },
+    "docker-resources-pool-repair": {
+      "test": "test/docker-resources-ui.test.ts",
+      "title": "offers to put the approved pool limits back when the running pool no longer shows them",
+      "assertions": [
+        "expect(body).toEqual({ sessionId: sid, sessionGeneration: 9, expectedScopeDigest: 'c'.repeat(64) })",
+        "expect(f.button('Reconcile shared pool observation')).toBeUndefined()",
+        "expect(f.writes()).toHaveLength(1)"
+      ],
+      "outcome": "The profile offers the in-place pool repair for the hold its status named and submits that exact scope. Native restoration and installed office behavior require separate verification."
+    },
     "docker-resources-cold-pool": {
       "test": "test/docker-resources-ui.test.ts",
       "title": "requires explicit owner confirmation before submitting the stopped pool recovery preview",
@@ -1545,6 +1555,11 @@
       "declaration": "src/web/public/company-resources.js::EmployeePanel.load::inline::button:Review resource default",
       "scenarios": ["docker-resources-new-revision"],
       "remaining": "DOM fixture and the named assertions only. Native/production execution, other callers, all policy states and full-site coverage remain separate."
+    },
+    {
+      "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Put approved pool limits back",
+      "scenarios": ["docker-resources-pool-repair"],
+      "remaining": "Native restoration and installed office behavior require separate verification."
     },
     {
       "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Reconcile shared pool observation",

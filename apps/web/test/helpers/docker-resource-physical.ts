@@ -3,6 +3,10 @@
 import { expect } from 'vitest';
 import type { DockerResourceRevisionStore } from '../../src/docker-resource-revisions.js';
 export const writer = 'sha256:' + 'f'.repeat(64);
+/** The separately pinned pool restore helper image. */
+export const restorer = 'sha256:' + 'c1'.repeat(32);
+import { readFileSync } from 'node:fs';
+import type { DockerResourceRepairJournal } from '../../src/docker-resource-repair-journal.js';
 import { isDeepStrictEqual } from 'node:util';
 import { DockerContainedResources } from '../../src/docker-contained-resource-controller.js';
 import {
@@ -35,12 +39,33 @@ export function fixture(
   boxId = 'b'.repeat(64),
   revisions?: DockerResourceRevisionStore,
   writeImage?: string,
-  leafWriterImage?: string
+  leafWriterImage?: string,
+  /** The office's repair journal and its file, with the restore helper image it may issue. */
+  repair?: { journal: DockerResourceRepairJournal; path: string; restoreImage?: string }
 ) {
   let retained: DockerContinuationTask[] = [];
-  /** What each failed helper printed, and the lines the next leaf writers will print. */
+  /** What each failed helper printed, and the lines the next leaf and pool writers will print. */
   const stderr = new Map<string, string>(),
-    leafFailures: string[] = [];
+    leafFailures: string[] = [],
+    poolFailures: string[] = [];
+  /** The newest journaled phase of a repair writer, read from the journal's own file. */
+  const repairPhase = (name: string): string | undefined => {
+    if (!repair) return undefined;
+    let raw: string;
+    try {
+      raw = readFileSync(repair.path, 'utf8');
+    } catch {
+      return undefined;
+    }
+    let phase: string | undefined;
+    for (const line of raw.split('\n').filter(Boolean)) {
+      const task = (JSON.parse(line) as { task?: { name: string; phase: string } }).task;
+      if (task?.name === name) phase = task.phase;
+    }
+    return phase;
+  };
+  /** Whether a reload of the service manager reset what only a helper wrote to the worker's leaf. */
+  let leafSwap = '0';
   let members: string[] = [];
   let parentInode = '2',
     anchorBirth = '10';
@@ -76,12 +101,21 @@ export function fixture(
     changedHelper: { role: string; field: 'restart' | 'parent' } | undefined,
     weight = 100,
     delayLeaf = false,
-    lateId: string | undefined;
+    lateId: string | undefined,
+    poolSwap = '0';
+  /** `--member CID:PID:START` values of one command, and of the laptops that run now. */
+  const declared = (args: readonly string[]) => args.filter((_value, index) => args[index - 1] === '--member');
+  const live = () =>
+    members
+      .filter((id) => (containers.get(id)?.State as { Running?: boolean } | undefined)?.Running)
+      .sort()
+      .map((id) => `${id}:${(containers.get(id)!.State as { Pid: number }).Pid}:20`);
   const resources = (worker: boolean) => ({
-    memoryMax: configured ? String(policy.memoryMaxBytes) : 'max',
+    // Docker and systemd own a leaf's hard memory limit; only the pool's is a helper's.
+    memoryMax: configured || (worker && leafSwap !== '0') ? String(policy.memoryMaxBytes) : 'max',
     memoryHigh: worker && high ? String(high) : 'max',
-    swapMax: '0',
-    pidsMax: configured ? String(worker ? 512 : 8192) : 'max',
+    swapMax: worker ? leafSwap : configured ? '0' : poolSwap,
+    pidsMax: configured || (worker && leafSwap !== '0') ? String(worker ? 512 : 8192) : 'max',
     cpuWeight: String(worker ? weight : 100),
     cpuMax: 'max 100000',
     cpusetCpus: '0-1',
@@ -145,6 +179,11 @@ export function fixture(
       return row;
     },
   };
+  /** The box's anchor, whichever container the fixture was given first. */
+  const anchorId = () =>
+    [...containers].find(
+      ([, raw]) => (raw.Config as { Labels?: Record<string, string> }).Labels?.['reverie.box.resource.role'] === 'anchor'
+    )?.[0] ?? [...containers.keys()][0]!;
   let beforeRun: ((args: readonly string[]) => void | Promise<void>) | undefined;
   let pauseLog: { entered: () => void; wait: Promise<void> } | undefined;
   let pauseCreate: { entered: () => void; wait: Promise<void> } | undefined;
@@ -157,7 +196,7 @@ export function fixture(
       expect(
         attempt?.state === 'helper' && attempt.task.name === name
           ? attempt.task.phase
-          : tasks.get(role as DockerContinuationTaskRole)?.phase
+          : (repairPhase(name) ?? tasks.get(role as DockerContinuationTaskRole)?.phase)
       ).toBe('create-issued');
       if (rejectCreate) {
         rejectCreate = false;
@@ -216,6 +255,7 @@ export function fixture(
               Labels: {
                 'org.reverie.purpose': 'boxed-resource-helper-v1',
                 ...(args[2] === writer ? { 'org.reverie.resource.memory-high-only': 'v1' } : {}),
+                ...(args[2] === restorer ? { 'org.reverie.resource.pool-restore': 'v1' } : {}),
               },
             },
           },
@@ -265,7 +305,9 @@ export function fixture(
           attempt = revised ? revisions?.attempt(row, revised.revision) : undefined;
         const helperName = (raw.Config as { Labels: Record<string, string> }).Labels['reverie.box.resource.name'];
         expect(
-          attempt?.state === 'helper' && attempt.task.name === helperName ? attempt.task.phase : tasks.get(role)?.phase
+          attempt?.state === 'helper' && attempt.task.name === helperName
+            ? attempt.task.phase
+            : (repairPhase(helperName!) ?? tasks.get(role)?.phase)
         ).toBe('start-issued');
         starts.push(role);
         if (role === 'leaf-helper' && delayLeaf) {
@@ -274,7 +316,21 @@ export function fixture(
           raw.State = { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 300 };
           throw Error('lost live start reply');
         }
-        const printed = role === 'leaf-helper' ? leafFailures.shift() : undefined;
+        const command = (raw.Config as { Cmd: string[] }).Cmd;
+        // What the real helper refuses by itself: a pool that has members is
+        // never initialized, a restore names exactly the members that run, and
+        // `configure-high` never writes a leaf whose swap limit is not approved.
+        const refusal =
+          command[0] === 'configure-pool' && live().length
+            ? 'BOXED_RESOURCE_FOREIGN_CHILD; effectIssued=false\n'
+            : command[0] === 'restore-pool' && !isDeepStrictEqual(declared(command), live())
+              ? 'BOXED_RESOURCE_FOREIGN_CHILD; effectIssued=false\n'
+              : command[0] === 'configure-high' && leafSwap !== '0'
+                ? 'BOXED_RESOURCE_HARD_POLICY_MISMATCH; effectIssued=false\n'
+                : undefined;
+        const printed =
+          (role === 'leaf-helper' ? leafFailures.shift() : role === 'pool-helper' ? poolFailures.shift() : undefined) ??
+          refusal;
         raw.State = {
           Status: role === 'anchor' ? 'running' : 'exited',
           Running: role === 'anchor',
@@ -299,10 +355,35 @@ export function fixture(
         if (role === 'leaf-helper') {
           const args = (raw.Config as { Cmd: string[] }).Cmd;
           high = Number(args[args.indexOf('--memory-high') + 1]);
-          if (args[0] === 'configure-high') weight = 100;
+          if (args[0] !== 'configure-memory-high') weight = 100;
+          if (args[0] === 'restore-high') leafSwap = '0';
         }
-        if (role !== 'anchor')
-          logs.set(id, JSON.stringify(observation([...containers.keys()][0]!, role === 'leaf-helper')));
+        if (role !== 'anchor') {
+          const seen = observation(anchorId(), role === 'leaf-helper');
+          logs.set(
+            id,
+            JSON.stringify(
+              command[0] === 'restore-pool'
+                ? {
+                    version: 1,
+                    purpose: 'reverie-boxed-restore-pool-ack-v1',
+                    observation: seen,
+                    members: declared(command).map((value) => {
+                      const [member, pid, startTicks] = value.split(':');
+                      return {
+                        id: member,
+                        pid: Number(pid),
+                        startTicks,
+                        path: parent + '/docker-' + member + '.scope',
+                        dev: '1',
+                        ino: '5',
+                      };
+                    }),
+                  }
+                : seen
+            )
+          );
+        }
         if (lostStart) {
           lostStart = false;
           throw Error('lost start reply');
@@ -335,6 +416,8 @@ export function fixture(
     helperImageId: helper,
     memoryHighHelperImageId: writeImage,
     leafWriterHelperImageId: leafWriterImage,
+    poolRestoreHelperImageId: repair?.restoreImage,
+    repairs: repair?.journal,
     selectedWorkerContainerIds: () => members,
     retainedPoolConfigurationTasks: () => retained,
   };
@@ -385,6 +468,31 @@ export function fixture(
     failLeafWriters: (...lines: string[]) => {
       leafFailures.push(...lines);
     },
+    /** The same for the next pool writers. */
+    failPoolWriters: (...lines: string[]) => {
+      poolFailures.push(...lines);
+    },
+    /** A reload of the host's service manager: every limit that only a helper
+     * wrote is back at its default. The limits Docker owns are kept. */
+    reloadServiceManager: () => {
+      configured = false;
+      poolSwap = 'max';
+      if (containers.has(workerId)) {
+        high = undefined;
+        leafSwap = 'max';
+      }
+    },
+    changeRestorePin: (image: string | undefined) => {
+      configuration.poolRestoreHelperImageId = image;
+    },
+    /** The worker of this fixture's own record is one of the box's laptops. */
+    selectWorker: () => {
+      if (!members.includes(workerId)) members = [...members, workerId];
+    },
+    stopMember: (id: string) => {
+      (containers.get(id)!.State as Record<string, unknown>).Running = false;
+    },
+    repairPhase,
     stderr,
     /** Another running laptop of the same box, as every later scope sees it. */
     addMember: (id: string, pid: number) => {

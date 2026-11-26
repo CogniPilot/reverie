@@ -123,8 +123,13 @@ describe('the terminal failed phase', () => {
     ])
       expect(allowedDockerTaskTransition(before, task(next))).toBe(false);
   });
-  it('exists for the leaf writer only, with a closed class and a real exit status', () => {
-    for (const role of ['anchor', 'pool-helper', 'storage-holder', 'identity-helper']) {
+  it('exists for the leaf and pool writers only, with a closed class and a real exit status', () => {
+    // The shared pool's one-shot writer may end as a recorded failure and be followed by another attempt.
+    expect(DockerContinuationTask.safeParse({ ...failed('lost-process'), role: 'pool-helper' }).success).toBe(true);
+    expect(
+      DockerContinuationTask.safeParse({ ...leaf, role: 'pool-helper', phase: 'create-issued', attempt: 2 }).success
+    ).toBe(true);
+    for (const role of ['anchor', 'storage-holder', 'identity-helper']) {
       expect(DockerContinuationTask.safeParse({ ...failed('lost-process'), role }).success).toBe(false);
       expect(DockerContinuationTask.safeParse({ ...leaf, role, phase: 'create-issued', attempt: 2 }).success).toBe(
         false

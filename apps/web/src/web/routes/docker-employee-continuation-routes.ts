@@ -249,6 +249,23 @@ export function registerDockerEmployeeContinuationRoutes(
         return pool.status(id, capture(req, id));
       })
     );
+    // Puts the already approved limits of the running pool back in place. It
+    // takes no policy: the only thing a caller chooses is to confirm the hold
+    // that the status read named. The same recovery permission as reconcile.
+    app.post('/api/company/employees/:id/docker-pool/repair', async (req, reply) =>
+      run(reply, async () => {
+        const id = uuid.parse((req.params as { id: string }).id);
+        const input = z
+          .object({
+            sessionId: uuid,
+            sessionGeneration: z.number().int().positive().safe(),
+            expectedScopeDigest: digest,
+          })
+          .strict()
+          .parse(req.body);
+        return pool.repair(id, input, capture(req, id));
+      })
+    );
     app.post('/api/company/employees/:id/docker-pool/reconcile', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);
@@ -367,6 +384,14 @@ export function registerDockerEmployeeContinuationRoutes(
         current();
       }
       return described(await service.begin(employeeId, body.request, authority));
+    })
+  );
+  // Re-applies the already approved limits of one running laptop in place.
+  app.post('/api/company/employees/:id/docker-continuation/repair', async (req, reply) =>
+    run(reply, async () => {
+      const employeeId = uuid.parse((req.params as { id: string }).id),
+        body = z.object({ operationId: uuid }).strict().parse(req.body);
+      return described(await service.repair(employeeId, body.operationId, capture(req, employeeId)));
     })
   );
   app.post('/api/company/employees/:id/docker-continuation/observe', async (req, reply) =>

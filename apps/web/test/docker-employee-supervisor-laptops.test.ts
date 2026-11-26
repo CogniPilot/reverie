@@ -77,6 +77,13 @@ function world() {
       operationId: null,
     } as Record<string, unknown>,
     rebuilt: { operationId: 'new', state: 'ready' } as Record<string, unknown>,
+    /** What the shared pool's status read and a laptop's in-place repair answer. */
+    pool: { state: 'retained', sessionId: EMPLOYEE.sessionId, sessionGeneration: 3, allowedActions: [] } as
+      | Record<string, unknown>
+      | Error,
+    repaired: { operationId: REQUEST.operationId, phase: 'ready', state: 'ready', allowedActions: ['observe'] } as
+      | Record<string, unknown>
+      | Error,
     calls: [] as Array<[string, unknown]>,
     authority: undefined as DockerContinuationAuthority | undefined,
     during: undefined as (() => void) | undefined,
@@ -131,6 +138,22 @@ function world() {
         if (state.result instanceof Error) throw state.result;
         return state.result;
       },
+      repair: async (_id: string, operationId: string, authority: DockerContinuationAuthority) => {
+        took('repair', operationId, authority);
+        if (state.repaired instanceof Error) throw state.repaired;
+        return state.repaired;
+      },
+    },
+    pool: {
+      status: async (_id: string, authority: DockerContinuationAuthority) => {
+        took('pool-status', undefined, authority);
+        if (state.pool instanceof Error) throw state.pool;
+        return state.pool;
+      },
+      repair: async (_id: string, input: unknown, authority: DockerContinuationAuthority) => {
+        took('pool-repair', input, authority);
+        return { ...(state.pool as Record<string, unknown>), state: 'retained', allowedActions: [] };
+      },
     },
     absent: {
       previewRebuild: async (_id: string, template: unknown, authority: DockerContinuationAuthority) => {
@@ -182,6 +205,68 @@ describe('the office supervisor’s laptop authority', () => {
     expect(await w.laptops.read(EMPLOYEE, w.guard)).toMatchObject({ state: 'held', code: 'DOCKER_CONTINUATION_UNCONFIRMED' });
     expect(await w.laptops.provider(EMPLOYEE, w.guard)).toBe('unknown');
     expect(await w.laptops.source(EMPLOYEE, w.guard)).toBe('unknown');
+  });
+});
+
+describe('putting approved limits back on a running laptop', () => {
+  const published = () => {
+    const w = world();
+    w.state.record = { version: 2, phase: 'ready', request: REQUEST, destination: { containerId: DESTINATION } };
+    return w;
+  };
+  it('repairs the shared pool when its status offers that, then the laptop’s own limits, and sends no set-up request', async () => {
+    const w = published();
+    w.state.pool = {
+      state: 'held',
+      code: 'DOCKER_POOL_POLICY_CHANGED',
+      sessionId: EMPLOYEE.sessionId,
+      sessionGeneration: 3,
+      scopeDigest: '9'.repeat(64),
+      allowedActions: ['repair-pool'],
+    };
+    expect(await w.laptops.resend(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'ready' });
+    expect(w.state.calls.map(([name]) => name)).toEqual(['pool-status', 'pool-repair', 'repair']);
+    // The pool repair carries the hold the status named and nothing else: no limit and no policy.
+    expect(w.made('pool-repair')).toEqual([
+      { sessionId: EMPLOYEE.sessionId, sessionGeneration: 3, expectedScopeDigest: '9'.repeat(64) },
+    ]);
+    expect(w.made('repair')).toEqual([REQUEST.operationId]);
+  });
+  it('leaves a pool alone whose status offers no repair', async () => {
+    const w = published();
+    expect(await w.laptops.resend(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'ready' });
+    expect(w.state.calls.map(([name]) => name)).toEqual(['pool-status', 'repair']);
+  });
+  it('reports what a repair did not settle, and falls back to the request only when the laptop offers it', async () => {
+    const w = published();
+    w.state.repaired = {
+      operationId: REQUEST.operationId,
+      phase: 'ready',
+      state: 'held',
+      code: 'DOCKER_RESOURCE_HELPER_FAILED',
+      allowedActions: ['observe'],
+    };
+    expect(await w.laptops.resend(EMPLOYEE, w.guard)).toEqual({
+      outcome: 'refused',
+      detail: 'DOCKER_RESOURCE_HELPER_FAILED',
+    });
+    expect(w.made('begin')).toEqual([]);
+    w.state.repaired = { ...w.state.repaired, code: 'DOCKER_CONTINUATION_STORAGE_UNCONFIRMED', allowedActions: ['observe', 'continue'] };
+    expect(await w.laptops.resend(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'ready' });
+    expect(w.made('begin')).toEqual([REQUEST]);
+  });
+  it('holds the supervisor’s authority for both repairs and refuses once the switch is off', async () => {
+    const w = published();
+    w.state.pool = new DockerEmployeeContinuationError('DOCKER_POOL_TARGET_CHANGED');
+    expect(await w.laptops.resend(EMPLOYEE, w.guard)).toEqual({ outcome: 'refused', detail: 'DOCKER_POOL_TARGET_CHANGED' });
+    expect(w.made('repair')).toEqual([]);
+    w.state.guard = false;
+    await expect(w.laptops.resend(EMPLOYEE, w.guard)).rejects.toThrow(/switched off/);
+  });
+  it('never repairs for a laptop whose set-up is not finished: that set-up applies its own limits', async () => {
+    const w = world();
+    await w.laptops.resend(EMPLOYEE, w.guard);
+    expect(w.state.calls.map(([name]) => name)).toEqual(['begin']);
   });
 });
 

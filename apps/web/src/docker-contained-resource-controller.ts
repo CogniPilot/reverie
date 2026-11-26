@@ -55,6 +55,11 @@ import {
 import { DockerOriginalResourceWriterReader } from './docker-resource-original-writer.js';
 import { parseDockerLeafWriterArguments } from './docker-resource-leaf-census.js';
 import { formatKernelCpuList } from './docker-cpu-reservation-data.js';
+import type {
+  DockerResourceRepairAttempt,
+  DockerResourceRepairJournal,
+  DockerResourceRepairTarget,
+} from './docker-resource-repair-journal.js';
 
 const cid = z.string().regex(/^[a-f0-9]{64}$/);
 /** Leaf writers one request may issue before it holds and asks to be repeated. */
@@ -114,6 +119,9 @@ export interface DockerContainedResourcesConfiguration {
    * DATA only: a POOL observation may show one of them beside "no quota".
    * A worker leaf never has a quota, and nothing here issues a write. */
   approvedPoolCpuMax?(): readonly string[];
+  /** Durable cursors for re-applying approved limits in place. Without one,
+   * nothing is ever written to a pool that has members or to a published leaf. */
+  readonly repairs?: DockerResourceRepairJournal;
 }
 function refuse(code = 'DOCKER_RESOURCE_REVISION_CHANGED'): never {
   throw new DockerEmployeeContinuationError(code);
@@ -236,6 +244,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
   readonly #epochs = new Map<string, symbol>();
   readonly #readFacts = new Map<string, string>();
   readonly #observedAt = new WeakMap<object, number>();
+  #poolWrites: Promise<unknown> = Promise.resolve();
   constructor(
     private readonly command: DockerEngineCommand,
     private readonly journal: DockerContinuationTaskJournal,
@@ -586,17 +595,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
       return false;
     const raw = await this.#inspect(task.containerId);
     const args = z.object({ Cmd: z.array(z.string()).min(1).max(512) }).parse(raw.Config).Cmd;
-    if (
-      args[0] !==
-      (revisionImage
-        ? 'configure-memory-high'
-        : worker
-          ? 'configure-high'
-          : restore
-            ? 'restore-pool'
-            : 'configure-pool')
-    )
-      return false;
+    // A leaf's approved limits are written by `configure-high` when the laptop
+    // is set up and re-applied in place by `restore-high`.
+    const commands = revisionImage
+      ? ['configure-memory-high']
+      : worker
+        ? ['configure-high', 'restore-high']
+        : [restore ? 'restore-pool' : 'configure-pool'];
+    if (!commands.includes(args[0]!)) return false;
     if (restore) {
       await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
     }
@@ -659,13 +665,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
   async #poolWriterState(task: DockerContinuationTask): Promise<'closed' | 'removed' | 'unconfirmed'> {
     if (task.phase === 'create-issued' || task.phase === 'created') return 'closed';
     const restore = task.imageId === this.configuration.poolRestoreHelperImageId;
+    // Recorded finished: with an acknowledgement, or as a proven terminal failure.
+    const ended = task.phase === 'completed' || task.phase === 'failed';
     if (task.role !== 'pool-helper' || !('containerId' in task)) return 'unconfirmed';
-    // A completed writer the Engine positively reports absent can no longer
+    // A finished writer the Engine positively reports absent can no longer
     // write, whichever helper image generation created it. Checked first so a
     // later manifest's helper image selection cannot hold a removed writer.
-    if (task.phase !== 'completed' && !restore && task.imageId !== this.configuration.helperImageId)
-      return 'unconfirmed';
-    if (task.phase === 'completed') {
+    if (!ended && !restore && task.imageId !== this.configuration.helperImageId) return 'unconfirmed';
+    if (ended) {
       // An absent completed writer cannot supply an ACK. Use an unscoped
       // exact-ID census so a changed label cannot hide a still-present writer.
       const selected = (
@@ -683,10 +690,15 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if (!selected) return 'removed';
       if (selected !== task.containerId) return 'unconfirmed';
     }
-    if (!restore && task.imageId !== this.configuration.helperImageId) return 'unconfirmed';
+    // A writer that is recorded finished is proved closed under the image its
+    // own journaled configuration names, so that a later selection of another
+    // helper image cannot turn an exited writer into an unknown one. Such a
+    // writer still acknowledges nothing: only #ack reads an acknowledgement,
+    // and only under the images this office is configured with.
     const raw = await this.#inspect(task.containerId);
     const args = z.array(z.string()).min(1).max(512).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Cmd);
-    if (args[0] !== (restore ? 'restore-pool' : 'configure-pool')) return 'unconfirmed';
+    const commands = ended ? ['restore-pool', 'configure-pool'] : [restore ? 'restore-pool' : 'configure-pool'];
+    if (!commands.includes(args[0]!)) return 'unconfirmed';
     if (restore) await requireDockerPoolRestoreHelperImage(this.command, task.imageId, () => {});
     const expected = this.#configuration(
       'pool-helper',
@@ -696,7 +708,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
         path: this.#parent,
         target: '/run/reverie-box-pool',
       },
-      restore ? task.imageId : undefined
+      task.imageId
     );
     if (dockerContinuationDigest(expected) !== task.configurationDigest) return 'unconfirmed';
     await this.#fixed(task.containerId, expected);
@@ -725,8 +737,17 @@ export class DockerContainedResources implements DockerContainedResourceControll
       (state.Error ?? '') === '';
     return closed ? 'closed' : 'unconfirmed';
   }
+  /** Every pool writer cursor on record: laptop operations, published
+   * observations and the office's own repairs. DATA for native proof only. */
+  #retainedPoolTasks(): DockerContinuationTask[] {
+    const tasks = [
+      ...(this.configuration.retainedPoolConfigurationTasks?.() ?? []),
+      ...(this.configuration.repairs?.poolTasks() ?? []),
+    ];
+    return [...new Map(tasks.map((task) => [dockerContinuationDigest(task), task])).values()];
+  }
   async #poolWritersClosed(except?: DockerContinuationTask): Promise<DockerContinuationTask[]> {
-    const prior = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    const prior = this.#retainedPoolTasks();
     if (prior.length > 128) refuse('DOCKER_RESOURCE_POOL_OWNERS_UNKNOWN');
     const retained: DockerContinuationTask[] = [];
     for (const task of prior) {
@@ -750,18 +771,26 @@ export class DockerContainedResources implements DockerContainedResourceControll
     for (const task of await this.#poolWritersClosed()) if (await this.#ack(task, fresh, policy, null, false)) return true;
     return false;
   }
-  async #poolAck(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<void> {
+  /** Whether a surviving acknowledgement covers this exact observation. An
+   * own writer that may have written, or that finished and is still present,
+   * must supply it itself. One that never started, is proved terminal and
+   * failed, or is positively absent acknowledges nothing and is no unknown
+   * write, so another closed writer's acknowledgement may be adopted. */
+  async #poolAcknowledgedFor(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<boolean> {
     const own = this.journal.read(row, 'pool-helper');
     // A delayed earlier configure must not race this fresh probe. Its persisted
     // START fence remains unknown until the ORIGINAL fixed container is terminal.
     const prior = await this.#poolWritersClosed();
-    if (own) {
-      if (!(await this.#ack(own, fresh, row.policy.pool, null, false)))
-        refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
-      return;
-    }
-    for (const task of prior) if (await this.#ack(task, fresh, row.policy.pool, null, false)) return;
-    refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+    if (own && ['start-issued', 'running'].includes(own.phase)) {
+      if (await this.#ack(own, fresh, row.policy.pool, null, false)) return true;
+      if (!(await this.#failedPoolWriter(own, () => {}))) return false;
+    } else if (own?.phase === 'completed' && (await this.#poolWriterState(own)) !== 'removed')
+      return this.#ack(own, fresh, row.policy.pool, null, false);
+    for (const task of prior) if (await this.#ack(task, fresh, row.policy.pool, null, false)) return true;
+    return false;
+  }
+  async #poolAck(row: DockerEmployeeContinuationRecord, fresh: Observation): Promise<void> {
+    if (!(await this.#poolAcknowledgedFor(row, fresh))) refuse('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
   }
   async validate(_original: DockerEmployeeOriginal, policy: DockerEmployeeResourcePolicy): Promise<void> {
     if (policy.memoryHighBytes === null || !Number.isSafeInteger(policy.memoryMaxBytes + policy.swapMaxBytes))
@@ -812,6 +841,20 @@ export class DockerContainedResources implements DockerContainedResourceControll
       attempt = leaf?.attempt ?? 1;
     const name = leaf?.name ?? this.#taskName(row, role, revision?.id, attempt);
     const config = this.#configuration(role, name, args, writable, revision?.imageId ?? leaf?.imageId);
+    await this.#runWriter(row, role, name, config, current, journal, attempt);
+  }
+  /** Creates (or finds), starts and waits for one fixed writer under its own
+   * journal cursor, and records its acknowledgement. A task that is already
+   * issued is continued as itself: its CREATE and START are never repeated. */
+  async #runWriter(
+    row: DockerEmployeeContinuationRecord,
+    role: 'pool-helper' | 'leaf-helper',
+    name: string,
+    config: Config,
+    current: () => void,
+    journal: DockerContinuationTaskJournal,
+    attempt: number
+  ): Promise<void> {
     let task = await this.#created(row, role, name, config, current, journal, attempt);
     if (!('containerId' in task)) refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');
     if (task.phase === 'created') {
@@ -828,9 +871,15 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const result = (await this.command.run(['container', 'wait', task.containerId])).trim();
     current();
     if (result !== '0') refuse('DOCKER_RESOURCE_HELPER_FAILED');
-    const seen = observation.parse(JSON.parse(await this.command.run(['container', 'logs', task.containerId])));
+    const output: unknown = JSON.parse(await this.command.run(['container', 'logs', task.containerId]));
+    // The restore helper prints the pool observation together with the members it bound.
+    const seen =
+      (config.Cmd as readonly string[])[0] === 'restore-pool'
+        ? DockerPoolRestoreAcknowledgement.parse(output)
+        : observation.parse(output);
     current();
-    if (seen.boxId !== this.configuration.boxId) refuse('DOCKER_RESOURCE_HELPER_RESULT_CHANGED');
+    if (('observation' in seen ? seen.observation : seen).boxId !== this.configuration.boxId)
+      refuse('DOCKER_RESOURCE_HELPER_RESULT_CHANGED');
     if (task.phase === 'start-issued' || task.phase === 'running')
       await journal.publish(
         row,
@@ -879,31 +928,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
       task.imageId
     );
     if (dockerContinuationDigest(config) !== task.configurationDigest) return undefined;
-    const terminal = async () => {
-      const value = await this.#fixed(task.containerId, config);
-      current();
-      const state = z
-        .object({
-          Status: z.literal('exited'),
-          Running: z.literal(false),
-          Pid: z.literal(0),
-          Paused: z.literal(false),
-          Restarting: z.literal(false),
-          Dead: z.literal(false),
-          ExitCode: z.number().int().min(1).max(255),
-          OOMKilled: z.boolean().optional(),
-          Error: z.string().optional(),
-        })
-        .safeParse(value.State);
-      return state.success
-        ? {
-            digest: dockerContinuationDigest(value.State),
-            exitCode: state.data.ExitCode,
-            // Only a helper that ran to its own exit printed a reason.
-            failed: state.data.ExitCode === 1 && state.data.OOMKilled !== true && (state.data.Error ?? '') === '',
-          }
-        : undefined;
-    };
+    const terminal = () => this.#failedTerminal(task.containerId, config, current);
     const first = await terminal();
     if (!first) return undefined;
     const latest = await this.#refresh(seen, current);
@@ -925,23 +950,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!task || !('containerId' in task) || !['start-issued', 'running'].includes(task.phase)) return seen;
     const closed = await this.#failedLeafWriter(task, seen, current);
     if (!closed) return seen;
-    const read = closed.failed
-      ? await (this.command.helperFailure?.(task.containerId) ?? Promise.resolve(undefined)).catch(() => undefined)
-      : undefined;
-    current();
-    await this.journal.publish(
-      row,
-      task,
-      {
-        ...dockerTaskIdentity(task),
-        phase: 'failed',
-        containerId: task.containerId,
-        exitCode: closed.exitCode,
-        failure: DockerTaskFailure.catch('unknown').parse(read ?? 'unknown'),
-      },
-      current
-    );
-    current();
+    await this.#recordFailedWriter(row, this.journal, task, closed, current);
     return closed.seen;
   }
   /** Every leaf writer container of this box that targets one worker, each
@@ -964,6 +973,107 @@ export class DockerContainedResources implements DockerContainedResourceControll
       throw error;
     }
     return result;
+  }
+  /** One inspection of a fixed writer container that shows it exited with a
+   * nonzero status and can do nothing more. Undefined for any other state. */
+  async #failedTerminal(id: string, config: Config, current: () => void) {
+    const value = await this.#fixed(id, config);
+    current();
+    const state = z
+      .object({
+        Status: z.literal('exited'),
+        Running: z.literal(false),
+        Pid: z.literal(0),
+        Paused: z.literal(false),
+        Restarting: z.literal(false),
+        Dead: z.literal(false),
+        ExitCode: z.number().int().min(1).max(255),
+        OOMKilled: z.boolean().optional(),
+        Error: z.string().optional(),
+      })
+      .safeParse(value.State);
+    return state.success
+      ? {
+          digest: dockerContinuationDigest(value.State),
+          exitCode: state.data.ExitCode,
+          // Only a helper that ran to its own exit printed a reason.
+          failed: state.data.ExitCode === 1 && state.data.OOMKilled !== true && (state.data.Error ?? '') === '',
+        }
+      : undefined;
+  }
+  /** The fixed configuration a pool writer of this box was created with,
+   * rebuilt from its own command under the image it is recorded with. */
+  #poolWriterConfiguration(name: string, imageId: string, raw: Record<string, unknown>): Config | undefined {
+    const args = z.object({ Cmd: z.array(z.string().max(4096)).min(1).max(512) }).safeParse(raw.Config);
+    if (!args.success || !['configure-pool', 'restore-pool'].includes(args.data.Cmd[0]!)) return undefined;
+    return this.#configuration(
+      'pool-helper',
+      name,
+      args.data.Cmd,
+      { path: this.#parent, target: '/run/reverie-box-pool' },
+      imageId
+    );
+  }
+  /** Proves that a started pool writer is terminal and failed: the exact
+   * fixed container of its journaled configuration, exited with a nonzero
+   * status, not running, PID 0, and unchanged across two inspections. Such a
+   * writer acknowledged nothing and can write nothing more. Reads only. */
+  async #failedPoolWriter(
+    task: DockerContinuationTask,
+    current: () => void
+  ): Promise<{ exitCode: number; failed: boolean } | undefined> {
+    current();
+    if (
+      task.role !== 'pool-helper' ||
+      !('containerId' in task) ||
+      !['start-issued', 'running', 'failed'].includes(task.phase)
+    )
+      return undefined;
+    const raw = await this.#inspect(task.containerId);
+    current();
+    const config = this.#poolWriterConfiguration(task.name, task.imageId, raw);
+    if (!config || dockerContinuationDigest(config) !== task.configurationDigest) return undefined;
+    const first = await this.#failedTerminal(task.containerId, config, current);
+    const second = first && (await this.#failedTerminal(task.containerId, config, current));
+    return first && second && isDeepStrictEqual(first, second)
+      ? { exitCode: second.exitCode, failed: second.failed }
+      : undefined;
+  }
+  /** Records that a started writer is terminal and failed, with the class of
+   * what it printed. One journal publication and reads; no CREATE, START or
+   * kernel write. Anything that cannot be proved is left exactly as it is. */
+  async #recordFailedWriter(
+    row: DockerEmployeeContinuationRecord,
+    journal: DockerContinuationTaskJournal,
+    task: DockerContinuationTask,
+    closed: { exitCode: number; failed: boolean },
+    current: () => void
+  ): Promise<void> {
+    if (!('containerId' in task)) return;
+    const read = closed.failed
+      ? await (this.command.helperFailure?.(task.containerId) ?? Promise.resolve(undefined)).catch(() => undefined)
+      : undefined;
+    current();
+    await journal.publish(
+      row,
+      task,
+      {
+        ...dockerTaskIdentity(task),
+        phase: 'failed',
+        containerId: task.containerId,
+        exitCode: closed.exitCode,
+        failure: DockerTaskFailure.catch('unknown').parse(read ?? 'unknown'),
+      },
+      current
+    );
+    current();
+  }
+  /** The pool writer of this operation, once it is proved terminal and failed. */
+  async #settleFailedPool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    const task = this.journal.read(row, 'pool-helper');
+    if (!task || !['start-issued', 'running'].includes(task.phase)) return;
+    const closed = await this.#failedPoolWriter(task, current);
+    if (closed) await this.#recordFailedWriter(row, this.journal, task, closed, current);
   }
   /** Which leaf writer attempt may run now: the issued one, as itself, or the
    * one after a terminal failure. A rerun needs all of: a failure class that
@@ -1015,9 +1125,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return { attempt: dockerTaskAttempt(task) + 1, imageId, seen: closed.seen, fresh: true };
   }
   /** Read-only except for one journal publication: records a proven terminal
-   * failure of this operation's started leaf writer so that its phase owner
-   * may rerun it. Never a CREATE, START or kernel write. */
+   * failure of this operation's started pool or leaf writer so that its phase
+   * owner may issue the attempt after it. Never a CREATE, START or kernel write. */
   async settleFailedWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    current();
+    await this.#settleFailedPool(row, current);
     current();
     const task = this.journal.read(row, 'leaf-helper');
     if (!task || !['start-issued', 'running'].includes(task.phase)) return;
@@ -1134,6 +1246,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     if (!ids.length) refuse('DOCKER_POOL_ORIGINAL_ACK_MISSING');
     const matches: DockerContinuationTask[] = [];
     const history: DockerContinuationTask[] = [];
+    const closed: Array<() => Promise<void>> = [];
     for (const candidate of ids) {
       const raw = await this.#inspect(candidate);
       current();
@@ -1144,7 +1257,19 @@ export class DockerContainedResources implements DockerContainedResourceControll
         .parse(label['reverie.box.resource.name']);
       const restore = raw.Image === this.configuration.poolRestoreHelperImageId;
       const imageId = restore ? this.configuration.poolRestoreHelperImageId! : this.configuration.helperImageId;
-      if (raw.Image !== imageId) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+      if (
+        raw.Image !== imageId ||
+        z
+          .object({ Status: z.literal('exited'), ExitCode: z.number().int().min(1).max(255) })
+          .safeParse(raw.State).success
+      ) {
+        // A writer of another helper image generation, or one that exited with
+        // an error, printed no acknowledgement this office reads. It is admitted
+        // as a closed writer only: never as an acknowledgement, never as unknown.
+        closed.push(await this.#closedPoolWriter(candidate, taskName, raw, current));
+        current();
+        continue;
+      }
       if (restore) await requireDockerPoolRestoreHelperImage(this.command, imageId, current);
       // The terminal ACK records the complete scope at the ORIGINAL write.
       // Current membership is independently earned by the fresh Rust probe;
@@ -1249,6 +1374,10 @@ export class DockerContainedResources implements DockerContainedResourceControll
       if ((await this.#poolWriterState(task)) !== 'closed') refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
       current();
     }
+    for (const stillClosed of closed) {
+      await stillClosed();
+      current();
+    }
     if (
       !isDeepStrictEqual(await this.#poolCensus('pool-helper'), ids) ||
       !isDeepStrictEqual(await this.#poolCensus('anchor'), anchors)
@@ -1257,7 +1386,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     current();
     // Only a closed writer with an ACK for the current epoch can supply the
     // observation. Picking one does not attribute the pool to an old operation.
-    const retained = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    const retained = this.#retainedPoolTasks();
     const chosen =
       matches.find((task) =>
         retained.some(
@@ -1296,9 +1425,43 @@ export class DockerContainedResources implements DockerContainedResourceControll
     });
     return new DockerPoolReconciliationReceipt(poolObservationOrigin, record, current);
   }
+  /** Proves one pool writer container closed without reading an
+   * acknowledgement from it, and returns the same proof to be made again. A
+   * writer that is recorded finished is proved under its own journaled
+   * configuration. One that is on no record, as the failed attempt of an
+   * operation that has since issued the next one is, must be of a configured
+   * image, fixed, and exited with an error. */
+  async #closedPoolWriter(
+    id: string,
+    name: string,
+    raw: Record<string, unknown>,
+    current: () => void
+  ): Promise<() => Promise<void>> {
+    const recorded = this.#retainedPoolTasks().find(
+      (task) =>
+        (task.phase === 'completed' || task.phase === 'failed') && task.containerId === id && task.name === name
+    );
+    if (recorded) {
+      const proof = async () => {
+        if ((await this.#poolWriterState(recorded)) !== 'closed') refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+      };
+      await proof();
+      return proof;
+    }
+    const image = z.string().parse(raw.Image);
+    const config = [this.configuration.helperImageId, this.configuration.poolRestoreHelperImageId].includes(image)
+      ? this.#poolWriterConfiguration(name, image, raw)
+      : undefined;
+    const first = config && (await this.#failedTerminal(id, config, current));
+    if (!config || !first) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+    return async () => {
+      if (!isDeepStrictEqual(await this.#failedTerminal(id, config, current), first))
+        refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+    };
+  }
   #requireHistoricalPoolWriter(task: DockerContinuationTask): void {
     const digest = dockerContinuationDigest(task);
-    const retained = this.configuration.retainedPoolConfigurationTasks?.() ?? [];
+    const retained = this.#retainedPoolTasks();
     if (!retained.some((reference) => dockerContinuationDigest(reference) === digest))
       refuse('DOCKER_POOL_ORIGINAL_ACK_CHANGED');
   }
@@ -1398,35 +1561,403 @@ export class DockerContainedResources implements DockerContainedResourceControll
     const anchor = await this.#anchor(row, current);
     current();
     if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    await this.#exclusiveWriter(() => this.#preparePool(row, anchor, current, admitted));
+  }
+  /** One pool writer or in-place repair at a time in this office process.
+   * Every other writer on record is proved terminal natively before a writer
+   * is created or started. */
+  #exclusiveWriter<T>(run: () => Promise<T>): Promise<T> {
+    const next = this.#poolWrites.then(run, run);
+    this.#poolWrites = next.catch(() => undefined);
+    return next;
+  }
+  async #preparePool(
+    row: DockerEmployeeContinuationRecord,
+    anchor: Init,
+    current: () => void,
+    admitted: () => void
+  ): Promise<void> {
+    // A started own writer that is proved terminal and failed is recorded as
+    // exactly that first. Nothing below treats it as an acknowledgement.
+    await this.#settleFailedPool(row, current);
+    current();
     const seen = await this.#probe(anchor);
     current();
+    const p = row.policy.pool;
     // Limits that already match still need a surviving acknowledgement. When
     // every earlier writer is terminal or positively absent and none can
-    // supply one, this operation's own helper re-applies the same approved
-    // limits below and earns a fresh acknowledgement.
-    if (
-      this.#matches(seen, row.policy.pool, null) &&
-      (this.journal.read(row, 'pool-helper') || (await this.#poolAcknowledged(seen, row.policy.pool)))
-    ) {
-      await this.#poolAck(row, seen);
+    // supply one, the same approved limits are written again below and that
+    // writer earns a fresh acknowledgement.
+    if (this.#matches(seen, p, null) && (await this.#poolAcknowledgedFor(row, seen))) {
       current();
       return;
     }
-    await this.#poolWritersClosed(this.journal.read(row, 'pool-helper'));
+    const own = this.journal.read(row, 'pool-helper');
+    const members = await this.#members();
     current();
-    const p = row.policy.pool;
-    await this.#configureTask(
-      row,
-      'pool-helper',
-      this.#poolArguments(seen, p),
-      { path: this.#parent, target: '/run/reverie-box-pool' },
-      current
-    );
+    // The operation's own `configure-pool` initializes an EMPTY pool only, and
+    // only while its cursor can still take an attempt. A pool that has members,
+    // or an operation whose own writer is spent, is restored through the
+    // office's repair journal with the restore helper.
+    const attempt = members.length ? undefined : this.#ownPoolAttempt(row, own);
+    if (attempt) {
+      await this.#poolWritersClosed(own);
+      current();
+      await this.#configureTask(
+        row,
+        'pool-helper',
+        this.#poolArguments(seen, p),
+        { path: this.#parent, target: '/run/reverie-box-pool' },
+        current,
+        undefined,
+        attempt
+      );
+    } else await this.#repairPool(row, anchor, admitted);
     const actual = await this.#probe(anchor);
     current();
     if (!this.#matches(actual, p, null)) refuse('DOCKER_RESOURCE_POOL_READBACK');
     await this.#poolAck(row, actual);
     current();
+  }
+  /** The attempt this operation's own pool writer may run now: its first, an
+   * issued one as itself, or the one after a terminal failure. Undefined when
+   * its cursor is spent: an acknowledged writer is never issued again. */
+  #ownPoolAttempt(
+    row: DockerEmployeeContinuationRecord,
+    own: DockerContinuationTask | undefined
+  ): { attempt: number; imageId: string; name?: string } | undefined {
+    const imageId = this.configuration.helperImageId;
+    if (!own) return { attempt: 1, imageId };
+    if (own.phase === 'completed') return undefined;
+    if (own.phase !== 'failed') {
+      if (
+        own.imageId !== imageId ||
+        own.name !== this.#taskName(row, 'pool-helper', undefined, dockerTaskAttempt(own))
+      )
+        refuse('DOCKER_RESOURCE_ORIGINAL_TASK_CHANGED');
+      return { attempt: dockerTaskAttempt(own), imageId, name: own.name };
+    }
+    const hold = dockerFailedWriterHold(own);
+    if (hold !== 'DOCKER_RESOURCE_HELPER_RETRY_PENDING') refuse(hold);
+    return { attempt: dockerTaskAttempt(own) + 1, imageId };
+  }
+  /** The fixed configuration of an issued repair writer, rebuilt from the
+   * command of its own container and required to be the journaled one. */
+  #repairConfiguration(task: DockerContinuationTask, raw: Record<string, unknown>): Config {
+    let config: Config | undefined;
+    if (task.role === 'pool-helper') config = this.#poolWriterConfiguration(task.name, task.imageId, raw);
+    else {
+      const args = z.object({ Cmd: z.array(z.string().max(4096)).min(1).max(512) }).parse(raw.Config).Cmd;
+      const parsed = parseDockerLeafWriterArguments(args, this.configuration.boxId);
+      if (parsed.mode === 'restore-high')
+        config = this.#configuration(
+          'leaf-helper',
+          task.name,
+          args,
+          { path: `${this.#parent}/docker-${parsed.workerId}.scope`, target: '/run/reverie-worker-cgroup' },
+          task.imageId
+        );
+    }
+    if (!config || dockerContinuationDigest(config) !== task.configurationDigest)
+      refuse('DOCKER_RESOURCE_ORIGINAL_TASK_CHANGED');
+    return config;
+  }
+  /** Records a repair writer that is proved terminal and failed. Returns
+   * whether its cursor now says so. Reads and one journal publication. */
+  async #settleFailedRepair(
+    row: DockerEmployeeContinuationRecord,
+    role: 'pool-helper' | 'leaf-helper',
+    journal: DockerContinuationTaskJournal,
+    current: () => void
+  ): Promise<boolean> {
+    const task = journal.read(row, role);
+    if (!task || !('containerId' in task) || !['start-issued', 'running'].includes(task.phase)) return false;
+    const config = this.#repairConfiguration(task, await this.#inspect(task.containerId));
+    current();
+    const first = await this.#failedTerminal(task.containerId, config, current);
+    const second = first && (await this.#failedTerminal(task.containerId, config, current));
+    if (!first || !second || !isDeepStrictEqual(first, second)) return false;
+    await this.#recordFailedWriter(row, journal, task, second, current);
+    return journal.read(row, role)?.phase === 'failed';
+  }
+  /** Observes an issued repair attempt as itself until its cursor records how
+   * it ended. Its CREATE and START are never repeated, and a writer that was
+   * created and never started is started with the arguments it was created
+   * with: the helper re-proves every one of them before it writes. A writer
+   * that was recorded as about to be created and that the Engine positively
+   * does not list was never created: its attempt is closed, never resumed. */
+  async #resumeRepair(
+    row: DockerEmployeeContinuationRecord,
+    role: 'pool-helper' | 'leaf-helper',
+    attempt: DockerResourceRepairAttempt,
+    current: () => void
+  ): Promise<void> {
+    const journal = attempt.journal;
+    const task = journal.read(row, role);
+    if (!task || task.phase === 'completed' || task.phase === 'failed') return;
+    let id = 'containerId' in task ? task.containerId : undefined;
+    if (!id) {
+      const listed = (
+        await this.command.run([
+          'container',
+          'ls',
+          '--all',
+          '--no-trunc',
+          '--filter',
+          'label=reverie.box.resource.name=' + task.name,
+          '--format',
+          '{{.ID}}',
+        ])
+      ).trim();
+      current();
+      if (!listed) {
+        // Only a journaled `created` container is ever started, so a container
+        // that was never recorded as created can never write for this attempt.
+        attempt.abandon(current);
+        return;
+      }
+      id = cid.parse(listed);
+    }
+    const config = this.#repairConfiguration(task, await this.#inspect(id));
+    current();
+    if (role === 'pool-helper') await this.#poolWritersClosed(task);
+    current();
+    try {
+      await this.#runWriter(row, role, task.name, config, current, journal, 1);
+    } catch (error) {
+      if (!(error instanceof DockerEmployeeContinuationError) || error.code !== 'DOCKER_RESOURCE_HELPER_FAILED')
+        throw error;
+      if (!(await this.#settleFailedRepair(row, role, journal, current))) throw error;
+    }
+  }
+  /** One repair attempt for `target`: an attempt that is already issued is
+   * observed as itself and nothing new is issued in that call. Returns
+   * whether a new attempt ran to its acknowledgement. */
+  async #repairAttempt(
+    target: DockerResourceRepairTarget,
+    row: DockerEmployeeContinuationRecord,
+    current: () => void,
+    issue: (attempt: DockerResourceRepairAttempt) => Promise<void>
+  ): Promise<boolean> {
+    const repairs = this.configuration.repairs;
+    if (!repairs) refuse('DOCKER_RESOURCE_REPAIR_UNAVAILABLE');
+    const role = target.kind === 'pool' ? 'pool-helper' : 'leaf-helper';
+    return repairs.attempt(target, current, async (attempt) => {
+      if (!attempt.fresh) {
+        await this.#resumeRepair(row, role, attempt, current);
+        return false;
+      }
+      try {
+        await issue(attempt);
+      } catch (error) {
+        // A writer that exited with an error is recorded as failed at once, so
+        // that the request after this one may issue a new attempt.
+        if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_RESOURCE_HELPER_FAILED')
+          await this.#settleFailedRepair(row, role, attempt.journal, current).catch(() => false);
+        throw error;
+      }
+      return true;
+    });
+  }
+  /** Writes the approved pool limits once through the repair journal:
+   * `restore-pool` with every live member bound by its birth for a pool that
+   * has members, `configure-pool` for an empty one. */
+  async #issuePoolRepair(
+    row: DockerEmployeeContinuationRecord,
+    anchor: Init,
+    attempt: DockerResourceRepairAttempt,
+    current: () => void
+  ): Promise<void> {
+    const policy = row.policy.pool;
+    const members = await this.#members();
+    current();
+    const seen = await this.#probe(anchor);
+    current();
+    await this.#poolWritersClosed();
+    current();
+    let imageId = this.configuration.helperImageId,
+      args = this.#poolArguments(seen, policy);
+    if (members.length) {
+      // `configure-pool` refuses a pool that has members. Without a pinned
+      // restore helper nothing is issued against one.
+      const selected = this.configuration.poolRestoreHelperImageId;
+      if (!selected) refuse('DOCKER_POOL_RESTORE_HELPER_REQUIRED');
+      await requireDockerPoolRestoreHelperImage(this.command, selected, current);
+      imageId = selected;
+      args = ['restore-pool', ...args.slice(1), ...members];
+    }
+    // The members named to the helper are those of the probe above. The
+    // helper binds each one to its process birth again before and after it writes.
+    if (!isDeepStrictEqual(await this.#members(), members)) refuse('DOCKER_RESOURCE_MEMBERS_CHANGED');
+    current();
+    await this.#configureTask(row, 'pool-helper', args, { path: this.#parent, target: '/run/reverie-box-pool' }, current, {
+      id: attempt.id,
+      journal: attempt.journal,
+      imageId,
+    });
+  }
+  /** Re-applies the already approved pool limits when the kernel no longer
+   * shows them, or shows them with no surviving acknowledgement. The policy is
+   * the one this record was approved with; nothing here can change it. */
+  async #repairPool(
+    row: DockerEmployeeContinuationRecord,
+    anchor: Init,
+    current: () => void
+  ): Promise<'unchanged' | 'restored'> {
+    const policy = row.policy.pool;
+    for (let pass = 0; ; pass++) {
+      const seen = await this.#probe(anchor);
+      current();
+      if (this.#matches(seen, policy, null) && (await this.#poolAcknowledged(seen, policy))) {
+        if (pass) await this.#removeSupersededRepairs({ kind: 'pool' }, current);
+        return pass ? 'restored' : 'unchanged';
+      }
+      current();
+      // An earlier attempt is settled as itself first; then one new attempt.
+      if (pass > 1) refuse('DOCKER_RESOURCE_POOL_READBACK');
+      const issued = await this.#repairAttempt({ kind: 'pool' }, row, current, (attempt) =>
+        this.#issuePoolRepair(row, anchor, attempt, current)
+      );
+      current();
+      if (issued) pass = 1;
+    }
+  }
+  /** The owner's or the supervisor's in-place repair of the shared pool, for
+   * the already recorded running anchor. No worker is stopped or recreated. */
+  async repairPool(row: DockerEmployeeContinuationRecord, current: () => void): Promise<'unchanged' | 'restored'> {
+    current();
+    const anchor = await this.#anchor(row);
+    current();
+    if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    return this.#exclusiveWriter(() => this.#repairPool(row, anchor, current));
+  }
+  /** Re-applies one published laptop's own approved limits in place, when the
+   * kernel no longer shows them or no acknowledgement of them survives. The
+   * laptop keeps running; the shared pool must already be confirmed. */
+  async repairLeaf(row: DockerEmployeeContinuationRecord, current: () => void): Promise<'unchanged' | 'restored'> {
+    current();
+    if (
+      row.version === 3 ||
+      !['provider-issued', 'ready'].includes(row.phase) ||
+      !row.destination ||
+      this.journal.read(row, 'leaf-helper')?.phase !== 'completed'
+    )
+      refuse('DOCKER_RESOURCE_REPAIR_SCOPE_UNSUPPORTED');
+    // An owner's soft-memory revision has its own ledger, writer and approval.
+    if ((this.revisions?.history(row).length ?? 0) > 0) refuse('DOCKER_RESOURCE_REPAIR_REVISION_PRESENT');
+    const workerId = row.destination.containerId;
+    // One repair at a time: a read of every leaf writer of the box never runs beside this office's own writer.
+    return this.#exclusiveWriter(() => this.#repairLeaf(row, workerId, current));
+  }
+  async #repairLeaf(
+    row: DockerEmployeeContinuationRecord,
+    workerId: string,
+    current: () => void
+  ): Promise<'unchanged' | 'restored'> {
+    const approved = async () => {
+      try {
+        const actual = await this.read(row);
+        return !!actual && isDeepStrictEqual(actual, row.policy);
+      } catch (error) {
+        // No acknowledgement of this leaf survives: exactly what a repair earns again.
+        if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_RESOURCE_LEAF_ACK_MISSING')
+          return false;
+        throw error;
+      }
+    };
+    for (let pass = 0; ; pass++) {
+      if (await approved()) {
+        if (pass) await this.#removeSupersededRepairs({ kind: 'leaf', workerId }, current);
+        return pass ? 'restored' : 'unchanged';
+      }
+      current();
+      if (pass > 1) refuse('DOCKER_RESOURCE_WORKER_READBACK');
+      const issued = await this.#repairAttempt({ kind: 'leaf', workerId }, row, current, (attempt) =>
+        this.#issueLeafRepair(row, attempt, current)
+      );
+      current();
+      if (issued) pass = 1;
+    }
+  }
+  async #issueLeafRepair(
+    row: DockerEmployeeContinuationRecord,
+    attempt: DockerResourceRepairAttempt,
+    current: () => void
+  ): Promise<void> {
+    const anchor = await this.#anchor(row);
+    current();
+    if (!anchor) refuse('DOCKER_RESOURCE_ANCHOR_UNCONFIRMED');
+    const worker = await this.#worker(row);
+    current();
+    const seen = await this.#probe(anchor, worker);
+    current();
+    if (!seen.worker) refuse('DOCKER_RESOURCE_WORKER_READBACK');
+    // No other writer of this laptop's leaf is left unterminated.
+    await this.#workerLeafWriters(seen.worker.id, current);
+    const imageId = await this.#leafWriterImage(current);
+    await this.#configureTask(
+      row,
+      'leaf-helper',
+      this.#leafArguments(seen, row.policy, await this.#members(worker.id), 'restore-high'),
+      { path: seen.worker.path, target: '/run/reverie-worker-cgroup' },
+      current,
+      { id: attempt.id, journal: attempt.journal, imageId }
+    );
+  }
+  /** Once a repair's writer is acknowledged and read back, every earlier
+   * repair writer of the same target that is recorded finished is superseded:
+   * the newest acknowledgement stays, and so does any writer the company
+   * record names. The Engine port re-reads each container's name, image,
+   * labels and exited state before it removes it, never by force. Without this
+   * a host that reloads often would fill the helper census. A removal that
+   * fails is left for the next repair and never fails this one. */
+  async #removeSupersededRepairs(target: DockerResourceRepairTarget, current: () => void): Promise<void> {
+    const repairs = this.configuration.repairs,
+      remove = this.command.removeSupersededHelper?.bind(this.command);
+    if (!repairs || !remove) return;
+    try {
+      const role = target.kind === 'pool' ? 'pool-helper' : 'leaf-helper';
+      const finished = repairs.finished(target),
+        newest = finished.filter((task) => task.phase === 'completed').at(-1);
+      if (!newest) return;
+      const present = new Set(await this.#poolCensus(role));
+      current();
+      const recorded = new Set(
+        (this.configuration.retainedPoolConfigurationTasks?.() ?? []).flatMap((task) =>
+          'containerId' in task ? [task.containerId] : []
+        )
+      );
+      for (const task of finished) {
+        if (task.containerId === newest.containerId || recorded.has(task.containerId) || !present.has(task.containerId))
+          continue;
+        await remove(
+          task.containerId,
+          {
+            name: '/' + task.name,
+            imageId: task.imageId,
+            labels: {
+              'org.reverie.purpose': 'boxed-resource-helper-v1',
+              'reverie.box.resource.box': this.configuration.boxId,
+              'reverie.box.resource.role': role,
+              'reverie.box.resource.name': task.name,
+            },
+          },
+          current
+        ).catch(() => undefined);
+      }
+    } catch {
+      /* Housekeeping only: the repair above is already acknowledged. */
+    }
+  }
+  async #closedPoolHelper(id: string, current: () => void): Promise<void> {
+    const raw = await this.#inspect(id);
+    current();
+    const labels = z.record(z.string(), z.string()).parse(z.record(z.string(), z.unknown()).parse(raw.Config).Labels);
+    const name = z
+      .string()
+      .regex(/^reverie-boxed-pool-helper-[a-f0-9]{64}$/)
+      .parse(labels['reverie.box.resource.name']);
+    await this.#closedPoolWriter(id, name, raw, current);
   }
   async observePool(row: DockerEmployeeContinuationRecord): Promise<DockerEmployeePool | null> {
     const anchor = await this.#anchor(row);
@@ -1464,8 +1995,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
     current();
     const retained = await this.#poolWritersClosed();
     current();
-    if (helpers.some(helper => !retained.some(task => task.phase === 'completed' && task.containerId === helper)))
-      refuse('DOCKER_POOL_COLD_WRITER_UNCONFIRMED');
+    for (const helper of helpers) {
+      if (retained.some(task => (task.phase === 'completed' || task.phase === 'failed') && task.containerId === helper))
+        continue;
+      // On no record: only a writer proved terminal and failed, which wrote nothing it may still change.
+      await this.#closedPoolHelper(helper, current).catch((cause: unknown) => {
+        throw new DockerEmployeeContinuationError('DOCKER_POOL_COLD_WRITER_UNCONFIRMED', 409, { cause });
+      });
+    }
     if (dockerContinuationDigest(await this.#stoppedPoolAnchor(id, configuration, current)) !== dockerContinuationDigest(state) ||
         !isDeepStrictEqual(await this.#poolCensus('pool-helper'), helpers))
       refuse('DOCKER_POOL_COLD_SOURCE_CHANGED');
@@ -1630,7 +2167,14 @@ export class DockerContainedResources implements DockerContainedResourceControll
     return this.#refresh(seen, current);
   }
   async #closedLeafWriters(ids: readonly string[], current: () => void) {
-    const result: { id: string; name: string; args: string[]; scopeArguments: string[]; imageId: string }[] = [];
+    const result: {
+      id: string;
+      name: string;
+      args: string[];
+      scopeArguments: string[];
+      imageId: string;
+      exitCode: number;
+    }[] = [];
     for (const id of ids) {
       const raw = await this.#inspect(id);
       current();
@@ -1644,8 +2188,8 @@ export class DockerContainedResources implements DockerContainedResourceControll
       const parsed = parseDockerLeafWriterArguments(config.Cmd, this.configuration.boxId);
       if (parsed.cpus) cpus(parsed.cpus);
       const imageId =
-        parsed.mode === 'configure-high'
-          ? // Either pin a configure-high writer may carry; the fixed
+        parsed.mode !== 'configure-memory-high'
+          ? // Either pin a configure-high or restore-high writer may carry; the fixed
             // configuration check below still requires that exact image.
             (this.#leafWriterImages().find((image) => image === raw.Image) ?? this.configuration.helperImageId)
           : this.configuration.memoryHighHelperImageId;
@@ -1679,14 +2223,26 @@ export class DockerContainedResources implements DockerContainedResourceControll
         })
         .parse(raw.State);
       if ((state.Error ?? '') !== '') refuse('DOCKER_RESOURCE_LEAF_WRITER_UNCONFIRMED');
-      result.push({ id, name, args: config.Cmd, scopeArguments: parsed.scopeArguments, imageId });
+      result.push({
+        id,
+        name,
+        args: config.Cmd,
+        scopeArguments: parsed.scopeArguments,
+        imageId,
+        exitCode: state.ExitCode,
+      });
     }
     return result;
   }
-  #leafArguments(seen: Observation, policy: DockerEmployeeResourcePolicy, members: readonly string[]): string[] {
+  #leafArguments(
+    seen: Observation,
+    policy: DockerEmployeeResourcePolicy,
+    members: readonly string[],
+    command: 'configure-high' | 'restore-high' = 'configure-high'
+  ): string[] {
     if (!seen.worker || policy.memoryHighBytes === null) refuse('DOCKER_RESOURCE_FINITE_HIGH_REQUIRED');
     return [
-      'configure-high',
+      command,
       '--box-id',
       this.configuration.boxId,
       '--anchor-id',
@@ -1748,10 +2304,17 @@ export class DockerContainedResources implements DockerContainedResourceControll
     check();
     // A terminal helper proves its original membership. Current complete
     // membership is earned by fresh native probes, not that historical list.
-    const expected = this.#leafArguments(seen, row.policy, []),
+    // Either command writes this same approved policy to this same leaf.
+    const expected = this.#leafArguments(seen, row.policy, []).slice(1),
       matches: DockerContinuationTask[] = [];
     for (const writer of writers) {
-      if (!this.#leafWriterImages().includes(writer.imageId) || !isDeepStrictEqual(writer.scopeArguments, expected))
+      if (
+        !this.#leafWriterImages().includes(writer.imageId) ||
+        !['configure-high', 'restore-high'].includes(writer.scopeArguments[0]!) ||
+        !isDeepStrictEqual(writer.scopeArguments.slice(1), expected) ||
+        // A writer that exited with an error acknowledged nothing.
+        writer.exitCode !== 0
+      )
         continue;
       const ack = observation.parse(JSON.parse(await this.command.run(['container', 'logs', writer.id])));
       check();
@@ -2711,12 +3274,11 @@ export class DockerContainedResources implements DockerContainedResourceControll
       const high = role === 'leaf-helper' ? row.policy.memoryHighBytes : null,
         policy = role === 'leaf-helper' ? row.policy : row.policy.pool;
       if (!('containerId' in original) || !(await this.#ack(original, seen, policy, high, role === 'leaf-helper'))) {
-        // A leaf writer proved terminal and failed is recorded as exactly that.
-        // Its phase owner then reruns it or holds it; nothing is acknowledged.
-        if (role === 'leaf-helper') {
-          await this.#settleFailedLeaf(row, seen, current);
-          if (this.journal.read(row, role)?.phase === 'failed') continue;
-        }
+        // A writer proved terminal and failed is recorded as exactly that. Its
+        // phase owner then reruns it or holds it; nothing is acknowledged.
+        if (role === 'leaf-helper') await this.#settleFailedLeaf(row, seen, current);
+        else await this.#settleFailedPool(row, current);
+        if (this.journal.read(row, role)?.phase === 'failed') continue;
         refuse('DOCKER_RESOURCE_TASK_UNCONFIRMED');
       }
       current();

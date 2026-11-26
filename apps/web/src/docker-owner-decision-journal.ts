@@ -2,14 +2,15 @@
  * append-only file beside the company store; the newest line for this box is
  * the current decision. A decision is DATA: it grants no kernel write, launch
  * or resource credit by itself. */
-import { closeSync, constants, fstatSync, fsyncSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { z } from 'zod';
 import { withCanonicalStateLock } from './canonical-state-lock.js';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
-
-const budget = 512 * 1024;
+import {
+  appendDockerPrivateJournal,
+  readDockerPrivateJournal,
+  type DockerPrivateJournalRefusals,
+} from './docker-private-journal.js';
 
 /** Every decision names its revision and the box it belongs to. */
 export interface DockerOwnerDecision {
@@ -34,64 +35,21 @@ export class DockerOwnerDecisionJournal<T extends DockerOwnerDecision> {
     throw new DockerEmployeeContinuationError(this.code + '_' + suffix);
   }
 
-  #privateFile(fd: number): void {
-    const status = fstatSync(fd);
-    if (
-      !status.isFile() ||
-      status.nlink !== 1 ||
-      status.uid !== process.getuid?.() ||
-      (status.mode & 0o077) !== 0 ||
-      status.size > budget
-    )
-      this.#refuse('JOURNAL_UNCONFIRMED');
+  get #refusals(): DockerPrivateJournalRefusals {
+    return { unconfirmed: () => this.#refuse('JOURNAL_UNCONFIRMED'), full: () => this.#refuse('JOURNAL_FULL') };
   }
 
   /** Every decision for this box, oldest first. */
   entries(): T[] {
-    let fd: number;
-    try {
-      fd = openSync(this.path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-      throw error;
-    }
-    try {
-      this.#privateFile(fd);
-      const raw = readFileSync(fd, 'utf8');
-      if (!raw) return [];
-      if (!raw.endsWith('\n')) this.#refuse('JOURNAL_UNCONFIRMED');
-      return raw
-        .slice(0, -1)
-        .split('\n')
-        .map((line) => this.schema.parse(JSON.parse(line)))
-        .filter((entry) => entry.boxId === this.boxId);
-    } finally {
-      closeSync(fd);
-    }
+    return readDockerPrivateJournal(this.path, this.#refusals, { emptyAllowed: true })
+      .map((line) => this.schema.parse(JSON.parse(line)))
+      .filter((entry) => entry.boxId === this.boxId);
   }
 
   #append(entry: T, current: () => void): void {
     const line = JSON.stringify(this.schema.parse(entry)) + '\n';
     current();
-    const file = openSync(
-      this.path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-      0o600
-    );
-    try {
-      this.#privateFile(file);
-      if (fstatSync(file).size + Buffer.byteLength(line) > budget) this.#refuse('JOURNAL_FULL');
-      writeFileSync(file, line, 'utf8');
-      fsyncSync(file);
-      const parent = openSync(dirname(this.path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
-      try {
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
-      }
-    } finally {
-      closeSync(file);
-    }
+    appendDockerPrivateJournal(this.path, line, this.#refusals);
   }
 
   /** The owner's current decision for this box, if any. */

@@ -49,12 +49,23 @@ export type DockerSingleAttemptTask = z.infer<typeof DockerSingleAttemptTask>;
 /** The most leaf writers one operation may ever issue. Three are issued
  * without being asked again; the rest need a repeated request. */
 export const DOCKER_TASK_ATTEMPT_LIMIT = 9;
-/** Why an exited leaf writer failed, as a closed class. The helper's own
- * text is never stored. Only `lost-process` and `deadline` permit a rerun. */
+/** Why an exited resource writer failed, as a closed class. The helper's own
+ * text is never stored. A leaf writer is rerun only after `lost-process` or
+ * `deadline`; the shared pool's writer also after `refused`. */
 export const DockerTaskFailure = z.enum(['lost-process', 'deadline', 'refused', 'close-unconfirmed', 'unknown']);
 export type DockerTaskFailure = z.infer<typeof DockerTaskFailure>;
-export function dockerTaskFailureRetryable(failure: DockerTaskFailure): boolean {
-  return failure === 'lost-process' || failure === 'deadline';
+export function dockerTaskFailureRetryable(
+  failure: DockerTaskFailure,
+  role: DockerContinuationTaskRole = 'leaf-helper'
+): boolean {
+  // A pool writer that refused wrote nothing outside the approved policy, and
+  // the attempt after it starts from a freshly read pool: for a pool that has
+  // members that is the restore helper, never the same refused request.
+  return failure === 'lost-process' || failure === 'deadline' || (role === 'pool-helper' && failure === 'refused');
+}
+/** The roles whose one-shot writer may end in a recorded terminal failure. */
+function mayFail(role: DockerContinuationTaskRole): boolean {
+  return role === 'leaf-helper' || role === 'pool-helper';
 }
 /** Absent on a first attempt, so that every earlier record reads unchanged. */
 const retry = { attempt: z.number().int().min(2).max(DOCKER_TASK_ATTEMPT_LIMIT).optional() };
@@ -77,7 +88,7 @@ export const DockerContinuationTask = z
       failure: DockerTaskFailure,
     }),
   ])
-  .refine((task) => task.role === 'leaf-helper' || (task.phase !== 'failed' && !('attempt' in task && task.attempt)));
+  .refine((task) => mayFail(task.role) || (task.phase !== 'failed' && !('attempt' in task && task.attempt)));
 export type DockerContinuationTask = z.infer<typeof DockerContinuationTask>;
 export interface DockerContinuationTaskJournal {
   read(row: DockerEmployeeContinuationRecord, role: DockerContinuationTaskRole): DockerContinuationTask | undefined;
@@ -106,10 +117,11 @@ export function dockerTaskIdentity(task: DockerContinuationTask) {
     ...(attempt === undefined ? {} : { attempt }),
   };
 }
-/** The hold a terminally failed leaf writer leaves its operation in until it
- * is rerun or the laptop is rebuilt. Only the first of these may be rerun. */
+/** The hold a terminally failed writer leaves its operation in until it is
+ * rerun or the laptop is rebuilt. Only the last of these may be rerun. */
 export function dockerFailedWriterHold(task: Extract<DockerContinuationTask, { phase: 'failed' }>): string {
-  if (task.failure === 'refused') return 'DOCKER_RESOURCE_HELPER_REFUSED';
+  if (task.failure === 'refused' && !dockerTaskFailureRetryable(task.failure, task.role))
+    return 'DOCKER_RESOURCE_HELPER_REFUSED';
   if (task.failure === 'close-unconfirmed') return 'DOCKER_RESOURCE_HELPER_CLOSE_UNCONFIRMED';
   if (task.failure === 'unknown') return 'DOCKER_RESOURCE_HELPER_FAILURE_UNKNOWN';
   return dockerTaskAttempt(task) >= DOCKER_TASK_ATTEMPT_LIMIT
@@ -128,8 +140,8 @@ export function allowedDockerTaskTransition(
     const attempt = dockerTaskAttempt(before) + 1;
     return (
       next.phase === 'create-issued' &&
-      next.role === 'leaf-helper' &&
-      dockerTaskFailureRetryable(before.failure) &&
+      mayFail(next.role) &&
+      dockerTaskFailureRetryable(before.failure, before.role) &&
       attempt <= DOCKER_TASK_ATTEMPT_LIMIT &&
       next.attempt === attempt &&
       next.name !== before.name
@@ -144,7 +156,7 @@ export function allowedDockerTaskTransition(
   )
     return false;
   if ('containerId' in before && (!('containerId' in next) || before.containerId !== next.containerId)) return false;
-  if (next.phase === 'failed' && next.role !== 'leaf-helper') return false;
+  if (next.phase === 'failed' && !mayFail(next.role)) return false;
   const transitions: Record<DockerContinuationTask['phase'], readonly DockerContinuationTask['phase'][]> = {
     'create-issued': ['created'],
     created: ['start-issued', 'running'],

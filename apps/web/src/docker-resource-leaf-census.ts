@@ -31,7 +31,12 @@ function unsigned(value: string | undefined, positive = false): bigint {
 }
 export function parseDockerLeafWriterArguments(args: readonly string[], boxId: string) {
   const mode = args[0];
-  if (!['configure-high', 'configure-memory-high'].includes(mode ?? '') || args.length > 512 || args.length % 2 !== 1)
+  // `restore-high` takes exactly the arguments of `configure-high`.
+  if (
+    !['configure-high', 'restore-high', 'configure-memory-high'].includes(mode ?? '') ||
+    args.length > 512 ||
+    args.length % 2 !== 1
+  )
     refuse();
   const values = new Map<string, string>(),
     scopeArguments = [mode!],

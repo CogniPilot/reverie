@@ -17,6 +17,10 @@
  * more: it can confirm an attendance the owner already set, and can never bring anyone back from being out of the
  * office. It cannot approve or change resource limits, choose a plan or a template, or answer for a stopped employee.
  *
+ * Putting limits BACK is not changing them. When a running laptop, or the pool all laptops share, no longer shows
+ * the limits the owner approved (a reload of the host's service manager resets them), the supervisor asks the same
+ * two services the owner's repair routes call to write those same approved values again. No laptop is stopped.
+ *
  * A rebuild is requested without `confirmDiscardRunning` unless one running laptop is exactly the recorded
  * destination and a read made inside it just now says no agent runs there. That statement is the supervisor's only
  * use of the owner's confirmation.
@@ -25,6 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
 import type { DockerAbsentReprovision } from './docker-absent-reprovision.js';
+import type { DockerPoolReconciliation } from './docker-pool-reconciliation.js';
 import { reprovisionHeads, type DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
 import {
   DockerEmployeeContinuationError,
@@ -53,7 +58,9 @@ export interface DockerSupervisorLaptopDeps {
   readonly engine: {
     observeDestination(row: DockerEmployeeContinuationRecord): Promise<DockerContainerObservation | null>;
   };
-  readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'flightActive'>;
+  readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'repair' | 'flightActive'>;
+  /** The shared pool's status and in-place repair, as the owner's routes call them. */
+  readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
   /** The office's own terminal object for a session, when it has one. */
   readonly sessions: { get(sessionId: string): { readonly pid: number | null } | undefined };
@@ -229,16 +236,48 @@ export class DockerSupervisorLaptops {
     return this.#destinationPresence(row);
   }
 
-  /** Continue: the recorded request, sent again. Never for a plan move's private record. */
+  /**
+   * Continue: the recorded request, sent again. Never for a plan move's private record. A laptop whose set-up is
+   * finished has no step left to continue; what can be put right there without stopping it is its approved limits.
+   */
   async resend(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult> {
     const row = this.#row(employee.id);
     if (!row || row.version === 3)
       return { outcome: 'refused', detail: 'no laptop set-up of this employee to continue' };
     try {
-      return settled(await this.deps.service.begin(employee.id, row.request, this.#authority(employee, guard)));
+      const authority = this.#authority(employee, guard);
+      const repaired = ['provider-issued', 'ready'].includes(row.phase)
+        ? await this.#repair(employee, row, authority)
+        : undefined;
+      return repaired ?? settled(await this.deps.service.begin(employee.id, row.request, authority));
     } catch (error) {
       return refusal(error);
     }
+  }
+
+  /**
+   * The owner's two repair calls for a running laptop: the pool that every laptop shares first, when its status
+   * offers that, then this laptop's own limits. Both write only values the owner already approved. Undefined when
+   * the laptop is held by something a repair does not settle and the request sent again is offered instead.
+   */
+  async #repair(
+    employee: SupervisedEmployee,
+    row: DockerEmployeeContinuationRecord,
+    authority: DockerContinuationAuthority
+  ): Promise<SupervisorActionResult | undefined> {
+    const pool = await this.deps.pool.status(employee.id, authority);
+    if (pool.allowedActions.includes('repair-pool') && pool.scopeDigest)
+      await this.deps.pool.repair(
+        employee.id,
+        {
+          sessionId: pool.sessionId,
+          sessionGeneration: pool.sessionGeneration,
+          expectedScopeDigest: pool.scopeDigest,
+        },
+        authority
+      );
+    const result = await this.deps.service.repair(employee.id, row.request.operationId, authority);
+    return result.state === 'held' && result.allowedActions.includes('continue') ? undefined : settled(result);
   }
 
   /** The owner's "read the policy, then continue" for a stopped source that has no set-up yet. */
