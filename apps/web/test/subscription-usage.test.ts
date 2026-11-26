@@ -49,6 +49,34 @@ describe('per-subscription usage', () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ five_hour: { utilization: 0, resets_at: '2026-10-22T12:00:00Z' } }))));
     try { expect((await reader.read(a)).status).toBe('ready'); } finally { vi.unstubAllGlobals(); }
   });
+  it('answers a page read from the last reading and refreshes a stale one in the background', async () => {
+    const p = await profile('page');
+    await credential(p, 'page-token');
+    let release: () => void = () => {};
+    const auth = vi.fn(async () => 'signed-out' as const);
+    const reader = new SubscriptionUsageReader('test', auth);
+    const first = await reader.readCached(p);
+    expect(first.authState).toBe('signed-out');
+    expect(auth).toHaveBeenCalledTimes(1);
+    vi.useFakeTimers({ now: Date.now() + 60_000, toFake: ['Date'] });
+    try {
+      // Stale (past the 15 s window): the old reading comes back at once while a new one is collected.
+      auth.mockImplementation(() => new Promise((resolve) => (release = () => resolve('signed-out'))));
+      expect(await reader.readCached(p)).toBe(first);
+      await vi.waitFor(() => expect(auth).toHaveBeenCalledTimes(2));
+      release();
+      await vi.waitFor(async () => expect(await reader.readCached(p)).not.toBe(first));
+      expect(auth).toHaveBeenCalledTimes(2);
+      // Changed credentials are never answered from the old reading.
+      await credential(p, 'other-token');
+      const touched = new Date(Date.now() + 5_000);
+      await fs.utimes(join(p.configDir, '.credentials.json'), touched, touched);
+      auth.mockImplementation(async () => 'error' as const);
+      expect((await reader.readCached(p)).authState).toBe('error');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('keeps authentication errors and signed-out state separate from absent usage', async () => {
     const p = await profile('expired');
     await credential(p, 'not-a-working-login');

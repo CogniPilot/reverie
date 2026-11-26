@@ -2453,7 +2453,8 @@ export class WebServer extends EventEmitter {
     });
     // Plans: every subscription account paced against its weekly window, plus the GPU.
     this.planService = new PlanService({
-      reader: this.subscriptionUsageReader,
+      // Pages answer from the last reading and refresh it behind the scenes; the five-minute refresh below keeps it warm.
+      reader: { read: (profile) => this.subscriptionUsageReader.readCached(profile) },
       sessions: () => this.sessions.values(),
       coordinatorIds: () =>
         this.chatroomService

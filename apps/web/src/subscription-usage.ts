@@ -45,7 +45,7 @@ export class SubscriptionUsageReader {
   private inFlight = new Map<string, Promise<SubscriptionUsage>>();
   constructor(private readonly version: string, private readonly auth = providerAuthState) {}
 
-  async read(profile: SubscriptionProfile): Promise<SubscriptionUsage> {
+  private async stamp(profile: SubscriptionProfile): Promise<string> {
     let mtime = 0;
     try {
       mtime = (
@@ -54,14 +54,33 @@ export class SubscriptionUsageReader {
     } catch {
       /* Not signed in yet. */
     }
-    const stamp = JSON.stringify(profile) + ':' + mtime;
-    const cached = this.cache.get(profile.id);
+    return JSON.stringify(profile) + ':' + mtime;
+  }
+  private fresh(cached: { result: SubscriptionUsage } | undefined, profile: SubscriptionProfile): boolean {
     // Missing CLI/auth errors can be transient while private tools install. Recheck those
     // promptly even when the credential file is unchanged; preserve the provider's five-minute
     // quota polling budget once signed in, including rate-limited usage responses.
     const cacheMs = profile.provider === 'anthropic' && cached?.result.authState === 'signed-in'
       ? 5 * 60_000 : 15_000;
-    if (cached?.stamp === stamp && Date.now() - cached.result.updatedAt < cacheMs) return cached.result;
+    return !!cached && Date.now() - cached.result.updatedAt < cacheMs;
+  }
+
+  /**
+   * For page reads (Plans): the last reading of an unchanged profile at once, refreshed in the background once it
+   * is older than `read()` allows. Only a profile never read, or whose credentials changed, waits for a reading:
+   * each reading starts a provider CLI, which took seconds a page while the machine was busy.
+   */
+  async readCached(profile: SubscriptionProfile): Promise<SubscriptionUsage> {
+    const cached = this.cache.get(profile.id);
+    if (cached?.stamp !== (await this.stamp(profile))) return this.read(profile);
+    if (!this.fresh(cached, profile)) void this.read(profile).catch(() => {});
+    return cached.result;
+  }
+
+  async read(profile: SubscriptionProfile): Promise<SubscriptionUsage> {
+    const stamp = await this.stamp(profile);
+    const cached = this.cache.get(profile.id);
+    if (cached?.stamp === stamp && this.fresh(cached, profile)) return cached.result;
     const pending = this.inFlight.get(profile.id);
     if (pending) return pending;
     const promise = this.collect(profile)
