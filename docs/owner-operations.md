@@ -85,7 +85,7 @@ ten healthy minutes):
 
 | Step | When | Bound |
 | --- | --- | --- |
-| Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min |
+| Continue the laptop (the recorded request again) | the operation offers `continue` or `retry` | 4, spaced 30 s to 5 min; once when only `continue` is offered and the request was refused with a code that only a fresh laptop settles |
 | Put approved limits back in place (the shared pool first, then the laptop's own) | a running laptop's read offers `repair-pool` or `repair` | the same 4 |
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
@@ -94,6 +94,16 @@ ten healthy minutes):
 | Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop | 2, and 2 per day |
 
 It never answers a sign-in or an owner's decision screen, never approves limits
+A laptop record can offer `continue` for a step it has not issued while the
+request is refused before that step, for example a set-up that was made for a
+laptop image the office no longer uses
+(`DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED`). The supervisor sends such a
+request once. When it is refused with a code that only a fresh laptop settles,
+it does not send it again and goes on to the rebuild, three minutes after the
+problem was first seen, and then starts the fresh laptop. With
+`supervisorAutoRepair` off it sends the request once and then names that switch
+and the rebuild calls.
+
 or a laptop layout, never returns anyone to the office, and never rebuilds
 while an agent runs in the laptop or while it cannot read the laptop. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an

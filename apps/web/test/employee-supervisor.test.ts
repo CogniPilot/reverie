@@ -240,6 +240,90 @@ describe('EmployeeSupervisor', () => {
     const reads = () => w.state.reads.filter((read) => read === 'provider:a').length;
     // Forty passes; one read when the rebuild first came due, then one per two minutes.
     expect(reads()).toBeLessThanOrEqual(9);
+  describe('a set-up made for a laptop image the office no longer uses, with no laptop running', () => {
+    const CODE = 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED';
+    /** As seen after an office deploy: held at `pool-issued`, the read still offers `continue`, nothing runs. */
+    const outdated = () => {
+      const target = hold(person('a'), CODE, ['observe', 'continue']);
+      target.glance.laptop = {
+        ...target.glance.laptop,
+        record: { phase: 'pool-issued', version: 2, operationId: 'op-a' },
+      };
+      target.reading = { ...target.reading!, phase: 'pool-issued' };
+      target.provider = 'no-laptop';
+      return target;
+    };
+    /** The laptop services as the supervisor's steps leave them: a refused request, a rebuilt source, a start. */
+    const office = (target: Person, w: ReturnType<typeof world>) => {
+      const at: Array<[number, string]> = [];
+      w.state.respond = async (action) => {
+        at.push([(w.state.now - 10 * MINUTE) / 1000, action]);
+        if (action === 'rebuild-laptop') {
+          // The rebuild retires the record and leaves a fresh, stopped source made from the current image.
+          const { restoration: _restoration, ...laptop } = target.glance.laptop;
+          target.glance = { ...target.glance, laptop: { ...laptop, record: null } };
+          target.reading = undefined;
+          target.source = 'stopped';
+          return { outcome: 'done', detail: 'rebuilt op-new' };
+        }
+        if (action === 'start-continuation') {
+          target.glance = person('a').glance;
+          return { outcome: 'done', detail: 'ready' };
+        }
+        return { outcome: 'refused', detail: CODE };
+      };
+      return at;
+    };
+
+    it('sends the request once, then rebuilds the laptop and starts it, and asks nobody', async () => {
+      const target = outdated();
+      const w = world([target]);
+      const at = office(target, w);
+      await w.run(1);
+      expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild', code: CODE });
+      await w.run(9);
+      expect(at).toEqual([
+        [60, 'resend-continuation'], // first seen at 30 s, 20 s dwell, next tick
+        [210, 'rebuild-laptop'], // three minutes after it was first seen; the refused re-send is not repeated
+        [270, 'start-continuation'], // the fresh source, 20 s dwell, next tick
+      ]);
+      // The one read a rebuild depends on was made right before it, and found no laptop running.
+      expect(w.state.reads.filter((read) => read === 'provider:a')).toHaveLength(1);
+      expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+      expect(w.report('a').needsHuman).toBeUndefined();
+      expect(w.state.logs.some((line) => line.includes('needs a person'))).toBe(false);
+      await w.run(60);
+      expect(at).toHaveLength(3);
+    });
+
+    it('never rebuilds it while an agent runs in a laptop of that employee', async () => {
+      const target = outdated();
+      target.provider = 'running';
+      const w = world([target]);
+      const at = office(target, w);
+      await w.run(120);
+      expect(at.map(([, action]) => action)).toEqual(['resend-continuation']);
+      expect(w.report('a').needsHuman).toMatch(/confirmDiscardRunning/);
+    });
+
+    it('with automatic repairs switched off, sends the request once and then names the switch and the calls', async () => {
+      const target = outdated();
+      const w = world([target]);
+      w.state.flags = { enabled: true, autoRepair: false };
+      const at = office(target, w);
+      await w.run(120);
+      expect(at).toEqual([[60, 'resend-continuation']]);
+      expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild' });
+      expect(w.report('a').next).toBeUndefined();
+      expect(w.report('a').needsHuman).toMatch(/supervisorAutoRepair.*docker-rebuild\/preview/);
+      // Switched on, the same laptop is rebuilt and started without anything else being asked of the owner.
+      w.state.flags = { enabled: true, autoRepair: true };
+      await w.run(3);
+      expect(at.map(([, action]) => action)).toEqual(['resend-continuation', 'rebuild-laptop', 'start-continuation']);
+      expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+    });
+  });
+
     expect(reads()).toBeGreaterThanOrEqual(7);
     expect(w.state.acts).toEqual([]);
     expect(w.report('a').needsHuman).toMatch(/needs the owner/);

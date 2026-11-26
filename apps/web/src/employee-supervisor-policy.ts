@@ -74,6 +74,7 @@ const MINUTE = 60 * SECOND;
  *
  * - Retries are cheap and guarded by the operation they repeat (an unknown outcome is never repeated there), so they
  *   start within a minute and are spaced out; four re-sends cover the helper's own three-writer budget per request.
+ *   A request that was refused with a code only a fresh laptop settles is the exception: see `resendAnswered`.
  * - A viewer is first left to the laptop runtime's own ten-second reconnect; the supervisor only adds a nudge.
  * - A sign-in the laptop is missing is put back at once. It replaces one file the client at the sign-in screen is
  *   waiting for and gives nothing up, so it is a retry: it also runs with automatic repairs switched off.
@@ -463,6 +464,8 @@ const SHARED_POOL_CODES: ReadonlySet<string> = new Set([
 ]);
 /** What a laptop read offers that the supervisor's re-send performs. */
 const RESENDABLE: readonly string[] = ['continue', 'retry', 'repair', 'repair-pool'];
+/** Codes that say a fresh laptop is the reset. A re-send refused with one of them has nothing left to re-send. */
+const FRESH_LAPTOP_KINDS: readonly (SupervisorCodeKind | undefined)[] = ['rebuild', 'stopped'];
 const REPAIR_POOL_BY_HAND =
   'Put the approved limits of the shared pool back: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
   '(or …/docker-pool/reconcile when the status offers that instead). No laptop is stopped.';
@@ -831,6 +834,27 @@ function rebuildGate(
   return { kind: 'ok', preconditions: provider === undefined ? ['no-agent-running'] : [] };
 }
 
+/**
+ * The request sent again was already answered for good.
+ *
+ * `continue` says the record has a step it has not issued yet. It does not say the laptop's hold stands in front of
+ * that step: a request whose image, limits or container no longer match is refused before anything is issued, and
+ * the read goes on offering `continue`. One re-send finds out. Once the service has refused it with a code that
+ * only a fresh laptop settles, the same request is not sent for that hold again and the next rung is considered at
+ * once. `retry`, `repair` and `repair-pool` are offered for the hold itself and keep their attempts.
+ *
+ * The refusal counts while it belongs to this episode and to this problem: it is the hold the laptop shows now, or
+ * it was given since this problem was first seen.
+ */
+function resendAnswered(offered: readonly string[], code: string | undefined, history: SupervisorHistory): boolean {
+  const last = history.lastAction;
+  if (!last || last.action !== 'resend-continuation' || last.outcome !== 'refused' || !last.detail) return false;
+  if (!offered.every((name) => name === 'continue')) return false;
+  if (history.attempts['resend-continuation']?.lastAt !== last.at) return false;
+  if (!FRESH_LAPTOP_KINDS.includes(supervisorCodeKind(last.detail))) return false;
+  return last.detail === code || last.at >= history.since;
+}
+
 function gate(
   action: SupervisorAction,
   observed: SupervisorObservation,
@@ -842,13 +866,16 @@ function gate(
   const seen = observed.laptop.continuation,
     move = observed.move;
   switch (action) {
-    case 'resend-continuation':
+    case 'resend-continuation': {
       // Offered by the operation itself, and never for a plan move's private record.
+      const offered = seen?.allowedActions.filter((name) => RESENDABLE.includes(name)) ?? [];
       return observed.laptop.record &&
         observed.laptop.record.version !== 3 &&
-        seen?.allowedActions.some((name) => RESENDABLE.includes(name))
+        offered.length &&
+        !resendAnswered(offered, seen?.code, history)
         ? { kind: 'ok' }
         : { kind: 'skip' };
+    }
     case 'start-continuation':
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }

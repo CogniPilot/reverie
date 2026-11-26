@@ -897,3 +897,131 @@ describe('employee supervisor: limits a reload of the service manager reset', ()
     expect(supervisorCodeKind('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED')).toBe('retry-owner');
   });
 });
+
+describe('employee supervisor: a set-up made for an image the office no longer uses', () => {
+  const CODE = 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED';
+  const FINGERPRINT = 'code:' + CODE;
+  /**
+   * As observed after an office deploy: the set-up stopped earlier at `pool-issued` with a helper it never started,
+   * so the read still offers `continue`; no laptop container of this employee runs; another laptop of the box does.
+   */
+  const outdated = (provider?: 'no-laptop' | 'running' | 'unknown') => {
+    const base = held(CODE, { phase: 'pool-issued', allowedActions: ['observe', 'continue'] });
+    return {
+      ...base,
+      laptop: {
+        ...base.laptop,
+        record: { phase: 'pool-issued', version: 2, operationId: 'op-1' },
+        poolAlive: true,
+        ...(provider ? { provider } : {}),
+      },
+    };
+  };
+  /** The history after `count` re-sends, the last one at `at` and refused with `detail`. */
+  const refused = (at: number, detail: string, count = 1, first = 0) =>
+    Array.from({ length: count }).reduce<SupervisorHistory>(
+      (history) => recordSupervisorAttempt(history, 'resend-continuation', at, 'refused', detail),
+      since(first, FINGERPRINT)
+    );
+
+  it('reads as a laptop that needs a rebuild and sends the request once to find out', () => {
+    const result = assessEmployee(outdated(), since(0, FINGERPRINT), ON, MINUTE);
+    expect(result).toMatchObject({
+      condition: 'held-needs-rebuild',
+      code: CODE,
+      next: { action: 'resend-continuation', at: 20_000 },
+    });
+  });
+
+  it('rebuilds after the one refused re-send instead of sending the same request again', () => {
+    const history = refused(30_000, CODE);
+    const result = assessEmployee(outdated(), history, ON, MINUTE);
+    // The rebuild's own dwell, counted from when the problem was first seen: nothing waits on the re-send.
+    expect(result).toMatchObject({
+      condition: 'held-needs-rebuild',
+      next: { action: 'rebuild-laptop', at: 3 * MINUTE, preconditions: ['no-agent-running'] },
+    });
+    expect(result.needsHuman).toBeUndefined();
+    // With the read that found no laptop of this employee running, the rebuild is due with nothing left to prove.
+    const proved = assessEmployee(outdated('no-laptop'), history, ON, 3 * MINUTE);
+    expect(proved.next).toEqual({ action: 'rebuild-laptop', at: 3 * MINUTE, preconditions: [] });
+  });
+
+  it('keeps every rule of a rebuild: never beside a running agent, never on an unread laptop', () => {
+    const history = refused(30_000, CODE);
+    const occupied = assessEmployee(outdated('running'), history, ON, 5 * MINUTE);
+    expect(occupied.next.action).toBeNull();
+    expect(occupied.needsHuman).toContain('confirmDiscardRunning');
+    const unread = assessEmployee(outdated('unknown'), history, ON, 5 * MINUTE);
+    expect(unread.next).toMatchObject({ action: null, waitingFor: 'a confirmed read of what is running in the laptop' });
+  });
+
+  it('names the switch and the calls at once when automatic repairs are off, and re-sends nothing more', () => {
+    const result = assessEmployee(outdated(), refused(30_000, CODE), { ...ON, autoRepair: false }, MINUTE);
+    expect(result.next.action).toBeNull();
+    expect(result.needsHuman).toMatch(/supervisorAutoRepair.*docker-rebuild\/preview/);
+  });
+
+  it('never sends a request again that was refused with a code only a fresh laptop settles', () => {
+    for (const detail of [
+      CODE,
+      'DOCKER_CONTINUATION_POLICY_CHANGED',
+      'DOCKER_CONTINUATION_DESTINATION_CHANGED',
+      'DOCKER_CONTINUATION_CONTAINER_STOPPED',
+    ]) {
+      expect(supervisorCodeKind(detail)).toMatch(/^(rebuild|stopped)$/);
+      // Whatever the count and however long ago within this problem: no pass schedules that re-send again.
+      for (const now of [31_000, 2 * MINUTE, 30 * MINUTE, 600 * MINUTE])
+        expect([detail, now, assessEmployee(outdated(), refused(30_000, detail), ON, now).next.action]).not.toEqual([
+          detail,
+          now,
+          'resend-continuation',
+        ]);
+    }
+  });
+
+  it('counts a refusal that named the hold the laptop shows now, even when that hold was first seen afterwards', () => {
+    // The re-send was made for another hold; its refusal is what the next read then showed.
+    const history = { ...refused(30_000, CODE), since: 60_000 };
+    expect(assessEmployee(outdated(), history, ON, 2 * MINUTE).next.action).toBe('rebuild-laptop');
+  });
+
+  it('does not let an old refusal of an earlier episode or another problem stop a new re-send', () => {
+    // Episode over: the attempts are cleared, the last action is still on record.
+    const earlier = { ...refused(30_000, CODE), attempts: {}, since: 900 * MINUTE };
+    expect(assessEmployee(outdated(), earlier, ON, 901 * MINUTE).next.action).toBe('resend-continuation');
+    // Same episode, another hold that was first seen after the refusal.
+    const other = held('DOCKER_CONTINUATION_IDENTITY_UNCONFIRMED', { allowedActions: ['observe', 'continue'] });
+    const moved = { ...refused(30_000, CODE), fingerprint: 'code:DOCKER_CONTINUATION_IDENTITY_UNCONFIRMED', since: MINUTE };
+    expect(assessEmployee(other, moved, ON, 2 * MINUTE).next.action).toBe('resend-continuation');
+  });
+
+  it('keeps re-sending what was refused for a reason that passes, or is offered for the hold itself', () => {
+    // A refusal that is no rebuild code says nothing about the request.
+    for (const detail of ['DOCKER_RESOURCE_HELPER_RETRY_PENDING', 'DOCKER_CONTINUATION_TARGET_CHANGED', 'no reason'])
+      expect([detail, assessEmployee(outdated(), refused(30_000, detail), ON, 2 * MINUTE).next.action]).toEqual([
+        detail,
+        'resend-continuation',
+      ]);
+    // An in-place repair or a guided retry is offered for the hold itself and keeps its attempts.
+    for (const offer of ['repair', 'repair-pool', 'retry']) {
+      const base = held('DOCKER_RESOURCE_LEAF_ACK_MISSING', { allowedActions: ['observe', 'continue', offer] });
+      const history = recordSupervisorAttempt(
+        since(0, 'code:DOCKER_RESOURCE_LEAF_ACK_MISSING'),
+        'resend-continuation',
+        30_000,
+        'refused',
+        'DOCKER_RESOURCE_LEAF_ACK_MISSING'
+      );
+      expect([offer, assessEmployee(base, history, ON, 2 * MINUTE).next.action]).toEqual([offer, 'resend-continuation']);
+    }
+    // A re-send that was busy or failed tried nothing or proved nothing.
+    for (const outcome of ['busy', 'failed'] as const) {
+      const history = recordSupervisorAttempt(since(0, FINGERPRINT), 'resend-continuation', 30_000, outcome, CODE);
+      expect([outcome, assessEmployee(outdated(), history, ON, 2 * MINUTE).next.action]).toEqual([
+        outcome,
+        'resend-continuation',
+      ]);
+    }
+  });
+});
