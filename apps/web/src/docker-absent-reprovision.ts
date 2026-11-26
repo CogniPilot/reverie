@@ -219,6 +219,10 @@ export class DockerAbsentReprovision {
       throw Error('Actual boxed company owners required');
     if (!cid.test(configuration.boxId)) throw Error('Fixed boxed namespace required');
   }
+  /** Denial DATA for other owners of the same employee; never an admission. */
+  flightActive(employeeId: string): boolean {
+    return this.#flights.has(employeeId);
+  }
   /** Positive inventory only. A command failure or foreign output is unknown. */
   async #listed(kind: 'container' | 'network', filters: readonly string[], format: string): Promise<string[]> {
     let text: string;

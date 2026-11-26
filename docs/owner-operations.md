@@ -757,8 +757,9 @@ present one is re-proven unused before removal is requested again.
 A superseded record's storage holder (`reverie-boxed-storage-<digest>`,
 labels `reverie.box.storage.*`) and exited ephemeral helpers
 (`reverie-boxed-ephemeral-<digest>`, labels `reverie.box.ephemeral.*`) are left
-in place. No existing workflow stops a storage holder, so this one does not
-either. A holder keeps read-only directory handles and its name belongs to the
+in place by this workflow. The exited helpers are removed later by the owner's
+[leftover cleanup](#remove-superseded-laptop-leftovers). No workflow stops a
+storage holder, so this one does not either. A holder keeps read-only directory handles and its name belongs to the
 retired operation, so the next continuation creates its own. The shared pool
 anchor and pool helpers are not touched; their lineage stays in
 `dockerSharedPoolLineages`.
@@ -768,3 +769,111 @@ policy, creates a network, deletes journal history, or changes an employee's
 identity, session, generation or account. It removes only a never-started
 reprovision source. Rebuilding deleted worker images is separate. Installed
 qualification on a real Engine is still required.
+
+## Remove superseded laptop leftovers
+
+Every laptop set-up leaves three stopped one-shot helpers behind, and every
+laptop image the office has run stays on the host while one of them exists,
+because Docker does not delete an image a container was created from. This
+operation removes the helpers of laptop generations the office has retired,
+and then the laptop images nothing refers to any more. It is the only supported
+way to do that; do not prune containers or images by hand, because the office
+reads several stopped containers again (below).
+
+Both calls are owner-only: a signed-in owner request without parent-session,
+worker-identity or service-token headers, and the second one same-origin. No
+agent permission or title reaches them. There is no GUI control yet; an
+authorized headless client uses the same API.
+
+`GET /api/company/docker-resources/leftovers` reads only. It lists the
+Engine's complete container inventory twice (the two listings must agree),
+classifies every container, and returns:
+
+- `containers.remove`: the helpers one apply removes, at most 48, each with its
+  kind, employee and operation. `containers.deferred` counts further superseded
+  helpers that a later report will offer.
+- `containers.kept` and `containers.keptByReason`: everything else, with the
+  reason it stays.
+- `images.remove` (at most 8) and `images.kept`, for images tagged
+  `reverie-boxed-worker:*` or `reverie-boxed-source:*` only. Other images are
+  not listed.
+- `sourceImageIds`: which entries of the runtime configuration's approved
+  source list are `unneeded` (no laptop record, binding, waiting source or
+  remaining container uses that image), which are `absent` from the host, and
+  which are `needed` and why. The list is capped at 32 entries and is produced
+  outside the office, so this is a report for the next build: drop the
+  `unneeded` entries there. The office does not edit its own configuration.
+- `docker`: the image and container lines of `docker system df` as Docker
+  printed them, with the same figures in bytes. `reclaimableImageBytes` is the
+  sum of the bytes Docker attributes to the listed images alone. Laptop images
+  share most of their layers, so this is usually far less than their nominal
+  size: layers shared only among the removed images are freed on top of it, and
+  layers shared with an image that stays are not freed.
+- `digest`, which binds exactly the removals listed, and `allowedActions`.
+
+`POST /api/company/docker-resources/leftovers/apply` with
+`{ "expectedDigest": "<digest>" }` computes the report again and refuses with
+`DOCKER_LEFTOVER_SCOPE_CHANGED` unless it is the one the owner saw. It then
+removes the listed helpers one at a time, and after them the listed images. It
+answers `state: "complete"`, or `state: "incomplete"` with a `code` and the
+list of what was removed before it stopped. Repeat from a fresh report; each
+step only removes, so repeating converges.
+
+### What counts as superseded
+
+A helper is removed only when all of this holds:
+
+- A laptop record in `retiredDockerEmployeeContinuations` names that exact
+  container. The office writes such an entry only after the Engine positively
+  listed the laptop of that record absent. The record names its
+  ephemeral-directory helper (`reverie-boxed-ephemeral-<digest>`), its identity
+  installer (`reverie-boxed-identity-<digest>`) and its leaf writer
+  (`reverie-boxed-leaf-helper-<digest>`).
+- The container's name, image and labels are the ones that record and this
+  box give it, and its state is `exited`.
+- No current laptop record, employee binding, pool record or unfinished cursor
+  names the container or its operation.
+- The employee has nothing in flight: no laptop operation or reprovision in
+  this office process, no reprovision whose source is not created yet, and no
+  open plan move. Without the plan journal nothing is removed.
+- For an identity installer: the installer of the employee's current record is
+  still listed. The office treats "no installer of this employee exists" as a
+  fact of its own, so the others stay until that one is back.
+- For a leaf writer: the laptop it wrote to is neither listed nor recorded.
+
+Kept, always, with these reasons:
+
+| Reason | What it covers |
+| --- | --- |
+| `storage-holder` | Every `reverie-boxed-storage-*` container, current or superseded. A holder keeps read-only handles on an employee's home and Nix store, and the office reads the log of a stopped one again. |
+| `shared-pool` | The pool anchor and pool writers. Pool reconciliation reads their logs again. |
+| `laptop` | Laptops and their never-started sources, running or not. Only the laptop rebuild removes one. |
+| `current-operation` | A helper that a laptop on record still names. The office reads its exit state and log again, and can start an ephemeral helper again. |
+| `operation-in-flight` | See above; `detail` says which. |
+| `not-terminal` | Created, running, paused, restarting or dead. |
+| `unrecorded`, `record-mismatch` | A boxed helper no retired record names, or one that differs from its record. |
+| `installer-inventory`, `worker-present` | The two special rules above. |
+| `unclassified` | A boxed name with no rule here, for example a seat or Nix preparation helper. |
+| `foreign` | Anything else on the host, including another box's helpers and the office's own deployment containers. |
+
+Volumes and networks are never touched, nothing is stopped, and no removal is
+forced: a helper that is running again is refused, and it is left as it is.
+
+An image is removed only when it carries nothing but laptop image tags, is not
+the configured laptop image or a helper image, is named by no current record,
+binding or waiting source, has no remaining container, and is named by a
+retired laptop record. That last condition keeps an image that was built for
+the next update and has not run a laptop yet (`never-recorded`). The Engine
+port removes the image's tags without force, so the Engine itself refuses the
+last one if a container still uses the image. Rebuilding a removed laptop
+image is a build, as before.
+
+Removing a leaf writer changes the box-wide listing of leaf writers. A resource
+observation of another employee that runs at that same moment can be refused
+once (`DOCKER_RESOURCE_LEAF_CENSUS_CHANGED`) and succeeds when repeated.
+
+Current gaps: superseded storage holders keep running; the deployment tool's
+own stopped containers (`reverie-before-front-*`, `reverie-candidate-*`) and
+the office images they pin are outside this operation and outside
+`prune-deployments`; the retired-record journal itself is append-only and
+capped at 256 entries; and there is no GUI control.

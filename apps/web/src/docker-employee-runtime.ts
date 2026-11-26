@@ -23,6 +23,8 @@ import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
 import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
 import { DockerCpuReservation } from './docker-cpu-reservation.js';
 import { registerDockerCpuReservationRoutes } from './web/routes/docker-cpu-reservation-routes.js';
+import { DockerLeftoverCleanup } from './docker-leftover-cleanup.js';
+import { registerDockerLeftoverCleanupRoutes } from './web/routes/docker-leftover-cleanup-routes.js';
 import { dockerProviderModeReader } from './docker-employee-provider-hooks.js';
 import { DockerProviderHealth } from './docker-provider-health.js';
 import { providerHealthBinding } from './worker-provider-health.js';
@@ -100,6 +102,7 @@ interface Attached {
   resourceRevisions: DockerResourceRevisionService;
   cpuCeiling: DockerPoolCpuCeiling;
   cpuReservation: DockerCpuReservation;
+  leftovers: DockerLeftoverCleanup;
   recoveryHelper?: DockerWorkerReattachHelper;
   absent: DockerAbsentReprovision;
   command: PackagedDockerEngineCommand;
@@ -502,6 +505,33 @@ export class DockerEmployeeRuntime {
       Date.now,
       () => this.#seatAccounts()
     );
+    // The owner's cleanup of superseded helpers and laptop images. It reads the same records and
+    // removes only through the same Engine port as every laptop workflow above.
+    const leftovers = new DockerLeftoverCleanup(
+      command,
+      {
+        deployment: configuration.deployment,
+        boxId,
+        workerImageId: configuration.workerImageId,
+        sourceImageIds: configuration.sourceImageIds,
+        helperImageIds: [
+          configuration.helperImageId,
+          configuration.memoryHighHelperImageId,
+          configuration.poolRestoreHelperImageId,
+          configuration.leafWriterHelperImageId,
+          configuration.recoveryHelperImageId,
+        ].filter((id): id is string => id !== undefined),
+      },
+      {
+        records: () => company.store.view(),
+        inFlight: (employeeId) => service.flightActive(employeeId) || absent.flightActive(employeeId),
+        planMoves: () => this.#absentPlanMoves,
+        runtimeCurrent: () => {
+          if (!this.current() || company.store.publicationUnconfirmed)
+            throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
+        },
+      }
+    );
     this.#attached = {
       company,
       ctx,
@@ -513,6 +543,7 @@ export class DockerEmployeeRuntime {
       resourceRevisions,
       cpuCeiling,
       cpuReservation,
+      leftovers,
       recoveryHelper,
       absent,
       command,
@@ -607,6 +638,11 @@ export class DockerEmployeeRuntime {
     registerDockerCpuReservationRoutes(
       app,
       a.cpuReservation,
+      guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
+    );
+    registerDockerLeftoverCleanupRoutes(
+      app,
+      a.leftovers,
       guardDockerRuntimeOrigin({ ...auth, worker: dockerWorkerIdentityOf }, requireCurrent)
     );
     registerDockerOwnerStopRoutes(

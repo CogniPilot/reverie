@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { request, type ClientRequest } from 'node:http';
 import { DockerEmployeeContinuationError } from './docker-employee-continuation.js';
 import type { DockerTaskFailure } from './docker-continuation-task.js';
+import type { DockerSupersededHelperProof } from './docker-leftover-cleanup-data.js';
 import { classifyDockerResourceHelperFailure } from './docker-resource-helper-failure.js';
 import {
   prepareSeatDirectory,
@@ -85,6 +86,56 @@ export interface DockerEngineCommand {
     proof: DockerLaptopContainerProof,
     requireCurrent: () => void
   ): Promise<void>;
+  /** Removes one exited one-shot helper of a retired laptop operation, never
+   * by force and never with volumes. The owning workflow proves that a retired
+   * record names it; this port reads its name, image, labels and state again
+   * immediately before the removal and refuses anything that is not exited. */
+  removeSupersededHelper?(
+    containerId: string,
+    proof: DockerSupersededHelperProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+  /** Removes the listed tags of one laptop image, never by force. It carries
+   * exactly those tags and no container was created from it; the Engine itself
+   * refuses the last one while any container still uses the image. */
+  removeUnusedLaptopImage?(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void>;
+}
+const SUPERSEDED_HELPER_NAME = /^\/reverie-boxed-(?:ephemeral|identity|leaf-helper)-[a-f0-9]{64}$/,
+  LAPTOP_IMAGE_TAG = /^reverie-boxed-(?:worker|source):[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** Whether an inspected container is exactly the proven helper and has run to
+ * its end. A created, running, paused, restarting or dead container is not. */
+export function dockerSupersededHelperProven(
+  row: {
+    Id?: unknown;
+    Name?: unknown;
+    Image?: unknown;
+    State?: Record<string, unknown> | null;
+    Config?: { Labels?: Record<string, string> | null } | null;
+  } | null,
+  containerId: string,
+  proof: DockerSupersededHelperProof
+): boolean {
+  const expected = Object.entries(proof.labels),
+    labels = row?.Config?.Labels ?? {},
+    state = row?.State;
+  return (
+    SUPERSEDED_HELPER_NAME.test(proof.name) &&
+    expected.length >= 2 &&
+    expected.length <= 4 &&
+    expected.every(
+      ([key, value]) =>
+        (key.startsWith('reverie.box.') || key === 'org.reverie.purpose') && value !== '' && labels[key] === value
+    ) &&
+    row?.Id === containerId &&
+    row.Name === proof.name &&
+    row.Image === proof.imageId &&
+    state?.Status === 'exited' &&
+    state.Running === false &&
+    state.Paused === false &&
+    state.Restarting === false &&
+    state.Dead === false &&
+    state.Pid === 0
+  );
 }
 /** How one container is bound to the employee whose laptop is being rebuilt:
  * by the labels its creator gave it, or, for a container the employee's own
@@ -401,6 +452,58 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
     if (state.Running !== false || !['exited', 'created', 'dead'].includes(String(state.Status))) notRemovable();
     requireCurrent();
     await this.run(['container', 'rm', containerId]);
+  }
+  /** The owner's leftover cleanup. `rm` takes no `--force` and no `--volumes`:
+   * a helper that is running again is refused by this read and by the Engine. */
+  async removeSupersededHelper(
+    containerId: string,
+    proof: DockerSupersededHelperProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId) || !SUPERSEDED_HELPER_NAME.test(proof.name))
+      throw Error('Fixed superseded helper required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    if (!dockerSupersededHelperProven(row, containerId, proof))
+      throw new DockerEmployeeContinuationError('DOCKER_LEFTOVER_HELPER_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  /** Only tags of the two laptop image repositories, and only while the image
+   * carries exactly the listed ones and no container at all descends from it. */
+  async removeUnusedLaptopImage(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void> {
+    if (
+      !/^sha256:[a-f0-9]{64}$/.test(imageId) ||
+      tags.length < 1 ||
+      tags.length > 16 ||
+      new Set(tags).size !== tags.length ||
+      tags.some((tag) => !LAPTOP_IMAGE_TAG.test(tag))
+    )
+      throw Error('Fixed laptop image required');
+    const notRemovable = (): never => {
+      throw new DockerEmployeeContinuationError('DOCKER_LEFTOVER_IMAGE_NOT_REMOVABLE');
+    };
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['image', 'inspect', imageId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    const listed = Array.isArray(row?.RepoTags) ? [...(row.RepoTags as unknown[])].map(String).sort() : [];
+    if (row?.Id !== imageId || JSON.stringify(listed) !== JSON.stringify([...tags].sort())) notRemovable();
+    const users = await this.run([
+      'container',
+      'ls',
+      '--all',
+      '--no-trunc',
+      '--filter',
+      'ancestor=' + imageId,
+      '--format',
+      '{{.ID}}',
+    ]);
+    if (users.trim() !== '') notRemovable();
+    for (const tag of tags) {
+      requireCurrent();
+      await this.run(['image', 'rm', '--no-prune', tag]);
+    }
   }
   create(name: string, configuration: Readonly<Record<string, unknown>>, requireCurrent: () => void): Promise<string> {
     if (!/^reverie-boxed-(?:(?:storage|anchor|pool|leaf)-)?[a-z0-9-]{1,100}$/.test(name))
