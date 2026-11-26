@@ -1823,11 +1823,16 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
   /** Re-applies the approved limits of one published, running laptop in place.
    * The laptop is never stopped, started or recreated here. */
   async repairResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {
+    await this.restoreResources(row, current);
+  }
+  /** The same repair, saying whether the approved limits were already in place (`unchanged`) or were written again
+   * and read back (`restored`). */
+  async restoreResources(row: DockerEmployeeContinuationRecord, current: () => void): Promise<'unchanged' | 'restored'> {
     const raw = await this.#destination(row, current, true);
     current();
     if (!raw?.State.Running) refuse('DOCKER_CONTINUATION_CONTAINER_STOPPED');
     if (!this.resources.repairLeaf) refuse('DOCKER_RESOURCE_REPAIR_UNAVAILABLE');
-    await this.resources.repairLeaf(row, current);
+    return this.resources.repairLeaf(row, current);
   }
   /** Journal metadata only: a started resource writer proved terminal and failed. */
   async settleResourceWriter(row: DockerEmployeeContinuationRecord, current: () => void): Promise<void> {

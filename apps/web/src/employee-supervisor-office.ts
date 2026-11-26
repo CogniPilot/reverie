@@ -13,7 +13,9 @@
  *   check. The route keeps refusing every agent, worker and service identity; this caller is none of them;
  * - a lost terminal: the same wake the owner's Wake starts, which attaches only a provider that is already running;
  * - a laptop at the provider's sign-in screen: the plan sign-in reconciler's own pass for that one plan, asked for
- *   now instead of at its next read. It places only a sign-in some holder of that plan already has.
+ *   now instead of at its next read. It places only a sign-in some holder of that plan already has;
+ * - keeping a running laptop's approved limits in place: `DockerSupervisorLaptops.keepLimits`, for an employee in
+ *   the office or not.
  */
 import type { CompanyService } from './company-service.js';
 import type { CompanyEmployee } from './company-types.js';
@@ -223,6 +225,9 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     readLaptop: async (employee, guard) => laptops?.read(employee, guard),
     readSource: async (employee, guard) => (laptops ? laptops.source(employee, guard) : 'unknown'),
     readProvider: async (employee, guard) => (laptops ? laptops.provider(employee, guard) : 'unknown'),
+    ...(laptops
+      ? { keepLimits: (employee: SupervisedEmployee, guard: SupervisorGuard) => laptops.keepLimits(employee, guard) }
+      : {}),
     actions: {
       ...(laptops
         ? {

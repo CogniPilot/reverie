@@ -70,7 +70,8 @@ quiescence remains a product workflow requirement.
 Under the boxed laptop runtime the office checks every employee who should be
 running (in the office, `desiredRunning`) every thirty seconds and takes the
 next mechanical repair step itself. An employee who is stopped or out of the
-office is never read or touched. It runs no HTTP request of its own: each step
+office is never read or repaired; only the approved limits of a laptop that is
+still running are kept in place for them (below). It runs no HTTP request of its own: each step
 is the service call behind the owner route for that step, recorded in the admin
 audit log as `office supervisor` with one console line `[supervisor] …`.
 
@@ -93,7 +94,6 @@ ten healthy minutes):
 | Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
 | Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop | 2, and 2 per day |
 
-It never answers a sign-in or an owner's decision screen, never approves limits
 A laptop record can offer `continue` for a step it has not issued while the
 request is refused before that step, for example a set-up that was made for a
 laptop image the office no longer uses
@@ -104,6 +104,7 @@ problem was first seen, and then starts the fresh laptop. With
 `supervisorAutoRepair` off it sends the request once and then names that switch
 and the rebuild calls.
 
+It never answers a sign-in or an owner's decision screen, never approves limits
 or a laptop layout, never returns anyone to the office, and never rebuilds
 while an agent runs in the laptop or while it cannot read the laptop. A rebuild
 reuses, verbatim, the layout of the employee's most recent laptop operation; an
@@ -119,6 +120,20 @@ refused although its agent is still running. The supervisor calls the same two
 repairs an owner would ([below](#put-approved-limits-back-after-a-reload-of-the-host-service-manager)),
 which write the already approved values again. It never rebuilds a laptop for a
 hold of the shared pool: a new laptop would join the same pool.
+
+That reload resets the limits of every running laptop, whoever it belongs to.
+So beside the repair steps the supervisor checks the approved limits of each
+finished laptop about every ten minutes, one employee per pass, and puts them
+back when they are gone. It does this for an employee who is running normally
+and for one who is stopped or out of the office while their laptop still runs:
+the two states in which no repair step looks at the laptop. The check needs
+`supervisorEnabled` only. It writes only values the owner already approved,
+attaches no terminal, reads and starts no agent, changes no attendance and
+spends no attempt of a repair step. `GET /api/company` shows the last check as
+`supervisor.limits` (`at`, `outcome`, and `detail`: `unchanged`, `restored`,
+`not-running`, or the code of a refusal). A line `[supervisor] … keep-limits`
+and an audit entry `supervisor_keep_limits` are written when limits were put
+back, and once when a check starts to be refused.
 
 Two company settings switch it (`PUT /api/company/settings`, owner only; absent
 means on): `supervisorEnabled` (observe, continue, wake) and
@@ -503,6 +518,15 @@ owner and to an agent with a current `recoverEmployees` grant:
    limits Docker owns to be unchanged, then reads the laptop again. An agent
    that was refused only for its limits reads `ready` again and the office
    terminal is attached to it; nothing in the laptop is restarted.
+
+   For an employee who is stopped or out of the office the same route answers
+   `{ operationId, limits }` with `unchanged` or `restored` and reads nothing
+   else: a laptop set-up is never continued for such an employee, but a laptop
+   that still runs keeps its approved limits. The same proofs hold (the finished
+   record, the unchanged employee and policy, the record's image, ready storage
+   and a confirmed pool), nothing is attached or started, and attendance is not
+   changed. A laptop that is not running is refused with
+   `DOCKER_CONTINUATION_CONTAINER_STOPPED`.
 
 What these calls cannot do: they take no limit and no policy. The values come
 from the laptop's own approved record, and a pool repair is refused for an

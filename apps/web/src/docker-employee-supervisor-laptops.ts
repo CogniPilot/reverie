@@ -21,6 +21,12 @@
  * the limits the owner approved (a reload of the host's service manager resets them), the supervisor asks the same
  * two services the owner's repair routes call to write those same approved values again. No laptop is stopped.
  *
+ * That one step does not depend on attendance (`keepLimits`). A laptop that keeps running while its employee is
+ * out of the office or stopped needs its limits like any other, and a set-up step would be refused for it, so the
+ * supervisor asks `DockerLaptopLimitUpkeep` instead, the service the owner's repair route uses for such an employee.
+ * Its guard there is the owner's switch, the ready office and the unchanged employee; it never requires anyone to be
+ * in the office and never brings anyone back. Nothing is attached, no agent is read or started.
+ *
  * A rebuild is requested without `confirmDiscardRunning` unless one running laptop is exactly the recorded
  * destination and a read made inside it just now says no agent runs there. That statement is the supervisor's only
  * use of the owner's confirmation.
@@ -29,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
 import { CompanyError, type CompanyService } from './company-service.js';
 import type { DockerAbsentReprovision } from './docker-absent-reprovision.js';
+import type { DockerLaptopLimitUpkeep } from './docker-laptop-limit-upkeep.js';
 import type { DockerPoolReconciliation } from './docker-pool-reconciliation.js';
 import { reprovisionHeads, type DockerLaptopTemplate } from './docker-absent-reprovision-data.js';
 import {
@@ -61,6 +68,8 @@ export interface DockerSupervisorLaptopDeps {
   readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'repair' | 'flightActive'>;
   /** The shared pool's status and in-place repair, as the owner's routes call them. */
   readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'>;
+  /** The in-place repair of one finished laptop's own limits that does not ask where its employee is. */
+  readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
   /** The office's own terminal object for a session, when it has one. */
   readonly sessions: { get(sessionId: string): { readonly pid: number | null } | undefined };
@@ -70,6 +79,8 @@ export interface DockerSupervisorLaptopDeps {
 
 /** Another operation holds the employee: nothing was tried and the attempt is not spent. */
 const BUSY = new Set(['DOCKER_CONTINUATION_BUSY', 'DOCKER_REPROVISION_BUSY']);
+/** The shared pool is what stands in the way of a laptop's own limits. Its in-place repair comes first. */
+const POOL_FIRST = new Set(['DOCKER_CONTINUATION_POOL_UNCONFIRMED', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']);
 
 function refusal(error: unknown): SupervisorActionResult {
   if (error instanceof DockerEmployeeContinuationError)
@@ -150,7 +161,7 @@ export class DockerSupervisorLaptops {
   }
 
   flightActive(employeeId: string): boolean {
-    return this.deps.service.flightActive(employeeId);
+    return this.deps.service.flightActive(employeeId) || !!this.deps.limits?.flightActive(employeeId);
   }
 
   /** The owner's observe read. A refusal is returned as the hold it names. */
@@ -265,19 +276,53 @@ export class DockerSupervisorLaptops {
     row: DockerEmployeeContinuationRecord,
     authority: DockerContinuationAuthority
   ): Promise<SupervisorActionResult | undefined> {
-    const pool = await this.deps.pool.status(employee.id, authority);
-    if (pool.allowedActions.includes('repair-pool') && pool.scopeDigest)
-      await this.deps.pool.repair(
-        employee.id,
-        {
-          sessionId: pool.sessionId,
-          sessionGeneration: pool.sessionGeneration,
-          expectedScopeDigest: pool.scopeDigest,
-        },
-        authority
-      );
+    await this.#repairPool(employee, authority);
     const result = await this.deps.service.repair(employee.id, row.request.operationId, authority);
     return result.state === 'held' && result.allowedActions.includes('continue') ? undefined : settled(result);
+  }
+
+  /** The owner's pool repair, when the pool's status offers it. True when it was asked for. */
+  async #repairPool(employee: SupervisedEmployee, authority: DockerContinuationAuthority): Promise<boolean> {
+    const pool = await this.deps.pool.status(employee.id, authority);
+    if (!pool.allowedActions.includes('repair-pool') || !pool.scopeDigest) return false;
+    await this.deps.pool.repair(
+      employee.id,
+      {
+        sessionId: pool.sessionId,
+        sessionGeneration: pool.sessionGeneration,
+        expectedScopeDigest: pool.scopeDigest,
+      },
+      authority
+    );
+    return true;
+  }
+
+  /**
+   * Keep the approved limits of this employee's finished laptop in place, wherever the employee is. `unchanged`:
+   * they were in place. `restored`: they were written again and read back. `not-running`: the laptop is stopped,
+   * so there is nothing to keep. Undefined: the employee has no finished laptop. The laptop's own limits are tried
+   * first; only when the shared pool stands in the way is the pool repaired, once, and the laptop tried again.
+   */
+  async keepLimits(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult | undefined> {
+    const limits = this.deps.limits,
+      row = limits?.finished(employee.id);
+    if (!limits || !row) return undefined;
+    try {
+      const authority = this.#authority(employee, guard);
+      const restore = () => limits.restore(employee.id, row.request.operationId, authority);
+      const first = await restore().catch((error: unknown) => {
+        if (error instanceof DockerEmployeeContinuationError && POOL_FIRST.has(error.code)) return error;
+        throw error;
+      });
+      if (!(first instanceof DockerEmployeeContinuationError)) return { outcome: 'done', detail: first.limits };
+      if (!(await this.#repairPool(employee, authority))) throw first;
+      await restore();
+      return { outcome: 'done', detail: 'restored' };
+    } catch (error) {
+      if (error instanceof DockerEmployeeContinuationError && error.code === 'DOCKER_CONTINUATION_CONTAINER_STOPPED')
+        return { outcome: 'done', detail: 'not-running' };
+      return refusal(error);
+    }
   }
 
   /** The owner's "read the policy, then continue" for a stopped source that has no set-up yet. */

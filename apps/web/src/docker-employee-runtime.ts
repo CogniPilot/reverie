@@ -7,6 +7,7 @@ import type{PlanService}from'./plan-accounts.js';
 import {PlanMoveStore}from'./plan-move-store.js';
 import type{ChatroomService}from'./chatroom-service.js';
 import {DockerPoolReconciliation} from './docker-pool-reconciliation.js';
+import { DockerLaptopLimitUpkeep } from './docker-laptop-limit-upkeep.js';
 import {
   DockerAbsentReprovision,
   type DockerAbsentReprovisionPlanMoves,
@@ -100,6 +101,7 @@ interface Attached {
   provider: DockerEmployeeSessionProvider;
   service: DockerEmployeeContinuation;
   pool: DockerPoolReconciliation;
+  limits: DockerLaptopLimitUpkeep;
   repairs: DockerResourceRepairJournal;
   resourceRevisions: DockerResourceRevisionService;
   cpuCeiling: DockerPoolCpuCeiling;
@@ -456,7 +458,14 @@ export class DockerEmployeeRuntime {
           key: this.#key.key.toString('hex'),
         }))
       : undefined;
-    const absent = new DockerAbsentReprovision(
+    // The in-place repair of a finished laptop's own limits that does not ask where its employee is. It stands
+    // aside for every set-up step and rebuild of that employee, and they stand aside for it.
+    const limits: DockerLaptopLimitUpkeep = new DockerLaptopLimitUpkeep({
+      store,
+      engine,
+      busy: (employeeId): boolean => service.flightActive(employeeId) || absent.flightActive(employeeId),
+    });
+    const absent: DockerAbsentReprovision = new DockerAbsentReprovision(
       company,
       store,
       command,
@@ -507,7 +516,7 @@ export class DockerEmployeeRuntime {
         clear: (proof) => ctx.store.commitDockerAbsentReprovision(proof),
       },
       () => this.#absentPlanMoves,
-      (employeeId) => service.flightActive(employeeId),
+      (employeeId) => service.flightActive(employeeId) || limits.flightActive(employeeId),
       () => {
         if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       },
@@ -533,7 +542,8 @@ export class DockerEmployeeRuntime {
       },
       {
         records: () => company.store.view(),
-        inFlight: (employeeId) => service.flightActive(employeeId) || absent.flightActive(employeeId),
+        inFlight: (employeeId) =>
+          service.flightActive(employeeId) || absent.flightActive(employeeId) || limits.flightActive(employeeId),
         planMoves: () => this.#absentPlanMoves,
         runtimeCurrent: () => {
           if (!this.current() || company.store.publicationUnconfirmed)
@@ -549,6 +559,7 @@ export class DockerEmployeeRuntime {
       provider,
       service,
       pool,
+      limits,
       repairs,
       resourceRevisions,
       cpuCeiling,
@@ -625,6 +636,7 @@ export class DockerEmployeeRuntime {
       engine: a.engine,
       service: a.service,
       pool: a.pool,
+      limits: a.limits,
       absent: a.absent,
       sessions: a.ctx.sessions,
       current: () => this.current() && this.#attached === a,
@@ -672,7 +684,8 @@ export class DockerEmployeeRuntime {
       readLegacyDockerPolicyProposal,
       a.pool,
       a.recoveryHelper,
-      a.absent
+      a.absent,
+      a.limits
     );
   }
   /** Server composition only. Inert until the API supplies its genuine captured

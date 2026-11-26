@@ -34,6 +34,7 @@ import {
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { registerDockerEmployeeContinuationRoutes } from '../src/web/routes/docker-employee-continuation-routes.js';
 import type { DockerAbsentReprovision } from '../src/docker-absent-reprovision.js';
+import type { DockerLaptopLimitUpkeep } from '../src/docker-laptop-limit-upkeep.js';
 import {
   DockerWorkerIdentityAuthentication,
   dockerWorkerIdentityOf,
@@ -237,6 +238,17 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
     async run() { throw Error('No native operation during approval'); },
     async create() { throw Error('No container creation during approval'); },
   }, destinationImage, () => { throw Error('No token during approval'); });
+  // The repair of a finished laptop's limits that does not ask where its employee is: an inert recorder.
+  const limitCalls: Array<{ employeeId: string; operationId: string; owner: unknown }> = [];
+  const limitOutcome: { answer: 'unchanged' | 'restored' | Error } = { answer: 'restored' };
+  const limits = {
+    async restore(employeeId: string, operationId: string, authority: { owner: unknown; require(): void }) {
+      authority.require();
+      limitCalls.push({ employeeId, operationId, owner: authority.owner });
+      if (limitOutcome.answer instanceof Error) throw limitOutcome.answer;
+      return { operationId, limits: limitOutcome.answer };
+    },
+  };
   const absentCalls: Array<{
     kind: 'preview' | 'reprovision' | 'rebuild-preview' | 'rebuild';
     employeeId: string;
@@ -284,7 +296,8 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
       () => {
         if (!runtimeCurrent) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
       }
-    ), undefined, undefined, reattach, absent as unknown as DockerAbsentReprovision
+    ), undefined, undefined, reattach, absent as unknown as DockerAbsentReprovision,
+    limits as unknown as DockerLaptopLimitUpkeep
   );
   let resourceReads = 0,
     beforeResourceRead: (() => Promise<void>) | undefined;
@@ -366,6 +379,8 @@ async function fixture(options: { recover?: boolean; office?: boolean; storedPol
   };
   return {
     app,
+    limitCalls,
+    limitOutcome,
     absentCalls,
     rebuildOutcome,
     companyStore,
@@ -2282,6 +2297,59 @@ describe('absent laptop reprovision routes are owner-only', () => {
     f.logout();
     for (const response of await calls(f, f.ownerHeaders)) expect([401, 403]).toContain(response.statusCode);
     expect(f.absentCalls).toEqual([]);
+  });
+});
+
+describe('the limits repair route for an employee who is out of the office', () => {
+  const operationId = '77777777-7777-4777-8777-777777777777';
+  const repair = (f: Awaited<ReturnType<typeof fixture>>, headers: Record<string, string>) =>
+    f.app.inject({ method: 'POST', url: f.url + '/docker-continuation/repair', headers, payload: { operationId } });
+
+  it('answers with the repair that does not ask about attendance, and changes nothing else', async () => {
+    const f = await fixture({ storedPolicy: true });
+    const before = f.companyStore.snapshot();
+    expect(before.employees.find((employee) => employee.id === target)).toMatchObject({ onVacation: true });
+    const response = await repair(f, f.ownerHeaders);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toEqual({ success: true, data: { operationId, limits: 'restored' } });
+    expect(f.limitCalls).toEqual([{ employeeId: target, operationId, owner: undefined }]);
+    // Attendance, the record and every Engine effect are untouched.
+    expect(f.companyStore.snapshot()).toEqual(before);
+    expect(f.effects()).toBe(0);
+  });
+
+  it('passes a refusal on by its code', async () => {
+    const f = await fixture({ storedPolicy: true });
+    f.limitOutcome.answer = new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CONTAINER_STOPPED');
+    const response = await repair(f, f.ownerHeaders);
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({ success: false, error: { code: 'DOCKER_CONTINUATION_CONTAINER_STOPPED' } });
+  });
+
+  it('keeps the set-up service for an employee who is in the office', async () => {
+    const f = await fixture({ storedPolicy: true });
+    await f.companyStore.update((state) => {
+      const employee = state.employees.find((value) => value.id === target)!;
+      employee.onVacation = false;
+      employee.desiredRunning = true;
+    });
+    const response = await repair(f, f.ownerHeaders);
+    // No laptop set-up is on record here, which is that service's own answer.
+    expect(response.json()).toMatchObject({ success: false, error: { code: 'DOCKER_CONTINUATION_UNKNOWN_OPERATION' } });
+    expect(f.limitCalls).toEqual([]);
+  });
+
+  it('needs the same authority as every other laptop repair', async () => {
+    const f = await fixture({ storedPolicy: true, recover: false });
+    for (const headers of [
+      { origin: 'http://localhost', host: 'localhost' },
+      f.workerHeaders,
+      { ...f.ownerHeaders, 'x-reverie-service-token': 'synthetic' },
+    ])
+      expect([401, 403]).toContain((await repair(f, headers as Record<string, string>)).statusCode);
+    f.logout();
+    expect([401, 403]).toContain((await repair(f, f.ownerHeaders)).statusCode);
+    expect(f.limitCalls).toEqual([]);
   });
 });
 

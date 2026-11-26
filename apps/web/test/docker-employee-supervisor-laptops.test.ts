@@ -84,6 +84,9 @@ function world() {
     repaired: { operationId: REQUEST.operationId, phase: 'ready', state: 'ready', allowedActions: ['observe'] } as
       | Record<string, unknown>
       | Error,
+    /** What the attendance-independent repair of the laptop's own limits answers, call by call. */
+    kept: ['unchanged'] as Array<'unchanged' | 'restored' | Error>,
+    limitsFlight: false,
     calls: [] as Array<[string, unknown]>,
     authority: undefined as DockerContinuationAuthority | undefined,
     during: undefined as (() => void) | undefined,
@@ -153,6 +156,19 @@ function world() {
       repair: async (_id: string, input: unknown, authority: DockerContinuationAuthority) => {
         took('pool-repair', input, authority);
         return { ...(state.pool as Record<string, unknown>), state: 'retained', allowedActions: [] };
+      },
+    },
+    limits: {
+      flightActive: () => state.limitsFlight,
+      finished: () =>
+        state.record && state.record.version !== 3 && ['provider-issued', 'ready'].includes(String(state.record.phase))
+          ? state.record
+          : undefined,
+      restore: async (_id: string, operationId: string, authority: DockerContinuationAuthority) => {
+        took('limits', operationId, authority);
+        const answer = state.kept.length > 1 ? state.kept.shift()! : state.kept[0]!;
+        if (answer instanceof Error) throw answer;
+        return { operationId, limits: answer };
       },
     },
     absent: {
@@ -267,6 +283,102 @@ describe('putting approved limits back on a running laptop', () => {
     const w = world();
     await w.laptops.resend(EMPLOYEE, w.guard);
     expect(w.state.calls.map(([name]) => name)).toEqual(['begin']);
+  });
+});
+
+describe('keeping the approved limits of a laptop whose employee is out of the office', () => {
+  const AWAY: SupervisedEmployee = { ...EMPLOYEE, onVacation: true, desiredRunning: false };
+  const published = () => {
+    const w = world();
+    w.state.record = { version: 2, phase: 'ready', request: REQUEST, destination: { containerId: DESTINATION } };
+    return w;
+  };
+  const names = (w: ReturnType<typeof world>) => w.state.calls.map(([name]) => name);
+
+  it('asks the repair that does not depend on attendance, and nothing of a set-up, a terminal or an agent', async () => {
+    const w = published();
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({ outcome: 'done', detail: 'unchanged' });
+    w.state.kept = ['restored'];
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({ outcome: 'done', detail: 'restored' });
+    expect(names(w)).toEqual(['limits', 'limits']);
+    expect(w.made('limits')).toEqual([REQUEST.operationId, REQUEST.operationId]);
+    // The same call serves an employee who is in the office.
+    expect(await w.laptops.keepLimits(EMPLOYEE, w.guard)).toEqual({ outcome: 'done', detail: 'restored' });
+  });
+
+  it('repairs the shared pool first only when the pool stands in the way, then tries the laptop once more', async () => {
+    for (const code of ['DOCKER_CONTINUATION_POOL_UNCONFIRMED', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']) {
+      const w = published();
+      w.state.kept = [new DockerEmployeeContinuationError(code), 'unchanged'];
+      w.state.pool = {
+        state: 'held',
+        code: 'DOCKER_POOL_POLICY_CHANGED',
+        sessionId: EMPLOYEE.sessionId,
+        sessionGeneration: 3,
+        scopeDigest: '9'.repeat(64),
+        allowedActions: ['repair-pool'],
+      };
+      expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({ outcome: 'done', detail: 'restored' });
+      expect(names(w)).toEqual(['limits', 'pool-status', 'pool-repair', 'limits']);
+      expect(w.made('pool-repair')).toEqual([
+        { sessionId: EMPLOYEE.sessionId, sessionGeneration: 3, expectedScopeDigest: '9'.repeat(64) },
+      ]);
+    }
+    // A pool whose status offers no repair is left alone, and the hold is reported.
+    const w = published();
+    w.state.kept = [new DockerEmployeeContinuationError('DOCKER_CONTINUATION_POOL_UNCONFIRMED')];
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({
+      outcome: 'refused',
+      detail: 'DOCKER_CONTINUATION_POOL_UNCONFIRMED',
+    });
+    expect(names(w)).toEqual(['limits', 'pool-status']);
+  });
+
+  it('has nothing to keep without a finished laptop, and calls a stopped laptop not running', async () => {
+    const w = world();
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toBeUndefined();
+    w.state.record = { ...w.state.record, phase: 'ready', version: 3 };
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toBeUndefined();
+    w.state.record = undefined;
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toBeUndefined();
+    expect(w.state.calls).toEqual([]);
+    const stopped = published();
+    stopped.state.kept = [new DockerEmployeeContinuationError('DOCKER_CONTINUATION_CONTAINER_STOPPED')];
+    expect(await stopped.laptops.keepLimits(AWAY, stopped.guard)).toEqual({ outcome: 'done', detail: 'not-running' });
+  });
+
+  it('reports a refusal by its code, a busy laptop as busy, and never falls back to a set-up request', async () => {
+    const w = published();
+    w.state.kept = [new DockerEmployeeContinuationError('DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED')];
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({
+      outcome: 'refused',
+      detail: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED',
+    });
+    w.state.kept = [new DockerEmployeeContinuationError('DOCKER_CONTINUATION_BUSY')];
+    expect(await w.laptops.keepLimits(AWAY, w.guard)).toEqual({ outcome: 'busy', detail: 'DOCKER_CONTINUATION_BUSY' });
+    for (const never of ['begin', 'repair', 'observe', 'selection', 'preview', 'rebuild', 'observeDestination'])
+      expect([never, w.made(never)]).toEqual([never, []]);
+  });
+
+  it('presents the supervisor’s authority, which holds only while the switch, the runtime and the binding hold', async () => {
+    const w = published();
+    await w.laptops.keepLimits(AWAY, w.guard);
+    const authority = w.state.authority!;
+    for (const key of ['guard', 'current', 'binding'] as const) {
+      w.state[key] = false;
+      expect(() => authority.require()).toThrow();
+      w.state[key] = true;
+    }
+    w.state.guard = false;
+    await expect(w.laptops.keepLimits(AWAY, w.guard)).rejects.toThrow(/switched off/);
+    expect(names(w)).toEqual(['limits']);
+  });
+
+  it('counts a limits repair in flight as an operation on that employee', () => {
+    const w = published();
+    expect(w.laptops.flightActive(EMPLOYEE.id)).toBe(false);
+    w.state.limitsFlight = true;
+    expect(w.laptops.flightActive(EMPLOYEE.id)).toBe(true);
   });
 });
 

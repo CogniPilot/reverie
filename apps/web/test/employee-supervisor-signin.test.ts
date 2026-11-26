@@ -300,6 +300,7 @@ describe('the supervisor driving it', () => {
       startupGraceMs: 0,
       actionWaitMs: 1000,
       idleReadMs: 2 * MINUTE,
+      limitsCheckMs: 10 * MINUTE,
     });
     await supervisor.tick();
     expect(state.placed).toBe(1);

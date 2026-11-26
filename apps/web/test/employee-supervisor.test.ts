@@ -20,7 +20,7 @@ import type {
 } from '../src/employee-supervisor-policy.js';
 
 const MINUTE = 60_000;
-const LIMITS = { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0 };
+const LIMITS = { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0, limitsCheckMs: 10 * MINUTE };
 
 interface Person {
   employee: SupervisedEmployee;
@@ -96,13 +96,23 @@ function heldMove(target: Person, error: string): Person {
   return target;
 }
 
-function world(people: Person[], options: { limits?: typeof LIMITS; histories?: Map<string, SupervisorHistory> } = {}) {
+function world(
+  people: Person[],
+  options: {
+    limits?: typeof LIMITS;
+    histories?: Map<string, SupervisorHistory>;
+    /** The office's answer to a limits check. Without it the office has no such port. */
+    keepLimits?: (employee: SupervisedEmployee) => Promise<SupervisorActionResult | undefined>;
+  } = {}
+) {
   const state = {
     now: 10 * MINUTE,
     ready: true,
     flags: { enabled: true, autoRepair: true },
     reads: [] as string[],
     acts: [] as string[],
+    /** Limits checks, as `<seconds since the start>:<employee>`. */
+    kept: [] as string[],
     logs: [] as string[],
     audits: [] as SupervisorAuditEntry[],
     saves: [] as Array<Map<string, SupervisorHistory>>,
@@ -151,6 +161,15 @@ function world(people: Person[], options: { limits?: typeof LIMITS; histories?: 
       state.reads.push('provider:' + employee.id);
       return find(employee).provider;
     },
+    ...(options.keepLimits
+      ? {
+          keepLimits: async (employee: SupervisedEmployee, guard: () => void) => {
+            guard();
+            state.kept.push(`${(state.now - 10 * MINUTE) / 1000}:${employee.id}`);
+            return options.keepLimits!(employee);
+          },
+        }
+      : {}),
     actions: {
       'resend-continuation': act('resend-continuation'),
       'start-continuation': act('start-continuation'),
@@ -190,7 +209,7 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.saves).toEqual([]);
   });
 
-  it('never reads or touches an employee the owner stopped, whatever is wrong with their laptop', async () => {
+  it('never reads or repairs an employee the owner stopped, whatever is wrong with their laptop', async () => {
     for (const patch of [{ desiredRunning: false }, { onVacation: true }, { desiredRunning: undefined }]) {
       const stopped = heldMove(hold(person('a', patch), 'DOCKER_RESOURCE_HELPER_FAILED'), 'DOCKER_RESOURCE_HELPER_FAILED');
       const w = world([stopped]);
@@ -221,25 +240,6 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.reads.filter((read) => read === 'provider:a')).toHaveLength(2);
   });
 
-  it('never rebuilds while an agent is running in the laptop, and says who has to decide', async () => {
-    const running = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
-    running.provider = 'running';
-    const w = world([running]);
-    await w.run(120);
-    expect(w.state.acts).toEqual([]);
-    expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild' });
-    expect(w.report('a').needsHuman).toMatch(/would discard its conversation.*confirmDiscardRunning/);
-    expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
-  });
-
-  it('does not keep asking an occupied laptop what runs in it, and still reads again before any rebuild', async () => {
-    const occupied = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
-    occupied.provider = 'running';
-    const w = world([occupied], { limits: { ...LIMITS, idleReadMs: 120_000 } });
-    await w.run(20);
-    const reads = () => w.state.reads.filter((read) => read === 'provider:a').length;
-    // Forty passes; one read when the rebuild first came due, then one per two minutes.
-    expect(reads()).toBeLessThanOrEqual(9);
   describe('a set-up made for a laptop image the office no longer uses, with no laptop running', () => {
     const CODE = 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED';
     /** As seen after an office deploy: held at `pool-issued`, the read still offers `continue`, nothing runs. */
@@ -324,6 +324,25 @@ describe('EmployeeSupervisor', () => {
     });
   });
 
+  it('never rebuilds while an agent is running in the laptop, and says who has to decide', async () => {
+    const running = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    running.provider = 'running';
+    const w = world([running]);
+    await w.run(120);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({ condition: 'held-needs-rebuild' });
+    expect(w.report('a').needsHuman).toMatch(/would discard its conversation.*confirmDiscardRunning/);
+    expect(w.state.logs.filter((line) => line.includes('needs a person'))).toHaveLength(1);
+  });
+
+  it('does not keep asking an occupied laptop what runs in it, and still reads again before any rebuild', async () => {
+    const occupied = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    occupied.provider = 'running';
+    const w = world([occupied], { limits: { ...LIMITS, idleReadMs: 120_000 } });
+    await w.run(20);
+    const reads = () => w.state.reads.filter((read) => read === 'provider:a').length;
+    // Forty passes; one read when the rebuild first came due, then one per two minutes.
+    expect(reads()).toBeLessThanOrEqual(9);
     expect(reads()).toBeGreaterThanOrEqual(7);
     expect(w.state.acts).toEqual([]);
     expect(w.report('a').needsHuman).toMatch(/needs the owner/);
@@ -664,6 +683,154 @@ describe('EmployeeSupervisor', () => {
     await w.run(1);
     expect(w.supervisor.reports(undefined).map((row) => row.employeeId)).toEqual(['a']);
     expect(w.supervisor.reports('someone').map((row) => row.employeeId)).toEqual(['b']);
+  });
+});
+
+describe('EmployeeSupervisor: keeping approved limits in place', () => {
+  const restored = async (): Promise<SupervisorActionResult> => ({ outcome: 'done', detail: 'restored' });
+  const unchanged = async (): Promise<SupervisorActionResult> => ({ outcome: 'done', detail: 'unchanged' });
+
+  it('puts the limits of a running laptop back for an employee who is out of the office or stopped', async () => {
+    for (const patch of [{ onVacation: true }, { desiredRunning: false }, { desiredRunning: undefined }]) {
+      const away = hold(person('a', patch), 'DOCKER_RESOURCE_HELPER_FAILED');
+      const w = world([away], { keepLimits: restored });
+      await w.run(1);
+      expect(w.state.kept).toEqual(['30:a']);
+      // Nothing else was read, no repair step was taken, and the employee is described as before.
+      expect(w.state.reads).toEqual([]);
+      expect(w.state.acts).toEqual([]);
+      expect(w.report('a')).toMatchObject({
+        condition: 'owner-stopped',
+        limits: { at: 10 * MINUTE + 30_000, outcome: 'done', detail: 'restored' },
+      });
+      expect(w.report('a').next).toBeUndefined();
+      expect(w.state.logs).toEqual(['[supervisor] A (a): keep-limits -> done restored']);
+      expect(w.state.audits).toEqual([
+        {
+          admin: 'office supervisor',
+          action: 'supervisor_keep_limits',
+          target: 'A',
+          detail: { id: 'a', sessionId: 'session-a', outcome: 'done', detail: 'restored' },
+        },
+      ]);
+      // No attempt of the repair ladder is spent and nothing is written for it.
+      expect(w.state.saves).toEqual([]);
+    }
+  });
+
+  it('checks each laptop again every ten minutes, one employee per pass, and says nothing while all is in place', async () => {
+    const w = world([person('a', { onVacation: true }), person('b', { onVacation: true }), person('c')], {
+      keepLimits: unchanged,
+    });
+    await w.run(21);
+    expect(w.state.kept).toEqual(['30:a', '60:b', '90:c', '630:a', '660:b', '690:c', '1230:a', '1260:b']);
+    expect(w.state.logs).toEqual([]);
+    expect(w.state.audits).toEqual([]);
+    expect(w.report('a').limits).toEqual({ at: 10 * MINUTE + 1230_000, outcome: 'done', detail: 'unchanged' });
+    // An employee who is running normally is checked the same way; nothing about them is touched.
+    expect(w.report('c')).toMatchObject({ condition: 'healthy', limits: { outcome: 'done', detail: 'unchanged' } });
+    expect(w.state.acts).toEqual([]);
+  });
+
+  it('leaves a laptop the repair ladder is working on to the ladder', async () => {
+    const held = hold(person('a'), 'DOCKER_RESOURCE_LEAF_ACK_MISSING', ['observe', 'repair']);
+    const w = world([held], { keepLimits: restored });
+    await w.run(3);
+    expect(w.state.kept).toEqual([]);
+    expect(w.state.acts[0]).toBe('resend-continuation:a');
+  });
+
+  it('reports a refusal once, and again only when it changes or ends', async () => {
+    let answer: SupervisorActionResult | undefined = { outcome: 'refused', detail: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED' };
+    const w = world([person('a', { onVacation: true })], { keepLimits: async () => answer });
+    await w.run(31);
+    expect(w.state.kept).toHaveLength(4);
+    expect(w.state.logs).toEqual(['[supervisor] A (a): keep-limits -> refused DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED']);
+    expect(w.report('a').limits).toMatchObject({ outcome: 'refused', detail: 'DOCKER_CONTINUATION_WORKER_IMAGE_CHANGED' });
+    answer = { outcome: 'failed', detail: 'Error' };
+    await w.run(10);
+    expect(w.state.logs).toHaveLength(2);
+    answer = { outcome: 'done', detail: 'not-running' };
+    await w.run(10);
+    expect(w.state.logs).toHaveLength(2);
+    expect(w.report('a').limits).toMatchObject({ outcome: 'done', detail: 'not-running' });
+    // An employee with no finished laptop has nothing to keep and nothing to show.
+    answer = undefined;
+    await w.run(10);
+    expect(w.report('a').limits).toBeUndefined();
+  });
+
+  it('asks again soon when another operation held the employee, and keeps the earlier finding', async () => {
+    let answer: SupervisorActionResult = { outcome: 'done', detail: 'unchanged' };
+    const w = world([person('a', { onVacation: true })], { keepLimits: async () => answer });
+    await w.run(1);
+    answer = { outcome: 'busy', detail: 'DOCKER_CONTINUATION_BUSY' };
+    await w.run(11);
+    expect(w.state.kept).toEqual(['30:a', '630:a', '690:a']);
+    expect(w.report('a').limits).toMatchObject({ outcome: 'done', detail: 'unchanged' });
+  });
+
+  it('does nothing while the supervisor is switched off, the office is not ready or it has stopped', async () => {
+    const w = world([person('a', { onVacation: true })], { keepLimits: restored });
+    w.state.flags = { enabled: false, autoRepair: true };
+    await w.run(5);
+    w.state.flags = { enabled: true, autoRepair: false };
+    w.state.ready = false;
+    await w.run(5);
+    expect(w.state.kept).toEqual([]);
+    // Putting limits back gives nothing up: it needs the first switch only.
+    w.state.ready = true;
+    await w.run(1);
+    expect(w.state.kept).toHaveLength(1);
+    w.supervisor.close();
+    await w.run(30);
+    expect(w.state.kept).toHaveLength(1);
+  });
+
+  it('holds only for the unchanged employee, and never asks or changes where the employee is', async () => {
+    const away = person('a', { onVacation: true });
+    let guard!: () => void;
+    const w = world([away]);
+    w.ports.keepLimits = async (_employee, held) => {
+      guard = held;
+      return { outcome: 'done', detail: 'unchanged' };
+    };
+    await w.run(1);
+    expect(() => guard()).not.toThrow();
+    // Back in the office, or stopped: the same guard still holds.
+    away.employee = { ...away.employee, onVacation: false };
+    expect(() => guard()).not.toThrow();
+    away.employee = { ...away.employee, desiredRunning: false };
+    expect(() => guard()).not.toThrow();
+    for (const change of [{ sessionGeneration: 2 }, { sessionId: 'another' }, { owner: 'someone' }, { bindingMigration: true }]) {
+      const before = away.employee;
+      away.employee = { ...before, ...change };
+      expect(() => guard()).toThrow(/employee changed/);
+      away.employee = before;
+    }
+    w.state.flags = { enabled: false, autoRepair: true };
+    expect(() => guard()).toThrow(/switched off/);
+  });
+
+  it('never runs beside a repair step of the same employee', async () => {
+    const target = person('a', { onVacation: true });
+    let release!: (result: SupervisorActionResult) => void;
+    const w = world([target], {
+      keepLimits: () => new Promise<SupervisorActionResult>((resolve) => (release = resolve)),
+    });
+    await w.run(1);
+    expect(w.state.kept).toEqual(['30:a']);
+    // The employee comes back and their laptop is held, while the limits check has not returned.
+    hold(target, 'DOCKER_RESOURCE_HELPER_RETRY_PENDING', ['observe', 'continue']);
+    target.employee = { ...target.employee, onVacation: false };
+    target.glance = { ...target.glance, onVacation: false };
+    await w.run(5);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a').waitingFor).toBe('the last step to return');
+    release({ outcome: 'done', detail: 'restored' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await w.run(1);
+    expect(w.state.acts).toEqual(['resend-continuation:a']);
   });
 });
 

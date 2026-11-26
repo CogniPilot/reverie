@@ -52,6 +52,8 @@ function office() {
     flight: false,
     screenReads: 0,
     calls: [] as Array<[string, ...unknown[]]>,
+    /** Limits checks the laptops service was asked for, by employee. */
+    keeps: [] as string[],
     audits: [] as SupervisorAuditEntry[],
     wake: { awakened: ['a'], skipped: [] } as { awakened: string[]; skipped: Array<{ employeeId: string; reason: string }> },
     throwing: undefined as Error | undefined,
@@ -78,6 +80,11 @@ function office() {
       resend: async () => ({ outcome: 'done' }),
       start: async () => ({ outcome: 'done' }),
       rebuild: async () => ({ outcome: 'done' }),
+      keepLimits: async (employee: SupervisedEmployee, guard: () => void) => {
+        guard();
+        state.keeps.push(employee.id);
+        return { outcome: 'done', detail: 'unchanged' };
+      },
     },
     restorations: () => state.restorations,
     providerHealth: () => ({ state: 'healthy' }),
@@ -303,10 +310,18 @@ describe('office supervisor ports', () => {
     ]);
   });
 
+  it('keeps a laptop’s approved limits through the laptops service, wherever its employee is', async () => {
+    const o = office();
+    o.state.rows[1] = { ...o.state.rows[1]!, onVacation: true };
+    expect(await o.ports.keepLimits!(o.employee('b'), pass)).toEqual({ outcome: 'done', detail: 'unchanged' });
+    expect(await o.ports.keepLimits!(o.employee('a'), pass)).toEqual({ outcome: 'done', detail: 'unchanged' });
+    expect(o.state.keeps).toEqual(['b', 'a']);
+  });
+
   it('drives a whole pass: a held move is continued and recorded under the supervisor’s own name', async () => {
     const o = office();
     o.state.moves = [move()];
-    const supervisor = new EmployeeSupervisor(o.ports, undefined, { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0 });
+    const supervisor = new EmployeeSupervisor(o.ports, undefined, { actionsPerTick: 2, startupGraceMs: 0, actionWaitMs: 50, idleReadMs: 0, limitsCheckMs: 600_000 });
     await supervisor.tick();
     o.state.now += 61_000;
     await supervisor.tick();

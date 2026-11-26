@@ -1,5 +1,6 @@
 import type { DockerWorkerReattachHelper } from '../../docker-worker-reattach-helper.js';
 import type { DockerPoolReconciliation } from '../../docker-pool-reconciliation.js';
+import type { DockerLaptopLimitUpkeep } from '../../docker-laptop-limit-upkeep.js';
 import { dockerReprovisionHoldDetail, type DockerAbsentReprovision } from '../../docker-absent-reprovision.js';
 import type { DockerPolicyProposal } from '../../docker-employee-policy-import.js';
 /** Thin transport for the shared boxed recovery decision owner. */
@@ -64,7 +65,8 @@ export function registerDockerEmployeeContinuationRoutes(
   proposal?: (employeeId: string) => DockerPolicyProposal | undefined,
   pool?: DockerPoolReconciliation,
   recoveryHelper?: DockerWorkerReattachHelper,
-  absent?: DockerAbsentReprovision
+  absent?: DockerAbsentReprovision,
+  limits?: DockerLaptopLimitUpkeep
 ): void {
   const human = (req: FastifyRequest) =>
     req.headers['x-reverie-parent-session'] === undefined &&
@@ -386,12 +388,21 @@ export function registerDockerEmployeeContinuationRoutes(
       return described(await service.begin(employeeId, body.request, authority));
     })
   );
-  // Re-applies the already approved limits of one running laptop in place.
+  // Re-applies the already approved limits of one running laptop in place. The set-up service answers every step
+  // for an employee who is out of the office or stopped with DOCKER_CONTINUATION_OFFICE_CHANGED before it reads the
+  // laptop, so for such an employee the repair that does not ask about attendance answers: `{ operationId, limits }`
+  // with `unchanged` or `restored`. It attaches nothing, starts nothing and changes no attendance.
   app.post('/api/company/employees/:id/docker-continuation/repair', async (req, reply) =>
     run(reply, async () => {
       const employeeId = uuid.parse((req.params as { id: string }).id),
-        body = z.object({ operationId: uuid }).strict().parse(req.body);
-      return described(await service.repair(employeeId, body.operationId, capture(req, employeeId)));
+        body = z.object({ operationId: uuid }).strict().parse(req.body),
+        authority = capture(req, employeeId),
+        employee = company.store
+          .snapshot()
+          .employees.find((member) => member.id === employeeId && member.owner === authority.owner);
+      if (limits && employee && (employee.onVacation || employee.desiredRunning !== true))
+        return limits.restore(employeeId, body.operationId, authority);
+      return described(await service.repair(employeeId, body.operationId, authority));
     })
   );
   app.post('/api/company/employees/:id/docker-continuation/observe', async (req, reply) =>

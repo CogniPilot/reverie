@@ -10,7 +10,15 @@
  * - never a second action for an employee while an earlier one has not returned;
  * - a small number of actions per tick, and none in the first moments after the office starts;
  * - an attempt is persisted BEFORE its effect, so an office restart cannot repeat a step for free;
- * - an employee the owner stopped or sent out of the office is never read through a port, let alone acted on.
+ * - an employee the owner stopped or sent out of the office is never read through a port, let alone acted on,
+ *   with one exception that is no repair step: keeping approved limits in place (below).
+ *
+ * Keeping limits. A reload of the host's service manager resets the limits a helper wrote on every running laptop,
+ * whoever it belongs to. So beside the ladder, at most once per pass and once per `limitsCheckMs` for each
+ * employee, the supervisor asks the `keepLimits` port to put the approved limits of a finished, running laptop back.
+ * It is asked for an employee who is stopped or out of the office and for one who is running normally: the two
+ * states in which no repair step looks at the laptop. It writes only values the owner already approved, attaches
+ * nothing, starts nothing, changes no attendance and spends no attempt of the ladder.
  */
 import {
   EMPTY_SUPERVISOR_HISTORY,
@@ -82,6 +90,12 @@ export interface EmployeeSupervisorPorts {
   ): Promise<'stopped' | 'running' | 'absent' | 'outdated' | 'unknown'>;
   /** Fresh positive read of what runs in the employee's laptops. */
   readProvider(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorProviderPresence>;
+  /**
+   * Put the approved limits of this employee's finished, running laptop back in place, wherever the employee is.
+   * `done` with `unchanged`, `restored` or `not-running`; undefined when the employee has no finished laptop.
+   * Absent where the office has no laptops.
+   */
+  keepLimits?(employee: SupervisedEmployee, guard: SupervisorGuard): Promise<SupervisorActionResult | undefined>;
   /** One effect each. A port that is absent is a step this office cannot take. */
   readonly actions: {
     readonly [K in SupervisorAction]?: (
@@ -106,13 +120,26 @@ export interface EmployeeSupervisorLimits {
   readonly actionWaitMs: number;
   /** How often the laptop of an employee with no step pending (waiting for a person, unknown) is read again. */
   readonly idleReadMs: number;
+  /** How often the approved limits of one employee's running laptop are checked, and put back when they are gone. */
+  readonly limitsCheckMs: number;
 }
 export const SUPERVISOR_LIMITS: EmployeeSupervisorLimits = {
   actionsPerTick: 2,
   startupGraceMs: 90_000,
   actionWaitMs: 5 * 60_000,
   idleReadMs: 2 * 60_000,
+  limitsCheckMs: 10 * 60_000,
 };
+/** A limits check that found the employee busy is asked again this soon. */
+const LIMITS_BUSY_RETRY_MS = 60_000;
+
+/** The last check of the approved limits of one employee's laptop. */
+export interface SupervisorLimitsReport {
+  readonly at: number;
+  readonly outcome: SupervisorActionResult['outcome'];
+  /** `unchanged`, `restored` or `not-running` when it was done; otherwise the code or phrase of the refusal. */
+  readonly detail?: string;
+}
 
 /** What `GET /api/company` shows for one employee. */
 export interface SupervisorReport {
@@ -134,6 +161,8 @@ export interface SupervisorReport {
   readonly waitingFor?: string;
   /** What a person or a managing agent has to do, when the supervisor will not. */
   readonly needsHuman?: string;
+  /** The last check of the laptop's approved limits, for an employee who has a finished laptop. */
+  readonly limits?: SupervisorLimitsReport;
 }
 
 class SupervisorStopped extends Error {
@@ -164,6 +193,9 @@ export class EmployeeSupervisor {
   #reused = false;
   /** The last read that found a laptop occupied or unreadable. Never one that found it empty. */
   readonly #occupied = new Map<string, { at: number; presence: 'running' | 'unknown' }>();
+  /** The last limits check of each employee, and when the next one is due. In memory: a restart checks again. */
+  readonly #limits = new Map<string, SupervisorLimitsReport>();
+  readonly #limitsDue = new Map<string, number>();
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -219,6 +251,11 @@ export class EmployeeSupervisor {
         this.#readings.delete(id);
         this.#occupied.delete(id);
       }
+    for (const id of [...this.#limitsDue.keys()])
+      if (!known.has(id)) {
+        this.#limitsDue.delete(id);
+        this.#limits.delete(id);
+      }
     // Whoever was acted on longest ago goes first, so one noisy employee cannot take every seat.
     const order = [...employees].sort(
       (a, b) =>
@@ -234,7 +271,127 @@ export class EmployeeSupervisor {
         this.ports.log(`[supervisor] ${employee.name} (${employee.id}): could not be checked: ${describe(error)}`);
       }
     }
+    if (!this.#closed) await this.#keepLimits(employees);
     await this.#persist();
+  }
+
+  /**
+   * Whether no repair step looks at this employee's laptop right now: the employee is stopped or out of the office,
+   * or was just read as running normally. Every other condition belongs to the ladder, which repairs limits itself.
+   */
+  #unattended(employee: SupervisedEmployee): boolean {
+    if (employee.desiredRunning !== true || employee.onVacation) return true;
+    return this.#reports.get(employee.id)?.condition === 'healthy';
+  }
+
+  /** The limits check of the one employee whose check is longest overdue. See the file comment. */
+  async #keepLimits(employees: readonly SupervisedEmployee[]): Promise<void> {
+    const keep = this.ports.keepLimits?.bind(this.ports);
+    if (!keep) return;
+    const now = this.ports.now(),
+      due = (employee: SupervisedEmployee) => this.#limitsDue.get(employee.id) ?? 0;
+    const employee = employees
+      .filter(
+        (row) =>
+          due(row) <= now &&
+          !row.bindingMigration &&
+          !this.#acting.has(row.id) &&
+          this.#unattended(row) &&
+          this.ports.flags(row.owner).enabled
+      )
+      .sort((a, b) => due(a) - due(b) || a.id.localeCompare(b.id))[0];
+    if (!employee) return;
+    this.#limitsDue.set(employee.id, now + this.limits.limitsCheckMs);
+    const guard = this.#identityGuard(employee);
+    const work = (async (): Promise<SupervisorActionResult | undefined> => {
+      try {
+        guard();
+        return await keep(employee, guard);
+      } catch (error) {
+        return error instanceof SupervisorStopped
+          ? { outcome: 'busy', detail: error.message }
+          : { outcome: 'failed', detail: describe(error) };
+      }
+    })().then((result) => {
+      this.#acting.delete(employee.id);
+      this.#limitsChecked(employee, result, now);
+    });
+    this.#acting.set(employee.id, work);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const waited = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, this.limits.actionWaitMs);
+      timer.unref?.();
+    });
+    await Promise.race([work, waited]);
+    if (timer) clearTimeout(timer);
+  }
+
+  /** Record one limits check. A line and an audit entry are written when limits were put back, and once when a
+   * check starts to be refused or to fail; a check that found everything in place says nothing. */
+  #limitsChecked(employee: SupervisedEmployee, result: SupervisorActionResult | undefined, at: number): void {
+    const before = this.#limits.get(employee.id);
+    if (!result) {
+      this.#limits.delete(employee.id);
+      return;
+    }
+    if (result.outcome === 'busy') {
+      // Another operation held the employee and nothing was tried: the earlier finding stands, and this is asked
+      // again soon.
+      this.#limitsDue.set(employee.id, at + LIMITS_BUSY_RETRY_MS);
+      return;
+    }
+    const entry: SupervisorLimitsReport = {
+      at,
+      outcome: result.outcome,
+      ...(result.detail ? { detail: result.detail } : {}),
+    };
+    this.#limits.set(employee.id, entry);
+    const report = this.#reports.get(employee.id);
+    if (report) this.#reports.set(employee.id, { ...report, limits: entry });
+    const restored = entry.outcome === 'done' && entry.detail === 'restored';
+    const changed = !before || before.outcome !== entry.outcome || before.detail !== entry.detail;
+    if (!restored && (entry.outcome === 'done' || !changed)) return;
+    try {
+      this.ports.log(
+        `[supervisor] ${employee.name} (${employee.id}): keep-limits -> ${entry.outcome}` +
+          `${entry.detail ? ' ' + entry.detail : ''}`
+      );
+      this.ports.audit({
+        admin: 'office supervisor',
+        action: 'supervisor_keep_limits',
+        target: employee.name,
+        detail: {
+          id: employee.id,
+          sessionId: employee.sessionId,
+          outcome: entry.outcome,
+          ...(entry.detail ? { detail: entry.detail } : {}),
+        },
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * Throws unless the supervisor may still keep limits for exactly this employee: the owner's switch, the ready
+   * office and the unchanged employee. Attendance is not asked, in either direction.
+   */
+  #identityGuard(employee: SupervisedEmployee): SupervisorGuard {
+    return () => {
+      if (this.#closed) throw new SupervisorStopped('The office supervisor has stopped');
+      if (!this.ports.ready()) throw new SupervisorStopped('The office is not ready');
+      if (!this.ports.flags(employee.owner).enabled)
+        throw new SupervisorStopped('The office supervisor was switched off');
+      const live = this.ports.employees().find((row) => row.id === employee.id);
+      if (
+        !live ||
+        live.owner !== employee.owner ||
+        live.sessionId !== employee.sessionId ||
+        live.sessionGeneration !== employee.sessionGeneration ||
+        live.bindingMigration
+      )
+        throw new SupervisorStopped('The employee changed');
+    };
   }
 
   #forget(id: string): void {
@@ -347,6 +504,7 @@ export class EmployeeSupervisor {
     const previous = this.#histories.get(employee.id) ?? EMPTY_SUPERVISOR_HISTORY;
     if (employee.desiredRunning !== true || employee.onVacation) {
       // Stopped by choice: described from the record alone. No port is read and nothing is remembered but the reset.
+      // The approved limits of a laptop that still runs are kept by the pass itself (`#keepLimits`).
       const stopped: SupervisorObservation = {
         employeeId: employee.id,
         name: employee.name,
@@ -519,6 +677,7 @@ export class EmployeeSupervisor {
       ...(assessment.next.action ? { next: { action: assessment.next.action, at: assessment.next.at ?? now } } : {}),
       ...(waitingFor ? { waitingFor } : {}),
       ...(assessment.needsHuman ? { needsHuman: assessment.needsHuman } : {}),
+      ...(this.#limits.has(employee.id) ? { limits: this.#limits.get(employee.id)! } : {}),
     };
     this.#reports.set(employee.id, report);
     // One console line when an employee starts to need a person, and one when that ends.
