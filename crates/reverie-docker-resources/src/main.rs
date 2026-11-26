@@ -39,6 +39,7 @@ fn main() -> std::process::ExitCode {
         }
         Command::ProbeWorker(input) => operations::probe_worker(&mut files, &input),
         Command::ConfigureHigh(input) => operations::configure_high(&mut files, &input),
+        Command::RestoreHigh(input) => operations::restore_high(&mut files, &input),
         Command::ConfigureMemoryHigh(input) => {
             operations::configure_memory_high(&mut files, &input)
         }

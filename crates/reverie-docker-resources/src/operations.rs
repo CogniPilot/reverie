@@ -1,3 +1,4 @@
+mod leaf_restore;
 mod memory_high;
 mod pool;
 mod pool_cpu;
@@ -209,4 +210,9 @@ pub(crate) fn configure_high(files: &mut Files, input: &HighWrite) -> Result<Str
 
 pub(crate) fn configure_memory_high(files: &mut Files, input: &MemoryHighWrite) -> Result<String> {
     memory_high::configure(files, input)
+}
+/// Re-applies `memory.swap.max`, `memory.high` and `cpu.weight` on a running
+/// worker's leaf. `memory.max` and `pids.max` are asserted and never written.
+pub(crate) fn restore_high(files: &mut Files, input: &HighWrite) -> Result<String> {
+    leaf_restore::restore(files, input)
 }

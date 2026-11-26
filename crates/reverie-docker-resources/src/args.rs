@@ -20,6 +20,8 @@ pub(crate) enum Command {
     ConfigurePoolCpuMax(PoolCpuMaxWrite),
     ProbeWorker(Worker),
     ConfigureHigh(HighWrite),
+    /// Re-apply the leaf limits only this helper writes, on a leaf whose engine-owned limits are intact.
+    RestoreHigh(HighWrite),
     /// Write only memory.high, retaining all declared hard, CPU and cpuset limits.
     ConfigureMemoryHigh(MemoryHighWrite),
     HoldStorage,
