@@ -436,6 +436,11 @@ export class SubmitVerifier {
   /** The outcome callback of the check in flight; a newer arm or cancel settles it as unverified. */
   private pending: { onOutcome?: (outcome: SubmitOutcome) => void } | undefined;
 
+  /** A check is still deciding about the prompt it was armed for. */
+  get armed(): boolean {
+    return this.pending !== undefined;
+  }
+
   cancel(): void {
     const pending = this.pending;
     this.pending = undefined;

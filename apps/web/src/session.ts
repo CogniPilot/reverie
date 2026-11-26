@@ -156,7 +156,7 @@ import { EXEC_TIMEOUT_MS } from './config/exec-timeout.js';
 import { getCli } from './config/cli-registry/registry.js';
 import { accountReplacementProfile } from './utils/account-replacement-profile.js';
 import { resolvedStockProtocol } from './utils/resolved-stock-protocol.js';
-import { composerGlyphVerified, composerIsEmpty, SubmitVerifier } from './session-submit-verifier.js';
+import { composerGlyphVerified, composerIsEmpty, promptStillInComposer, SubmitVerifier } from './session-submit-verifier.js';
 import { withWriteGate } from './submit-settle.js';
 import { compileVersionRegex } from './config/cli-registry/patterns.js';
 import { resolveSessionCliVersion } from './utils/cli-resolver.js';
@@ -6942,6 +6942,33 @@ export class Session extends EventEmitter {
       return true;
     }
     return false;
+  }
+
+  /**
+   * Take up a line this office typed earlier that is still sitting unsent in the composer. A write that owns the composer
+   * (an agent wake) leaves its text typed and unsent whenever the Enter could not be justified at that moment: the pane could
+   * not be read right after the text (a laptop the office had just lost its connection to), the write's gate closed while the
+   * text settled, or the CLI ignored every Enter of the retry schedule. Nothing pressed Enter for it later, and the composer
+   * was never empty again, so every later wake was refused for good.
+   *
+   * Nothing is typed or cleared here. When the pane is idle in every other respect and its WHOLE composer is exactly `text`,
+   * the composer check (session-submit-verifier.ts) is armed for that text again: it presses Enter only while the complete
+   * composer still is that text and this pane is still idle, and reports how it ended. One character more or less in the
+   * composer, a turn in progress, held input, another write or check in flight, or a harness whose composer cannot be read:
+   * false, and nothing was done.
+   */
+  resubmitStranded(text: string, onOutcome?: SessionWriteOptions['onOutcome']): boolean {
+    const admitted = this.captureInputAdmission();
+    const mux = this._mux, subject = this._muxSession;
+    const glyph = getCli(this.mode)?.capabilities.workDetect?.promptGlyph ?? '';
+    if (!admitted() || !text.trim() || !mux?.capturePaneText || !subject || !composerGlyphVerified(glyph)) return false;
+    if (this._inputHeldForRecovery() || this._capacityTextPending || this._submitVerifier?.armed) return false;
+    const idle = (): boolean => !this._inputHeldForRecovery() && this._idleForWake(null, false);
+    if (!idle()) return false;
+    const screen = mux.capturePaneText(subject.muxName, undefined, { escapes: true });
+    if (screen == null || promptStillInComposer(screen, text, glyph) !== true) return false;
+    this._verifySubmitted(`${text}\r`, onOutcome, false, idle, admitted);
+    return true;
   }
 
   /**
