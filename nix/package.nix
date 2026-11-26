@@ -293,7 +293,7 @@ let
         test/routes/voice-turn-routes.test.ts test/routes/voice-service-status.test.ts test/voice-member-dispatch.test.ts test/chat-app-dm-voice.test.ts \
         test/read-aloud-team-voice.test.ts test/session-cli-builder.test.ts test/board-page-routes.test.ts test/company-logos.test.ts \
         test/reboot-restore.test.ts test/reboot-restore-persistent.test.ts \
-        test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts \
+        test/routes/reboot-restore-routes.test.ts test/codex-transcript.test.ts test/routes/company-avatar.test.ts test/routes/board-known-state.test.ts \
         test/company-avatar-picker-ui.test.ts test/agent-avatar-background.test.ts test/company-hire-plan-refresh.test.ts \
         test/company-hire-wizard.test.ts test/company-role-context.test.ts test/company-rest-context.test.ts test/handbook.test.ts test/company-preferences-autosave.test.ts \
         test/employee-gpu-access.test.ts test/employee-gpu-ui.test.ts test/company-settings-ui.test.ts test/company-settings-patches-ui.test.ts test/chat-app-dom.test.ts test/chat-reference-navigation.test.ts test/profile-avatar-preview.test.ts test/cli-config-content.test.ts \
