@@ -557,7 +557,7 @@ let
         test/split-pane-hidden-button-css.test.ts test/split-pane-per-device-setting.test.ts \
         test/split-pane-picker-listener-leak-unit.test.ts test/spreadsheet-preview.test.ts \
         test/spreadsheet-xlsx-core.test.ts test/sse-cors-headers.test.ts test/sse-dispatch-table.test.ts test/sse-events.test.ts \
-        test/sse-heartbeat.test.ts test/sse-policy-revocation.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts \
+        test/sse-heartbeat.test.ts test/sse-policy-revocation.test.ts test/sse-registry-parity.test.ts test/sse-routing-remote.test.ts test/sse-staleness.test.ts test/sse-reconnect-backoff.test.ts \
         test/sse-subscription-filter.test.ts test/sse-subscription-ownership.test.ts test/sse-tile-grid-filter.test.ts test/stale-expiration-map.test.ts \
         test/stalled-seat-alert.test.ts test/stalled-seat-notice-resolution.test.ts test/stalled-seat-notice-routing.test.ts \
         test/state-publication-status.test.ts test/state-store-publication.test.ts test/state-store-tab-layout.test.ts test/state-store.test.ts test/static-cache-headers.test.ts \
