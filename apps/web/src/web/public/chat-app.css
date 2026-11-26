@@ -3784,7 +3784,8 @@ button.ca-stat:focus-visible {
 }
 /* z-index 2 keeps the page and org panels under the phone drawers (3); the scrim (2) comes later in the DOM so it still covers them. */
 .ca-page,
-.ca-board-page {
+.ca-board-page,
+.ca-warm-page {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -3792,11 +3793,13 @@ button.ca-stat:focus-visible {
   background: var(--ca-main-bg);
 }
 .ca-page[hidden],
-.ca-board-page[hidden] {
+.ca-board-page[hidden],
+.ca-warm-page[hidden] {
   display: none;
 }
 .ca-page-frame,
-.ca-board-frame {
+.ca-board-frame,
+.ca-warm-frame {
   flex: 1;
   width: 100%;
   min-width: 0;
@@ -6154,12 +6157,14 @@ button.ca-company-profile-trigger:focus-visible {
   padding: 8px 12px;
   border-bottom: 1px solid var(--ca-line);
 }
-.ca-page:has(> .ca-tool-page-head) {
+.ca-page:has(> .ca-tool-page-head),
+.ca-warm-page {
   display: flex;
   flex-direction: column;
 }
 .ca-page > .ca-tool-page-head + .ca-page-frame,
-.ca-board-frame {
+.ca-board-frame,
+.ca-warm-frame {
   flex: 1;
   min-height: 0;
 }

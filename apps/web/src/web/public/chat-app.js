@@ -1715,6 +1715,9 @@ const CA_ICONS = {
 };
 
 /** The Board is pinned above the channel list, shown in the main pane. */
+/** Owner pages the console loads hidden once and keeps, so opening them shows the last view at once. */
+const CA_WARM_PAGES = ['board', 'workspace'];
+
 const CA_PAGES = {
   office: { label: 'Office', icon: 'gear', path: null, nav: false },
   board: { label: 'Board', icon: 'calendar', path: '/board' },
@@ -2439,7 +2442,7 @@ class ReverieChatApp {
     if (!initial && this.view === 'chat') caWrite('session', 'reverie:debug-session', null);
     this.els.root.hidden = this.view === 'debug';
     if (this.view === 'debug') this.suspendBoardFrame();
-    else if (this._boardCache && this.embed === 'board') void this.openWarmBoard({ push: false });
+    else if (this._warmPages?.has(this.embed)) void this.openWarmPage(this.embed, { push: false });
     if (this.view === 'chat' && this.built) this.touchHint();
     if (this.view === 'debug') {
       this.ensureBackButton();
@@ -2659,7 +2662,8 @@ class ReverieChatApp {
           (this.embed === 'people' && event.data?.type === 'office-back-to-chat')
         ) ||
         event.origin !== this.doc.defaultView.location.origin ||
-        event.source !== this.els.page?.querySelector('iframe')?.contentWindow
+        (event.source !== this.els.page?.querySelector('iframe')?.contentWindow &&
+          event.source !== this._warmPages?.get(this.embed)?.frame.contentWindow)
       )
         return;
       void this.returnToCompanyTools();
@@ -2678,20 +2682,19 @@ class ReverieChatApp {
       }
     });
     this.doc.defaultView?.addEventListener('resize', () => this.renderOfficePane());
+    // A retained page that finds its owner sign-in gone says so; only its own frame, on this origin, is heard.
     this.doc.defaultView?.addEventListener('message', (event) => {
-      const cache = this._boardCache;
-      if (
-        cache &&
-        event.origin === this.doc.defaultView.location.origin &&
-        event.source === cache.frame.contentWindow &&
-        event.data?.type === 'board-auth-lost'
-      )
-        this.discardBoardFrame();
+      if (event.origin !== this.doc.defaultView.location.origin) return;
+      for (const [kind, cache] of this._warmPages || [])
+        if (event.source === cache.frame.contentWindow && event.data?.type === `${kind}-auth-lost`) {
+          this.discardBoardFrame();
+          return;
+        }
     });
     this.doc.addEventListener('visibilitychange', () => {
       if (this.doc.hidden) this.suspendBoardFrame();
-      else if (this._boardCache && this.embed === 'board' && this.view === 'chat')
-        void this.openWarmBoard({ push: false });
+      else if (this._warmPages?.has(this.embed) && this.view === 'chat')
+        void this.openWarmPage(this.embed, { push: false });
     });
     this.doc.defaultView?.addEventListener('pageshow', (event) => {
       if (event.persisted && this.active) {
@@ -5744,11 +5747,12 @@ class ReverieChatApp {
   async readBoardOwnerKey() {
     if (this.app._chatSelf) return null;
     try {
-      const [company, auth] = await Promise.all([
+      // One round trip: the three reads are independent, and every one must still agree.
+      const [company, auth, me] = await Promise.all([
         this.app._chatApi('/api/company'),
         this.app._chatApi('/api/chatrooms/phone-status'),
+        this.app._chatApi('/api/office/me'),
       ]);
-      const me = await this.app._chatApi('/api/office/me');
       const owner =
         company.ok && auth.ok && me.ok && this.canManageOffice(company.data, auth.data)
           ? this.boardIdentity(me.data?.person)
@@ -5759,66 +5763,122 @@ class ReverieChatApp {
     }
   }
 
+  /** The retained Board document, or null. */
+  get _boardCache() {
+    return this._warmPages?.get('board') || null;
+  }
+
+  /** The owner the retained pages were loaded for, or null when none is retained. */
+  warmPagesOwner() {
+    return this._warmPages?.values().next().value?.owner ?? null;
+  }
+
   checkBoardIdentity(person) {
     const owner = this.boardIdentity(person);
-    if (owner !== this._boardKnownIdentity || (this._boardCache && owner !== this._boardCache.owner)) {
+    const retained = this.warmPagesOwner();
+    if (owner !== this._boardKnownIdentity || (retained !== null && owner !== retained)) {
       this._boardKnownIdentity = owner;
       this.discardBoardFrame();
       if (owner && this.canManageOffice()) this.scheduleBoardWarm();
     }
   }
 
+  /** Drop every retained owner page (Board and Workspace) and any warm-up still in flight. */
   discardBoardFrame() {
     this._boardEpoch = (this._boardEpoch || 0) + 1;
     this._boardWarmAttempted = false;
-    const cache = this._boardCache;
-    this._boardCache = null;
-    if (cache) {
+    const pages = this._warmPages;
+    this._warmPages = null;
+    for (const [kind, cache] of pages || []) {
       cache.frame.src = 'about:blank';
       cache.panel.remove();
-      if (this.embed === 'board') this.closePage();
+      if (this.embed === kind) this.closePage();
     }
   }
 
-  notifyBoard(active) {
-    const cache = this._boardCache;
+  /** Tell a retained page whether it is on screen: the Board polls only while it is, the Workspace refreshes on show. */
+  notifyWarmPage(kind, active) {
+    const cache = this._warmPages?.get(kind);
     if (!cache) return;
     active = active && this.view === 'chat' && !this.doc.hidden && !cache.panel.hidden;
-    cache.frame.dataset.boardActive = String(active);
-    cache.frame.contentWindow?.postMessage({ type: 'board-visibility', active }, this.doc.defaultView.location.origin);
+    cache.frame.dataset[`${kind}Active`] = String(active);
+    cache.frame.contentWindow?.postMessage(
+      { type: `${kind}-visibility`, active },
+      this.doc.defaultView.location.origin
+    );
+  }
+
+  notifyBoard(active) {
+    this.notifyWarmPage('board', active);
   }
 
   suspendBoardFrame() {
     this._boardOpen = (this._boardOpen || 0) + 1;
-    if (this._boardCache) {
-      this._boardCache.panel.hidden = true;
-      this.notifyBoard(false);
+    for (const [kind, cache] of this._warmPages || []) {
+      if (cache.panel.hidden) continue;
+      cache.panel.hidden = true;
+      this.notifyWarmPage(kind, false);
     }
   }
 
+  /** The address a console page loads from; the shell's own tool pages follow a mounted base path. */
+  pagePath(kind) {
+    return ['workspace', 'bots', 'previews', 'failures'].includes(kind)
+      ? (this.doc.defaultView.__REVERIE_BASE__ || '') + CA_PAGES[kind].path
+      : CA_PAGES[kind].path;
+  }
+
+  /** A hidden, owner-bound copy of one console page, loaded once and shown at once when opened. */
+  warmPageEl(kind, owner) {
+    const board = kind === 'board';
+    const panel = this.el('section', board ? 'ca-board-page' : 'ca-warm-page');
+    panel.hidden = true;
+    panel.dataset.kind = kind;
+    const frame = this.el('iframe', board ? 'ca-board-frame' : 'ca-warm-frame');
+    frame.title = CA_PAGES[kind].label;
+    frame.dataset[`${kind}Managed`] = 'true';
+    frame.dataset[`${kind}Active`] = 'false';
+    frame.loading = 'eager';
+    if (!board) {
+      const back = this.el('header', 'ca-tool-page-head');
+      back.append(
+        this.button('ca-btn', 'Back to Company / tools', () => void this.returnToCompanyTools(), {
+          icon: 'back',
+          text: 'Back to Company / tools',
+        })
+      );
+      panel.append(back);
+    }
+    frame.onload = () => {
+      if (this._warmPages?.get(kind)?.frame !== frame || this.embed !== kind || this.view !== 'chat' || panel.hidden)
+        return;
+      if (!board) this.configureCompanyToolsBack(frame);
+      this.notifyWarmPage(kind, true);
+    };
+    panel.append(frame);
+    return { owner, panel, frame };
+  }
+
+  /** Load the Board and the Workspace hidden, once, for the verified owner, so opening either shows it at once. */
   scheduleBoardWarm() {
-    if (this._boardCache || this._boardWarmAttempted || !this.canManageOffice() || this.doc.hidden) return;
+    const missing = () => CA_WARM_PAGES.filter((kind) => !this._warmPages?.has(kind));
+    if (!missing().length || this._boardWarmAttempted || !this.canManageOffice() || this.doc.hidden) return;
     this._boardWarmAttempted = true;
     const epoch = this._boardEpoch || 0;
     const warm = async () => {
-      if (this.doc.hidden || this.embed === 'board') return;
+      if (this.doc.hidden) return;
       const owner = await this.readBoardOwnerKey();
-      if (!owner || epoch !== (this._boardEpoch || 0) || this._boardCache || this.embed === 'board') return;
-      const panel = this.el('section', 'ca-board-page');
-      panel.hidden = true;
-      const frame = this.el('iframe', 'ca-board-frame');
-      frame.title = 'Board';
-      frame.dataset.boardManaged = 'true';
-      frame.dataset.boardActive = 'false';
-      frame.loading = 'eager';
-      this._boardCache = { owner, panel, frame };
-      frame.onload = () => {
-        if (this._boardCache?.frame === frame && this.embed === 'board' && this.view === 'chat' && !panel.hidden)
-          this.notifyBoard(true);
-      };
-      panel.append(frame);
-      this.els.body.append(panel);
-      frame.src = CA_PAGES.board.path;
+      if (!owner || epoch !== (this._boardEpoch || 0)) return;
+      const retained = this.warmPagesOwner();
+      if (retained !== null && retained !== owner) return;
+      for (const kind of missing()) {
+        // A page already open in the shared frame keeps it; the next close warms it.
+        if (this.embed === kind) continue;
+        const cache = this.warmPageEl(kind, owner);
+        (this._warmPages ||= new Map()).set(kind, cache);
+        this.els.body.append(cache.panel);
+        cache.frame.src = this.pagePath(kind);
+      }
     };
     if (this.doc.defaultView.requestIdleCallback)
       this.doc.defaultView.requestIdleCallback(
@@ -5833,15 +5893,21 @@ class ReverieChatApp {
       }, 200);
   }
 
-  async openWarmBoard({ push = true } = {}) {
-    const cache = this._boardCache,
+  async openWarmBoard(options) {
+    return this.openWarmPage('board', options);
+  }
+
+  /** Show a retained page after the same owner check that loaded it; a changed owner falls back to a fresh page. */
+  async openWarmPage(kind, { push = true } = {}) {
+    const cache = this._warmPages?.get(kind),
       attempt = (this._boardOpen = (this._boardOpen || 0) + 1);
     if (!cache) return;
     const owner = await this.readBoardOwnerKey();
-    if (attempt !== this._boardOpen || cache !== this._boardCache || this.view !== 'chat' || this.doc.hidden) return;
+    if (attempt !== this._boardOpen || cache !== this._warmPages?.get(kind) || this.view !== 'chat' || this.doc.hidden)
+      return;
     if (!owner || owner !== cache.owner) {
       this.discardBoardFrame();
-      this.openPage('board', { push });
+      this.openPage(kind, { push });
       return;
     }
     this.disposeCompanyPage();
@@ -5849,16 +5915,22 @@ class ReverieChatApp {
     if (this.orgOpen) this.closeOrg();
     this.toggleDrawer(null);
     if (this.els.page) this.els.page.hidden = true;
-    this.embed = 'board';
+    for (const [other, retained] of this._warmPages)
+      if (other !== kind && !retained.panel.hidden) {
+        retained.panel.hidden = true;
+        this.notifyWarmPage(other, false);
+      }
+    this.embed = kind;
     this._embedRoom = this.roomId;
     cache.panel.hidden = false;
     this.els.root.classList.add('is-page');
     this.els.chat.inert = true;
     this.els.members.inert = true;
-    this.notifyBoard(true);
+    if (kind !== 'board') this.configureCompanyToolsBack(cache.frame);
+    this.notifyWarmPage(kind, true);
     const win = this.doc.defaultView;
-    if (push && caPageFromHash(win.location.hash) !== 'board')
-      win.history.pushState({ reveriePage: 'board' }, '', '#board');
+    if (push && caPageFromHash(win.location.hash) !== kind)
+      win.history.pushState({ reveriePage: kind }, '', `#${kind}`);
     this.renderSidebar();
     this.renderHeader();
   }
@@ -6165,8 +6237,8 @@ class ReverieChatApp {
   openPage(kind, { push = true } = {}) {
     const page = CA_PAGES[kind];
     if (!page) return;
-    if (kind === 'board' && this._boardCache) {
-      void this.openWarmBoard({ push });
+    if (this._warmPages?.has(kind)) {
+      void this.openWarmPage(kind, { push });
       return;
     }
     this.suspendBoardFrame();
@@ -6261,7 +6333,7 @@ class ReverieChatApp {
   /** Back to the conversation. `history: 'replace'` also takes #board out of the address bar. */
   closePage({ history = 'replace' } = {}) {
     if (!this.embed) return;
-    const wasBoard = this.embed === 'board';
+    const wasWarm = CA_WARM_PAGES.includes(this.embed);
     this.suspendBoardFrame();
     this.disposeCompanyPage();
     this.embed = null;
@@ -6286,7 +6358,7 @@ class ReverieChatApp {
     }
     this.renderSidebar();
     this.renderHeader();
-    if (wasBoard && !this._boardCache) {
+    if (wasWarm && CA_WARM_PAGES.some((kind) => !this._warmPages?.has(kind))) {
       this._boardWarmAttempted = false;
       this.scheduleBoardWarm();
     }
@@ -9912,7 +9984,7 @@ class ReverieChatApp {
   async loadPhoneStatus() {
     const res = await this.app._chatApi('/api/chatrooms/phone-status');
     if (!this._phonePending?.size) this.phoneStatus = res.ok ? res.data : undefined;
-    if (this._boardCache && (!res.ok || !this.canManageOffice(this.company, res.data))) this.discardBoardFrame();
+    if (this._warmPages && (!res.ok || !this.canManageOffice(this.company, res.data))) this.discardBoardFrame();
     this.renderUser();
     if (this.view === 'chat') this.renderMembers();
   }

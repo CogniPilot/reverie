@@ -264,3 +264,38 @@ it('refuses standalone stale binding and over-budget streams while retaining Dow
     expect(doc.querySelector('#preview a')?.textContent).toContain('Download');dom?.window.close();
   }
 });
+
+it('refreshes the shown folder behind its rows when the console shows the kept page again', async () => {
+  const next = deferred<Response>();
+  let reads = 0;
+  const { win, doc } = setup(async () => (++reads === 1 ? listing([item('old.txt')]) : next.promise));
+  await vi.waitFor(() => expect(doc.querySelectorAll('#files button.file')).toHaveLength(1));
+  const show = (data: unknown, origin = win.location.origin) =>
+    win.dispatchEvent(new win.MessageEvent('message', { data, origin, source: win.parent as never }));
+  show({ type: 'workspace-visibility', active: false });
+  show({ type: 'workspace-visibility', active: true }, 'https://foreign.test');
+  expect(reads).toBe(1);
+  show({ type: 'workspace-visibility', active: true });
+  expect(reads).toBe(2);
+  // The old rows stay on screen while the read is in flight; the new listing replaces them.
+  expect(doc.querySelector('#files button.file')?.getAttribute('data-path')).toBe('old.txt');
+  expect(doc.getElementById('status')?.textContent).not.toContain('Loading');
+  show({ type: 'workspace-visibility', active: true });
+  expect(reads).toBe(2);
+  next.resolve(listing([item('old.txt'), item('new.txt')]));
+  await vi.waitFor(() => expect(doc.querySelectorAll('#files button.file')).toHaveLength(2));
+});
+
+it('tells the console when a read finds the owner sign-in gone', async () => {
+  let reads = 0;
+  const { win, doc, button } = setup(async () =>
+    ++reads === 1 ? listing([item('old.txt')]) : Response.json({ success: false, error: 'Owner sign-in required.' }, { status: 403 })
+  );
+  await vi.waitFor(() => expect(doc.querySelectorAll('#files button.file')).toHaveLength(1));
+  const posted: unknown[] = [];
+  Object.defineProperty(win, 'parent', { configurable: true, value: { postMessage: (data: unknown, origin: string) => posted.push([data, origin]) } });
+  button('refresh').click();
+  await vi.waitFor(() => expect(doc.getElementById('status')?.textContent).toBe('Owner sign-in required.'));
+  expect(doc.querySelectorAll('#files button.file')).toHaveLength(0);
+  expect(posted).toEqual([[{ type: 'workspace-auth-lost' }, win.location.origin]]);
+});
