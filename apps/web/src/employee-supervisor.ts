@@ -294,6 +294,11 @@ export interface EmployeeSupervisorLimits {
   readonly homeRecordsPerTick?: number;
   /** Wait after attempt N to record a home that was not recorded, before attempt N+1. The last value repeats. */
   readonly homeRecordRetryMs?: readonly number[];
+  /**
+   * How long one pass waits for the limits check it started. The check goes on by itself after that, and no other
+   * is started before it has ended, so a slow one holds up neither the repair steps nor the next pass.
+   */
+  readonly limitsWaitMs?: number;
   /** How long one pass waits for the home records it started. They go on by themselves after that. */
   readonly homeRecordWaitMs?: number;
   /** How long a read of other work in a laptop is shown to the policy while no later read replaces it. */
@@ -332,6 +337,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   homeRecordsPerTick: 2,
   homeRecordRetryMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
   homeRecordWaitMs: 5_000,
+  limitsWaitMs: 5_000,
   otherWorkKeptMs: 10 * 60_000,
   occupiedRebuildSpacingMs: 60 * 60_000,
   sharedCauseProbeMs: 30 * 60_000,
@@ -486,6 +492,8 @@ export class EmployeeSupervisor {
    * how often it was tried without. In memory: an office start records every running laptop again.
    */
   readonly #homeRecords = new Map<string, { operationId: string; at: number; done: boolean; tries: number }>();
+  /** The limits check that a pass started, while it has not ended. One at a time across the office. */
+  #limitsFlight?: Promise<void>;
   /** The home records that a pass started and that have not all ended. */
   #homeFlight?: Promise<void>;
   readonly #resolved: Required<EmployeeSupervisorLimits>;
@@ -915,7 +923,7 @@ export class EmployeeSupervisor {
   /** The limits check of the one employee whose check is longest overdue. See the file comment. */
   async #keepLimits(employees: readonly SupervisedEmployee[]): Promise<void> {
     const keep = this.ports.keepLimits?.bind(this.ports);
-    if (!keep) return;
+    if (!keep || this.#limitsFlight) return;
     const now = this.ports.now(),
       due = (employee: SupervisedEmployee) => this.#limitsDue.get(employee.id) ?? 0;
     const employee = employees
@@ -940,14 +948,20 @@ export class EmployeeSupervisor {
           ? { outcome: 'busy', detail: error.message }
           : { outcome: 'failed', detail: describe(error) };
       }
-    })().then((result) => {
-      this.#acting.delete(employee.id);
-      this.#limitsChecked(employee, result, now);
-    });
+    })()
+      .then((result) => {
+        this.#acting.delete(employee.id);
+        this.#limitsChecked(employee, result, now);
+      })
+      .finally(() => {
+        this.#limitsFlight = undefined;
+      });
     this.#acting.set(employee.id, work);
+    this.#limitsFlight = work;
+    // The pass waits only a moment: a slow check goes on beside the passes that follow.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waited = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, this.limits.actionWaitMs);
+      timer = setTimeout(resolve, this.#resolved.limitsWaitMs);
       timer.unref?.();
     });
     await Promise.race([work, waited]);

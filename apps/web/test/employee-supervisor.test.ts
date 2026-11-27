@@ -1829,3 +1829,29 @@ describe('EmployeeSupervisor: what a restart of the office would cut off', () =>
     expect(w.supervisor.stepInFlight()).toBeUndefined();
   });
 });
+
+describe('EmployeeSupervisor: a limits check that is slow', () => {
+  it('holds up neither the pass nor the steps of others, and no second check starts beside it', async () => {
+    let release!: () => void;
+    const slow = new Promise<SupervisorActionResult>((resolve) => (release = () => resolve({ outcome: 'done', detail: 'unchanged' })));
+    const calls: string[] = [];
+    const w = world([person('a'), hold(person('b'), 'DOCKER_RESOURCE_HELPER_FAILED')], {
+      limits: { ...LIMITS, actionWaitMs: 2000, limitsWaitMs: 20 } as typeof LIMITS,
+      keepLimits: (employee) => {
+        calls.push(employee.id);
+        return employee.id === 'a' ? slow : Promise.resolve({ outcome: 'done', detail: 'unchanged' });
+      },
+    });
+    const started = Date.now();
+    await w.run(5);
+    // Ten passes, each waiting for the check only a moment.
+    expect(Date.now() - started).toBeLessThan(1500);
+    expect(calls).toEqual(['a']);
+    // The other employee's repair went ahead meanwhile.
+    expect(w.state.acts).toContain('rebuild-laptop:b');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await w.run(1);
+    expect(calls.length).toBeGreaterThan(1);
+  });
+});
