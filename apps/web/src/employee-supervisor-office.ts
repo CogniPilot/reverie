@@ -16,6 +16,10 @@
  *   of the agent's turn (`readSupervisedTerminal`), read from memory. The rebuild that follows is a laptop step;
  * - a laptop at the provider's sign-in screen: the plan sign-in reconciler's own pass for that one plan, asked for
  *   now instead of at its next read. It places only a sign-in some holder of that plan already has;
+ * - an agent parked on a provider start-up screen (a sign-in the office put back, a first-run screen it could not
+ *   answer): what the office's own terminal object says of that screen and of the pane (`readParkedScreen`), read
+ *   from one pane capture and from memory. The office never types at such a screen from here. The rebuild that
+ *   starts the agent again is a laptop step;
  * - keeping a running laptop's approved limits in place: `DockerSupervisorLaptops.keepLimits`, for an employee in
  *   the office or not.
  */
@@ -33,20 +37,22 @@ import type {
   SupervisorMove,
 } from './employee-supervisor.js';
 import {
+  SIGN_IN_NO_FOLDER,
+  SIGN_IN_NOWHERE,
+  readParkedScreen,
   readSupervisedTerminal,
-  type SupervisedTerminal,
+  type SupervisedScreenTerminal,
   type SupervisorBusy,
   type SupervisorHistory,
-  type SupervisorObservation,
   type SupervisorPrecondition,
+  type SupervisorScreenReading,
 } from './employee-supervisor-policy.js';
 import { PlanMoveError, type PlanMoveExecutor, type PlanMoves } from './plan-move.js';
 import { viewerHealth } from './worker-provider-health.js';
 
-interface OfficeSession extends SupervisedTerminal {
+interface OfficeSession extends SupervisedScreenTerminal {
   readonly runtimeHealth?: 'healthy' | 'dead' | 'disconnected' | 'unknown';
   readonly runtimeHealthScope?: 'provider' | 'terminal';
-  startupScreen?(): NonNullable<SupervisorObservation['session']['startupScreen']> | null;
 }
 
 export interface OfficeSupervisorDeps {
@@ -69,8 +75,14 @@ export interface OfficeSupervisorDeps {
   /** A plan move executor that can only continue the original of a held move, while `current` holds. */
   moveExecutor(employee: SupervisedEmployee, current: () => boolean): PlanMoveExecutor;
   planSignedIn(accountId: string): Promise<boolean | undefined>;
-  /** Read every copy of one plan's sign-in now and put right what can be. Absent where no laptop holds one. */
-  readonly signIn?: { reconcile(accountId: string): Promise<PlanSignInReport | undefined> };
+  /**
+   * Read every copy of one plan's sign-in now and put right what can be (`reconcile`), and what the last read of
+   * one plan found (`report`, from memory). Absent where no laptop holds one.
+   */
+  readonly signIn?: {
+    reconcile(accountId: string): Promise<PlanSignInReport | undefined>;
+    report?(accountId: string): PlanSignInReport | undefined;
+  };
   /** The owner's Wake. */
   wake(employeeId: string, options: { stillCurrent: () => boolean }): Promise<CompanyWakeReport>;
   load(): Map<string, SupervisorHistory>;
@@ -82,6 +94,8 @@ export interface OfficeSupervisorDeps {
 
 /** How often a session that looks fine has its screen read for a provider start-up screen. */
 const SCREEN_READ_MS = 60_000;
+/** How old the reconciler's last read of a plan may be and still say what a laptop holds. It reads once a minute. */
+const SIGN_IN_REPORT_MS = 5 * 60_000;
 const holds = (guard: SupervisorGuard) => () => {
   try {
     guard();
@@ -93,7 +107,7 @@ const holds = (guard: SupervisorGuard) => () => {
 
 export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSupervisorPorts {
   const now = deps.now ?? Date.now;
-  const screens = new Map<string, { at: number; value: SupervisorObservation['session']['startupScreen'] }>();
+  const screens = new Map<string, { at: number; value: SupervisorScreenReading }>();
   const employees = (): SupervisedEmployee[] =>
     deps.company.registeredEmployees().map((employee) => ({
       id: employee.id,
@@ -117,20 +131,20 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     const settings = deps.company.view(owner).settings;
     return { enabled: settings.supervisorEnabled !== false, autoRepair: settings.supervisorAutoRepair !== false };
   };
-  const screen = (employee: SupervisedEmployee, session: OfficeSession | undefined) => {
+  const screen = (
+    employee: SupervisedEmployee,
+    session: OfficeSession | undefined,
+    fresh: boolean
+  ): SupervisorScreenReading => {
     if (!session?.startupScreen || session.pid === null || session.paneExit || session.status === 'busy') {
       screens.delete(employee.sessionId);
-      return undefined;
+      return {};
     }
+    // A session that looked fine is read again a minute later. One that showed a screen is read on every pass,
+    // and a step is decided only on a read made for it.
     const cached = screens.get(employee.sessionId);
-    if (cached && now() - cached.at < SCREEN_READ_MS) return cached.value;
-    let value: SupervisorObservation['session']['startupScreen'];
-    try {
-      const read = session.startupScreen();
-      value = read ? { label: read.label, kind: read.kind, answering: read.answering } : undefined;
-    } catch {
-      value = undefined;
-    }
+    if (!fresh && cached && !cached.value.startupScreen && now() - cached.at < SCREEN_READ_MS) return cached.value;
+    const value = readParkedScreen(session);
     if (screens.size > 512) screens.clear();
     screens.set(employee.sessionId, { at: now(), value });
     return value;
@@ -147,7 +161,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
             : session?.paneLifecycleInFlight
               ? 'lifecycle-in-progress'
               : undefined;
-  const glance: EmployeeSupervisorPorts['glance'] = (employee) => {
+  const glance: EmployeeSupervisorPorts['glance'] = (employee, fresh = false) => {
     const session = deps.session(employee.sessionId);
     const rows = deps.company.registeredEmployees();
     const row = rows.find((value) => value.id === employee.id);
@@ -155,7 +169,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     const report = reports.find((value) => value.employeeId === employee.id);
     const laptop = deps.laptops?.glance(employee.id);
     const health = row ? deps.providerHealth?.(row)?.state : undefined;
-    const startupScreen = screen(employee, session);
+    const parked = screen(employee, session, fresh);
     const held = busy(employee, session);
     return {
       employeeId: employee.id,
@@ -171,7 +185,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
         runtimeHealth: session?.runtimeHealth ?? 'unknown',
         viewerHealth: viewerHealth(session),
         ...(health ? { providerHealth: health } : {}),
-        ...(startupScreen ? { startupScreen } : {}),
+        ...parked,
         ...readSupervisedTerminal(session, !session && deps.inputHeldOnRecord?.(employee.sessionId) === true),
       },
       laptop: {
@@ -232,6 +246,12 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
     glance,
     openMove,
     planSignedIn: (accountId) => deps.planSignedIn(accountId),
+    laptopSignedIn: (employee) => {
+      const report = employee.planAccountId ? deps.signIn?.report?.(employee.planAccountId) : undefined;
+      if (!report || now() - report.checkedAt > SIGN_IN_REPORT_MS) return undefined;
+      const holder = report.holders.find((value) => value.id === laptopSignInHolderId(employee.id));
+      return holder ? holder.state === 'usable' : undefined;
+    },
     readLaptop: async (employee, guard) => laptops?.read(employee, guard),
     readSource: async (employee, guard) => (laptops ? laptops.source(employee, guard) : 'unknown'),
     readProvider: async (employee, guard) => (laptops ? laptops.provider(employee, guard) : 'unknown'),
@@ -264,8 +284,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
               const report = await deps.signIn!.reconcile(employee.planAccountId);
               const id = laptopSignInHolderId(employee.id);
               const holder = report?.holders.find((value) => value.id === id);
-              if (!report || !holder)
-                return { outcome: 'refused', detail: 'the laptop has no sign-in folder of this plan to read' };
+              if (!report || !holder) return { outcome: 'refused', detail: SIGN_IN_NO_FOLDER };
               if (holder.state === 'usable')
                 return {
                   outcome: 'done',
@@ -275,9 +294,7 @@ export function officeSupervisorPorts(deps: OfficeSupervisorDeps): EmployeeSuper
                 };
               return {
                 outcome: 'refused',
-                detail: report.usable
-                  ? 'the sign-in could not be placed yet'
-                  : 'no usable sign-in of this plan is held anywhere',
+                detail: report.usable ? 'the sign-in could not be placed yet' : SIGN_IN_NOWHERE,
               };
             },
           }

@@ -8,11 +8,13 @@ import {
   classifyEmployee,
   classifyMoveError,
   issueSupervisorAttempt,
+  readParkedScreen,
   readSupervisedTerminal,
   recordSupervisorAttempt,
   settleSupervisorAttempt,
   rollSupervisorHistory,
   supervisorCodeKind,
+  type SupervisedScreenTerminal,
   type SupervisedTerminal,
   type SupervisorAction,
   type SupervisorCondition,
@@ -103,8 +105,13 @@ describe('employee supervisor: classification', () => {
     [
       'a session parked on a sign-in screen',
       observed({ session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } } }),
-      'needs-sign-in',
+      'at-sign-in-screen',
       /sign-in screen/,
+    ],
+    [
+      'a held move that waits for a sign-in',
+      move(describeStartupScreen("Stan's new session", { label: "Claude's sign-in screen", kind: 'credential', answering: false })),
+      'needs-sign-in',
     ],
     [
       'a session on a first-run screen the office is answering',
@@ -114,12 +121,13 @@ describe('employee supervisor: classification', () => {
     [
       'a session on a first-run screen the office gave up on',
       observed({ session: { startupScreen: { label: "Claude's theme chooser", kind: 'first-run', answering: false } } }),
-      'needs-owner',
+      'stuck-first-run-screen',
     ],
     [
-      'a session on a screen that is the owner’s choice',
+      // No row of the table reports a decision any more. A reading that still says so is no reason to ask the owner.
+      'a session on a screen once left to the owner',
       observed({ session: { startupScreen: { label: 'a permissions prompt', kind: 'decision', answering: false } } }),
-      'needs-owner',
+      'stuck-first-run-screen',
     ],
     ['a laptop set-up that is still running', held('DOCKER_CONTINUATION_BUSY'), 'starting'],
     ['a laptop read that a busy box could not finish in time', held('DOCKER_RESOURCE_PROBE_DEADLINE'), 'starting'],
@@ -221,7 +229,8 @@ describe('employee supervisor: classification', () => {
     const seen = new Set(cases.map(([, input]) => classifyEmployee(input).condition));
     // `move-held-dead-end` is `move-held-retryable` once its ladder reaches the abandon rung (see the ladder tests).
     const all: SupervisorCondition[] = [
-      'healthy', 'starting', 'waiting-first-run-screen', 'needs-sign-in', 'needs-owner', 'provider-exited',
+      'healthy', 'starting', 'waiting-first-run-screen', 'stuck-first-run-screen', 'at-sign-in-screen', 'needs-sign-in',
+      'needs-owner', 'provider-exited',
       'viewer-lost', 'held-retryable', 'held-needs-rebuild', 'laptop-not-started', 'move-in-progress',
       'move-held-retryable', 'owner-stopped', 'unknown',
     ];
@@ -265,13 +274,20 @@ describe('employee supervisor: classification', () => {
     expect(supervisorCodeKind('DOCKER_CONTINUATION_LOCAL_MODEL_x; rm')).toBeUndefined();
   });
 
-  it('names the plan and says where to sign in', () => {
+  it('asks for a sign-in only when the office itself is signed out of the plan, and names the plan', () => {
     const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false };
     const unsigned = classifyEmployee(observed({ planSignedIn: false, session: { startupScreen: screen } }));
-    expect(unsigned.needsHuman).toMatch(/Sign in the plan “Max 20x” at the office/);
-    const signed = classifyEmployee(observed({ planSignedIn: true, session: { startupScreen: screen } }));
-    expect(signed.condition).toBe('needs-sign-in');
-    expect(signed.needsHuman).toMatch(/signed in at the office, but this laptop's own sign-in folder does not have it/);
+    expect(unsigned).toMatchObject({ condition: 'at-sign-in-screen', code: 'plan-signed-out' });
+    expect(unsigned.needsHuman).toMatch(/^The plan “Max 20x” is not signed in at the office\./);
+    expect(unsigned.needsHuman).toMatch(/Only the account holder can sign a plan in \(Plans\)/);
+    expect(unsigned.needsHuman).not.toMatch(/terminal/);
+    // Signed in at the office, or not known yet: the office repairs it and asks nobody.
+    for (const planSignedIn of [true, undefined]) {
+      const signed = classifyEmployee(observed({ planSignedIn, session: { startupScreen: screen } }));
+      expect(signed).toMatchObject({ condition: 'at-sign-in-screen', code: 'sign-in-screen' });
+      expect(signed.needsHuman).toBeUndefined();
+      expect(signed.fingerprint).toBe(unsigned.fingerprint);
+    }
   });
 
   it('keeps how an exited agent ended in its sentence', () => {
@@ -805,15 +821,22 @@ describe('employee supervisor: last night', () => {
     expect(assessEmployee(rebuilt, after, ON, 5 * MINUTE).next).toMatchObject({ action: 'start-continuation' });
   });
 
-  it('a laptop at a sign-in screen whose plan is signed in at the office is reported, never answered', () => {
+  it('a laptop at a sign-in screen whose plan is signed in at the office is rebuilt, and nobody is asked', () => {
     const screen = observed({
       planSignedIn: true,
-      session: { startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false } },
+      session: {
+        startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'widget' },
+        turn: 'idle',
+        idleSince: 0,
+      },
     });
-    const result = assessEmployee(screen, since(0, classifyEmployee(screen).fingerprint), ON, 600 * MINUTE);
-    expect(result).toMatchObject({ condition: 'needs-sign-in', next: { action: null } });
+    const result = assessEmployee(screen, since(0, classifyEmployee(screen).fingerprint), ON, 10 * MINUTE);
+    expect(result).toMatchObject({
+      condition: 'at-sign-in-screen',
+      next: { action: 'rebuild-laptop', preconditions: ['agent-parked-at-screen'] },
+    });
     expect(result.sentence).toBe("Stan is waiting at Claude's sign-in screen.");
-    expect(result.needsHuman).toMatch(/the plan “Max 20x” is signed in at the office/);
+    expect(result.needsHuman).toBeUndefined();
   });
 
   it('a local-model agent that exited at launch keeps its evidence and is rebuilt', () => {
@@ -1279,5 +1302,156 @@ describe('employee supervisor: a terminal the office can never type into again',
       expect(readSupervisedTerminal(undefined, true)).toEqual({ inputHeld: true, turn: 'unknown' });
       expect(readSupervisedTerminal(undefined, false)).toEqual({});
     });
+  });
+});
+
+describe('employee supervisor: an agent parked on a start-up screen the office could not answer', () => {
+  const stuck = (patch: Partial<SupervisorObservation['session']> = {}, label = "Claude's theme chooser") =>
+    observed({
+      session: {
+        startupScreen: { label, kind: 'first-run', answering: false, proof: 'launch' },
+        turn: 'idle',
+        idleSince: 0,
+        ...patch,
+      },
+    });
+  const seen = (at: number, input = stuck()) => since(at, classifyEmployee(input).fingerprint);
+  const RELAUNCH: SupervisorFlags = { ...ON, relaunchAvailable: true };
+
+  it('is a condition of its own with a path, and is never left to the owner', () => {
+    const result = classifyEmployee(stuck());
+    expect(result).toMatchObject({
+      condition: 'stuck-first-run-screen',
+      code: 'first-run-screen',
+      sentence: "Stan is stuck at Claude's theme chooser, which the office could not answer.",
+    });
+    expect(result.needsHuman).toBeUndefined();
+    expect(SUPERVISOR_PATHS['stuck-first-run-screen']).toEqual(['relaunch-provider', 'rebuild-laptop']);
+    // A screen the table does not know at all is the same condition, under the name the terminal gives it.
+    expect(classifyEmployee(stuck({}, 'a start-up screen the office does not know'))).toMatchObject({
+      condition: 'stuck-first-run-screen',
+      sentence: 'Stan is stuck at a start-up screen the office does not know, which the office could not answer.',
+    });
+  });
+
+  it('is rebuilt three minutes after it was first seen, on proof that the agent is parked', () => {
+    expect(assessEmployee(stuck(), seen(MINUTE), ON, 3 * MINUTE).next).toEqual({
+      action: 'rebuild-laptop',
+      at: 4 * MINUTE,
+      preconditions: ['agent-parked-at-screen'],
+    });
+    // What runs in the laptop is not asked: an agent does. The proof is the pane, read again by the driver and the step.
+    expect(assessEmployee(stuck(), seen(MINUTE), ON, 10 * MINUTE).next.preconditions).not.toContain('no-agent-running');
+  });
+
+  it('is relaunched inside its laptop first where the office can do that', () => {
+    expect(assessEmployee(stuck(), seen(MINUTE), RELAUNCH, 3 * MINUTE).next).toEqual({
+      action: 'relaunch-provider',
+      at: MINUTE + 30_000,
+      preconditions: ['agent-parked-at-screen'],
+    });
+    const relaunched = { ...seen(MINUTE), attempts: tried('relaunch-provider', 2, 5 * MINUTE) };
+    expect(assessEmployee(stuck({ idleSince: 6 * MINUTE }), relaunched, RELAUNCH, 10 * MINUTE).next.action).toBe('rebuild-laptop');
+  });
+
+  it.each([
+    ['the pane is still changing', { turn: 'working' as const, idleSince: undefined }, "the agent's terminal to stop changing"],
+    ['the office is not reading the pane', { turn: 'unknown' as const, idleSince: undefined }, "a reading of the agent's terminal"],
+    ['the pane went quiet a minute ago', { idleSince: 9 * MINUTE }, "the agent's terminal to stay quiet a little longer"],
+    ['the pane says work was left running', { background: true }, 'the work the agent left running to finish'],
+  ])('waits and asks nobody while %s', (_title, session, waitingFor) => {
+    for (const flags of [ON, RELAUNCH]) {
+      const result = assessEmployee(stuck(session), seen(MINUTE), flags, 10 * MINUTE);
+      expect(result.next).toMatchObject({ action: null, waitingFor });
+      expect(result.needsHuman).toBeUndefined();
+    }
+  });
+
+  it('takes no step for a screen without proof, or beside a plan move', () => {
+    const words = observed({ session: { startupScreen: { label: "Claude's theme chooser", kind: 'first-run', answering: false }, turn: 'idle', idleSince: 0 } });
+    const moving = { ...stuck(), move: { id: 'm', docker: true, phase: 'approval', busy: false, allowedActions: [] } };
+    for (const input of [words, moving])
+      for (const now of [MINUTE, 10 * MINUTE, 120 * MINUTE])
+        expect(assessEmployee(input, seen(MINUTE, input), RELAUNCH, now).next.action).toBeNull();
+  });
+
+  it('never says to answer it in a terminal, whatever was tried', () => {
+    let history = seen(MINUTE);
+    const said: string[] = [];
+    for (let now = MINUTE; now <= 8 * 60 * MINUTE; now += MINUTE) {
+      history = rollSupervisorHistory(history, classifyEmployee(stuck()), now);
+      const result = assessEmployee(stuck({ idleSince: now - 5 * MINUTE }), history, ON, now);
+      if (result.needsHuman) said.push(result.needsHuman);
+      if (result.next.action && (result.next.at ?? 0) <= now)
+        history = recordSupervisorAttempt(history, result.next.action, now, 'refused', 'DOCKER_REPROVISION_SOURCE_UNCONFIRMED');
+    }
+    expect(said.length).toBeGreaterThan(0);
+    for (const sentence of said) expect(sentence).not.toMatch(/terminal|POST|docker-rebuild/);
+    // Two rebuilds, six hours, and two more: the steps are given back, the screen is never given up on.
+    expect(history.attempts['rebuild-laptop']!.count).toBeGreaterThanOrEqual(1);
+    expect(history.lastAction!.at).toBeGreaterThan(6 * 60 * MINUTE);
+  });
+
+  it('is still answered by the office while its scan is open, and that is no problem to work on', () => {
+    const answering = observed({ session: { startupScreen: { label: "Claude's API key question", kind: 'first-run', answering: true, proof: 'widget' } } });
+    expect(classifyEmployee(answering)).toMatchObject({ condition: 'waiting-first-run-screen', fingerprint: '' });
+    expect(assessEmployee(answering, EMPTY_SUPERVISOR_HISTORY, RELAUNCH, 10 * MINUTE).next.action).toBeNull();
+  });
+});
+
+describe('employee supervisor: reading a parked start-up screen off the office terminal', () => {
+  const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false, shown: 'widget' as const };
+  const terminal = (patch: Partial<SupervisedScreenTerminal> = {}): SupervisedScreenTerminal => ({
+    pid: 7,
+    status: 'idle',
+    runtimeHealth: 'healthy',
+    isWorking: false,
+    lastActivityAt: 5000,
+    lastPromptTime: 0,
+    paneStartedAt: 1000,
+    startupScreen: () => screen,
+    ...patch,
+  });
+
+  it('reports the screen with its proof and the turn a held input would be judged by', () => {
+    expect(readParkedScreen(terminal())).toEqual({
+      startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'widget' },
+      turn: 'idle',
+      idleSince: 5000,
+    });
+    expect(readParkedScreen(terminal({ startupScreen: () => ({ ...screen, shown: 'launch' }), watching: '1 shell' }))).toMatchObject({
+      startupScreen: { proof: 'launch' },
+      background: true,
+    });
+    // The same rule for "idle" as a held input has, so the two can never disagree.
+    const held = readSupervisedTerminal({ ...terminal(), terminalInputHeld: true });
+    expect(readParkedScreen(terminal())).toMatchObject({ turn: held.turn, idleSince: held.idleSince });
+    // It says nothing of a hold: that is another condition with its own reading.
+    expect(readParkedScreen(terminal())).not.toHaveProperty('inputHeld');
+  });
+
+  it.each([
+    ['there is no terminal', undefined],
+    ['the terminal cannot name a screen', terminal({ startupScreen: undefined })],
+    ['the pane shows no start-up screen', terminal({ startupScreen: () => null })],
+    ['the screen is known only by its words', terminal({ startupScreen: () => ({ ...screen, shown: 'words' }) })],
+    ['the reading does not say how it is known', terminal({ startupScreen: () => ({ label: 'x', kind: 'credential', answering: false }) })],
+    ['the pane cannot be read', terminal({ startupScreen: () => { throw new Error('tmux gone'); } })],
+    ['the terminal has no process', terminal({ pid: null })],
+    ['the terminal lost its client', terminal({ runtimeHealth: 'disconnected' })],
+    ['the terminal is being reconnected', terminal({ viewerInputHeld: true })],
+    ['a start or stop of the pane is running', terminal({ paneLifecycleInFlight: true })],
+    ['the pane exited', terminal({ paneExit: { code: 0 } })],
+    ['the agent is working', terminal({ status: 'busy', isWorking: true })],
+    ['the office does not track its work', terminal({ isWorking: undefined })],
+  ])('reports nothing when %s', (_title, input) => {
+    expect(readParkedScreen(input)).toEqual({});
+  });
+
+  it('does not read the pane at all while the agent works', () => {
+    let reads = 0;
+    const counting = terminal({ status: 'busy', startupScreen: () => (reads++, screen) });
+    readParkedScreen(counting);
+    expect(reads).toBe(0);
   });
 });

@@ -777,3 +777,96 @@ describe('rebuilding a laptop whose office terminal can never be typed into agai
     await expect(w.laptops.rebuild(EMPLOYEE, w.guard, HELD)).rejects.toThrow(/switched off/);
   });
 });
+
+describe('rebuilding a laptop whose agent is parked on a provider start-up screen', () => {
+  const PARKED = ['agent-parked-at-screen'] as const;
+  const NOT_EMPTY = { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
+  const NOT_PARKED = { outcome: 'refused', detail: 'the agent is not shown to be parked on a start-up screen' };
+  const NOT_READ = { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
+  const signIn = { label: "Claude's sign-in screen", kind: 'credential', answering: false, shown: 'widget' };
+  /** The one running laptop is the recorded one, an agent runs in it, and the office terminal shows it parked. */
+  const parked = (terminal: Record<string, unknown> = {}) => {
+    const w = world();
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'running', operationId: 'o', sessionId: 's' } };
+    w.state.session = { pid: 77, status: 'idle', isWorking: false, lastActivityAt: 1000, startupScreen: () => signIn, ...terminal };
+    return w;
+  };
+
+  it('confirms the discard when the policy chose the rebuild for that reason and the pane, read again, still shows it', async () => {
+    const w = parked();
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, PARKED)).toEqual({ outcome: 'done', detail: 'rebuilt new' });
+    expect(w.made('rebuild')).toEqual([expect.objectContaining({ template: TEMPLATE, confirmDiscardRunning: true })]);
+    expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination', 'rebuild']);
+    // A screen the office cannot read, proved by its own launch, is the same reason.
+    const unread = parked({ startupScreen: () => ({ label: "Claude's theme chooser", kind: 'first-run', answering: false, shown: 'launch' }) });
+    expect((await unread.laptops.rebuild(EMPLOYEE, unread.guard, PARKED)).outcome).toBe('done');
+  });
+
+  it('never confirms it without that reason, whatever the pane shows', async () => {
+    const w = parked();
+    for (const proved of [undefined, [], ['no-agent-running'], ['terminal-input-held']] as const)
+      expect((await w.laptops.rebuild(EMPLOYEE, w.guard, proved)).outcome).toBe('refused');
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, [])).toEqual(NOT_EMPTY);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it.each([
+    ['the screen is gone', { startupScreen: () => null }, NOT_PARKED],
+    ['only words about the screen are on the pane', { startupScreen: () => ({ ...signIn, shown: 'words' }) }, NOT_PARKED],
+    ['the office is answering the screen itself again', { startupScreen: () => ({ label: 'x', kind: 'first-run', answering: true, shown: 'widget' }) }, NOT_PARKED],
+    ['the agent began to work', { isWorking: true, status: 'busy' }, NOT_PARKED],
+    ['the pane cannot be read', { startupScreen: () => { throw new Error('tmux gone'); } }, NOT_PARKED],
+    ['the terminal has no process', { pid: null }, NOT_PARKED],
+    ['the terminal lost its client', { runtimeHealth: 'disconnected' }, NOT_PARKED],
+    ['the terminal is being reconnected', { viewerInputHeld: true }, NOT_PARKED],
+    ['the terminal is not idle', { status: 'error' }, NOT_READ],
+    ['the pane prints while its screen is up', { isWorking: true }, { outcome: 'busy', detail: "the agent's terminal is still changing" }],
+  ])('reads the pane again and requests nothing when %s', async (_title, terminal, expected) => {
+    const w = parked(terminal);
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, PARKED)).toEqual(expected);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('requests nothing when the office has no terminal object at all', async () => {
+    const w = parked();
+    w.state.session = undefined;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, PARKED)).toEqual(NOT_PARKED);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('reads the pane last: a screen that clears while the laptop is being read stops the rebuild', async () => {
+    const w = parked();
+    const running = w.state.observed;
+    Object.defineProperty(w.state, 'observed', {
+      get: () => {
+        w.state.session = { ...w.state.session!, startupScreen: () => null };
+        return running;
+      },
+    });
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, PARKED)).toEqual(NOT_PARKED);
+    expect(w.state.calls.map(([name]) => name)).toEqual(['preview', 'observeDestination']);
+  });
+
+  it.each([
+    ['the running laptop is not the recorded one', { state: 'running', provider: { kind: 'running' } }, ['f'.repeat(64)]],
+    ['a second laptop runs', { state: 'running', provider: { kind: 'running' } }, [DESTINATION, 'f'.repeat(64)]],
+    ['the laptop cannot be read', { state: 'running', provider: { kind: 'unknown' } }, [DESTINATION]],
+    ['the read of the laptop fails', new Error('exec failed'), [DESTINATION]],
+  ])('confirms it only for the one recorded laptop: not when %s', async (_title, observed, running) => {
+    const w = parked();
+    w.state.preview = { ...w.state.preview, runningLaptops: running };
+    w.state.observed = observed;
+    expect(await w.laptops.rebuild(EMPLOYEE, w.guard, PARKED)).toEqual(NOT_EMPTY);
+    expect(w.made('rebuild')).toEqual([]);
+  });
+
+  it('holds the fence of every such rebuild: a step that takes flight or a replaced terminal stops it', async () => {
+    const flight = parked();
+    flight.state.during = () => (flight.state.flight = true);
+    expect(await flight.laptops.rebuild(EMPLOYEE, flight.guard, PARKED)).toEqual({ outcome: 'busy', detail: 'DOCKER_CONTINUATION_BUSY' });
+    const replaced = parked();
+    replaced.state.during = () => (replaced.state.session = { ...replaced.state.session!, pid: 78 });
+    expect((await replaced.laptops.rebuild(EMPLOYEE, replaced.guard, PARKED)).outcome).toBe('refused');
+  });
+});

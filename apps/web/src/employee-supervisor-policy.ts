@@ -17,6 +17,8 @@ export type SupervisorCondition =
   | 'healthy'
   | 'starting'
   | 'waiting-first-run-screen'
+  | 'stuck-first-run-screen'
+  | 'at-sign-in-screen'
   | 'needs-sign-in'
   | 'needs-owner'
   | 'provider-exited'
@@ -68,6 +70,11 @@ export interface SupervisorPolicy {
   readonly heldInputIdleMs: number;
   /** A turn that such a laptop's agent has not ended this long after the problem was first seen is reported. */
   readonly heldInputTurnMs: number;
+  /**
+   * An employee parked on a provider start-up screen whose steps were all tried gets them again once the last one
+   * is this old. Hours, so a screen no step clears costs a few steps a day and is never given up on.
+   */
+  readonly ladderRestartMs: number;
 }
 
 const SECOND = 1000;
@@ -96,6 +103,12 @@ const MINUTE = 60 * SECOND;
  *   on waiting and never rebuilds in the middle of it. An agent that ended its turn with work left running (a
  *   monitor, a background shell) is given those same thirty minutes for it: a job of ordinary length finishes, and
  *   a shell that never ends does not keep the employee out of reach for good.
+ * - An agent parked on a provider start-up screen (a sign-in, a first-run screen the office could not answer) is in
+ *   no turn at all: it never reached its composer. It is started again, by a relaunch where the office has one and
+ *   otherwise by a rebuild, under the same two-minute and thirty-minute rules, read from the same office terminal
+ *   and proved again by the driver and by the step (see `parkedScreenGate`). Once every step has been tried, they
+ *   are all tried again six hours after the last one: often enough that a sign-in the owner renewed overnight is
+ *   picked up, seldom enough that a screen nothing clears costs two rebuilds a day at most.
  */
 export const SUPERVISOR_POLICY: SupervisorPolicy = {
   ladder: {
@@ -161,13 +174,15 @@ export const SUPERVISOR_POLICY: SupervisorPolicy = {
   stalledAfterMs: 15 * MINUTE,
   heldInputIdleMs: 2 * MINUTE,
   heldInputTurnMs: 30 * MINUTE,
+  ladderRestartMs: 6 * 60 * MINUTE,
 };
 
 /** The two owner switches. Both off means the supervisor only describes what it sees. */
 export interface SupervisorFlags {
   /** Observe, retry and reconnect. */
   readonly enabled: boolean;
-  /** Abandon a dead-end move, and rebuild a laptop nothing is running in or whose terminal input is held for good. */
+  /** Abandon a dead-end move, and rebuild a laptop nothing is running in, whose terminal input is held for good or
+   * whose agent is parked on a provider start-up screen. */
   readonly autoRepair: boolean;
   /** The office can relaunch an exited agent inside its running laptop. */
   readonly relaunchAvailable: boolean;
@@ -192,8 +207,11 @@ export type SupervisorTurn = 'working' | 'idle' | 'unknown';
  * - `no-agent-running`: a fresh read inside the laptop finds no agent.
  * - `terminal-input-held`: the office terminal's input is still held and its pane still shows no turn in progress.
  *   It is the only reason for which a rebuild may discard a laptop its agent runs in.
+ * - `agent-parked-at-screen`: the office terminal still shows the agent on a provider start-up screen, proved by
+ *   more than the screen's words, and its pane still shows no turn in progress. An agent there never reached its
+ *   composer, so a relaunch or a rebuild discards no conversation.
  */
-export type SupervisorPrecondition = 'no-agent-running' | 'terminal-input-held';
+export type SupervisorPrecondition = 'no-agent-running' | 'terminal-input-held' | 'agent-parked-at-screen';
 
 /** Everything the office can read about one employee, already reduced to plain values. */
 export interface SupervisorObservation {
@@ -208,6 +226,11 @@ export interface SupervisorObservation {
   readonly planLabel?: string;
   /** Whether the office reports that plan signed in. `undefined` when it does not know. */
   readonly planSignedIn?: boolean;
+  /**
+   * Whether the last read of that plan's sign-in copies found a usable one in this employee's laptop. `undefined`
+   * when no recent read says. Read for an employee at a sign-in screen only.
+   */
+  readonly laptopSignedIn?: boolean;
   readonly session: {
     readonly available: boolean;
     readonly runtimeHealth: 'healthy' | 'dead' | 'disconnected' | 'unknown';
@@ -218,6 +241,13 @@ export interface SupervisorObservation {
       readonly label: string;
       readonly kind: 'first-run' | 'credential' | 'decision';
       readonly answering: boolean;
+      /**
+       * How the office knows the screen is up: its live widget on the frame, or a launch of this office that has
+       * not reached its composer. Absent when only the screen's words were read, which a conversation that quotes
+       * the screen shows as well; nothing is then restarted for it. `turn`, `idleSince` and `background` below
+       * are reported with a proved screen too.
+       */
+      readonly proof?: 'widget' | 'launch';
     };
     /**
      * The office can never type into this terminal again: an input it may have sent was never confirmed, and
@@ -335,6 +365,67 @@ export function readSupervisedTerminal(
     turn: 'idle',
     ...(idleSince > 0 ? { idleSince } : {}),
     ...(terminal.watching ? { background: true } : {}),
+  };
+}
+
+/** An office terminal that can also say which provider start-up screen its pane is parked on. */
+export interface SupervisedScreenTerminal extends SupervisedTerminal {
+  /** `shown` is how the terminal knows: by the live `widget`, by its own `launch`, or only by the `words`. */
+  startupScreen?(): {
+    readonly label: string;
+    readonly kind: 'first-run' | 'credential' | 'decision';
+    readonly answering: boolean;
+    readonly shown?: 'widget' | 'launch' | 'words';
+  } | null;
+}
+
+export type SupervisorScreenReading = Pick<
+  SupervisorObservation['session'],
+  'startupScreen' | 'turn' | 'idleSince' | 'background'
+>;
+
+/** Every field of the terminal, so the copy below cannot silently drop one that is added later. */
+type WholeTerminal = { readonly [Key in keyof Required<SupervisedTerminal>]: SupervisedTerminal[Key] };
+
+/**
+ * One office terminal reduced to what a parked start-up screen is judged by: the screen its pane shows, and the
+ * same reading of the agent's turn that a held input gets (`readSupervisedTerminal`, asked as if the input were
+ * held, so there is one rule for "idle" and not two). Like that reading, the observation is built with it and a
+ * step reads it again immediately before it acts.
+ *
+ * Nothing is reported for a pane the office is not reading, for an agent that is working, or for a screen the
+ * office knows only by its words: none of those is a parked agent.
+ */
+export function readParkedScreen(terminal: SupervisedScreenTerminal | undefined): SupervisorScreenReading {
+  if (!terminal?.startupScreen || !paneWatched(terminal) || terminal.status === 'busy') return {};
+  let screen: ReturnType<NonNullable<SupervisedScreenTerminal['startupScreen']>>;
+  try {
+    screen = terminal.startupScreen();
+  } catch {
+    return {};
+  }
+  if (!screen || (screen.shown !== 'widget' && screen.shown !== 'launch')) return {};
+  const startupScreen = { label: screen.label, kind: screen.kind, answering: screen.answering, proof: screen.shown };
+  const held: WholeTerminal = {
+    pid: terminal.pid,
+    status: terminal.status,
+    runtimeHealth: terminal.runtimeHealth,
+    paneExit: terminal.paneExit,
+    viewerInputHeld: terminal.viewerInputHeld,
+    paneLifecycleInFlight: terminal.paneLifecycleInFlight,
+    terminalInputHeld: true,
+    isWorking: terminal.isWorking,
+    watching: terminal.watching,
+    lastActivityAt: terminal.lastActivityAt,
+    lastPromptTime: terminal.lastPromptTime,
+    paneStartedAt: terminal.paneStartedAt,
+  };
+  const { turn, idleSince, background } = readSupervisedTerminal(held);
+  return {
+    startupScreen,
+    ...(turn ? { turn } : {}),
+    ...(idleSince === undefined ? {} : { idleSince }),
+    ...(background ? { background } : {}),
   };
 }
 
@@ -820,29 +911,22 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
   const screen = observed.session.startupScreen;
   if (screen) {
     const fingerprint = 'screen:' + screen.label;
+    // A sign-in the office puts back and an agent it starts again ask nobody for anything. The one thing it
+    // cannot do is sign a plan in that is signed in nowhere, so that alone is said, as soon as it is known.
     if (screen.kind === 'credential')
-      return classified('needs-sign-in', `${name} is waiting at ${screen.label}.`, {
-        code: 'sign-in-screen',
+      return classified('at-sign-in-screen', `${name} is waiting at ${screen.label}.`, {
+        code: observed.planSignedIn === false ? 'plan-signed-out' : 'sign-in-screen',
         fingerprint,
-        needsHuman:
-          observed.planSignedIn === true
-            ? `${plan(observed)} is signed in at the office, but this laptop's own sign-in folder does not have it. ` +
-              'Sign in inside the laptop terminal, or rebuild the laptop so it is created with that plan.'
-            : `Sign in ${plan(observed)} at the office (Plans), or in the laptop terminal. The office never answers a sign-in prompt.`,
+        ...(observed.planSignedIn === false ? { needsHuman: signedOutAtOffice(observed) } : {}),
       });
-    if (screen.kind === 'decision')
-      return classified('needs-owner', `${name} is waiting at ${screen.label}.`, {
-        code: 'decision-screen',
-        fingerprint,
-        needsHuman: "That choice is the owner's. Answer it in the session's terminal.",
-      });
-    if (screen.answering)
+    if (screen.kind === 'first-run' && screen.answering)
       return classified('waiting-first-run-screen', `${name} is starting: the office is answering ${screen.label}.`);
-    return classified('needs-owner', `${name} is stuck at ${screen.label}, which the office could not answer.`, {
-      code: 'first-run-screen',
-      fingerprint,
-      needsHuman: "Answer it in the session's terminal.",
-    });
+    // No screen is left to the owner. One the office could not answer is cleared by starting the agent again.
+    return classified(
+      'stuck-first-run-screen',
+      `${name} is stuck at ${screen.label}, which the office could not answer.`,
+      { code: 'first-run-screen', fingerprint }
+    );
   }
   if (!observed.boxed) {
     const { session } = observed;
@@ -866,6 +950,25 @@ export function classifyEmployee(observed: SupervisorObservation): SupervisorCla
     : laptop;
 }
 
+/** What is said while the office itself is signed out of the plan. Information: the office goes on trying. */
+function signedOutAtOffice(observed: SupervisorObservation): string {
+  return (
+    `${plan(observed).replace(/^t/, 'T')} is not signed in at the office. Only the account holder can sign a plan in ` +
+    '(Plans); the ' +
+    'office never types a sign-in. While this laptop still holds a sign-in that works, the office starts the agent ' +
+    'again with it. Otherwise it puts the sign-in into the laptop and starts the agent again once the plan is signed in.'
+  );
+}
+
+/** What is said once neither the office nor the laptop is known to hold a sign-in of the plan that works. */
+function signedOutEverywhere(observed: SupervisorObservation): string {
+  return (
+    `Neither the office nor this laptop holds a sign-in of ${plan(observed)} that works. Only the account holder ` +
+    'can sign a plan in (Plans). The office never types a sign-in; once the plan is signed in, it puts the sign-in ' +
+    'into this laptop and starts the agent again by itself.'
+  );
+}
+
 /**
  * A lost terminal whose input is also held for good. No reconnect gives such a terminal back: the hold is evidence
  * of an input that may have been sent, every attach is refused while it stands, and only a new laptop ends it.
@@ -881,6 +984,8 @@ function terminalHeldForGood(observed: SupervisorObservation, condition: Supervi
 export const SUPERVISOR_PATHS: Readonly<Partial<Record<SupervisorCondition, readonly SupervisorAction[]>>> = {
   'viewer-lost': ['reconnect-viewer'],
   'needs-sign-in': ['replace-sign-in'],
+  'at-sign-in-screen': ['replace-sign-in', 'relaunch-provider', 'rebuild-laptop'],
+  'stuck-first-run-screen': ['relaunch-provider', 'rebuild-laptop'],
   'provider-exited': ['relaunch-provider', 'rebuild-laptop'],
   'held-retryable': ['resend-continuation', 'rebuild-laptop'],
   'held-needs-rebuild': ['resend-continuation', 'rebuild-laptop'],
@@ -979,6 +1084,96 @@ function heldInputRebuildGate(
       `${Math.round(policy.heldInputTurnMs / MINUTE)} minutes it still cannot see that it has. It goes on waiting ` +
       `and rebuilds as soon as the turn ends. To rebuild now instead: ${REBUILD_RUNNING_CALLS}`,
   };
+}
+
+/** What the office waits for before it starts an agent again that is parked on a start-up screen. */
+const PARKED_SCREEN_WAIT: Readonly<Record<SupervisorTurn, string>> = {
+  working: "the agent's terminal to stop changing",
+  idle: "the agent's terminal to stay quiet a little longer",
+  unknown: "a reading of the agent's terminal",
+};
+
+/** Details of a `replace-sign-in` step that the policy reads. Written by the office's step, compared here. */
+export const SIGN_IN_NO_FOLDER = 'the laptop has no sign-in folder of this plan to read';
+export const SIGN_IN_NOWHERE = 'no usable sign-in of this plan is held anywhere';
+
+/**
+ * Putting the sign-in back was already answered for good for this problem, so it is not repeated and the next step
+ * is considered at once. Two answers say so: the laptop holds a usable sign-in and its agent still shows the
+ * screen (a client reads its sign-in when it starts, so placing the file again changes nothing), or the laptop has
+ * no sign-in folder of this plan to put one into (only a new laptop gets one). A later step that was tried for
+ * this problem says the same, because it is only reached past this one. So does a read of the plan's copies that
+ * was made since and found a usable sign-in in the laptop: there is nothing left to place.
+ */
+function signInAnswered(observed: SupervisorObservation, history: SupervisorHistory): boolean {
+  if (observed.laptopSignedIn === true) return true;
+  const last = history.lastAction;
+  if (!last || last.at < history.since) return false;
+  if (last.action === 'relaunch-provider' || last.action === 'rebuild-laptop') return true;
+  if (last.action !== 'replace-sign-in' || history.attempts['replace-sign-in']?.lastAt !== last.at) return false;
+  return last.outcome === 'done' || (last.outcome === 'refused' && last.detail === SIGN_IN_NO_FOLDER);
+}
+
+/**
+ * No copy of the plan's sign-in is known to work. Either the last look at every copy found none that can be used
+ * (the office's own included, whatever its Plans page says of it), or the office is signed out of the plan and the
+ * last look did not find or place a usable one in the laptop. A new agent or a new laptop would stop at the same
+ * screen. A later read that found a usable sign-in in the laptop ends it at once: the plan was signed in, and the
+ * reconciler has put the sign-in there.
+ */
+function signedInNowhere(observed: SupervisorObservation, history: SupervisorHistory): boolean {
+  if (observed.laptopSignedIn === true) return false;
+  const last = history.lastAction;
+  const looked = last && last.at >= history.since && last.action === 'replace-sign-in' ? last : undefined;
+  if (looked?.outcome === 'refused' && looked.detail === SIGN_IN_NOWHERE) return true;
+  return observed.planSignedIn === false && looked?.outcome !== 'done';
+}
+
+/**
+ * Starting an agent again that is parked on a provider start-up screen: a relaunch inside its laptop where the
+ * office can do that, otherwise a rebuild, which keeps the home directory and continues the saved conversation.
+ *
+ * An agent on such a screen is in no turn: it has not reached its composer, so nothing of a conversation is running
+ * that the step could discard. That is not assumed from the screen's name. It is allowed only when
+ *
+ * - the office knows the screen by more than its words (`proof`): the live widget on the frame, or a launch of
+ *   its own that has not shown a composer since. A conversation that quotes a screen shows the same words, and
+ *   nothing is restarted for words;
+ * - the office terminal, by the reading a held input is judged by, shows the pane idle and silent for
+ *   `heldInputIdleMs`. A pane that still changes, or one the office is not reading, is waited for;
+ * - work the pane says was left running is given `heldInputTurnMs` since the problem was first seen.
+ *
+ * The step proves the screen and the idle pane again itself, and a rebuild confirms the discard only for the one
+ * recorded laptop (`DockerSupervisorLaptops.rebuild`). The rebuild keeps the limits every rebuild keeps. An
+ * employee a plan move owns is left to the move.
+ *
+ * A sign-in screen of a plan that is signed in nowhere is not restarted: the new agent would stop at the same
+ * screen. That is the one thing said to a person here, and the office goes on reading.
+ */
+function parkedScreenGate(
+  action: 'relaunch-provider' | 'rebuild-laptop',
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  flags: SupervisorFlags,
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
+  const screen = observed.session.startupScreen;
+  if (!screen?.proof || !observed.boxed || observed.move) return { kind: 'skip' };
+  if (action === 'relaunch-provider' && (!flags.relaunchAvailable || observed.laptop.record?.version === 3))
+    return { kind: 'skip' };
+  if (screen.kind === 'credential' && signedInNowhere(observed, history))
+    return action === 'rebuild-laptop'
+      ? { kind: 'human', needsHuman: signedOutEverywhere(observed) }
+      : { kind: 'skip' };
+  const limit =
+    action === 'rebuild-laptop' ? rebuildLimit(observed, history, now, policy, REBUILD_RUNNING_BY_HAND) : undefined;
+  if (limit) return limit;
+  const { turn = 'unknown', idleSince, background } = observed.session;
+  const overdue = history.since > 0 && now - history.since >= policy.heldInputTurnMs;
+  const quiet = turn === 'idle' && idleSince !== undefined && now - idleSince >= policy.heldInputIdleMs;
+  if (quiet && (!background || overdue)) return { kind: 'ok', preconditions: ['agent-parked-at-screen'] };
+  return { kind: 'wait', waitingFor: quiet ? HELD_INPUT_BACKGROUND_WAIT : PARKED_SCREEN_WAIT[turn] };
 }
 
 /**
@@ -1107,10 +1302,13 @@ function gate(
         flags.signInRepairAvailable === true &&
         observed.boxed &&
         !observed.move &&
-        observed.session.startupScreen?.kind === 'credential'
+        observed.session.startupScreen?.kind === 'credential' &&
+        !signInAnswered(observed, history)
         ? { kind: 'ok' }
         : { kind: 'skip' };
     case 'relaunch-provider':
+      // An agent on a start-up screen is started again only on proof that it is parked there.
+      if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
     case 'abandon-move': {
       const kind = classifyMoveError(move?.error);
@@ -1131,6 +1329,7 @@ function gate(
     case 'rebuild-laptop':
       // A new laptop would join the same pool and be held by the same thing.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };
+      if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return heldInput
         ? heldInputRebuildGate(observed, history, flags, now, policy)
         : rebuildGate(observed, history, now, policy);
@@ -1148,11 +1347,21 @@ const BY_HAND: Readonly<Record<SupervisorAction, string>> = {
   'start-continuation': 'Start the laptop: GET …/docker-policy, then POST …/docker-continuation.',
   'continue-move': 'Continue the move: POST /api/plans/moves/:id/resolve with action continue-original.',
   'reconnect-viewer': 'Reconnect the terminal from the employee card, or wake the employee.',
-  'replace-sign-in': 'Sign the plan in at the office (Plans), or in the laptop terminal.',
+  'replace-sign-in': 'Switch them on and the office puts the sign-in back itself.',
   'relaunch-provider': 'Restart the agent in its laptop.',
   'abandon-move': 'Abandon the move: POST /api/plans/moves/:id/abandon, then rebuild the laptop.',
   'rebuild-laptop': REBUILD_BY_HAND,
 };
+
+/**
+ * Said while every step for a start-up screen has been tried and the screen is still there. Information only: the
+ * office reads the laptop on every pass, and `rollSupervisorHistory` gives all the steps back after
+ * `ladderRestartMs`.
+ */
+const SCREEN_LADDER_SPENT =
+  'The office has tried every step it has for this screen, and the agent still shows it. It goes on reading the ' +
+  'laptop and tries all of them again a few hours after the last one. Nobody has to do anything; the screen and ' +
+  'the steps are in the audit log.';
 
 const EXHAUSTED: Readonly<Partial<Record<SupervisorCondition, string>>> = {
   'viewer-lost':
@@ -1163,20 +1372,11 @@ const EXHAUSTED: Readonly<Partial<Record<SupervisorCondition, string>>> = {
   'held-needs-rebuild': 'Rebuilding did not help. ' + REBUILD_BY_HAND,
   'laptop-not-started': 'The laptop would not start. Read GET …/docker-policy, then POST …/docker-continuation.',
   'move-held-retryable': 'The move is still held. ' + BY_HAND['abandon-move'],
+  'at-sign-in-screen': SCREEN_LADDER_SPENT,
+  'stuck-first-run-screen': SCREEN_LADDER_SPENT,
 };
 /** Said once every step for a lost terminal whose input is held for good has been tried. */
 const HELD_INPUT_EXHAUSTED = 'The office could not rebuild the laptop on its own. ' + REBUILD_RUNNING_BY_HAND;
-
-/**
- * The office put the plan's sign-in back and the agent still shows the sign-in screen. The office has no way to
- * start an agent again inside a running laptop, so what is left is the owner's rebuild, named call by call.
- */
-const SIGN_IN_PLACED =
-  "The office put the plan's sign-in back into this laptop, and the agent is still at the sign-in screen. It has to " +
-  'be started again, which the office can only do by rebuilding the laptop: POST ' +
-  '/api/company/employees/:id/docker-rebuild/preview, then POST …/docker-rebuild/apply with the scope digest that ' +
-  'preview returned (and confirmDiscardRunning while the preview lists a running laptop: an agent at a sign-in ' +
-  'screen has no conversation in progress), then continue it.';
 
 /** The condition a base condition is reported as once its ladder has reached a given rung. */
 function reported(base: SupervisorCondition, rung: SupervisorAction | undefined): SupervisorCondition {
@@ -1260,9 +1460,6 @@ export function assessEmployee(
     if (tried.count >= rung.maxAttempts) {
       const settles = tried.lastAt + rung.escalateAfterMs;
       if (now < settles) return result(idle('the outcome of the last attempt', settles), action, placing(action));
-      // Placed, and still at the sign-in screen: the agent has to be started again, which only a rebuild does.
-      if (action === 'replace-sign-in' && last?.action === action && last.outcome === 'done')
-        return result(idle(), action, SIGN_IN_PLACED);
       continue;
     }
     if (allowed.kind === 'human') return result(idle(), action, allowed.needsHuman);
@@ -1279,6 +1476,25 @@ export function assessEmployee(
 }
 
 // ─── History ──────────────────────────────────────────────────────────────────
+
+/** Conditions whose steps are all given back once the last of them is `ladderRestartMs` old. */
+const RESTARTING_LADDERS: ReadonlySet<SupervisorCondition> = new Set(['at-sign-in-screen', 'stuck-first-run-screen']);
+
+/**
+ * The attempts to carry on with. A parked start-up screen never ends in "nothing more is tried": when its steps
+ * were used and the last one is `ladderRestartMs` old, the counts start again, so every step is taken again under
+ * its own waits. The rebuilds of the last day are counted separately and keep their limit.
+ */
+function restartedAttempts(
+  history: SupervisorHistory,
+  condition: SupervisorCondition,
+  now: number,
+  policy: SupervisorPolicy
+): SupervisorHistory['attempts'] {
+  const tried = Object.values(history.attempts);
+  const spent = tried.length > 0 && tried.every((attempt) => now - attempt.lastAt >= policy.ladderRestartMs);
+  return spent && RESTARTING_LADDERS.has(condition) ? {} : history.attempts;
+}
 
 /**
  * Carry the history across one observation. A problem keeps its `since` while its detail is unchanged, including
@@ -1307,7 +1523,7 @@ export function rollSupervisorHistory(
           ...last,
         };
   }
-  const kept = { attempts: history.attempts, rebuilds, ...last };
+  const kept = { attempts: restartedAttempts(history, seen.condition, now, policy), rebuilds, ...last };
   // In transit (starting, moving): the problem being worked on, if any, keeps its clock.
   if (seen.fingerprint === '')
     return {

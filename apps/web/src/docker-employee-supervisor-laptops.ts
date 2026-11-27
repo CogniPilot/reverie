@@ -28,7 +28,7 @@
  * in the office and never brings anyone back. Nothing is attached, no agent is read or started.
  *
  * A rebuild is requested without `confirmDiscardRunning` unless one running laptop is exactly the recorded
- * destination and one of two statements holds, read just now. Those two statements are the supervisor's only uses
+ * destination and one of three statements holds, read just now. Those statements are the supervisor's only uses
  * of the owner's confirmation:
  *
  * - a read made inside that laptop says no agent runs there; or
@@ -36,7 +36,12 @@
  *   (`terminal-input-held`), and that terminal, read again at this moment, still has its input held and shows no
  *   turn in progress. The office can never type to that agent again, so nothing is gained by keeping it between
  *   turns. A turn in progress, a pane the office is not reading, a second running laptop or a running laptop that
- *   is not the recorded one all refuse, as they always did.
+ *   is not the recorded one all refuse, as they always did; or
+ * - an agent runs there, the policy chose the rebuild because that agent is parked on a provider start-up screen
+ *   (`agent-parked-at-screen`), and the office terminal, read again at this moment, still shows that screen by
+ *   more than its words and shows no turn in progress. An agent on such a screen has not reached its composer, so
+ *   it holds no conversation in progress; its home directory and saved conversation are kept by the rebuild. A
+ *   pane that shows anything else, one that is still changing and one the office is not reading all refuse.
  */
 import { randomUUID } from 'node:crypto';
 import { ZodError } from 'zod';
@@ -62,8 +67,9 @@ import type {
   SupervisorLaptopReading,
 } from './employee-supervisor.js';
 import {
+  readParkedScreen,
   readSupervisedTerminal,
-  type SupervisedTerminal,
+  type SupervisedScreenTerminal,
   type SupervisorObservation,
   type SupervisorPrecondition,
   type SupervisorProviderPresence,
@@ -85,7 +91,7 @@ export interface DockerSupervisorLaptopDeps {
   readonly limits?: Pick<DockerLaptopLimitUpkeep, 'finished' | 'restore' | 'flightActive'>;
   readonly absent: Pick<DockerAbsentReprovision, 'previewRebuild' | 'rebuild'>;
   /** The office's own terminal object for a session, when it has one. */
-  readonly sessions: { get(sessionId: string): SupervisedTerminal | undefined };
+  readonly sessions: { get(sessionId: string): SupervisedScreenTerminal | undefined };
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
@@ -400,8 +406,22 @@ export class DockerSupervisorLaptops {
   }
 
   /**
+   * The parked agent, read again now from the pane: why the laptop it runs in may not be discarded for its start-up
+   * screen, or undefined when it may. A pane that is still changing tried nothing and is waited for.
+   */
+  #parkedScreenRefusal(employee: SupervisedEmployee): SupervisorActionResult | undefined {
+    const { startupScreen, turn } = readParkedScreen(this.deps.sessions.get(employee.sessionId));
+    if (!startupScreen?.proof || (startupScreen.kind === 'first-run' && startupScreen.answering))
+      return { outcome: 'refused', detail: 'the agent is not shown to be parked on a start-up screen' };
+    if (turn === 'working') return { outcome: 'busy', detail: "the agent's terminal is still changing" };
+    if (turn !== 'idle') return { outcome: 'refused', detail: "the office is not reading the agent's terminal" };
+    return undefined;
+  }
+
+  /**
    * Why the running laptops a rebuild would stop may not be discarded, read now; undefined when they may. See the
-   * file comment: only the one recorded laptop, and only when it is empty or its terminal's input is held for good.
+   * file comment: only the one recorded laptop, and only when it is empty, its terminal's input is held for good or
+   * its agent is parked on a start-up screen.
    */
   async #discardRefusal(
     employee: SupervisedEmployee,
@@ -414,6 +434,8 @@ export class DockerSupervisorLaptops {
     if (presence === 'exited' || presence === 'absent') return undefined;
     if (recorded && presence === 'running' && proved.includes('terminal-input-held'))
       return this.#heldTerminalRefusal(employee);
+    if (recorded && presence === 'running' && proved.includes('agent-parked-at-screen'))
+      return this.#parkedScreenRefusal(employee);
     return { outcome: 'refused', detail: 'a running laptop is not shown to be empty' };
   }
 

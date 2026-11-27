@@ -238,27 +238,71 @@ describe('office supervisor ports', () => {
     expect(o.ports.glance(o.employee()).busy).toBe(busy);
   });
 
-  it('reads a start-up screen at most once a minute and never while the agent is working', () => {
+  it('reads the screen of a session that looks fine at most once a minute and never while the agent is working', () => {
     const o = office();
     const session = o.state.sessions.get('session-a')!;
+    session.isWorking = false;
     session.startupScreen = () => {
       o.state.screenReads++;
-      return { id: 'login', label: "Claude's sign-in screen", kind: 'credential', answering: false };
+      return null;
     };
-    const seen = () => o.ports.glance(o.employee()).session.startupScreen;
-    expect(seen()).toEqual({ label: "Claude's sign-in screen", kind: 'credential', answering: false });
-    expect(seen()).toBeDefined();
+    const seen = (fresh?: boolean) => o.ports.glance(o.employee(), fresh).session.startupScreen;
+    expect(seen()).toBeUndefined();
+    expect(seen()).toBeUndefined();
     expect(o.state.screenReads).toBe(1);
     o.state.now += 61_000;
     seen();
     expect(o.state.screenReads).toBe(2);
+    // A step is never decided on a kept read: the driver asks for the pane to be read now.
+    seen(true);
+    expect(o.state.screenReads).toBe(3);
     session.status = 'busy';
-    expect(seen()).toBeUndefined();
+    expect(seen(true)).toBeUndefined();
+    expect(o.state.screenReads).toBe(3);
     session.status = 'idle';
     session.startupScreen = () => {
       throw new Error('tmux gone');
     };
-    expect(seen()).toBeUndefined();
+    expect(seen(true)).toBeUndefined();
+  });
+
+  it('reports a start-up screen only when it is proved, with what the pane shows of a turn, and reads it on every pass', () => {
+    const o = office();
+    const session = o.state.sessions.get('session-a')!;
+    Object.assign(session, { isWorking: false, lastActivityAt: 900_000, paneStartedAt: 100_000 });
+    let shown: string | undefined = 'widget';
+    session.startupScreen = () => {
+      o.state.screenReads++;
+      return { id: 'login', label: "Claude's sign-in screen", kind: 'credential', answering: false, ...(shown ? { shown } : {}) };
+    };
+    const seen = () => o.ports.glance(o.employee()).session;
+    expect(seen()).toEqual({
+      available: true,
+      runtimeHealth: 'healthy',
+      viewerHealth: 'connected',
+      providerHealth: 'healthy',
+      startupScreen: { label: "Claude's sign-in screen", kind: 'credential', answering: false, proof: 'widget' },
+      turn: 'idle',
+      idleSince: 900_000,
+    });
+    // Not from a kept read: a screen that went away is seen at the next pass.
+    seen();
+    expect(o.state.screenReads).toBe(2);
+    shown = 'launch';
+    expect(seen().startupScreen).toMatchObject({ proof: 'launch' });
+    // The pane says its agent left something running.
+    session.watching = '1 shell';
+    expect(seen()).toMatchObject({ turn: 'idle', background: true });
+    // Words about a screen are what a conversation that quotes it shows too: nothing is reported for them.
+    for (const words of ['words', undefined]) {
+      shown = words;
+      expect(seen()).not.toHaveProperty('startupScreen');
+      expect(seen()).not.toHaveProperty('turn');
+    }
+    // Nor for a pane the office is not reading.
+    shown = 'widget';
+    session.runtimeHealth = 'disconnected';
+    expect(seen()).not.toHaveProperty('startupScreen');
   });
 
   it('shows the one open laptop move and ignores held moves of the retired runtime', async () => {

@@ -325,7 +325,7 @@ export const CompanySettingsSchema = z.object({
   autoWakeEnabled: z.boolean().default(true),
   /** The office supervisor observes, retries and reconnects on its own. Absent means on. */
   supervisorEnabled: z.boolean().optional(),
-  /** The supervisor may also abandon a dead-end plan move and rebuild a laptop nothing runs in, or one whose office terminal can never take input again. Absent means on. */
+  /** The supervisor may also abandon a dead-end plan move and rebuild a laptop nothing runs in, one whose office terminal can never take input again, or one whose agent is parked on a provider start-up screen. Absent means on. */
   supervisorAutoRepair: z.boolean().optional(),
   crashWakeEmployeeId: z.string().min(1).optional(),
   timeZone: z

@@ -824,7 +824,7 @@ describe('EmployeeSupervisor', () => {
     expect(w.state.acts).toHaveLength(1);
   });
 
-  it('asks whether the plan is signed in and never answers the screen', async () => {
+  it('asks whether the plan is signed in, and starts nothing again for a screen it cannot prove', async () => {
     const waiting = person('a');
     waiting.glance = {
       ...waiting.glance,
@@ -835,8 +835,55 @@ describe('EmployeeSupervisor', () => {
     await w.run(60);
     expect(w.state.acts).toEqual([]);
     expect(w.state.reads).toContain('plan:plan-a');
-    expect(w.report('a')).toMatchObject({ condition: 'needs-sign-in', sentence: "A is waiting at Claude's sign-in screen." });
-    expect(w.report('a').needsHuman).toMatch(/the plan “Plan A” is signed in at the office/);
+    expect(w.state.reads).not.toContain('laptop:a');
+    expect(w.report('a')).toMatchObject({ condition: 'at-sign-in-screen', sentence: "A is waiting at Claude's sign-in screen." });
+  });
+
+  it('rebuilds a laptop whose agent is parked on a proved sign-in screen, on a read of the pane made for that step', async () => {
+    const parked = person('a');
+    const screen = { label: "Claude's sign-in screen", kind: 'credential' as const, answering: false, proof: 'widget' as const };
+    parked.glance = { ...parked.glance, session: { ...parked.glance.session, startupScreen: screen, turn: 'idle', idleSince: 1 } };
+    const w = world([parked]);
+    w.state.signedIn = true;
+    const fresh: Array<boolean | undefined> = [];
+    const glance = w.ports.glance;
+    w.ports.glance = (employee, now) => {
+      fresh.push(now);
+      return glance(employee, now);
+    };
+    await w.run(2);
+    expect(w.state.acts).toEqual([]); // a rebuild waits three minutes from the first sight of the problem
+    await w.run(2);
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(w.state.proved).toEqual([['rebuild-laptop', ['agent-parked-at-screen']]]);
+    // What runs in the laptop is not asked: an agent does, and the pane says it is parked.
+    expect(w.state.reads).not.toContain('provider:a');
+    // The step was decided on a read of the pane made for it, not on the pass's own.
+    expect(fresh.filter((value) => value === true)).toHaveLength(1);
+    expect(w.state.audits.at(-1)).toMatchObject({
+      action: 'supervisor_rebuild_laptop',
+      detail: { condition: 'at-sign-in-screen', proved: ['agent-parked-at-screen'] },
+    });
+    expect(w.state.logs.filter((line) => line.includes('needs a person'))).toEqual([]);
+  });
+
+  it('does not rebuild when the read made for the step no longer shows the agent parked', async () => {
+    const parked = person('a');
+    const screen = { label: "Claude's theme chooser", kind: 'first-run' as const, answering: false, proof: 'launch' as const };
+    const session = { ...parked.glance.session, startupScreen: screen, turn: 'idle' as const, idleSince: 1 };
+    parked.glance = { ...parked.glance, session };
+    const w = world([parked]);
+    const glance = w.ports.glance;
+    // Between the pass and the step the pane printed: the agent is in a turn after all.
+    w.ports.glance = (employee, now) =>
+      now ? { ...glance(employee), session: { ...session, turn: 'working', idleSince: undefined } } : glance(employee);
+    await w.run(10);
+    expect(w.state.acts).toEqual([]);
+    expect(w.report('a')).toMatchObject({
+      condition: 'stuck-first-run-screen',
+      waitingFor: "the agent's terminal to stop changing",
+    });
+    expect(w.report('a').needsHuman).toBeUndefined();
   });
 
   it('skips a step this office has no port for', async () => {
