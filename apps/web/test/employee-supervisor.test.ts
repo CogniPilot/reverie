@@ -1855,3 +1855,21 @@ describe('EmployeeSupervisor: a limits check that is slow', () => {
     expect(calls.length).toBeGreaterThan(1);
   });
 });
+
+describe('EmployeeSupervisor: a limits check that never returns', () => {
+  it('is given up after thirty minutes, and the limits of everyone else are checked again', async () => {
+    const calls = new Map<string, number>();
+    const w = world(['a', 'b', 'c', 'd', 'e'].map((id) => person(id)), {
+      keepLimits: (employee) => {
+        calls.set(employee.id, (calls.get(employee.id) ?? 0) + 1);
+        return employee.id === 'a' ? new Promise(() => {}) : Promise.resolve({ outcome: 'done', detail: 'unchanged' });
+      },
+    });
+    await w.run(3 * 60);
+    // About every ten minutes for each of the others; the one that hangs is not asked again while it hangs.
+    for (const id of ['b', 'c', 'd', 'e']) expect(calls.get(id) ?? 0, id).toBeGreaterThan(10);
+    expect(calls.get('a')).toBe(1);
+    expect(w.state.logs.some((line) => /A \(a\): keep-limits has not returned after 30 minutes/.test(line))).toBe(true);
+    expect(w.state.audits.map((entry) => entry.action)).toContain('supervisor_keep_limits_unreturned');
+  });
+});

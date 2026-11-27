@@ -432,7 +432,10 @@ So beside the repair steps the supervisor checks the approved limits of each
 finished laptop about every ten minutes, one employee per pass, and puts them
 back when they are gone. A check that is slow goes on beside the passes: a pass
 waits for it five seconds at most, the repair steps of everyone else go on, and
-no other check starts before it has ended. It does this for every employee whose laptop may be
+no other check starts before it has ended. A check that has not returned after thirty minutes is
+given up, with a line `… keep-limits has not returned after … minutes` and an
+audit entry `supervisor_keep_limits_unreturned`; the others are checked again,
+and none is started for that employee until the hung one returns. It does this for every employee whose laptop may be
 running, whatever their attendance and whatever their condition reads: one who
 is running normally, one who is stopped or out of the office, and one who is
 waiting for any repair, such as a lost terminal, a start-up screen or a

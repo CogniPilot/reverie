@@ -492,8 +492,13 @@ export class EmployeeSupervisor {
    * how often it was tried without. In memory: an office start records every running laptop again.
    */
   readonly #homeRecords = new Map<string, { operationId: string; at: number; done: boolean; tries: number }>();
-  /** The limits check that a pass started, while it has not ended. One at a time across the office. */
-  #limitsFlight?: Promise<void>;
+  /**
+   * The limits check that a pass started, while it has not ended and was not given up. One at a time across the
+   * office. `givenUp` once it had not returned within `stepDeadlineMs`.
+   */
+  #limitsFlight?: { readonly employee: SupervisedEmployee; readonly at: number; givenUp: boolean };
+  /** Employees whose limits check was given up and has not returned since. None is started for them meanwhile. */
+  readonly #limitsHung = new Set<string>();
   /** The home records that a pass started and that have not all ended. */
   #homeFlight?: Promise<void>;
   readonly #resolved: Required<EmployeeSupervisorLimits>;
@@ -923,7 +928,7 @@ export class EmployeeSupervisor {
   /** The limits check of the one employee whose check is longest overdue. See the file comment. */
   async #keepLimits(employees: readonly SupervisedEmployee[]): Promise<void> {
     const keep = this.ports.keepLimits?.bind(this.ports);
-    if (!keep || this.#limitsFlight) return;
+    if (!keep || !this.#limitsFree()) return;
     const now = this.ports.now(),
       due = (employee: SupervisedEmployee) => this.#limitsDue.get(employee.id) ?? 0;
     const employee = employees
@@ -932,6 +937,7 @@ export class EmployeeSupervisor {
           due(row) <= now &&
           !row.bindingMigration &&
           !this.#acting.has(row.id) &&
+          !this.#limitsHung.has(row.id) &&
           this.#limitsLookedAt(row) &&
           this.ports.flags(row.owner).enabled
       )
@@ -939,6 +945,7 @@ export class EmployeeSupervisor {
     if (!employee) return;
     this.#limitsDue.set(employee.id, now + this.limits.limitsCheckMs);
     const guard = this.#identityGuard(employee);
+    const flight = { employee, at: now, givenUp: false };
     const work = (async (): Promise<SupervisorActionResult | undefined> => {
       try {
         guard();
@@ -950,14 +957,15 @@ export class EmployeeSupervisor {
       }
     })()
       .then((result) => {
+        if (flight.givenUp) return void this.#limitsHung.delete(employee.id);
         this.#acting.delete(employee.id);
         this.#limitsChecked(employee, result, now);
       })
       .finally(() => {
-        this.#limitsFlight = undefined;
+        if (this.#limitsFlight === flight) this.#limitsFlight = undefined;
       });
     this.#acting.set(employee.id, work);
-    this.#limitsFlight = work;
+    this.#limitsFlight = flight;
     // The pass waits only a moment: a slow check goes on beside the passes that follow.
     let timer: ReturnType<typeof setTimeout> | undefined;
     const waited = new Promise<void>((resolve) => {
@@ -966,6 +974,40 @@ export class EmployeeSupervisor {
     });
     await Promise.race([work, waited]);
     if (timer) clearTimeout(timer);
+  }
+
+  /**
+   * Whether a limits check may start: none is in flight, or the one that is has not returned within
+   * `stepDeadlineMs` and is given up now. Without that, one check that never returns would stop every limits
+   * check of the office for good. A check given up keeps its employee's limits service busy until it ends, which
+   * refuses a second one for that employee by itself; everyone else is checked again.
+   */
+  #limitsFree(): boolean {
+    const flight = this.#limitsFlight;
+    if (!flight) return true;
+    const now = this.ports.now();
+    if (now - flight.at < this.#resolved.stepDeadlineMs) return false;
+    flight.givenUp = true;
+    this.#limitsFlight = undefined;
+    this.#limitsHung.add(flight.employee.id);
+    this.#acting.delete(flight.employee.id);
+    const minutes = Math.round((now - flight.at) / 60_000),
+      { employee } = flight;
+    try {
+      this.ports.log(
+        `[supervisor] ${employee.name} (${employee.id}): keep-limits has not returned after ${minutes} minutes; ` +
+          'taken as interrupted, and the limits of the others are checked again'
+      );
+      this.ports.audit({
+        admin: 'office supervisor',
+        action: 'supervisor_keep_limits_unreturned',
+        target: employee.name,
+        detail: { id: employee.id, sessionId: employee.sessionId, minutes },
+      });
+    } catch {
+      /* best-effort */
+    }
+    return true;
   }
 
   /** Record one limits check. A line and an audit entry are written when limits were put back, and once when a
