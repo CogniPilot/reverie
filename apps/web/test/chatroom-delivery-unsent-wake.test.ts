@@ -6,11 +6,17 @@
  * now presses Enter for that line when it is the whole composer of an otherwise idle pane.
  *
  * The first block drives delivery against a fake pane; the second the real Session and its composer check against a fake mux.
+ *
+ * Observed the same day, after that fix went live: the Enter was pressed, the agent took it and started its turn, and the
+ * office then held that agent's terminal input for good. The multiplexer reads a key's authority again once the key is out,
+ * and the Enter's authority included "the pane is idle", which a taken Enter ends. The fake mux below now reads authority
+ * after the key as the real one does, and the last block pins what may and may not hold the terminal.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatroomDelivery, DELIVERY_SPACING_MS, UNSENT_WAKE_RETRY_MS, WAKE_LINE, type DeliverySession, type DeliveryStall } from '../src/chatroom-delivery.js';
 import { Session } from '../src/session.js';
 import { typeAndSubmit } from '../src/submit-settle.js';
+import { TerminalInputAttempt } from '../src/terminal-input-outcome.js';
 import { registeredMuxFixture } from './helpers/registered-mux-fixture.js';
 
 type Options = Parameters<DeliverySession['writeViaMux']>[1];
@@ -218,20 +224,28 @@ describe('how a wake line comes to be left unsent', () => {
   });
 });
 
-/** A real Session on a fake mux whose pane shows `screen.text`; an Enter is recorded and answered by `onEnter`. */
+/**
+ * A real Session on a fake mux whose pane shows `screen.text`; an Enter is recorded and answered by `onEnter`. As
+ * TmuxManager.sendInput does, the mux reads the write's authority before the key and again once the key is out, and a
+ * key whose authority has gone by then is an input of unknown outcome.
+ */
 function paneSession(initial: string, mode = 'claude') {
   const screen = { text: claude(initial) as string | null };
   const keys: string[] = [];
-  const hooks = { onEnter: () => { screen.text = claude(''); } };
+  const hooks = { onEnter: () => { screen.text = claude(''); }, onText: (_text: string) => {} };
   const registered = registeredMuxFixture({ sessionId: 'unsent-wake-1', muxName: 'reverie-unsent-wake', pid: 42, mode: mode as never });
   const mux = {
     getSession: registered.getSession,
     capturePaneText: () => screen.text,
-    sendInput: vi.fn(async (_id: string, input: string, options?: { admitted?: () => boolean }) => {
+    sendInput: vi.fn(async (_id: string, input: string, options?: { admitted?: () => boolean; settled?: () => boolean }) => {
+      const attempt = new TerminalInputAttempt();
       if (options?.admitted && !options.admitted()) return false;
+      attempt.beforeEffect();
       keys.push(input);
       if (input === '\r') hooks.onEnter();
-      return true;
+      else hooks.onText(input);
+      const after = options?.settled ?? options?.admitted;
+      return attempt.finish(true, !after || after());
     }),
   };
   const session = new Session({
@@ -243,7 +257,12 @@ function paneSession(initial: string, mode = 'claude') {
     Object.assign(session, { ptyProcess: null, _muxSession: null });
     await session.stop(false);
   };
-  return { session, screen, keys, hooks, close };
+  /** What the pane's own output does to the session when the agent takes an Enter: its turn is running. */
+  const turnStarts = () => {
+    screen.text = claude('');
+    Object.assign(session, { _isWorking: true, _status: 'busy' });
+  };
+  return { session, screen, keys, hooks, close, registered, turnStarts };
 }
 
 describe('Session.resubmitStranded', () => {
@@ -376,6 +395,95 @@ describe('delivery and the real session together', () => {
       expect(await delivery.flush('unsent-wake-1')).toBe(true);
       expect(p.keys).toEqual(['\r', `${WAKE_LINE}\r`]);
       delivery.stop();
+    } finally {
+      await p.close();
+    }
+  });
+});
+
+describe('an Enter the agent took is a delivered Enter', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('does not hold the terminal when the Enter for a stranded line starts the turn', async () => {
+    vi.useFakeTimers();
+    const p = paneSession(WAKE_LINE);
+    try {
+      p.hooks.onEnter = p.turnStarts;
+      const outcomes: string[] = [];
+      expect(p.session.resubmitStranded(WAKE_LINE, (outcome) => outcomes.push(outcome))).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(p.keys).toEqual(['\r']);
+      expect(p.session.terminalInputHeld).toBe(false);
+      expect(outcomes).toEqual(['submitted']);
+    } finally {
+      await p.close();
+    }
+  });
+
+  it('does not hold the terminal when a later Enter of an idle-only wake starts the turn', async () => {
+    vi.useFakeTimers();
+    const p = paneSession('');
+    try {
+      // The wake's own Enter is ignored (a CLI that has just started): the line stays in the composer.
+      let ignored = 1;
+      p.hooks.onText = (text) => { p.screen.text = claude(text.replace(/\r/g, '')); };
+      p.hooks.onEnter = () => { if (ignored-- <= 0) p.turnStarts(); };
+      const outcomes: string[] = [];
+      p.session.sendInput = undefined as never; // the wake goes through writeViaMux only
+      const sent = p.session.writeViaMux(`${WAKE_LINE}\r`, {
+        requireIdle: true, requireEmptyComposer: true, onOutcome: (outcome) => outcomes.push(outcome),
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await sent).toBe(true);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(p.session.terminalInputHeld).toBe(false);
+      expect(outcomes).toEqual(['submitted']);
+    } finally {
+      await p.close();
+    }
+  });
+
+  it('does not hold the terminal when another write arms its own check while the Enter is out', async () => {
+    vi.useFakeTimers();
+    const p = paneSession(WAKE_LINE);
+    try {
+      p.hooks.onEnter = () => {
+        p.screen.text = claude('');
+        p.session.verifySubmitted('something a person sent');
+      };
+      expect(p.session.resubmitStranded(WAKE_LINE)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(p.keys).toEqual(['\r']);
+      expect(p.session.terminalInputHeld).toBe(false);
+    } finally {
+      await p.close();
+    }
+  });
+
+  it('still holds the terminal when the pane the Enter went to is no longer the same one', async () => {
+    vi.useFakeTimers();
+    const p = paneSession(WAKE_LINE);
+    try {
+      // Another process took the pane's place in the registry while the key was on its way.
+      p.hooks.onEnter = () => { p.registered.sessions.set(p.session.id, { ...p.registered.subject }); };
+      expect(p.session.resubmitStranded(WAKE_LINE)).toBe(true);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(p.keys).toEqual(['\r']);
+      expect(p.session.terminalInputHeld).toBe(true);
+    } finally {
+      await p.close();
+    }
+  });
+
+  it('presses nothing when the gate closes before the key', async () => {
+    vi.useFakeTimers();
+    const p = paneSession(WAKE_LINE);
+    try {
+      expect(p.session.resubmitStranded(WAKE_LINE)).toBe(true);
+      Object.assign(p.session, { _moveHolds: 1 });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(p.keys).toEqual([]);
+      expect(p.session.terminalInputHeld).toBe(false);
     } finally {
       await p.close();
     }

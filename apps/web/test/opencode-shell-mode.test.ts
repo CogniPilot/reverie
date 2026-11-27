@@ -216,15 +216,16 @@ describe('who gets the guard', () => {
     sendInput.mockClear();
     const verifier = (s as unknown as { _submitVerifier: { deps: { sendEnter: () => Promise<boolean> | undefined } } })._submitVerifier;
     await verifier.deps.sendEnter();
-    expect(sendInput).toHaveBeenCalledWith(s.id, '\r', { opencode: true, admitted: expect.any(Function) });
+    expect(sendInput).toHaveBeenCalledWith(s.id, '\r', { opencode: true, admitted: expect.any(Function), settled: expect.any(Function) });
     expect(sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
+    expect(sendInput.mock.calls.at(-1)?.[2]?.settled?.()).toBe(true);
     // and a Claude pane\u2019s retry is the plain one
     const claude = session('claude');
     (claude.s as unknown as { _mux: { capturePaneText: () => string } })._mux.capturePaneText = () => '';
     await claude.s.writeViaMux('hello\r');
     claude.sendInput.mockClear();
     await (claude.s as unknown as { _submitVerifier: { deps: { sendEnter: () => Promise<boolean> | undefined } } })._submitVerifier.deps.sendEnter();
-    expect(claude.sendInput).toHaveBeenCalledWith(claude.s.id, '\r', {admitted: expect.any(Function)});
+    expect(claude.sendInput).toHaveBeenCalledWith(claude.s.id, '\r', {admitted: expect.any(Function), settled: expect.any(Function)});
     expect(claude.sendInput.mock.calls.at(-1)?.[2]?.admitted?.()).toBe(true);
   });
 

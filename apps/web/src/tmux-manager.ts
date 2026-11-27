@@ -4298,8 +4298,11 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
     const attempt = new TerminalInputAttempt();
     const session = this.sessions.get(sessionId);
     const originalName = session?.muxName, originalPid = session?.pid;
-    const admitted = () => attempt.continuing() && this.sessions.get(sessionId) === session
-      && session?.muxName === originalName && session?.pid === originalPid && (!options.admitted || options.admitted());
+    const sameSubject = () => attempt.continuing() && this.sessions.get(sessionId) === session
+      && session?.muxName === originalName && session?.pid === originalPid;
+    const admitted = () => sameSubject() && (!options.admitted || options.admitted());
+    // Read once the keys are out. A write may name what still has to hold then (MuxInputOptions.settled).
+    const settled = () => options.settled ? sameSubject() && options.settled() : admitted();
     if (!admitted()) return false;
     const dispatch = async (command: string, execOptions: {timeout: number}, terminalEffect = true) => {
       if (!admitted()) throw attempt.fail(new Error('Input provider authority changed')) ?? new Error('Input provider authority changed');
@@ -4370,7 +4373,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         if (outcome === 'blocked') {
           console.warn(`[TmuxManager] ${session.muxName} stayed in OpenCode shell mode after Escape: text left unsent, Enter withheld`);
         }
-        return attempt.finish(outcome !== 'not-written', admitted());
+        return attempt.finish(outcome !== 'not-written', outcome === 'not-written' ? admitted() : settled());
       }
 
       if (textPart && hasCarriageReturn) {
@@ -4413,7 +4416,7 @@ export class TmuxManager extends EventEmitter implements TerminalMultiplexer {
         });
       }
 
-      return attempt.finish(true, admitted());
+      return attempt.finish(true, settled());
     } catch (err) {
       const unconfirmed = attempt.fail(err);
       if (unconfirmed) throw unconfirmed;

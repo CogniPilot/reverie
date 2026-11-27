@@ -7012,9 +7012,15 @@ export class Session extends EventEmitter {
         };
         try {
           const shellKeyGuard = protocol.shellKeyGuard;
-          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, ...(shellKeyGuard ? {opencode: true} : {})});
+          // The gate (idle, exclusive, move-free) and this check being the current one decide whether the Enter may be
+          // pressed. They are not what the key is held to once it is out: the turn a taken Enter starts ends "idle",
+          // and a newer write arms its own check. Read after the key, either called a delivered Enter an input of
+          // unknown outcome, and that hold is never lifted. Once the key is out, only the subject it went to counts.
+          const send = () => mux.sendInput(this.id, '\r', {admitted: effect, settled: original, ...(shellKeyGuard ? {opencode: true} : {})});
           const sent = gate && shellKeyGuard ? (await withWriteGate(effect, send)).result : await send();
-          if (!effect()) verifier.cancel();
+          // A closed gate alone leaves the schedule running: the next look finds the composer empty (sent), or finds the
+          // text and stops at the gate above without pressing anything.
+          if (!current()) verifier.cancel();
           return sent;
         } catch (cause) {
           if (cause instanceof TerminalInputUnconfirmedError) {this.holdUnconfirmedInput(cause); verifier.cancel();}
