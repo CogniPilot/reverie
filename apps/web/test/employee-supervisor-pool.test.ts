@@ -66,7 +66,9 @@ function box(
     now: START,
     flags: { enabled: true, autoRepair: true },
     /** The pool's anchor. A host restart stops it together with every laptop. */
-    anchor: 'stopped' as 'stopped' | 'running',
+    anchor: 'stopped' as 'stopped' | 'running' | 'dead' | 'absent',
+    /** What the container engine answers when the office removes a dead anchor: nothing, or its refusal. */
+    removeAnchor: (() => undefined) as () => string | undefined,
     /** A cold recovery that was issued and did not finish. */
     recoveryOpen: false,
     /** The pool cannot be read. */
@@ -151,6 +153,8 @@ function box(
     state.candidates.push(candidates.map((row) => row.id));
     if (state.unreadable) return { pool: 'unknown', detail: 'DOCKER_POOL_OBSERVATION_UNCONFIRMED' };
     const source = candidates[0]!;
+    /** The look only reads unless it was asked for exactly this step. */
+    const asked = (wanted: string) => step !== wanted;
     const took = (result: SupervisorPoolResult): SupervisorPoolResult => {
       state.steps.push(`${at()}:${result.step}:${result.outcome}`);
       return { ...result, employeeId: source.id };
@@ -163,6 +167,19 @@ function box(
       return took({ pool: 'up', step: 'finish-pool-recovery', outcome: 'done', detail: 'retained' });
     }
     if (state.anchor === 'running') return { pool: 'up', employeeId: source.id };
+    // No anchor at all: no record can stand for a pool, and a laptop set-up creates one.
+    if (state.anchor === 'absent') return { pool: 'none', detail: 'no laptop record names the shared pool' };
+    if (state.anchor === 'dead') {
+      const step = 'remove-dead-anchor' as const,
+        detail = 'DOCKER_POOL_COLD_ANCHOR_DEAD';
+      if (state.people.some(running)) return { pool: 'down', detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING' };
+      if (asked(step)) return { pool: 'down', step, detail, employeeId: source.id };
+      guard(source, 'repair')();
+      const refusal = state.removeAnchor();
+      if (refusal) return took({ pool: 'down', step, outcome: 'refused', detail: refusal });
+      state.anchor = 'absent';
+      return took({ pool: 'down', step, outcome: 'done', detail: 'DOCKER_POOL_DEAD_ANCHOR_REMOVED' });
+    }
     // The service refuses to recover a pool cold while any laptop of the box runs.
     if (state.people.some(running))
       return { pool: 'down', detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING', employeeId: source.id };
@@ -194,6 +211,8 @@ function box(
       }
       if (action === 'start-continuation') {
         // A fresh laptop cannot be set up while the pool's anchor is stopped.
+        // With no anchor at all a set-up creates and starts one. It never starts one that is stopped or dead.
+        if (state.anchor === 'absent') state.anchor = 'running';
         if (state.anchor !== 'running')
           return { outcome: 'refused', detail: 'DOCKER_RESOURCE_ANCHOR_START_UNCONFIRMED' };
         row.laptop = 'attached';
@@ -636,6 +655,63 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
     w.state.anchor = 'running';
     await w.run(MINUTE);
     expect(w.report('a').storedHomeCheck).toBe('compare-only');
+  });
+});
+
+describe('EmployeeSupervisor: an anchor that the container engine reports dead', () => {
+  it('removes it by itself, lets the next laptop set-up create the pool, and brings everyone back', async () => {
+    const w = box([person('a'), person('b'), person('c')]);
+    w.state.anchor = 'dead';
+    await w.run(30 * MINUTE);
+    // One minute after it was first seen, like every other step of the pool.
+    expect(w.state.steps).toEqual(['90:remove-dead-anchor:done']);
+    expect(w.state.audits.filter((entry) => entry.action === 'supervisor_remove_dead_anchor')).toHaveLength(1);
+    expect(w.state.anchor).toBe('running');
+    for (const id of ['a', 'b', 'c']) {
+      expect(w.report(id).condition, id).toBe('healthy');
+      expect(w.report(id).needsHuman, id).toBeUndefined();
+    }
+    // Nobody was rebuilt or started before the dead anchor was gone.
+    expect(w.state.acts.every((line) => Number(line.split(':')[0]) > 90)).toBe(true);
+  });
+
+  it('shows the engine’s own refusal, tries again with a growing wait, and goes on when the engine lets go', async () => {
+    const words =
+      'the container engine refused: Error response from daemon: container 3f2a: driver "overlay2" failed to remove root filesystem: device or resource busy';
+    const w = box([person('a'), person('b')]);
+    w.state.anchor = 'dead';
+    w.state.removeAnchor = () => words;
+    await w.run(3 * HOUR);
+    const times = w.state.steps.map((line) => Number(line.split(':')[0]));
+    expect(times.slice(0, 5)).toEqual([90, 150, 450, 1350, 4950]);
+    expect(w.state.steps.every((line) => line.endsWith(':remove-dead-anchor:refused'))).toBe(true);
+    expect(w.state.acts).toEqual([]);
+    expect(w.supervisor.pool()).toMatchObject({ pool: 'down', step: 'remove-dead-anchor', last: { detail: words } });
+    for (const id of ['a', 'b'])
+      expect(w.report(id).needsHuman, id).toMatch(
+        /reports the pool's anchor container as dead.*The office removes it itself.*Its last attempt did not remove it: the container engine refused: Error response from daemon: .*device or resource busy\. \(DOCKER_POOL_COLD_ANCHOR_DEAD\) The office looks at the pool again every minute and takes its next step \(remove-dead-anchor\) at /
+      );
+    w.state.removeAnchor = () => undefined;
+    await w.run(90 * MINUTE);
+    expect(w.state.steps.at(-1)).toMatch(/:remove-dead-anchor:done$/);
+    expect(w.report('a').condition).toBe('healthy');
+    expect(w.report('b').condition).toBe('healthy');
+  });
+
+  it('removes nothing while a laptop of the office runs, and nothing with the switch for repairs off', async () => {
+    const beside = box([person('a', 'running-detached'), person('b')]);
+    beside.state.anchor = 'dead';
+    await beside.run(HOUR);
+    expect(beside.state.steps).toEqual([]);
+    expect(beside.state.anchor).toBe('dead');
+    const off = box([person('a'), person('b')]);
+    off.state.anchor = 'dead';
+    off.state.flags = { enabled: true, autoRepair: false };
+    await off.run(HOUR);
+    expect(off.state.steps).toEqual([]);
+    expect(off.report('a').needsHuman).toMatch(
+      /Removing it is a repair, and the company setting supervisorAutoRepair is off.*POST \/api\/company\/employees\/:id\/docker-pool\/remove-dead-anchor/
+    );
   });
 });
 

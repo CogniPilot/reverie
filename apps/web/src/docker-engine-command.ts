@@ -99,6 +99,59 @@ export interface DockerEngineCommand {
    * exactly those tags and no container was created from it; the Engine itself
    * refuses the last one while any container still uses the image. */
   removeUnusedLaptopImage?(imageId: string, tags: readonly string[], requireCurrent: () => void): Promise<void>;
+  /** Removes the anchor container of one box's shared pool while the Engine
+   * reports it dead, never by force and never with volumes. A dead container
+   * is one the Engine failed to remove or stop: it can be neither started nor
+   * used again. The owning workflow proves that it is this box's anchor and
+   * that nothing of the box runs; this port reads its name, image, labels and
+   * state again immediately before the removal and refuses anything that is
+   * not exactly that anchor, or is not dead. The Engine may still refuse. */
+  removeDeadPoolAnchor?(
+    containerId: string,
+    proof: DockerDeadPoolAnchorProof,
+    requireCurrent: () => void
+  ): Promise<void>;
+}
+/** What names the one anchor of a box's shared pool: its fixed name, the
+ * image it was created from and the four labels its creator gave it. */
+export interface DockerDeadPoolAnchorProof {
+  readonly name: string;
+  readonly imageId: string;
+  readonly boxId: string;
+}
+const POOL_ANCHOR_NAME = /^\/reverie-boxed-anchor-[a-f0-9]{32}$/;
+/** Whether an inspected container is exactly the proven anchor and dead. One
+ * that is created, running, paused, restarting or merely exited is not. */
+export function dockerDeadPoolAnchorProven(
+  row: {
+    Id?: unknown;
+    Name?: unknown;
+    Image?: unknown;
+    State?: Record<string, unknown> | null;
+    Config?: { Labels?: Record<string, string> | null } | null;
+  } | null,
+  containerId: string,
+  proof: DockerDeadPoolAnchorProof
+): boolean {
+  const labels = row?.Config?.Labels ?? {},
+    state = row?.State;
+  return (
+    POOL_ANCHOR_NAME.test(proof.name) &&
+    /^[a-f0-9]{64}$/.test(proof.boxId) &&
+    proof.name === '/reverie-boxed-anchor-' + proof.boxId.slice(0, 32) &&
+    row?.Id === containerId &&
+    row.Name === proof.name &&
+    row.Image === proof.imageId &&
+    labels['org.reverie.purpose'] === 'boxed-resource-helper-v1' &&
+    labels['reverie.box.resource.box'] === proof.boxId &&
+    labels['reverie.box.resource.role'] === 'anchor' &&
+    labels['reverie.box.resource.name'] === proof.name.slice(1) &&
+    (state?.Dead === true || state?.Status === 'dead') &&
+    state.Running === false &&
+    state.Paused === false &&
+    state.Restarting === false &&
+    state.Pid === 0
+  );
 }
 // A pool helper is named only by the office's own repair, for an earlier
 // repair writer that a newer acknowledged one has superseded.
@@ -469,6 +522,21 @@ export class PackagedDockerEngineCommand implements DockerEngineCommand {
     const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
     if (!dockerSupersededHelperProven(row, containerId, proof))
       throw new DockerEmployeeContinuationError('DOCKER_LEFTOVER_HELPER_NOT_REMOVABLE');
+    requireCurrent();
+    await this.run(['container', 'rm', containerId]);
+  }
+  async removeDeadPoolAnchor(
+    containerId: string,
+    proof: DockerDeadPoolAnchorProof,
+    requireCurrent: () => void
+  ): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(containerId) || !POOL_ANCHOR_NAME.test(proof.name))
+      throw Error('Fixed pool anchor required');
+    requireCurrent();
+    const rows = JSON.parse(await this.run(['container', 'inspect', containerId])) as unknown;
+    const row = Array.isArray(rows) && rows.length === 1 ? (rows[0] as Record<string, unknown> | null) : null;
+    if (!dockerDeadPoolAnchorProven(row, containerId, proof))
+      throw new DockerEmployeeContinuationError('DOCKER_POOL_DEAD_ANCHOR_NOT_REMOVABLE');
     requireCurrent();
     await this.run(['container', 'rm', containerId]);
   }

@@ -852,9 +852,9 @@ const POOL_STUCK: Readonly<Record<string, string>> = {
     'configured with, so the office cannot prove that it writes nothing more. The office starts the pool by itself ' +
     'once every such helper has ended. One of an image it does not know has to be removed by the owner.',
   DOCKER_POOL_COLD_ANCHOR_DEAD:
-    "The container engine reports the pool's anchor container as dead. A dead container cannot be started, and " +
-    'the office has no operation that removes an anchor: the owner has to remove that container. The office then ' +
-    'sets the pool up again with the next laptop.',
+    "The container engine reports the pool's anchor container as dead: it failed to remove or stop it, and such " +
+    'a container can be neither started nor used again. The office removes it itself while nothing of this office ' +
+    'runs, and the next laptop set-up creates the pool again.',
   DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED:
     "The pool's anchor container is neither running nor stopped: it is paused or restarting. The office starts it " +
     'by itself once the container engine reports it stopped.',
@@ -868,6 +868,12 @@ const POOL_STUCK: Readonly<Record<string, string>> = {
   DOCKER_POOL_COLD_SOURCE_CHANGED:
     'What the office found changed between its look and its step. It looks again and steps on what it finds then.',
 };
+const ANCHOR_DEAD_CODE = 'DOCKER_POOL_COLD_ANCHOR_DEAD';
+const POOL_REMOVAL_OFF =
+  "The container engine reports the pool's anchor container as dead, so it can be neither started nor used " +
+  'again. Removing it is a repair, and the company setting supervisorAutoRepair is off, so the office does not ' +
+  'take that step. Switch supervisorAutoRepair on (PUT /api/company/settings), or remove it yourself: ' +
+  'POST /api/company/employees/:id/docker-pool/remove-dead-anchor.';
 const POOL_REPAIR_OFF =
   'Starting the stopped anchor is a repair, and the company setting supervisorAutoRepair is off, so the office ' +
   'does not take that step. Switch supervisorAutoRepair on (PUT /api/company/settings), or recover the pool ' +
@@ -875,11 +881,17 @@ const POOL_REPAIR_OFF =
 
 /** What is said once a pool has stayed stopped for `poolStuckMs`: why, by code, and what the office does next. */
 function poolStuck(detail: NonNullable<SupervisorObservation['laptop']['poolDetail']>): string {
-  const code = detail.refused ?? detail.code;
+  // The removal of a dead anchor is refused by the container engine, if at all, and in its own words.
+  const removal = detail.step === 'remove-dead-anchor';
+  const code = removal ? detail.code : (detail.refused ?? detail.code);
   const reason = detail.repairOff
-    ? POOL_REPAIR_OFF
-    : ((code && POOL_STUCK[code]) ??
-      (code ? `The pool service refused to start it (${code}).` : 'The office has not been able to start it.'));
+    ? removal
+      ? POOL_REMOVAL_OFF
+      : POOL_REPAIR_OFF
+    : removal && detail.refused
+      ? `${POOL_STUCK[ANCHOR_DEAD_CODE]} Its last attempt did not remove it: ${detail.refused}.`
+      : ((code && POOL_STUCK[code]) ??
+        (code ? `The pool service refused to start it (${code}).` : 'The office has not been able to start it.'));
   const next = detail.step
     ? ` and takes its next step (${detail.step})${detail.stepAt === undefined ? '' : ' at ' + when(detail.stepAt)}`
     : '';

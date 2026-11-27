@@ -388,11 +388,29 @@ takes the step (`stepAt`) and since when the pool has not been up
 | The anchor is stopped and a laptop on record no longer exists | the Engine is asked for exactly that ID; a laptop it positively reports absent runs nothing, and the pool is recovered. One that is there and cannot be read stops the step |
 | The anchor is stopped and any container with this box's laptop label runs, is paused or is restarting, on record or not | `pool: down`, `DOCKER_POOL_COLD_WORKERS_RUNNING`; recovered once none does. The office never stops a laptop for this |
 | The anchor is paused or restarting | `pool: down`, `DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`; recovered once the Engine reports it stopped |
-| The Engine reports the anchor dead | `pool: down`, `DOCKER_POOL_COLD_ANCHOR_DEAD`. A dead container cannot be started and the office has no operation that removes an anchor: the owner has to remove it. A host restart does not leave this state |
+| The Engine reports the anchor dead | `remove-dead-anchor` after one minute. A dead container is one the Engine failed to remove or stop; it can be neither started nor used, and no set-up can create an anchor under its name. The office removes it (see below); the next look then finds no pool to wait for (`pool: none`) and the next laptop set-up creates and starts a new anchor. When the Engine refuses the removal, `supervisor.pool.last.detail` and every waiting employee's `needsHuman` carry the Engine's own words, and the step is tried again after 1, 5, 15 and 60 minutes and then every hour |
 | The anchor on record is gone, or another container is the anchor now | that record cannot stand for the pool and the next one is tried. When none can, `pool: none`: nothing is waited for and the next laptop set-up creates or starts the pool |
 | Employees are approved with different pool limits | `pool: down`, `DOCKER_POOL_COLD_POLICY_CHANGED`. A policy carries no time of approval, so the office cannot tell the newer one and does not choose: the owner approves one for everyone |
 | The pool cannot be read at all | `pool: unknown` with the code. Never recovered cold. Rebuilds, starts and re-sent set-ups wait for fifteen minutes, then go on as they would without the look |
 | `supervisorAutoRepair` is off and the step would start the anchor | the step is not taken; `stepNeedsRepairSwitch`, and the report names the switch and the calls |
+
+The removal of a dead anchor proves everything first and never uses force. The
+laptop record it acts through names this very container as the pool's anchor,
+under the pool limits every employee is approved with. It is the one anchor of
+the box by census and has exactly the anchor's fixed configuration. The Engine
+reports it dead, not running, with no process. No laptop of the box runs: none
+on record, and no container with the box's laptop label that is running, paused
+or restarting. Every pool helper is accounted for and can write nothing more.
+No cold recovery is unfinished. The Engine port then reads the container's
+name, image, labels and state once more and removes exactly that one, the same
+way the removal of superseded helpers does
+([leftovers](#remove-superseded-laptop-leftovers)); that cleanup itself never
+touches the shared pool, so this is a removal of its own beside it. Nothing of
+any employee, record or pool observation is changed. The step needs
+`supervisorAutoRepair`; the owner's own call is
+`POST /api/company/employees/:id/docker-pool/remove-dead-anchor` (verified
+owner, empty body), which answers `removed` or `refused` with the Engine's
+words. Each step is an audit entry `supervisor_remove_dead_anchor`.
 
 While the pool is stopped every employee who waits for it shows
 `waitingFor: the shared pool, …`. Once it has been stopped for fifteen minutes

@@ -142,7 +142,12 @@ export interface DockerSupervisorLaptopDeps {
   readonly service: Pick<DockerEmployeeContinuation, 'observe' | 'selection' | 'begin' | 'repair' | 'flightActive'>;
   /** The shared pool's status, in-place repair, observation record and cold recovery, as the owner's routes call them. */
   readonly pool: Pick<DockerPoolReconciliation, 'status' | 'repair'> &
-    Partial<Pick<DockerPoolReconciliation, 'reconcile' | 'coldPreview' | 'coldRecover' | 'coldResume' | 'coldHeld'>>;
+    Partial<
+      Pick<
+        DockerPoolReconciliation,
+        'reconcile' | 'coldPreview' | 'coldRecover' | 'coldResume' | 'coldHeld' | 'removeDeadAnchor'
+      >
+    >;
   /** Reads of an employee's stored HOME and Nix directories. Absent where the office has no laptops to verify. */
   readonly storage?: {
     /** See `DockerEmployeeEngine.stoppedStorage`. */
@@ -183,6 +188,16 @@ const STORED_HOME_REFUSALS: Readonly<Partial<Record<SupervisorStoredHome, string
 const NO_SOURCE = '';
 /** The refusal that says this employee has no laptop record that names the pool's anchor; another one may. */
 const NO_POOL_SOURCE = new Set(['DOCKER_POOL_COLD_SOURCE_UNCONFIRMED']);
+/** The Engine refused a removal the office asked for, in its own words. */
+class EngineRefused extends Error {
+  constructor(readonly words: string) {
+    super('The container engine refused');
+  }
+}
+/** What the pool status says while a container of the pool is paused, restarting or dead. */
+const ANCHOR_STATE_UNKNOWN = 'DOCKER_RESOURCE_CONTAINER_UNKNOWN';
+/** What the cold preview answers for an anchor that the Engine reports dead. */
+const ANCHOR_DEAD = 'DOCKER_POOL_COLD_ANCHOR_DEAD';
 /** The pool's anchor is not running: what the cold recovery is for. */
 const ANCHOR_STOPPED = 'DOCKER_POOL_ANCHOR_UNCONFIRMED';
 /** The anchor runs and its limits or their acknowledgement are missing: a laptop set-up or the in-place repair
@@ -508,8 +523,10 @@ export class DockerSupervisorLaptops {
     }
   }
 
-  /** The code of a refusal by one of the laptop services, or a fixed phrase. Never a message. */
+  /** The code of a refusal by one of the laptop services, or a fixed phrase. Never a message, except what the
+   * container engine itself said when it refused to remove a dead anchor. */
   #code(error: unknown): string {
+    if (error instanceof EngineRefused) return 'the container engine refused: ' + error.words;
     if (error instanceof DockerEmployeeContinuationError) return error.code;
     return error instanceof CompanyError ? 'the office refused this employee' : 'the read failed';
   }
@@ -578,7 +595,10 @@ export class DockerSupervisorLaptops {
   #poolState(status: { state: string; code?: string }): Pick<SupervisorPoolResult, 'pool' | 'detail'> {
     if (status.state !== 'held') return { pool: 'up' };
     if (status.code && POOL_RUNNING_HOLDS.has(status.code)) return { pool: 'up', detail: status.code };
-    const down = status.code === ANCHOR_STOPPED || status.code === 'DOCKER_POOL_COLD_ATTEMPT_HELD';
+    const down =
+      status.code === ANCHOR_STOPPED ||
+      status.code === 'DOCKER_POOL_COLD_ATTEMPT_HELD' ||
+      status.code === 'DOCKER_POOL_DEAD_ANCHOR_REMOVED';
     return { pool: down ? 'down' : 'unknown', ...(status.code ? { detail: status.code } : {}) };
   }
 
@@ -611,7 +631,11 @@ export class DockerSupervisorLaptops {
           this.#authority(employee, guard(employee, 'retry'))
         )
       );
-    if (status.code !== ANCHOR_STOPPED || !pool.coldPreview || !pool.coldRecover) return seen;
+    // The Engine reports an anchor it failed to remove as dead, and the status read then says only that a
+    // container of the pool is in a state it does not know. The preview is asked what that is; only its answer
+    // that the anchor is dead is acted on, and anything else leaves the pool as the status read found it.
+    const odd = status.code === ANCHOR_STATE_UNKNOWN;
+    if ((status.code !== ANCHOR_STOPPED && !odd) || !pool.coldPreview || !pool.coldRecover) return seen;
     // The service decides whether the pool may be recovered cold: a stopped anchor, no laptop of the box running,
     // every earlier writer accounted for. Its refusal is the answer.
     let preview: Awaited<ReturnType<DockerPoolReconciliation['coldPreview']>>;
@@ -619,10 +643,22 @@ export class DockerSupervisorLaptops {
       preview = await pool.coldPreview(employee.id, this.#authority(employee, guard(employee, 'retry')));
     } catch (error) {
       const code = this.#code(error);
+      if (code === ANCHOR_DEAD && pool.removeDeadAnchor)
+        return this.#poolStep('remove-dead-anchor', { pool: 'down', detail: code }, asked, async () => {
+          const result = await pool.removeDeadAnchor!(
+            employee.id,
+            this.#authority(employee, guard(employee, 'repair'))
+          );
+          if (result.state === 'refused') throw new EngineRefused(result.engine);
+          // The anchor is gone. The next look finds no pool to recover, and a laptop set-up creates one.
+          return { state: 'held', code: 'DOCKER_POOL_DEAD_ANCHOR_REMOVED' };
+        });
+      if (odd) return seen;
       if (NO_POOL_SOURCE.has(code) || error instanceof CompanyError) return NO_SOURCE;
       // Whatever the refusal, another employee's record may not meet it.
       return { refused: code };
     }
+    if (odd) return seen;
     return this.#poolStep('recover-pool', seen, asked, async () =>
       pool.coldRecover!(
         employee.id,

@@ -203,7 +203,12 @@ absent.
 
 A cold recovery of the shared pool admits a stopped anchor however it ended,
 refuses a dead one with `DOCKER_POOL_COLD_ANCHOR_DEAD` and any other state with
-`DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`. A pool writer that no record names as
+`DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED`. A dead anchor is removed by
+`removeDeadPoolAnchor`: the record names it, it is the box's one anchor with
+its fixed configuration, the Engine reports it dead, no laptop of the box
+runs, every pool writer is closed and no cold recovery is unfinished; the
+Engine port proves name, image, labels and the dead state again and removes it
+without force. An Engine refusal is returned in the Engine's words. A pool writer that no record names as
 finished is admitted when it is of a configured image, fixed, and either never
 started or ended, the same across two inspections: it can write nothing more to
 a pool whose anchor is stopped. A pool observation admits a writer that was

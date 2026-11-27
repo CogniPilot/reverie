@@ -257,6 +257,17 @@ export function registerDockerEmployeeContinuationRoutes(
         return pool.coldResume(id, capture(req, id));
       })
     );
+    // Removes the pool's anchor while the Engine reports it dead, which the
+    // supervisor also does. It takes nothing: every fact is read again.
+    app.post('/api/company/employees/:id/docker-pool/remove-dead-anchor', async (req, reply) =>
+      run(reply, async () => {
+        if (!human(req) || !sameOrigin(req))
+          throw new CompanyError('Verified same-origin owner required for shared pool recovery', 403);
+        const id = uuid.parse((req.params as { id: string }).id);
+        z.object({}).strict().parse(req.body ?? {});
+        return pool.removeDeadAnchor(id, capture(req, id));
+      })
+    );
     app.get('/api/company/employees/:id/docker-pool/status', async (req, reply) =>
       run(reply, async () => {
         const id = uuid.parse((req.params as { id: string }).id);

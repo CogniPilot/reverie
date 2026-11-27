@@ -25,6 +25,7 @@ import { EmployeeSchema } from '../src/company-types.js';
 import { CompanyDockerContinuationStore } from '../src/docker-employee-store.js';
 import { DockerPoolReconciliation } from '../src/docker-pool-reconciliation.js';
 import { DockerColdPoolJournal } from '../src/docker-cold-pool-journal.js';
+import { PackagedDockerEngineCommand, dockerDeadPoolAnchorProven } from '../src/docker-engine-command.js';
 import { DockerEmployeeContinuationRecord } from '../src/docker-employee-continuation-data.js';
 import {
   DockerPoolReconciliationReceipt,
@@ -965,6 +966,166 @@ describe('owner recovery of a stopped shared pool', () => {
     raw.State = { Running: false, Paused: false, Restarting: false, Dead: false, Pid: 0, ...state };
     f.physical.containers.set(id, raw);
   };
+  // An anchor the Engine failed to remove or stop. It can be neither started nor used again.
+  const dead = async () => {
+    const f = await fixture({ cold: true });
+    anchorState(f, { Status: 'dead', Dead: true });
+    const command = f.physical.command,
+      removed: string[] = [];
+    let engine: Error | undefined;
+    // The real port method, over this fixture's Engine.
+    command.removeDeadPoolAnchor = (id, proof, current) =>
+      PackagedDockerEngineCommand.prototype.removeDeadPoolAnchor.call(command, id, proof, current);
+    const run = command.run.bind(command);
+    vi.spyOn(command, 'run').mockImplementation(async (args, input) => {
+      if (args[0] !== 'container' || args[1] !== 'rm') return run(args, input);
+      expect(args).toEqual(['container', 'rm', f.anchor.containerId]);
+      if (engine) throw engine;
+      removed.push(args[2]!);
+      f.physical.containers.delete(args[2]!);
+      return args[2]!;
+    });
+    const remove = () =>
+      f.app.inject({ method: 'POST', url: f.url + '/remove-dead-anchor', headers: f.ownerHeaders, payload: {} });
+    return { f, removed, remove, refuseWith: (error: Error | undefined) => (engine = error) };
+  };
+  it('removes a dead anchor through the re-proving removal, and the next laptop set-up creates the pool again', async () => {
+    const { f, removed, remove } = await dead();
+    const prior = f.companyStore.snapshot();
+    const status = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(status.json().data).toMatchObject({ state: 'held', code: 'DOCKER_RESOURCE_CONTAINER_UNKNOWN' });
+    const unauthorized = await f.app.inject({
+      method: 'POST', url: f.url + '/remove-dead-anchor', headers: f.workerHeaders, payload: {},
+    });
+    expect(unauthorized.statusCode).toBe(403);
+    expect(removed).toEqual([]);
+    const result = await remove();
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json().data).toEqual({ state: 'removed' });
+    expect(removed).toEqual([f.anchor.containerId]);
+    // No employee, laptop record or pool observation was touched.
+    expect(f.companyStore.snapshot()).toEqual(prior);
+    // No anchor is left, so no record can stand for a pool any more: nothing is waited for.
+    const after = await f.app.inject({ method: 'GET', url: f.url + '/status', headers: f.ownerHeaders });
+    expect(after.json().data).toMatchObject({ state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED' });
+    const preview = await f.app.inject({ method: 'GET', url: f.url + '/cold-preview', headers: f.ownerHeaders });
+    expect(preview.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    // A laptop set-up that has no anchor of its own yet creates one under the same fixed name and starts it.
+    // (This fixture has one laptop operation. A new one has a pool helper of its own name, so the earlier
+    // operation's helper container is taken out of the way here.)
+    f.physical.tasks.delete('anchor');
+    f.physical.tasks.delete('pool-helper');
+    f.physical.containers.delete(f.completed.containerId);
+    f.physical.driftEpoch();
+    f.physical.requireConfigure();
+    await f.physical.controller.preparePool(f.physical.row(), f.physical.current);
+    const created = f.physical.tasks.get('anchor');
+    expect(created?.phase).toBe('running');
+    expect((created as { containerId: string }).containerId).not.toBe(f.anchor.containerId);
+    expect((f.physical.containers.get((created as { containerId: string }).containerId)!.State as { Running: boolean }).Running).toBe(true);
+  });
+  it('shows the engine’s own words when it refuses to remove the dead anchor, and changes nothing', async () => {
+    const { f, removed, remove, refuseWith } = await dead();
+    refuseWith(
+      new Error(
+        'Command failed: docker container rm ' + f.anchor.containerId +
+          '\nError response from daemon: container ' + f.anchor.containerId.slice(0, 12) +
+          ': driver "overlay2" failed to remove root filesystem: device or resource busy\n'
+      )
+    );
+    const refused = await remove();
+    expect(refused.statusCode, refused.body).toBe(200);
+    expect(refused.json().data).toEqual({
+      state: 'refused',
+      engine:
+        'Error response from daemon: container ' + f.anchor.containerId.slice(0, 12) +
+        ': driver "overlay2" failed to remove root filesystem: device or resource busy',
+    });
+    expect(removed).toEqual([]);
+    expect(f.physical.containers.has(f.anchor.containerId)).toBe(true);
+    // The engine lets go: the same call removes it.
+    refuseWith(undefined);
+    expect((await remove()).json().data).toEqual({ state: 'removed' });
+  });
+  it.each([
+    ['is only stopped', (f: Awaited<ReturnType<typeof fixture>>) => anchorState(f, { Status: 'exited', Dead: false }), 'DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD'],
+    ['runs', (f: Awaited<ReturnType<typeof fixture>>) => anchorState(f, { Status: 'running', Dead: false, Running: true, Pid: 9 }), 'DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD'],
+    [
+      'stands beside a laptop container of the box that runs',
+      (f: Awaited<ReturnType<typeof fixture>>) =>
+        f.physical.containers.set('e'.repeat(64), {
+          Id: 'e'.repeat(64),
+          Image: 'sha256:' + '7'.repeat(64),
+          Config: { Labels: { 'reverie.boxed.box': 'b'.repeat(64) } },
+          HostConfig: { PidMode: '' },
+          State: { Status: 'running', Running: true, Paused: false, Restarting: false, Dead: false, Pid: 5 },
+        }),
+      'DOCKER_POOL_COLD_WORKERS_RUNNING',
+    ],
+    [
+      'stands beside a pool helper that still runs',
+      (f: Awaited<ReturnType<typeof fixture>>) => leftover(f, 'f'.repeat(64), { Status: 'running', Running: true, Pid: 9 }),
+      'DOCKER_POOL_COLD_WRITER_UNCONFIRMED',
+    ],
+  ] as const)('removes no anchor that %s', async (_name, arrange, code) => {
+    const { f, removed, remove } = await dead();
+    arrange(f);
+    const refused = await remove();
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(refused.json().error.code).toBe(code);
+    expect(removed).toEqual([]);
+  });
+  it('removes no anchor while a cold recovery is unfinished, nor one that another record does not name', async () => {
+    const held = await dead();
+    await new DockerColdPoolJournal(held.f.coldFile)
+      .issue(
+        { operationId: randomUUID(), employeeId: held.f.eid, sessionId: held.f.physical.row().request.sessionId,
+          sessionGeneration: held.f.physical.row().request.sessionGeneration, scopeDigest: 'a'.repeat(64) },
+        () => {},
+        async () => { throw Error('lost'); }
+      )
+      .catch(() => undefined);
+    const refused = await held.remove();
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error.code).toBe('DOCKER_POOL_COLD_ATTEMPT_HELD');
+    expect(held.removed).toEqual([]);
+    const other = await dead();
+    await other.f.companyStore.update((state) => { state.dockerEmployeeContinuations = []; });
+    const unnamed = await other.remove();
+    expect(unnamed.json().error.code).toBe('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    expect(other.removed).toEqual([]);
+  });
+  it('proves the container again in the Engine port: exactly this box’s anchor, and dead', () => {
+    const box = 'b'.repeat(64), id = 'c'.repeat(64);
+    const proof = { name: '/reverie-boxed-anchor-' + 'b'.repeat(32), imageId: 'sha256:' + 'd'.repeat(64), boxId: box };
+    const row = (patch: Record<string, unknown> = {}, labels: Record<string, string> = {}) => ({
+      Id: id, Name: proof.name, Image: proof.imageId,
+      State: { Status: 'dead', Dead: true, Running: false, Paused: false, Restarting: false, Pid: 0 },
+      Config: { Labels: {
+        'org.reverie.purpose': 'boxed-resource-helper-v1', 'reverie.box.resource.box': box,
+        'reverie.box.resource.role': 'anchor', 'reverie.box.resource.name': proof.name.slice(1), ...labels,
+      } },
+      ...patch,
+    });
+    expect(dockerDeadPoolAnchorProven(row(), id, proof)).toBe(true);
+    const state = (patch: Record<string, unknown>) => ({ State: { ...row().State, ...patch } });
+    for (const [index, value] of [
+      row({ Id: 'e'.repeat(64) }),
+      row({ Name: '/reverie-boxed-anchor-' + 'a'.repeat(32) }),
+      row({ Image: 'sha256:' + 'e'.repeat(64) }),
+      row({}, { 'reverie.box.resource.box': 'a'.repeat(64) }),
+      row({}, { 'reverie.box.resource.role': 'pool-helper' }),
+      row({}, { 'org.reverie.purpose': 'other' }),
+      row(state({ Status: 'exited', Dead: false })),
+      row(state({ Status: 'created', Dead: false })),
+      row(state({ Running: true })),
+      row(state({ Pid: 12 })),
+      row(state({ Restarting: true })),
+      null,
+    ].entries())
+      expect(dockerDeadPoolAnchorProven(value, id, proof), String(index)).toBe(false);
+    expect(dockerDeadPoolAnchorProven(row(), id, { ...proof, name: '/reverie-boxed-anchor-' + 'a'.repeat(32) })).toBe(false);
+  });
   it('recovers past a pool helper that the interrupted run created and never started', async () => {
     const f = await fixture({ cold: true }), id = randomUUID(), effects = observeEffects(f, id);
     leftover(f, 'f'.repeat(64), { Status: 'created' });

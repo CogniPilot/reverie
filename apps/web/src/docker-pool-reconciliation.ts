@@ -217,6 +217,32 @@ export class DockerPoolReconciliation {
     });
   }
 
+  /** Removes the anchor of the shared pool while the Engine reports it dead,
+   * so that the pool can be set up again: a dead container can be neither
+   * started nor used, and no laptop set-up can create an anchor under its
+   * name while it stands. The same source checks as a cold recovery apply:
+   * the employee's own laptop record names this anchor under the pool policy
+   * every employee is approved with, and no cold recovery is unfinished. The
+   * resource controller proves the rest (`removeDeadPoolAnchor`). Nothing of
+   * any employee, record or pool observation is changed.
+   * `removed`: the anchor is gone and the next laptop set-up creates one.
+   * `refused`: the Engine would not remove it, in its own words. */
+  async removeDeadAnchor(
+    employeeId: string,
+    authority: DockerContinuationAuthority
+  ): Promise<{ state: 'removed' } | { state: 'refused'; engine: string }> {
+    if (!this.cold) refuse('DOCKER_POOL_COLD_RECOVERY_UNAVAILABLE');
+    const cold = this.cold;
+    cold.requireIdle();
+    const context = this.#coldContext(employeeId, authority);
+    const current = () => {
+      context.current();
+      cold.requireIdle();
+    };
+    const result = await this.resources.removeDeadPoolAnchor(context.row, current);
+    return result.removed ? { state: 'removed' } : { state: 'refused', engine: result.engine };
+  }
+
   /** The one cold recovery that was issued and has not finished, when there
    * is one. DATA only: the employee and session it was issued for. */
   coldHeld(): { employeeId: string; sessionId: string; sessionGeneration: number; operationId: string } | undefined {

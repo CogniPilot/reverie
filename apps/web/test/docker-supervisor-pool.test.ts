@@ -39,7 +39,9 @@ function world() {
     /** Employees who have a laptop record. */
     records: new Set([A.id, B.id, C.id]),
     /** The anchor of the pool. */
-    anchor: 'stopped' as 'stopped' | 'running',
+    anchor: 'stopped' as 'stopped' | 'running' | 'dead' | 'paused' | 'absent',
+    /** What the container engine says when it refuses to remove a dead anchor. */
+    engineRefuses: undefined as string | undefined,
     /** A laptop of the box is running. */
     laptopRunning: false,
     /** The cold recovery that was issued and did not finish, when there is one. */
@@ -70,7 +72,10 @@ function world() {
       ? { state: 'held', code: 'DOCKER_POOL_COLD_ATTEMPT_HELD', allowedActions: [] }
       : state.anchor === 'running'
         ? { state: 'retained', allowedActions: [] }
-        : { state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', allowedActions: [] }),
+        : state.anchor === 'dead' || state.anchor === 'paused'
+          ? // All the status read can say of a container of the pool in a state it does not know.
+            { state: 'held', code: 'DOCKER_RESOURCE_CONTAINER_UNKNOWN', allowedActions: [] }
+          : { state: 'held', code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', allowedActions: [] }),
     ...{ sessionId: session(id).sessionId, sessionGeneration: 3 },
   });
   const took = (name: string, id: string, authority: DockerContinuationAuthority, argument?: unknown) => {
@@ -137,10 +142,19 @@ function world() {
         took('cold-preview', id, authority);
         const refused = state.preview?.(id);
         if (refused) throw refused;
-        if (!state.records.has(id)) throw refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+        if (!state.records.has(id) || state.anchor === 'absent') throw refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+        if (state.anchor === 'dead') throw refuse('DOCKER_POOL_COLD_ANCHOR_DEAD');
+        if (state.anchor === 'paused') throw refuse('DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED');
         // The service's own rule: nothing is recovered cold while a laptop of the box runs.
         if (state.laptopRunning) throw refuse('DOCKER_POOL_COLD_WORKERS_RUNNING');
         return { sessionId: session(id).sessionId, sessionGeneration: 3, scopeDigest: SCOPE, policy: {} };
+      },
+      removeDeadAnchor: async (id: string, authority: DockerContinuationAuthority) => {
+        took('remove-dead-anchor', id, authority);
+        if (state.laptopRunning) throw refuse('DOCKER_POOL_COLD_WORKERS_RUNNING');
+        if (state.engineRefuses) return { state: 'refused' as const, engine: state.engineRefuses };
+        state.anchor = 'absent';
+        return { state: 'removed' as const };
       },
       coldRecover: async (id: string, input: unknown, authority: DockerContinuationAuthority) => {
         took('cold-recover', id, authority, input);
@@ -324,6 +338,70 @@ describe('the shared pool after a host restart', () => {
       detail: code,
     });
     expect(all.made('cold-recover')).toEqual([]);
+  });
+
+  it('removes an anchor that the engine reports dead, after which there is no pool to wait for', async () => {
+    const w = world();
+    w.state.anchor = 'dead';
+    // The look names the step and removes nothing.
+    await expect(w.laptops.keepPool([A, B], w.guard)).resolves.toEqual({
+      pool: 'down',
+      detail: 'DOCKER_POOL_COLD_ANCHOR_DEAD',
+      step: 'remove-dead-anchor',
+      employeeId: A.id,
+    });
+    expect(w.made('remove-dead-anchor')).toEqual([]);
+    // Another step is not this one.
+    await w.laptops.keepPool([A, B], w.guard, 'recover-pool');
+    expect(w.made('remove-dead-anchor')).toEqual([]);
+    await expect(w.laptops.keepPool([A, B], w.guard, 'remove-dead-anchor')).resolves.toEqual({
+      pool: 'down',
+      detail: 'DOCKER_POOL_DEAD_ANCHOR_REMOVED',
+      step: 'remove-dead-anchor',
+      outcome: 'done',
+      employeeId: A.id,
+    });
+    expect(w.made('remove-dead-anchor').map(([, id]) => id)).toEqual([A.id]);
+    expect(w.made('cold-recover')).toEqual([]);
+    // No anchor is left: no record can stand for a pool, and the next laptop set-up creates one.
+    await expect(w.laptops.keepPool([A, B], w.guard)).resolves.toEqual({
+      pool: 'none',
+      detail: 'no laptop record names the shared pool',
+    });
+  });
+
+  it('reports the engine’s own words when it refuses to remove a dead anchor, and the service’s code when that refuses', async () => {
+    const w = world();
+    w.state.anchor = 'dead';
+    w.state.engineRefuses = 'Error response from daemon: container 3f2a: device or resource busy';
+    await expect(w.laptops.keepPool([A], w.guard, 'remove-dead-anchor')).resolves.toEqual({
+      pool: 'down',
+      detail: 'the container engine refused: Error response from daemon: container 3f2a: device or resource busy',
+      step: 'remove-dead-anchor',
+      outcome: 'refused',
+      employeeId: A.id,
+    });
+    expect(w.state.anchor).toBe('dead');
+    w.state.engineRefuses = undefined;
+    w.state.laptopRunning = true;
+    await expect(w.laptops.keepPool([A], w.guard, 'remove-dead-anchor')).resolves.toMatchObject({
+      pool: 'down',
+      outcome: 'refused',
+      detail: 'DOCKER_POOL_COLD_WORKERS_RUNNING',
+    });
+    expect(w.state.anchor).toBe('dead');
+  });
+
+  it('takes an anchor in any other state it does not know for unknown, and removes nothing', async () => {
+    const w = world();
+    w.state.anchor = 'paused';
+    await expect(w.laptops.keepPool([A, B], w.guard, 'remove-dead-anchor')).resolves.toEqual({
+      pool: 'unknown',
+      detail: 'DOCKER_RESOURCE_CONTAINER_UNKNOWN',
+      employeeId: A.id,
+    });
+    expect(w.made('remove-dead-anchor')).toEqual([]);
+    expect(w.made('cold-recover')).toEqual([]);
   });
 
   it('reports a recovery that the service refused, and leaves the pool down', async () => {

@@ -91,7 +91,7 @@ export interface SupervisorStoredHomeReading {
   readonly cause?: SupervisorStoredHomeCause;
 }
 /** The step a look at the shared pool calls for. */
-export type SupervisorPoolStep = 'recover-pool' | 'finish-pool-recovery' | 'reconcile-pool';
+export type SupervisorPoolStep = 'recover-pool' | 'finish-pool-recovery' | 'reconcile-pool' | 'remove-dead-anchor';
 /** What one look at the shared pool found, and how the one step it took ended, when it took one. */
 export interface SupervisorPoolResult {
   /**
@@ -281,6 +281,8 @@ const POOL_STEP_TIER: Readonly<Record<SupervisorPoolStep, 'retry' | 'repair'>> =
   'recover-pool': 'repair',
   'finish-pool-recovery': 'repair',
   'reconcile-pool': 'retry',
+  // Removing the anchor that the Engine reports dead discards a container: a repair.
+  'remove-dead-anchor': 'repair',
 };
 /** Said once with a pool step that needs the switch for repairs: what happens with it on, and the calls with it off. */
 const POOL_REPAIR_NOTE =

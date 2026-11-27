@@ -140,6 +140,19 @@ function cpus(raw: string): number[] {
   }
   return result;
 }
+/** What the container engine itself said when it refused a command: the lines its client printed after the
+ * command line, as one clipped line of printable text. It names a container of this office and nothing private. */
+function engineWords(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  const said = message
+    .split('\n')
+    .slice(1)
+    .join(' ')
+    .replace(/[^\x20-\x7e]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return said ? said.slice(0, 300) : 'the container engine gave no reason';
+}
 function startTicks(raw: string): string {
   // Linux comm may contain spaces and ')'; the fields follow its final ')'.
   if (raw.length > 4096 || !raw.startsWith('1 (')) refuse('DOCKER_RESOURCE_INIT_UNKNOWN');
@@ -2095,6 +2108,76 @@ export class DockerContainedResources implements DockerContainedResourceControll
       (await this.#endedTerminal(id, config, current)) ?? (await this.#neverStarted(id, config, current));
     const first = await read();
     if (!first || !isDeepStrictEqual(await read(), first)) refuse('DOCKER_POOL_WRITER_UNCONFIRMED');
+  }
+  /**
+   * Removes the anchor of this box's pool while the Engine reports it dead. A
+   * dead container is one the Engine failed to remove or stop; it can be
+   * neither started nor used again, so the pool cannot be recovered while it
+   * stands, and a laptop set-up cannot create a new anchor under its name.
+   *
+   * Everything is proved first, and nothing is removed by force:
+   * - `row` is a laptop record that names this very container as the pool's
+   *   anchor, under the configuration and policy the record was made with.
+   * - It is the one anchor of the box by census, and its fixed configuration
+   *   is exactly the anchor configuration of this box.
+   * - The Engine reports it dead, not running, with no process.
+   * - No laptop of the box runs: none on record, and no container with the
+   *   box's laptop label that is running, paused or restarting.
+   * - Every pool writer is accounted for and can write nothing more.
+   * - The caller's `current` holds the cold-recovery journal idle: no
+   *   recovery that was issued for this anchor is unfinished.
+   * The Engine port then reads the container once more and removes it. The
+   * Engine may refuse to remove a dead container; its own words are returned,
+   * and nothing else was changed.
+   */
+  async removeDeadPoolAnchor(
+    row: DockerEmployeeContinuationRecord,
+    current: () => void
+  ): Promise<{ removed: true } | { removed: false; engine: string }> {
+    current();
+    const remove = this.command.removeDeadPoolAnchor?.bind(this.command);
+    if (!remove) refuse('DOCKER_POOL_DEAD_ANCHOR_REMOVAL_UNAVAILABLE');
+    const original = row.tasks?.find(task => task.role === 'anchor');
+    const name = 'reverie-boxed-anchor-' + this.configuration.boxId.slice(0, 32);
+    const configuration = this.#configuration('anchor', name, ['anchor']);
+    if (!row.pool || original?.phase !== 'running' || original.containerId !== row.pool.containerId ||
+        original.configurationDigest !== dockerContinuationDigest(configuration) ||
+        row.pool.cgroupParent !== this.#slice || row.pool.policyDigest !== dockerContinuationDigest(row.policy.pool))
+      refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const id = original.containerId;
+    const anchors = await this.#poolCensus('anchor');
+    current();
+    if (anchors.length !== 1 || anchors[0] !== id) refuse('DOCKER_POOL_COLD_SOURCE_UNCONFIRMED');
+    const dead = async () => {
+      const raw = await this.#fixed(id, configuration);
+      current();
+      return z.object({
+        Running: z.literal(false), Paused: z.literal(false), Restarting: z.literal(false), Pid: z.literal(0),
+      }).passthrough().refine(state => state.Dead === true || state.Status === 'dead').safeParse(raw.State).success;
+    };
+    if (!(await dead())) refuse('DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD');
+    await this.#coldPoolMembers(current);
+    const retained = await this.#poolWritersClosed();
+    current();
+    for (const helper of await this.#poolCensus('pool-helper')) {
+      if (retained.some(task => (task.phase === 'completed' || task.phase === 'failed') && task.containerId === helper))
+        continue;
+      await this.#coldClosedHelper(helper, current).catch((cause: unknown) => {
+        throw new DockerEmployeeContinuationError('DOCKER_POOL_COLD_WRITER_UNCONFIRMED', 409, { cause });
+      });
+    }
+    if (!(await dead())) refuse('DOCKER_POOL_DEAD_ANCHOR_NOT_DEAD');
+    try {
+      await remove(id, { name: '/' + name, imageId: this.configuration.helperImageId, boxId: this.configuration.boxId }, current);
+    } catch (error) {
+      current();
+      if (error instanceof DockerEmployeeContinuationError) throw error;
+      return { removed: false, engine: engineWords(error) };
+    }
+    current();
+    if ((await this.#poolCensus('anchor')).includes(id))
+      return { removed: false, engine: 'the container engine still lists the container' };
+    return { removed: true };
   }
   /** The one fixed anchor of this box, stopped. An anchor that ended by any
    * exit status, that was killed for memory, or whose last start failed is

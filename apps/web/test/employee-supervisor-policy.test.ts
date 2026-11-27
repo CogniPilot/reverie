@@ -2729,7 +2729,7 @@ describe('employee supervisor: after a host restart', () => {
     }
     const sentences: Array<[string, RegExp]> = [
       ['DOCKER_POOL_COLD_WRITER_UNCONFIRMED', /helper container that writes the pool's limits is still running, or is of an image/],
-      ['DOCKER_POOL_COLD_ANCHOR_DEAD', /reports the pool's anchor container as dead.*the owner has to remove that container/],
+      ['DOCKER_POOL_COLD_ANCHOR_DEAD', /reports the pool's anchor container as dead.*The office removes it itself while nothing of this office runs/],
       ['DOCKER_POOL_COLD_ANCHOR_NOT_STOPPED', /neither running nor stopped: it is paused or restarting/],
       ['DOCKER_POOL_COLD_POLICY_CHANGED', /approved with different limits for the shared pool, and no record says which approval is the newer one.*Approve the same pool limits for every employee/],
       ['DOCKER_POOL_COLD_ATTEMPT_HELD', /was started and did not finish.*starts no second one beside it/],
@@ -2750,6 +2750,23 @@ describe('employee supervisor: after a host restart', () => {
     expect(again.needsHuman).toMatch(
       /refused to start it \(DOCKER_RESOURCE_HELPER_FAILED\)\. The office looks at the pool again every minute and takes its next step \(recover-pool\) at 1970-01-01 03:00 UTC/
     );
+    // The removal of a dead anchor that the container engine refused: the engine's own words, and the next try.
+    const engine = stuck(
+      {
+        since: 0,
+        code: 'DOCKER_POOL_COLD_ANCHOR_DEAD',
+        step: 'remove-dead-anchor',
+        stepAt: 2 * HOUR,
+        refused: 'the container engine refused: Error response from daemon: device or resource busy',
+      },
+      HOUR
+    );
+    expect(engine.needsHuman).toMatch(
+      /The office removes it itself.*Its last attempt did not remove it: the container engine refused: Error response from daemon: device or resource busy\. \(DOCKER_POOL_COLD_ANCHOR_DEAD\).*takes its next step \(remove-dead-anchor\) at 1970-01-01 02:00 UTC/
+    );
+    expect(
+      stuck({ since: 0, code: 'DOCKER_POOL_COLD_ANCHOR_DEAD', step: 'remove-dead-anchor', repairOff: true }, HOUR).needsHuman
+    ).toMatch(/Removing it is a repair.*supervisorAutoRepair is off.*docker-pool\/remove-dead-anchor/);
     // The step needs the owner's switch for repairs, and it is off: that is what is needed.
     const off = stuck({ since: 0, code: 'DOCKER_POOL_ANCHOR_UNCONFIRMED', step: 'recover-pool', repairOff: true }, HOUR);
     expect(off.needsHuman).toMatch(/supervisorAutoRepair is off.*Switch supervisorAutoRepair on.*cold-preview/);
