@@ -357,7 +357,9 @@ was first made, and lapses when it is not repeated):
   start of the stopped anchor, the end of a recovery, the removal of a dead
   anchor); for a request of the supervisor also no step of its own and no pool
   step that is still to be taken. A restart would cut such an operation off, and for a plan move
-  it would reset what the move has watched. `waitingFor` then reads “the
+  it would reset what the move has watched. The handoff a closed move still
+  owes, or whose outcome is not known, is no such operation: it is on record
+  and survives a restart. `waitingFor` then reads “the
   office to restart itself once … has ended”;
 - it has not restarted itself within the last hour, nor twice within a day.
   The record is `office-self-restart.json` in the office data directory,

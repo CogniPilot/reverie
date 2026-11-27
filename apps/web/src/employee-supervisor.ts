@@ -49,6 +49,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  moveOwnsLaptop,
   newSupervisorRound,
   officeReading,
   resumeSupervisorHistory,
@@ -1283,7 +1284,9 @@ export class EmployeeSupervisor {
     else if (provider !== undefined && provider !== 'unknown') this.#runningSeen.delete(employee.id);
     const seen = this.#runningSeen.get(employee.id);
     this.#reading.set(employee.id, officeReading(observed, seen !== undefined && now - seen <= RUNNING_SEEN_MS));
-    if (observed.busy || observed.move) this.#operating.add(employee.id);
+    // What a closed move still owes holds no laptop and no step of the office (`moveOwnsLaptop`); an unconfirmed
+    // handoff stays on record for as long as the session lasts, and must not keep the office from restarting itself.
+    if (observed.busy || moveOwnsLaptop(observed.move)) this.#operating.add(employee.id);
     else this.#operating.delete(employee.id);
   }
 

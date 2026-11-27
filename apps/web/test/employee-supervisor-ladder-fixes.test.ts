@@ -1037,3 +1037,23 @@ describe('the office asking for its own restart', () => {
     expect(officeRestart.asked.length).toBeGreaterThan(0);
   });
 });
+
+describe('the office asking for its own restart beside what a closed plan move still owes', () => {
+  const unread = () => ({
+    session: UNREADABLE,
+    restoration: VIEW_LOST,
+    reading: { state: 'held', phase: 'ready', code: 'DOCKER_CONTINUATION_UNCONFIRMED', allowedActions: [] },
+    provider: 'running' as const,
+  });
+  it.each(['handoff-owed', 'handoff-unconfirmed'])(
+    'asks although one of five unreadable laptops carries a handoff that is %s',
+    async (phase) => {
+      const officeRestart = { asked: [] as string[], answer: 'pending' as const };
+      const o = officeOf(['a', 'b', 'c', 'd', 'e'], unread, { officeRestart });
+      o.desks.get('a')!.move = { id: 'm1', docker: true, phase, busy: false, allowedActions: [] };
+      await o.run(60);
+      expect(officeRestart.asked.length).toBeGreaterThan(0);
+      expect(officeRestart.asked[0]).toMatch(/reads none of its laptops/);
+    }
+  );
+});
