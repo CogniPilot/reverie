@@ -806,6 +806,14 @@ const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking
  * the problem was first seen. That covers the recovery of the shared pool after a host restart. After it the move
  * is abandoned: the employee is not kept out of work for a move that cannot finish.
  *
+ * Only a continue can tell whether such a cause is gone: the laptop of an employee who is being moved is not read,
+ * and nothing else the office observes says that the pool's limits are confirmed again. So the three continues of
+ * a round are spread as probes over that time instead of being spent in its first minutes: one at once, one not
+ * before `outsideProbeMs`, and the last not before the thirty minutes are over. The move is abandoned only after
+ * that last probe has found the cause still there. A move is therefore never abandoned because all its probes fell
+ * inside an outage that then ended. For as long as the cause is outside the move it is one problem, whichever code
+ * names it at the moment, so a second code of the same outage does not start the thirty minutes again.
+ *
  * A move that stopped at the sign-in screen of its new session is NOT such a cause, whatever the office reports
  * about the plan. That screen is only reached after the move has launched the agent in the candidate laptop, and
  * the candidate keeps the plan's sign-in in a folder of its own. A sign-in made at the office afterwards does not
@@ -816,7 +824,12 @@ const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking
  * abandoned on the same times as any other; once it is abandoned the employee is an ordinary employee on that plan
  * and the laptop's own sign-in repair applies.
  */
-export const SUPERVISOR_MOVE_POLICY: { readonly outsideCauseMs: number } = { outsideCauseMs: 30 * MINUTE };
+export const SUPERVISOR_MOVE_POLICY: { readonly outsideCauseMs: number; readonly outsideProbeMs: number } = {
+  outsideCauseMs: 30 * MINUTE,
+  outsideProbeMs: 10 * MINUTE,
+};
+/** The classes of move error whose cause lies outside the move. */
+const OUTSIDE_MOVE_CAUSES: readonly SupervisorMoveErrorClass[] = ['wait', 'owner'];
 
 // ─── Classification ───────────────────────────────────────────────────────────
 
@@ -853,9 +866,11 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
       `A plan move of ${name} from before the laptop runtime is still on record as stopped part-way: ${error}`,
       { code: 'move-retired', fingerprint }
     );
+  const kind = classifyMoveError(move.error);
   return classified('move-held-retryable', `${name}'s plan move stopped part-way: ${error}`, {
-    code: 'move-' + classifyMoveError(move.error),
-    fingerprint,
+    code: 'move-' + kind,
+    // A cause outside the move is one problem for as long as it lasts, whichever code names it at the moment.
+    fingerprint: OUTSIDE_MOVE_CAUSES.includes(kind) ? `move:${move.id}:outside` : fingerprint,
   });
 }
 
@@ -878,23 +893,75 @@ function outsideCauseWait(waitingFor: string, history: SupervisorHistory): Gate 
     : { kind: 'wait', waitingFor };
 }
 
-/** Continue: only a laptop move, and only while its record offers it. */
-function continueMoveGate(observed: SupervisorObservation): Gate {
+/**
+ * When the next continue of a move held by a cause outside itself may run: the first at once, the last of the
+ * round not before the wait for that cause is over, any other not before `outsideProbeMs`. Each is a probe, and
+ * the last one is what the abandon is judged by (`abandonMoveGate`).
+ */
+function outsideProbeAt(history: SupervisorHistory, policy: SupervisorPolicy): number {
+  const count = history.attempts['continue-move']?.count ?? 0;
+  if (count >= policy.ladder['continue-move'].maxAttempts - 1)
+    return history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs;
+  return count === 0 ? history.since : history.since + SUPERVISOR_MOVE_POLICY.outsideProbeMs;
+}
+
+/**
+ * Continue: only a laptop move, and only while its record offers it. For a move held by a cause outside itself
+ * the continues are probes, spread over the wait for that cause (`outsideProbeAt`).
+ */
+function continueMoveGate(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
   const move = observed.move;
-  return move?.docker && move.allowedActions.includes('continue-original') ? { kind: 'ok' } : { kind: 'skip' };
+  if (!move?.docker || !move.allowedActions.includes('continue-original')) return { kind: 'skip' };
+  const outside = moveCauseOutside(observed);
+  if (!outside || history.since <= 0) return { kind: 'ok' };
+  const at = outsideProbeAt(history, policy);
+  return now < at ? { kind: 'wait', waitingFor: outside, at } : { kind: 'ok' };
+}
+
+/**
+ * A continue of this round was made after the wait for the outside cause was over. The ladder reaches the abandon
+ * only once that continue's outcome has been watched, so the move being held now says that it found the cause
+ * still there.
+ */
+function probedAfterWait(history: SupervisorHistory): boolean {
+  const tried = history.attempts['continue-move'];
+  return !!tried?.count && tried.lastAt >= history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs;
 }
 
 /**
  * Close the move: abandon a laptop move, or settle one of the retired runtime. Nothing about the error decides
- * whether, only when. A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first.
- * What the record offers is not asked here: the service that closes the move decides that itself and refuses in
- * its own words, and a refusal spends one of the rung's few attempts.
+ * whether, only when. What the record offers is not asked here: the service that closes the move decides that
+ * itself and refuses in its own words, and a refusal spends one of the rung's few attempts.
+ *
+ * A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first, and is abandoned
+ * only after a continue made once that time was over found the cause still there. Where this round's continues
+ * were used up before that, by an earlier error of the same move, nothing is abandoned in this round: the next
+ * round continues the move again first. A move that offers no continue cannot be probed and is abandoned when the
+ * time is over.
  */
-function abandonMoveGate(observed: SupervisorObservation, history: SupervisorHistory, now: number): Gate {
-  if (!observed.move) return { kind: 'skip' };
-  if (!observed.move.docker) return { kind: 'ok' };
-  const outside = moveCauseOutside(observed);
-  return outside && !moveCauseOverdue(history, now) ? outsideCauseWait(outside, history) : { kind: 'ok' };
+function abandonMoveGate(
+  observed: SupervisorObservation,
+  history: SupervisorHistory,
+  now: number,
+  policy: SupervisorPolicy
+): Gate {
+  const move = observed.move;
+  if (!move) return { kind: 'skip' };
+  const outside = move.docker ? moveCauseOutside(observed) : undefined;
+  if (!outside) return { kind: 'ok' };
+  if (!moveCauseOverdue(history, now)) return outsideCauseWait(outside, history);
+  if (!move.allowedActions.includes('continue-original') || probedAfterWait(history)) return { kind: 'ok' };
+  const again = ladderRestartAt(history, policy);
+  return {
+    kind: 'wait',
+    waitingFor: 'the next round of repair steps, which continues the move once more before it may be closed',
+    ...(again === undefined ? {} : { at: again }),
+  };
 }
 
 const POLICY_REQUIRED = 'DOCKER_CONTINUATION_OWNER_POLICY_REQUIRED';
@@ -1539,7 +1606,7 @@ function gate(
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
     case 'continue-move':
-      return continueMoveGate(observed);
+      return continueMoveGate(observed, history, now, policy);
     case 'reconnect-viewer':
       // A session outside a laptop has no laptop record to judge by: the wake itself decides.
       if (!observed.boxed) return { kind: 'ok' };
@@ -1564,7 +1631,7 @@ function gate(
       if (observed.session.startupScreen) return parkedScreenGate(action, observed, history, flags, now, policy);
       return flags.relaunchAvailable && observed.laptop.record?.version !== 3 ? { kind: 'ok' } : { kind: 'skip' };
     case 'abandon-move':
-      return abandonMoveGate(observed, history, now);
+      return abandonMoveGate(observed, history, now, policy);
     case 'rebuild-laptop':
       // A new laptop would join the same pool and be held by the same thing.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };

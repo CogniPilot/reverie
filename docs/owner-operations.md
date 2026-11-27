@@ -308,13 +308,22 @@ record offers. No sentence about a held move asks for a person.
 | An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
 | A decision screen in the new session | The same: three continues, then abandon | The same |
 | The sign-in screen of the new session | The same: three continues, then abandon. Nothing waits for the plan to be signed in (below) | The same |
-| An operation that only has to finish, or something every laptop shares (the pool, the storage, the office's configuration) | Three continues | Abandons 30 minutes after the problem was first seen |
+| An operation that only has to finish, or something every laptop shares (the pool, the storage, the office's configuration) | Three continues, spread as probes: 1, 10 and 30 minutes after the problem was first seen | Abandons 3 minutes after the last probe, if that probe found the cause still there |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
 | More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
 | A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
 | A step of the move is running | Nothing | |
 
 The thirty minutes cover the recovery of the shared pool after a host restart.
+Only a continue can tell whether such a cause is gone, so the three continues
+are probes and the last one is held back until the thirty minutes are over. A
+move is abandoned for such a cause only after that last probe failed: never
+because all its probes fell inside an outage that then ended. A second code of
+the same outage is the same problem and does not start the thirty minutes
+again. If the three continues of a round were already used on an earlier error
+of the move, nothing is abandoned in that round; the next round, six hours
+after its last attempt, continues the move first. A move that offers no
+continue cannot be probed and is abandoned when the thirty minutes are over.
 
 A move that stopped at the sign-in screen of its new session is not waited
 for, whatever the office reports about the plan. That screen is reached only

@@ -1277,7 +1277,6 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     ['a decision screen', "Stan's new session is waiting at Claude's usage-credit offer. That choice is the owner's; answer it in the session's terminal, then continue.", 15.5],
     ['an error the office does not recognize', 'The original Docker journal changed', 15.5],
     ['no recorded error', undefined, 15.5],
-    ['a hold of the shared pool', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED', 30.5],
   ] as Array<[string, string | undefined, number]>)('continues a move held at %s three times and then abandons it', async (_title, error, minute) => {
     const stuck = heldMove(person('a'), error as string);
     const w = world([stuck]);
@@ -1290,6 +1289,50 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       [3.5, 'continue-move'],
       [8.5, 'continue-move'],
       [minute, 'abandon-move'],
+    ]);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+  });
+
+  it('probes a move held by the shared pool over thirty minutes and abandons it only after the last probe', async () => {
+    const stuck = heldMove(person('a'), 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+    const w = world([stuck]);
+    const at = record(w, (action) => {
+      if (action === 'abandon-move') stuck.move = undefined;
+    });
+    expect(await quiet(w, 20)).toEqual([]);
+    expect(at).toEqual([
+      [1.5, 'continue-move'],
+      [10.5, 'continue-move'],
+    ]);
+    // First seen at the first pass, half a minute in; the last probe is held back until thirty minutes after that.
+    expect(w.report('a')).toMatchObject({
+      waitingFor: 'the repair of what holds the move, which every laptop shares',
+      waitingUntil: 10 * MINUTE + 30_000 + 30 * MINUTE,
+    });
+    expect(await quiet(w, 20)).toEqual([]);
+    expect(at.slice(2)).toEqual([
+      [30.5, 'continue-move'],
+      [33.5, 'abandon-move'],
+    ]);
+    expect(w.report('a')).toMatchObject({ condition: 'healthy' });
+  });
+
+  it('never abandons a move whose outage ended before its last probe', async () => {
+    const stuck = heldMove(person('a'), 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+    const w = world([stuck]);
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      const minute = (w.state.now - 10 * MINUTE) / MINUTE;
+      at.push([minute, action]);
+      // The pool is back twenty minutes in: the continue made after that finishes the move.
+      if (minute > 20) stuck.move = undefined;
+      return { outcome: minute > 20 ? 'done' : 'refused' };
+    };
+    expect(await quiet(w, 90)).toEqual([]);
+    expect(at).toEqual([
+      [1.5, 'continue-move'],
+      [10.5, 'continue-move'],
+      [30.5, 'continue-move'],
     ]);
     expect(w.report('a')).toMatchObject({ condition: 'healthy' });
   });

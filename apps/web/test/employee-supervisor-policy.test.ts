@@ -1672,20 +1672,128 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       expect(timeline(move(error), 45, 'done').actions).toEqual([...continues, [15, 'abandon-move']]);
   });
 
-  it('gives a move that is held by something outside itself thirty minutes before it abandons', () => {
-    for (const error of ['DOCKER_CONTINUATION_BUSY', 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED']) {
-      const outside = move(error);
-      expect(timeline(outside, 45, 'done').actions).toEqual([...continues, [30, 'abandon-move']]);
-      const waiting = assessEmployee(
-        outside,
-        since(START, classifyEmployee(outside).fingerprint, { attempts: tried('continue-move', 3, START + 8 * MINUTE) }),
-        ON,
-        START + 20 * MINUTE
-      );
-      expect(waiting.next.action).toBeNull();
-      expect(waiting.next.waitingFor).toBeTruthy();
+  describe('a move held by a cause outside itself', () => {
+    const POOL = 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED';
+    const probes: Array<[number, string]> = [
+      [1, 'continue-move'],
+      [10, 'continue-move'],
+      [30, 'continue-move'],
+    ];
+
+    it('spreads its three continues over the thirty minutes and abandons only after the last one failed', () => {
+      for (const error of ['DOCKER_CONTINUATION_BUSY', POOL]) {
+        const outside = move(error);
+        expect(timeline(outside, 45, 'done').actions).toEqual([...probes, [33, 'abandon-move']]);
+        expect(timeline(outside, 45).actions).toEqual([...probes, [33, 'abandon-move'], [38, 'abandon-move']]);
+      }
+    });
+
+    it('says what it waits for between two probes, and until when', () => {
+      const outside = move(POOL);
+      const history = since(START, classifyEmployee(outside).fingerprint, {
+        attempts: tried('continue-move', 2, START + 10 * MINUTE),
+      });
+      const waiting = assessEmployee(outside, history, ON, START + 20 * MINUTE);
+      expect(waiting.next).toEqual({
+        action: null,
+        at: START + 30 * MINUTE,
+        waitingFor: 'the repair of what holds the move, which every laptop shares',
+        preconditions: [],
+      });
       expect(waiting.needsHuman).toBeUndefined();
-    }
+      // The second probe waits for its own time.
+      const second = assessEmployee(
+        outside,
+        { ...history, attempts: tried('continue-move', 1, START + MINUTE) },
+        ON,
+        START + 5 * MINUTE
+      );
+      expect(second.next).toMatchObject({ action: null, at: START + 10 * MINUTE });
+    });
+
+    it('is finished by a later probe when the cause is gone by then, and is never abandoned', () => {
+      // The outage ends twenty minutes in. The first two probes fell inside it; the last one finishes the move.
+      let history = EMPTY_SUPERVISOR_HISTORY,
+        current = move(POOL);
+      const actions: Array<[number, string]> = [];
+      for (let now = START; now <= START + 90 * MINUTE; now += 30_000) {
+        history = rollSupervisorHistory(history, classifyEmployee(current), now);
+        const next = assessEmployee(current, history, ON, now).next;
+        if (!next.action || (next.at ?? 0) > now) continue;
+        actions.push([(now - START) / MINUTE, next.action]);
+        history = recordSupervisorAttempt(history, next.action, now, 'done');
+        if (now >= START + 20 * MINUTE) current = observed();
+      }
+      expect(actions).toEqual(probes);
+      expect(classifyEmployee(current).condition).toBe('healthy');
+    });
+
+    it('is not abandoned on the strength of probes that were made before the thirty minutes were over', () => {
+      const outside = move(POOL);
+      const fingerprint = classifyEmployee(outside).fingerprint;
+      // All three continues of this round were spent on an earlier error of the move, before this cause was seen.
+      const spent = since(START + 10 * MINUTE, fingerprint, { attempts: tried('continue-move', 3, START + 8 * MINUTE) });
+      const restart = START + 8 * MINUTE + SUPERVISOR_POLICY.ladderRestartMs;
+      for (const minute of [20, 40, 45, 120]) {
+        const result = assessEmployee(outside, spent, ON, START + minute * MINUTE);
+        expect(result.next.action, String(minute)).toBeNull();
+        expect(result.needsHuman).toBeUndefined();
+      }
+      expect(assessEmployee(outside, spent, ON, START + 45 * MINUTE).next).toMatchObject({
+        at: restart,
+        waitingFor: 'the next round of repair steps, which continues the move once more before it may be closed',
+      });
+      // The next round continues the move first, and only then may it be closed.
+      const next = rollSupervisorHistory(spent, classifyEmployee(outside), restart);
+      expect(next.attempts).toEqual({});
+      expect(assessEmployee(outside, next, ON, restart).next).toMatchObject({ action: 'continue-move' });
+      const probed = { ...next, attempts: tried('continue-move', 3, restart + 7 * MINUTE) };
+      expect(assessEmployee(outside, probed, ON, restart + 10 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
+    });
+
+    it('holds the last probe back even when the earlier ones were spent on another error', () => {
+      const outside = move(POOL);
+      const history = since(START + 5 * MINUTE, classifyEmployee(outside).fingerprint, {
+        attempts: tried('continue-move', 2, START + 3 * MINUTE),
+      });
+      expect(assessEmployee(outside, history, ON, START + 20 * MINUTE).next).toMatchObject({
+        action: null,
+        at: START + 35 * MINUTE,
+      });
+      expect(assessEmployee(outside, history, ON, START + 35 * MINUTE).next).toMatchObject({ action: 'continue-move' });
+    });
+
+    it('is one problem whichever code names the cause, so a second code does not start the wait again', () => {
+      const first = classifyEmployee(move(POOL)),
+        second = classifyEmployee(move('DOCKER_CONTINUATION_POOL_UNCONFIRMED'));
+      expect(first.fingerprint).toBe(second.fingerprint);
+      expect(first.sentence).not.toBe(second.sentence);
+      const rolled = rollSupervisorHistory(since(START, first.fingerprint), second, START + 31 * MINUTE);
+      expect(rolled.since).toBe(START);
+      // An error of the move's own is another problem, and so is another move.
+      expect(classifyEmployee(move('The original Docker journal changed')).fingerprint).not.toBe(first.fingerprint);
+      expect(classifyEmployee(move(POOL, { id: 'move-2' })).fingerprint).not.toBe(first.fingerprint);
+    });
+
+    it('is abandoned when the thirty minutes are over if its record offers no continue to probe with', () => {
+      expect(timeline(move(POOL, { allowedActions: ['abandon'] }), 45, 'done').actions).toEqual([[30, 'abandon-move']]);
+    });
+
+    it('goes through the same probes in every later round', () => {
+      const run = timeline(move(POOL), 8 * 60);
+      // Round two starts six hours after the last attempt; the wait is long over, so its probes follow each other.
+      expect(run.actions).toEqual([
+        ...probes,
+        [33, 'abandon-move'],
+        [38, 'abandon-move'],
+        [398, 'continue-move'],
+        [400, 'continue-move'],
+        [405, 'continue-move'],
+        [408, 'abandon-move'],
+        [413, 'abandon-move'],
+      ]);
+      expect(run.asked).toEqual([]);
+    });
   });
 
   it('asks nobody once both rungs are used up, and says when the next round starts', () => {
