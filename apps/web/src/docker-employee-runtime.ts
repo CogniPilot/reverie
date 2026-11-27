@@ -19,6 +19,7 @@ import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
 import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
 import { DockerColdPoolJournal } from './docker-cold-pool-journal.js';
+import { DockerStorageIdentityJournal } from './docker-storage-identity-journal.js';
 import { DockerPoolCpuCeiling } from './docker-pool-cpu-ceiling.js';
 import { DockerPoolCpuCeilingStore } from './docker-pool-cpu-ceiling-store.js';
 import { registerDockerPoolCpuCeilingRoutes } from './web/routes/docker-pool-cpu-ceiling-routes.js';
@@ -452,11 +453,24 @@ export class DockerEmployeeRuntime {
     const cpuCeiling = new DockerPoolCpuCeiling(company, cpuCeilings, resources, boxId, () => {
       if (!this.current()) throw new DockerEmployeeContinuationError('DOCKER_CONTINUATION_RUNTIME_CHANGED');
     });
+    // What the office itself has seen of the filesystem each employee's directories are on, and the owner's
+    // standing answer for a device renumbering that this record cannot prove.
+    const storageIdentity = new DockerStorageIdentityJournal(
+      join(dirname(company.store.file), 'docker-storage-identity.jsonl')
+    );
     const recoveryHelper = configuration.recoveryHelperImageId
-      ? new DockerWorkerReattachHelper(command, configuration.recoveryHelperImageId, () => ({
-          instanceId: this.#key.instanceId,
-          key: this.#key.key.toString('hex'),
-        }))
+      ? new DockerWorkerReattachHelper(
+          command,
+          configuration.recoveryHelperImageId,
+          () => ({
+            instanceId: this.#key.instanceId,
+            key: this.#key.key.toString('hex'),
+          }),
+          {
+            granted: (owner) => company.view(owner).settings.acceptStorageRenumbering === true,
+            identity: storageIdentity,
+          }
+        )
       : undefined;
     // The in-place repair of a finished laptop's own limits that does not ask where its employee is. It stands
     // aside for every set-up step and rebuild of that employee, and they stand aside for it.
@@ -638,6 +652,15 @@ export class DockerEmployeeRuntime {
       pool: a.pool,
       limits: a.limits,
       absent: a.absent,
+      storage: {
+        stopped: (row, current) => a.engine.stoppedStorage(row, a.recoveryHelper, current),
+        ...(a.recoveryHelper
+          ? {
+              remember: (row: DockerEmployeeContinuationRecord, current: () => void) =>
+                a.engine.rememberStorage(row, a.recoveryHelper!, current),
+            }
+          : {}),
+      },
       sessions: a.ctx.sessions,
       current: () => this.current() && this.#attached === a,
     });

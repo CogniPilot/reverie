@@ -192,8 +192,19 @@ export type SupervisorTurn = 'working' | 'idle' | 'unknown';
  * - `no-agent-running`: a fresh read inside the laptop finds no agent.
  * - `terminal-input-held`: the office terminal's input is still held and its pane still shows no turn in progress.
  *   It is the only reason for which a rebuild may discard a laptop its agent runs in.
+ * - `stored-home`: a read of the stopped laptop's stored HOME and Nix directories (`laptop.storedHome`). A new
+ *   laptop is bound to the same paths, so the step waits when they no longer hold the recorded directories.
  */
-export type SupervisorPrecondition = 'no-agent-running' | 'terminal-input-held';
+export type SupervisorPrecondition = 'no-agent-running' | 'terminal-input-held' | 'stored-home';
+
+/**
+ * The stored HOME and Nix directories of a finished laptop that is stopped, compared with what its storage holder
+ * recorded. `verified`: the same directories (under a new device number only when the office could prove or was
+ * granted that). `unchecked`: there is no stopped, finished laptop to compare, or this office has no verifier.
+ * `renumbered`: unchanged directories on a device number that nothing accepts. `different`: other directories.
+ * `unknown`: the read failed.
+ */
+export type SupervisorStoredHome = 'verified' | 'unchecked' | 'renumbered' | 'different' | 'unknown';
 
 /** Everything the office can read about one employee, already reduced to plain values. */
 export interface SupervisorObservation {
@@ -260,6 +271,15 @@ export interface SupervisorObservation {
     readonly templateOnRecord: boolean;
     /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
     readonly poolAlive?: boolean;
+    /**
+     * What the office's own look at the shared pool last found, while no laptop is attached: `up` (its anchor runs
+     * and no recovery is open), `down` (the anchor is stopped, as after a host restart, or a recovery is open) or
+     * `unknown`. `none`: no laptop record names a pool, so there is none to recover and a laptop set-up creates it.
+     * Absent while the office is not looking.
+     */
+    readonly pool?: 'up' | 'down' | 'unknown' | 'none';
+    /** A fresh read of the stopped laptop's stored directories. Only made before a rebuild is decided. */
+    readonly storedHome?: SupervisorStoredHome;
     /** A rebuild of this laptop is recorded but not finished. The same request sent again finishes it. */
     readonly rebuildPending?: boolean;
   };
@@ -417,8 +437,9 @@ export interface SupervisorAssessment {
  * - `wait`: a read that raced or an operation still running; observe again.
  * - `retry`: the same request sent again is the documented next step; a rebuild follows if that never helps.
  * - `rebuild`: the operation cannot advance; a fresh laptop is the reset.
- * - `stopped`: the laptop container is not running. One stopped laptop is rebuilt; when no other laptop of the box
- *   is running either, the host most likely restarted and the shared pool has to be recovered first.
+ * - `stopped`: the laptop container is not running. A stopped laptop is rebuilt. When no other laptop of the box
+ *   is running either, the host most likely restarted: the office recovers the shared pool first, by itself, and
+ *   the rebuild waits for that (`rebuildGate`).
  * - `retry-owner`: re-send while the operation offers it; otherwise the cause is outside one laptop.
  * - `provider`: the laptop runs but no agent of this employee is confirmed in it.
  * - `viewer`: the agent may be fine; the office terminal is not attached.
@@ -539,7 +560,12 @@ const CODES: Readonly<Record<string, readonly [SupervisorCodeKind, string]>> = {
     'retry-owner',
     'Nothing on record confirms the limits of the shared resource pool.',
   ],
-  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED: ['retry-owner', "{name}'s home storage could not be verified."],
+  // The small container that holds the laptop's home and Nix directories open is not running, as after a host
+  // restart, and nothing starts it again. A fresh laptop gets a new one.
+  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED: [
+    'rebuild',
+    "The container that holds {name}'s home storage for their laptop is not running, so the laptop cannot be confirmed.",
+  ],
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE: [
     'retry-owner',
     'The office is configured with a limits helper image that the container engine does not have.',
@@ -567,9 +593,15 @@ const SHARED_POOL_CODES: ReadonlySet<string> = new Set([
 const RESENDABLE: readonly string[] = ['continue', 'retry', 'repair', 'repair-pool'];
 /** Codes that say a fresh laptop is the reset. A re-send refused with one of them has nothing left to re-send. */
 const FRESH_LAPTOP_KINDS: readonly (SupervisorCodeKind | undefined)[] = ['rebuild', 'stopped'];
+export function sharedPoolCode(code: string | undefined): boolean {
+  return code !== undefined && SHARED_POOL_CODES.has(code);
+}
 const REPAIR_POOL_BY_HAND =
-  'Put the approved limits of the shared pool back: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
+  'The office puts the approved limits of the shared pool back itself and tries again about every ten minutes. ' +
+  'The same by hand: GET …/docker-pool/status, then POST …/docker-pool/repair ' +
   '(or …/docker-pool/reconcile when the status offers that instead). No laptop is stopped.';
+/** Shown while a rebuild or a start waits for the pool that the office is recovering after a host restart. */
+const POOL_WAIT = 'the shared pool, which the office is recovering after a host restart';
 /** A refused local-model launch check: its code carries the reason after this prefix and its message says the rest. */
 const LOCAL_MODEL_PREFIX = 'DOCKER_CONTINUATION_LOCAL_MODEL_';
 
@@ -581,8 +613,6 @@ const OWNER_STEPS: Readonly<Record<string, string>> = {
   DOCKER_CONTINUATION_RUNTIME_CHANGED: 'Restart the office so it reads its configuration again.',
   DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED: REPAIR_POOL_BY_HAND,
   DOCKER_CONTINUATION_POOL_UNCONFIRMED: REPAIR_POOL_BY_HAND,
-  DOCKER_CONTINUATION_STORAGE_UNCONFIRMED:
-    'After a host restart, approve the storage device change: POST …/docker-storage/device-approval.',
   DOCKER_RESOURCE_LEAF_WRITER_IMAGE_UNAVAILABLE:
     'Load the configured helper image or correct the office setting, then continue the laptop.',
 };
@@ -725,14 +755,14 @@ function classifyCode(
     );
   if (kind === 'owner')
     return classified('needs-owner', sentence, { code, fingerprint, needsHuman: OWNER_STEPS[code] });
-  if (kind === 'stopped' && observed.laptop.poolAlive !== true)
-    return classified('needs-owner', `${sentence} No other laptop of this office is running either.`, {
-      code,
-      fingerprint,
-      needsHuman:
-        'After a host restart, recover the shared pool first: GET …/docker-pool/cold-preview, then POST ' +
-        '…/docker-pool/cold-recover. Then rebuild this laptop.',
-    });
+  // What a host restart looks like. Nobody is asked for anything: the office recovers the shared pool itself and
+  // the rebuild rung waits for it.
+  if (kind === 'stopped' && !poolUsable(observed))
+    return classified(
+      'held-needs-rebuild',
+      `${sentence} No other laptop of this office is running either, so the office recovers the shared pool first.`,
+      { code, fingerprint }
+    );
   if (kind === 'retry-owner') {
     const offered = observed.laptop.continuation?.allowedActions.some((action) => RESENDABLE.includes(action));
     return offered
@@ -1013,16 +1043,50 @@ function rebuildGate(
         }
       : { kind: 'wait', waitingFor: 'a confirmed read of what is running in the laptop' };
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart
-  // looks like, and then the shared pool has to be recovered before any laptop is built.
-  if (provider === 'no-laptop' && observed.laptop.poolAlive === false)
-    return {
-      kind: 'human',
-      needsHuman:
-        'No laptop of this office is running. After a host restart, recover the shared pool first: GET ' +
-        '…/docker-pool/cold-preview, then POST …/docker-pool/cold-recover. ' +
-        REBUILD_BY_HAND,
-    };
-  return { kind: 'ok', preconditions: provider === undefined ? ['no-agent-running'] : [] };
+  // looks like. The office recovers the shared pool itself, and no laptop is rebuilt before that: a rebuild
+  // retires the laptop record the recovery reads, and a fresh laptop could not be set up without the pool.
+  if (provider === 'no-laptop' && observed.laptop.poolAlive === false && !poolUsable(observed))
+    return { kind: 'wait', waitingFor: POOL_WAIT };
+  // A finding that stops the rebuild is known without asking again what runs in the laptop.
+  const stored = observed.laptop.storedHome;
+  if (stored !== undefined && storedHomeGate(stored).kind !== 'ok') return storedHomeGate(stored);
+  if (provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
+  // Only a finished laptop that is stopped has a stored home to compare with what its holder recorded.
+  const finished = ['ready', 'provider-issued'].includes(observed.laptop.record?.phase ?? '');
+  return provider === 'no-laptop' && finished ? storedHomeGate(stored) : { kind: 'ok', preconditions: [] };
+}
+
+const STORED_HOME_RENUMBERED =
+  "The filesystem this employee's home is on has a new device number since their laptop was built, and the office " +
+  'holds no earlier record of that filesystem to prove it is the same one. It reads the home again about every ' +
+  'ten minutes and rebuilds the laptop by itself once this is settled. To settle it, either set the company ' +
+  'setting acceptStorageRenumbering (PUT /api/company/settings), which accepts a new device number while both ' +
+  'recorded directories are otherwise unchanged, or approve this one laptop: POST ' +
+  '/api/company/employees/:id/docker-storage/device-approval.';
+const STORED_HOME_DIFFERENT =
+  "The directory at this employee's home path is not the one their laptop was built on (another inode, owner or " +
+  'mode), which is what a different or missing disk at that path looks like. The office will not start them on ' +
+  'it. Once the right filesystem is mounted, the office finds the recorded directory at its next read, about ' +
+  'every ten minutes, and rebuilds the laptop by itself. To accept the directory that is there now instead: ' +
+  REBUILD_BY_HAND;
+
+/**
+ * A rebuilt laptop is bound to the home path of the laptop it replaces. Before a stopped laptop is rebuilt, the
+ * office reads whether that path still holds the recorded directory. Only a positive finding stops the rebuild,
+ * and it is read again later: nothing here is final.
+ */
+function storedHomeGate(stored: SupervisorStoredHome | undefined): Gate {
+  if (stored === undefined) return { kind: 'ok', preconditions: ['stored-home'] };
+  if (stored === 'renumbered') return { kind: 'human', needsHuman: STORED_HOME_RENUMBERED };
+  if (stored === 'different') return { kind: 'human', needsHuman: STORED_HOME_DIFFERENT };
+  if (stored === 'unknown') return { kind: 'wait', waitingFor: "a read of the laptop's stored home directory" };
+  return { kind: 'ok', preconditions: [] };
+}
+
+/** Another laptop of the box is attached, or the office's own look found the pool's anchor running, or found
+ * that no laptop record names a pool at all, so that there is nothing to wait for. */
+function poolUsable(observed: SupervisorObservation): boolean {
+  return observed.laptop.poolAlive === true || observed.laptop.pool === 'up' || observed.laptop.pool === 'none';
 }
 
 /**
@@ -1089,6 +1153,8 @@ function gate(
         : { kind: 'skip' };
     }
     case 'start-continuation':
+      // A fresh laptop cannot be set up while the pool's anchor is stopped. Only the office's own look says so.
+      if (observed.laptop.pool !== undefined && !poolUsable(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
       return observed.laptop.source === 'stopped' && observed.laptop.policyApproved
         ? { kind: 'ok' }
         : { kind: 'wait', waitingFor: 'a stopped laptop source and approved resource limits' };
@@ -1129,7 +1195,8 @@ function gate(
       return { kind: 'ok' };
     }
     case 'rebuild-laptop':
-      // A new laptop would join the same pool and be held by the same thing.
+      // A new laptop would join the same pool and be held by the same thing. The office goes on putting the
+      // pool's limits back in place (see `EmployeeSupervisor`); the sentence is shown while it does.
       if (seen?.code && SHARED_POOL_CODES.has(seen.code)) return { kind: 'human', needsHuman: REPAIR_POOL_BY_HAND };
       return heldInput
         ? heldInputRebuildGate(observed, history, flags, now, policy)
