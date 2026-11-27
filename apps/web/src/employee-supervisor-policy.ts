@@ -264,6 +264,21 @@ export interface SupervisorFlags {
   readonly signInRepairAvailable?: boolean;
 }
 
+/**
+ * A plain fact about an employee's running laptop, read inside it: whether anything of the employee runs there
+ * besides the agent and the laptop's own fixed processes (a job that was started detached, a tmux server of
+ * their own). A rebuild would end it. `unknown`: the read could not be made or gave no answer, which is never
+ * `false`. With `true`: how many such processes, and the names of up to five. `cpu`: what the whole laptop used
+ * of the CPU between this read and the one before it, when there was one. `at`: when it was read.
+ */
+export interface SupervisorOtherWork {
+  readonly otherWork: true | false | 'unknown';
+  readonly processes?: number;
+  readonly names?: readonly string[];
+  readonly cpu?: { readonly usedMs: number; readonly overMs: number };
+  readonly at: number;
+}
+
 export type SupervisorProviderPresence = 'running' | 'exited' | 'absent' | 'no-laptop' | 'unknown';
 
 export type SupervisorBusy =
@@ -425,6 +440,15 @@ export interface SupervisorObservation {
      * to an employee who has none of their own. Absent where the office has no laptops.
      */
     readonly standing?: { readonly enabled: boolean; readonly limits: boolean; readonly layout: boolean };
+    /**
+     * Whether anything of the employee runs in their running laptop besides the agent and the laptop's own fixed
+     * processes, by a read made inside the laptop: see `SupervisorOtherWork`. `true` is treated exactly like
+     * work the pane shows its agent left running. `unknown` and absent say nothing: they start no wait and end
+     * none. Present from the read of what runs in the laptop until a later read replaces it or it has gone stale.
+     */
+    readonly otherWork?: SupervisorOtherWork['otherWork'];
+    /** Everything that read reported. Data for reports; no rule reads it. */
+    readonly otherWorkDetail?: SupervisorOtherWork;
     /** Another laptop of the same box is attached and running, so the shared pool they all use is alive. */
     readonly poolAlive?: boolean;
     /**
@@ -1403,14 +1427,24 @@ function classifyLaptop(observed: SupervisorObservation): SupervisorClassificati
 }
 
 /**
- * What one observation is rolled into the history as: its classification, and what an idle pane says of work the
- * agent left running. Only an idle pane says anything about that, so every other reading leaves it out.
+ * What one observation is rolled into the history as: its classification, and what it says of work left running
+ * in the laptop. Two readings say something about that. An idle pane shows whether its agent left work running;
+ * any other pane says nothing. The read made inside the laptop says whether anything else of the employee runs
+ * there (`laptop.otherWork`): `true` is work left running whatever the pane shows, `false` agrees with a pane
+ * that shows none, and `unknown` says nothing, so it neither starts the clock of such work nor ends it.
  */
 export function sightEmployee(
   observed: SupervisorObservation
 ): SupervisorClassification & { readonly background?: boolean } {
-  const { turn, background } = observed.session;
-  return { ...classifyEmployee(observed), ...(turn === 'idle' ? { background: background === true } : {}) };
+  const { turn, background } = observed.session,
+    other = observed.laptop.otherWork;
+  const left =
+    other === true || (turn === 'idle' && background === true)
+      ? true
+      : turn === 'idle' && other !== 'unknown'
+        ? false
+        : undefined;
+  return { ...classifyEmployee(observed), ...(left === undefined ? {} : { background: left }) };
 }
 
 /** Waits that say an operation of the office's own is running or pending. They are no failure to read a laptop. */
@@ -1840,7 +1874,10 @@ function betweenTurnsGate(
   policy: SupervisorPolicy,
   proof: readonly SupervisorPrecondition[]
 ): Gate {
-  const { turn = 'unknown', idleSince, background } = observed.session;
+  const { turn = 'unknown', idleSince } = observed.session;
+  // Work the pane shows its agent left running, and work a read inside the laptop found beside the agent (a job
+  // started detached, a tmux server of the employee's own): one and the same thing here.
+  const background = observed.session.background === true || observed.laptop.otherWork === true;
   const watched = watchedSince(history);
   // Work left running has a clock of its own, from when it was first seen. An agent parked on a start-up screen
   // has no conversation that could have started any, so what its pane shows is given the short wait only.
@@ -1860,6 +1897,14 @@ function betweenTurnsGate(
   // A laptop that this read shows to be empty never comes here: `rebuildGate` decides for it.
   if (observed.laptop.provider === undefined) return { kind: 'ok', preconditions: ['no-agent-running'] };
   const at = watched + policy.blindRebuildMs;
+  // A pane that cannot be read shows no work left running, but the read inside the laptop may have found some:
+  // that is given its time here as well.
+  if (watched > 0 && now >= at && observed.laptop.otherWork === true && !overdue)
+    return {
+      kind: 'wait',
+      waitingFor: HELD_INPUT_BACKGROUND_WAIT,
+      ...(leftSince === undefined ? {} : { at: leftSince + grace }),
+    };
   if (watched > 0 && now >= at)
     return {
       kind: 'ok',

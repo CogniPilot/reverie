@@ -731,6 +731,41 @@ describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () 
     expect(w.report('b').otherWork).toBeUndefined();
   });
 
+  it('gives found work four hours from its first sighting, not from every read anew, and then rebuilds', async () => {
+    // The office's own pace: a reading of what runs in a laptop is kept for two minutes and then made again.
+    const w = box([person('a', 'running-detached'), person('b', 'attached')], { ...LIMITS, idleReadMs: 2 * MINUTE });
+    w.state.anchor = 'running';
+    w.state.people[0]!.hold = HELD;
+    w.state.otherWork = () => ({ otherWork: true, processes: 1, names: ['cargo'] });
+    const rebuilt = () => w.state.acts.filter((line) => line.endsWith(':rebuild-laptop:a'));
+    await w.run(3 * HOUR);
+    // Without the job the unreadable laptop would have been rebuilt after two hours.
+    expect(rebuilt()).toEqual([]);
+    expect(w.report('a').waitingFor).toBe('the work the agent left running to finish');
+    const until = w.report('a').waitingUntil!;
+    // The read was made again and again meanwhile, and the time did not move with it.
+    expect(w.state.reads.filter((line) => line.endsWith(':work:a')).length).toBeGreaterThan(20);
+    await w.run(30 * MINUTE);
+    expect(w.report('a').waitingUntil).toBe(until);
+    expect(until - START).toBeLessThan(4 * HOUR + 2 * HOUR + 10 * MINUTE);
+    // Four hours after the job was first seen the laptop is rebuilt with it, as for work the pane shows.
+    await w.run(until - w.state.now + 10 * MINUTE);
+    expect(rebuilt()).toHaveLength(1);
+  });
+
+  it('rebuilds at once when a later read finds the work gone', async () => {
+    const w = box([person('a', 'running-detached'), person('b', 'attached')], { ...LIMITS, idleReadMs: 2 * MINUTE });
+    w.state.anchor = 'running';
+    w.state.people[0]!.hold = HELD;
+    w.state.otherWork = () => ({ otherWork: true, processes: 1, names: ['cargo'] });
+    const rebuilt = () => w.state.acts.filter((line) => line.endsWith(':rebuild-laptop:a'));
+    await w.run(150 * MINUTE);
+    expect(rebuilt()).toEqual([]);
+    w.state.otherWork = () => ({ otherWork: false, processes: 0 });
+    await w.run(10 * MINUTE);
+    expect(rebuilt()).toHaveLength(1);
+  });
+
   it('shows unknown as unknown when the read gives no answer, and reads nothing in a laptop that does not run', async () => {
     vi.mocked(assessEmployee).mockClear();
     const w = box([person('a', 'running-detached'), person('b', 'attached')]);

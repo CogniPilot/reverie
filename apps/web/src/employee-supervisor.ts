@@ -60,6 +60,7 @@ import {
   type SupervisorCondition,
   type SupervisorHistory,
   type SupervisorObservation,
+  type SupervisorOtherWork,
   type SupervisorOutcome,
   type SupervisorPolicy,
   type SupervisorPrecondition,
@@ -96,22 +97,11 @@ export interface SupervisorActionResult {
 export type SupervisorGuard = () => void;
 
 /**
- * A plain fact about an employee's running laptop, read inside it: whether anything of the employee runs there
- * besides the agent and the laptop's own fixed processes (a job that was started detached, a tmux server of
- * their own). A rebuild would end it. `unknown`: the read could not be made or gave no answer, which is never
- * `false`. With `true`: how many such processes, and the names of up to five. `cpu`: what the whole laptop used
- * of the CPU between this read and the one before it, when there was one. `at`: when it was read.
- *
- * The driver puts it on the observation as `laptop.otherWork` (the three-valued fact) and
- * `laptop.otherWorkDetail` (all of this), and on the report as `otherWork`. No rule of the policy reads it yet.
+ * What a read inside an employee's running laptop found of work besides the agent. The driver puts it on the
+ * observation as `laptop.otherWork` (the three-valued fact) and `laptop.otherWorkDetail` (all of it), and on the
+ * report as `otherWork`. The policy treats `true` like work an agent left running: see `sightEmployee`.
  */
-export interface SupervisorOtherWork {
-  readonly otherWork: true | false | 'unknown';
-  readonly processes?: number;
-  readonly names?: readonly string[];
-  readonly cpu?: { readonly usedMs: number; readonly overMs: number };
-  readonly at: number;
-}
+export type { SupervisorOtherWork };
 
 /** One read of a stopped laptop's stored home: what was found, and why where the finding has a cause. */
 export interface SupervisorStoredHomeReading {
@@ -301,6 +291,8 @@ export interface EmployeeSupervisorLimits {
   readonly homeRecordRetryMs?: readonly number[];
   /** How long one pass waits for the home records it started. They go on by themselves after that. */
   readonly homeRecordWaitMs?: number;
+  /** How long a read of other work in a laptop is shown to the policy while no later read replaces it. */
+  readonly otherWorkKeptMs?: number;
   /** Least time, across the office, between two rebuilds of laptops that an agent runs in or may run in. */
   readonly occupiedRebuildSpacingMs?: number;
   /** A cause that several employees share must have been shared this long before one laptop is rebuilt as a probe. */
@@ -326,6 +318,7 @@ export const SUPERVISOR_LIMITS: Required<EmployeeSupervisorLimits> = {
   homeRecordsPerTick: 2,
   homeRecordRetryMs: [60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000],
   homeRecordWaitMs: 5_000,
+  otherWorkKeptMs: 10 * 60_000,
   occupiedRebuildSpacingMs: 60 * 60_000,
   sharedCauseProbeMs: 30 * 60_000,
   officeBlindRestartMs: 30 * 60_000,
@@ -1163,8 +1156,9 @@ export class EmployeeSupervisor {
       const laptop = {
         ...seen.laptop,
         ...(kept ? { provider: occupied.presence } : {}),
-        // Read with the reading above, and kept exactly as long.
-        ...(kept ? this.#otherWorkSeen(employee.id) : {}),
+        // Read with the reading above. It is shown on every pass until a later read replaces it, so that the time
+        // such work is given is counted from when it was first seen and not from every read anew.
+        ...this.#otherWorkSeen(employee.id, now),
         ...(storedFresh ? storedSeen(stored) : {}),
         ...(this.#pool ? { pool: this.#pool.pool } : {}),
         ...(this.#poolDetail() ? { poolDetail: this.#poolDetail()! } : {}),
@@ -1197,8 +1191,7 @@ export class EmployeeSupervisor {
         this.#occupied.set(employee.id, { at: now, presence: provider });
       else this.#occupied.delete(employee.id);
       await this.#readOtherWork(employee, provider, now);
-      const laptop = { ...observed.laptop, provider, ...this.#otherWorkSeen(employee.id) };
-      observed = { ...observed, laptop };
+      observed = { ...observed, laptop: { ...observed.laptop, provider, ...this.#otherWorkSeen(employee.id, now) } };
       this.#noteReading(employee, observed, now);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       // A laptop the read found occupied may still be rebuilt, between its agent's turns: that is decided next.
@@ -1542,12 +1535,15 @@ export class EmployeeSupervisor {
   }
 
   /** The last read of other work, as the observation carries it: the fact, and everything that was read. */
-  #otherWorkSeen(employeeId: string): {
-    readonly otherWork?: SupervisorOtherWork['otherWork'];
-    readonly otherWorkDetail?: SupervisorOtherWork;
-  } {
+  #otherWorkSeen(
+    employeeId: string,
+    now: number
+  ): Pick<SupervisorObservation['laptop'], 'otherWork' | 'otherWorkDetail'> {
     const work = this.#otherWork.get(employeeId);
-    return work ? { otherWork: work.otherWork, otherWorkDetail: work } : {};
+    // A reading that no later read has replaced for this long says nothing of the laptop as it is now.
+    return work && now - work.at < this.#resolved.otherWorkKeptMs
+      ? { otherWork: work.otherWork, otherWorkDetail: work }
+      : {};
   }
 
   #report(

@@ -733,7 +733,7 @@ other users are not counted, and only what is there in two looks a quarter of a
 second apart, by PID and start time. Work that the agent itself started and
 still holds is part of the agent's tree and is not reported here.
 
-It is a plain fact, and no rule acts on it yet:
+The fact is shown in two places:
 
 - on the observation the policy decides with: `laptop.otherWork` (`true`,
   `false` or `'unknown'`) and `laptop.otherWorkDetail`;
@@ -741,9 +741,23 @@ It is a plain fact, and no rule acts on it yet:
   `{ otherWork, processes?, names?, cpu?, at }`. `processes` is how many,
   `names` the process names of up to five, `at` when it was read.
 
+The policy treats `otherWork: true` exactly like work the pane shows its agent
+left running: the laptop is not rebuilt between the agent's turns, nor for a
+pane that cannot be read, until four hours after the office first saw the work
+(the same clock, `backgroundSince`, and the same wait, `the work the agent
+left running to finish`). The reading is shown to the policy on every pass
+until a later read replaces it, for up to ten minutes, so those four hours
+count from the first sighting and not from every read anew. A later read that
+finds none, with a pane that shows none, ends the wait at once.
+
 `unknown` means the read could not be made or gave no answer: the laptop on
 record does not run, the supervisor may not act for the employee, or the
-program refused. It is never reported as `false`.
+program refused. It is never reported as `false`, and it grants nothing and
+blocks nothing by itself: it starts no wait and ends none. The program refuses
+in one case of its own: tmux cannot be asked on the laptop's own socket while
+some tmux process of the laptop's user is alive. That may be the agent's own
+server under a socket file that was cleared, and without tmux's word the
+agent's processes cannot be told from other work.
 
 `cpu` is `{ usedMs, overMs }`: the CPU time the whole laptop used between this
 read and the one before it of the same laptop, from `usage_usec` in the

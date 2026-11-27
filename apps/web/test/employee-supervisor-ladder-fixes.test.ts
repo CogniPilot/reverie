@@ -402,6 +402,74 @@ describe('work an agent left running when its turn ended', () => {
     expect(rollSupervisorHistory(history, sightEmployee(idle(true)), T + 5 * HOUR).backgroundSince).toBe(T + 5 * HOUR);
   });
 
+  // What a read made inside the laptop found beside the agent: a job started detached, a tmux server of the
+  // employee's own. The pane shows none of it. `true` is the same thing as work the pane shows.
+  const other = (found: true | false | 'unknown' | undefined, base = idle(false)) =>
+    withLaptop(base, found === undefined ? {} : { otherWork: found });
+
+  it('gives work that only a read inside the laptop found the same four hours, from when it was first seen', () => {
+    // With nothing found the idle, silent laptop is rebuilt after the rung's own three minutes; a read that found
+    // none changes nothing.
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(undefined), T)).toBe(3 * MINUTE);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(false), T)).toBe(3 * MINUTE);
+    // The laptop was held for three hours; then a read finds a detached job that the pane does not show.
+    const held3h = rollOn(EMPTY_SUPERVISOR_HISTORY, withLaptop(idle(false), {}, { turn: 'working' }), T, T + 3 * HOUR);
+    const first = rollSupervisorHistory(held3h, sightEmployee(other(true)), T + 3 * HOUR);
+    expect(first.backgroundSince).toBe(T + 3 * HOUR);
+    expect(assessEmployee(other(true), first, ON, T + 3 * HOUR).next).toEqual({
+      action: null,
+      at: T + 7 * HOUR,
+      waitingFor: 'the work the agent left running to finish',
+      preconditions: [],
+    });
+    expect(dueAfter(held3h, other(true), T + 3 * HOUR)).toBe(4 * HOUR);
+    // The pane shows work and the read found more: one clock, from the first of the two sightings.
+    const both = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(true), T, T + HOUR);
+    expect(dueAfter(both, other(true, idle(true)), T + HOUR)).toBe(3 * HOUR);
+  });
+
+  it('counts those four hours whatever the pane shows meanwhile, and ends them when a read finds the work gone', () => {
+    let history = rollOn(EMPTY_SUPERVISOR_HISTORY, other(true), T, T + HOUR);
+    expect(history.backgroundSince).toBe(T);
+    // A turn runs, the pane cannot be read, the pane is idle and shows nothing: the job is still there.
+    history = rollOn(history, other(true, withLaptop(idle(false), {}, { turn: 'working' })), T + HOUR, T + 2 * HOUR);
+    history = rollOn(history, other(true, withLaptop(failed, { provider: 'running' })), T + 2 * HOUR, T + 3 * HOUR);
+    expect(history.backgroundSince).toBe(T);
+    expect(dueAfter(history, other(true), T + 3 * HOUR)).toBe(HOUR);
+    // A read finds none any more, and the pane shows none: nothing is waited for.
+    const gone = rollSupervisorHistory(history, sightEmployee(other(false)), T + 3 * HOUR);
+    expect(gone.backgroundSince).toBeUndefined();
+    expect(dueAfter(history, other(false), T + 3 * HOUR)).toBe(0);
+    // A read that found none does not end what the pane itself shows.
+    expect(rollSupervisorHistory(history, sightEmployee(other(false, idle(true))), T + 3 * HOUR).backgroundSince).toBe(
+      T
+    );
+  });
+
+  it('lets a read that could not tell grant nothing and block nothing by itself', () => {
+    // No clock is started by it, and the idle, silent laptop is rebuilt as if no read had been made.
+    expect(sightEmployee(other('unknown')).background).toBeUndefined();
+    expect(rollOn(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T, T + HOUR).backgroundSince).toBeUndefined();
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown'), T)).toBe(3 * MINUTE);
+    // It ends no clock either: work that was seen keeps its four hours from its first sighting, and no more.
+    const seen = rollOn(EMPTY_SUPERVISOR_HISTORY, other(true), T, T + HOUR);
+    const unread = rollOn(seen, other('unknown'), T + HOUR, T + 2 * HOUR);
+    expect(unread.backgroundSince).toBe(T);
+    expect(dueAfter(unread, other(true), T + 2 * HOUR)).toBe(2 * HOUR);
+    // Work the pane shows is waited for whatever the read says.
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown', idle(true)), T)).toBe(4 * HOUR);
+  });
+
+  it('gives found work its time too where the pane cannot be read at all', () => {
+    // An unreadable pane leads to a rebuild two hours after the problem was first seen. Found work is not ended
+    // then: it has four hours from its own first sighting.
+    const blind = withLaptop(failed, { provider: 'running' });
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, blind, T)).toBe(2 * HOUR);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(true, blind), T)).toBe(4 * HOUR);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other('unknown', blind), T)).toBe(2 * HOUR);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, other(false, blind), T)).toBe(2 * HOUR);
+  });
+
   it('is watched anew after an office start', () => {
     const saved = rollOn(EMPTY_SUPERVISOR_HISTORY, idle(true), T, T + 5 * HOUR);
     expect(resumeSupervisorHistory(saved).backgroundSince).toBeUndefined();
