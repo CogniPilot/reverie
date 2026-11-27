@@ -678,6 +678,8 @@ describe('EmployeeSupervisor: the stored home of a stopped laptop', () => {
 });
 
 describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () => {
+  /** A hold that the laptop's own read names, for a cause a rebuild is known to settle. */
+  const HELD = { code: 'DOCKER_RESOURCE_HELPER_FAILED', allowedActions: ['observe'] };
   /** What the policy was shown of one employee's laptop, each time it was asked. */
   const shown = (id: string) =>
     vi
@@ -688,9 +690,11 @@ describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () 
 
   it('reads it with the read of what runs in the laptop, and shows it to the policy and in the report', async () => {
     vi.mocked(assessEmployee).mockClear();
-    // A laptop that runs with no terminal, in an office whose pool is up: the ladder reaches the read.
+    // A laptop that runs with no terminal and whose own read says it is held, in an office whose pool is up: only
+    // such a laptop is considered for a rebuild while an agent may run in it, so the ladder reaches the read.
     const w = box([person('a', 'running-detached'), person('b', 'attached')]);
     w.state.anchor = 'running';
+    w.state.people[0]!.hold = HELD;
     w.state.otherWork = () => ({
       otherWork: true,
       processes: 2,
@@ -725,6 +729,7 @@ describe('EmployeeSupervisor: what else runs in a laptop besides its agent', () 
     vi.mocked(assessEmployee).mockClear();
     const w = box([person('a', 'running-detached'), person('b', 'attached')]);
     w.state.anchor = 'running';
+    w.state.people[0]!.hold = HELD;
     w.state.otherWork = () => new Error('exec failed');
     await w.run(HOUR);
     expect(w.report('a').otherWork).toMatchObject({ otherWork: 'unknown' });

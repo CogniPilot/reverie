@@ -132,9 +132,9 @@ minutes, and both are read again immediately before the rebuild is requested.
 The running laptop is discarded only when it is the one recorded laptop of that
 employee. While a turn is in progress, or while the office is not reading the
 pane, it waits and asks nobody. An agent that ended its
-turn with work left running (a monitor, a background shell) is given thirty
-minutes from when the problem was first seen, and is then rebuilt with that
-work still running. The
+turn with work left running (a monitor, a background shell) is given four
+hours from when the office first saw that work, and is then rebuilt with it
+still running. The
 home directory is
 kept and the fresh laptop is started as after any rebuild. With
 `supervisorAutoRepair` off it wakes once and then names that switch and the
@@ -142,17 +142,43 @@ calls, including `confirmDiscardRunning`. A terminal that is not connected but
 still takes input is only woken, never rebuilt.
 
 The same rule serves every other laptop that only a rebuild settles while an
-agent runs in it, for example one whose limits helper failed for good or one
-that reports `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did
-not start runs in its terminal, which the office cannot take over). Such a
-laptop is rebuilt between the agent's turns and never in the middle of one:
+agent runs in it. Such a laptop is rebuilt between the agent's turns and never
+in the middle of one, and only for what the laptop itself reports:
+
+- The laptop's own read, made in that pass, must say that it is held or
+  unfinished. A read that says ready wins over the office's older reports of
+  the laptop (its last attempt to attach a terminal, a health reading): what
+  is wrong then is the terminal, and the step is the wake.
+- A laptop whose agent the office can reach (its pane is attached and read) is
+  rebuilt only for a cause a rebuild is known to settle: a code the table lists
+  as such, for example a limits helper that failed for good,
+  `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did not start
+  runs in its terminal), or a code the table does not list that the laptop's
+  own read has reported for thirty minutes. For any other hold (a step to send
+  again, a read that never succeeds, a set-up that stopped) such a laptop is
+  kept, and the steps that discard nothing go on in their rounds.
+- A laptop whose agent the office cannot reach at all is rebuilt for any hold,
+  after the two hours described below.
 
 - A turn the office terminal shows in progress is waited for, however long it
   lasts.
-- An idle pane must have been silent for two minutes. The step reads the pane
-  again itself immediately before the rebuild, and where the reason is a held
-  laptop it reads the laptop again too; a laptop that has finished meanwhile is
-  kept.
+- An idle pane must have been silent for two minutes. The step asks the same
+  of the pane itself, and where the reason is a held laptop it reads the laptop
+  again too; a laptop that has finished meanwhile is kept. From that look until
+  the rebuild has returned, the session's input is held and chat for it stays
+  queued, to be delivered to the new laptop. The rebuild then makes its own
+  checks and prepares the sign-in folder, and immediately before it stops the
+  laptop the pane is looked at once more: a turn that started, or a pane that
+  printed, since the proof stops the rebuild with nothing stopped.
+- Work the agent left running when its turn ended is given four hours from
+  when the office first saw it. That clock is the work's own: it is kept while
+  a turn runs, ends when an idle pane shows no such work, and starts again at
+  an office start. Only work the agent's pane announces is seen. A job started
+  under `nohup` or in a detached tmux is not: nothing the office reads from a
+  laptop today says that other processes are working in it.
+- A laptop is called empty only on a finding. When the tmux socket file of a
+  laptop is missing, the read inside the laptop answers "nothing runs" only
+  when no tmux process of the laptop user is alive; otherwise it does not know.
 - A read that cannot say what runs in the laptop is never taken for an empty
   laptop. It is asked again for fifteen minutes; after that the laptop is
   treated as one an agent runs in.
@@ -169,12 +195,61 @@ laptop is rebuilt between the agent's turns and never in the middle of one:
   second running laptop, or a running laptop that is not the recorded one, is
   refused.
 
+Across the office, the rebuild of a laptop an agent runs in is braked, because
+one fault of the office or of something all laptops share looks like the same
+fault in every laptop:
+
+- At most one such rebuild an hour, across all employees and across office
+  restarts. `waitingFor` reads “the limit of one rebuild an hour, across the
+  office, …” with the time.
+- While the office reads none of its laptops, no laptop is rebuilt for a pane
+  it cannot read: the fault is taken to be the office's own. After thirty
+  minutes of that the office asks for its own restart
+  ([below](#the-office-restarting-itself)). Only when a restart was tried
+  within the last six hours, or this office does not restart itself, is the
+  cause treated as one that several employees share.
+
+  “Reads none of its laptops” has one meaning. The container engine reports
+  at least two laptops running, the office can attach to or read none of
+  them, and it reads no other laptop either. A laptop counts when its own
+  read says ready and no terminal is attached, or when the engine lists it
+  as running with an agent in it and reading it fails. Nothing else counts:
+  not a stopped laptop (as after a host restart), not one that is being set
+  up, started, rebuilt or moved to another plan, not one that waits for the
+  shared pool, not one that an operation of the office's own holds, not one
+  held in the middle of its set-up, not one whose agent has exited, and not a
+  terminal whose input the office itself holds. An employee who is merely
+  held says nothing about the office.
+
+  One laptop that runs and cannot be read is as likely that laptop's fault
+  as the office's, and a restart drops every terminal. So with exactly one,
+  in an office of one employee as in any other, the laptop's own steps apply
+  (it is rebuilt after two hours without a reading) and the office does not
+  restart itself.
+- A cause that more than one employee in the office shares is rebuilt for
+  nobody at first. Once it has been shared for thirty minutes, one laptop is
+  rebuilt as a probe, and no other laptop is touched until that one is healthy.
+  Then the next follows, an hour later at the earliest. A probe that does not
+  come back healthy leaves every other laptop as it is.
+
+The worst case is therefore one working agent's turn lost per hour across the
+office, and for one laptop two a day.
+
 A laptop code the office does not recognize is not acted on at once: it may be
 a state of a newer laptop runtime that settles by itself. The recorded request
 is sent again when the laptop offers that. When the code still stands after
-thirty minutes the laptop is treated as held, under every rule above. A laptop
-that has been starting, or between two states, for fifteen minutes without
-becoming healthy is treated the same way from that moment.
+thirty minutes the laptop is treated as held, under every rule above. A code
+that only the office's attach report carries, beside a laptop whose own read
+says ready, is reported and watched and is never a reason for a rebuild. A
+laptop that has been starting, or between two states, for fifteen minutes
+without becoming healthy is treated as held from that moment: it is rebuilt at
+once when nothing runs in it, kept while the office can reach its agent, and
+rebuilt after two hours when it cannot. A hold reported with no code at all is
+watched for thirty minutes like a code the office does not know.
+
+A step that an office restart interrupted is settled as failed at the next
+office start, so nothing waits for its outcome. An interrupted rebuild counts
+against the limit per day, because it may have been carried out.
 
 The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the
@@ -184,8 +259,8 @@ neither held back by this limit nor counted against it
 ([after a host restart](#after-a-host-restart)).
 
 Every wait above that ends in a laptop being rebuilt (fifteen minutes of
-starting or of an unreadable laptop, thirty minutes of an unrecognized code or
-of work left running, two hours without a reading of the pane) counts only an
+starting or of an unreadable laptop, thirty minutes of an unrecognized code,
+two hours without a reading of the pane) counts only an
 unbroken run of that same state as this office process saw it. A start that
 follows a plan move, a start-up screen or the wait for the office's own restart
 begins its own fifteen minutes, and a state that cleared and came back is
@@ -222,12 +297,20 @@ every one of them has:
   soft memory, swap, tasks, CPU weight) and the processors all of them may use.
   They are saved through the store method behind the docker-policy route; the
   setting and the derived values are read again inside that save.
-- Layout: all laptops that have a layout on record must run as the same user
-  and keep scratch space under the same root. The drives are the ones every one
-  of them has, read-only where any has it read-only. The choice among several
-  office networks and a sign-in folder outside the home belong to one employee
-  and are never copied. The layout is used for a rebuild and is recorded with
-  that rebuild, as an owner's layout is.
+- Layout: read from the employee's own last laptop wherever its container can
+  be read (one read-only inspect): the user it ran as, the drives it had and
+  whether it could write on them, its office network, and the folder of its
+  plan sign-in when that is kept outside its home. What the other laptops share
+  fills in only what the own laptop cannot say: the scratch root of a laptop
+  from before that layout, and everything for an employee whose laptop is
+  gone. For that all of them must run as the same user and keep scratch space
+  under the same root, and the drives are the ones every one of them has,
+  read-only. The office network and the sign-in folder are never taken from
+  another employee. An employee whose plan needs a sign-in folder and whose
+  laptop cannot be read gets no layout: the rebuild step refuses and says why,
+  because a laptop built without the folder would stop at the sign-in screen.
+  The layout is used for a rebuild and is recorded with that rebuild, as an
+  owner's layout is.
 
 The office makes up no number and no path. Where the others disagree on the
 pool, the user or the scratch root, or no other employee has anything
@@ -251,8 +334,14 @@ laptop route answers `DOCKER_CONTINUATION_RUNTIME_CHANGED`, the supervisor
 stops its passes, and nothing reads them again in place. A new office process
 does. The office therefore ends its own process, by its ordinary graceful
 shutdown, so that Docker starts it again; laptops keep running and are
-attached again as after any office restart. It does so only when all of this
-holds:
+attached again as after any office restart. It does the same when the
+supervisor finds that the office reads none of its laptops for thirty minutes
+(in the sense given [above](#office-recovery-supervisor): at least two laptops
+that the engine reports running), and asks for it on every pass: a fault that
+every running laptop shows at once is taken to be the office's own. It does so
+only when all of this holds (the second and the first apply to a changed
+configuration; a request of the supervisor counts its ten minutes from when it
+was first made, and lapses when it is not repeated):
 
 - the change has stood, with nothing about it changing, for ten minutes;
 - a new process would accept the configuration that is in place and would read
@@ -262,6 +351,12 @@ holds:
   office's own container. A container nothing would start again is never
   taken down;
 - `supervisorAutoRepair` is not switched off;
+- nothing the office itself runs is in flight for any employee, in the office
+  or not: no open plan move, no laptop set-up, rebuild or limits repair, and
+  for a request of the supervisor also no step of its own and no step for the
+  shared pool. A restart would cut such an operation off, and for a plan move
+  it would reset what the move has watched. `waitingFor` then reads “the
+  office to restart itself once … has ended”;
 - it has not restarted itself within the last hour, nor twice within a day.
   The record is `office-self-restart.json` in the office data directory,
   written before the exit and read after it; a record that cannot be read
@@ -288,9 +383,19 @@ same calls.
 That reload resets the limits of every running laptop, whoever it belongs to.
 So beside the repair steps the supervisor checks the approved limits of each
 finished laptop about every ten minutes, one employee per pass, and puts them
-back when they are gone. It does this for an employee who is running normally
-and for one who is stopped or out of the office while their laptop still runs:
-the two states in which no repair step looks at the laptop. The check needs
+back when they are gone. It does this for every employee whose laptop may be
+running, whatever their attendance and whatever their condition reads: one who
+is running normally, one who is stopped or out of the office, and one who is
+waiting for any repair, such as a lost terminal, a start-up screen or a
+handoff that is still owed. The check itself finds out whether the laptop is
+finished and running and whether another operation on it is in flight. Only
+while a step of a plan move is running is the laptop left to the move. An
+employee who was once moved to another plan has a laptop record that the move
+made, and it stays that kind of record for good. Such a laptop gets the same
+check as any other once no plan move of the employee is open; while one is
+open, or while the office cannot tell, it is left to the move
+(`DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED` as the check's detail). The
+check needs
 `supervisorEnabled` only. It writes only values the owner already approved,
 attaches no terminal, reads and starts no agent, changes no attendance and
 spends no attempt of a repair step. `GET /api/company` shows the last check as
@@ -662,15 +767,16 @@ record offers. No sentence about a held move asks for a person.
 | What the move shows | What the office does | When |
 | --- | --- | --- |
 | Any error, and the record offers `continue-original` | Continues the original | 1, 3 and 8 minutes after the problem was first seen |
-| Still held on the same error after that | Abandons the move | 15 minutes after that error was first seen, and once more 5 minutes later if the first attempt was refused |
+| Still held on the same error after that | Abandons the move | Once the running office has watched it held on that error for 15 minutes, and once more 5 minutes later if the first attempt was refused |
 | An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
 | A decision screen in the new session | The same: three continues, then abandon | The same |
 | The sign-in screen of the new session | The same: three continues, then abandon. Nothing waits for the plan to be signed in (below) | The same |
 | An operation that only has to finish, or something every laptop shares (the pool's limits, the office's configuration) | Three continues, spread as probes: 1, 10 and 30 minutes after the problem was first seen | Abandons 3 minutes after the last probe, if that probe found the cause still there |
 | Any error, while the office's own look finds the shared pool down (its anchor stopped or a recovery open, as after a host restart) | Waits and spends no continue | Not abandoned while the pool is down; once it is back, three continues and then the abandon, as above |
 | No `continue-original` offered | No continue | Abandons after 15 minutes |
-| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
-| A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
+| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; each move has its own attempts |
+| A held move from before the laptop runtime | Closes it (below). A laptop that needs a repair comes first | After the employee has been running normally for 15 minutes |
+| A closed move that switched the employee to the session they are on and never typed its handoff | Types the handoff once, when the agent is idle at an empty composer (below) | Three attempts in a round, again every round; never closed |
 | A step of the move is running | Nothing, while the step comes back. A step that does not is given up by the move service itself (below), and the move is then held like any other | After 10 minutes without a sign of life, or when its phase has lasted 15 or 45 minutes |
 
 The thirty minutes cover the repair of the pool's limits and the other causes
@@ -691,7 +797,8 @@ neither continued nor closed, however long the recovery takes
 ([after a host restart](#after-a-host-restart)). Nothing was tried for it with
 a pool that works, and no laptop could be rebuilt or started in its place
 either. No probe is spent against a pool that is known to be down; once it is
-back the move gets its continues and then the abandon. A move whose error is a
+back the move's time starts again, and it is closed only after a continue made
+with the pool back has come back (below). A move whose error is a
 stopped storage holder (`DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`) is a step of
 the move itself: no other repair starts a holder again, so it is continued
 three times and then closed after the usual fifteen minutes, and the laptop is
@@ -718,16 +825,39 @@ because the service refused to close it, is not left there: like every path,
 its round starts again six hours after its last attempt, with the three
 continues first and then the abandon.
 
-After an office restart the times above still count from when the move's error
-was first seen, so a move whose three continues were used before the restart
-would be due for the abandon at the new process's first look. A restart puts
-right some of what stops a move, because every terminal is attached again and
-the laptop configuration is read afresh. The new process is therefore given
-one of those continues back: it continues the move once itself, watches the
-outcome for the usual three minutes, and only then may close it. This happens
-once in a round. An office that restarts again with the move still held gets
-nothing more and closes the move as before, so repeated restarts cannot
-continue a move for ever. A continue repeats no paid step, whoever asks for it.
+The three continues and the two abandons are counted for one move, not for the
+employee. A second move of the same employee starts with all of its own,
+whatever the first one used, and so does the move that is left when the older
+of two open moves has been closed.
+
+**What counts towards closing a move.** Every time in this section that ends
+in a move being closed is measured from what the running office process has
+itself seen: the unbroken time for which it has watched the move held, its own
+continues included. Three things do not count.
+
+- Time before the office started. A move that was held for hours under an
+  earlier office process, or that an earlier version of the office kept for
+  the owner, starts its fifteen (or thirty) minutes again at the new process's
+  first look. It is never closed at that first look.
+- Time in which the office saw the shared pool down. An outage is a problem
+  of its own, so it does not use the time up, and the time starts again when
+  the pool is back.
+- Continues that an earlier office process made, or that were made before the
+  pool came back. A move that offers a continue is closed only after the
+  running process has continued it itself, with a pool that works, and that
+  continue has come back. A continue that only found the move busy does not
+  count.
+
+A restart puts right some of what stops a move, because every terminal is
+attached again and the laptop configuration is read afresh. Where the earlier
+process had used all three continues, the new one is therefore given one of
+them back, once in a round, and continues the move at its first look. An
+office that restarts again in the same round gets nothing more, so repeated
+restarts cannot continue a move for ever. It closes nothing either: it has no
+continue of its own to judge by, so the move waits for the next round, six
+hours after its last attempt, which continues it first. The same holds for a
+move whose continues were all used before a pool outage. A continue repeats
+no paid step, whoever asks for it.
 
 Continuing uses `supervisorEnabled`; abandoning and closing use
 `supervisorAutoRepair`. Each step is one audit entry
@@ -798,12 +928,60 @@ immediately before it launches the agent there.
   replaced is never revived. From then on they are an ordinary employee on
   that plan, and the repairs that the held move stood in front of apply to
   them: putting the plan's sign-in back, the start-up screens, the rebuild. The
-  handoff text the move had not typed yet is not typed. The stopped laptop of
-  the old plan is removed by the next rebuild, as after a move that finished.
+  handoff the move had not typed yet stays owed and the office types it
+  (below). The stopped laptop of the old plan is removed by the next rebuild,
+  as after a move that finished.
+
+**The handoff is never dropped.** The handoff is the text a move types into
+the new session so that the agent there carries on from where the old one
+was. A move types it last, after it has switched the employee to the new
+session and launched the agent. A move that is closed between those two
+points would leave the employee on a session that was never told anything,
+and the laptop would read as running normally. So the handoff of such a move
+stays owed, whoever closed the move (the supervisor, the owner's
+`POST /api/plans/moves/:id/abandon`, or a rebuild that closed it):
+
+- The employee is not reported as running normally. While nothing else is
+  wrong, their `condition` is `move-held-retryable` with the code
+  `move-handoff-owed` and a sentence that says the handoff has not been typed.
+  While the laptop needs a repair, that repair comes first and its sentence
+  says that the handoff is owed as well.
+- The office types exactly the move's text, once, into that same session, when
+  the agent is next idle at an empty composer: the conditions under which the
+  move itself types it, through the same guarded writer. It is the
+  `continue-move` step, three attempts in a round and again every round, and
+  it is never given up. An attempt that finds the agent working or the
+  composer in use types nothing and is not counted.
+- Exactly once is kept the way a move keeps it. `issued` is written to
+  `plan-move-handoffs.json` in the office data directory before the first key,
+  `delivered` once the terminal confirmed the prompt. From then on the
+  employee is reported as running normally.
+- A handoff that was issued and not confirmed is never typed again, and
+  neither is one the move itself had begun to type. Its outcome is not known.
+  The employee's sentence goes on saying so for as long as they are on that
+  session: this is the one state the office cannot settle, and reading the
+  conversation tells whether the handoff is in it.
+- Nothing is owed for a move that was closed before the office first kept that
+  file, for a session the employee has left since, or for a move that had not
+  yet switched the employee. A file that cannot be read means nothing is
+  typed.
+
+What the new session knows without the handoff depends on the provider. A
+move between two plans of the same provider carries the old conversation
+over: it installs the conversation into the new plan's folder and the new
+session resumes it by its identifier, so a rebuilt laptop on the new plan
+resumes that same conversation as long as its transcript is in the home
+directory. A move to another provider starts an empty conversation, and the
+handoff is all the new agent is told. In both cases the old conversation
+stays on disk in the home directory; closing a move deletes nothing.
 
 **A held move from before the laptop runtime** has no laptop journal. It gates
 no laptop, but it keeps its employee locked against every later plan move. The
-supervisor closes it and keeps the employee where they work now. When the
+supervisor closes it and keeps the employee where they work now. Because it
+gates no laptop, it never stands in front of one: while the employee's laptop
+needs any repair, that repair runs on its own steps and times as if the record
+were not there, and the record is looked at only once the employee is running
+normally. Its fifteen minutes are counted from then. When the
 employee already works on the session that move was creating and its source
 cleanup is durably recorded, it uses the owner's own adoption
 (`adopt-existing`, see [plan move recovery](plan-move-recovery.md)). Otherwise,

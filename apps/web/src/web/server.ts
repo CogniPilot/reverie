@@ -374,6 +374,8 @@ import { registerPlanMoveRoutes } from './routes/plan-move-routes.js';
 import { authenticatedPlanMover } from './plan-move-auth.js';
 import { PlanMoves, PlanMoveError } from '../plan-move.js';
 import { PlanMoveStore } from '../plan-move-store.js';
+import { PlanMoveHandoffStore } from '../plan-move-handoff-store.js';
+import { PlanMoveOwedHandoffs } from '../plan-move-owed-handoff.js';
 import { dockerPlanSourceRetirementSubject, dockerPlanSourceViewRetired, requireDockerPlanSourceRetirement } from '../docker-plan-source-retirement.js';
 import {
   captureDockerPlanMoveRequester,
@@ -2660,6 +2662,23 @@ export class WebServer extends EventEmitter {
         stamp: () => dockerRuntime.identityStamp(),
         startable: () => dockerRuntime.restartWouldKeepIdentity(),
         allowed: () => this.companyService.view(undefined).settings.supervisorAutoRepair !== false,
+        // Every employee is asked, in the office or not: a move or a laptop operation of anyone is cut off by a restart.
+        operation: async () => {
+          const moves = await planMoves.list(undefined);
+          if (
+            moves.some(
+              (row) =>
+                !['completed', 'failed'].includes(row.phase) &&
+                (row.backend === 'docker' || row.phase !== 'recovery-required')
+            )
+          )
+            return 'a plan move that is open';
+          return this.companyService
+            .registeredEmployees()
+            .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
+            ? 'a laptop operation that is running'
+            : undefined;
+        },
         restartPolicy: () => {
           let mounts = '';
           try {
@@ -2678,6 +2697,13 @@ export class WebServer extends EventEmitter {
       });
       this.officeSelfRestart = officeSelfRestart;
       const supervisorStore = new EmployeeSupervisorStore(dataPath('employee-supervisor.json'));
+      // The handoff a closed plan move still owes: typed once, through the terminal's own guarded writer.
+      const owedHandoffs = new PlanMoveOwedHandoffs({
+        moves: planMoves,
+        store: new PlanMoveHandoffStore(dataPath('plan-move-handoffs.json')),
+        session: (id) => this.sessions.get(id),
+        capturePane: (muxName) => this.mux?.capturePaneText?.(muxName, undefined, { escapes: true }),
+      });
       this.employeeSupervisor = new EmployeeSupervisor(
         officeSupervisorPorts({
           company: this.companyService,
@@ -2685,7 +2711,23 @@ export class WebServer extends EventEmitter {
           inputHeldOnRecord: (id) => this.store.getSession(id)?.terminalInputHeld === true,
           ready: () => this.companyWakeReady && dockerRuntime.current(),
           notReady: () => officeSelfRestart.status(),
-          laptops: dockerRuntime.supervisorLaptops(),
+          officeRestart: {
+            request: (reason) => officeSelfRestart.request(reason),
+            lastAt: () => officeSelfRestart.lastAt(),
+          },
+          laptops: dockerRuntime.supervisorLaptops({
+            // While a rebuild is about to stop a laptop its agent runs in, nothing may be typed into that session and
+            // chat for it stays queued. Both are the holds a plan move takes; the chat is delivered to the new laptop.
+            holdInput: (sessionId) => {
+              const releases = [
+                this.chatroomService.delivery.pauseForMigration(sessionId),
+                this.sessions.get(sessionId)?.pauseCapacityRetry() ?? (() => {}),
+              ];
+              return () => {
+                for (const release of releases) release();
+              };
+            },
+          }),
           restorations: () => dockerRuntime.restorationReports,
           providerHealth: (employee) => this.workerProviderHealth?.read(employee),
           ownerStopPending,
@@ -2714,6 +2756,7 @@ export class WebServer extends EventEmitter {
           ...(this.planSignIn ? { signIn: this.planSignIn } : {}),
           planSignedIn: async (accountId) =>
             (await this.planService.rows()).accounts.find((account) => account.id === accountId)?.signedIn,
+          handoffs: owedHandoffs,
           wake: (id, options) => this.companyWake.wakeOne(id, options),
           load: () => supervisorStore.load(),
           save: (histories) => supervisorStore.save(histories),

@@ -1920,8 +1920,9 @@ export class DockerContainedResources implements DockerContainedResourceControll
    * laptop keeps running; the shared pool must already be confirmed. */
   async repairLeaf(row: DockerEmployeeContinuationRecord, current: () => void): Promise<'unchanged' | 'restored'> {
     current();
+    // A record that a plan move made is repaired like any other. That it is no longer the move's own is the
+    // caller's to prove (`DockerLaptopLimitUpkeep`); the set-up service's own repair still refuses such a record.
     if (
-      row.version === 3 ||
       !['provider-issued', 'ready'].includes(row.phase) ||
       !row.destination ||
       this.journal.read(row, 'leaf-helper')?.phase !== 'completed'
@@ -2476,7 +2477,7 @@ export class DockerContainedResources implements DockerContainedResourceControll
     // A terminally failed writer acknowledged nothing: no enforcement is known.
     if (!issued || issued.phase === 'create-issued' || issued.phase === 'created' || issued.phase === 'failed')
       return null;
-    if (row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase) && issued.phase === 'completed') {
+    if (['provider-issued', 'ready'].includes(row.phase) && issued.phase === 'completed') {
       const ids = await this.#poolCensus('leaf-helper');
       current();
       if (!ids.includes(issued.containerId)) return this.#replacementLeafObservation(row, issued, seen, ids, current);
@@ -2609,7 +2610,6 @@ export class DockerContainedResources implements DockerContainedResourceControll
       const retained = this.journal.read(row, 'leaf-helper');
       if (
         dockerResourceScope(row) !== scope ||
-        row.version === 3 ||
         !['provider-issued', 'ready'].includes(row.phase) ||
         !retained ||
         dockerContinuationDigest(retained) !== originalDigest

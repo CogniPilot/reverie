@@ -31,9 +31,18 @@ const History = z
     transitSince: time.optional(),
     transitOf: z.string().max(100).optional(),
     watchSince: time.optional(),
+    backgroundSince: time.optional(),
+    occupiedRebuildAt: time.optional(),
     attempts: z.partialRecord(
       action,
-      z.object({ count: z.number().int().min(0).max(1000), lastAt: time, resumed: z.literal(true).optional() }).strict()
+      z
+        .object({
+          count: z.number().int().min(0).max(1000),
+          lastAt: time,
+          resumed: z.literal(true).optional(),
+          earlier: z.literal(true).optional(),
+        })
+        .strict()
     ),
     rebuilds: z.array(time).max(8),
     lastAction: z

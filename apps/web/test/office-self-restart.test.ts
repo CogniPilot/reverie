@@ -26,6 +26,8 @@ function office(record: number[] = []) {
     policy: 'unless-stopped' as string | null | Error,
     record,
     saveFails: false,
+    /** What the office is in the middle of, or that this cannot be told. */
+    operation: undefined as string | Error | undefined,
     /** What happens while the Engine is being asked. */
     duringPolicy: undefined as (() => void) | undefined,
     exits: 0,
@@ -43,6 +45,10 @@ function office(record: number[] = []) {
       state.duringPolicy?.();
       if (state.policy instanceof Error) throw state.policy;
       return state.policy;
+    },
+    operation: async () => {
+      if (state.operation instanceof Error) throw state.operation;
+      return state.operation;
     },
     load: () => state.record,
     save: (times) => {
@@ -296,5 +302,98 @@ describe('reading the restart policy of the office’s own container', () => {
     expect(await ownRestartPolicy(engine({}).run, 'office-host', MOUNTS)).toBeNull();
     expect(await ownRestartPolicy(engine({ [ID]: 'office-host|always\nextra' }).run, 'office-host', MOUNTS)).toBeNull();
     expect(await ownRestartPolicy(engine({}).run, 'not a name', '')).toBeNull();
+  });
+});
+
+describe('the office restarting itself because it reads none of its laptops', () => {
+  const REASON = 'the office reads none of its laptops although they should be running';
+  /** The laptop runtime is current; the supervisor asks on every look, as it does on every pass. */
+  const asking = (record: number[] = []) => {
+    const o = office(record);
+    o.state.stale = false;
+    const run = async (minutes: number, ask = true) => {
+      for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+        o.state.now += 30_000;
+        if (ask) o.restart.request(REASON);
+        await o.restart.tick();
+      }
+    };
+    return { ...o, run };
+  };
+
+  it('does so ten minutes after it was first asked, under every condition of any other restart', async () => {
+    const o = asking();
+    await o.run(9.5);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toMatch(/^the office to restart itself at .* UTC: the office reads none of its laptops/);
+    await o.run(1);
+    expect(o.state.exits).toBe(1);
+    expect(o.state.audits[0]).toMatchObject({ action: 'supervisor_restart_office', detail: { reason: REASON } });
+    expect(o.state.record).toHaveLength(1);
+  });
+
+  it('lets a request lapse that is not repeated', async () => {
+    const o = asking();
+    await o.run(5);
+    await o.run(30, false);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toBeUndefined();
+  });
+
+  it('says when this office never restarts itself, so that the supervisor does not wait for it', async () => {
+    const off = asking();
+    off.state.allowed = false;
+    await off.run(1);
+    expect(off.restart.request(REASON)).toBe('refused');
+    const fixed = asking();
+    fixed.state.policy = 'no';
+    expect(fixed.restart.request(REASON)).toBe('pending');
+    await fixed.run(12);
+    expect(fixed.state.exits).toBe(0);
+    expect(fixed.restart.request(REASON)).toBe('refused');
+  });
+
+  it('keeps the limits of any restart, and says when it last restarted', async () => {
+    const start = 100 * HOUR;
+    const o = asking([start - 20 * MINUTE]);
+    expect(o.restart.lastAt()).toBe(start - 20 * MINUTE);
+    expect(o.restart.request(REASON)).toBe('pending');
+    await o.run(39);
+    expect(o.state.exits).toBe(0);
+    await o.run(2);
+    expect(o.state.exits).toBe(1);
+    expect(asking().restart.lastAt()).toBeUndefined();
+  });
+});
+
+describe('the office never ending its process beside an operation of its own', () => {
+  it('waits for a plan move or a laptop operation to end, whatever asked for the restart, and says so', async () => {
+    for (const stale of [true, false]) {
+      const o = office();
+      o.state.stale = stale;
+      o.state.operation = 'a plan move that is open';
+      const run = async (minutes: number) => {
+        for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+          o.state.now += 30_000;
+          if (!stale) o.restart.request('the office reads none of its laptops');
+          await o.restart.tick();
+        }
+      };
+      await run(3 * 60);
+      expect([stale, o.state.exits]).toEqual([stale, 0]);
+      expect(o.restart.status()).toBe('the office to restart itself once a plan move that is open has ended');
+      expect(o.state.record).toEqual([]);
+      o.state.operation = undefined;
+      await run(1);
+      expect([stale, o.state.exits]).toEqual([stale, 1]);
+    }
+  });
+
+  it('does not end it when it cannot tell whether an operation is running', async () => {
+    const o = office();
+    o.state.operation = new Error('the list of moves could not be read');
+    await o.run(60);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toMatch(/once an operation it could not rule out has ended$/);
   });
 });

@@ -1074,12 +1074,47 @@ describe('EmployeeSupervisor: keeping approved limits in place', () => {
     expect(w.state.acts).toEqual([]);
   });
 
-  it('leaves a laptop the repair ladder is working on to the ladder', async () => {
+  it('checks a laptop the repair ladder is working on as well, and leaves the ladder its own step', async () => {
     const held = hold(person('a'), 'DOCKER_RESOURCE_LEAF_ACK_MISSING', ['observe', 'repair']);
     const w = world([held], { keepLimits: restored });
     await w.run(3);
-    expect(w.state.kept).toEqual([]);
+    expect(w.state.kept).toEqual(['30:a']);
     expect(w.state.acts[0]).toBe('resend-continuation:a');
+  });
+
+  it('checks the limits of an employee whatever their condition reads, as long as no move step is running', async () => {
+    // A lost terminal, a handoff that is still owed, a held move, a record of the retired runtime: in each the
+    // laptop may well be running, and none of them is "running normally".
+    const lost = person('a');
+    lost.glance = { ...lost.glance, session: { ...lost.glance.session, viewerHealth: 'disconnected' } };
+    const owing = person('b');
+    owing.move = { id: 'move-b', docker: true, phase: 'handoff-owed', busy: false, allowedActions: [] };
+    const heldBack = heldMove(person('c'), 'DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
+    const retired = person('d');
+    retired.move = { id: 'native', docker: false, phase: 'recovery-required', busy: false, error: 'x', allowedActions: ['settle'] };
+    const w = world([lost, owing, heldBack, retired], { keepLimits: unchanged });
+    w.state.respond = async () => ({ outcome: 'refused' });
+    await w.run(3);
+    expect(['a', 'b', 'c', 'd'].map((id) => w.report(id).condition)).toEqual([
+      'viewer-lost',
+      'move-held-retryable',
+      'move-held-retryable',
+      'move-held-dead-end',
+    ]);
+    expect(w.state.kept).toEqual(['30:a', '60:b', '90:c', '120:d']);
+    expect(w.report('b').limits).toMatchObject({ outcome: 'done', detail: 'unchanged' });
+  });
+
+  it('does not check the limits of a laptop while a step of a plan move is running, and does once it has come back', async () => {
+    const moving = heldMove(person('a'), 'x');
+    moving.move = { ...moving.move!, busy: true };
+    const w = world([moving], { keepLimits: unchanged });
+    await w.run(15);
+    expect(w.report('a').condition).toBe('move-in-progress');
+    expect(w.state.kept).toEqual([]);
+    moving.move = undefined;
+    await w.run(1);
+    expect(w.state.kept).toHaveLength(1);
   });
 
   it('reports a refusal once, and again only when it changes or ends', async () => {
@@ -1419,22 +1454,57 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       at.push([(w.state.now - 130 * MINUTE) / MINUTE, action]);
       return { outcome: 'refused' };
     };
-    expect(await quiet(w, 3)).toEqual([]);
-    // The new process continues the move itself at its first look, and closes nothing before it has watched that.
+    expect(await quiet(w, 14)).toEqual([]);
+    // The new process continues the move itself at its first look. The hour the old office had the move for does
+    // not count: nothing is closed before this process has watched the move for fifteen minutes.
     expect(at).toEqual([[0.5, 'continue-move']]);
-    expect(w.state.stored.get('a')!.attempts['continue-move']).toMatchObject({ count: 3, resumed: true });
+    expect(w.state.stored.get('a')!.attempts['continue-move']).toEqual({ count: 3, lastAt: 130.5 * MINUTE, resumed: true });
+    expect(w.report('a')).toMatchObject({ waitingUntil: 145.5 * MINUTE });
     await w.run(2);
     expect(at).toEqual([
       [0.5, 'continue-move'],
-      [3.5, 'abandon-move'],
+      [15.5, 'abandon-move'],
     ]);
+  });
 
-    // The office restarts once more with the move still held: nothing is given back a second time.
-    const again = world([stuck], { histories: new Map(w.state.stored) });
-    again.state.now = 140 * MINUTE;
-    await again.run(10);
-    expect(again.state.acts).not.toContain('continue-move:a');
-    expect(again.state.acts).toContain('abandon-move:a');
+  it('closes nothing after a second office restart in a round, and continues nothing either', async () => {
+    const stuck = heldMove(person('a'), 'The target application viewer is unavailable');
+    // Saved by an office process that had already been given its one continue back and has ended since.
+    const saved: SupervisorHistory = {
+      fingerprint: 'move:move-a:The target application viewer is unavailable',
+      since: 70 * MINUTE,
+      attempts: { 'continue-move': { count: 3, lastAt: 130 * MINUTE, resumed: true } },
+      rebuilds: [],
+    };
+    const w = world([stuck], { histories: new Map([['a', saved]]) });
+    w.state.now = 140 * MINUTE;
+    expect(await quiet(w, 60)).toEqual([]);
+    expect(w.state.acts).toEqual([]);
+    // It says what it waits for: the next round, six hours after the last attempt, continues the move first.
+    expect(w.report('a')).toMatchObject({ condition: 'move-held-dead-end', waitingUntil: 130 * MINUTE + 6 * 60 * MINUTE });
+    expect(w.report('a').waitingFor).toMatch(/the next round of repair steps, which continues the move once more/);
+  });
+
+  it('does not abandon at its first pass a move the old office kept for the owner', async () => {
+    // The move stopped at a sign-in screen two hours ago. The old office waited for the owner and continued nothing.
+    const stuck = heldMove(person('a'), SIGN_IN);
+    const saved: SupervisorHistory = { fingerprint: 'move:move-a:' + SIGN_IN, since: 10 * MINUTE, attempts: {}, rebuilds: [] };
+    const w = world([stuck], { histories: new Map([['a', saved]]) });
+    w.state.now = 130 * MINUTE;
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      at.push([(w.state.now - 130 * MINUTE) / MINUTE, action]);
+      if (action === 'abandon-move') stuck.move = undefined;
+      return { outcome: action === 'abandon-move' ? 'done' : 'refused' };
+    };
+    expect(await quiet(w, 20)).toEqual([]);
+    // Its own three continues first, then the fifteen minutes it has itself watched the move.
+    expect(at).toEqual([
+      [0.5, 'continue-move'],
+      [2.5, 'continue-move'],
+      [7.5, 'continue-move'],
+      [15.5, 'abandon-move'],
+    ]);
   });
 
   it('keeps the mark of a continue that was given back in its saved history', async () => {
@@ -1448,6 +1518,18 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     await new EmployeeSupervisorStore(file).save(new Map([['a', history]]));
     expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
     rmSync(join(file, '..'), { recursive: true, force: true });
+  });
+
+  it('repairs a laptop that is down although a held move of the retired runtime is on record', async () => {
+    const down = hold(person('a'), 'DOCKER_RESOURCE_HELPER_FAILED');
+    down.provider = 'absent';
+    down.move = { id: 'native', docker: false, phase: 'recovery-required', busy: false, error: 'x', allowedActions: ['settle'] };
+    const w = world([down]);
+    await w.run(5);
+    // The laptop is read and rebuilt on its own times. Nothing waits for the record's fifteen minutes.
+    expect(w.state.reads).toContain('laptop:a');
+    expect(w.state.acts).toEqual(['rebuild-laptop:a']);
+    expect(w.report('a').code).toBe('DOCKER_RESOURCE_HELPER_FAILED');
   });
 
   it('acts on nothing while a step of the move is running', async () => {

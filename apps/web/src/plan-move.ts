@@ -6,7 +6,7 @@ import {
 } from './docker-plan-disjoint-generation.js';
 import { dockerContinuationDigest } from './docker-employee-continuation.js';
 import type { DockerEmployeeContinuationRecord } from './docker-employee-continuation-data.js';
-import type { DockerPlanMoveJournalState } from './docker-plan-move-data.js';
+import { dockerPlanMoveHandoffDigest, type DockerPlanMoveJournalState } from './docker-plan-move-data.js';
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { assertResourceOperation, type ResourceOwnerBinding } from './resource-owner-authority.js';
@@ -90,6 +90,9 @@ export interface PlanMoveRecord {
   allowedActions?: readonly ('continue-original' | 'abandon')[];
   /** Public diagnostic only; never stored as native effect credit. */
   sourceViewRetirement?: PlanMoveSourceViewRetirement;
+  /** Public view DATA only, for a laptop move that has switched the employee to the new session: whether its
+   * handoff was typed there. `owed`: not typed. `unconfirmed`: typed, outcome unknown. `delivered`: confirmed. */
+  handoffState?: 'owed' | 'unconfirmed' | 'delivered';
   /** PRIVATE mutable native journal; never serialize through public views. */
   dockerReplacement?: DockerPlanMoveJournalState;
   dockerSettlementBudget?: { version: 1; purpose: 'docker-plan-settlement-budget-v1'; maxRecordBytes: number };
@@ -136,6 +139,21 @@ export interface PlanMoveOwnerAbandonment {
     sourceHolder?: string;
     helpers: { role: 'storage-holder' | 'leaf-helper' | 'identity-helper'; containerId: string }[];
   };
+}
+/** The handoff of a closed laptop move that switched its employee to the new session and never confirmed typing it
+ * there. DATA only: it types nothing and proves nothing about the session. */
+export interface PlanMoveOwedHandoff {
+  readonly moveId: string;
+  readonly employeeId: string;
+  /** The session the move switched the employee to. */
+  readonly sessionId: string;
+  /** The text the move would have typed, and the digest of the exact bytes. */
+  readonly text: string;
+  readonly digest: string;
+  /** The move had begun to type it and never confirmed it. It must not be typed again. */
+  readonly typed: boolean;
+  /** When the move was closed. */
+  readonly closedAt: number;
 }
 export interface PlanMoveSourceViewRetirement {
   state: 'pending' | 'completed' | 'unconfirmed';
@@ -409,8 +427,12 @@ export class PlanMoves {
       ...record
     } = source;
     delete record.sourceViewRetirement;
+    delete record.handoffState;
     if (source.dockerReplacement) {
       record.backend = 'docker';
+      const { companyPublication, handoff } = source.dockerReplacement;
+      if (companyPublication)
+        record.handoffState = handoff?.phase === 'submitted' ? 'delivered' : handoff ? 'unconfirmed' : 'owed';
       const retirement = this.sourceRetirement(source);
       if (retirement) record.sourceViewRetirement = retirement;
       const idle = !this.aborts.has(record.id) && !this.intents.has(record.id);
@@ -1063,6 +1085,30 @@ export class PlanMoves {
         ? [{ moveId: row.id, containers: structuredClone(row.dockerAbandonment.containers) }]
         : []
     );
+  }
+
+  /** The handoffs that closed laptop moves of one owner never confirmed typing, oldest first. A move counts once
+   * it has begun to switch its employee to the new session: from then on the employee may be on a session that was
+   * never told anything. Whether the employee is on that session, and whether the office has typed the handoff
+   * since, is the caller's to find out (`PlanMoveOwedHandoffs`). DATA only. */
+  async owedHandoffs(owner: string | undefined): Promise<readonly PlanMoveOwedHandoff[]> {
+    await this.init();
+    return [...this.records.values()].flatMap((row) => {
+      const state = row.dockerReplacement;
+      if (row.owner !== owner || row.phase !== 'failed' || !state?.companyPublication) return [];
+      if (state.handoff?.phase === 'submitted' || this.aborts.has(row.id) || this.intents.has(row.id)) return [];
+      return [
+        {
+          moveId: row.id,
+          employeeId: row.employeeId,
+          sessionId: state.seed.target.sessionId,
+          text: state.seed.handoff,
+          digest: dockerPlanMoveHandoffDigest(state.seed.handoff),
+          typed: state.handoff !== undefined,
+          closedAt: row.dockerAbandonment?.at ?? row.at,
+        },
+      ];
+    });
   }
 
   /** The candidate laptop that each abandoned Docker move of one employee had created, exactly as that move's

@@ -191,8 +191,11 @@ describe('the sign-in is in place and the agent still shows the sign-in screen',
     }
     expect(at({ idleSince: 9 * MINUTE }).next).toMatchObject({ action: null, waitingFor: "the agent's terminal to stay quiet a little longer" });
     expect(at({ idleSince: 8 * MINUTE }).next.action).toBe('rebuild-laptop');
-    // Work the pane says was left running is given thirty minutes from the first sight of the problem.
-    const since = recordSupervisorAttempt(seenAt(MINUTE), 'replace-sign-in', MINUTE, 'done', 'sign-in placed');
+    // Work the pane says was left running is given thirty minutes from when the office first saw it.
+    const since = {
+      ...recordSupervisorAttempt(seenAt(MINUTE), 'replace-sign-in', MINUTE, 'done', 'sign-in placed'),
+      backgroundSince: MINUTE,
+    };
     const left = (now: number) => assessEmployee(atSignIn({ session: { ...parkedSession, background: true } }), since, REPAIR, now);
     expect(left(10 * MINUTE).next).toMatchObject({ action: null, waitingFor: 'the work the agent left running to finish' });
     expect(left(30 * MINUTE).next.action).toBeNull();

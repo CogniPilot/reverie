@@ -12,9 +12,13 @@
  * for a published laptop:
  *
  * - the caller's authority, at every step;
- * - the record is finished (`provider-issued` or `ready`), is no plan move's private record, and is still exactly
- *   the record this call started from; the employee, session, generation and launch recipe still match it, and the
- *   owner's approved policy is still the record's policy;
+ * - the record is finished (`provider-issued` or `ready`) and is still exactly the record this call started from;
+ *   the employee, session, generation and launch recipe still match it, and the owner's approved policy is still
+ *   the record's policy;
+ * - a record that a plan move made is no longer that move's: no plan move of the employee is open. Such a record
+ *   stays a plan-move record for good, so excluding it by its kind left every employee who was ever moved without
+ *   this repair. What the exclusion protects is the move: while one is open the laptop is left to it, and when
+ *   that cannot be told the laptop is left alone as well;
  * - no set-up step, rebuild or other repair of this employee is in flight;
  * - the laptop was built from the image the record names;
  * - its storage is ready and the shared pool shows the record's approved pool limits.
@@ -52,6 +56,11 @@ export interface DockerLaptopLimitUpkeepDeps {
   };
   /** A set-up step or a rebuild of this employee is running. Denial DATA only. */
   busy(employeeId: string): boolean;
+  /**
+   * The plan moves of this employee that are not finished. Asked only for a record that a plan move made. Absent
+   * where the office cannot say, and then such a record is never repaired here.
+   */
+  openMoves?(employeeId: string, owner: string | undefined): Promise<readonly { readonly id: string }[]>;
 }
 
 export interface DockerLaptopLimitUpkeepResult {
@@ -76,9 +85,19 @@ export class DockerLaptopLimitUpkeep {
   /** The finished laptop record a repair acts for, when the employee has one. No Engine call. */
   finished(employeeId: string): DockerEmployeeContinuationRecord | undefined {
     const row = this.deps.store.record(employeeId);
-    return row && row.version !== 3 && ['provider-issued', 'ready'].includes(row.phase) && row.destination
-      ? row
+    return row && ['provider-issued', 'ready'].includes(row.phase) && row.destination ? row : undefined;
+  }
+
+  /**
+   * A record that a plan move made belongs to that move while a move of the employee is open: its steps and its
+   * checks own the laptop. Refuses then, and when the open moves cannot be told.
+   */
+  async #leftToMove(row: DockerEmployeeContinuationRecord): Promise<void> {
+    if (row.version !== 3) return;
+    const open = this.deps.openMoves
+      ? await this.deps.openMoves(row.employeeId, row.owner).catch(() => undefined)
       : undefined;
+    if (!open || open.length) refuse('DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED');
   }
 
   /**
@@ -96,6 +115,8 @@ export class DockerLaptopLimitUpkeep {
     if (!row || row.request.operationId !== operationId || row.owner !== authority.owner)
       refuse('DOCKER_CONTINUATION_UNKNOWN_OPERATION');
     if (!restore) refuse('DOCKER_RESOURCE_REPAIR_UNAVAILABLE');
+    await this.#leftToMove(row);
+    authority.require();
     const subject = this.deps.store.existingSubject(employeeId, row);
     if (
       !subject ||
@@ -125,8 +146,10 @@ export class DockerLaptopLimitUpkeep {
     this.#flights.add(employeeId);
     try {
       await this.#qualify(row, current);
-      // Nothing else of this employee took flight while the laptop was being read.
+      // Nothing else of this employee took flight while the laptop was being read, and no plan move opened.
       if (this.deps.busy(employeeId)) refuse('DOCKER_CONTINUATION_BUSY');
+      await this.#leftToMove(row);
+      current();
       const limits = await restore(row, current);
       current();
       return { operationId, limits };

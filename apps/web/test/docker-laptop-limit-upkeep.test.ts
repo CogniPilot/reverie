@@ -131,12 +131,77 @@ describe('keeping the approved limits of a finished laptop', () => {
     expect(w.upkeep.flightActive(EMPLOYEE)).toBe(false);
   });
 
-  it('acts only for a finished record that is no plan move’s private record', async () => {
+  describe('for a laptop that a plan move made', () => {
+    const MOVE = 'move-1';
+    /** The record of an employee who was moved to another plan: it stays a plan-move record for good. */
+    const moved = () => record({ version: 3, planReplacement: { moveId: MOVE } });
+    const withMoves = (open: readonly { id: string }[] | Error | undefined) => {
+      const w = world();
+      w.state.record = moved();
+      const asked: string[] = [];
+      const upkeep = new DockerLaptopLimitUpkeep({
+        ...w.deps,
+        ...(open === undefined
+          ? {}
+          : {
+              openMoves: async (employeeId: string) => {
+                asked.push(employeeId);
+                if (open instanceof Error) throw open;
+                return open;
+              },
+            }),
+      });
+      const refused = () =>
+        upkeep.restore(EMPLOYEE, OPERATION, { owner: undefined, require: () => {}, requireOffice: () => {} }).then(
+          (result) => result.limits as string,
+          (error: unknown) => (error instanceof DockerEmployeeContinuationError ? error.code : String(error))
+        );
+      return { w, upkeep, refused, asked };
+    };
+
+    it('keeps the limits like any other once the move is finished', async () => {
+      const o = withMoves([]);
+      expect(o.upkeep.finished(EMPLOYEE)).toMatchObject({ version: 3, phase: 'ready' });
+      expect(await o.refused()).toBe('restored');
+      expect(o.w.state.calls).toEqual(['image', 'storage', 'pool', 'restore']);
+      expect(o.asked.length).toBeGreaterThan(0);
+    });
+
+    it.each<[string, readonly { id: string }[] | Error | undefined]>([
+      ['the move that made it is still open', [{ id: MOVE }]],
+      ['another move of the employee is open', [{ id: 'move-2' }]],
+      ['the moves cannot be read', new Error('journal')],
+      ['the office cannot say which moves are open', undefined],
+    ])('leaves the laptop to the move while %s', async (_title, open) => {
+      const o = withMoves(open);
+      expect(await o.refused()).toBe('DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED');
+      expect(o.w.state.calls).toEqual([]);
+    });
+
+    it('writes nothing when a move opens while the laptop is being read', async () => {
+      const open: { id: string }[] = [];
+      const o = withMoves(open);
+      o.w.state.during.pool = () => open.push({ id: 'move-2' });
+      expect(await o.refused()).toBe('DOCKER_PLAN_REPLACEMENT_PRIVATE_OWNER_REQUIRED');
+      expect(o.w.state.calls).toEqual(['image', 'storage', 'pool']);
+    });
+
+    it('asks nothing about moves for a laptop no plan move made', async () => {
+      const w = world();
+      const asked: string[] = [];
+      const upkeep = new DockerLaptopLimitUpkeep({ ...w.deps, openMoves: async (id) => (asked.push(id), [{ id: MOVE }]) });
+      const result = await upkeep.restore(EMPLOYEE, OPERATION, { owner: undefined, require: () => {}, requireOffice: () => {} });
+      expect(result.limits).toBe('restored');
+      expect(asked).toEqual([]);
+    });
+  });
+
+  it('acts only for a finished record', async () => {
     for (const patch of [
       { phase: 'resources-issued' },
       { phase: 'pool-issued' },
-      { version: 3 },
       { destination: undefined },
+      { version: 3, phase: 'resources-issued' },
     ]) {
       const w = world();
       w.state.record = record(patch);

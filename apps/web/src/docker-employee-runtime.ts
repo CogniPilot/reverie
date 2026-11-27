@@ -14,7 +14,8 @@ import {
   type DockerAbsentReprovisionSeatAccounts,
 } from './docker-absent-reprovision.js';
 import { DockerPlanAccountSnapshot } from './docker-plan-account.js';
-import { DockerSupervisorLaptops } from './docker-employee-supervisor-laptops.js';
+import { DockerSupervisorLaptops, type DockerSupervisorLaptopDeps } from './docker-employee-supervisor-laptops.js';
+import { ownLaptop } from './docker-standing-defaults.js';
 import { DockerLaptopSignInHolder } from './docker-signin-holder.js';
 import { laptopSignInHolderId } from './plan-signin-reconciler.js';
 import { clampEnvOverridesForOwner } from './session-env-clamp.js';
@@ -314,6 +315,13 @@ export class DockerEmployeeRuntime {
     }
     return this.#key.sameOnDisk();
   }
+  /** A set-up step, a limits repair or a rebuild of this employee's laptop is running in this office. Denial DATA. */
+  laptopOperationInFlight(employeeId: string): boolean {
+    const a = this.#attached;
+    return (
+      !!a && (a.service.flightActive(employeeId) || a.limits.flightActive(employeeId) || a.absent.flightActive(employeeId))
+    );
+  }
   /** One read-only Engine command for the office's own use, where no laptop is involved. */
   engineRead(args: readonly string[]): Promise<string> {
     const attached = this.#attached;
@@ -516,6 +524,13 @@ export class DockerEmployeeRuntime {
       store,
       engine,
       busy: (employeeId): boolean => service.flightActive(employeeId) || absent.flightActive(employeeId),
+      // Bound later, by the server's composition. Until then the office cannot say, and a plan move's record is
+      // left alone.
+      openMoves: async (employeeId, owner) => {
+        const moves = this.#absentPlanMoves;
+        if (!moves) throw Error('The plan moves are not bound yet');
+        return moves.openMoves(employeeId, owner);
+      },
     });
     const absent: DockerAbsentReprovision = new DockerAbsentReprovision(
       company,
@@ -679,7 +694,9 @@ export class DockerEmployeeRuntime {
   }
   /** Server composition only: the office supervisor's laptop reads and steps. Each one is a call to the same
    * service the owner's route for that step calls, under the authority `DockerSupervisorLaptops` documents. */
-  supervisorLaptops(): DockerSupervisorLaptops | undefined {
+  supervisorLaptops(
+    office: Pick<DockerSupervisorLaptopDeps, 'holdInput'> = {}
+  ): DockerSupervisorLaptops | undefined {
     const a = this.#attached;
     if (!a) return undefined;
     // Once, at office start: what the office can check of a stopped laptop's stored home with the recovery helper
@@ -693,6 +710,9 @@ export class DockerEmployeeRuntime {
         .catch(() => said('unknown'));
     else said('none');
     return new DockerSupervisorLaptops({
+      ...office,
+      inspectLaptop: async (containerId) =>
+        ownLaptop((JSON.parse(await a.command.run(['container', 'inspect', containerId])) as unknown[])[0]),
       company: a.company,
       store: a.store,
       engine: a.engine,
