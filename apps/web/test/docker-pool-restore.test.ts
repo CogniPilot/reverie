@@ -589,6 +589,54 @@ describe('a running laptop after a reload of the service manager', () => {
     await expect(f.controller.repairLeaf(f.row(), f.current)).resolves.toBe('restored');
   });
 
+  it.each([
+    ['an earlier start of the same laptop', '--worker-start', '1'],
+    ['an earlier start of the pool anchor', '--anchor-start', '2'],
+    ['another operation that wrote other limits', '--memory-max', String(policy.memoryMaxBytes - 4096)],
+    // A writer of another laptop names that laptop's leaf everywhere: in its arguments and in what it mounts.
+    ['another laptop', '--worker-id', 'f'.repeat(64)],
+  ])('never takes the acknowledgement of a writer for %s as its own, and writes the leaf again', async (_title, flag, value) => {
+    const { f, original } = await reloaded();
+    if (!('containerId' in original)) throw Error('Completed leaf helper required');
+    // The set-up writer is gone. Left beside the laptop: a finished writer that differs in exactly one fact.
+    const before = f.containers.get(original.containerId)! as Record<string, unknown>;
+    const raw = (
+      flag === '--worker-id' ? JSON.parse(JSON.stringify(before).replaceAll(workerId, value)) : structuredClone(before)
+    ) as Record<string, unknown>;
+    const config = raw.Config as { Cmd: string[] };
+    config.Cmd[config.Cmd.indexOf(flag) + 1] = value;
+    const id = 'e'.repeat(64);
+    raw.Id = id;
+    f.containers.set(id, raw);
+    f.logs.set(id, f.logs.get(original.containerId)!);
+    f.containers.delete(original.containerId);
+    f.logs.delete(original.containerId);
+    await expect(f.controller.read(f.row())).rejects.toThrow();
+    const creates = f.creates.length;
+    await expect(f.controller.repairLeaf(f.row(), f.current)).resolves.toBe('restored');
+    expect(f.creates.length).toBe(creates + 1);
+    await expect(f.controller.read(f.row())).resolves.toEqual(policy);
+  });
+
+  it('writes nothing beside a writer with the labels of this box whose arguments name another box, and takes nothing from it', async () => {
+    const { f, original } = await reloaded();
+    if (!('containerId' in original)) throw Error('Completed leaf helper required');
+    const raw = structuredClone(f.containers.get(original.containerId)!) as Record<string, unknown>;
+    const config = raw.Config as { Cmd: string[] };
+    config.Cmd[config.Cmd.indexOf('--box-id') + 1] = 'c'.repeat(64);
+    const id = 'e'.repeat(64);
+    raw.Id = id;
+    f.containers.set(id, raw);
+    f.logs.set(id, f.logs.get(original.containerId)!);
+    f.containers.delete(original.containerId);
+    f.logs.delete(original.containerId);
+    // Such a container is no writer this office made: what the leaf holds is unknown, and nothing is written.
+    const creates = f.creates.length;
+    await expect(f.controller.read(f.row())).rejects.toThrow();
+    await expect(f.controller.repairLeaf(f.row(), f.current)).rejects.toThrow('DOCKER_RESOURCE_LEAF_WRITER_UNCONFIRMED');
+    expect(f.creates.length).toBe(creates);
+  });
+
   it('never rewrites a leaf with the set-up writer, which does not write the swap limit', async () => {
     const { f, commands } = await reloaded();
     await f.controller.repairLeaf(f.row(), f.current);
