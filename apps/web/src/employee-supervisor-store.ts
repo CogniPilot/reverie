@@ -33,7 +33,14 @@ const History = z
     watchSince: time.optional(),
     attempts: z.partialRecord(
       action,
-      z.object({ count: z.number().int().min(0).max(1000), lastAt: time, resumed: z.literal(true).optional() }).strict()
+      z
+        .object({
+          count: z.number().int().min(0).max(1000),
+          lastAt: time,
+          resumed: z.literal(true).optional(),
+          earlier: z.literal(true).optional(),
+        })
+        .strict()
     ),
     rebuilds: z.array(time).max(8),
     lastAction: z

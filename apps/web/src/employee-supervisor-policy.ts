@@ -508,6 +508,12 @@ export interface SupervisorAttempt {
   readonly lastAt: number;
   /** One attempt of this rung was given back at an office start in this round; see `resumeSupervisorHistory`. */
   readonly resumed?: true;
+  /**
+   * Every attempt counted here was made by an earlier office process, or before the office last saw the shared pool
+   * down: none has been made, and come back, since. Set at an office start and when the pool is seen back under a
+   * held plan move; ended by the first attempt after that which comes back.
+   */
+  readonly earlier?: true;
 }
 
 /** What the supervisor remembers about one employee. Persisted, so an office restart keeps the ladder. */
@@ -847,6 +853,11 @@ const ACTIVE_MOVE_PHASES = new Set(['waiting', 'creating', 'starting', 'checking
  * the problem was first seen. That covers the repair of the pool's limits. After it the move is abandoned: the
  * employee is not kept out of work for a move that cannot finish.
  *
+ * Every time here is counted from `watchedSince`: the unbroken time for which THIS office process has seen the
+ * move held, its own continues included. Time in which the office was not running does not count, and neither does
+ * time in which it saw the pool down, which is a problem of its own (`classifyMove`). So a move is never closed at
+ * a new process's first look because its time ran out while nothing was looking, or while nothing could work.
+ *
  * Only a continue can tell whether such a cause is gone: the laptop of an employee who is being moved is not read,
  * and the office's look at the pool says whether its anchor runs, not whether its limits are confirmed again. So
  * the three continues of a round are spread as probes over that time instead of being spent in its first minutes:
@@ -918,8 +929,14 @@ function classifyMove(observed: SupervisorObservation): SupervisorClassification
   const kind = classifyMoveError(move.error);
   return classified('move-held-retryable', `${name}'s plan move stopped part-way: ${error}`, {
     code: 'move-' + kind,
-    // A cause outside the move is one problem for as long as it lasts, whichever code names it at the moment.
-    fingerprint: OUTSIDE_MOVE_CAUSES.includes(kind) ? `move:${move.id}:outside` : fingerprint,
+    // While the office sees the pool down, that is the problem, whatever the move's own error says: the times a
+    // move is given are not used up by an outage, and start again when the pool is back. Otherwise a cause outside
+    // the move is one problem for as long as it lasts, whichever code names it at the moment.
+    fingerprint: poolDown(observed)
+      ? `move:${move.id}:pool-down`
+      : OUTSIDE_MOVE_CAUSES.includes(kind)
+        ? `move:${move.id}:outside`
+        : fingerprint,
   });
 }
 
@@ -931,16 +948,8 @@ function moveCauseOutside(observed: SupervisorObservation): string | undefined {
   return undefined;
 }
 
-function moveCauseOverdue(history: SupervisorHistory, now: number): boolean {
-  return history.since > 0 && now - history.since >= SUPERVISOR_MOVE_POLICY.outsideCauseMs;
-}
-
-/** The wait for a cause outside the move. It ends by itself when the move is closed for it after all. */
-function outsideCauseWait(waitingFor: string, history: SupervisorHistory): Gate {
-  return history.since > 0
-    ? { kind: 'wait', waitingFor, at: history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs }
-    : { kind: 'wait', waitingFor };
-}
+/** What a move that is held for its own reasons waits for before it is closed. */
+const MOVE_WATCH_WAIT = "the time a held move is given, under this office's eyes, before it is closed";
 
 /**
  * When the next continue of a move held by a cause outside itself may run: the first at once, the last of the
@@ -948,10 +957,10 @@ function outsideCauseWait(waitingFor: string, history: SupervisorHistory): Gate 
  * the last one is what the abandon is judged by (`abandonMoveGate`).
  */
 function outsideProbeAt(history: SupervisorHistory, policy: SupervisorPolicy): number {
-  const count = history.attempts['continue-move']?.count ?? 0;
-  if (count >= policy.ladder['continue-move'].maxAttempts - 1)
-    return history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs;
-  return count === 0 ? history.since : history.since + SUPERVISOR_MOVE_POLICY.outsideProbeMs;
+  const count = history.attempts['continue-move']?.count ?? 0,
+    watched = watchedSince(history);
+  if (count >= policy.ladder['continue-move'].maxAttempts - 1) return watched + SUPERVISOR_MOVE_POLICY.outsideCauseMs;
+  return count === 0 ? watched : watched + SUPERVISOR_MOVE_POLICY.outsideProbeMs;
 }
 
 /**
@@ -970,19 +979,19 @@ function continueMoveGate(
   // spent against that, and the wait has no end of its own (see `abandonMoveGate`).
   if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
   const outside = moveCauseOutside(observed);
-  if (!outside || history.since <= 0) return { kind: 'ok' };
+  if (!outside) return { kind: 'ok' };
   const at = outsideProbeAt(history, policy);
   return now < at ? { kind: 'wait', waitingFor: outside, at } : { kind: 'ok' };
 }
 
 /**
- * A continue of this round was made after the wait for the outside cause was over. The ladder reaches the abandon
- * only once that continue's outcome has been watched, so the move being held now says that it found the cause
- * still there.
+ * This office process has itself continued the move, and that continue came back. For a cause outside the move it
+ * must also have been made once the wait for that cause was over. The ladder reaches the abandon only when the
+ * outcome of the last continue has been watched, so the move being held now says what that continue found.
  */
-function probedAfterWait(history: SupervisorHistory): boolean {
+function continuedHere(history: SupervisorHistory, after: number): boolean {
   const tried = history.attempts['continue-move'];
-  return !!tried?.count && tried.lastAt >= history.since + SUPERVISOR_MOVE_POLICY.outsideCauseMs;
+  return !!tried?.count && !tried.earlier && tried.lastAt >= after;
 }
 
 /**
@@ -990,11 +999,18 @@ function probedAfterWait(history: SupervisorHistory): boolean {
  * whether, only when. What the record offers is not asked here: the service that closes the move decides that
  * itself and refuses in its own words, and a refusal spends one of the rung's few attempts.
  *
- * A move whose cause is outside itself is given `SUPERVISOR_MOVE_POLICY.outsideCauseMs` first, and is abandoned
- * only after a continue made once that time was over found the cause still there. Where this round's continues
- * were used up before that, by an earlier error of the same move, nothing is abandoned in this round: the next
- * round continues the move again first. A move that offers no continue cannot be probed and is abandoned when the
- * time is over.
+ * Three things must hold, and each is about what THIS office process has seen and done:
+ *
+ * - It has watched the move held, without a break, for the rung's fifteen minutes, or for
+ *   `SUPERVISOR_MOVE_POLICY.outsideCauseMs` when the cause is outside the move (`watchedSince`). Time before the
+ *   office started and time in which it saw the pool down do not count.
+ * - It has continued the move itself and that continue came back (`continuedHere`). The continues an earlier
+ *   process made say nothing about what a restart may have put right. For a cause outside the move the continue
+ *   must have been made after the wait was over.
+ * - The pool is not seen down.
+ *
+ * Where this round has no continue left to make, nothing is closed in this round: the next round continues the move
+ * first. A move that offers no continue cannot be continued and is closed when the time is over.
  */
 function abandonMoveGate(
   observed: SupervisorObservation,
@@ -1004,16 +1020,17 @@ function abandonMoveGate(
 ): Gate {
   const move = observed.move;
   if (!move) return { kind: 'skip' };
-  if (!move.docker) return { kind: 'ok' };
   // While the office's own look says the pool is down, as after a host restart, a move is not closed: nothing was
   // tried for it with a pool that works, and closing it would not bring the employee back any sooner, because no
-  // laptop can be rebuilt or started either. Once the pool is back the move is continued as often as any other,
-  // and closed after that if it is still held.
-  if (poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
-  const outside = moveCauseOutside(observed);
-  if (!outside) return { kind: 'ok' };
-  if (!moveCauseOverdue(history, now)) return outsideCauseWait(outside, history);
-  if (!move.allowedActions.includes('continue-original') || probedAfterWait(history)) return { kind: 'ok' };
+  // laptop can be rebuilt or started either. The outage is a problem of its own (`classifyMove`), so the move's
+  // times start again once the pool is back.
+  if (move.docker && poolDown(observed)) return { kind: 'wait', waitingFor: POOL_WAIT };
+  const outside = move.docker ? moveCauseOutside(observed) : undefined,
+    wait = outside ? SUPERVISOR_MOVE_POLICY.outsideCauseMs : policy.ladder['abandon-move'].dwellMs,
+    over = watchedSince(history) + wait;
+  if (now < over) return { kind: 'wait', waitingFor: outside ?? MOVE_WATCH_WAIT, at: over };
+  if (!move.docker || !move.allowedActions.includes('continue-original')) return { kind: 'ok' };
+  if (continuedHere(history, outside ? over : 0)) return { kind: 'ok' };
   const again = ladderRestartAt(history, policy);
   return {
     kind: 'wait',
@@ -2005,6 +2022,11 @@ export function rollSupervisorHistory(
       since: history.since,
       transitSince: running ? history.transitSince : now,
       transitOf,
+      // A held plan move that is being continued is still that move being watched: its own flight does not break
+      // the run. Every other problem's run ends here, as it always did.
+      ...(history.watchSince !== undefined && seen.condition === 'move-in-progress' && ofMove(history.fingerprint)
+        ? { watchSince: history.watchSince }
+        : {}),
       ...kept,
     };
   }
@@ -2014,7 +2036,32 @@ export function rollSupervisorHistory(
     since: same ? history.since : now,
     watchSince: same ? (history.watchSince ?? now) : now,
     ...kept,
+    attempts: moveAttemptsAfter(history.fingerprint, seen.fingerprint, attempts),
   };
+}
+
+/**
+ * The attempts of the plan move steps, as the next problem finds them.
+ *
+ * When the office has just seen the pool come back under a held move, every continue counted for that move was
+ * made before the pool worked again. They are marked like the continues of an earlier office process, so the move
+ * is closed only after a continue made with a pool that works has come back (`abandonMoveGate`).
+ */
+function moveAttemptsAfter(
+  before: string,
+  seen: string,
+  attempts: SupervisorHistory['attempts']
+): SupervisorHistory['attempts'] {
+  const tried = attempts['continue-move'],
+    move = ofMove(before);
+  if (!tried || tried.earlier || move === undefined || move !== ofMove(seen)) return attempts;
+  if (before !== `move:${move}:pool-down` || seen === before) return attempts;
+  return { ...attempts, 'continue-move': { ...tried, earlier: true } };
+}
+
+/** The plan move a problem's detail names, when the problem is a held plan move. */
+function ofMove(fingerprint: string): string | undefined {
+  return fingerprint.startsWith('move:') ? fingerprint.split(':')[1] : undefined;
 }
 
 /**
@@ -2057,7 +2104,17 @@ export function resumeSupervisorHistory(
     healthySince: _healthySince,
     ...kept
   } = history;
-  return continueGivenBack(kept, policy);
+  return continuesOfEarlierProcess(continueGivenBack(kept, policy));
+}
+
+/**
+ * The continues counted for a held plan move were made by the office process that has just ended. The new process
+ * may close the move only after a continue of its own has come back (`abandonMoveGate`), so they are marked.
+ */
+function continuesOfEarlierProcess(history: SupervisorHistory): SupervisorHistory {
+  const tried = history.attempts['continue-move'];
+  if (!ofMove(history.fingerprint) || !tried || tried.earlier) return history;
+  return { ...history, attempts: { ...history.attempts, 'continue-move': { ...tried, earlier: true } } };
 }
 
 /**
@@ -2068,14 +2125,14 @@ export function resumeSupervisorHistory(
  * a restart puts right some of what stops a move: it attaches every terminal again and reads the laptop
  * configuration afresh. So the new process continues the move once itself, watches that, and only then may close
  * it. It is one attempt, given back at most once in a round (`resumed`, which ends with the round's counts), so an
- * office that keeps restarting cannot continue a move for ever: from its second start on, the move is closed as it
- * was before. A continue repeats no paid step, whoever asks for it.
+ * office that keeps restarting cannot continue a move for ever. From its second start in a round on, nothing is
+ * given back and nothing is closed either: the move waits for the next round, which continues it first. A continue
+ * repeats no paid step, whoever asks for it.
  */
 function continueGivenBack(history: SupervisorHistory, policy: SupervisorPolicy): SupervisorHistory {
   const tried = history.attempts['continue-move'],
     max = policy.ladder['continue-move'].maxAttempts;
-  if (!history.fingerprint.startsWith('move:') || !tried || tried.resumed || tried.count < max || max < 1)
-    return history;
+  if (!ofMove(history.fingerprint) || !tried || tried.resumed || tried.count < max || max < 1) return history;
   return {
     ...history,
     attempts: { ...history.attempts, 'continue-move': { count: max - 1, lastAt: tried.lastAt, resumed: true } },
@@ -2112,12 +2169,16 @@ export function settleSupervisorAttempt(
   const last = history.lastAction;
   if (!last || last.outcome !== 'issued') return history;
   const spent = history.attempts[last.action] ?? { count: 1, lastAt: last.at };
+  // An attempt of this office process came back with an answer: the count is no longer only an earlier one's.
+  const { earlier: _earlier, ...here } = spent;
   return {
     ...history,
     attempts:
       outcome === 'busy'
         ? { ...history.attempts, [last.action]: { ...spent, count: Math.max(0, spent.count - 1) } }
-        : history.attempts,
+        : spent.earlier
+          ? { ...history.attempts, [last.action]: here }
+          : history.attempts,
     rebuilds:
       last.action === 'rebuild-laptop' && outcome === 'done' && !last.uncounted
         ? [...history.rebuilds, last.at].slice(-8)

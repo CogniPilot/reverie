@@ -471,7 +471,7 @@ record offers. No sentence about a held move asks for a person.
 | What the move shows | What the office does | When |
 | --- | --- | --- |
 | Any error, and the record offers `continue-original` | Continues the original | 1, 3 and 8 minutes after the problem was first seen |
-| Still held on the same error after that | Abandons the move | 15 minutes after that error was first seen, and once more 5 minutes later if the first attempt was refused |
+| Still held on the same error after that | Abandons the move | Once the running office has watched it held on that error for 15 minutes, and once more 5 minutes later if the first attempt was refused |
 | An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
 | A decision screen in the new session | The same: three continues, then abandon | The same |
 | The sign-in screen of the new session | The same: three continues, then abandon. Nothing waits for the plan to be signed in (below) | The same |
@@ -500,7 +500,8 @@ neither continued nor closed, however long the recovery takes
 ([after a host restart](#after-a-host-restart)). Nothing was tried for it with
 a pool that works, and no laptop could be rebuilt or started in its place
 either. No probe is spent against a pool that is known to be down; once it is
-back the move gets its continues and then the abandon. A move whose error is a
+back the move's time starts again, and it is closed only after a continue made
+with the pool back has come back (below). A move whose error is a
 stopped storage holder (`DOCKER_CONTINUATION_STORAGE_UNCONFIRMED`) is a step of
 the move itself: no other repair starts a holder again, so it is continued
 three times and then closed after the usual fifteen minutes, and the laptop is
@@ -527,16 +528,34 @@ because the service refused to close it, is not left there: like every path,
 its round starts again six hours after its last attempt, with the three
 continues first and then the abandon.
 
-After an office restart the times above still count from when the move's error
-was first seen, so a move whose three continues were used before the restart
-would be due for the abandon at the new process's first look. A restart puts
-right some of what stops a move, because every terminal is attached again and
-the laptop configuration is read afresh. The new process is therefore given
-one of those continues back: it continues the move once itself, watches the
-outcome for the usual three minutes, and only then may close it. This happens
-once in a round. An office that restarts again with the move still held gets
-nothing more and closes the move as before, so repeated restarts cannot
-continue a move for ever. A continue repeats no paid step, whoever asks for it.
+**What counts towards closing a move.** Every time in this section that ends
+in a move being closed is measured from what the running office process has
+itself seen: the unbroken time for which it has watched the move held, its own
+continues included. Three things do not count.
+
+- Time before the office started. A move that was held for hours under an
+  earlier office process, or that an earlier version of the office kept for
+  the owner, starts its fifteen (or thirty) minutes again at the new process's
+  first look. It is never closed at that first look.
+- Time in which the office saw the shared pool down. An outage is a problem
+  of its own, so it does not use the time up, and the time starts again when
+  the pool is back.
+- Continues that an earlier office process made, or that were made before the
+  pool came back. A move that offers a continue is closed only after the
+  running process has continued it itself, with a pool that works, and that
+  continue has come back. A continue that only found the move busy does not
+  count.
+
+A restart puts right some of what stops a move, because every terminal is
+attached again and the laptop configuration is read afresh. Where the earlier
+process had used all three continues, the new one is therefore given one of
+them back, once in a round, and continues the move at its first look. An
+office that restarts again in the same round gets nothing more, so repeated
+restarts cannot continue a move for ever. It closes nothing either: it has no
+continue of its own to judge by, so the move waits for the next round, six
+hours after its last attempt, which continues it first. The same holds for a
+move whose continues were all used before a pool outage. A continue repeats
+no paid step, whoever asks for it.
 
 Continuing uses `supervisorEnabled`; abandoning and closing use
 `supervisorAutoRepair`. Each step is one audit entry

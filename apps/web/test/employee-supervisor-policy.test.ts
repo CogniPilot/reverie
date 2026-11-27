@@ -487,7 +487,9 @@ describe('employee supervisor: ladder', () => {
       const settling = assessEmployee(composer, since(0, fp, { attempts }), ON, 10 * MINUTE);
       expect(settling).toMatchObject({ condition: 'move-held-retryable', next: { action: null } });
       const early = assessEmployee(composer, since(0, fp, { attempts }), ON, 12 * MINUTE);
-      expect(early).toMatchObject({ condition: 'move-held-dead-end', next: { action: 'abandon-move', at: 15 * MINUTE } });
+      expect(early).toMatchObject({ condition: 'move-held-dead-end', next: { action: null, at: 15 * MINUTE } });
+      const due = assessEmployee(composer, since(0, fp, { attempts }), ON, 15 * MINUTE);
+      expect(due).toMatchObject({ condition: 'move-held-dead-end', next: { action: 'abandon-move' } });
     });
     it('restarts the fifteen minutes when the error changes', () => {
       const history = rollSupervisorHistory(since(0, 'move:move-1:something else'), classifyEmployee(composer), 14 * MINUTE);
@@ -1744,7 +1746,10 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       const outside = move(POOL);
       const fingerprint = classifyEmployee(outside).fingerprint;
       // All three continues of this round were spent on an earlier error of the move, before this cause was seen.
-      const spent = since(START + 10 * MINUTE, fingerprint, { attempts: tried('continue-move', 3, START + 8 * MINUTE) });
+      const spent = since(START + 10 * MINUTE, fingerprint, {
+        watchSince: START + 10 * MINUTE,
+        attempts: tried('continue-move', 3, START + 8 * MINUTE),
+      });
       const restart = START + 8 * MINUTE + SUPERVISOR_POLICY.ladderRestartMs;
       for (const minute of [20, 40, 45, 120]) {
         const result = assessEmployee(outside, spent, ON, START + minute * MINUTE);
@@ -1918,6 +1923,8 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
   });
 
   describe('after an office restart', () => {
+    const NEXT_ROUND = 'the next round of repair steps, which continues the move once more before it may be closed';
+    const WATCHED = "the time a held move is given, under this office's eyes, before it is closed";
     const stuck = move('The target application viewer is unavailable');
     const fingerprint = classifyEmployee(stuck).fingerprint;
     /** Saved by the earlier process: three continues, the last one eight minutes after the move was first held. */
@@ -1928,54 +1935,104 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     });
     /** The new office process takes its first look an hour after the move was first held. */
     const up = START + 60 * MINUTE;
+    /** What the new process holds after that first look. */
+    const look = (history: SupervisorHistory, seen: SupervisorObservation = stuck, at = up) =>
+      rollSupervisorHistory(resumeSupervisorHistory(history), classifyEmployee(seen), at);
+    const next = (seen: SupervisorObservation, history: SupervisorHistory, at: number) =>
+      assessEmployee(seen, history, ON, at).next;
 
-    it('gives the new process one continue of its own before the move may be abandoned', () => {
-      // Without that, the move would be closed at the first look: its fifteen minutes passed while the office was down.
-      const unresumed = rollSupervisorHistory(saved, classifyEmployee(stuck), up);
-      expect(assessEmployee(stuck, unresumed, ON, up).next).toMatchObject({ action: 'abandon-move' });
-
-      const resumed = resumeSupervisorHistory(saved);
-      expect(resumed.attempts).toEqual({ 'continue-move': { count: 2, lastAt: START + 8 * MINUTE, resumed: true } });
-      expect(resumed).toMatchObject({ fingerprint, since: START, lastAction: saved.lastAction });
-      const first = rollSupervisorHistory(resumed, classifyEmployee(stuck), up);
-      const next = assessEmployee(stuck, first, ON, up).next;
-      expect(next.action).toBe('continue-move');
-      expect(next.at).toBeLessThanOrEqual(up);
-      // Its outcome is watched like any other continue, and only then is the move closed.
+    it('does not abandon at its first pass a move whose three continues the old office had used', () => {
+      const first = look(saved);
+      // The fifteen minutes of the old office are over, and so is everything it watched. Nothing of that counts.
+      expect(first).toMatchObject({ fingerprint, since: START, watchSince: up });
+      expect(first.attempts).toEqual({
+        'continue-move': { count: 2, lastAt: START + 8 * MINUTE, resumed: true, earlier: true },
+      });
+      const step = next(stuck, first, up);
+      expect(step.action).toBe('continue-move');
+      expect(step.at).toBeLessThanOrEqual(up);
+      // Its own continue has come back. The move is closed only once this process has watched it for fifteen minutes.
       const continued = recordSupervisorAttempt(first, 'continue-move', up, 'refused');
       expect(continued.attempts['continue-move']).toEqual({ count: 3, lastAt: up, resumed: true });
-      expect(assessEmployee(stuck, continued, ON, up + 2 * MINUTE).next.action).toBeNull();
-      expect(assessEmployee(stuck, continued, ON, up + 3 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
+      expect(next(stuck, continued, up + 2 * MINUTE).action).toBeNull();
+      for (const minutes of [3, 10, 14])
+        expect(next(stuck, continued, up + minutes * MINUTE), String(minutes)).toMatchObject({
+          action: null,
+          at: up + 15 * MINUTE,
+          waitingFor: WATCHED,
+        });
+      expect(next(stuck, continued, up + 15 * MINUTE)).toMatchObject({ action: 'abandon-move' });
     });
 
-    it('gives it back once in a round, so an office that keeps restarting cannot continue a move for ever', () => {
-      let history = resumeSupervisorHistory(saved);
-      history = recordSupervisorAttempt(rollSupervisorHistory(history, classifyEmployee(stuck), up), 'continue-move', up, 'refused');
-      // The office restarts again and again: nothing more is given back, and the move is closed as it was before.
-      for (let start = 1; start <= 5; start++) {
-        const at = up + start * 2 * MINUTE;
-        history = rollSupervisorHistory(resumeSupervisorHistory(history), classifyEmployee(stuck), at);
-        expect(history.attempts['continue-move'], String(start)).toEqual({ count: 3, lastAt: up, resumed: true });
+    it('continues first a move the old office kept for the owner and never continued, and gives it its time again', () => {
+      // A move at a sign-in screen: the old office waited for the owner and spent no continue on it.
+      const kept = move(signInScreen);
+      const first = look(since(START, classifyEmployee(kept).fingerprint), kept);
+      expect(first.attempts).toEqual({});
+      expect(next(kept, first, up)).toMatchObject({ action: 'continue-move' });
+      // Three continues of this process within minutes do not shorten the fifteen minutes it has to watch.
+      const three = { ...first, attempts: tried('continue-move', 3, up + 7 * MINUTE) };
+      expect(next(kept, three, up + 11 * MINUTE)).toMatchObject({ action: null, at: up + 15 * MINUTE });
+      expect(next(kept, three, up + 15 * MINUTE)).toMatchObject({ action: 'abandon-move' });
+    });
+
+    it('gives a move that offers no continue, and one of the retired runtime, its fifteen minutes again', () => {
+      for (const closing of [
+        move('x', { allowedActions: ['abandon'] }),
+        move('x', { allowedActions: [] }),
+        move('x', { docker: false, allowedActions: ['settle'] }),
+      ]) {
+        const first = look(since(START, classifyEmployee(closing).fingerprint), closing);
+        expect(next(closing, first, up), JSON.stringify(closing.move)).toMatchObject({
+          action: null,
+          at: up + 15 * MINUTE,
+          waitingFor: WATCHED,
+        });
+        expect(next(closing, first, up + 15 * MINUTE)).toMatchObject({ action: 'abandon-move' });
       }
-      expect(assessEmployee(stuck, history, ON, up + 10 * MINUTE).next).toMatchObject({ action: 'abandon-move' });
-      // A continue that found the move busy tried nothing: it is handed back as always and the mark stays.
-      const busy = recordSupervisorAttempt(resumeSupervisorHistory(saved), 'continue-move', up, 'busy');
-      expect(busy.attempts['continue-move']).toEqual({ count: 2, lastAt: up, resumed: true });
-      expect(resumeSupervisorHistory(busy).attempts).toEqual(busy.attempts);
-      // The mark ends with the round: six hours after the last attempt the counts are cleared, and it with them.
-      const later = up + SUPERVISOR_POLICY.ladderRestartMs;
-      expect(rollSupervisorHistory(history, classifyEmployee(stuck), later).attempts).toEqual({});
     });
 
-    it('gives nothing back where nothing was used up, for another rung or for a problem that is no move', () => {
+    it('does not take a continue that found the move busy for a continue of its own', () => {
+      const busy = recordSupervisorAttempt(look(saved), 'continue-move', up, 'busy');
+      expect(busy.attempts['continue-move']).toEqual({ count: 2, lastAt: up, resumed: true, earlier: true });
+      expect(next(stuck, busy, up + 20 * MINUTE)).toMatchObject({ action: 'continue-move' });
+    });
+
+    it('gives one continue back once in a round; after that nothing is closed before the next round continued it', () => {
+      const continued = recordSupervisorAttempt(look(saved), 'continue-move', up, 'refused');
+      // The office starts a second time with the move still held. Nothing more is given back.
+      const second = look(continued, stuck, up + 20 * MINUTE);
+      expect(second.attempts['continue-move']).toEqual({ count: 3, lastAt: up, resumed: true, earlier: true });
+      // And nothing is closed either: this process has made no continue of its own and has none left to make.
+      for (const minutes of [20, 36, 120])
+        expect(next(stuck, second, up + minutes * MINUTE).action, String(minutes)).toBeNull();
+      expect(next(stuck, second, up + 40 * MINUTE)).toMatchObject({
+        at: up + SUPERVISOR_POLICY.ladderRestartMs,
+        waitingFor: NEXT_ROUND,
+      });
+      // However often it restarts: no continue, no close.
+      let history = second;
+      for (let start = 2; start <= 6; start++) {
+        history = look(history, stuck, up + start * 20 * MINUTE);
+        expect(history.attempts['continue-move'], String(start)).toEqual(second.attempts['continue-move']);
+      }
+      // The next round clears the counts and the marks with them, and continues the move first.
+      const round = rollSupervisorHistory(history, classifyEmployee(stuck), up + SUPERVISOR_POLICY.ladderRestartMs);
+      expect(round.attempts).toEqual({});
+      expect(next(stuck, round, up + SUPERVISOR_POLICY.ladderRestartMs)).toMatchObject({ action: 'continue-move' });
+    });
+
+    it('marks only the continues of a held move, and gives back only what was used up', () => {
       const some = { ...saved, attempts: tried('continue-move', 2, START + 3 * MINUTE) };
-      expect(resumeSupervisorHistory(some).attempts).toEqual(some.attempts);
+      expect(resumeSupervisorHistory(some).attempts).toEqual({
+        'continue-move': { count: 2, lastAt: START + 3 * MINUTE, earlier: true },
+      });
       const closing = {
         ...saved,
         attempts: { ...tried('continue-move', 3, START + 8 * MINUTE), ...tried('abandon-move', 2, START + 20 * MINUTE) },
       };
       expect(resumeSupervisorHistory(closing).attempts).toEqual({
-        'continue-move': { count: 2, lastAt: START + 8 * MINUTE, resumed: true },
+        'continue-move': { count: 2, lastAt: START + 8 * MINUTE, resumed: true, earlier: true },
         'abandon-move': { count: 2, lastAt: START + 20 * MINUTE },
       });
       const laptop = since(START, 'code:DOCKER_RESOURCE_HELPER_FAILED', {
@@ -1985,18 +2042,74 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       expect(resumeSupervisorHistory(EMPTY_SUPERVISOR_HISTORY)).toEqual(EMPTY_SUPERVISOR_HISTORY);
     });
 
-    it('holds the continue it gave back until the wait for an outside cause is over', () => {
+    it('starts the wait for an outside cause again, and holds the continue it gave back until that wait is over', () => {
       const outside = move('DOCKER_RESOURCE_POOL_HELPER_UNACKNOWLEDGED');
       const probed = since(START, classifyEmployee(outside).fingerprint, {
-        attempts: tried('continue-move', 3, START + 5 * MINUTE),
+        attempts: tried('continue-move', 3, START + 30 * MINUTE),
       });
-      const resumed = rollSupervisorHistory(resumeSupervisorHistory(probed), classifyEmployee(outside), START + 12 * MINUTE);
-      // It is the last probe of the round, so it waits for the thirty minutes like any last probe.
-      expect(assessEmployee(outside, resumed, ON, START + 12 * MINUTE).next).toMatchObject({
-        action: null,
-        at: START + 30 * MINUTE,
+      // The old office had made its last probe and would have closed the move three minutes later.
+      expect(next(outside, probed, START + 33 * MINUTE)).toMatchObject({ action: 'abandon-move' });
+      // The new one starts at that moment. Its thirty minutes begin with its own first look.
+      const at = START + 33 * MINUTE;
+      const first = look(probed, outside, at);
+      expect(next(outside, first, at)).toMatchObject({ action: null, at: at + 30 * MINUTE });
+      expect(next(outside, first, at + 30 * MINUTE)).toMatchObject({ action: 'continue-move' });
+      const again = recordSupervisorAttempt(first, 'continue-move', at + 30 * MINUTE, 'refused');
+      expect(next(outside, again, at + 33 * MINUTE)).toMatchObject({ action: 'abandon-move' });
+    });
+  });
+
+  describe('while the office sees the shared pool down', () => {
+    const HOUR = 60 * MINUTE;
+    const POOL_WAIT = 'the shared pool, which the office is recovering after a host restart';
+    const own = move('The target application viewer is unavailable');
+    const down: SupervisorObservation = { ...own, laptop: { ...own.laptop, pool: 'down', poolAlive: false } };
+    /** Roll one observation into the history and say what the office would do. */
+    const watch = (state: { history: SupervisorHistory }, seen: SupervisorObservation, at: number) => {
+      state.history = rollSupervisorHistory(state.history, classifyEmployee(seen), at);
+      return assessEmployee(seen, state.history, ON, at).next;
+    };
+
+    it('is a problem of its own, so an outage does not use up the time a move is given', () => {
+      expect(classifyEmployee(down).fingerprint).not.toBe(classifyEmployee(own).fingerprint);
+      expect(classifyEmployee(down).sentence).toBe(classifyEmployee(own).sentence);
+      const state = { history: EMPTY_SUPERVISOR_HISTORY };
+      // Held for five minutes with one continue made, then the pool goes down for three hours.
+      watch(state, own, START);
+      state.history = recordSupervisorAttempt(state.history, 'continue-move', START + MINUTE, 'refused');
+      for (const at of [START + 5 * MINUTE, START + HOUR, START + 3 * HOUR])
+        expect(watch(state, down, at), String(at)).toEqual({ action: null, waitingFor: POOL_WAIT, preconditions: [] });
+      // Back. The move's fifteen minutes begin again here; they were not running during the outage.
+      const back = START + 3 * HOUR + MINUTE;
+      expect(watch(state, own, back)).toMatchObject({ action: 'continue-move' });
+      state.history = { ...state.history, attempts: tried('continue-move', 3, back + 8 * MINUTE) };
+      expect(watch(state, own, back + 12 * MINUTE)).toMatchObject({ action: null, at: back + 15 * MINUTE });
+      expect(watch(state, own, back + 15 * MINUTE)).toMatchObject({ action: 'abandon-move' });
+    });
+
+    it('does not close a move on continues that were all made before the pool came back', () => {
+      const state = { history: EMPTY_SUPERVISOR_HISTORY };
+      watch(state, own, START);
+      // All three continues of the round are used, then the pool is down for an hour. The office keeps running.
+      for (const minute of [1, 3, 8])
+        state.history = recordSupervisorAttempt(state.history, 'continue-move', START + minute * MINUTE, 'refused');
+      watch(state, down, START + 10 * MINUTE);
+      const back = START + 70 * MINUTE;
+      watch(state, own, back);
+      expect(state.history.attempts['continue-move']).toEqual({ count: 3, lastAt: START + 8 * MINUTE, earlier: true });
+      // Nothing was tried with a pool that works, and this round has no continue left: nothing is closed in it.
+      for (const minutes of [0, 15, 60]) expect(watch(state, own, back + minutes * MINUTE).action, String(minutes)).toBeNull();
+      expect(watch(state, own, back + 20 * MINUTE)).toMatchObject({
+        at: START + 8 * MINUTE + SUPERVISOR_POLICY.ladderRestartMs,
       });
-      expect(assessEmployee(outside, resumed, ON, START + 30 * MINUTE).next).toMatchObject({ action: 'continue-move' });
+      // With a continue left, it is made first, and only then is the move closed.
+      const some = { history: EMPTY_SUPERVISOR_HISTORY };
+      watch(some, own, START);
+      some.history = recordSupervisorAttempt(some.history, 'continue-move', START + MINUTE, 'refused');
+      watch(some, down, START + 10 * MINUTE);
+      expect(watch(some, own, back)).toMatchObject({ action: 'continue-move' });
+      some.history = recordSupervisorAttempt(some.history, 'continue-move', back, 'refused');
+      expect(some.history.attempts['continue-move']).toEqual({ count: 2, lastAt: back });
     });
   });
 

@@ -1419,22 +1419,57 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
       at.push([(w.state.now - 130 * MINUTE) / MINUTE, action]);
       return { outcome: 'refused' };
     };
-    expect(await quiet(w, 3)).toEqual([]);
-    // The new process continues the move itself at its first look, and closes nothing before it has watched that.
+    expect(await quiet(w, 14)).toEqual([]);
+    // The new process continues the move itself at its first look. The hour the old office had the move for does
+    // not count: nothing is closed before this process has watched the move for fifteen minutes.
     expect(at).toEqual([[0.5, 'continue-move']]);
-    expect(w.state.stored.get('a')!.attempts['continue-move']).toMatchObject({ count: 3, resumed: true });
+    expect(w.state.stored.get('a')!.attempts['continue-move']).toEqual({ count: 3, lastAt: 130.5 * MINUTE, resumed: true });
+    expect(w.report('a')).toMatchObject({ waitingUntil: 145.5 * MINUTE });
     await w.run(2);
     expect(at).toEqual([
       [0.5, 'continue-move'],
-      [3.5, 'abandon-move'],
+      [15.5, 'abandon-move'],
     ]);
+  });
 
-    // The office restarts once more with the move still held: nothing is given back a second time.
-    const again = world([stuck], { histories: new Map(w.state.stored) });
-    again.state.now = 140 * MINUTE;
-    await again.run(10);
-    expect(again.state.acts).not.toContain('continue-move:a');
-    expect(again.state.acts).toContain('abandon-move:a');
+  it('closes nothing after a second office restart in a round, and continues nothing either', async () => {
+    const stuck = heldMove(person('a'), 'The target application viewer is unavailable');
+    // Saved by an office process that had already been given its one continue back and has ended since.
+    const saved: SupervisorHistory = {
+      fingerprint: 'move:move-a:The target application viewer is unavailable',
+      since: 70 * MINUTE,
+      attempts: { 'continue-move': { count: 3, lastAt: 130 * MINUTE, resumed: true } },
+      rebuilds: [],
+    };
+    const w = world([stuck], { histories: new Map([['a', saved]]) });
+    w.state.now = 140 * MINUTE;
+    expect(await quiet(w, 60)).toEqual([]);
+    expect(w.state.acts).toEqual([]);
+    // It says what it waits for: the next round, six hours after the last attempt, continues the move first.
+    expect(w.report('a')).toMatchObject({ condition: 'move-held-dead-end', waitingUntil: 130 * MINUTE + 6 * 60 * MINUTE });
+    expect(w.report('a').waitingFor).toMatch(/the next round of repair steps, which continues the move once more/);
+  });
+
+  it('does not abandon at its first pass a move the old office kept for the owner', async () => {
+    // The move stopped at a sign-in screen two hours ago. The old office waited for the owner and continued nothing.
+    const stuck = heldMove(person('a'), SIGN_IN);
+    const saved: SupervisorHistory = { fingerprint: 'move:move-a:' + SIGN_IN, since: 10 * MINUTE, attempts: {}, rebuilds: [] };
+    const w = world([stuck], { histories: new Map([['a', saved]]) });
+    w.state.now = 130 * MINUTE;
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      at.push([(w.state.now - 130 * MINUTE) / MINUTE, action]);
+      if (action === 'abandon-move') stuck.move = undefined;
+      return { outcome: action === 'abandon-move' ? 'done' : 'refused' };
+    };
+    expect(await quiet(w, 20)).toEqual([]);
+    // Its own three continues first, then the fifteen minutes it has itself watched the move.
+    expect(at).toEqual([
+      [0.5, 'continue-move'],
+      [2.5, 'continue-move'],
+      [7.5, 'continue-move'],
+      [15.5, 'abandon-move'],
+    ]);
   });
 
   it('keeps the mark of a continue that was given back in its saved history', async () => {
