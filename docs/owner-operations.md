@@ -293,7 +293,13 @@ The rebuild's hold on the session's input and chat ends at the same thirty
 minutes, with a line in the log, so a rebuild that never returns does not keep
 the employee's chat queued for good. A turn that starts after that is still
 protected: the rebuild's last look at the pane before it stops the laptop
-refuses to stop it.
+refuses to stop it. Once the rebuild has begun to stop the laptop, that look
+is no longer made, so the hold is not let go at the thirty minutes: a prompt
+typed then would go into a laptop that is being stopped. It ends when the
+rebuild returns, or an hour after the stop began, whichever comes first.
+What follows the stop is a chain of the same thirty-second engine calls as
+what came before it, so a rebuild still running that long after its stop has
+hung, and the chat is not held for ever.
 
 The limit of two rebuilds per laptop per day is a pause. `waitingFor` reads “the
 daily limit on rebuilds of one laptop (2) … the next one may run at …”, and the

@@ -104,6 +104,8 @@ function world(extra: Partial<DockerSupervisorLaptopDeps> = {}) {
     holds: [] as string[],
     /** While set, the rebuild does not return until it settles. */
     hang: undefined as Promise<void> | undefined,
+    /** While set, the rebuild waits before it says that the stop is next, until it settles. */
+    hangBeforeStop: undefined as Promise<void> | undefined,
     /** The rebuild service holds a flight for the employee. */
     rebuildFlight: false,
     /** Each read of the stored home: the holds in place then, and the calls that had been made before it. */
@@ -223,6 +225,7 @@ function world(extra: Partial<DockerSupervisorLaptopDeps> = {}) {
         took('rebuild', request, authority);
         // As the service does: its checks and the seat preparation, then word that the stop is next, then the stop.
         state.beforeStop?.();
+        if (state.hangBeforeStop) await state.hangBeforeStop;
         authority.require();
         authority.discarding?.();
         state.during?.();
@@ -1523,7 +1526,7 @@ describe('a rebuild that does not return', () => {
     w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
     w.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
     let finish!: () => void;
-    w.state.hang = new Promise<void>((resolve) => (finish = resolve));
+    w.state.hangBeforeStop = new Promise<void>((resolve) => (finish = resolve));
     const rebuild = w.laptops.rebuild(EMPLOYEE, w.guard);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(w.state.holds).toEqual(['hold ' + SESSION]);
@@ -1531,7 +1534,7 @@ describe('a rebuild that does not return', () => {
     // Chat and capacity retries flow again although the rebuild has not returned.
     expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
     expect(lines).toEqual([
-      `[supervisor] ${EMPLOYEE.name} (${EMPLOYEE.id}): the rebuild has not returned after 0 minutes; the hold on the session's input is released`,
+      `[supervisor] ${EMPLOYEE.name} (${EMPLOYEE.id}): the rebuild has not returned 0 minutes after it began; the hold on the session's input is released`,
     ]);
     finish();
     expect((await rebuild).outcome).toBe('done');
@@ -1567,5 +1570,42 @@ describe('limits that the laptop holds too much memory for', () => {
         'DOCKER_RESOURCE_REPAIR_MEMORY_IN_USE: the laptop holds 20.0 GiB that reclaim cannot give back, more than its ' +
         'approved soft limit of 16.0 GiB and its hard limit of 48.0 GiB',
     });
+  });
+});
+
+describe('a rebuild that hangs after it began to stop the laptop', () => {
+  const SESSION = EMPLOYEE.sessionId;
+  it('keeps the hold past the first deadline, and lets it go at the longer one or when it returns', async () => {
+    const lines: string[] = [];
+    const w = world({ holdDeadlineMs: 40, holdDiscardingDeadlineMs: 160, log: (line) => void lines.push(line) });
+    w.state.preview = { ...w.state.preview, runningLaptops: [DESTINATION] };
+    w.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    let finish!: () => void;
+    w.state.hang = new Promise<void>((resolve) => (finish = resolve));
+    const rebuild = w.laptops.rebuild(EMPLOYEE, w.guard);
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    // The stop has begun: nothing is typed into the laptop that is being stopped.
+    expect(w.state.holds).toEqual(['hold ' + SESSION]);
+    expect(lines).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    expect(lines).toEqual([
+      `[supervisor] ${EMPLOYEE.name} (${EMPLOYEE.id}): the rebuild has not returned 0 minutes after it began to stop the laptop; the hold on the session's input is released`,
+    ]);
+    finish();
+    expect((await rebuild).outcome).toBe('done');
+    expect(w.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
+    // One that returns before the longer deadline releases the hold itself, once.
+    const quick = world({ holdDeadlineMs: 40, holdDiscardingDeadlineMs: 160 });
+    quick.state.preview = { ...quick.state.preview, runningLaptops: [DESTINATION] };
+    quick.state.observed = { state: 'running', provider: { kind: 'exited', exit: {} } };
+    let done!: () => void;
+    quick.state.hang = new Promise<void>((resolve) => (done = resolve));
+    const second = quick.laptops.rebuild(EMPLOYEE, quick.guard);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    done();
+    await second;
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(quick.state.holds).toEqual(['hold ' + SESSION, 'release ' + SESSION]);
   });
 });

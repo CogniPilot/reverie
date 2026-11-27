@@ -191,6 +191,8 @@ export interface DockerSupervisorLaptopDeps {
    * taken to hang, and the employee's chat and capacity retries are let go with a line in the log.
    */
   readonly holdDeadlineMs?: number;
+  /** How long the hold is kept at most once the rebuild has begun to stop the laptop. Default: an hour. */
+  readonly holdDiscardingDeadlineMs?: number;
   /** One console line. */
   log?(line: string): void;
   /**
@@ -202,6 +204,9 @@ export interface DockerSupervisorLaptopDeps {
   /** The laptop runtime's configuration and key are still the ones the office started with. */
   current(): boolean;
 }
+
+/** See `DockerSupervisorLaptops.#holdInput`: twice the whole step's own deadline, counted from the stop. */
+const HOLD_DISCARDING_DEADLINE_MS = 2 * SUPERVISOR_LIMITS.stepDeadlineMs;
 
 /** Findings about the stored home of a stopped laptop with which the rebuild step itself refuses. */
 const STORED_HOME_REFUSALS: Readonly<Partial<Record<SupervisorStoredHome, string>>> = {
@@ -1046,32 +1051,46 @@ export class DockerSupervisorLaptops {
   }
 
   /**
-   * The hold a rebuild takes on the session's input (`holdInput`), released by the returned function, and in any
-   * case at `holdDeadlineMs`: a rebuild that never returns must not keep the employee's chat queued for good. Once
-   * the hold is let go a turn may start; the rebuild's last look at the pane before it stops the laptop then refuses
-   * to stop it (`#quiet`).
+   * The hold a rebuild takes on the session's input (`holdInput`). `end` releases it, and the rebuild calls it on
+   * every way out. Until the rebuild says that the stop is next (`discarding`), the hold also ends by itself at
+   * `holdDeadlineMs`: a rebuild that never returns must not keep the employee's chat queued for good, and a turn
+   * that starts once it is let go is refused by the rebuild's last look at the pane before the stop (`#quiet`).
+   * From that word on, that look is no longer made, so the hold is not let go at that deadline: a prompt typed
+   * then would go into a laptop that is being stopped. It ends with the rebuild, or at the longer
+   * `holdDiscardingDeadlineMs` after the stop began, whichever comes first. What follows the stop is a chain of the
+   * same thirty-second engine calls as what came before it (removals, the record's retirement, the new source),
+   * so a rebuild still running that long after its stop has hung, and the employee's chat is not held for ever.
    */
-  #holdInput(employee: SupervisedEmployee): (() => void) | undefined {
+  #holdInput(employee: SupervisedEmployee): { end: () => void; discarding: () => void } | undefined {
     const release = this.deps.holdInput?.(employee.sessionId);
     if (!release) return undefined;
     let held = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const end = () => {
       if (!held) return;
       held = false;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       release();
     };
-    const deadline = this.deps.holdDeadlineMs ?? SUPERVISOR_LIMITS.stepDeadlineMs;
-    const timer = setTimeout(() => {
-      if (!held) return;
-      end();
-      this.deps.log?.(
-        `[supervisor] ${employee.name} (${employee.id}): the rebuild has not returned after ${Math.round(deadline / 60_000)} ` +
-          "minutes; the hold on the session's input is released"
-      );
-    }, deadline);
-    timer.unref?.();
-    return end;
+    const arm = (deadline: number, when: string) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (!held) return;
+        end();
+        this.deps.log?.(
+          `[supervisor] ${employee.name} (${employee.id}): the rebuild has not returned ${Math.round(deadline / 60_000)} ` +
+            `minutes after ${when}; the hold on the session's input is released`
+        );
+      }, deadline);
+      timer.unref?.();
+    };
+    arm(this.deps.holdDeadlineMs ?? SUPERVISOR_LIMITS.stepDeadlineMs, 'it began');
+    return {
+      end,
+      discarding: () => {
+        if (held) arm(this.deps.holdDiscardingDeadlineMs ?? HOLD_DISCARDING_DEADLINE_MS, 'it began to stop the laptop');
+      },
+    };
   }
 
   /**
@@ -1083,7 +1102,7 @@ export class DockerSupervisorLaptops {
     guard: SupervisorGuard,
     proved: readonly SupervisorPrecondition[] = []
   ): Promise<SupervisorActionResult> {
-    let release: (() => void) | undefined;
+    let hold: { end: () => void; discarding: () => void } | undefined;
     try {
       const pending = this.#pending(employee.id);
       if (pending) {
@@ -1116,7 +1135,7 @@ export class DockerSupervisorLaptops {
         // From before the last look at the pane until the rebuild has returned, nothing the office does may start a
         // turn in a laptop that is about to be stopped: its input is held and chat for it stays queued, to be
         // delivered to the new laptop. The hold is released on every way out of this method.
-        release = this.#holdInput(employee);
+        hold = this.#holdInput(employee);
         const discard = await this.#discardRefusal(employee, preview.runningLaptops, proved);
         if (discard.refused) return discard.refused;
         quiet = this.#quiet(employee, discard.occupied);
@@ -1137,7 +1156,16 @@ export class DockerSupervisorLaptops {
           template,
           ...(quiet ? { confirmDiscardRunning: true as const } : {}),
         },
-        this.#authority(employee, guard, quiet?.fence, quiet?.discarding)
+        this.#authority(
+          employee,
+          guard,
+          quiet?.fence,
+          quiet &&
+            (() => {
+              quiet.discarding();
+              hold?.discarding();
+            })
+        )
       );
       return result.state === 'ready'
         ? { outcome: 'done', detail: 'rebuilt ' + result.operationId }
@@ -1147,7 +1175,7 @@ export class DockerSupervisorLaptops {
       if (error instanceof TurnStarted) return IN_A_TURN;
       return refusal(error);
     } finally {
-      release?.();
+      hold?.end();
     }
   }
 }
