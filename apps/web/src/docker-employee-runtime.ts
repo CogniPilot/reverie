@@ -314,6 +314,13 @@ export class DockerEmployeeRuntime {
     }
     return this.#key.sameOnDisk();
   }
+  /** A set-up step, a limits repair or a rebuild of this employee's laptop is running in this office. Denial DATA. */
+  laptopOperationInFlight(employeeId: string): boolean {
+    const a = this.#attached;
+    return (
+      !!a && (a.service.flightActive(employeeId) || a.limits.flightActive(employeeId) || a.absent.flightActive(employeeId))
+    );
+  }
   /** One read-only Engine command for the office's own use, where no laptop is involved. */
   engineRead(args: readonly string[]): Promise<string> {
     const attached = this.#attached;

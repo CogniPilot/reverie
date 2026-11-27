@@ -208,6 +208,24 @@ fault in every laptop:
   ([below](#the-office-restarting-itself)). Only when a restart was tried
   within the last six hours, or this office does not restart itself, is the
   cause treated as one that several employees share.
+
+  “Reads none of its laptops” has one meaning. The container engine reports
+  at least two laptops running, the office can attach to or read none of
+  them, and it reads no other laptop either. A laptop counts when its own
+  read says ready and no terminal is attached, or when the engine lists it
+  as running with an agent in it and reading it fails. Nothing else counts:
+  not a stopped laptop (as after a host restart), not one that is being set
+  up, started, rebuilt or moved to another plan, not one that waits for the
+  shared pool, not one that an operation of the office's own holds, not one
+  held in the middle of its set-up, not one whose agent has exited, and not a
+  terminal whose input the office itself holds. An employee who is merely
+  held says nothing about the office.
+
+  One laptop that runs and cannot be read is as likely that laptop's fault
+  as the office's, and a restart drops every terminal. So with exactly one,
+  in an office of one employee as in any other, the laptop's own steps apply
+  (it is rebuilt after two hours without a reading) and the office does not
+  restart itself.
 - A cause that more than one employee in the office shares is rebuilt for
   nobody at first. Once it has been shared for thirty minutes, one laptop is
   rebuilt as a probe, and no other laptop is touched until that one is healthy.
@@ -318,8 +336,9 @@ does. The office therefore ends its own process, by its ordinary graceful
 shutdown, so that Docker starts it again; laptops keep running and are
 attached again as after any office restart. It does the same when the
 supervisor finds that the office reads none of its laptops for thirty minutes
-although something holds an employee, and asks for it on every pass: a fault
-that every laptop shows at once is taken to be the office's own. It does so
+(in the sense given [above](#office-recovery-supervisor): at least two laptops
+that the engine reports running), and asks for it on every pass: a fault that
+every running laptop shows at once is taken to be the office's own. It does so
 only when all of this holds (the second and the first apply to a changed
 configuration; a request of the supervisor counts its ten minutes from when it
 was first made, and lapses when it is not repeated):
@@ -332,6 +351,12 @@ was first made, and lapses when it is not repeated):
   office's own container. A container nothing would start again is never
   taken down;
 - `supervisorAutoRepair` is not switched off;
+- nothing the office itself runs is in flight for any employee, in the office
+  or not: no open plan move, no laptop set-up, rebuild or limits repair, and
+  for a request of the supervisor also no step of its own and no step for the
+  shared pool. A restart would cut such an operation off, and for a plan move
+  it would reset what the move has watched. `waitingFor` then reads “the
+  office to restart itself once … has ended”;
 - it has not restarted itself within the last hour, nor twice within a day.
   The record is `office-self-restart.json` in the office data directory,
   written before the exit and read after it; a record that cannot be read

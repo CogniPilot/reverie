@@ -20,6 +20,8 @@
  *   that nothing would bring back is never taken down. A container the owner or an update tool stops is not
  *   affected: Docker does not restart a container it was told to stop;
  * - no owner switched automatic repairs off (`supervisorAutoRepair`);
+ * - nothing the office itself runs is in flight for any employee: no open plan move, no laptop set-up, rebuild or
+ *   repair. A restart would cut it off in the middle;
  * - at most `perDay` restarts in a day and never two within `spacingMs`, by a record that is written before the
  *   exit and read after it. A fault that survives a restart therefore cannot turn into a restart loop.
  *
@@ -67,6 +69,12 @@ export interface OfficeSelfRestartDeps {
   allowed(): boolean;
   /** The restart policy of the office's own container as the Engine reports it; null when it cannot be read. */
   restartPolicy(): Promise<string | null>;
+  /**
+   * What the office itself is in the middle of for any employee (an open plan move, a laptop set-up, rebuild or
+   * repair), in a few words, or undefined when nothing is. A rejection counts as something. Absent where the
+   * office runs no such operations.
+   */
+  operation?(): Promise<string | undefined>;
   /** The times of earlier restarts, from the record that survives them. */
   load(): readonly number[];
   /** Write that record. A throw means nothing was recorded, and then the office does not exit. */
@@ -214,6 +222,12 @@ export class OfficeSelfRestart {
       );
     }
     this.#never = false;
+    // Asked last, so that as little as possible can start between the answer and the exit. A restart would cut an
+    // operation off in the middle, and for a plan move it would also reset what the move's own clocks have watched.
+    const operation = this.deps.operation
+      ? await this.deps.operation().catch(() => 'an operation it could not rule out')
+      : undefined;
+    if (operation) return this.#say(`the office to restart itself once ${operation} has ended`);
     // Read once more after the await: nothing is ended for a fault that is gone or still moving.
     const stands = request
       ? !this.deps.stale() && asked()?.reason === request.reason

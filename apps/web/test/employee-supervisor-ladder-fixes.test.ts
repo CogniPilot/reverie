@@ -15,6 +15,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  officeReading,
   resumeSupervisorHistory,
   rollSupervisorHistory,
   sightEmployee,
@@ -447,6 +448,9 @@ interface Desk {
   restoration: SupervisorObservation['laptop']['restoration'];
   reading: SupervisorLaptopReading | undefined;
   provider: SupervisorProviderPresence;
+  /** The employee's open plan move, and what else of the office's own holds them. */
+  move?: NonNullable<Awaited<ReturnType<EmployeeSupervisorPorts['openMove']>>>;
+  busy?: SupervisorObservation['busy'];
 }
 const ATTACHED_IDLE: Session = {
   available: true,
@@ -520,9 +524,10 @@ function officeOf(
           ...(row.restoration ? { restoration: row.restoration } : {}),
           poolAlive: true,
         },
+        ...(row.busy ? { busy: row.busy } : {}),
       };
     },
-    openMove: async () => undefined,
+    openMove: async (employee) => desks.get(employee.id)!.move,
     readLaptop: async (employee) => desks.get(employee.id)!.reading,
     readSource: async () => 'unknown',
     readProvider: async (employee) => desks.get(employee.id)!.provider,
@@ -644,9 +649,11 @@ describe('an office that can read none of its laptops', () => {
   it('rebuilds no laptop for a pane it cannot read, and asks for its own restart after thirty minutes', async () => {
     const officeRestart = { asked: [] as string[], answer: 'pending' as const };
     const o = blind({ officeRestart });
-    await o.run(29);
+    // The engine first says that these laptops run when a rebuild comes due, eighteen minutes in. From then on the
+    // office knows that it cannot read laptops that run, and thirty minutes later it asks.
+    await o.run(47);
     expect(officeRestart.asked).toEqual([]);
-    await o.run(2);
+    await o.run(4);
     expect(officeRestart.asked.length).toBeGreaterThan(0);
     expect(officeRestart.asked[0]).toMatch(/reads none of its laptops/);
     await o.run(6 * 60);
@@ -749,5 +756,216 @@ describe('rebuilding laptops that agents run in, across the office', () => {
     for (const id of ['a', 'b']) o.afterRebuild.set(id, healthy);
     await o.run(10);
     expect(o.rebuilt.map((row) => row.id).sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('what counts as the office not reading a laptop that runs', () => {
+  const ready = { state: 'ready' as const, phase: 'ready', allowedActions: ['observe'] };
+  /** A laptop whose own read says ready, with no terminal of the office on it. */
+  const unattached = (patch: Patch = {}) =>
+    observed({
+      ...patch,
+      session: { available: false, viewerHealth: 'unknown', ...patch.session },
+      laptop: { restoration: VIEW_LOST, continuation: ready, ...patch.laptop },
+    });
+  const moving = {
+    id: 'move-1',
+    docker: true,
+    phase: 'recovery-required',
+    busy: false,
+    error: 'x',
+    allowedActions: ['continue-original'],
+  };
+
+  it.each<[string, SupervisorObservation, boolean, ReturnType<typeof officeReading>]>([
+    // The office reads it.
+    ['a healthy employee with an attached terminal', observed(), true, 'reads'],
+    [
+      'a pane the office reads, whatever the laptop reports',
+      withLaptop(held('DOCKER_RESOURCE_HELPER_FAILED'), {}, { turn: 'idle', idleSince: 0 }),
+      true,
+      'reads',
+    ],
+    [
+      'an agent at a start-up screen, which the office read off its pane',
+      observed({
+        session: { turn: 'idle', idleSince: 0, startupScreen: { label: 'x', kind: 'credential', answering: false } },
+      }),
+      true,
+      'reads',
+    ],
+    // Evidence: the engine says it runs, and the office cannot attach to it or read it.
+    ['a laptop whose own read says ready, with no terminal on it', unattached(), false, 'cannot-read'],
+    [
+      'a laptop the engine lists as running whose read fails',
+      withLaptop(held('DOCKER_CONTINUATION_UNCONFIRMED'), {}),
+      true,
+      'cannot-read',
+    ],
+    [
+      'the same with a read that timed out',
+      withLaptop(held('DOCKER_RESOURCE_PROBE_DEADLINE'), {}),
+      true,
+      'cannot-read',
+    ],
+    // No evidence either way.
+    [
+      'a laptop whose read fails while nothing says that it runs',
+      held('DOCKER_CONTINUATION_UNCONFIRMED'),
+      false,
+      'no-evidence',
+    ],
+    ['an employee the owner stopped', unattached({ desiredRunning: false }), true, 'no-evidence'],
+    ['an employee who is out of the office', unattached({ onVacation: true }), true, 'no-evidence'],
+    [
+      'an employee whose plan move is held',
+      { ...unattached(), move: moving } as SupervisorObservation,
+      true,
+      'no-evidence',
+    ],
+    [
+      'an employee whose plan move is running',
+      { ...unattached(), move: { ...moving, phase: 'creating', busy: true } } as SupervisorObservation,
+      true,
+      'no-evidence',
+    ],
+    ['an employee who is being moved to another session', unattached({ bindingMigration: true }), true, 'no-evidence'],
+    ['a laptop a set-up step is running for', unattached({ busy: 'continuation-flight' }), true, 'no-evidence'],
+    ['a laptop another operation holds', unattached({ busy: 'laptop-operation' }), true, 'no-evidence'],
+    ['a session that is being started or stopped', unattached({ busy: 'lifecycle-in-progress' }), true, 'no-evidence'],
+    ['a laptop whose rebuild has not finished', unattached({ laptop: { rebuildPending: true } }), true, 'no-evidence'],
+    ['a laptop that waits for the shared pool', unattached({ laptop: { pool: 'down' } }), true, 'no-evidence'],
+    ['a laptop while the pool cannot be read', unattached({ laptop: { pool: 'unknown' } }), true, 'no-evidence'],
+    ['a stopped laptop', held('DOCKER_CONTINUATION_CONTAINER_STOPPED'), false, 'no-evidence'],
+    ['a laptop that is being set up', held('DOCKER_CONTINUATION_BUSY'), true, 'no-evidence'],
+    ['a set-up that has not finished', held('DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING'), true, 'no-evidence'],
+    [
+      'a laptop held in the middle of its set-up, which never had a terminal',
+      held('DOCKER_RESOURCE_HELPER_FAILED'),
+      true,
+      'no-evidence',
+    ],
+    ['a laptop whose agent has exited', held('DOCKER_CONTINUATION_PROVIDER_UNCONFIRMED'), true, 'no-evidence'],
+    [
+      'a fresh laptop that was never started',
+      observed({ session: { available: false }, laptop: { record: null, restoration: undefined, source: 'stopped' } }),
+      false,
+      'no-evidence',
+    ],
+    [
+      'an employee with no laptop',
+      observed({ session: { available: false }, laptop: { record: null, restoration: undefined, source: 'unknown' } }),
+      false,
+      'no-evidence',
+    ],
+    [
+      'a terminal whose input the office itself holds',
+      unattached({ session: { inputHeld: true } }),
+      true,
+      'no-evidence',
+    ],
+    ['a session that is not in a laptop', unattached({ boxed: false }), true, 'no-evidence'],
+    ['the wait for the office’s own restart', held('DOCKER_CONTINUATION_RUNTIME_CHANGED'), true, 'no-evidence'],
+  ])('%s', (_title, seen, running, expected) => {
+    expect(officeReading(seen, running)).toBe(expected);
+  });
+});
+
+describe('the office asking for its own restart', () => {
+  const unread = () => ({
+    session: UNREADABLE,
+    restoration: VIEW_LOST,
+    reading: READY,
+    provider: 'running' as const,
+  });
+  const restartable = () => ({ asked: [] as string[], answer: 'pending' as const });
+  const heldMove = {
+    id: 'move-1',
+    docker: true,
+    phase: 'recovery-required',
+    busy: false,
+    error: 'DOCKER_RESOURCE_HELPER_FAILED',
+    allowedActions: [],
+  };
+
+  it('asks when it reads none of several laptops that run', async () => {
+    const officeRestart = restartable();
+    const o = officeOf(['a', 'b', 'c'], unread, { officeRestart });
+    await o.run(29);
+    expect(officeRestart.asked).toEqual([]);
+    await o.run(3);
+    expect(officeRestart.asked.length).toBeGreaterThan(0);
+  });
+
+  it.each<[string, (o: ReturnType<typeof officeOf>) => void]>([
+    ['their plan move is held', (o) => (o.desks.get('a')!.move = heldMove)],
+    [
+      'a step of their plan move has been running',
+      (o) => (o.desks.get('a')!.move = { ...heldMove, phase: 'creating', busy: true }),
+    ],
+    ['their laptop is stopped', (o) => (o.desks.get('a')!.reading = heldAt('DOCKER_CONTINUATION_CONTAINER_STOPPED'))],
+    ['a laptop operation holds them', (o) => (o.desks.get('a')!.busy = 'laptop-operation')],
+  ])('never asks for an office with one employee because %s', async (_title, arrange) => {
+    const officeRestart = restartable();
+    const o = officeOf(['a'], unread, { officeRestart });
+    arrange(o);
+    await o.run(4 * 60);
+    expect(officeRestart.asked).toEqual([]);
+  });
+
+  it('never asks for one laptop that runs and cannot be read: that is left to the laptop’s own ladder', async () => {
+    const officeRestart = restartable();
+    const o = officeOf(['a'], unread, { officeRestart });
+    await o.run(4 * 60);
+    expect(officeRestart.asked).toEqual([]);
+    // The same holds beside employees whose laptops say nothing about the office.
+    const others = officeOf(
+      ['a', 'b', 'c'],
+      (id) =>
+        id === 'a'
+          ? unread()
+          : { ...unread(), reading: heldAt('DOCKER_CONTINUATION_CONTAINER_STOPPED'), provider: 'no-laptop' },
+      { officeRestart }
+    );
+    await others.run(4 * 60);
+    expect(officeRestart.asked).toEqual([]);
+  });
+
+  it('does not count stopped laptops, as after a host restart, as laptops it cannot read', async () => {
+    const officeRestart = restartable();
+    const o = officeOf(
+      ['a', 'b', 'c'],
+      () => ({
+        session: UNREADABLE,
+        restoration: VIEW_LOST,
+        reading: heldAt('DOCKER_CONTINUATION_CONTAINER_STOPPED'),
+        provider: 'no-laptop',
+      }),
+      { officeRestart }
+    );
+    await o.run(4 * 60);
+    expect(officeRestart.asked).toEqual([]);
+  });
+
+  it.each<[string, (o: ReturnType<typeof officeOf>) => void, (o: ReturnType<typeof officeOf>) => void]>([
+    [
+      'a plan move of any employee is open',
+      (o) => (o.desks.get('c')!.move = heldMove),
+      (o) => delete o.desks.get('c')!.move,
+    ],
+    [
+      'an operation holds any employee',
+      (o) => (o.desks.get('c')!.busy = 'continuation-flight'),
+      (o) => delete o.desks.get('c')!.busy,
+    ],
+  ])('does not ask while %s, and asks once that has ended', async (_title, begin, end) => {
+    const officeRestart = restartable();
+    const o = officeOf(['a', 'b', 'c'], unread, { officeRestart });
+    begin(o);
+    await o.run(3 * 60);
+    expect(officeRestart.asked).toEqual([]);
+    end(o);
+    await o.run(35);
+    expect(officeRestart.asked.length).toBeGreaterThan(0);
   });
 });

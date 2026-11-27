@@ -1255,6 +1255,72 @@ export function sightEmployee(
   return { ...classifyEmployee(observed), ...(turn === 'idle' ? { background: background === true } : {}) };
 }
 
+/** Waits that say an operation of the office's own is running or pending. They are no failure to read a laptop. */
+const OPERATION_WAITS: ReadonlySet<string> = new Set([
+  'DOCKER_CONTINUATION_BUSY',
+  'DOCKER_REPROVISION_BUSY',
+  'DOCKER_CONTINUATION_ORIGINAL_ATTEMPT_PENDING',
+  'DOCKER_CONTINUATION_OFFICE_CHANGED',
+  'DOCKER_CONTINUATION_OFFICE_UNCONFIRMED',
+  RUNTIME_CHANGED,
+]);
+
+/**
+ * What one employee's laptop says about whether the OFFICE can read its laptops. The driver adds these up across
+ * the office (`EmployeeSupervisor`): an office that reads none of several laptops that run takes the fault for its
+ * own and asks for its own restart. That is a strong step, so only one thing counts as evidence for it: the
+ * container engine reports the laptop RUNNING, and the office nevertheless cannot attach to it or read it. An
+ * employee who is merely held, for whatever reason, says nothing about the office.
+ *
+ * `running` is the driver's fact that the engine reported this employee's laptop running a moment ago (a read
+ * that found an agent in it). A laptop whose own read says ready is running by that read.
+ *
+ * | The employee                                                          | counts as                         |
+ * | --------------------------------------------------------------------- | --------------------------------- |
+ * | stopped by the owner, or out of the office                            | nothing: not in the office        |
+ * | terminal attached, or the office reads the agent's pane (healthy, an  | `reads`                           |
+ * |   agent at a start-up screen, a held laptop with an attached pane)    |                                   |
+ * | plan move open, held or running; being moved to another session       | nothing: the move owns the laptop |
+ * | a set-up step, another laptop operation, an owner stop or recovery,   | nothing: an operation of the      |
+ * |   a start or stop of the session, or an unconfirmed save is running   |   office's own holds them         |
+ * | rebuild recorded and not finished                                     | nothing: being rebuilt            |
+ * | the shared pool is down, being recovered, or cannot be read           | nothing: waits for the pool       |
+ * | session not in a laptop; no laptop record; fresh laptop not started   | nothing: no laptop that runs      |
+ * | terminal input held by the office                                     | nothing: every attach is refused  |
+ * |                                                                       |   by the office's own hold        |
+ * | own read says ready, and no terminal is attached                      | `cannot-read`: it runs, and the   |
+ * |                                                                       |   office cannot attach to it      |
+ * | own read failed (a wait that is a result of reading, not of an        | `cannot-read` when the engine     |
+ * |   operation), e.g. could not be read just now, timed out              |   says it runs; nothing otherwise |
+ * | laptop stopped or its container not found                             | nothing: it does not run          |
+ * | laptop being set up, or its set-up not finished                       | nothing: being built or started   |
+ * | laptop held in the middle of its set-up (limits, identity, image)     | nothing: such a laptop never had  |
+ * |                                                                       |   a terminal                      |
+ * | agent exited or not confirmed                                         | nothing: there is no agent to read|
+ * | the wait for the office's own restart                                 | nothing: already being settled    |
+ */
+export function officeReading(
+  observed: SupervisorObservation,
+  running: boolean
+): 'reads' | 'cannot-read' | 'no-evidence' {
+  const { session, laptop } = observed;
+  if (observed.onVacation || observed.desiredRunning !== true) return 'no-evidence';
+  const attached =
+    laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected';
+  if (session.turn === 'working' || session.turn === 'idle' || attached) return 'reads';
+  if (observed.move || observed.bindingMigration || observed.busy || !observed.boxed) return 'no-evidence';
+  if (!laptop.record || laptop.rebuildPending || session.inputHeld === true) return 'no-evidence';
+  if (laptop.pool !== undefined && laptop.pool !== 'up') return 'no-evidence';
+  const seen = laptop.continuation;
+  if (seen?.state === 'ready') return 'cannot-read';
+  const failed =
+    seen?.state === 'held' &&
+    !!seen.code &&
+    supervisorCodeKind(seen.code) === 'wait' &&
+    !OPERATION_WAITS.has(seen.code);
+  return failed && running ? 'cannot-read' : 'no-evidence';
+}
+
 /** One observation, one condition. Reads no history and no clock. */
 export function classifyEmployee(observed: SupervisorObservation): SupervisorClassification {
   return besideTheLaptop(observed, classifyAlone(observed));

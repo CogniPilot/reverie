@@ -2662,6 +2662,23 @@ export class WebServer extends EventEmitter {
         stamp: () => dockerRuntime.identityStamp(),
         startable: () => dockerRuntime.restartWouldKeepIdentity(),
         allowed: () => this.companyService.view(undefined).settings.supervisorAutoRepair !== false,
+        // Every employee is asked, in the office or not: a move or a laptop operation of anyone is cut off by a restart.
+        operation: async () => {
+          const moves = await planMoves.list(undefined);
+          if (
+            moves.some(
+              (row) =>
+                !['completed', 'failed'].includes(row.phase) &&
+                (row.backend === 'docker' || row.phase !== 'recovery-required')
+            )
+          )
+            return 'a plan move that is open';
+          return this.companyService
+            .registeredEmployees()
+            .some((employee) => dockerRuntime.laptopOperationInFlight(employee.id))
+            ? 'a laptop operation that is running'
+            : undefined;
+        },
         restartPolicy: () => {
           let mounts = '';
           try {

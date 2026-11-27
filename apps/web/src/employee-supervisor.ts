@@ -49,6 +49,7 @@ import {
   assessEmployee,
   classifyEmployee,
   issueSupervisorAttempt,
+  officeReading,
   resumeSupervisorHistory,
   sightEmployee,
   rollSupervisorHistory,
@@ -282,7 +283,9 @@ const WORKING_AGENT_PROOFS: readonly SupervisorPrecondition[] = [
   'agent-between-turns',
   'agent-unreadable',
 ];
-const OFFICE_BLIND = 'the office reads none of its laptops although they should be running';
+const OFFICE_BLIND = 'the office reads none of its laptops although the container engine says that they run';
+/** How long the engine's word that a laptop runs with an agent in it stands without being heard again. */
+const RUNNING_SEEN_MS = 5 * 60_000;
 /** A time as a sentence names it, as the policy writes it. */
 function when(at: number): string {
   return new Date(at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
@@ -378,8 +381,12 @@ export class EmployeeSupervisor {
   /** Since when the office has read none of its laptops while something holds an employee. In memory. */
   #blindSince?: number;
   #restartAnswer?: 'pending' | 'refused';
-  /** Whether the office read each employee's laptop at their last look. In memory. */
-  readonly #read = new Map<string, boolean>();
+  /** What each employee's laptop said, at their last look, about whether the office reads its laptops. In memory. */
+  readonly #reading = new Map<string, ReturnType<typeof officeReading>>();
+  /** When the engine last reported each employee's laptop running with an agent in it. In memory. */
+  readonly #runningSeen = new Map<string, number>();
+  /** Employees a plan move or another operation of the office's own holds, at their last look. In memory. */
+  readonly #operating = new Set<string>();
   readonly #startedAt: number;
   #flight?: Promise<void>;
   #closed = false;
@@ -872,9 +879,15 @@ export class EmployeeSupervisor {
       // Only the reset is kept; `since` moves with the clock and is not worth a write on its own.
       this.#remember(employee.id, { ...history, since: 0 });
       this.#report(employee, assessEmployee(stopped, history, this.#flags(employee), now, this.policy), history, now);
+      this.#reading.delete(employee.id);
+      this.#runningSeen.delete(employee.id);
+      this.#operating.delete(employee.id);
       return false;
     }
     if (this.#acting.has(employee.id)) {
+      // An employee with a step in flight says nothing about the office; the step itself keeps the office from
+      // asking for its own restart (`#officeOperating`).
+      this.#reading.set(employee.id, 'no-evidence');
       // A step for this employee has not returned. Nothing is read or decided beside it.
       const running = this.#reports.get(employee.id);
       if (running)
@@ -901,7 +914,7 @@ export class EmployeeSupervisor {
       },
     });
     let observed = withOccupied(await this.#observe(employee, flags.enabled));
-    this.#read.set(employee.id, this.#readable(observed));
+    this.#noteReading(employee, observed, now);
     let history = rollSupervisorHistory(previous, sightEmployee(observed), now, this.policy);
     let assessment = assessEmployee(observed, history, flags, now, this.policy);
     this.#remember(employee.id, history);
@@ -926,6 +939,7 @@ export class EmployeeSupervisor {
         this.#occupied.set(employee.id, { at: now, presence: provider });
       else this.#occupied.delete(employee.id);
       observed = { ...observed, laptop: { ...observed.laptop, provider } };
+      this.#noteReading(employee, observed, now);
       assessment = assessEmployee(observed, history, flags, now, this.policy);
       // A laptop the read found occupied may still be rebuilt, between its agent's turns: that is decided next.
       if (!due(assessment) || assessment.next.preconditions.includes('no-agent-running')) {
@@ -991,18 +1005,48 @@ export class EmployeeSupervisor {
     return employees.filter((row) => row.desiredRunning === true && !row.onVacation && !row.bindingMigration);
   }
 
-  /** The office terminal is attached to this employee's laptop, or reads its agent's pane. */
-  #readable({ session, laptop }: SupervisorObservation): boolean {
-    if (session.turn === 'working' || session.turn === 'idle') return true;
-    return laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected';
+  /**
+   * Keep what one employee's observation says about the office: whether their laptop is read, runs unread, or says
+   * nothing (`officeReading`), and whether an operation of the office's own holds them. The engine's word that a
+   * laptop runs with an agent in it comes from the read a rebuild makes, which is not made on every pass, so it
+   * stands for `RUNNING_SEEN_MS`; a read that finds no laptop or no agent ends it at once.
+   */
+  #noteReading(employee: SupervisedEmployee, observed: SupervisorObservation, now: number): void {
+    const provider = observed.laptop.provider;
+    if (provider === 'running' || observed.laptop.continuation?.state === 'ready')
+      this.#runningSeen.set(employee.id, now);
+    else if (provider !== undefined && provider !== 'unknown') this.#runningSeen.delete(employee.id);
+    const seen = this.#runningSeen.get(employee.id);
+    this.#reading.set(employee.id, officeReading(observed, seen !== undefined && now - seen <= RUNNING_SEEN_MS));
+    if (observed.busy || observed.move) this.#operating.add(employee.id);
+    else this.#operating.delete(employee.id);
+  }
+
+  /**
+   * An operation that the office itself runs is in flight, or pending, for some employee: a step of this
+   * supervisor, a look at or a step for the shared pool, a plan move that is open, a laptop set-up, rebuild or
+   * repair, a session start or stop. The office never asks for its own restart beside one: a restart would cut it
+   * off, and for a plan move it would also reset what the move's own clocks have watched.
+   */
+  #officeOperating(): boolean {
+    return this.#acting.size > 0 || !!this.#poolFlight || this.#pool?.step !== undefined || this.#operating.size > 0;
   }
 
   /**
    * Once per pass, before any employee is looked at: which causes are shared, and whether the office reads any of
    * its laptops at all. Both are judged from what the last pass reported, so they are half a minute old.
    *
-   * An office that reads none of its laptops, while something holds an employee, takes the fault for its own. After
-   * `officeBlindRestartMs` it asks for its own restart on every pass, for as long as that stands.
+   * "The office reads none of its laptops" has one meaning: the engine reports laptops RUNNING, the office can
+   * attach to or read none of them, and it reads no other laptop either. `officeReading` says which employees are
+   * evidence of that and which say nothing (a stopped laptop, one being built, moved, rebuilt or started, one that
+   * waits for the pool, one any operation of the office's own holds). At least two such laptops are needed. One
+   * laptop that runs and cannot be read is as likely that laptop's fault as the office's, and a restart of the
+   * office drops every terminal for it; so with one, in an office of one employee as in any other, the laptop's
+   * own ladder applies and the office does not restart itself. Two that fail in the same way at the same time are
+   * unlikely to be two separate faults.
+   *
+   * After `officeBlindRestartMs` of that the office asks for its own restart on every pass, for as long as it
+   * stands, and never while an operation of its own is in flight (`#officeOperating`).
    */
   #lookAtOffice(employees: readonly SupervisedEmployee[]): void {
     const now = this.ports.now(),
@@ -1015,8 +1059,14 @@ export class EmployeeSupervisor {
       if (count > 1 && !this.#sharedSince.has(cause)) this.#sharedSince.set(cause, now);
     for (const cause of [...this.#sharedSince.keys()])
       if ((holders.get(cause) ?? 0) < 2) this.#sharedSince.delete(cause);
-    for (const id of [...this.#read.keys()]) if (!present.has(id)) this.#read.delete(id);
-    const blind = this.#causes.size > 0 && ![...this.#read.values()].some(Boolean);
+    for (const id of [...this.#reading.keys()])
+      if (!present.has(id)) {
+        this.#reading.delete(id);
+        this.#runningSeen.delete(id);
+        this.#operating.delete(id);
+      }
+    const readings = [...this.#reading.values()],
+      blind = !readings.includes('reads') && readings.filter((value) => value === 'cannot-read').length > 1;
     if (!blind) {
       this.#blindSince = undefined;
       this.#restartAnswer = undefined;
@@ -1024,6 +1074,10 @@ export class EmployeeSupervisor {
     }
     this.#blindSince ??= now;
     if (now - this.#blindSince < this.#resolved.officeBlindRestartMs) return;
+    if (this.#officeOperating()) {
+      this.#restartAnswer = undefined;
+      return;
+    }
     try {
       this.#restartAnswer = this.ports.officeRestart?.request(OFFICE_BLIND);
     } catch {

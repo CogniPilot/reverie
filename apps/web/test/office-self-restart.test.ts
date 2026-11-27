@@ -26,6 +26,8 @@ function office(record: number[] = []) {
     policy: 'unless-stopped' as string | null | Error,
     record,
     saveFails: false,
+    /** What the office is in the middle of, or that this cannot be told. */
+    operation: undefined as string | Error | undefined,
     /** What happens while the Engine is being asked. */
     duringPolicy: undefined as (() => void) | undefined,
     exits: 0,
@@ -43,6 +45,10 @@ function office(record: number[] = []) {
       state.duringPolicy?.();
       if (state.policy instanceof Error) throw state.policy;
       return state.policy;
+    },
+    operation: async () => {
+      if (state.operation instanceof Error) throw state.operation;
+      return state.operation;
     },
     load: () => state.record,
     save: (times) => {
@@ -357,5 +363,37 @@ describe('the office restarting itself because it reads none of its laptops', ()
     await o.run(2);
     expect(o.state.exits).toBe(1);
     expect(asking().restart.lastAt()).toBeUndefined();
+  });
+});
+
+describe('the office never ending its process beside an operation of its own', () => {
+  it('waits for a plan move or a laptop operation to end, whatever asked for the restart, and says so', async () => {
+    for (const stale of [true, false]) {
+      const o = office();
+      o.state.stale = stale;
+      o.state.operation = 'a plan move that is open';
+      const run = async (minutes: number) => {
+        for (let elapsed = 0; elapsed < minutes * MINUTE; elapsed += 30_000) {
+          o.state.now += 30_000;
+          if (!stale) o.restart.request('the office reads none of its laptops');
+          await o.restart.tick();
+        }
+      };
+      await run(3 * 60);
+      expect([stale, o.state.exits]).toEqual([stale, 0]);
+      expect(o.restart.status()).toBe('the office to restart itself once a plan move that is open has ended');
+      expect(o.state.record).toEqual([]);
+      o.state.operation = undefined;
+      await run(1);
+      expect([stale, o.state.exits]).toEqual([stale, 1]);
+    }
+  });
+
+  it('does not end it when it cannot tell whether an operation is running', async () => {
+    const o = office();
+    o.state.operation = new Error('the list of moves could not be read');
+    await o.run(60);
+    expect(o.state.exits).toBe(0);
+    expect(o.restart.status()).toMatch(/once an operation it could not rule out has ended$/);
   });
 });
