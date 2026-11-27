@@ -1276,3 +1276,26 @@ describe('a step that hangs, as the restart of the office weighs it', () => {
     expect(o.supervisor().stepInFlight() ?? '').not.toMatch(/for A /);
   });
 });
+
+describe('a step that hangs past its time', () => {
+  it('makes the office ask for its own restart, which is what ends it', async () => {
+    const officeRestart = { asked: [] as string[], answer: 'pending' as const };
+    const o = officeOf(
+      ['a'],
+      () => ({
+        session: ATTACHED_IDLE,
+        restoration: VIEW_LOST,
+        reading: heldAt('DOCKER_RESOURCE_HELPER_FAILED'),
+        provider: 'running',
+      }),
+      { hang: () => true, officeRestart }
+    );
+    await o.run(30);
+    expect(o.rebuilt).toHaveLength(1);
+    expect(officeRestart.asked).toEqual([]);
+    await o.run(10);
+    expect(officeRestart.asked.at(-1)).toBe(
+      'a step of the office has not returned for half an hour, and only a new office process ends it'
+    );
+  });
+});

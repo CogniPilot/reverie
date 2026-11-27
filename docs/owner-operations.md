@@ -410,7 +410,11 @@ was first made, and lapses when it is not repeated):
   (a rebuild resumes from its journal entry, or, cut off before it retired the
   laptop record, is repeated from a fresh preview; a limits repair resumes its
   open attempt), and the restart is what ends one that hangs. A laptop set-up
-  step is always waited for. For
+  step is always waited for. While a step of the supervisor that was taken as
+  interrupted has still not returned, the office itself asks for this
+  restart on every pass (“a step of the office has not returned for half an
+  hour, and only a new office process ends it”), since nothing else ends it.
+  For
   a request of the supervisor there is also no pool step that is still to be
   taken. A restart would cut such an operation off, and for a plan move
   it would reset what the move has watched. The handoff a closed move still

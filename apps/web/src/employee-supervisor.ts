@@ -368,6 +368,7 @@ const WORKING_AGENT_PROOFS: readonly SupervisorPrecondition[] = [
   'agent-unreadable',
 ];
 const OFFICE_BLIND = 'the office reads none of its laptops although the container engine says that they run';
+const OFFICE_HUNG = 'a step of the office has not returned for half an hour, and only a new office process ends it';
 /** How long the engine's word that a laptop runs with an agent in it stands without being heard again. */
 const RUNNING_SEEN_MS = 5 * 60_000;
 /** A time as a sentence names it, as the policy writes it. */
@@ -629,6 +630,7 @@ export class EmployeeSupervisor {
     );
     if (!this.#closed) await this.#keepPool(employees);
     this.#lookAtOffice(employees);
+    this.#lookAtHungSteps();
     let seats = this.limits.actionsPerTick;
     for (const employee of order) {
       if (this.#closed) break;
@@ -1466,6 +1468,25 @@ export class EmployeeSupervisor {
       this.#restartAnswer = this.ports.officeRestart?.request(OFFICE_BLIND);
     } catch {
       this.#restartAnswer = undefined;
+    }
+  }
+
+  /**
+   * A step of this supervisor that was taken as interrupted and has still not returned (a repair step or a limits
+   * check) hangs inside the office, and holds its laptop's service busy for as long as it does. Nothing but a new
+   * office process ends it, so the office asks for its own restart, on every pass while it stands. The restart
+   * keeps all of its own conditions and limits (office-self-restart.ts): it waits for every operation that is
+   * still young, and a rebuild or a repair of limits that hangs no longer counts as one (`operationHoldsRestart`).
+   * The request for an office that reads none of its laptops goes first; one request at a time.
+   */
+  #lookAtHungSteps(): void {
+    const restart = this.ports.officeRestart;
+    if (!restart || (!this.#unreturned.size && !this.#limitsHung.size)) return;
+    if (this.#blindSince !== undefined && this.#restartAnswer !== undefined) return;
+    try {
+      restart.request(OFFICE_HUNG);
+    } catch {
+      /* the next pass asks again */
     }
   }
 
