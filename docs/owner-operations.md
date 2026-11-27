@@ -91,7 +91,7 @@ ten healthy minutes):
 | Start a fresh stopped source | no record, approved limits | 3 |
 | Continue a held plan move (`continue-original`) | a Docker move is `recovery-required` | 3 |
 | Wake (attach a provider that already runs) | the terminal is not connected | 6; once when the terminal's input is also held for good and the wake was refused |
-| Abandon a held plan move | 3 continues did not help and the same recognized error lasted 15 min | 2 |
+| Abandon a held plan move, or close one from before the laptop runtime | continuing did not help or is not offered, and the same error lasted 15 min (30 min when the cause lies outside the move) | 2 |
 | Rebuild the laptop, then start it | the operation cannot advance, or an unused laptop was made for an earlier laptop image, and nothing runs in the laptop; or the office terminal's input is held for good and the agent is between turns | 2, and 2 per day |
 
 A laptop record can offer `continue` for a step it has not issued while the
@@ -134,8 +134,9 @@ reuses, verbatim, the layout of the employee's most recent laptop operation; an
 employee with none on record is rebuilt by hand once. A stopped or missing
 laptop is rebuilt only while another laptop of the box runs; when none does,
 that is what a host restart looks like, so recover the shared pool first
-(below). A code or a plan move error it does not recognize is reported and left
-alone.
+(below). A laptop code it does not recognize is reported and left alone. A plan
+move is never left alone, whatever its error says: see
+[a plan move that stopped part-way](#a-plan-move-that-stopped-part-way).
 
 Putting limits back is not changing them. A reload of the host's service
 manager resets the limits that only a helper wrote, and every laptop is then
@@ -163,6 +164,88 @@ means on): `supervisorEnabled` (observe, continue, wake) and
 `supervisorAutoRepair` (abandon and rebuild). Its pacing state is
 `employee-supervisor.json` in the office data directory; deleting it only
 restarts the waits.
+
+### A plan move that stopped part-way
+
+A plan move that stops part-way is `recovery-required` and keeps its error. The
+supervisor never keeps such a move for the owner. Every held move is continued
+while that can help and is then closed, whatever stopped it and whatever its
+record offers. No sentence about a held move asks for a person.
+
+| What the move shows | What the office does | When |
+| --- | --- | --- |
+| Any error, and the record offers `continue-original` | Continues the original | 1, 3 and 8 minutes after the problem was first seen |
+| Still held on the same error after that | Abandons the move | 15 minutes after that error was first seen, and once more 5 minutes later if the first attempt was refused |
+| An error the office does not recognize, or no error | The same: three continues, then abandon | The same |
+| A decision screen in the new session | The same: three continues, then abandon | The same |
+| The sign-in screen of a plan the office does not report as signed in | Waits and spends no continue; continues at once when the plan becomes signed in | Abandons 30 minutes after the problem was first seen |
+| An operation that only has to finish, or something every laptop shares (the pool, the storage, the office's configuration) | Three continues | Abandons 30 minutes after the problem was first seen |
+| No `continue-original` offered | No continue | Abandons after 15 minutes |
+| More than one open move of one employee | Continues none; closes them oldest first, one at a time, until one is left, which is then continued like any other | 15 minutes after each one is first seen; the two abandon attempts of an episode are shared by them |
+| A held move from before the laptop runtime | Closes it (below) | After 15 minutes |
+| A step of the move is running | Nothing | |
+
+No move is abandoned while a sign-in that the office placed for that employee
+is being placed or is less than three minutes old. The thirty minutes cover a
+sign-in the office places or refreshes itself and the recovery of the shared
+pool after a host restart.
+
+Continuing uses `supervisorEnabled`; abandoning and closing use
+`supervisorAutoRepair`. Each step is one audit entry
+(`supervisor_continue_move`, `supervisor_abandon_move`) with the move, the
+class of its error and the outcome. Asking twice is safe: a move that has ended
+is answered with `already closed` and nothing is written.
+
+**Paid steps.** A move launches the agent in the new laptop once, and records
+that launch before it issues it. The office never repeats it and never starts
+one. Continuing a move whose launch is on record only reads and verifies what
+exists; the journal refuses to hand such a move to a new actor. Abandoning
+takes no executor and no requester at all: it cannot issue, repeat or inspect a
+launch, and it keeps the launch record exactly as it was.
+
+**What abandoning changes.** It writes the move's journal and nothing else. The
+move is closed as `failed`; its sentence says that the office closed it on the
+owner's standing rule and what it had stopped with; the employee is no longer
+locked by it; the containers its journal named are recorded for the laptop
+rebuild. Nothing is started, stopped or removed by the abandonment itself.
+
+**Where the employee is afterwards** depends on how far the move had come. A
+move switches the employee's record to the new plan and the new session
+immediately before it launches the agent there.
+
+- The move stopped before that. The employee is still on the plan and the
+  session they came from. If the move had already stopped their laptop, the
+  ordinary steps above take over: the stopped laptop is rebuilt and started,
+  the home directory and the conversation saved in it are kept. That rebuild
+  also removes what the move left behind: its candidate laptop, the holder of
+  the stopped source and its helpers. A candidate that is still running holds
+  no agent, because the move starts the container before it launches one; the
+  supervisor's rebuild discards it once a read inside it, made immediately
+  before, finds no agent. A candidate in which anything runs, or which cannot
+  be read, is not discarded.
+- The move stopped after that, which is always the case when it stopped at a
+  sign-in or decision screen of the new session. The employee stays on the new
+  plan and the new session. Abandoning does not put them back: only a plan move
+  changes a plan, the office never starts one, and a session a move has
+  replaced is never revived. From then on they are an ordinary employee on
+  that plan, and the repairs that the held move stood in front of apply to
+  them: putting the plan's sign-in back, the start-up screens, the rebuild. The
+  handoff text the move had not typed yet is not typed. The stopped laptop of
+  the old plan is removed by the next rebuild, as after a move that finished.
+
+**A held move from before the laptop runtime** has no laptop journal. It gates
+no laptop, but it keeps its employee locked against every later plan move. The
+supervisor closes it and keeps the employee where they work now. When the
+employee already works on the session that move was creating and its source
+cleanup is durably recorded, it uses the owner's own adoption
+(`adopt-existing`, see [plan move recovery](plan-move-recovery.md)). Otherwise,
+or when the adoption's checks refuse, it closes the record as `failed` with the
+reason. Both change the journal only. This is done only for an employee who
+works in a laptop, and only with `supervisorAutoRepair` on; with it off such a
+record is not shown, as before. A record of a resource transaction keeps its
+own recovery and is not touched or shown. A closing step that was refused is not tried
+again for six hours, and in that time the record does not stand in front of
+the laptop's own repair.
 
 ## Employee disk budget
 
