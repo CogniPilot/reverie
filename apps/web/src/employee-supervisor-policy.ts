@@ -1830,20 +1830,33 @@ const FOREIGN_PROVIDER = 'DOCKER_CONTINUATION_FOREIGN_PROVIDER';
 
 /**
  * What the laptop's own read reports is a reason to rebuild it although its agent runs and the office can reach
- * it: a code the table lists as settled by a rebuild, something the office did not start in the laptop's terminal,
- * or a code the table does not list, which was watched for `unrecognizedAfterMs` before it came this far. A code
- * that only the office's attach report carries is none of these.
+ * it: a code the table lists as settled by a rebuild, or something the office did not start in the laptop's
+ * terminal. A code the table does not list is not: nothing says a rebuild settles it, and an agent the office can
+ * reach is never given up for it (see `rebuildGate`). A code that only the office's attach report carries is none
+ * of these.
  */
-function rebuildCause(
-  observed: SupervisorObservation,
-  base: Pick<SupervisorClassification, 'code' | 'fingerprint'> | undefined
-): boolean {
+function rebuildCause(observed: SupervisorObservation): boolean {
   const seen = observed.laptop.continuation,
     code = seen?.state === 'held' ? seen.code : undefined;
   if (!code) return false;
-  const kind = supervisorCodeKind(code);
-  return kind === 'rebuild' || code === FOREIGN_PROVIDER || (kind === undefined && base?.code === code);
+  return supervisorCodeKind(code) === 'rebuild' || code === FOREIGN_PROVIDER;
 }
+
+/**
+ * The agent can be reached: the office terminal is attached to it, or it reads the agent's pane. An agent the
+ * office can reach is not rebuilt for a code it does not know.
+ */
+function agentReachable(observed: SupervisorObservation): boolean {
+  const { session, laptop } = observed;
+  const attached =
+    laptop.restoration?.state === 'attached' && session.available && session.viewerHealth !== 'disconnected';
+  return attached || paneRead(session);
+}
+
+/** Why a laptop held for a code the office does not know is kept while its agent can be reached. */
+const UNLISTED_REACHABLE =
+  "the laptop's own report to clear: it names a code the office does not know, and the agent in it runs and can " +
+  'be reached, so nothing is given up for it; the laptop is rebuilt for it only once the agent cannot be reached';
 
 /** The office terminal is attached to the agent's pane and reads it, so the agent can be reached. */
 function paneRead(session: SupervisorObservation['session']): boolean {
@@ -2102,8 +2115,9 @@ function rebuildGate(
     // A working agent is given up, between its turns, for a cause a rebuild is known to settle. For any other
     // hold (a step to send again, a read that never succeeds, a set-up that stopped) it is given up only when the
     // office cannot reach it at all: an employee nobody can talk to is not kept for the sake of a turn nobody sees.
-    if (!rebuildCause(observed, base) && paneRead(observed.session))
-      return { kind: 'wait', waitingFor: REACHABLE_AGENT };
+    if (base && unrecognizedCode(base) && agentReachable(observed))
+      return { kind: 'wait', waitingFor: UNLISTED_REACHABLE };
+    if (!rebuildCause(observed) && paneRead(observed.session)) return { kind: 'wait', waitingFor: REACHABLE_AGENT };
     return betweenTurnsGate(observed, history, now, policy, ['agent-between-turns', 'laptop-held']);
   }
   // No laptop of this employee runs, and no other laptop of the box does either: that is what a host restart

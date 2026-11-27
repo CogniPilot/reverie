@@ -2490,10 +2490,11 @@ describe('employee supervisor: no path ends for good', () => {
         preconditions: ['no-agent-running'],
       });
       expect(assessEmployee(empty(odd), history, ON, 30 * MINUTE).next).toMatchObject({ action: 'rebuild-laptop', preconditions: [] });
+      // An agent the office can reach is never given up for a code it does not know.
       const working = withLaptop(odd, { provider: 'running' }, { turn: 'working' });
       expect(assessEmployee(working, history, ON, 30 * HOUR).next).toMatchObject({
         action: null,
-        waitingFor: "the agent's current turn to end",
+        waitingFor: expect.stringMatching(/^the laptop's own report to clear: it names a code the office does not know/),
       });
       const off = assessEmployee(empty(odd), history, { ...ON, autoRepair: false }, 30 * MINUTE);
       expect(off.next.action).toBeNull();
@@ -2725,7 +2726,8 @@ describe('employee supervisor: no path ends for good', () => {
     const T = 1000;
     const reasons: Array<[string, SupervisorObservation, SupervisorHistory]> = [
       ['a failed limits helper', failed, since(T, FAILED)],
-      ['a code the office does not recognize', held('DOCKER_CONTINUATION_SOMETHING_NEW'), since(T, 'code:DOCKER_CONTINUATION_SOMETHING_NEW')],
+      // A code the office does not recognize is no reason to rebuild a laptop whose agent it can reach at all:
+      // employee-supervisor-ladder-fixes.test.ts.
       ['something the office did not start', held('DOCKER_CONTINUATION_FOREIGN_PROVIDER'), since(T, 'code:DOCKER_CONTINUATION_FOREIGN_PROVIDER')],
       // A hold that a rebuild is not known to settle (an agent that is not confirmed, a start that never finishes)
       // is no reason to rebuild a laptop whose pane the office reads: employee-supervisor-ladder-fixes.test.ts.

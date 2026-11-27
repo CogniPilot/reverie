@@ -243,9 +243,29 @@ describe('a laptop that reports a code while an agent runs in it', () => {
       expect([code, until(EMPTY_SUPERVISOR_HISTORY, reachable(held(code)), T, rebuilds)]).toEqual([code, 3 * MINUTE]);
   });
 
-  it('is rebuilt for a code the table does not list only when the laptop’s own read reports it, after thirty minutes', () => {
+  it('is never rebuilt for a code the table does not list while its agent can be reached, and after two hours when it cannot', () => {
     const own = reachable(held('DOCKER_SOMETHING_NOBODY_LISTED'));
-    expect(until(EMPTY_SUPERVISOR_HISTORY, own, T, rebuilds)).toBe(30 * MINUTE);
+    expect(until(EMPTY_SUPERVISOR_HISTORY, own, T, rebuilds)).toBeUndefined();
+    expect(
+      assessEmployee(own, since(T, 'code:DOCKER_SOMETHING_NOBODY_LISTED'), ON, T + 6 * HOUR).next.waitingFor
+    ).toMatch(/^the laptop's own report to clear: it names a code the office does not know/);
+    expect(
+      assessEmployee(own, since(T, 'code:DOCKER_SOMETHING_NOBODY_LISTED'), ON, T + 6 * HOUR).needsHuman
+    ).toBeUndefined();
+    // An attached terminal is reach enough, whether or not the pane is read.
+    const attached = withLaptop(
+      held('DOCKER_SOMETHING_NOBODY_LISTED'),
+      { provider: 'running', restoration: { state: 'attached' } },
+      {
+        available: true,
+        viewerHealth: 'connected',
+      }
+    );
+    expect(until(EMPTY_SUPERVISOR_HISTORY, attached, T, rebuilds)).toBeUndefined();
+    // No terminal and no pane: the rule of an agent nobody can reach, two hours after the problem was first seen.
+    expect(until(EMPTY_SUPERVISOR_HISTORY, unreachable(held('DOCKER_SOMETHING_NOBODY_LISTED')), T, rebuilds)).toBe(
+      2 * HOUR
+    );
     // The same code in the office's attach report, with no read of the laptop that bears it out: never.
     const reported = observed({
       session: { available: false, turn: 'idle', idleSince: 0 },
@@ -371,9 +391,13 @@ describe('work an agent left running when its turn ended', () => {
   });
 
   it('has a grace of its own beside a code the office does not know, which is watched for thirty minutes too', () => {
-    // Before, both waits ran from the same moment, so a job left running got no grace at all.
+    // Before, both waits ran from the same moment, so a job left running got no grace at all. Such a laptop is
+    // rebuilt only once its agent cannot be reached; work a read inside it found is then given its four hours.
     const odd = held('DOCKER_SOMETHING_NOBODY_LISTED');
-    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, idle(true, odd), T)).toBe(4 * HOUR);
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, withLaptop(odd, { provider: 'running', otherWork: true }), T)).toBe(
+      4 * HOUR
+    );
+    expect(dueAfter(EMPTY_SUPERVISOR_HISTORY, idle(true, odd), T)).toBeUndefined();
   });
 
   it('is rebuilt over at once when the pane shows the work has finished', () => {
@@ -673,19 +697,19 @@ const healthy = (target: Desk) => {
 
 describe('one cause that every laptop of the office shares', () => {
   const FIVE = ['a', 'b', 'c', 'd', 'e'];
-  /** Every laptop reports the same code the table does not list; every pane is attached, idle and silent. */
+  /** Every laptop reports the same code that a rebuild settles; every pane is attached, idle and silent. */
   const sameCode = () =>
     officeOf(FIVE, () => ({
       session: ATTACHED_IDLE,
       restoration: VIEW_LOST,
-      reading: heldAt('DOCKER_SOMETHING_NOBODY_LISTED'),
+      reading: heldAt('DOCKER_RESOURCE_HELPER_FAILED'),
       provider: 'running',
     }));
 
   it('does not rebuild five laptops within a minute: one is rebuilt as a probe, and no other while it is not healthy', async () => {
     const o = sameCode();
     await o.run(30);
-    // The code is watched for thirty minutes, and it must have been shared for as long before anything is tried.
+    // The cause must have been shared for thirty minutes before anything is tried.
     expect(o.rebuilt).toEqual([]);
     await o.run(8 * 60);
     expect(o.rebuilt[0]!.minute).toBeGreaterThanOrEqual(30);

@@ -153,8 +153,11 @@ in the middle of one, and only for what the laptop itself reports:
   rebuilt only for a cause a rebuild is known to settle: a code the table lists
   as such, for example a limits helper that failed for good,
   `DOCKER_CONTINUATION_FOREIGN_PROVIDER` (something the office did not start
-  runs in its terminal), or a code the table does not list that the laptop's
-  own read has reported for thirty minutes. For any other hold (a step to send
+  runs in its terminal). A code the table does not list is not such a cause:
+  while the office terminal is attached to the agent or reads its pane, the
+  laptop is never rebuilt for it, and the code is reported and read again.
+  Only once the agent cannot be reached at all is the laptop rebuilt for it,
+  under the two-hour rule below and the office-wide brake. For any other hold (a step to send
   again, a read that never succeeds, a set-up that stopped) such a laptop is
   kept, and the steps that discard nothing go on in their rounds.
 - A laptop whose agent the office cannot reach at all is rebuilt for any hold,
@@ -255,7 +258,8 @@ rebuild is the first step that brings such an agent back.
 A laptop code the office does not recognize is not acted on at once: it may be
 a state of a newer laptop runtime that settles by itself. The recorded request
 is sent again when the laptop offers that. When the code still stands after
-thirty minutes the laptop is treated as held, under every rule above. A code
+thirty minutes the laptop is treated as held, under every rule above, except
+that an agent the office can reach is never given up for it. A code
 that only the office's attach report carries, beside a laptop whose own read
 says ready, is reported and watched and is never a reason for a rebuild. A
 laptop that has been starting, or between two states, for fifteen minutes
