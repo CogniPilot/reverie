@@ -53,6 +53,11 @@ fn cli_has_only_fixed_roles_and_requires_actual_resource_target() {
     assert!(Arguments::try_parse_from(["helper", "configure-high"]).is_err());
     assert!(Arguments::try_parse_from(["helper", "exec", "/bin/sh"]).is_err());
     assert!(Arguments::try_parse_from(["helper", "probe-storage", "--path", "/etc"]).is_err());
+    assert!(Arguments::try_parse_from(["helper", "observe-storage-reference"]).is_ok());
+    assert!(
+        Arguments::try_parse_from(["helper", "observe-storage-reference", "--home", "/etc"])
+            .is_err()
+    );
     assert!(
         Arguments::try_parse_from(["helper", "storage-status", "--holder-start", "01"]).is_err()
     );

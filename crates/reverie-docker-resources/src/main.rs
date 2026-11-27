@@ -51,6 +51,7 @@ fn main() -> std::process::ExitCode {
             nix,
             filesystem_id,
         } => storage::verify_reference(&mut files, &home, &nix, filesystem_id),
+        Command::ObserveStorageReference => storage::observe_reference(&mut files),
         Command::VerifyWorkerCredential => credential::verify(std::io::stdin().lock()),
     };
     let result = error::finalized(result, files.close_all());
