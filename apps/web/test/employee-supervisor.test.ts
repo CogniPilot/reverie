@@ -1269,6 +1269,8 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
         action: 'supervisor_abandon_move',
         detail: { id: 'a', moveId: 'move-a', code: 'move-sign-in', outcome: 'done', attempt: 1 },
       });
+      // Nothing about the move depends on the plan's sign-in, so it is not asked for: neither plan is read.
+      expect(w.state.reads.filter((read) => read.startsWith('plan:'))).toEqual([]);
       expect(w.report('a')).toMatchObject({ condition: 'healthy' });
     }
   );

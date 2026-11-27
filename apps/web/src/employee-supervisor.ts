@@ -748,8 +748,10 @@ export class EmployeeSupervisor {
     const move = await this.ports.openMove(employee);
     let observed: SupervisorObservation = { ...glance, ...(move ? { move } : {}) };
     const first = classifyEmployee(observed);
-    if (first.condition === 'needs-sign-in' || first.code === 'move-sign-in') {
-      const account = move?.toAccount ?? employee.planAccountId;
+    // Only for a laptop at its sign-in screen. A plan move that stopped at one is not judged by the plan's sign-in:
+    // nothing about that move depends on it (see `SUPERVISOR_MOVE_POLICY`).
+    if (first.condition === 'needs-sign-in') {
+      const account = employee.planAccountId;
       const signedIn =
         account && this.ports.planSignedIn ? await this.ports.planSignedIn(account).catch(() => undefined) : undefined;
       if (signedIn !== undefined) observed = { ...observed, planSignedIn: signedIn };
