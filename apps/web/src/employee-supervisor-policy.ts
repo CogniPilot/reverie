@@ -356,6 +356,7 @@ export type SupervisorStoredHomeCause =
   | 'absent-no-record-no-grant'
   | 'absent-record-unreadable'
   | 'grant-withdrawn'
+  | 'grant-names-other-directories'
   | 'absent-grant-withdrawn'
   | 'verifier-image-missing'
   | 'verifier-lacks-command'
@@ -2224,6 +2225,15 @@ const STORED_HOME_RENUMBERED: Readonly<Record<string, string>> = {
     STORED_HOME_RENUMBERED_FACT +
     "The office's own record of this employee's storage names other directories, so it proves nothing here, and " +
     'acceptStorageRenumbering applies only where the office holds no record. To accept this home, ' +
+    APPROVE_ONE_LAPTOP +
+    '. ' +
+    STORED_HOME_REREAD +
+    'it is approved.',
+  'grant-names-other-directories':
+    STORED_HOME_RENUMBERED_FACT +
+    "The office holds no record of its own of this employee's storage. What the company setting " +
+    'acceptStorageRenumbering accepted for them earlier names other directories, so it proves nothing here, and the ' +
+    'setting does not accept directories other than the ones it accepted. To accept this home, ' +
     APPROVE_ONE_LAPTOP +
     '. ' +
     STORED_HOME_REREAD +

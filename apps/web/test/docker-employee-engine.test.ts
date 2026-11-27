@@ -3305,6 +3305,20 @@ describe('the stored home of a stopped laptop after a host restart', () => {
       for (const w of [split, group, emptyNix]) expect([...w.state.remembered, ...w.state.grantsRemembered]).toEqual([]);
     });
 
+    it('names an acceptance of the grant that named other directories as that, not as a record of its own', async () => {
+      const seed = await restarted();
+      for (const granted of [false, true]) {
+        const w = await restarted({ granted, accepted: { ...identity(seed.f, '4'), home: { ...identity(seed.f, '4').home, ino: '77' } } });
+        w.renumber('7');
+        await expect(w.read(), String(granted)).resolves.toBe('renumbered:grant-names-other-directories');
+        expect(w.helper.verdict(w.f.row)).toBe('renumbered-grant-other');
+      }
+      // The office's own record of other directories is still named as its own.
+      const own = await restarted({ granted: true, recorded: { ...identity(seed.f, '4'), home: { ...identity(seed.f, '4').home, ino: '77' } } });
+      own.renumber('7');
+      await expect(own.read()).resolves.toBe('renumbered:record-names-other-directories');
+    });
+
     it('does not take a record the grant accepted for a proof of a new device number either', async () => {
       const seed = await restarted();
       const w = await restarted({ accepted: identity(seed.f, '4') });

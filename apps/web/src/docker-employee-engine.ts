@@ -360,6 +360,7 @@ export type DockerRenumberedReason =
   | 'absent-no-record-no-grant'
   | 'absent-record-unreadable'
   | 'grant-withdrawn'
+  | 'grant-names-other-directories'
   | 'absent-grant-withdrawn';
 
 /** Where a rebuild of a laptop would bind its HOME and Nix directories from, and the user it would run as. */
@@ -916,6 +917,7 @@ export class DockerEmployeeEngine implements DockerContinuationEngine {
       if (verdict === 'different') return { state: 'different' };
       if (verdict === 'renumbered') return { state: 'renumbered', reason: 'no-record-no-grant' };
       if (verdict === 'renumbered-grant-withdrawn') return { state: 'renumbered', reason: 'grant-withdrawn' };
+      if (verdict === 'renumbered-grant-other') return { state: 'renumbered', reason: 'grant-names-other-directories' };
       if (verdict === 'renumbered-stale-record') return { state: 'renumbered', reason: 'record-names-other-directories' };
       if (verdict === 'renumbered-unverifiable') return { state: 'renumbered', reason: 'not-one-ext4-filesystem' };
       if (verdict === 'renumbered-record-unreadable') return { state: 'renumbered', reason: 'record-unreadable' };

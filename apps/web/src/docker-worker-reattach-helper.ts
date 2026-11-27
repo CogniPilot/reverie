@@ -76,6 +76,7 @@ export type DockerStoredHomeVerdict =
   | 'renumbered-unverifiable'
   | 'renumbered-record-unreadable'
   | 'renumbered-grant-withdrawn'
+  | 'renumbered-grant-other'
   | 'absent-proved'
   | 'absent-granted'
   | 'absent-no-record'
@@ -315,15 +316,16 @@ export class DockerWorkerReattachHelper {
     const granted =
       single && (!recorded || (!independent && sameDirectories)) && this.renumbering?.granted(row.owner) === true;
     if (!proved && !granted) {
-      const stale = independent || (!!recorded && !sameDirectories);
       this.#decided(
         row,
         !single
           ? 'renumbered-unverifiable'
-          : stale
+          : independent
             ? 'renumbered-stale-record'
             : recorded
-              ? 'renumbered-grant-withdrawn'
+              ? sameDirectories
+                ? 'renumbered-grant-withdrawn'
+                : 'renumbered-grant-other'
               : 'renumbered'
       );
       return { observation: historical };

@@ -3485,6 +3485,12 @@ describe('what the office says of a home that only the storage grant had accepte
     }
   });
 
+  it('says that an acceptance of the grant names other directories, not that the office\'s own record does', () => {
+    const text = said('grant-names-other-directories');
+    expect(text).toMatch(/What the company setting acceptStorageRenumbering accepted for them earlier names other directories/);
+    expect(text).not.toMatch(/The office's own record of this employee's storage names/);
+  });
+
   it('names everything the grant asks of a home with no record', () => {
     expect(said('absent-no-record-no-grant')).toMatch(
       /the home and the Nix directory real directories on one ext4 filesystem, and the home owned by the laptop's user and group/
