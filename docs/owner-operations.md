@@ -527,6 +527,17 @@ because the service refused to close it, is not left there: like every path,
 its round starts again six hours after its last attempt, with the three
 continues first and then the abandon.
 
+After an office restart the times above still count from when the move's error
+was first seen, so a move whose three continues were used before the restart
+would be due for the abandon at the new process's first look. A restart puts
+right some of what stops a move, because every terminal is attached again and
+the laptop configuration is read afresh. The new process is therefore given
+one of those continues back: it continues the move once itself, watches the
+outcome for the usual three minutes, and only then may close it. This happens
+once in a round. An office that restarts again with the move still held gets
+nothing more and closes the move as before, so repeated restarts cannot
+continue a move for ever. A continue repeats no paid step, whoever asks for it.
+
 Continuing uses `supervisorEnabled`; abandoning and closing use
 `supervisorAutoRepair`. Each step is one audit entry
 (`supervisor_continue_move`, `supervisor_abandon_move`) with the move, the

@@ -1403,6 +1403,53 @@ describe('employee supervisor: a plan move that stopped part-way never waits for
     expect(w.report('a')).toMatchObject({ condition: 'healthy' });
   });
 
+  it('continues a held move once after an office restart before it abandons it, and only once', async () => {
+    const stuck = heldMove(person('a'), 'The target application viewer is unavailable');
+    // What the earlier office process saved: the move first held an hour ago, its three continues used up.
+    const saved: SupervisorHistory = {
+      fingerprint: 'move:move-a:The target application viewer is unavailable',
+      since: 70 * MINUTE,
+      attempts: { 'continue-move': { count: 3, lastAt: 78 * MINUTE } },
+      rebuilds: [],
+    };
+    const w = world([stuck], { histories: new Map([['a', saved]]) });
+    w.state.now = 130 * MINUTE;
+    const at: Array<[number, string]> = [];
+    w.state.respond = async (action) => {
+      at.push([(w.state.now - 130 * MINUTE) / MINUTE, action]);
+      return { outcome: 'refused' };
+    };
+    expect(await quiet(w, 3)).toEqual([]);
+    // The new process continues the move itself at its first look, and closes nothing before it has watched that.
+    expect(at).toEqual([[0.5, 'continue-move']]);
+    expect(w.state.stored.get('a')!.attempts['continue-move']).toMatchObject({ count: 3, resumed: true });
+    await w.run(2);
+    expect(at).toEqual([
+      [0.5, 'continue-move'],
+      [3.5, 'abandon-move'],
+    ]);
+
+    // The office restarts once more with the move still held: nothing is given back a second time.
+    const again = world([stuck], { histories: new Map(w.state.stored) });
+    again.state.now = 140 * MINUTE;
+    await again.run(10);
+    expect(again.state.acts).not.toContain('continue-move:a');
+    expect(again.state.acts).toContain('abandon-move:a');
+  });
+
+  it('keeps the mark of a continue that was given back in its saved history', async () => {
+    const file = join(mkdtempSync(join(tmpdir(), 'supervisor-resumed-')), 'employee-supervisor.json');
+    const history: SupervisorHistory = {
+      fingerprint: 'move:move-a:x',
+      since: 1000,
+      attempts: { 'continue-move': { count: 3, lastAt: 2000, resumed: true }, 'abandon-move': { count: 1, lastAt: 3000 } },
+      rebuilds: [],
+    };
+    await new EmployeeSupervisorStore(file).save(new Map([['a', history]]));
+    expect(new EmployeeSupervisorStore(file).load()).toEqual(new Map([['a', history]]));
+    rmSync(join(file, '..'), { recursive: true, force: true });
+  });
+
   it('acts on nothing while a step of the move is running', async () => {
     const stuck = heldMove(person('a'), 'x');
     stuck.move = { ...stuck.move!, busy: true };

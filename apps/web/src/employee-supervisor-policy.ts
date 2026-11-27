@@ -506,6 +506,8 @@ export function readParkedScreen(terminal: SupervisedScreenTerminal | undefined)
 export interface SupervisorAttempt {
   readonly count: number;
   readonly lastAt: number;
+  /** One attempt of this rung was given back at an office start in this round; see `resumeSupervisorHistory`. */
+  readonly resumed?: true;
 }
 
 /** What the supervisor remembers about one employee. Persisted, so an office restart keeps the ladder. */
@@ -2041,8 +2043,13 @@ function watchedSince(history: SupervisorHistory): number {
  * minute after every start each employee reads as starting while their terminal is attached again. Without this a
  * bound could be met at the first look after a restart, and a laptop be rebuilt that the office had not tried to
  * read. The healthy clock is dropped for the same reason: ten healthy minutes are ten minutes that were seen.
+ *
+ * One attempt is given back: see `continueGivenBack`.
  */
-export function resumeSupervisorHistory(history: SupervisorHistory): SupervisorHistory {
+export function resumeSupervisorHistory(
+  history: SupervisorHistory,
+  policy: SupervisorPolicy = SUPERVISOR_POLICY
+): SupervisorHistory {
   const {
     transitSince: _transitSince,
     transitOf: _transitOf,
@@ -2050,7 +2057,29 @@ export function resumeSupervisorHistory(history: SupervisorHistory): SupervisorH
     healthySince: _healthySince,
     ...kept
   } = history;
-  return kept;
+  return continueGivenBack(kept, policy);
+}
+
+/**
+ * A held plan move whose continues an earlier office process used up gets one of them back at an office start.
+ *
+ * The time before a move is abandoned is counted from when its error was first seen, across restarts. Without this,
+ * a move whose continues were used before the restart would be abandoned at the new process's first look, although
+ * a restart puts right some of what stops a move: it attaches every terminal again and reads the laptop
+ * configuration afresh. So the new process continues the move once itself, watches that, and only then may close
+ * it. It is one attempt, given back at most once in a round (`resumed`, which ends with the round's counts), so an
+ * office that keeps restarting cannot continue a move for ever: from its second start on, the move is closed as it
+ * was before. A continue repeats no paid step, whoever asks for it.
+ */
+function continueGivenBack(history: SupervisorHistory, policy: SupervisorPolicy): SupervisorHistory {
+  const tried = history.attempts['continue-move'],
+    max = policy.ladder['continue-move'].maxAttempts;
+  if (!history.fingerprint.startsWith('move:') || !tried || tried.resumed || tried.count < max || max < 1)
+    return history;
+  return {
+    ...history,
+    attempts: { ...history.attempts, 'continue-move': { count: max - 1, lastAt: tried.lastAt, resumed: true } },
+  };
 }
 
 /** Count one attempt, before its effect: a throw or an office restart in the middle has still spent it. */
@@ -2064,7 +2093,7 @@ export function issueSupervisorAttempt(
   const before = history.attempts[action]?.count ?? 0;
   return {
     ...history,
-    attempts: { ...history.attempts, [action]: { count: before + 1, lastAt: at } },
+    attempts: { ...history.attempts, [action]: { ...history.attempts[action], count: before + 1, lastAt: at } },
     lastAction: {
       action,
       at,
@@ -2087,7 +2116,7 @@ export function settleSupervisorAttempt(
     ...history,
     attempts:
       outcome === 'busy'
-        ? { ...history.attempts, [last.action]: { count: Math.max(0, spent.count - 1), lastAt: spent.lastAt } }
+        ? { ...history.attempts, [last.action]: { ...spent, count: Math.max(0, spent.count - 1) } }
         : history.attempts,
     rebuilds:
       last.action === 'rebuild-laptop' && outcome === 'done' && !last.uncounted

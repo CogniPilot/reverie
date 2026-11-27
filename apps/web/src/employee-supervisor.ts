@@ -335,7 +335,7 @@ export class EmployeeSupervisor {
     private readonly limits: EmployeeSupervisorLimits = SUPERVISOR_LIMITS
   ) {
     // The pacing is kept across an office start; the clocks that count what this process has watched are not.
-    this.#histories = new Map([...ports.load()].map(([id, history]) => [id, resumeSupervisorHistory(history)]));
+    this.#histories = new Map([...ports.load()].map(([id, history]) => [id, resumeSupervisorHistory(history, policy)]));
     this.#startedAt = ports.now();
     this.#resolved = { ...SUPERVISOR_LIMITS, ...limits };
   }
