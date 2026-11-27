@@ -1374,3 +1374,27 @@ describe('agents that exit again and again in five laptops at once', () => {
     expect(o.rebuilt.length).toBeLessThanOrEqual(2);
   });
 });
+
+describe('a rebuild that hangs inside the rebuild service', () => {
+  it('is not followed by a second one beside it while the service holds its flight, and the office asks for a restart', async () => {
+    const officeRestart = { asked: [] as string[], answer: 'pending' as const };
+    const o = officeOf(
+      ['a'],
+      () => ({
+        session: ATTACHED_IDLE,
+        restoration: VIEW_LOST,
+        reading: heldAt('DOCKER_RESOURCE_HELPER_FAILED'),
+        provider: 'running',
+      }),
+      { hang: (_id, count) => count === 0, officeRestart }
+    );
+    await o.run(5);
+    expect(o.rebuilt.map((row) => row.proved)).toEqual(['hung']);
+    // The laptop service reports the employee busy while the rebuild service holds the hung flight.
+    o.desks.get('a')!.busy = 'continuation-flight';
+    await o.run(5 * 60);
+    expect(o.rebuilt).toHaveLength(1);
+    expect(o.report('a').waitingFor).toBe('a laptop set-up step that is running');
+    expect(officeRestart.asked.at(-1)).toMatch(/only a new office process ends it/);
+  });
+});
