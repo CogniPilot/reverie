@@ -32,8 +32,22 @@
  *   an arrow instead, read from this frame, and waits for the next frame.
  * - `continue`: a "press Enter" page with no menu. Enter is pressed only when
  *   the prompt is the last thing on the screen.
- * - `report`: a sign-in, API-key or other real decision. NEVER typed into. It is
- *   recognised so a stuck session can be reported by name.
+ * - `report`: a sign-in or paste-code screen. NEVER typed into: the office holds
+ *   no key that answers one, and a credential is never typed by the office. It is
+ *   recognised so the office can put the plan's sign-in back and start the agent
+ *   again (the supervisor's steps; nothing here does that).
+ *
+ * A screen that asks for a decision is never a `report` row. It gets the one
+ * standing answer that spends no money, buys or enables no usage credits and
+ * widens no access, as a `choose` row: the API-key question is answered
+ * "No (recommended)", so a key found in the environment is never billed.
+ *
+ * A session that stays on a screen is restarted by the supervisor, and a restart
+ * discards whatever the pane was doing. So a reading also says HOW the office
+ * knows the screen is up ({@link StartupScreenStatus.shown}): by its live widget
+ * on this frame, by a launch of this office that has not reached its composer
+ * since, or only by its words. Words alone are what a transcript that quotes
+ * the screen shows too, and nothing is ever restarted for them.
  *
  * The discipline is the workspace-trust dialog's (`session-trust-dialog.ts`,
  * which is now a view onto one row of this table), made to hold for every row:
@@ -109,10 +123,20 @@ export type ProviderScreenAnswer =
       readonly anchor: string;
     }
   | {
-      /** A real decision or a credential prompt: named, never answered. */
+      /** A credential prompt: named, never answered. */
       readonly kind: 'report';
-      readonly reason: 'credential' | 'decision';
+      readonly reason: 'credential';
+      /** What shows that the screen itself is up, since no key is ever read from it. */
+      readonly live: ProviderScreenLiveness;
     };
+
+/**
+ * The live-widget proof of a screen the office never answers, in the two forms the answered rows use:
+ * the LAST `❯` on the screen sits on one of the screen's own options, or its prompt is the last thing on it.
+ */
+export type ProviderScreenLiveness =
+  | { readonly kind: 'selection'; readonly options: readonly string[] }
+  | { readonly kind: 'prompt'; readonly anchor: string };
 
 export interface ProviderScreenPattern {
   /** Stable key for the attempt budget and logs. */
@@ -169,30 +193,38 @@ export const PROVIDER_SCREENS: readonly ProviderScreenPattern[] = [
     markers: [['bypasspermissionsmode'], ['yes,iaccept']],
     answer: { kind: 'choose', accept: ['yes,iaccept'], decline: ['no,exit'] },
   },
+  {
+    // A decision with a standing answer. "Yes" would bill the key found in the environment for every request, so
+    // the office only ever confirms "No (recommended)", the option Claude highlights by default, and steers back
+    // onto it from "Yes". An employee whose plan is then not signed in reaches the sign-in screen below.
+    id: 'claude-api-key',
+    label: "Claude's API key question",
+    markers: [['doyouwanttousethisapikey'], ['no(recommended)', 'customapikey']],
+    answer: { kind: 'choose', accept: ['no(recommended)'], decline: ['yes'] },
+  },
   // ── Reported, never answered ────────────────────────────────────────────────
   {
     id: 'claude-sign-in',
     label: "Claude's sign-in screen",
     markers: [['selectloginmethod'], ['claudeaccountwithsubscription', 'anthropicconsoleaccount']],
-    answer: { kind: 'report', reason: 'credential' },
+    answer: {
+      kind: 'report',
+      reason: 'credential',
+      live: { kind: 'selection', options: ['claudeaccountwithsubscription', 'anthropicconsoleaccount'] },
+    },
   },
   {
     id: 'claude-sign-in-code',
     label: "Claude's sign-in screen",
     markers: [['pastecodehere'], ['signin', 'login', 'browser']],
-    answer: { kind: 'report', reason: 'credential' },
-  },
-  {
-    id: 'claude-api-key',
-    label: "Claude's API key question",
-    markers: [['doyouwanttousethisapikey'], ['no(recommended)', 'customapikey']],
-    answer: { kind: 'report', reason: 'decision' },
+    // An empty prompt. Once somebody has typed at it, a person is signing in and the screen is theirs.
+    answer: { kind: 'report', reason: 'credential', live: { kind: 'prompt', anchor: 'pastecodehereifprompted>' } },
   },
   {
     id: 'codex-sign-in',
     label: "Codex's sign-in screen",
     markers: [['welcometocodex'], ['signinwithchatgpt']],
-    answer: { kind: 'report', reason: 'credential' },
+    answer: { kind: 'report', reason: 'credential', live: { kind: 'prompt', anchor: 'pressentertocontinue' } },
   },
 ];
 
@@ -201,6 +233,11 @@ export interface ProviderScreenReading {
   readonly screen: ProviderScreenPattern;
   /** Null for a `report` screen: nothing is ever typed at it. */
   readonly key: string | null;
+  /**
+   * The frame shows the screen's own widget: `❯` on one of its options, or its prompt last on the screen. False
+   * when only its words are there, which a conversation that quotes the screen shows as well.
+   */
+  readonly live: boolean;
 }
 
 export interface ProviderScreenReadOptions {
@@ -266,6 +303,24 @@ function continueKeyCompact(compact: string, anchor: string): string | null {
   return at >= 0 && CONTINUE_TAIL.test(compact.slice(at + anchor.length)) ? SCREEN_KEY_CONFIRM : null;
 }
 
+/** Whether the LAST `❯` on the screen sits on one of these options. */
+function selectionOn(compact: string, options: readonly string[]): boolean {
+  const at = compact.lastIndexOf(SELECTION_MARK);
+  if (at < 0) return false;
+  const selected = compact.slice(at + SELECTION_MARK.length).replace(OPTION_PREFIX, '');
+  return options.some((option) => selected.startsWith(option));
+}
+
+/** Whether the frame shows this row's own widget, by the row's own options or prompt. Never a reason to type. */
+function screenLive(compact: string, screen: ProviderScreenPattern): boolean {
+  const answer = screen.answer;
+  if (answer.kind === 'choose') return selectionOn(compact, [...answer.accept, ...answer.decline]);
+  if (answer.kind === 'continue') return continueKeyCompact(compact, answer.anchor) !== null;
+  return answer.live.kind === 'selection'
+    ? selectionOn(compact, answer.live.options)
+    : continueKeyCompact(compact, answer.live.anchor) !== null;
+}
+
 function composerVisible(compact: string, composerMark: string | undefined): boolean {
   const mark = composerMark ? compactScreenText(composerMark) : '';
   // A mark that is just a glyph (one CLI's is `❯` itself) cannot tell a composer from a menu.
@@ -308,7 +363,7 @@ export function readProviderScreen(
     else if (answer.kind === 'continue') key = continueKeyCompact(compact, answer.anchor);
     // An answerable row with no key is words about the screen, or a frame still painting.
     if (answer.kind !== 'report' && key === null) continue;
-    best = { screen, key };
+    best = { screen, key, live: screenLive(compact, screen) };
     bestAt = at;
   }
   return best;
@@ -340,31 +395,148 @@ export function nameProviderScreen(
   for (const screen of PROVIDER_SCREENS) {
     const at = markerPosition(compact, screen);
     if (at > bestAt) {
-      best = { screen, key: null };
+      // A menu whose highlight sits on a declined option with nothing to steer onto is still that menu.
+      best = { screen, key: null, live: screenLive(compact, screen) };
       bestAt = at;
     }
   }
   return best;
 }
 
-/** Why a session has not reached its composer, in terms the owner can act on. */
+/**
+ * How the office knows a named screen is really what the pane shows:
+ * - `widget`: this frame shows the screen's own live widget.
+ * - `launch`: this frame carries only its words (or is a screen the table does not know), on a pane this office
+ *   launched that has not shown its composer since, and that shows no composer now.
+ * - `words`: only its words are there. A conversation that quotes the screen reads the same, so this names a
+ *   screen and proves nothing.
+ */
+export type StartupScreenProof = 'widget' | 'launch' | 'words';
+
+/** Why a session has not reached its composer. */
 export interface StartupScreenStatus {
   readonly id: string;
   readonly label: string;
-  /** `first-run`: one the office answers. The others are the owner's to answer. */
+  /**
+   * `first-run`: one the office answers. `credential`: a sign-in, which it never types into. `decision` is no
+   * longer produced, because every decision row has a standing answer; the value stays for the sentence of a plan
+   * move that was held before that.
+   */
   readonly kind: 'first-run' | 'credential' | 'decision';
   /** True while the office is still working through it; false once it has given up or never would. */
   readonly answering: boolean;
+  readonly shown: StartupScreenProof;
 }
 
-export function startupScreenStatus(reading: ProviderScreenReading, answering: boolean): StartupScreenStatus {
+export function startupScreenStatus(
+  reading: ProviderScreenReading,
+  answering: boolean,
+  /** The pane was launched by this office and has not shown its composer since, nor does it now. */
+  shortOfComposer = false
+): StartupScreenStatus {
   const answer = reading.screen.answer;
   return {
     id: reading.screen.id,
     label: reading.screen.label,
     kind: answer.kind === 'report' ? answer.reason : 'first-run',
     answering: answer.kind !== 'report' && answering,
+    shown: reading.live ? 'widget' : shortOfComposer ? 'launch' : 'words',
   };
+}
+
+/** A row that begins with a rule: the line Claude draws above and below its composer. */
+const RULE_ROW = /^[─━═]{8}/;
+
+/**
+ * Whether the frame shows a composer by its shape: the last row that starts with the selection glyph has a rule row
+ * under it. A menu's highlighted option has its other options under it instead. A second, independent sign of a
+ * conversation beside the composer mark, which a footer can drop (`· 1 shell · ↓ to manage` carries no
+ * `shift+tab`). Only ever a reason NOT to act.
+ */
+export function showsComposerRow(text: string): boolean {
+  const rows = stripAnsi(text)
+    .replace(CHARSET_SELECT, '')
+    .split('\n')
+    .map((row) => row.trim());
+  let last = -1;
+  rows.forEach((row, index) => {
+    if (row.startsWith(SELECTION_MARK)) last = index;
+  });
+  return last >= 0 && rows.slice(last + 1).some((row) => RULE_ROW.test(row));
+}
+
+/** The status of a pane that is short of its composer on a screen no row of the table names. */
+export const UNKNOWN_STARTUP_SCREEN: StartupScreenStatus = Object.freeze({
+  id: 'unknown-startup-screen',
+  label: 'a start-up screen the office does not know',
+  kind: 'first-run',
+  answering: false,
+  shown: 'launch',
+});
+
+/** What a session's own scan says about its launch, for {@link readStartupScreen}. */
+export interface StartupScanView {
+  readonly active: boolean;
+  readonly endReason: FirstRunScanEnd | null;
+  /** The pane was launched by this office and has not been seen at its composer since. */
+  readonly shortOfComposer: boolean;
+  answering(screenId: string, now: number): boolean;
+}
+
+/**
+ * The start-up screen a pane is parked on, with how the office knows.
+ *
+ * A screen the table names is returned on its words, as {@link nameProviderScreen} names it, with the proof beside
+ * it. A screen the table does NOT name is returned only on positive evidence that the pane never left its start-up:
+ * this office launched it, its scan closed (the start-up window ran out, or a screen would not answer) without one
+ * sight of the composer, the CLI has a composer mark the scan could have seen, and the frame shows text and no
+ * composer. Anything less reads null, which is what a conversation reads.
+ */
+export function readStartupScreen(
+  text: string,
+  scan: StartupScanView,
+  now: number,
+  options: ProviderScreenReadOptions = {}
+): StartupScreenStatus | null {
+  const reading = nameProviderScreen(text, options);
+  const shortOfComposer = scan.shortOfComposer && !showsComposerRow(text);
+  if (reading) return startupScreenStatus(reading, scan.answering(reading.screen.id, now), shortOfComposer);
+  // Still open: the pane may only be slow. Never ended: the session is going away.
+  if (!shortOfComposer || scan.active || scan.endReason === null) return null;
+  const compact = compactScreenText(text);
+  const mark = options.composerMark ? compactScreenText(options.composerMark) : '';
+  // Without a usable mark the scan could never have seen a composer, so its silence about one says nothing.
+  if (mark.length < 3 || compact === '' || compact.includes(mark)) return null;
+  return UNKNOWN_STARTUP_SCREEN;
+}
+
+const SHAPE_ROWS = 16;
+const SHAPE_ROW_LENGTH = 100;
+
+/**
+ * The shape of a screen for the log, so a row can be written for one the table does not answer: its last rows, each
+ * shortened, with everything that could be a secret or a private detail replaced. These screens are provider
+ * chrome, but one of them prints part of an API key and another the workspace path, so links, addresses, paths and
+ * every long run of letters and digits are removed before anything is logged.
+ */
+export function screenShape(text: string): string {
+  const rows = stripAnsi(text)
+    .replace(CHARSET_SELECT, '')
+    .split('\n')
+    // eslint-disable-next-line no-control-regex
+    .map((row) => row.replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim())
+    .filter((row) => row !== '')
+    .slice(-SHAPE_ROWS)
+    .map((row) =>
+      row
+        .replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<link>')
+        .replace(/\S+@\S+\.\S+/g, '<address>')
+        .replace(/(?:~|\.{1,2})?\/[^\s/]+(?:\/[^\s/]*)+/g, '<path>')
+        .replace(/\bsk-[\w.*…-]+/gi, '<key>')
+        .replace(/[\w+/=.-]*\d[\w+/=.-]{11,}|[\w+/=-]{24,}/g, '<token>')
+        .slice(0, SHAPE_ROW_LENGTH)
+    );
+  return rows.join(' | ');
 }
 
 /**
@@ -383,7 +555,7 @@ export function describeStartupScreen(
     return `${who} is waiting at ${status.label}. That choice is the owner's, so the office has not answered it.`;
   if (status.answering)
     return `${who} has not reached its composer yet: the office is still answering ${status.label}.`;
-  return `${who} is stuck at ${status.label}, which the office could not answer on its own. Answer it in the session's terminal.`;
+  return `${who} is stuck at ${status.label}, which the office could not answer on its own.`;
 }
 
 // ─── The scan ─────────────────────────────────────────────────────────────────
@@ -487,6 +659,8 @@ export class FirstRunScan {
   private ended: FirstRunScanEnd | null = null;
   private attempts = new Map<string, number>();
   private extended = new Set<string>();
+  private launched = false;
+  private shaped = new Set<string>();
 
   constructor(private readonly limits: FirstRunScanLimits = FIRST_RUN_LIMITS) {}
 
@@ -499,6 +673,39 @@ export class FirstRunScan {
     this.ended = null;
     this.attempts = new Map();
     this.extended = new Set();
+    this.launched = true;
+    this.shaped = new Set();
+  }
+
+  /**
+   * The pane this scan was armed for turned out to be one that was already running (the office attached to it).
+   * Nothing is known about what it has shown, so the scan is no evidence of a launch short of its composer.
+   */
+  attached(): void {
+    this.launched = false;
+  }
+
+  /**
+   * The pane was launched by this office and has not been seen at its composer since. It is evidence only together
+   * with a frame that shows no composer now ({@link readStartupScreen}); it never opens the scan or permits a key.
+   */
+  get shortOfComposer(): boolean {
+    return this.launched && this.ended !== 'composer';
+  }
+
+  /**
+   * A read outside the scan (the supervisor's) saw the composer. The launch reached it, for good, whenever that
+   * was: a start-up window that closed on a slow launch must not leave the pane looking short of its composer.
+   */
+  composerSeen(): void {
+    this.finish('composer');
+  }
+
+  /** True the first time one screen's shape is offered for the log in this launch, so each is logged once. */
+  claimShape(screenId: string): boolean {
+    if (this.shaped.has(screenId)) return false;
+    this.shaped.add(screenId);
+    return true;
   }
 
   /** Whether the scan may still read the screen. False before the first launch and after any end. */

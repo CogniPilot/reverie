@@ -21,6 +21,10 @@ import {
   PROVIDER_SCREENS,
   readProviderScreen,
   nameProviderScreen,
+  readStartupScreen,
+  screenShape,
+  showsComposerRow,
+  UNKNOWN_STARTUP_SCREEN,
   describeStartupScreen,
   startupScreenStatus,
   compactScreenText,
@@ -272,16 +276,16 @@ describe('readProviderScreen', () => {
     for (const text of [screen, squeezed(screen)]) {
       const reading = readProviderScreen(text);
       expect(reading?.screen.label).toBe(label);
-      expect(reading?.screen.answer).toEqual({ kind: 'report', reason: 'credential' });
+      expect(reading?.screen.answer).toMatchObject({ kind: 'report', reason: 'credential' });
       expect(reading?.key).toBeNull();
     }
   });
 
-  it('keeps every credential and decision row unanswerable by construction', () => {
-    // A row that names a login, sign-in, API key or pasted code must be a `report` row.
+  it('keeps every credential row unanswerable by construction', () => {
+    // A row that names a login, a sign-in or a pasted code must be a `report` row: the office never types one.
     for (const screen of PROVIDER_SCREENS) {
       const words = [screen.id, screen.label, ...screen.markers.flat()].join(' ').toLowerCase();
-      if (/sign-?in|login|apikey|api key|pastecode|chatgpt/.test(words)) expect(screen.answer.kind).toBe('report');
+      if (/sign-?in|login|pastecode|chatgpt/.test(words)) expect(screen.answer.kind).toBe('report');
       // And every row needs two independent markers.
       expect(screen.markers[0].length).toBeGreaterThan(0);
       expect(screen.markers[1].length).toBeGreaterThan(0);
@@ -684,6 +688,7 @@ describe('Session first-run screen scan', () => {
       label: "Claude's sign-in screen",
       kind: 'credential',
       answering: false,
+      shown: 'widget',
     });
   });
 
@@ -723,5 +728,324 @@ describe('Session first-run screen scan', () => {
     launch(); // a respawn: a new CLI process, possibly on a config directory it has never seen
     await vi.advanceTimersByTimeAsync(READ_MS + 10);
     expect(writes).toEqual([SCREEN_KEY_CONFIRM]);
+  });
+});
+
+// ─── Screens that used to wait for the owner ─────────────────────────────────
+
+/**
+ * Claude's question about an API key it found in the environment.
+ *
+ * NO capture of this screen exists in the repository. The rows are the phrases the repository records about it
+ * ("Detected a custom API key in your environment", "Do you want to use this API key?" and its highlighted default
+ * "No (recommended)"). The "Yes" row is the other answer the question implies; its wording and position are assumed.
+ */
+const API_KEY = [
+  ' Detected a custom API key in your environment',
+  '',
+  ' Do you want to use this API key?',
+  '',
+  '   1. Yes',
+  ' ❯ 2. No (recommended)',
+].join('\n');
+const API_KEY_ON_YES = API_KEY.replace('   1. Yes\n ❯ 2. No', ' ❯ 1. Yes\n   2. No');
+
+/** An idle Claude pane whose footer carries no `shift+tab`, as captured on 2026-11-24 (test/fixtures/claude-model-frames.ts). */
+const idleWithoutMark = (above: string[]) =>
+  [...above, `${'─'.repeat(113)} Stan ─`, '❯ ', '─'.repeat(120), '  Fable 5.2  in:657,617 out:127  ctx:66%', '  ⏵⏵ bypass permissions on · 1 shell · ↓ to manage'].join('\n');
+/** Claude's usage-limit menu, the wording read off live panes (same fixture file). No row of the table names it. */
+const UNNAMED_SCREEN = [
+  "  ⎿  You've hit your Fable limit · resets Nov 26, 4am (UTC)",
+  '',
+  ' What do you want to do?',
+  '',
+  ' ❯ 1. Stop and wait for limit to reset',
+  '   2. Wait here, then continue automatically at Nov 26, 4am',
+  '   3. Add funds to continue with usage credits',
+  '',
+  ' Enter to confirm · Esc to cancel',
+].join('\n');
+const REDRAWN_THEME_SCREEN = THEME.replace(' ❯ ✔ Dark mode', ' ❯ ✔ High contrast\n     Dark mode');
+
+/** A scan as a session holds it after a launch (or an attach) and `reads` frames. */
+function scanAfter(frames: string[], options: { attached?: boolean; until?: number } = {}) {
+  const scan = new FirstRunScan();
+  scan.arm(0);
+  if (options.attached) scan.attached();
+  let now = 0;
+  for (const frame of frames) {
+    now += FIRST_RUN_RETRY_MS + 1;
+    if (scan.due(now)) scan.read(now, frame, { composerMark: CLAUDE_MARK });
+  }
+  if (options.until !== undefined) scan.due(options.until);
+  return scan;
+}
+
+describe('a decision screen has one standing answer', () => {
+  it('leaves no row that only reports a decision', () => {
+    // A row is answered, or it is a credential prompt. A decision that waits for the owner cannot be written.
+    for (const screen of PROVIDER_SCREENS)
+      if (screen.answer.kind === 'report') expect(screen.answer.reason).toBe('credential');
+  });
+
+  it('confirms "No (recommended)" on the API key question, so a key found in the environment is never billed', () => {
+    expect(read(API_KEY)).toEqual({ id: 'claude-api-key', key: SCREEN_KEY_CONFIRM });
+    expect(read(squeezed(API_KEY))).toEqual({ id: 'claude-api-key', key: SCREEN_KEY_CONFIRM });
+    expect(read(cursorForwards(API_KEY))).toEqual({ id: 'claude-api-key', key: SCREEN_KEY_CONFIRM });
+    const row = PROVIDER_SCREENS.find((screen) => screen.id === 'claude-api-key')!;
+    // The only option Enter may ever be pressed on.
+    expect(row.answer).toMatchObject({ kind: 'choose', accept: ['no(recommended)'] });
+  });
+
+  it('never presses Enter while the highlight is on "Yes": it moves the selection and reads again', () => {
+    expect(read(API_KEY_ON_YES)).toEqual({ id: 'claude-api-key', key: SCREEN_KEY_DOWN });
+    const flipped = [' Do you want to use this API key?', '   1. No (recommended)', ' ❯ 2. Yes'].join('\n');
+    expect(read(flipped)).toEqual({ id: 'claude-api-key', key: SCREEN_KEY_UP });
+  });
+
+  it('presses nothing when the frame does not show which option is highlighted, or shows one it cannot name', () => {
+    expect(read(API_KEY.replace(' ❯ 2. No', '   2. No'))).toBeNull();
+    expect(read(API_KEY.replace(' ❯ 2. No (recommended)', ' ❯ 2. Ask me later'))).toBeNull();
+    // Words about the question under a composer are a conversation.
+    expect(read(`  The prompt "Do you want to use this API key?" defaults to "No (recommended)".\n${COMPOSER}`, CLAUDE_MARK)).toBeNull();
+    expect(readProviderScreen(`  "Do you want to use this API key?" defaults to "No (recommended)".\n${COMPOSER}`)?.key ?? null).toBeNull();
+  });
+
+  it('is answered by the scan one key per re-read frame, within its own attempt budget', () => {
+    const scan = new FirstRunScan();
+    scan.arm(0);
+    let now = 0;
+    const step = (frame: string) => {
+      now += FIRST_RUN_RETRY_MS + 1;
+      return scan.due(now) ? scan.read(now, frame, { composerMark: CLAUDE_MARK }) : { action: 'skipped' as const };
+    };
+    expect(step(API_KEY_ON_YES)).toMatchObject({ action: 'press', key: SCREEN_KEY_DOWN, attempt: 1 });
+    // A second frame inside the retry gap is not read at all.
+    expect(scan.due(now + 1)).toBe(false);
+    expect(step(API_KEY)).toMatchObject({ action: 'press', key: SCREEN_KEY_CONFIRM, attempt: 2 });
+    // A menu that never moves runs out pressing arrows, never Enter, and the theme chooser keeps its own budget.
+    for (let attempt = 3; attempt <= FIRST_RUN_MAX_ATTEMPTS; attempt++)
+      expect(step(API_KEY_ON_YES)).toMatchObject({ action: 'press', key: SCREEN_KEY_DOWN, attempt });
+    expect(scan.answering('claude-theme', now)).toBe(true);
+    expect(step(API_KEY_ON_YES)).toMatchObject({ action: 'ended', reason: 'attempts' });
+  });
+
+  it('gives a plan move the same answer: the candidate is still starting, not waiting for the owner', () => {
+    const status = startupScreenStatus(readProviderScreen(API_KEY)!, true);
+    expect(status).toMatchObject({ kind: 'first-run', answering: true });
+    const waiting = new PlanMoveComposerNotReady({ who: "Stan's new session", ...status });
+    expect(waiting.message).toBe("Stan's new session has not reached its composer yet: the office is still answering Claude's API key question.");
+    expect(planMoveComposerWaitContinues(waiting, PLAN_MOVE_COMPOSER_WAIT_MS)).toBe(true);
+  });
+
+  it('tells nobody to answer a screen in a terminal', () => {
+    for (const screen of [THEME, TRUST, BYPASS, API_KEY])
+      for (const answering of [true, false])
+        expect(describeStartupScreen('The new session', startupScreenStatus(readProviderScreen(screen)!, answering))).not.toMatch(/terminal/i);
+  });
+});
+
+describe('how the office knows a screen is really up', () => {
+  it('reads every captured screen as its live widget', () => {
+    for (const screen of [THEME, SECURITY_NOTES, TRUST, TRUST_ON_YES, BYPASS, API_KEY, CLAUDE_SIGN_IN, CLAUDE_PASTE_CODE, CODEX_SIGN_IN]) {
+      expect(readProviderScreen(screen)?.live).toBe(true);
+      expect(readProviderScreen(squeezed(screen))?.live).toBe(true);
+    }
+  });
+
+  it('does not take words about a sign-in screen for the screen', () => {
+    // The prose of a bug report, with and without a composer drawn under it.
+    for (const text of [QUOTING_PROSE, QUOTING_TRANSCRIPT, idleWithoutMark(QUOTING_PROSE.split('\n'))]) {
+      const named = nameProviderScreen(text);
+      if (named) expect(named.live).toBe(false);
+    }
+    // The sign-in menu's words above a composer: the last `❯` is the composer's.
+    expect(nameProviderScreen(`${CLAUDE_SIGN_IN.replace('❯ 1.', '  1.')}\n${COMPOSER}`)?.live).toBe(false);
+    // A paste-code prompt somebody is typing at is theirs.
+    expect(readProviderScreen(`${CLAUDE_PASTE_CODE} 4f2a`)?.live).toBe(false);
+    // Codex's menu with something drawn after its prompt.
+    expect(readProviderScreen(`${CODEX_SIGN_IN}\n› explain this repository`)?.live).toBe(false);
+  });
+
+  it('sees a composer by its shape when the footer carries no mark', () => {
+    expect(showsComposerRow(COMPOSER)).toBe(true);
+    expect(showsComposerRow(idleWithoutMark(['● Work summary.']))).toBe(true);
+    for (const screen of [THEME, SECURITY_NOTES, TRUST, BYPASS, API_KEY, CLAUDE_SIGN_IN, CLAUDE_PASTE_CODE, CODEX_SIGN_IN, UNNAMED_SCREEN, ''])
+      expect(showsComposerRow(screen)).toBe(false);
+  });
+
+  const now = 10 * 60_000;
+  const at = (text: string, scan: FirstRunScan) => readStartupScreen(text, scan, now, { composerMark: CLAUDE_MARK });
+
+  it('says `widget` for a live screen, whoever started the pane', () => {
+    for (const attached of [false, true])
+      expect(at(CLAUDE_SIGN_IN, scanAfter([CLAUDE_SIGN_IN], { attached, until: now }))).toMatchObject({
+        id: 'claude-sign-in',
+        kind: 'credential',
+        answering: false,
+        shown: 'widget',
+      });
+  });
+
+  it('says `launch` for a screen it cannot read only on a pane this office launched that never showed a composer', () => {
+    const launched = scanAfter([REDRAWN_THEME_SCREEN], { until: now });
+    expect(at(REDRAWN_THEME_SCREEN, launched)).toMatchObject({ id: 'claude-theme', answering: false, shown: 'launch' });
+    // A pane that was already running when the office attached to it: the same frame proves nothing.
+    expect(at(REDRAWN_THEME_SCREEN, scanAfter([REDRAWN_THEME_SCREEN], { attached: true, until: now }))).toMatchObject({ shown: 'words' });
+    // A launch that reached its composer once is a conversation from then on.
+    expect(at(REDRAWN_THEME_SCREEN, scanAfter([COMPOSER, REDRAWN_THEME_SCREEN], { until: now }))).toMatchObject({ shown: 'words' });
+  });
+
+  it('says `words`, or nothing, for a conversation that quotes the screens', () => {
+    const launched = scanAfter([''], { until: now });
+    // With the composer mark on screen it is not a start-up screen at all.
+    expect(at(QUOTING_TRANSCRIPT, launched)).toBeNull();
+    // Without the mark, the composer's shape still says conversation: named on its words, proved by nothing.
+    const quoted = at(idleWithoutMark(QUOTING_PROSE.split('\n')), launched);
+    expect(quoted?.shown).toBe('words');
+  });
+
+  it('names a screen the table does not know only on a launch whose start-up window closed without a composer', () => {
+    const closed = scanAfter([UNNAMED_SCREEN], { until: now });
+    expect(closed.endReason).toBe('window');
+    expect(at(UNNAMED_SCREEN, closed)).toEqual(UNKNOWN_STARTUP_SCREEN);
+    expect(UNKNOWN_STARTUP_SCREEN).toMatchObject({ kind: 'first-run', answering: false, shown: 'launch' });
+    // So does a launch whose scan gave up on a screen that would not answer, and then shows something else.
+    const gaveUp = scanAfter(Array(FIRST_RUN_MAX_ATTEMPTS + 1).fill(TRUST));
+    expect(gaveUp.endReason).toBe('attempts');
+    expect(at(UNNAMED_SCREEN, gaveUp)).toEqual(UNKNOWN_STARTUP_SCREEN);
+    // Still inside the window: the pane may only be slow.
+    expect(at(UNNAMED_SCREEN, scanAfter([UNNAMED_SCREEN]))).toBeNull();
+    // Attached to a running pane, at its composer once, at a composer now, blank, or a CLI with no usable mark.
+    expect(at(UNNAMED_SCREEN, scanAfter([UNNAMED_SCREEN], { attached: true, until: now }))).toBeNull();
+    expect(at(UNNAMED_SCREEN, scanAfter([COMPOSER], { until: now }))).toBeNull();
+    expect(at(COMPOSER, closed)).toBeNull();
+    expect(at(idleWithoutMark(['● Work summary.']), closed)).toBeNull();
+    expect(at('   \n', closed)).toBeNull();
+    expect(readStartupScreen(UNNAMED_SCREEN, closed, now, { composerMark: '❯' })).toBeNull();
+    expect(readStartupScreen(UNNAMED_SCREEN, closed, now)).toBeNull();
+  });
+
+  it('forgets the launch for good once any read saw the composer', () => {
+    const closed = scanAfter([UNNAMED_SCREEN], { until: now });
+    expect(closed.shortOfComposer).toBe(true);
+    closed.composerSeen();
+    expect(closed.shortOfComposer).toBe(false);
+    expect(at(UNNAMED_SCREEN, closed)).toBeNull();
+    // A relaunch starts over.
+    closed.arm(now);
+    expect(closed.shortOfComposer).toBe(true);
+  });
+});
+
+describe('the shape of a screen for the log', () => {
+  it('keeps the words a table row is written from', () => {
+    const shape = screenShape(REDRAWN_THEME_SCREEN);
+    expect(shape).toContain('Choose the text style that looks best with your terminal');
+    expect(shape).toContain('❯ ✔ High contrast');
+    expect(shape.split(' | ')).toHaveLength(REDRAWN_THEME_SCREEN.split('\n').filter((row) => row.trim()).length);
+  });
+
+  it('removes links, addresses, paths, keys and every long run of letters and digits', () => {
+    const shape = screenShape(
+      [
+        TRUST,
+        CLAUDE_PASTE_CODE,
+        ' ANTHROPIC_API_KEY: sk-ant-SYNTHETIC…a1B2',
+        ' Signed in as someone@example.org',
+        ' code 9f8e7d6c5b4a39281716aabbccddeeff00112233',
+      ].join('\n')
+    );
+    expect(shape).not.toContain('/home/agent/work');
+    expect(shape).not.toContain('claude.ai');
+    expect(shape).not.toContain('SYNTHETIC');
+    expect(shape).not.toContain('example.org');
+    expect(shape).not.toContain('9f8e7d6c');
+    expect(shape).toContain('Paste code here if prompted >');
+    for (const mark of ['<path>', '<link>', '<key>', '<address>', '<token>']) expect(shape).toContain(mark);
+  });
+
+  it('is bounded: the last sixteen rows, a hundred characters each', () => {
+    const tall = Array.from({ length: 60 }, (_, row) => `row ${row} ${'x '.repeat(200)}`).join('\n');
+    const rows = screenShape(tall).split(' | ');
+    expect(rows).toHaveLength(16);
+    expect(rows[15]!.startsWith('row 59')).toBe(true);
+    expect(Math.max(...rows.map((row) => row.length))).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('a session parked on a screen the office does not answer', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function pane(screen: () => string) {
+    const registry = registeredMuxFixture({ mode: 'claude', sessionId: 'parked', muxName: 'reverie-parked', pid: 42 });
+    const writes: string[] = [];
+    const mux = {
+      ...registry,
+      isAvailable: () => true,
+      capturePaneText: () => screen(),
+      sendInput: (_id: string, data: string) => {
+        writes.push(data);
+        return Promise.resolve(true);
+      },
+    };
+    const session = new Session({ id: registry.subject.sessionId, workingDir: '/tmp', mode: 'claude', mux, muxSession: registry.subject } as ConstructorParameters<typeof Session>[0]);
+    const internals = session as unknown as { _armFirstRunScan(): void; _firstRunScan: FirstRunScan };
+    return { session, writes, launch: () => internals._armFirstRunScan(), scan: internals._firstRunScan };
+  }
+
+  it('reports a screen it cannot read as proved by its own launch, types nothing, and logs the shape once', async () => {
+    vi.useFakeTimers();
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { session, writes, launch } = pane(() => REDRAWN_THEME_SCREEN);
+    launch();
+    // While its window is open the office is still trying, and nothing is logged.
+    expect(session.startupScreen()).toMatchObject({ id: 'claude-theme', answering: true, shown: 'launch' });
+    expect(warned).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(FIRST_RUN_MAX_MS + 1000);
+    expect(writes).toEqual([]);
+    expect(session.startupScreen()).toMatchObject({ id: 'claude-theme', kind: 'first-run', answering: false, shown: 'launch' });
+    session.startupScreen();
+    const lines = warned.mock.calls.map((call) => String(call[0])).filter((line) => line.includes('Screen shape'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("is parked at Claude's theme chooser");
+    expect(lines[0]).toContain('❯ ✔ High contrast');
+  });
+
+  it('reports a screen no row names once its start-up window closed, and never types at it', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { session, writes, launch } = pane(() => UNNAMED_SCREEN);
+    launch();
+    expect(session.startupScreen()).toBeNull();
+    await vi.advanceTimersByTimeAsync(FIRST_RUN_WINDOW_MS + 5000);
+    expect(session.startupScreen()).toEqual(UNKNOWN_STARTUP_SCREEN);
+    expect(writes).toEqual([]);
+  });
+
+  it('proves nothing on a pane it only attached to, or one that has been at its composer', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let screen = REDRAWN_THEME_SCREEN;
+    const attached = pane(() => screen);
+    attached.launch();
+    attached.scan.attached();
+    await vi.advanceTimersByTimeAsync(FIRST_RUN_MAX_MS + 1000);
+    expect(attached.session.startupScreen()).toMatchObject({ id: 'claude-theme', shown: 'words' });
+    screen = UNNAMED_SCREEN;
+    expect(attached.session.startupScreen()).toBeNull();
+
+    // A launch whose slow start outlasted the window, seen at its composer by a later read.
+    let late = UNNAMED_SCREEN;
+    const slow = pane(() => late);
+    slow.launch();
+    await vi.advanceTimersByTimeAsync(FIRST_RUN_WINDOW_MS + 5000);
+    late = COMPOSER;
+    expect(slow.session.startupScreen()).toBeNull();
+    late = UNNAMED_SCREEN;
+    expect(slow.session.startupScreen()).toBeNull();
   });
 });
