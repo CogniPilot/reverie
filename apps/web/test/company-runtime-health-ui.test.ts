@@ -114,6 +114,9 @@ it.each([
 it('offers the canonical owner restart for a dead pane without requiring stalled recovery or changing intent',async()=>{
  const{h,employee,posts}=await fixture();await h.shell.openCompany();
  const button=h.document.querySelector('.ca-company-person .ca-dead-pane-restart');expect(button.disabled).toBe(false);
+ // The card's one next step for a dead agent is this button, named for the employee it restarts.
+ expect([...h.document.querySelectorAll('.ca-company-status-actions > button')]).toEqual([button]);
+ expect(button.getAttribute('aria-label')).toBe('Restart session for Alex');expect(button.textContent).toBe('Restart');
  button.click();await h.flush();expect(posts).toHaveLength(0);
  expect(h.document.querySelector('.ca-employee-restart input').closest('label').hidden).toBe(true);
  const accept=h.document.querySelector('.ca-employee-restart .is-primary');expect(accept.disabled).toBe(false);

@@ -994,10 +994,18 @@
             return `<div class="kcol"><h3><span><i style="background:${css('--' + (s === 'todo' ? 'plan' : s === 'doing' ? 'now' : s))}"></i>${STATUS[s]}</span><span>${col(s).length}</span></h3>
       <div class="kcards">${items.map(card).join('') || '<div class="hint" style="padding:6px">Nothing here</div>'}</div></div>`;
           }).join('') +
-          `</div>` +
-          (wontdo.length
-            ? `<details class="wontdo"${wontdoOpen ? ' open' : ''}><summary>Won't do (${wontdo.length})</summary><div class="kcards">${wontdoOpen ? wontdo.map(card).join('') : ''}</div></details>`
-            : '');
+          `</div>`;
+        if (!wontdo.length) return;
+        const box = document.createElement('details'),
+          summary = document.createElement('summary'),
+          list = document.createElement('div');
+        box.className = 'wontdo';
+        box.open = wontdoOpen;
+        summary.textContent = `Won't do (${wontdo.length})`;
+        list.className = 'kcards';
+        if (wontdoOpen) list.innerHTML = wontdo.map(card).join('');
+        box.append(summary, list);
+        host.append(box);
       }
       // The closed Won't-do list can hold hundreds of cards: they are drawn when it is opened, and it stays open across refreshes.
       let wontdoOpen = false;

@@ -878,6 +878,38 @@
       ],
       "outcome": "A page kept loaded in the background shows its own Back to Company / tools button when it is opened. Pressing it on the kept page and installed office behavior require separate verification."
     },
+    "company-card-reconnect": {
+      "test": "test/company-runtime-health-ui.test.ts",
+      "title": "offers a neutral owner Reconnect for viewer failure and sends only the current binding once",
+      "assertions": [
+        "expect([...h.document.querySelectorAll('.ca-company-person button:not(.ca-company-profile-trigger)')]).toEqual([button])",
+        "expect(button.textContent).toBe('Reconnect')",
+        "expect(reconnects).toEqual([{path:'/api/company/employees/expert/reconnect',method:'POST',body:{sessionId:SID,sessionGeneration:2}}])"
+      ],
+      "outcome": "For a lost terminal viewer the company card offers Reconnect as its one next step, and pressing it twice sends one reconnect request for the current session binding. DOM/API fixture only; the server reconnect and installed office behavior require separate verification."
+    },
+    "company-card-restart": {
+      "test": "test/company-runtime-health-ui.test.ts",
+      "title": "offers the canonical owner restart for a dead pane without requiring stalled recovery or changing intent",
+      "assertions": [
+        "expect([...h.document.querySelectorAll('.ca-company-status-actions > button')]).toEqual([button])",
+        "expect(button.getAttribute('aria-label')).toBe('Restart session for Alex')",
+        "expect(posts).toEqual([{path:'/api/company/employees/expert/restart',method:'POST',body:{}}])"
+      ],
+      "outcome": "For a dead agent the company card offers Restart session for the employee as its one next step; pressing it opens the restart confirmation and sends nothing until that is accepted, then one restart request. DOM/API fixture only; the server restart and installed office behavior require separate verification."
+    },
+    "board-kanban-wontdo": {
+      "test": "test/board-kanban-wontdo.test.ts",
+      "title": "draws the Won't do cards when its summary is opened and keeps the list open across refreshes",
+      "assertions": [
+        "expect(summary.textContent).toBe(\"Won't do (2)\")",
+        "expect(f.titles()).toEqual([])",
+        "summary.click()",
+        "expect(f.titles()).toEqual(['Card duplicate', 'Card <b>dropped</b>'])",
+        "expect(f.titles()).toEqual(['Card duplicate', 'Card <b>dropped</b>', 'Card late'])"
+      ],
+      "outcome": "The Board page's own kanban script draws the Won't do summary closed and without cards, draws the cards when the summary is pressed, and keeps the list open with the new count across a refresh. jsdom fixture only; layout and installed office behavior require separate verification."
+    },
     "docker-resources-cold-pool": {
       "test": "test/docker-resources-ui.test.ts",
       "title": "requires explicit owner confirmation before submitting the stopped pool recovery preview",
@@ -1569,6 +1601,21 @@
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.warmPageEl::inline::button:Back to Company / tools",
       "scenarios": ["office-warm-page-back"],
       "remaining": "Pressing the button on the kept page and installed office behavior require separate verification."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::reconnect::button:Reconnect",
+      "scenarios": ["company-card-reconnect"],
+      "remaining": "Only the owner's lost-viewer card and its single request are qualified. A delegate's card, the refusal and backoff states, the server reconnect itself and installed office behavior require separate verification."
+    },
+    {
+      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::restart::button:Restart session for ${employee.name}",
+      "scenarios": ["company-card-restart"],
+      "remaining": "Only the owner's dead-agent card, the confirmation it opens and the accepted request are qualified. A refused or failed restart, the disconnected-provider card, the server restart itself and installed office behavior require separate verification."
+    },
+    {
+      "declaration": "src/web/public/board.html#inline-1::kanban::summary::summary:[binding label]",
+      "scenarios": ["board-kanban-wontdo"],
+      "remaining": "Only opening, refreshing and closing the list in a jsdom fixture are qualified. Keyboard operation, layout with hundreds of cards and installed office behavior require separate verification."
     },
     {
       "declaration": "src/web/public/company-resources.js::EmployeePanel.renderPool::inline::button:Put approved pool limits back",
@@ -2572,14 +2619,6 @@
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.orgTreeEl::label::dynamic-constructor:d41c627948b8",
       "reason": "Detection gap: dynamic-constructor:d41c627948b8"
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::reconnect::button:Reconnect",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
-    },
-    {
-      "declaration": "src/web/public/chat-app.js::ReverieChatApp.paintEmployeeCard::restart::button:Restart session for ${employee.name}",
-      "reason": "No reviewed declaration-to-scenario behavioral contract; screenshot or test-file existence does not qualify this control."
     },
     {
       "declaration": "src/web/public/chat-app.js::ReverieChatApp.pictureField::choose::button:Choose picture",
@@ -6058,10 +6097,6 @@
       "reason": "Detection gap: embedded-control-markup:cd74335d8daf"
     },
     {
-      "declaration": "src/web/public/board.html#inline-1::kanban::inline::embedded-control-markup:9cc784a91a41",
-      "reason": "Detection gap: embedded-control-markup:9cc784a91a41"
-    },
-    {
       "declaration": "src/web/public/board.html#inline-1::kanban::inline::embedded-control-markup:96b3f46203c6",
       "reason": "Detection gap: embedded-control-markup:96b3f46203c6"
     },
@@ -7654,7 +7689,7 @@
       "reason": "Detection gap: script dependency. The shipped dependency and actual module DOM initialization are checked by docker-recovery.script-dependency; real browser startup remains separately required."
     }
   ],
-  "gapBudget": 1483,
+  "gapBudget": 1480,
   "limitations": [
     "This source ratchet recognizes named button/el/literalText/createElement constructors, static HTML tags and inline JavaScript. It is not an exhaustive JavaScript renderer analysis. Static explicitly focusable role=separator handles are inventoried as controls; other structural or runtime-generated roles remain outside this recognition.",
     "Dynamic labels/tags, embedded markup, semantic roles, duplicate declarations and external script dependencies remain explicit detection gaps, never inferred coverage.",

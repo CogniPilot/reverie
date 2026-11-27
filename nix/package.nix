@@ -395,7 +395,8 @@ let
         test/antigravity-mode.test.ts test/api-generate-plan.test.ts test/api-responses.test.ts test/app-settings-structure.test.ts \
         test/approval-inbox.test.ts test/attachment-magic.test.ts test/auth-security.test.ts test/avatar-pack-manifest.test.ts \
         test/avatar-pack-profile-select.test.ts test/away-digest-ui.test.ts test/away-digest.test.ts test/base-path-server.test.ts \
-        test/base-path.test.ts test/bash-tool-parser.test.ts test/board-blocker-severity.test.ts test/board-owner-identity.test.ts \
+        test/base-path.test.ts test/bash-tool-parser.test.ts test/board-blocker-severity.test.ts test/board-kanban-wontdo.test.ts \
+        test/board-owner-identity.test.ts \
         test/bot-avatar-history.test.ts test/bots-schedule-ui.test.ts test/bounded-path-probe.test.ts test/browser-hard-reload.test.ts \
         test/buffer-accumulator.test.ts test/buffer-management.test.ts test/car-playback-notice.test.ts test/car-speaker.test.ts \
         test/car-voice-turn-wait.test.ts test/car-wake-lock.test.ts test/case-path-unreachable.test.ts test/case-path.test.ts \
